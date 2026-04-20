@@ -2,6 +2,7 @@ import SwiftUI
 
 struct MainView: View {
     @State private var selectedTopic: String? = "All Stories"
+    @StateObject private var feedManager = FeedManager()
     
     let topics = ["All Stories", "World", "Tech", "Culture", "Science", "Politics"]
     
@@ -31,6 +32,12 @@ struct MainView: View {
                             .font(.system(size: 24, weight: .bold, design: .default))
                             .foregroundColor(.white)
                         Spacer()
+                        Image(systemName: "arrow.clockwise")
+                            .font(.title3)
+                            .foregroundColor(.white.opacity(0.8))
+                            .onTapGesture {
+                                feedManager.fetchFeeds()
+                            }
                         Image(systemName: "magnifyingglass")
                             .font(.title3)
                             .foregroundColor(.white.opacity(0.8))
@@ -41,13 +48,69 @@ struct MainView: View {
                     .padding(.top, 40)
                     .padding(.horizontal, 30)
                     
-                    Spacer()
-                    
-                    Text("RSS Parser & Caching Layer Coming Soon")
-                        .foregroundColor(.white.opacity(0.4))
-                        .frame(maxWidth: .infinity)
-                    
-                    Spacer()
+                    ScrollView {
+                        LazyVStack(spacing: 16) {
+                            if feedManager.articles.isEmpty {
+                                Text("No articles found or caching...")
+                                    .foregroundColor(.white.opacity(0.4))
+                                    .padding(.top, 40)
+                            } else {
+                                ForEach(feedManager.articles) { article in
+                                    ZStack(alignment: .bottomLeading) {
+                                        // Image Background
+                                        if let imageUrl = article.imageUrl, let url = URL(string: imageUrl) {
+                                            AsyncImage(url: url) { image in
+                                                image
+                                                    .resizable()
+                                                    .aspectRatio(contentMode: .fill)
+                                                    .frame(maxWidth: .infinity, minHeight: 250, maxHeight: 250)
+                                                    .clipped()
+                                            } placeholder: {
+                                                Color.white.opacity(0.1)
+                                                    .frame(maxWidth: .infinity, minHeight: 250, maxHeight: 250)
+                                            }
+                                        } else {
+                                            Color.gray.opacity(0.1)
+                                                .frame(maxWidth: .infinity, minHeight: 250)
+                                        }
+                                        
+                                        // Gradient overlay for text readability
+                                        LinearGradient(colors: [Color.clear, Color.black.opacity(0.8)], startPoint: .top, endPoint: .bottom)
+                                            .frame(height: 150)
+                                        
+                                        // Overlay info
+                                        VStack(alignment: .leading, spacing: 6) {
+                                            Text("LATEST UPDATE")
+                                                .font(.system(size: 10, weight: .bold))
+                                                .foregroundColor(.white.opacity(0.6))
+                                                .padding(.bottom, 2)
+                                                
+                                            Text(article.title)
+                                                .font(.system(size: 20, weight: .bold, design: .default))
+                                                .foregroundColor(.white)
+                                                .lineLimit(2)
+                                                .shadow(radius: 2)
+                                                
+                                            Text(article.description)
+                                                .font(.system(size: 14))
+                                                .foregroundColor(.white.opacity(0.8))
+                                                .lineLimit(2)
+                                        }
+                                        .padding(20)
+                                    }
+                                    .frame(maxWidth: .infinity)
+                                    .cornerRadius(18)
+                                    .padding(.horizontal, 30)
+                                    .shadow(color: Color.black.opacity(0.3), radius: 10, x: 0, y: 5)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            .onAppear {
+                if feedManager.articles.isEmpty {
+                    feedManager.fetchFeeds()
                 }
             }
         }

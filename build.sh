@@ -50,6 +50,7 @@ cat > "${CONTENTS_DIR}/Info.plist" <<EOF
 EOF
 
 echo "Signing binary..."
+find "${APP_DIR}" -name ".DS_Store" -delete
 xattr -cr "${APP_DIR}"
 codesign --force --deep --sign - "${APP_DIR}"
 
