@@ -1,0 +1,6 @@
+.DS_Store
+News.app/
+build/
+*.xcuserstate
+xcuserdata/
+*.swp
