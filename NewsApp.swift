@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import UserNotifications
 
 @main
 struct NewsApp: App {
@@ -18,9 +19,20 @@ struct NewsApp: App {
     }
 }
 
-class AppDelegate: NSObject, NSApplicationDelegate {
+class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
-        // App lifecycle hooks here. We'll set up background fetch logic later.
+        // Request Notification Permissions on App Launch
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { granted, error in
+            if granted {
+                print("Background Notifications Authorized.")
+            }
+        }
+        UNUserNotificationCenter.current().delegate = self
+    }
+    
+    // Force macOS to show alert even if app is focused (useful for our background tests)
+    func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification, withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
+        completionHandler([.banner, .sound])
     }
 }
 

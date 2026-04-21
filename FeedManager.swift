@@ -1,4 +1,5 @@
 import Foundation
+import UserNotifications
 
 class FeedManager: NSObject, ObservableObject, XMLParserDelegate {
     @Published var articles: [FeedArticle] = []
@@ -10,6 +11,12 @@ class FeedManager: NSObject, ObservableObject, XMLParserDelegate {
     private var currentPubDate = ""
     private var parsedArticles: [FeedArticle] = []
     
+    private var backgroundTimer: Timer?
+    
+    // Algorithmic Action Keywords (Phase 5)
+    // If an article contains these, it triggers a push.
+    private let triageKeywords = ["AI", "Apple", "Space", "Startup", "Tech", "Security", "Future"]
+    
     // Sample feed for initialization testing
     private let feedURLs = [
         "https://techcrunch.com/feed/"
@@ -20,6 +27,14 @@ class FeedManager: NSObject, ObservableObject, XMLParserDelegate {
     override init() {
         super.init()
         loadCachedArticles()
+        startBackgroundFetch()
+    }
+    
+    func startBackgroundFetch() {
+        // Fetch silently in the background every 15 minutes (900 seconds)
+        backgroundTimer = Timer.scheduledTimer(withTimeInterval: 900, repeats: true) { [weak self] _ in
+            self?.fetchFeeds(isBackground: true)
+        }
     }
     
     func loadCachedArticles() {
@@ -28,7 +43,7 @@ class FeedManager: NSObject, ObservableObject, XMLParserDelegate {
         }
     }
     
-    func fetchFeeds() {
+    func fetchFeeds(isBackground: Bool = false) {
         parsedArticles = []
         
         for urlString in feedURLs {
@@ -50,11 +65,40 @@ class FeedManager: NSObject, ObservableObject, XMLParserDelegate {
         DispatchQueue.main.async {
             // Sort by newest
             self.parsedArticles.sort { $0.pubDate > $1.pubDate }
-            // Deduplicate if needed and update published state
+            
+            // Check for net-new articles to fire Notifications
+            let existingIds = Set(self.articles.map { $0.id })
+            var notificationsToFire = [FeedArticle]()
+            
+            for article in self.parsedArticles {
+                if !existingIds.contains(article.id) {
+                    // Primitive Triage: if TITLE contains a target keyword, queue a notification
+                    if self.triageKeywords.contains(where: { article.title.localizedCaseInsensitiveContains($0) }) {
+                        notificationsToFire.append(article)
+                    }
+                }
+            }
+            
+            // Update Published State
             self.articles = self.parsedArticles 
-            // Save to cache layer automatically after new fetches
             CacheManager.shared.save(self.articles, forKey: self.cacheKey)
+            
+            // Dispatch Triage Notifications
+            for targetAlert in notificationsToFire {
+                self.triggerNotification(for: targetAlert)
+            }
         }
+    }
+    
+    private func triggerNotification(for article: FeedArticle) {
+        let content = UNMutableNotificationContent()
+        content.title = "Important News Triage"
+        content.subtitle = article.title
+        content.sound = .default
+        
+        // Use a UUID trigger to fire immediately
+        let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
+        UNUserNotificationCenter.current().add(request)
     }
     
     private var currentImageUrl = ""
