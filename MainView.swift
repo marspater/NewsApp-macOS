@@ -264,6 +264,22 @@ struct MainView: View {
         .onAppear {
             if feedManager.articles.isEmpty { feedManager.fetchFeeds() }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .openArticleFromNotification)) { notification in
+            guard let userInfo = notification.userInfo,
+                  let articleLink = userInfo["articleLink"] as? String else { return }
+            
+            // Find the article matching this link
+            if let article = feedManager.articles.first(where: { $0.link == articleLink }) {
+                // Switch to Today view and navigate
+                selectedTopic = "Today"
+                // Clear existing path and navigate to the article
+                articlePath = NavigationPath()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                    readManager.markAsRead(article.id)
+                    articlePath.append(FeedArticleWrap(article: article))
+                }
+            }
+        }
     }
 
     private var emptyStateText: String {

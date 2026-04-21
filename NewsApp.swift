@@ -2,6 +2,11 @@ import SwiftUI
 import AppKit
 import UserNotifications
 
+/// Notification posted when the user clicks a notification banner to open an article.
+extension Notification.Name {
+    static let openArticleFromNotification = Notification.Name("openArticleFromNotification")
+}
+
 @main
 struct NewsApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
@@ -42,9 +47,27 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
         UNUserNotificationCenter.current().delegate = self
     }
     
-    // Force macOS to show alert even if app is focused (useful for our background tests)
+    // Force macOS to show alert even if app is focused
     func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification, withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
         completionHandler([.banner, .sound])
+    }
+    
+    // Handle notification click — deep link to the article
+    func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse, withCompletionHandler completionHandler: @escaping () -> Void) {
+        let userInfo = response.notification.request.content.userInfo
+        if let articleLink = userInfo["articleLink"] as? String {
+            // Bring app to front
+            NSApp.activate(ignoringOtherApps: true)
+            // Post notification for MainView to pick up
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                NotificationCenter.default.post(
+                    name: .openArticleFromNotification,
+                    object: nil,
+                    userInfo: ["articleLink": articleLink]
+                )
+            }
+        }
+        completionHandler()
     }
 }
 
