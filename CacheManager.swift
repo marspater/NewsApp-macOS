@@ -1,7 +1,9 @@
 import Foundation
+import os
 
 class CacheManager {
     static let shared = CacheManager()
+    private let logger = Logger(subsystem: "com.marspater.news", category: "CacheManager")
     private let fileManager = FileManager.default
     
     private var cacheDirectory: URL {
@@ -20,7 +22,7 @@ class CacheManager {
             let data = try JSONEncoder().encode(object)
             try data.write(to: fileURL)
         } catch {
-            print("Failed to save cache for key \(key): \(error)")
+            logger.error("Failed to save cache for key \(key): \(error.localizedDescription)")
         }
     }
     
@@ -32,7 +34,7 @@ class CacheManager {
             let data = try Data(contentsOf: fileURL)
             return try JSONDecoder().decode(type, from: data)
         } catch {
-            print("Failed to load cache for key \(key): \(error)")
+            logger.error("Failed to load cache for key \(key): \(error.localizedDescription)")
             return nil
         }
     }

@@ -30,10 +30,8 @@ struct NewsApp: App {
 class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Request Notification Permissions on App Launch
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { granted, error in
-            if granted {
-                print("Background Notifications Authorized.")
-            }
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { _, _ in
+            // Notification authorization handled silently
         }
         UNUserNotificationCenter.current().delegate = self
     }
