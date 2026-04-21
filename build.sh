@@ -64,6 +64,10 @@ fi
 
 # Compile Swift files (exclude any standalone scripts)
 swiftc -O -parse-as-library -target $(uname -m)-apple-macos26.4 \
+    DateParser.swift \
+    JSONFeedParser.swift \
+    ReadManager.swift \
+    ThemeManager.swift \
     FeedArticle.swift \
     CacheManager.swift \
     AIManager.swift \

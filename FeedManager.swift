@@ -149,11 +149,17 @@ class FeedManager: NSObject, ObservableObject, XMLParserDelegate {
                 guard let _ = self, let data = data, error == nil else { return }
 
                 // Parse this feed synchronously on the background thread
-                let feedParser = FeedXMLParser(data: data, feedURL: urlString)
-                let articles = feedParser.parse()
+                let sniffer = String(data: data.prefix(30), encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                let articlesRes: [FeedArticle]
+                if sniffer.hasPrefix("{") || sniffer.hasPrefix("[") {
+                    articlesRes = JSONFeedParser.parse(data: data, feedURL: urlString) ?? []
+                } else {
+                    let feedParser = FeedXMLParser(data: data, feedURL: urlString)
+                    articlesRes = feedParser.parse()
+                }
 
                 lock.lock()
-                allParsed.append(contentsOf: articles)
+                allParsed.append(contentsOf: articlesRes)
                 lock.unlock()
             }.resume()
         }
@@ -616,26 +622,7 @@ private class FeedXMLParser: NSObject, XMLParserDelegate {
         if elementName == "item" || elementName == "entry" {
             insideItem = false
 
-            let formatter = DateFormatter()
-            formatter.locale = Locale(identifier: "en_US_POSIX")
-
-            let formats = [
-                "E, d MMM yyyy HH:mm:ss Z",
-                "E, d MMM yyyy HH:mm:ss zzz",
-                "yyyy-MM-dd'T'HH:mm:ssZ",
-                "yyyy-MM-dd'T'HH:mm:ss.SSSZ",
-                "yyyy-MM-dd'T'HH:mm:ssxxxxx",
-                "yyyy-MM-dd HH:mm:ss"
-            ]
-            var date = Date()
-            let trimmedDate = itemPubDate.trimmingCharacters(in: .whitespacesAndNewlines)
-            for fmt in formats {
-                formatter.dateFormat = fmt
-                if let d = formatter.date(from: trimmedDate) {
-                    date = d
-                    break
-                }
-            }
+            let date = DateParser.parse(itemPubDate)
 
             // Clean description
             let cleanDesc = stripHTMLSimple(itemDescription).trimmingCharacters(in: .whitespacesAndNewlines)

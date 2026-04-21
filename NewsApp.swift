@@ -6,12 +6,16 @@ import UserNotifications
 struct NewsApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @StateObject private var feedManager = FeedManager()
+    @StateObject private var themeManager = ThemeManager.shared
+    @StateObject private var readManager = ReadManager.shared
     
     var body: some Scene {
         Window("News", id: "main") {
             MainView()
                 .environmentObject(feedManager)
-                .preferredColorScheme(.dark)
+                .environmentObject(themeManager)
+                .environmentObject(readManager)
+                .preferredColorScheme(themeManager.appearance.colorScheme)
                 .background(WindowAccessor().frame(width: 0, height: 0))
         }
         .windowStyle(HiddenTitleBarWindowStyle())
@@ -22,7 +26,9 @@ struct NewsApp: App {
         Settings {
             SettingsView()
                 .environmentObject(feedManager)
-                .preferredColorScheme(.dark)
+                .environmentObject(themeManager)
+                .environmentObject(readManager)
+                .preferredColorScheme(themeManager.appearance.colorScheme)
         }
     }
 }
