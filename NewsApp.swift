@@ -5,16 +5,24 @@ import UserNotifications
 @main
 struct NewsApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
+    @StateObject private var feedManager = FeedManager()
     
     var body: some Scene {
-        WindowGroup {
+        Window("News", id: "main") {
             MainView()
+                .environmentObject(feedManager)
                 .preferredColorScheme(.dark)
-                .background(WindowAccessor())
+                .background(WindowAccessor().frame(width: 0, height: 0))
         }
         .windowStyle(HiddenTitleBarWindowStyle())
         .commands {
             SidebarCommands()
+        }
+        
+        Settings {
+            SettingsView()
+                .environmentObject(feedManager)
+                .preferredColorScheme(.dark)
         }
     }
 }
@@ -44,8 +52,6 @@ struct WindowAccessor: NSViewRepresentable {
             guard let window = view.window else { return }
             window.titlebarAppearsTransparent = true
             window.titleVisibility = .hidden
-            window.isOpaque = false
-            window.backgroundColor = NSColor.clear
             window.styleMask.insert(.fullSizeContentView)
             window.isMovableByWindowBackground = true
         }

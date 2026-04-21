@@ -8,4 +8,8 @@ struct FeedArticle: Identifiable, Codable, Hashable {
     let pubDate: Date
     let source: String
     var imageUrl: String?
+    var aiSummary: String?
+    var fullContent: String?
+    var category: String?
+    var contentFetched: Bool = false
 }
