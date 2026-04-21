@@ -218,8 +218,11 @@ class FeedManager: NSObject, ObservableObject, XMLParserDelegate {
 
                 // 3. Full content fetch + NLP cleaning
                 var fetchedContent: String?
+                var fetchedImage: String?
                 if article.fullContent == nil || article.fullContent!.isEmpty {
-                    fetchedContent = await self.fetchFullContent(for: article)
+                    let fetchRes = await self.fetchFullContentAndImage(for: article.link)
+                    fetchedContent = fetchRes.0
+                    fetchedImage = fetchRes.1
                 } else {
                     fetchedContent = article.fullContent
                 }
@@ -235,6 +238,7 @@ class FeedManager: NSObject, ObservableObject, XMLParserDelegate {
                 let contentResult = fetchedContent
                 let summaryResult = summary
                 let categoryResult = aiCategory
+                let imageResult = fetchedImage
                 await MainActor.run {
                     guard index < self.articles.count else { return }
                     self.articles[index].aiSummary = summaryResult
@@ -242,6 +246,10 @@ class FeedManager: NSObject, ObservableObject, XMLParserDelegate {
                     // Use AI category if RSS didn't provide one
                     if self.articles[index].category == nil || self.articles[index].category!.isEmpty {
                         self.articles[index].category = categoryResult
+                    }
+                    
+                    if (self.articles[index].imageUrl == nil || self.articles[index].imageUrl!.isEmpty), let fImg = imageResult {
+                        self.articles[index].imageUrl = fImg
                     }
 
                     if let content = contentResult, !content.isEmpty {
@@ -261,12 +269,8 @@ class FeedManager: NSObject, ObservableObject, XMLParserDelegate {
         }
     }
 
-    private func fetchFullContent(for article: FeedArticle) async -> String? {
-        if let existing = article.fullContent, existing.count > 300 {
-            return existing
-        }
-
-        guard let url = URL(string: article.link) else { return nil }
+    private func fetchFullContentAndImage(for link: String) async -> (String?, String?) {
+        guard let url = URL(string: link) else { return (nil, nil) }
 
         do {
             var request = URLRequest(url: url, cachePolicy: .returnCacheDataElseLoad, timeoutInterval: 12)
@@ -274,7 +278,16 @@ class FeedManager: NSObject, ObservableObject, XMLParserDelegate {
             request.setValue("text/html", forHTTPHeaderField: "Accept")
 
             let (data, _) = try await URLSession.shared.data(for: request)
-            guard let html = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .ascii) else { return nil }
+            guard let html = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .ascii) else { return (nil, nil) }
+
+            // Extract og:image
+            var extractedImageUrl: String? = nil
+            let ogPattern = "<meta[^>]+property=[\"']og:image[\"'][^>]+content=[\"']([^\"']+)[\"']"
+            if let regex = try? NSRegularExpression(pattern: ogPattern, options: .caseInsensitive),
+               let match = regex.firstMatch(in: html, range: NSRange(html.startIndex..., in: html)),
+               let range = Range(match.range(at: 1), in: html) {
+                extractedImageUrl = String(html[range])
+            }
 
             // Step 1: Remove boilerplate HTML blocks
             let cleaned = removeBoilerplateBlocks(from: html)
@@ -300,10 +313,10 @@ class FeedManager: NSObject, ObservableObject, XMLParserDelegate {
                 }
 
             let result = paragraphs.joined(separator: "\n\n")
-            if result.count > 200 { return result }
-            return nil
+            if result.count > 200 { return (result, extractedImageUrl) }
+            return (nil, extractedImageUrl)
         } catch {
-            return nil
+            return (nil, nil)
         }
     }
 
@@ -342,12 +355,15 @@ class FeedManager: NSObject, ObservableObject, XMLParserDelegate {
             "entry-content", "post-content", "article-body", "article__body",
             "story-body", "story-body__inner", "caas-body", "article-text",
             "story-content", "post-body", "content-body", "article__content",
-            "field-body", "c-entry-content", "article-content"
+            "field-body", "c-entry-content", "article-content",
+            // Heuristics derived from NetNewsWire structure
+            "content", "rich-text", "post_content", "main-content", "article",
+            "post-entry", "entry", "story", "page-content"
         ]
 
         for className in contentPatterns {
-            // Match div or section with this class
-            let pattern = "<(?:div|section)[^>]*class=\"[^\"]*\(className)[^\"]*\"[^>]*>(.*)"
+            // Match div, section, main, or article with this exact strict class boundary
+            let pattern = "<(?:div|section|main|article)[^>]*class=\"[^\"]*\\b\(className)\\b[^\"]*\"[^>]*>(.*)"
             if let regex = try? NSRegularExpression(pattern: pattern, options: [.dotMatchesLineSeparators, .caseInsensitive]),
                let match = regex.firstMatch(in: html, range: NSRange(html.startIndex..., in: html)),
                let range = Range(match.range(at: 1), in: html) {

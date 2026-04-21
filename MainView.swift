@@ -97,25 +97,9 @@ struct MainView: View {
                 )
                 
                 NavigationLink(value: "Unread") {
-                    Label {
-                        HStack {
-                            Text("Unread")
-                            let unreadCount = feedManager.articles.filter { !readManager.isRead($0.id) }.count
-                            if unreadCount > 0 {
-                                Spacer()
-                                Text("\(unreadCount)")
-                                    .font(.system(size: 10, weight: .bold))
-                                    .foregroundColor(.white)
-                                    .padding(.horizontal, 6)
-                                    .padding(.vertical, 2)
-                                    .background(accentPink.opacity(0.8))
-                                    .clipShape(Capsule())
-                            }
-                        }
-                    } icon: {
-                        Image(systemName: "circle.circle.fill")
-                    }
+                    Label("Unread", systemImage: "circle.circle.fill")
                 }
+                .badge(feedManager.articles.filter { !readManager.isRead($0.id) }.count)
                 .listRowBackground(
                     selectedTopic == "Unread" ? AnyView(accentPink.opacity(0.8).cornerRadius(8)) : AnyView(Color.clear)
                 )
@@ -123,23 +107,9 @@ struct MainView: View {
 
             Section("Library") {
                 NavigationLink(value: "Saved Stories") {
-                    Label {
-                        HStack {
-                            Text("Saved Stories")
-                            if !savedStories.savedArticles.isEmpty {
-                                Text("\(savedStories.savedArticles.count)")
-                                    .font(.system(size: 10, weight: .bold))
-                                    .foregroundColor(.white)
-                                    .padding(.horizontal, 6)
-                                    .padding(.vertical, 2)
-                                    .background(accentPink.opacity(0.6))
-                                    .clipShape(Capsule())
-                            }
-                        }
-                    } icon: {
-                        Image(systemName: "bookmark.fill")
-                    }
+                    Label("Saved Stories", systemImage: "bookmark.fill")
                 }
+                .badge(savedStories.savedArticles.isEmpty ? 0 : savedStories.savedArticles.count)
                 NavigationLink(value: "History") {
                     Label("History", systemImage: "clock.fill")
                 }
@@ -342,13 +312,13 @@ struct ArticleCardView: View {
                     AsyncImage(url: url) { phase in
                         switch phase {
                         case .success(let image):
-                            image.resizable().aspectRatio(contentMode: .fill).frame(height: 240).clipped()
+                            image.resizable().aspectRatio(contentMode: .fill).frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: 240).clipped()
                         default:
-                            Rectangle().fill(surfaceMid).frame(height: 240)
+                            Rectangle().fill(surfaceMid).frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: 240)
                         }
                     }
                 } else {
-                    Rectangle().fill(surfaceMid).frame(height: 240)
+                    Rectangle().fill(surfaceMid).frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: 240)
                 }
 
                 LinearGradient(colors: [Color.clear, Color.black.opacity(0.85)], startPoint: .center, endPoint: .bottom)
