@@ -62,12 +62,12 @@ struct MainView: View {
     }
 
     var body: some View {
-        NavigationSplitView {
+        NavigationSplitView(columnVisibility: .constant(.all)) {
             sidebar
         } detail: {
             detailContent
         }
-        .navigationSplitViewStyle(.prominentDetail)
+        .navigationSplitViewStyle(.balanced)
         .frame(minWidth: 900, minHeight: 600)
     }
 
@@ -144,6 +144,7 @@ struct MainView: View {
             }
         }
         .listStyle(.sidebar)
+        .scrollContentBackground(.visible)
         .navigationSplitViewColumnWidth(min: 220, ideal: 240, max: 300)
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
@@ -527,7 +528,6 @@ struct ArticleDetailView: View {
             .padding(.horizontal, 24)
             .padding(.top, 40)
         }
-        .toolbar(.hidden)
     }
 
     private func toolbarButton(icon: String, action: @escaping () -> Void) -> some View {

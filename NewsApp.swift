@@ -81,9 +81,24 @@ struct WindowAccessor: NSViewRepresentable {
             window.titleVisibility = .hidden
             window.styleMask.insert(.fullSizeContentView)
             window.isMovableByWindowBackground = true
+            window.titlebarSeparatorStyle = .none
+            
+            // Force the sidebar divider to render cleanly
+            if let splitView = findSplitView(in: window.contentView) {
+                splitView.dividerStyle = .thin
+            }
         }
         return view
     }
 
     func updateNSView(_ nsView: NSView, context: Context) {}
+    
+    private func findSplitView(in view: NSView?) -> NSSplitView? {
+        guard let view = view else { return nil }
+        if let splitView = view as? NSSplitView { return splitView }
+        for subview in view.subviews {
+            if let found = findSplitView(in: subview) { return found }
+        }
+        return nil
+    }
 }
