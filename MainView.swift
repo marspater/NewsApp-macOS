@@ -67,6 +67,7 @@ struct MainView: View {
         } detail: {
             detailContent
         }
+        .navigationSplitViewStyle(.prominentDetail)
         .frame(minWidth: 900, minHeight: 600)
     }
 
@@ -253,6 +254,7 @@ struct MainView: View {
                             }
                         }
                     }
+                    .onTapGesture {} // Prevents clicks from passing through to the window and triggering the title bar bug
                 }
             }
             .navigationDestination(for: FeedArticleWrap.self) { wrap in
@@ -441,12 +443,10 @@ struct ArticleDetailView: View {
                         Text(currentArticle.title)
                             .font(titleFontDef)
                             .foregroundColor(textPrimary)
-                            .textSelection(.enabled)
 
                         Text("\((currentArticle.source.components(separatedBy: "\n").first ?? currentArticle.source).trimmingCharacters(in: .whitespacesAndNewlines)) · \(currentArticle.pubDate.formatted(date: .long, time: .omitted))")
                             .font(.system(size: 15, weight: .semibold, design: themeManager.articleTheme == .alto ? .monospaced : .default))
                             .foregroundColor(accentPink)
-                            .textSelection(.enabled)
                             .tracking(1.2)
                             .textCase(.uppercase)
 
@@ -466,14 +466,12 @@ struct ArticleDetailView: View {
                                         .font(bodyFontDef)
                                         .foregroundColor(textPrimary.opacity(0.87))
                                         .lineSpacing(bodyLineSpacing)
-                                        .textSelection(.enabled)
                                 }
                             } else {
                                 Text(currentArticle.description)
                                     .font(bodyFontDef)
                                     .foregroundColor(textPrimary.opacity(0.87))
                                     .lineSpacing(bodyLineSpacing)
-                                    .textSelection(.enabled)
                             }
                         } else {
                             HStack {
@@ -494,12 +492,23 @@ struct ArticleDetailView: View {
                 }
             }
             .ignoresSafeArea(edges: .top)
+            .onTapGesture {} // Prevents clicks from passing through to the window and triggering the title bar bug
 
             HStack(spacing: 12) {
                 toolbarButton(icon: "chevron.left") { if !path.isEmpty { path.removeLast() } }
                 Spacer()
                 toolbarButton(icon: isSaved ? "bookmark.fill" : "bookmark") { isSaved ? savedStories.remove(currentArticle) : savedStories.save(currentArticle) }
-                toolbarButton(icon: "square.and.arrow.up") { shareArticle() }
+            
+            if let url = URL(string: currentArticle.link) {
+                ShareLink(item: url, subject: Text(currentArticle.title), message: Text(currentArticle.title)) {
+                    Image(systemName: "square.and.arrow.up")
+                        .font(.system(size: 15, weight: .bold))
+                        .foregroundColor(textPrimary)
+                        .frame(width: 40, height: 40)
+                        .background(.ultraThinMaterial, in: Circle())
+                }
+                .buttonStyle(.plain)
+            }
                 Menu {
                     Button {
                         NSPasteboard.general.clearContents()
@@ -511,7 +520,9 @@ struct ArticleDetailView: View {
                 } label: {
                     Image(systemName: "ellipsis").font(.system(size: 15, weight: .bold)).foregroundColor(textPrimary).frame(width: 40, height: 40).background(.ultraThinMaterial, in: Circle())
                 }
-                .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+                .buttonStyle(.plain)
+                .menuIndicator(.hidden)
+                .fixedSize()
             }
             .padding(.horizontal, 24)
             .padding(.top, 40)
@@ -524,14 +535,6 @@ struct ArticleDetailView: View {
             Image(systemName: icon).font(.system(size: 15, weight: .bold)).foregroundColor(textPrimary).frame(width: 40, height: 40).background(.ultraThinMaterial, in: Circle())
         }
         .buttonStyle(.plain)
-    }
-
-    private func shareArticle() {
-        let items: [Any] = [currentArticle.title, URL(string: currentArticle.link) as Any].compactMap { $0 }
-        let picker = NSSharingServicePicker(items: items)
-        if let window = NSApp.keyWindow, let contentView = window.contentView {
-            picker.show(relativeTo: .zero, of: contentView, preferredEdge: .minY)
-        }
     }
 
     private func contentParagraphs(_ text: String) -> [String] {

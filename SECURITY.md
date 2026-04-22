@@ -13,8 +13,6 @@ Currently, only the latest major release of NewsApp is actively supported with s
 
 We take the security and privacy of NewsApp seriously. If you discover a security vulnerability or a potential flaw within the project, please **do not disclose it publicly** by creating a GitHub Issue. 
 
-Instead, please report it privately by sending an email directly to **mars.son.of.jupiter@gmail.com**.
-
 ### What to expect:
 - **Acknowledgment:** You can expect an initial acknowledgment of your report within 48 hours.
 - **Updates:** We will provide updates on our progress as we investigate the scope of the vulnerability.
