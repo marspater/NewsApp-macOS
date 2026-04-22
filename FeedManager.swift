@@ -6,6 +6,9 @@ class FeedManager: NSObject, ObservableObject, XMLParserDelegate {
     @Published var articles: [FeedArticle] = []
     @Published var feedURLs: [String] = []
     @Published var userSections: [String] = []
+    @Published var fetchIntervalMinutes: Double = 15
+    @Published var notificationsEnabled: Bool = true
+    @Published var aiEnabled: Bool = true
 
     // XML parsing state
     private var currentElement = ""
@@ -29,6 +32,9 @@ class FeedManager: NSObject, ObservableObject, XMLParserDelegate {
     private let cacheKey = "feed_articles_cache"
     private let feedURLsKey = "saved_feed_urls"
     private let userSectionsKey = "user_sections"
+    private let fetchIntervalKey = "feed_fetch_interval_minutes"
+    private let notificationsEnabledKey = "notifications_enabled"
+    private let aiEnabledKey = "ai_enabled"
 
     private let defaultSections = [
         "Entertainment", "Politics", "Business", "Tech",
@@ -50,6 +56,21 @@ class FeedManager: NSObject, ObservableObject, XMLParserDelegate {
             userSections = savedSections
         } else {
             userSections = defaultSections
+        }
+        if UserDefaults.standard.object(forKey: fetchIntervalKey) != nil {
+            fetchIntervalMinutes = UserDefaults.standard.double(forKey: fetchIntervalKey)
+        } else {
+            fetchIntervalMinutes = 15
+        }
+        if UserDefaults.standard.object(forKey: notificationsEnabledKey) != nil {
+            notificationsEnabled = UserDefaults.standard.bool(forKey: notificationsEnabledKey)
+        } else {
+            notificationsEnabled = true
+        }
+        if UserDefaults.standard.object(forKey: aiEnabledKey) != nil {
+            aiEnabled = UserDefaults.standard.bool(forKey: aiEnabledKey)
+        } else {
+            aiEnabled = true
         }
         loadCachedArticles()
         startBackgroundFetch()
@@ -88,6 +109,22 @@ class FeedManager: NSObject, ObservableObject, XMLParserDelegate {
     func removeSection(_ name: String) {
         userSections.removeAll { $0 == name }
         UserDefaults.standard.set(userSections, forKey: userSectionsKey)
+    }
+
+    func setFetchInterval(minutes: Double) {
+        fetchIntervalMinutes = minutes
+        UserDefaults.standard.set(minutes, forKey: fetchIntervalKey)
+        startBackgroundFetch()
+    }
+
+    func setNotificationsEnabled(_ enabled: Bool) {
+        notificationsEnabled = enabled
+        UserDefaults.standard.set(enabled, forKey: notificationsEnabledKey)
+    }
+
+    func setAIEnabled(_ enabled: Bool) {
+        aiEnabled = enabled
+        UserDefaults.standard.set(enabled, forKey: aiEnabledKey)
     }
 
     // MARK: - Filtering (keyword-based auto-categorization)
@@ -136,7 +173,8 @@ class FeedManager: NSObject, ObservableObject, XMLParserDelegate {
     // MARK: - Background Fetch
 
     func startBackgroundFetch() {
-        backgroundTimer = Timer.scheduledTimer(withTimeInterval: 900, repeats: true) { [weak self] _ in
+        backgroundTimer?.invalidate()
+        backgroundTimer = Timer.scheduledTimer(withTimeInterval: fetchIntervalMinutes * 60, repeats: true) { [weak self] _ in
             self?.fetchFeeds()
         }
     }
@@ -187,7 +225,7 @@ class FeedManager: NSObject, ObservableObject, XMLParserDelegate {
             CacheManager.shared.save(self.articles, forKey: self.cacheKey)
 
             // Fire notifications asynchronously with AI triage
-            if !newArticles.isEmpty {
+            if self.notificationsEnabled && !newArticles.isEmpty {
                 Task { [weak self] in
                     guard let self = self else { return }
                     await self.triageAndNotify(newArticles)
@@ -202,6 +240,7 @@ class FeedManager: NSObject, ObservableObject, XMLParserDelegate {
     // MARK: - Background Enrichment (AI + Full Content + Categorization)
 
     private func enrichArticlesInBackground() {
+        guard aiEnabled else { return }
         Task.detached(priority: .userInitiated) { [weak self] in
             guard let self = self else { return }
             let snapshot = await MainActor.run { self.articles }

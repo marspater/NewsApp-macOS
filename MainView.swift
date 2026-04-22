@@ -39,6 +39,8 @@ struct MainView: View {
                 result = savedStories.savedArticles
             } else if topic == "Unread" {
                 result = feedManager.articles.filter { !readManager.isRead($0.id) }
+            } else if topic == "History" {
+                result = feedManager.articles.filter { readManager.isRead($0.id) }
             } else {
                 result = feedManager.articles(for: topic)
             }
@@ -47,7 +49,10 @@ struct MainView: View {
         }
         
         // Auto-Hide Read
-        if themeManager.autoHideRead && selectedTopic != "Saved Stories" && selectedTopic != "Unread" {
+        if themeManager.autoHideRead &&
+            selectedTopic != "Saved Stories" &&
+            selectedTopic != "Unread" &&
+            selectedTopic != "History" {
             result = result.filter { !readManager.isRead($0.id) }
         }
         
