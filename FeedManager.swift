@@ -58,8 +58,15 @@ class FeedManager: NSObject, ObservableObject, XMLParserDelegate {
     // MARK: - Feed URL Management
 
     func addFeed(url: String) {
-        guard !feedURLs.contains(url) else { return }
-        feedURLs.append(url)
+        var finalURL = url.trimmingCharacters(in: .whitespacesAndNewlines)
+        if finalURL.hasPrefix("http://") {
+            finalURL = finalURL.replacingOccurrences(of: "http://", with: "https://")
+        } else if !finalURL.hasPrefix("https://") {
+            finalURL = "https://" + finalURL
+        }
+        guard URL(string: finalURL) != nil else { return }
+        guard !feedURLs.contains(finalURL) else { return }
+        feedURLs.append(finalURL)
         UserDefaults.standard.set(feedURLs, forKey: feedURLsKey)
         fetchFeeds()
     }
@@ -625,6 +632,7 @@ private class FeedXMLParser: NSObject, XMLParserDelegate {
         parser.delegate = self
         parser.shouldProcessNamespaces = false
         parser.shouldReportNamespacePrefixes = false
+        parser.shouldResolveExternalEntities = false
         parser.parse()
 
         // Post-parse: if channelTitle is still empty, extract from feedURL

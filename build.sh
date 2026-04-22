@@ -100,11 +100,6 @@ cat > "${CONTENTS_DIR}/Info.plist" <<EOF
     <string>3</string>
     <key>LSMinimumSystemVersion</key>
     <string>26.4</string>
-    <key>NSAppTransportSecurity</key>
-    <dict>
-        <key>NSAllowsArbitraryLoads</key>
-        <true/>
-    </dict>
     <key>NSSupportsAutomaticGraphicsSwitching</key>
     <true/>
 </dict>

@@ -231,11 +231,13 @@ struct MainView: View {
                                             readManager.markAsRead(article.id)
                                             articlePath.append(FeedArticleWrap(article: article))
                                         }
+                                        .transition(.asymmetric(insertion: .opacity.combined(with: .scale(scale: 0.95)), removal: .opacity))
                                         .contextMenu {
                                             Button(role: .destructive) { savedStories.remove(article) } label: { Label("Remove from Saved", systemImage: "bookmark.slash") }
                                         }
                                     }
                                 }
+                                .animation(.spring(response: 0.4, dampingFraction: 0.75), value: filteredArticles)
                                 .padding(.horizontal, 24)
                                 .padding(.bottom, 30)
                             } else {
@@ -245,11 +247,13 @@ struct MainView: View {
                                             readManager.markAsRead(article.id)
                                             articlePath.append(FeedArticleWrap(article: article))
                                         }
+                                        .transition(.asymmetric(insertion: .opacity.combined(with: .scale(scale: 0.95)), removal: .opacity))
                                         .contextMenu {
                                             Button { readManager.toggleRead(article.id) } label: { Label(readManager.isRead(article.id) ? "Mark as Unread" : "Mark as Read", systemImage: readManager.isRead(article.id) ? "circle" : "checkmark.circle.fill") }
                                         }
                                     }
                                 }
+                                .animation(.spring(response: 0.4, dampingFraction: 0.75), value: filteredArticles)
                                 .padding(.horizontal, 24)
                                 .padding(.bottom, 30)
                             }
@@ -323,6 +327,7 @@ struct ArticleCardView: View {
     let article: FeedArticle
     let action: () -> Void
     @EnvironmentObject private var readManager: ReadManager
+    @State private var isHovered = false
     
     var body: some View {
         Button(action: action) {
@@ -331,7 +336,14 @@ struct ArticleCardView: View {
                     AsyncImage(url: url) { phase in
                         switch phase {
                         case .success(let image):
-                            image.resizable().aspectRatio(contentMode: .fill).frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: 240).clipped()
+                            image.resizable()
+                                .aspectRatio(contentMode: .fill)
+                                .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: 240)
+                                .brightness(-0.05)
+                                .contrast(1.05)
+                                .saturation(1.1)
+                                .clipped()
+                                .overlay(Color.black.opacity(0.1))
                         default:
                             Rectangle().fill(surfaceMid).frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: 240)
                         }
@@ -371,9 +383,17 @@ struct ArticleCardView: View {
             }
             .frame(height: 240)
             .clipShape(RoundedRectangle(cornerRadius: 14))
-            .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.primary.opacity(0.1), lineWidth: 0.5))
-            .shadow(color: Color.black.opacity(0.2), radius: 8, x: 0, y: 4)
+            .overlay(
+                RoundedRectangle(cornerRadius: 14)
+                    .stroke(isHovered ? accentPink.opacity(0.3) : Color.primary.opacity(0.1), lineWidth: isHovered ? 2 : 0.5)
+            )
+            .shadow(color: Color.black.opacity(isHovered ? 0.4 : 0.2), radius: isHovered ? 12 : 8, x: 0, y: isHovered ? 8 : 4)
+            .scaleEffect(isHovered ? 1.02 : 1.0)
+            .animation(.spring(response: 0.35, dampingFraction: 0.7), value: isHovered)
             .opacity(readManager.isRead(article.id) ? 0.45 : 1.0)
+            .onHover { hovering in
+                isHovered = hovering
+            }
         }
         .buttonStyle(.plain)
     }
@@ -461,29 +481,41 @@ struct ArticleDetailView: View {
                         }
 
                         if currentArticle.contentFetched {
-                            if let content = currentArticle.fullContent, !content.isEmpty {
-                                ForEach(contentParagraphs(content), id: \.self) { paragraph in
-                                    Text(paragraph)
+                            VStack(alignment: .leading, spacing: 20) {
+                                if let content = currentArticle.fullContent, !content.isEmpty {
+                                    ForEach(contentParagraphs(content), id: \.self) { paragraph in
+                                        Text(paragraph)
+                                            .font(bodyFontDef)
+                                            .foregroundColor(textPrimary.opacity(0.87))
+                                            .lineSpacing(bodyLineSpacing)
+                                    }
+                                } else {
+                                    Text(currentArticle.description)
                                         .font(bodyFontDef)
                                         .foregroundColor(textPrimary.opacity(0.87))
                                         .lineSpacing(bodyLineSpacing)
                                 }
-                            } else {
-                                Text(currentArticle.description)
-                                    .font(bodyFontDef)
-                                    .foregroundColor(textPrimary.opacity(0.87))
-                                    .lineSpacing(bodyLineSpacing)
                             }
+                            .transition(.opacity.combined(with: .move(edge: .bottom)))
                         } else {
-                            HStack {
-                                Spacer()
-                                VStack(spacing: 10) {
-                                    ProgressView().scaleEffect(1.2)
-                                    Text("Loading full article...").font(.system(size: 13, design: .monospaced)).foregroundColor(textTertiary)
+                            VStack(spacing: 20) {
+                                Spacer().frame(height: 40)
+                                ForEach(0..<3) { _ in
+                                    RoundedRectangle(cornerRadius: 4)
+                                        .fill(textTertiary.opacity(0.2))
+                                        .frame(height: 20)
+                                        .frame(maxWidth: .infinity)
                                 }
-                                .padding(.top, 40)
-                                Spacer()
+                                .phaseAnimator([0.5, 1.0]) { content, phase in
+                                    content.opacity(phase)
+                                }
+                                
+                                Text("AI is extracting full content...")
+                                    .font(.system(size: 13, weight: .medium, design: .monospaced))
+                                    .foregroundColor(accentGold.opacity(0.8))
+                                    .padding(.top, 10)
                             }
+                            .padding(.top, 20)
                         }
                         Spacer().frame(height: 80)
                     }
