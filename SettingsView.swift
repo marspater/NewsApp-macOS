@@ -10,9 +10,6 @@ struct SettingsView: View {
     
     @State private var newFeedURL: String = ""
     @State private var selectedTab = 0
-    @State private var fetchInterval: Double = 15
-    @State private var notificationsEnabled: Bool = true
-    @State private var aiEnabled: Bool = true
     @State private var cacheSize: String = "Calculating..."
 
     var body: some View {
@@ -88,7 +85,10 @@ struct SettingsView: View {
     private var preferencesTab: some View {
         Form {
             Section {
-                Picker("Background Fetch Interval", selection: $fetchInterval) {
+                Picker("Background Fetch Interval", selection: Binding(
+                    get: { feedManager.fetchIntervalMinutes },
+                    set: { feedManager.setFetchInterval(minutes: $0) }
+                )) {
                     Text("15 minutes").tag(15.0)
                     Text("30 minutes").tag(30.0)
                     Text("1 hour").tag(60.0)
@@ -97,12 +97,18 @@ struct SettingsView: View {
             }
             
             Section {
-                Toggle("Push Notifications", isOn: $notificationsEnabled)
+                Toggle("Push Notifications", isOn: Binding(
+                    get: { feedManager.notificationsEnabled },
+                    set: { feedManager.setNotificationsEnabled($0) }
+                ))
                 Text("Get alerts for important stories matching your interests")
                     .font(.caption)
                     .foregroundColor(stTextSecondary)
                     
-                Toggle("AI Article Analysis", isOn: $aiEnabled)
+                Toggle("AI Article Analysis", isOn: Binding(
+                    get: { feedManager.aiEnabled },
+                    set: { feedManager.setAIEnabled($0) }
+                ))
                 Text("Uses on-device NLP for sentiment scoring and entity extraction")
                     .font(.caption)
                     .foregroundColor(stTextSecondary)

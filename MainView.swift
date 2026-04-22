@@ -39,6 +39,8 @@ struct MainView: View {
                 result = savedStories.savedArticles
             } else if topic == "Unread" {
                 result = feedManager.articles.filter { !readManager.isRead($0.id) }
+            } else if topic == "History" {
+                result = feedManager.articles.filter { readManager.isRead($0.id) }
             } else {
                 result = feedManager.articles(for: topic)
             }
