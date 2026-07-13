@@ -49,7 +49,10 @@ struct MainView: View {
         }
         
         // Auto-Hide Read
-        if themeManager.autoHideRead && selectedTopic != "Saved Stories" && selectedTopic != "Unread" {
+        if themeManager.autoHideRead &&
+            selectedTopic != "Saved Stories" &&
+            selectedTopic != "Unread" &&
+            selectedTopic != "History" {
             result = result.filter { !readManager.isRead($0.id) }
         }
         
