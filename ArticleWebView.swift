@@ -65,9 +65,13 @@ struct ArticleWebView: NSViewRepresentable {
                     decisionHandler(.cancel)
                     return
                 }
-                if IPAddressValidator.checkLiteralIP(cleanHost) != nil {
+                let validationResult = IPAddressValidator.validateHost(cleanHost)
+                switch validationResult {
+                case .blocked, .unresolvable:
                     decisionHandler(.cancel)
                     return
+                case .allowed:
+                    break
                 }
             }
 
