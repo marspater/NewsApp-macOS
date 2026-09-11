@@ -60,12 +60,11 @@ struct ArticleWebView: NSViewRepresentable {
 
             // 2. Prevent navigation to local or intranet IP hosts
             if let host = requestURL.host {
-                let cleanHost = host.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-                if cleanHost == "localhost" || cleanHost.hasSuffix(".local") || cleanHost.hasSuffix(".internal") {
-                    decisionHandler(.cancel)
-                    return
-                }
-                if IPAddressValidator.checkLiteralIP(cleanHost) != nil {
+                let validationResult = IPAddressValidator.validateHost(host)
+                switch validationResult {
+                case .allowed:
+                    break
+                case .blocked, .unresolvable:
                     decisionHandler(.cancel)
                     return
                 }
