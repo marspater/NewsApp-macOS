@@ -159,6 +159,28 @@ struct NewsTests {
             print("❌ validateHost('router.internal') was not blocked")
             exit(1)
         }
+
+        // 6. DNS Resolution Engine
+        if case .allowed(let ips) = IPAddressValidator.validateHost("example.com") {
+            assertTrue(!ips.isEmpty, "example.com should resolve to at least one IP")
+        } else {
+            print("❌ validateHost('example.com') was not allowed")
+            exit(1)
+        }
+
+        if case .unresolvable = IPAddressValidator.validateHost("this-domain-surely-does-not-exist-123456.com") {
+            // expected
+        } else {
+            print("❌ validateHost('this-domain-surely-does-not-exist-123456.com') was not unresolvable")
+            exit(1)
+        }
+
+        if case .blocked = IPAddressValidator.validateHost("127.0.0.1.nip.io") {
+            // expected DNS rebinding defense
+        } else {
+            print("❌ validateHost('127.0.0.1.nip.io') was not blocked")
+            exit(1)
+        }
     }
 
     static func testSecureHTTPClientPolicies() async {
