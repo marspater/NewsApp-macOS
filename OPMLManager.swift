@@ -93,7 +93,7 @@ public enum OPMLExporter: Sendable {
         return xml
     }
 
-    private static func escapeXML(_ string: String) -> String {
+    internal static func escapeXML(_ string: String) -> String {
         return string
             .replacingOccurrences(of: "&", with: "&amp;")
             .replacingOccurrences(of: "<", with: "&lt;")

@@ -140,29 +140,43 @@ final class ContentExtractionPipeline: Sendable {
 
     // MARK: - 3. HTML Sanitization & Tag Stripping
 
+    private struct RegexCache {
+        static let removableTags: [NSRegularExpression] = {
+            let tags = [
+                "script", "style", "nav", "footer", "header", "aside", "form",
+                "noscript", "iframe", "svg", "figcaption", "button", "select", "dialog"
+            ]
+            return tags.compactMap { tag in
+                let pattern = "<\(tag)[\\s>].*?</\(tag)>"
+                return try? NSRegularExpression(pattern: pattern, options: [.dotMatchesLineSeparators, .caseInsensitive])
+            }
+        }()
+
+        static let commentRegex: NSRegularExpression? = {
+            try? NSRegularExpression(pattern: "<!--.*?-->", options: .dotMatchesLineSeparators)
+        }()
+
+        static let junkRegex: NSRegularExpression? = {
+            let junkPattern = "<(?:div|section|aside)[^>]*(?:class|id)=[\"'][^\"']*(?:share|social|related|sidebar|widget|ad-|advertisement|comment|newsletter|promo|cookie|banner|consent)[^\"']*[\"'][^>]*>.*?</(?:div|section|aside)>"
+            return try? NSRegularExpression(pattern: junkPattern, options: [.dotMatchesLineSeparators, .caseInsensitive])
+        }()
+    }
+
     private func stripNonContentTags(from html: String) -> String {
         var result = html
 
         // Remove script, style, nav, footer, header, form, etc.
-        let removableTags = [
-            "script", "style", "nav", "footer", "header", "aside", "form",
-            "noscript", "iframe", "svg", "figcaption", "button", "select", "dialog"
-        ]
-        for tag in removableTags {
-            let pattern = "<\(tag)[\\s>].*?</\(tag)>"
-            if let regex = try? NSRegularExpression(pattern: pattern, options: [.dotMatchesLineSeparators, .caseInsensitive]) {
-                result = regex.stringByReplacingMatches(in: result, range: NSRange(result.startIndex..., in: result), withTemplate: "")
-            }
+        for regex in RegexCache.removableTags {
+            result = regex.stringByReplacingMatches(in: result, range: NSRange(result.startIndex..., in: result), withTemplate: "")
         }
 
         // Remove HTML comments
-        if let commentRegex = try? NSRegularExpression(pattern: "<!--.*?-->", options: .dotMatchesLineSeparators) {
+        if let commentRegex = RegexCache.commentRegex {
             result = commentRegex.stringByReplacingMatches(in: result, range: NSRange(result.startIndex..., in: result), withTemplate: "")
         }
 
         // Strip non-content widget blocks by class/id
-        let junkPattern = "<(?:div|section|aside)[^>]*(?:class|id)=[\"'][^\"']*(?:share|social|related|sidebar|widget|ad-|advertisement|comment|newsletter|promo|cookie|banner|consent)[^\"']*[\"'][^>]*>.*?</(?:div|section|aside)>"
-        if let junkRegex = try? NSRegularExpression(pattern: junkPattern, options: [.dotMatchesLineSeparators, .caseInsensitive]) {
+        if let junkRegex = RegexCache.junkRegex {
             result = junkRegex.stringByReplacingMatches(in: result, range: NSRange(result.startIndex..., in: result), withTemplate: "")
         }
 

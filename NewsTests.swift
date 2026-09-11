@@ -35,6 +35,7 @@ struct NewsTests {
         
         await testURLNormalization()
         await testSSRFValidation()
+        await testIsBlockedIPv4()
         await testIPAddressValidatorDeep()
         await testSecureHTTPClientPolicies()
         await testFeedErrorHierarchy()
@@ -43,6 +44,7 @@ struct NewsTests {
         await testXMLParsing()
         await testJSONParsing()
         await testNavigationCommands()
+        await testEscapeXML()
         await testOPMLParsingAndExporting()
         await testOfflineCacheAndResilience()
         await testArticleIdentityDeep()
@@ -104,6 +106,42 @@ struct NewsTests {
         assertFalse(FeedManager.isBlockedLocalAddress("172.15.2.2"), "Should allow public range outside 172.16-31")
     }
 
+    static func testIsBlockedIPv4() async {
+        print("  - Testing isBlockedIPv4 directly...")
+
+        func makeInAddr(_ ipString: String) -> in_addr {
+            var sin = in_addr()
+            inet_pton(AF_INET, ipString, &sin)
+            return sin
+        }
+
+        // Loopback
+        assertTrue(IPAddressValidator.isBlockedIPv4(makeInAddr("127.0.0.1")) != nil, "127.0.0.1 must be blocked")
+
+        // Current network
+        assertTrue(IPAddressValidator.isBlockedIPv4(makeInAddr("0.0.0.0")) != nil, "0.0.0.0 must be blocked")
+
+        // Private
+        assertTrue(IPAddressValidator.isBlockedIPv4(makeInAddr("10.0.0.1")) != nil, "10.0.0.1 must be blocked")
+        assertTrue(IPAddressValidator.isBlockedIPv4(makeInAddr("172.16.0.1")) != nil, "172.16.0.1 must be blocked")
+        assertTrue(IPAddressValidator.isBlockedIPv4(makeInAddr("192.168.0.1")) != nil, "192.168.0.1 must be blocked")
+
+        // Link-Local
+        assertTrue(IPAddressValidator.isBlockedIPv4(makeInAddr("169.254.0.1")) != nil, "169.254.0.1 must be blocked")
+
+        // Carrier-Grade NAT
+        assertTrue(IPAddressValidator.isBlockedIPv4(makeInAddr("100.64.0.1")) != nil, "100.64.0.1 must be blocked")
+
+        // Multicast
+        assertTrue(IPAddressValidator.isBlockedIPv4(makeInAddr("224.0.0.1")) != nil, "224.0.0.1 must be blocked")
+
+        // Broadcast
+        assertTrue(IPAddressValidator.isBlockedIPv4(makeInAddr("255.255.255.255")) != nil, "255.255.255.255 must be blocked")
+
+        // Valid
+        assertTrue(IPAddressValidator.isBlockedIPv4(makeInAddr("8.8.8.8")) == nil, "8.8.8.8 must be allowed")
+    }
+
     static func testIPAddressValidatorDeep() async {
         print("  - Testing IPAddressValidator (IPv4, IPv6, mapped IPv6, DNS)...")
 
@@ -125,7 +163,7 @@ struct NewsTests {
         assertTrue(IPAddressValidator.checkLiteralIP("8.8.8.8") == nil, "8.8.8.8 public IP must be allowed")
 
         // 3. Literal IPv6 Loopback, ULA, Link-Local
-        assertTrue(IPAddressValidator.checkLiteralIP("::1") != nil, "::1 must be blocked")
+        assertTrue(IPAddressValidator.checkLiteralIP("::1") == "IPv6 loopback (::1)", "::1 must be blocked")
         assertTrue(IPAddressValidator.checkLiteralIP("::") != nil, ":: must be blocked")
         assertTrue(IPAddressValidator.checkLiteralIP("fe80::1") != nil, "fe80::1 link-local must be blocked")
         assertTrue(IPAddressValidator.checkLiteralIP("fc00::1") != nil, "fc00::1 ULA must be blocked")
@@ -138,7 +176,13 @@ struct NewsTests {
         assertTrue(IPAddressValidator.checkLiteralIP("::ffff:10.0.0.1") != nil, "::ffff:10.0.0.1 mapped private must be blocked")
         assertTrue(IPAddressValidator.checkLiteralIP("::ffff:93.184.216.34") == nil, "::ffff:93.184.216.34 mapped public must be allowed")
 
-        // 5. Hostname string validation
+        // 5. NAT64 IPv6 normalization
+        assertTrue(IPAddressValidator.checkLiteralIP("64:ff9b::127.0.0.1") == "NAT64 IPv6 (IPv4 loopback address (127.0.0.0/8))", "64:ff9b::127.0.0.1 NAT64 loopback must be blocked")
+        assertTrue(IPAddressValidator.checkLiteralIP("64:ff9b::192.168.1.1") == "NAT64 IPv6 (RFC 1918 private network (192.168.0.0/16))", "64:ff9b::192.168.1.1 NAT64 private must be blocked")
+        assertTrue(IPAddressValidator.checkLiteralIP("64:ff9b::10.0.0.1") == "NAT64 IPv6 (RFC 1918 private network (10.0.0.0/8))", "64:ff9b::10.0.0.1 NAT64 private must be blocked")
+        assertTrue(IPAddressValidator.checkLiteralIP("64:ff9b::93.184.216.34") == nil, "64:ff9b::93.184.216.34 NAT64 public must be allowed")
+
+        // 6. Hostname string validation
         if case .blocked = IPAddressValidator.validateHost("localhost") {
             // expected
         } else {
@@ -159,6 +203,54 @@ struct NewsTests {
             print("❌ validateHost('router.internal') was not blocked")
             exit(1)
         }
+
+        // 7. Socket Address Validation (validateSocketAddress)
+        var sin_loopback = sockaddr_in()
+        sin_loopback.sin_family = sa_family_t(AF_INET)
+        inet_pton(AF_INET, "127.0.0.1", &sin_loopback.sin_addr)
+        let blockedLoopback = withUnsafePointer(to: &sin_loopback) { ptr -> String? in
+            ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPtr in
+                IPAddressValidator.validateSocketAddress(sockaddrPtr)
+            }
+        }
+        assertTrue(blockedLoopback != nil, "127.0.0.1 socket address must be blocked")
+
+        var sin_public = sockaddr_in()
+        sin_public.sin_family = sa_family_t(AF_INET)
+        inet_pton(AF_INET, "8.8.8.8", &sin_public.sin_addr)
+        let allowedPublic = withUnsafePointer(to: &sin_public) { ptr -> String? in
+            ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPtr in
+                IPAddressValidator.validateSocketAddress(sockaddrPtr)
+            }
+        }
+        assertTrue(allowedPublic == nil, "8.8.8.8 socket address must be allowed")
+
+        var sin6_loopback = sockaddr_in6()
+        sin6_loopback.sin6_family = sa_family_t(AF_INET6)
+        inet_pton(AF_INET6, "::1", &sin6_loopback.sin6_addr)
+        let blockedLoopback6 = withUnsafePointer(to: &sin6_loopback) { ptr -> String? in
+            ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPtr in
+                IPAddressValidator.validateSocketAddress(sockaddrPtr)
+            }
+        }
+        assertTrue(blockedLoopback6 != nil, "::1 socket address must be blocked")
+
+        var sin6_public = sockaddr_in6()
+        sin6_public.sin6_family = sa_family_t(AF_INET6)
+        inet_pton(AF_INET6, "2606:4700:4700::1111", &sin6_public.sin6_addr)
+        let allowedPublic6 = withUnsafePointer(to: &sin6_public) { ptr -> String? in
+            ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPtr in
+                IPAddressValidator.validateSocketAddress(sockaddrPtr)
+            }
+        }
+        assertTrue(allowedPublic6 == nil, "2606:4700:4700::1111 socket address must be allowed")
+
+        var sin_unsupported = sockaddr()
+        sin_unsupported.sa_family = sa_family_t(AF_UNIX)
+        let allowedUnsupported = withUnsafePointer(to: &sin_unsupported) { ptr -> String? in
+            IPAddressValidator.validateSocketAddress(ptr)
+        }
+        assertTrue(allowedUnsupported == nil, "Unsupported family socket address must return nil")
     }
 
     static func testSecureHTTPClientPolicies() async {
@@ -364,6 +456,13 @@ struct NewsTests {
         let prevIndex = max(currentIndex - 1, 0)
         assertEqual(prevIndex, 1, "Previous index should be 1")
         assertEqual(sampleArticles[prevIndex].id, "guid-1", "Previous article should be guid-1")
+    }
+
+    static func testEscapeXML() async {
+        print("  - Testing XML Escaping...")
+        let unescaped = "Ben & Jerry's <Ice Cream> \"Taste Test\""
+        let expectedEscaped = "Ben &amp; Jerry&apos;s &lt;Ice Cream&gt; &quot;Taste Test&quot;"
+        assertEqual(OPMLExporter.escapeXML(unescaped), expectedEscaped, "Strings should be correctly XML escaped")
     }
 
     static func testOPMLParsingAndExporting() async {
@@ -980,6 +1079,9 @@ struct NewsTests {
         assertEqual(NotificationService.formatMinimalSummary(articleCount: 2, uniqueSourcesCount: 1), "2 new articles from 1 source", "Plural articles, singular source")
         assertEqual(NotificationService.formatMinimalSummary(articleCount: 3, uniqueSourcesCount: 2), "3 new articles across 2 sources", "Plural articles, plural sources")
         assertEqual(NotificationService.formatMinimalSummary(articleCount: 10, uniqueSourcesCount: 4), "10 new articles across 4 sources", "Multi-source plural formatting")
+        assertEqual(NotificationService.formatMinimalSummary(articleCount: 1, uniqueSourcesCount: 0), "1 new article across 0 sources", "Edge case: 1 article, 0 sources")
+        assertEqual(NotificationService.formatMinimalSummary(articleCount: 0, uniqueSourcesCount: 0), "0 new articles across 0 sources", "Edge case: 0 articles, 0 sources")
+        assertEqual(NotificationService.formatMinimalSummary(articleCount: 0, uniqueSourcesCount: 1), "0 new articles from 1 source", "Edge case: 0 articles, 1 source")
 
         // 2. AppSettings Migration Semantics
         let suiteName = "test.notifications.migration.\(UUID().uuidString)"
@@ -1479,6 +1581,11 @@ struct NewsTests {
         // 2. Plural grammar
         let pluralSummary = NotificationService.formatMinimalSummary(articleCount: 5, uniqueSourcesCount: 3)
         assertEqual(pluralSummary, "5 new articles across 3 sources", "Plural grammar check")
+
+        // Edge cases
+        assertEqual(NotificationService.formatMinimalSummary(articleCount: 1, uniqueSourcesCount: 0), "1 new article across 0 sources", "Edge case: 1 article, 0 sources")
+        assertEqual(NotificationService.formatMinimalSummary(articleCount: 0, uniqueSourcesCount: 0), "0 new articles across 0 sources", "Edge case: 0 articles, 0 sources")
+        assertEqual(NotificationService.formatMinimalSummary(articleCount: 0, uniqueSourcesCount: 1), "0 new articles from 1 source", "Edge case: 0 articles, 1 source")
 
         // 3. Importance computation range [0.0, 1.0]
         let score = service.computeImportance(title: "Breaking News: Major Crisis Declared", description: "Officials announce emergency response.")

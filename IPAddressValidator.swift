@@ -119,7 +119,7 @@ struct IPAddressValidator: Sendable {
 
     // MARK: - IPv4 Filtering
 
-    private static func isBlockedIPv4(_ inAddr: in_addr) -> String? {
+    static func isBlockedIPv4(_ inAddr: in_addr) -> String? {
         let ip = inAddr.s_addr.bigEndian
 
         let b1 = UInt8((ip >> 24) & 0xFF)

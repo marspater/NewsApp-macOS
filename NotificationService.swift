@@ -88,6 +88,7 @@ final class NotificationService: Sendable {
     }
 
     /// Backwards-compatibility triage entry point.
+    @available(*, deprecated, message: "Use triageAndNotify(newArticles:mode:maxNotifications:) instead")
     func triageAndNotify(
         newArticles: [FeedArticle],
         privateNotificationsEnabled: Bool,
