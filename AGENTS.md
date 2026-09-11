@@ -105,3 +105,12 @@ Before considering a change complete:
 4. Run the narrowest useful tests first, then the full project test/build checks.
 5. Review the diff for regressions, security issues, concurrency problems, memory/lifecycle problems, and unnecessary complexity.
 6. Report concrete results and remaining limitations.
+
+Before implementing changes, verify that the working branch is based on
+the current `origin/main`.
+
+Before creating the PR, fetch `origin/main` again and verify that the
+task has not become stale relative to the current default branch.
+
+If `origin/main` advanced materially during the task, stop and re-evaluate
+the work against the new state before creating the PR.
