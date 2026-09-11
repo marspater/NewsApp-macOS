@@ -26,7 +26,6 @@ class FeedManager: NSObject, ObservableObject {
     let articleStore: ArticleStore
 
     private var backgroundTimer: Timer?
-    private var enrichmentTask: Task<Void, Never>?
 
     // Backward-compatibility forwarders for existing UI / View bindings
     var feedURLs: [String] { appSettings.feedURLs }
@@ -214,101 +213,24 @@ class FeedManager: NSObject, ObservableObject {
 
     // MARK: - Background Enrichment
 
-    struct EnrichedResult: Sendable {
-        let articleId: String
-        let summary: String?
-        let category: String?
-        let content: String?
-        let image: String?
-    }
-
     private func enrichArticlesInBackground() {
         guard appSettings.aiEnabled else { return }
-        enrichmentTask?.cancel()
 
         let snapshot = articles
         let allowHTTP = appSettings.allowInsecureHTTP
 
-        enrichmentTask = Task {
-            let enrichedItems: [EnrichedResult] = await withTaskGroup(of: EnrichedResult?.self) { group in
-                var activeCount = 0
-                var collected = [EnrichedResult]()
+        Task {
+            // Cancel previous background backlog on new ingest
+            await EnrichmentQueue.shared.cancelAll(reason: .superseded)
 
-                for article in snapshot {
-                    if Task.isCancelled { break }
-                    if activeCount >= 3 {
-                        if let item = await group.next(), let val = item {
-                            collected.append(val)
-                        }
-                        activeCount -= 1
-                    }
-
-                    activeCount += 1
-                    group.addTask {
-                        if Task.isCancelled { return nil }
-
-                        let summary = await AIManager.shared.analyzeArticle(
-                            title: article.title,
-                            description: article.description
-                        )
-                        if Task.isCancelled { return nil }
-
-                        let aiCategory = AIManager.shared.categorizeArticle(
-                            title: article.title,
-                            description: article.description,
-                            rssCategory: article.category
-                        )
-                        if Task.isCancelled { return nil }
-
-                        var fetchedContent: String?
-                        var fetchedImage: String?
-                        if article.fullContent == nil || article.fullContent!.isEmpty {
-                            let fetchRes = await WebContentExtractor.fetchFullContentAndImage(for: article.link, allowHTTP: allowHTTP)
-                            fetchedContent = fetchRes.0
-                            fetchedImage = fetchRes.1
-                        }
-
-                        return EnrichedResult(
-                            articleId: article.id,
-                            summary: summary,
-                            category: aiCategory,
-                            content: fetchedContent,
-                            image: fetchedImage
-                        )
-                    }
-                }
-
-                for await remaining in group {
-                    if let val = remaining {
-                        collected.append(val)
-                    }
-                }
-                return collected
-            }
-
-            guard !Task.isCancelled else { return }
-
-            for item in enrichedItems {
-                await self.articleStore.updateEnrichment(
-                    id: item.articleId,
-                    summary: item.summary,
-                    category: item.category,
-                    content: item.content,
-                    image: item.image
+            // Enqueue top 5 unread articles as high priority, rest as background
+            for (index, article) in snapshot.enumerated() {
+                let priority: EnrichmentPriority = (index < 5) ? .high : .background
+                await EnrichmentQueue.shared.enqueue(
+                    article: article,
+                    priority: priority,
+                    allowHTTP: allowHTTP
                 )
-                if let idx = self.articles.firstIndex(where: { $0.id == item.articleId }) {
-                    var updated = self.articles[idx]
-                    if let s = item.summary { updated.aiSummary = s }
-                    if let c = item.category { updated.category = c }
-                    if let cnt = item.content {
-                        updated.fullContent = cnt
-                        updated.contentFetched = true
-                    }
-                    if let img = item.image, updated.imageUrl == nil {
-                        updated.imageUrl = img
-                    }
-                    self.articles[idx] = updated
-                }
             }
         }
     }

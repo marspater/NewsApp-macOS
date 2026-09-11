@@ -75,6 +75,9 @@ swiftc -O -parse-as-library -target $(uname -m)-apple-macos${TARGET_MACOS} \
     DatabaseEngine.swift \
     MigrationCoordinator.swift \
     ArticleStore.swift \
+    ArticleIntelligence.swift \
+    ContentExtractionPipeline.swift \
+    EnrichmentQueue.swift \
     SecureHTTPClient.swift \
     AppSettings.swift \
     FeedXMLParser.swift \

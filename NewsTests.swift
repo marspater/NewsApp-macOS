@@ -50,6 +50,9 @@ struct NewsTests {
         await testFTS5SearchAndOperators()
         await testMigrationCoordinatorAtomicity()
         await testArticleRetentionPolicy()
+        await testArticleIntelligenceCapabilities()
+        await testContentExtractionPipelineDeep()
+        await testEnrichmentQueueSchedulingAndPromotion()
         
         print("✅ SUCCESS: All tests passed!")
     }
@@ -651,5 +654,148 @@ struct NewsTests {
             print("❌ Retention test failed: \(error.localizedDescription)")
             exit(1)
         }
+    }
+    
+    static func testArticleIntelligenceCapabilities() async {
+        print("  - Testing Article Intelligence Capabilities & Protocols...")
+        
+        let ai = ArticleIntelligence.shared
+        
+        // 1. Sentiment with confidence
+        let positiveText = "The team celebrated their brilliant victory and delightful breakthrough with great joy."
+        let sentPos = await ai.sentimentAnalyzer.analyzeSentiment(for: positiveText)
+        assertTrue(sentPos.score > 0.1, "Sentiment score should be positive")
+        assertEqual(sentPos.label, "Positive", "Sentiment label should be Positive")
+        assertTrue(sentPos.confidence > 0.5, "Sentiment confidence should be substantive")
+        
+        // 2. Entity Extraction
+        let entityText = "Tim Cook spoke at the Apple headquarters in Cupertino, California today."
+        let entities = await ai.entityExtractor.extractEntities(from: entityText)
+        assertTrue(!entities.isEmpty, "Should extract named entities")
+        let entityNames = entities.map { $0.name }
+        assertTrue(entityNames.contains("Apple") || entityNames.contains("Tim Cook") || entityNames.contains("Cupertino"), "Should extract Apple or Tim Cook or Cupertino")
+        
+        // 3. Topic Classification with confidence and evidence
+        let topic = await ai.topicClassifier.classifyTopic(
+            title: "Breakthrough in Quantum Computing Processor Architecture",
+            description: "Physicists develop novel cryogenic semiconductor chip",
+            text: nil,
+            rssCategory: nil
+        )
+        assertTrue(topic != nil, "Should classify topic")
+        assertTrue(topic?.category == "Tech" || topic?.category == "Science", "Should classify as Tech or Science")
+        assertTrue((topic?.confidence ?? 0) > 0.5, "Confidence should exceed 0.5")
+        assertTrue(!((topic?.evidence.isEmpty) ?? true), "Evidence keywords should not be empty")
+        
+        // 4. Extractive Summarization
+        let longArticle = """
+        Researchers at the national laboratory have unveiled a groundbreaking clean energy reactor. The system generates continuous fusion output with zero carbon emissions. Earlier attempts struggled with magnetic confinement stability at high plasma temperatures. The team solved this by using high-temperature superconducting magnets. Commercial deployment is anticipated within the next decade following regulatory certification.
+        """
+        let summary = await ai.summarizer.summarize(title: "Groundbreaking Clean Energy Reactor Unveiled", content: longArticle)
+        assertTrue(!summary.text.isEmpty, "Summary should not be empty")
+        assertTrue(summary.sentencesUsed >= 1, "Should use at least 1 sentence")
+        assertTrue(summary.confidence > 0.5, "Summary confidence should exceed 0.5")
+        
+        // 5. Prose Content Cleaning
+        let dirtyText = """
+        Share this on Twitter or follow us on Facebook.
+        
+        The spacecraft successfully entered the orbit of Mars after a nine-month interplanetary journey. Mission control confirmed telemetry signals were nominal across all scientific instruments.
+        
+        Subscribe to our daily newsletter for more stories like this! All rights reserved.
+        """
+        let cleaned = ai.cleanContent(dirtyText)
+        assertFalse(cleaned.contains("Share this on Twitter"), "Should strip share boilerplate")
+        assertFalse(cleaned.contains("Subscribe to our daily newsletter"), "Should strip newsletter boilerplate")
+        assertTrue(cleaned.contains("The spacecraft successfully entered the orbit of Mars"), "Should preserve genuine prose")
+    }
+    
+    static func testContentExtractionPipelineDeep() async {
+        print("  - Testing Content Extraction Pipeline (Entities, Link Density, Lead Image)...")
+        
+        let pipeline = ContentExtractionPipeline.shared
+        
+        // 1. Entity decoding
+        let encoded = "&quot;Innovation &amp; Discovery&quot; &mdash; It&#39;s an &#8220;extraordinary&#8221; achievement"
+        let decoded = pipeline.decodeHTMLEntities(encoded)
+        assertEqual(decoded, "\"Innovation & Discovery\" — It's an “extraordinary” achievement", "Should decode named, decimal, and hex entities")
+        
+        // 2. Link density computation
+        let navigationSnippet = """
+        <div class="nav-menu">
+            <a href="/1">Home</a>
+            <a href="/2">About</a>
+            <a href="/3">Contact</a>
+            <a href="/4">Careers</a>
+            <a href="/5">Privacy</a>
+        </div>
+        """
+        let navDensity = pipeline.computeLinkDensity(navigationSnippet)
+        assertTrue(navDensity > 0.7, "Navigation snippet should have high link density (>0.7)")
+        
+        let articleSnippet = """
+        <div class="article-text">
+            Scientists have made a historic discovery deep within the Antarctic ice sheet.
+            According to the published <a href="/paper">study</a>, the ancient core contains climate records dating back two million years.
+            The findings provide critical insights into historical atmospheric compositions.
+        </div>
+        """
+        let articleDensity = pipeline.computeLinkDensity(articleSnippet)
+        assertTrue(articleDensity < 0.3, "Article text with few inline links should have low link density (<0.3)")
+        
+        // 3. Lead image extraction
+        let htmlWithOG = """
+        <html>
+        <head>
+            <title>Sample Article</title>
+            <meta property="og:image" content="https://example.com/lead-image.jpg">
+        </head>
+        <body><p>Content</p></body>
+        </html>
+        """
+        let extractedImage = pipeline.extractLeadImage(from: htmlWithOG)
+        assertEqual(extractedImage, "https://example.com/lead-image.jpg", "Should extract og:image meta tag")
+    }
+    
+    static func testEnrichmentQueueSchedulingAndPromotion() async {
+        print("  - Testing EnrichmentQueue Scheduling, Promotion & Cancellation...")
+        
+        let queue = EnrichmentQueue()
+        
+        let articleA = FeedArticle(
+            title: "Artificial Intelligence in Healthcare Diagnosis",
+            link: "https://example.com/ai-health",
+            guid: "eq-1",
+            description: "Doctors evaluate deep learning tools for radiology",
+            pubDate: Date(),
+            source: "MedTech"
+        )
+        let articleB = FeedArticle(
+            title: "Superconductor Breakthrough Confirmed",
+            link: "https://example.com/superconductor",
+            guid: "eq-2",
+            description: "Independent labs replicate zero resistance",
+            pubDate: Date(),
+            source: "Physics Journal"
+        )
+        
+        // 1. Enqueue background
+        await queue.enqueue(article: articleA, priority: .background)
+        
+        // 2. Duplicate prevention & promotion
+        await queue.enqueue(article: articleA, priority: .interactive)
+        
+        // 3. Enqueue second article
+        await queue.enqueue(article: articleB, priority: .high)
+        
+        // 4. Cancel articleB
+        await queue.cancel(articleId: articleB.id, reason: .user)
+        let stateB = await queue.state(for: articleB.id)
+        assertEqual(stateB, .cancelled(.user), "Article B should be in cancelled state")
+        
+        // 5. Cancel all
+        await queue.cancelAll(reason: .superseded)
+        let stateA = await queue.state(for: articleA.id)
+        assertEqual(stateA, .cancelled(.superseded), "Article A should be cancelled with superseded reason")
     }
 }
