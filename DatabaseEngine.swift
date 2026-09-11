@@ -544,6 +544,42 @@ actor DatabaseEngine {
         }
     }
     
+    func markReadBatch(articleIds: [String], isRead: Bool) throws {
+        guard let db = db else { throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Database not open"]) }
+        guard !articleIds.isEmpty else { return }
+
+        let sql = """
+        INSERT INTO article_state (article_id, is_read, is_saved, read_at, saved_at)
+        VALUES (?, ?, 0, ?, NULL)
+        ON CONFLICT(article_id) DO UPDATE SET
+            is_read = excluded.is_read,
+            read_at = excluded.read_at;
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to prepare markReadBatch statement"])
+        }
+        defer { sqlite3_finalize(stmt) }
+
+        let now = Date().timeIntervalSince1970
+        let readInt: Int32 = isRead ? 1 : 0
+
+        for articleId in articleIds {
+            sqlite3_reset(stmt)
+            sqlite3_bind_text(stmt, 1, articleId, -1, Self.SQLITE_TRANSIENT)
+            sqlite3_bind_int(stmt, 2, readInt)
+            if isRead {
+                sqlite3_bind_double(stmt, 3, now)
+            } else {
+                sqlite3_bind_null(stmt, 3)
+            }
+
+            if sqlite3_step(stmt) != SQLITE_DONE {
+                throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to execute markReadBatch for id: \(articleId)"])
+            }
+        }
+    }
+
     func markAllRead(feedUrl: String? = nil) throws {
         guard let db = db else { throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Database not open"]) }
         let now = Date().timeIntervalSince1970
