@@ -125,7 +125,7 @@ struct NewsTests {
         assertTrue(IPAddressValidator.checkLiteralIP("8.8.8.8") == nil, "8.8.8.8 public IP must be allowed")
 
         // 3. Literal IPv6 Loopback, ULA, Link-Local
-        assertTrue(IPAddressValidator.checkLiteralIP("::1") != nil, "::1 must be blocked")
+        assertTrue(IPAddressValidator.checkLiteralIP("::1") == "IPv6 loopback (::1)", "::1 must be blocked")
         assertTrue(IPAddressValidator.checkLiteralIP("::") != nil, ":: must be blocked")
         assertTrue(IPAddressValidator.checkLiteralIP("fe80::1") != nil, "fe80::1 link-local must be blocked")
         assertTrue(IPAddressValidator.checkLiteralIP("fc00::1") != nil, "fc00::1 ULA must be blocked")
@@ -138,7 +138,13 @@ struct NewsTests {
         assertTrue(IPAddressValidator.checkLiteralIP("::ffff:10.0.0.1") != nil, "::ffff:10.0.0.1 mapped private must be blocked")
         assertTrue(IPAddressValidator.checkLiteralIP("::ffff:93.184.216.34") == nil, "::ffff:93.184.216.34 mapped public must be allowed")
 
-        // 5. Hostname string validation
+        // 5. NAT64 IPv6 normalization
+        assertTrue(IPAddressValidator.checkLiteralIP("64:ff9b::127.0.0.1") == "NAT64 IPv6 (IPv4 loopback address (127.0.0.0/8))", "64:ff9b::127.0.0.1 NAT64 loopback must be blocked")
+        assertTrue(IPAddressValidator.checkLiteralIP("64:ff9b::192.168.1.1") == "NAT64 IPv6 (RFC 1918 private network (192.168.0.0/16))", "64:ff9b::192.168.1.1 NAT64 private must be blocked")
+        assertTrue(IPAddressValidator.checkLiteralIP("64:ff9b::10.0.0.1") == "NAT64 IPv6 (RFC 1918 private network (10.0.0.0/8))", "64:ff9b::10.0.0.1 NAT64 private must be blocked")
+        assertTrue(IPAddressValidator.checkLiteralIP("64:ff9b::93.184.216.34") == nil, "64:ff9b::93.184.216.34 NAT64 public must be allowed")
+
+        // 6. Hostname string validation
         if case .blocked = IPAddressValidator.validateHost("localhost") {
             // expected
         } else {
