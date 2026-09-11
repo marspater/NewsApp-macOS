@@ -980,6 +980,9 @@ struct NewsTests {
         assertEqual(NotificationService.formatMinimalSummary(articleCount: 2, uniqueSourcesCount: 1), "2 new articles from 1 source", "Plural articles, singular source")
         assertEqual(NotificationService.formatMinimalSummary(articleCount: 3, uniqueSourcesCount: 2), "3 new articles across 2 sources", "Plural articles, plural sources")
         assertEqual(NotificationService.formatMinimalSummary(articleCount: 10, uniqueSourcesCount: 4), "10 new articles across 4 sources", "Multi-source plural formatting")
+        assertEqual(NotificationService.formatMinimalSummary(articleCount: 1, uniqueSourcesCount: 0), "1 new article across 0 sources", "Edge case: 1 article, 0 sources")
+        assertEqual(NotificationService.formatMinimalSummary(articleCount: 0, uniqueSourcesCount: 0), "0 new articles across 0 sources", "Edge case: 0 articles, 0 sources")
+        assertEqual(NotificationService.formatMinimalSummary(articleCount: 0, uniqueSourcesCount: 1), "0 new articles from 1 source", "Edge case: 0 articles, 1 source")
 
         // 2. AppSettings Migration Semantics
         let suiteName = "test.notifications.migration.\(UUID().uuidString)"
@@ -1479,6 +1482,11 @@ struct NewsTests {
         // 2. Plural grammar
         let pluralSummary = NotificationService.formatMinimalSummary(articleCount: 5, uniqueSourcesCount: 3)
         assertEqual(pluralSummary, "5 new articles across 3 sources", "Plural grammar check")
+
+        // Edge cases
+        assertEqual(NotificationService.formatMinimalSummary(articleCount: 1, uniqueSourcesCount: 0), "1 new article across 0 sources", "Edge case: 1 article, 0 sources")
+        assertEqual(NotificationService.formatMinimalSummary(articleCount: 0, uniqueSourcesCount: 0), "0 new articles across 0 sources", "Edge case: 0 articles, 0 sources")
+        assertEqual(NotificationService.formatMinimalSummary(articleCount: 0, uniqueSourcesCount: 1), "0 new articles from 1 source", "Edge case: 0 articles, 1 source")
 
         // 3. Importance computation range [0.0, 1.0]
         let score = service.computeImportance(title: "Breaking News: Major Crisis Declared", description: "Officials announce emergency response.")
