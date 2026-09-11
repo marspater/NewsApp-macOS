@@ -49,4 +49,18 @@ enum NewsSignposts {
         defer { end(signposter, name: name, state: state) }
         return try work()
     }
+
+    /// Convenience wrapper to measure asynchronous work and propagate errors.
+    @discardableResult
+    static func measure<T>(
+        signposter: OSSignposter,
+        name: StaticString,
+        metadata: String? = nil,
+        work: () async throws -> T
+    ) async rethrows -> T {
+        let state = begin(signposter, name: name, metadata: metadata)
+        defer { end(signposter, name: name, state: state) }
+        return try await work()
+    }
 }
+

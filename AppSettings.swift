@@ -111,26 +111,54 @@ final class AppSettings: ObservableObject {
         self.allowInsecureHTTP = defaults.bool(forKey: Self.allowInsecureHTTPKey)
     }
 
-    // MARK: - Mutation APIs
+    // MARK: - URL Normalization
 
-    func addFeed(url: String) -> String? {
-        var finalURL = url.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !finalURL.hasPrefix("https://") && !finalURL.hasPrefix("http://") {
-            finalURL = "https://" + finalURL
-        }
-        guard let nsURL = URL(string: finalURL), nsURL.host != nil else {
+    /// Normalizes and validates a feed subscription URL using URLComponents.
+    /// Handles scheme upgrades, host lowercasing, and trailing slash cleanup without brittle string replacement.
+    static func normalizeFeedURL(_ raw: String, allowInsecureHTTP: Bool = false) -> String? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        let lower = trimmed.lowercased()
+        let hasScheme = lower.hasPrefix("https://") || lower.hasPrefix("http://")
+        let withScheme = hasScheme ? trimmed : "https://" + trimmed
+
+        guard let url = URL(string: withScheme),
+              var components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              let host = components.host, !host.isEmpty else {
             return nil
         }
 
-        // Scheme check
-        if !allowInsecureHTTP && nsURL.scheme?.lowercased() == "http" {
-            finalURL = finalURL.replacingOccurrences(of: "http://", with: "https://")
+        components.scheme = components.scheme?.lowercased()
+        components.host = host.lowercased()
+        if !allowInsecureHTTP && components.scheme == "http" {
+            components.scheme = "https"
         }
 
-        guard !feedURLs.contains(finalURL) else { return finalURL }
-        feedURLs.append(finalURL)
+        var path = components.path
+        if path == "/" {
+            path = ""
+            components.path = path
+        } else if path.hasSuffix("/") && path.count > 1 {
+            path.removeLast()
+            components.path = path
+        }
+
+        return components.url?.absoluteString
+    }
+
+
+    // MARK: - Mutation APIs
+
+    func addFeed(url: String) -> String? {
+        guard let normalized = Self.normalizeFeedURL(url, allowInsecureHTTP: allowInsecureHTTP) else {
+            return nil
+        }
+
+        guard !feedURLs.contains(normalized) else { return normalized }
+        feedURLs.append(normalized)
         saveFeeds()
-        return finalURL
+        return normalized
     }
 
     func removeFeed(url: String) {
@@ -188,18 +216,12 @@ final class AppSettings: ObservableObject {
         let items = OPMLParser.parse(data: opmlData)
         var addedCount = 0
         for item in items {
-            var finalURL = item.url.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !finalURL.hasPrefix("https://") && !finalURL.hasPrefix("http://") {
-                finalURL = "https://" + finalURL
+            guard let normalized = Self.normalizeFeedURL(item.url, allowInsecureHTTP: allowInsecureHTTP) else {
+                continue
             }
-            if !allowInsecureHTTP && finalURL.hasPrefix("http://") {
-                finalURL = finalURL.replacingOccurrences(of: "http://", with: "https://")
-            }
-            guard let nsURL = URL(string: finalURL), let host = nsURL.host else { continue }
-            _ = host
 
-            if !feedURLs.contains(finalURL) {
-                feedURLs.append(finalURL)
+            if !feedURLs.contains(normalized) {
+                feedURLs.append(normalized)
                 addedCount += 1
             }
             if let folder = item.folder, !folder.isEmpty, !userSections.contains(folder) {
@@ -218,10 +240,11 @@ final class AppSettings: ObservableObject {
     }
 
     private func saveFeeds() {
-        UserDefaults.standard.set(feedURLs, forKey: Self.feedURLsKey)
+        defaults.set(feedURLs, forKey: Self.feedURLsKey)
     }
 
     private func saveSections() {
-        UserDefaults.standard.set(userSections, forKey: Self.userSectionsKey)
+        defaults.set(userSections, forKey: Self.userSectionsKey)
     }
 }
+

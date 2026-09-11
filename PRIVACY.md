@@ -29,20 +29,31 @@ NewsApp is engineered with a **local-first, zero-telemetry architecture**. Your 
 
 ---
 
-## 3. On-Device Intelligence & Natural Language Processing
+## 3. Notification Privacy Tiers & Network Egress
+
+NewsApp provides three distinct notification privacy modes with clear network and metadata boundaries:
+
+* **Full Mode**: Displays the article headline, publisher source, and teaser snippet. If an article provides a lead image, it is fetched on-demand directly from the publisher via `SecureHTTPClient` with full SSRF validation, size limits (5 MB max), and timeout bounds.
+* **Private Mode**: Emits strictly generic notification alerts (`Title: News Update`, `Body: You have new articles available. Open to read.`). Zero article headlines, body snippets, or publisher names are included, and **zero remote image requests** are executed.
+* **Minimal Mode**: Aggregates all new articles into a single unified notification alert (`3 new articles across 2 sources`). No article headlines or content are disclosed, and **zero remote image requests** are executed.
+
+---
+
+## 4. On-Device Intelligence & Natural Language Processing
 
 * **Local Machine Learning**: All article intelligence operations—topic categorization, sentiment scoring, named entity extraction, and content summarization—are executed locally on-device using Apple's `NaturalLanguage` framework.
 * **Zero Cloud AI Egress**: Article content, summaries, and extracted metadata are never transmitted to third-party AI or cloud LLM APIs.
 
 ---
 
-## 4. Minimal Hardened Runtime Entitlements
+## 5. Minimal Hardened Runtime Entitlements
 
 NewsApp is signed with macOS **Hardened Runtime** and declares only the absolute minimum required entitlements (`News.entitlements`):
 
 | Entitlement | Purpose |
 |:---|:---|
 | `com.apple.security.network.client` | Outgoing HTTP/HTTPS network connections to fetch feeds and article web pages. |
+
 | `com.apple.security.files.user-selected.read-write` | User-initiated file dialogs to import and export OPML subscription lists. |
 
 No access is requested or granted for:
@@ -54,8 +65,9 @@ No access is requested or granted for:
 
 ---
 
-## 5. Data Retention & User Control
+## 6. Data Retention & User Control
 
 * **Retention Policies**: Configurable automatic pruning keeps local SQLite storage lightweight without removing bookmarked articles.
 * **Exportability**: You can export your entire feed library at any time via the standard OPML 2.0 format (`File > Export OPML...`).
 * **Complete Erasure**: Deleting the `~/Library/Application Support/News` and `~/Library/Caches/com.marspater.news.cache` directories completely purges all application state from your machine.
+

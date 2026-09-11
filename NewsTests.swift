@@ -59,9 +59,11 @@ struct NewsTests {
         await testNotificationModeTriageAndGrammar()
         await testRefreshCoordinatorSingleFlightCoalescing()
         await testSignpostHelperExecution()
+        await testAppSettingsIsolationAndURLNormalization()
         
         print("✅ SUCCESS: All tests passed!")
     }
+
     
     static func testURLNormalization() async {
         print("  - Testing URL Normalization...")
@@ -921,6 +923,8 @@ struct NewsTests {
         assertEqual(SemanticVersion.parse("v2.0.1"), SemanticVersion(major: 2, minor: 0, patch: 1), "v2.0.1 should parse")
         assertEqual(SemanticVersion.parse("2.0.1"), SemanticVersion(major: 2, minor: 0, patch: 1), "2.0.1 should parse")
         assertEqual(SemanticVersion.parse("10.12.3"), SemanticVersion(major: 10, minor: 12, patch: 3), "10.12.3 should parse")
+        assertEqual(SemanticVersion.parse("0.1.0"), SemanticVersion(major: 0, minor: 1, patch: 0), "0.1.0 should parse")
+        assertEqual(SemanticVersion.parse("v0.0.1"), SemanticVersion(major: 0, minor: 0, patch: 1), "v0.0.1 should parse")
 
         // 2. Invalid tags should be rejected (ignored)
         assertEqual(SemanticVersion.parse("release-2.0.1"), nil, "release- prefix should be rejected")
@@ -929,22 +933,32 @@ struct NewsTests {
         assertEqual(SemanticVersion.parse("foo"), nil, "Arbitrary string should be rejected")
         assertEqual(SemanticVersion.parse("v2.0.1-beta"), nil, "Non-numeric suffix should be rejected")
 
-        // 3. Numeric tuple comparison
+        // 3. Leading zeros must be rejected per SemVer 2.0.0
+        assertEqual(SemanticVersion.parse("001.002.003"), nil, "Components with leading zeros must be rejected")
+        assertEqual(SemanticVersion.parse("01.0.0"), nil, "Major with leading zero must be rejected")
+        assertEqual(SemanticVersion.parse("1.02.0"), nil, "Minor with leading zero must be rejected")
+        assertEqual(SemanticVersion.parse("1.0.03"), nil, "Patch with leading zero must be rejected")
+
+        // 4. Numeric tuple comparison
         assertTrue(SemanticVersion(major: 2, minor: 0, patch: 1) > SemanticVersion(major: 2, minor: 0, patch: 0), "2.0.1 > 2.0.0")
         assertTrue(SemanticVersion(major: 2, minor: 1, patch: 0) > SemanticVersion(major: 2, minor: 0, patch: 9), "2.1.0 > 2.0.9")
         assertTrue(SemanticVersion(major: 3, minor: 0, patch: 0) > SemanticVersion(major: 2, minor: 9, patch: 9), "3.0.0 > 2.9.9")
         assertFalse(SemanticVersion(major: 2, minor: 0, patch: 0) > SemanticVersion(major: 2, minor: 0, patch: 1), "2.0.0 is not > 2.0.1")
         assertEqual(SemanticVersion(major: 2, minor: 0, patch: 0), SemanticVersion(major: 2, minor: 0, patch: 0), "Equality check")
 
-        // 4. Release URL Domain Security
+        // 5. Release URL Domain & Path Prefix Security
         let validURL1 = URL(string: "https://github.com/marspater/NewsApp-macOS/releases/tag/v2.1.0")!
         let validURL2 = URL(string: "https://github.com/marspater/NewsApp-macOS/releases/latest")!
+        let validURL3 = URL(string: "https://github.com/marspater/NewsApp-macOS/releases")!
+        let invalidPrefix = URL(string: "https://github.com/marspater/NewsApp-macOS/releasesomething")!
         let invalidScheme = URL(string: "http://github.com/marspater/NewsApp-macOS/releases/tag/v2.1.0")!
         let evilDomain = URL(string: "https://evil-github.com/marspater/NewsApp-macOS/releases/tag/v2.1.0")!
         let otherRepo = URL(string: "https://github.com/malicious/phishing/releases/tag/v2.1.0")!
 
         assertTrue(UpdateChecker.isValidReleaseURL(validURL1), "Valid release URL should be approved")
         assertTrue(UpdateChecker.isValidReleaseURL(validURL2), "Valid latest URL should be approved")
+        assertTrue(UpdateChecker.isValidReleaseURL(validURL3), "Exact releases URL should be approved")
+        assertFalse(UpdateChecker.isValidReleaseURL(invalidPrefix), "Sibling path /releasesomething must be rejected")
         assertFalse(UpdateChecker.isValidReleaseURL(invalidScheme), "Insecure HTTP release URL must be rejected")
         assertFalse(UpdateChecker.isValidReleaseURL(evilDomain), "Spoofed domain must be rejected")
         assertFalse(UpdateChecker.isValidReleaseURL(otherRepo), "Non-matching repository path must be rejected")
@@ -992,8 +1006,10 @@ struct NewsTests {
         func increment() { value += 1 }
     }
 
+    struct SimulatedRefreshError: Error, Equatable {}
+
     static func testRefreshCoordinatorSingleFlightCoalescing() async {
-        print("  - Testing RefreshCoordinator Single-Flight Coalescing & Error Handling...")
+        print("  - Testing RefreshCoordinator 20-Caller Stress Coalescing, Error Handling & Cancellation...")
 
         let coordinator = RefreshCoordinator()
         let counter = TestCounter()
@@ -1005,31 +1021,98 @@ struct NewsTests {
         let count1 = await counter.value
         assertEqual(count1, 1, "Single refresh execution should succeed")
 
-        // 2. Coalescing: launch two concurrent tasks
-        async let run1: Void = coordinator.executeRefresh {
-            try? await Task.sleep(nanoseconds: 50_000_000) // 50ms
-            await counter.increment()
+        // 2. Stress Test: 20 concurrent callers coalesced onto 1 underlying refresh
+        let stressCounter = TestCounter()
+        await withTaskGroup(of: Void.self) { group in
+            for _ in 0..<20 {
+                group.addTask {
+                    do {
+                        try await coordinator.executeRefresh {
+                            // Simulated network latency
+                            try await Task.sleep(nanoseconds: 50_000_000) // 50ms
+                            await stressCounter.increment()
+                        }
+                    } catch {
+                        assertTrue(false, "Unexpected error in concurrent stress caller: \(error)")
+                    }
+                }
+            }
         }
-        async let run2: Void = coordinator.executeRefresh {
-            // If called while run1 is in flight, run2 joins run1 and does not execute this block
-            await counter.increment()
-        }
+        let totalExecutions = await stressCounter.value
+        assertEqual(totalExecutions, 1, "20 concurrent callers should coalesce into exactly 1 actual refresh execution")
+        let isRef = await coordinator.isRefreshing
+        assertFalse(isRef, "Coordinator should return to idle after 20-caller stress test")
 
-        _ = try? await (run1, run2)
-        let count2 = await counter.value
-        assertEqual(count2, 2, "Concurrent callers should coalesce into single flight rather than duplicating execution")
+        // 3. Failure Propagation: all concurrent waiters observe thrown error & coordinator resets
+        let errorCounter = TestCounter()
+        await withTaskGroup(of: Void.self) { group in
+            for _ in 0..<5 {
+                group.addTask {
+                    do {
+                        try await coordinator.executeRefresh {
+                            try await Task.sleep(nanoseconds: 30_000_000) // 30ms
+                            throw SimulatedRefreshError()
+                        }
+                    } catch is SimulatedRefreshError {
+                        await errorCounter.increment()
+                    } catch {
+                        assertTrue(false, "Unexpected error type: \(error)")
+                    }
+                }
+            }
+        }
+        let caughtErrors = await errorCounter.value
+        assertEqual(caughtErrors, 5, "All 5 concurrent callers must observe the thrown failure")
+        let isIdleAfterError = await coordinator.isRefreshing
+        assertFalse(isIdleAfterError, "Coordinator must be idle after thrown error")
+
+        // 4. Subsequent refresh works after failure
+        let recoveryCounter = TestCounter()
+        do {
+            try await coordinator.executeRefresh {
+                await recoveryCounter.increment()
+            }
+        } catch {
+            assertTrue(false, "Subsequent refresh should succeed after prior error")
+        }
+        let recoveryCount = await recoveryCounter.value
+        assertEqual(recoveryCount, 1, "Coordinator must successfully execute next refresh after error")
+
+        // 5. Caller Cancellation Resilience: cancelling one waiter does not abort execution for others
+        let cancelCoordinator = RefreshCoordinator()
+        let completionCounter = TestCounter()
+        let waiterTask1 = Task {
+            try await cancelCoordinator.executeRefresh {
+                try await Task.sleep(nanoseconds: 60_000_000) // 60ms
+                await completionCounter.increment()
+            }
+        }
+        let waiterTask2 = Task {
+            try await cancelCoordinator.executeRefresh {
+                await completionCounter.increment()
+            }
+        }
+        // Cancel waiterTask1 early
+        waiterTask1.cancel()
+        _ = try? await waiterTask1.value
+        _ = try? await waiterTask2.value
+
+        let completedRuns = await completionCounter.value
+        assertEqual(completedRuns, 1, "Background task should complete for remaining waiters even if first waiter cancelled")
+        let cancelIdle = await cancelCoordinator.isRefreshing
+        assertFalse(cancelIdle, "Coordinator must be idle after cancelled run completes")
     }
 
     static func testSignpostHelperExecution() async {
-        print("  - Testing OSSignposter Measure Execution & Error Propagation...")
+        print("  - Testing OSSignposter Measure Execution & Error Propagation (Sync & Async)...")
 
-        // 1. Helper executes work and returns result
+        // 1. Synchronous helper executes work and returns result
         let result = NewsSignposts.measure(signposter: NewsSignposts.database, name: "TestMeasure", metadata: "test=true") {
             return 42
         }
         assertEqual(result, 42, "measure should return work value")
 
-        // 2. Helper propagates thrown errors
+        // 2. Synchronous helper propagates thrown errors
         struct TestError: Error, Equatable {}
         var caughtError = false
         do {
@@ -1039,8 +1122,67 @@ struct NewsTests {
         } catch is TestError {
             caughtError = true
         } catch {}
-
         assertTrue(caughtError, "measure should propagate thrown error")
+
+        // 3. Asynchronous helper executes async work and returns result
+        let asyncResult = try? await NewsSignposts.measure(signposter: NewsSignposts.database, name: "TestAsyncMeasure", metadata: "async=true") {
+            try await Task.sleep(nanoseconds: 1_000_000)
+            return 84
+        }
+        assertEqual(asyncResult, 84, "async measure should return async work value")
+
+        // 4. Asynchronous helper propagates thrown errors
+        var caughtAsyncError = false
+        do {
+            try await NewsSignposts.measure(signposter: NewsSignposts.feeds, name: "TestAsyncError") {
+                try await Task.sleep(nanoseconds: 1_000_000)
+                throw TestError()
+            }
+        } catch is TestError {
+            caughtAsyncError = true
+        } catch {}
+        assertTrue(caughtAsyncError, "async measure should propagate thrown error")
+    }
+
+    @MainActor
+    static func testAppSettingsIsolationAndURLNormalization() async {
+        print("  - Testing AppSettings UserDefaults Isolation & URLComponents Normalization...")
+
+        // 1. URLComponents Normalization
+        let httpFeed = "http://feeds.arstechnica.com/arstechnica/index"
+        let normalizedHTTPS = AppSettings.normalizeFeedURL(httpFeed, allowInsecureHTTP: false)
+        assertEqual(normalizedHTTPS, "https://feeds.arstechnica.com/arstechnica/index", "Should upgrade http to https when allowInsecureHTTP is false")
+
+        let preservedHTTP = AppSettings.normalizeFeedURL(httpFeed, allowInsecureHTTP: true)
+        assertEqual(preservedHTTP, "http://feeds.arstechnica.com/arstechnica/index", "Should preserve http when allowInsecureHTTP is true")
+
+        let upperHost = "HTTPS://FEEDS.BBCO.CO.UK/NEWS/RSS.XML/"
+        let normalizedUpper = AppSettings.normalizeFeedURL(upperHost)
+        assertEqual(normalizedUpper, "https://feeds.bbco.co.uk/NEWS/RSS.XML", "Host must be lowercased and trailing slash stripped")
+
+        let bareDomain = "example.com/"
+        let normalizedBare = AppSettings.normalizeFeedURL(bareDomain)
+        assertEqual(normalizedBare, "https://example.com", "Bare domain should gain https scheme and strip trailing slash")
+
+        let invalidURL = AppSettings.normalizeFeedURL("")
+        assertEqual(invalidURL, nil, "Empty string should return nil")
+
+        // 2. Injected UserDefaults Isolation
+        let suiteName = "test.settings.isolation.\(UUID().uuidString)"
+        let tempDefaults = UserDefaults(suiteName: suiteName)!
+        defer { tempDefaults.removePersistentDomain(forName: suiteName) }
+
+        let settings = AppSettings(defaults: tempDefaults)
+        _ = settings.addFeed(url: "https://isolated.example.com/rss.xml")
+        settings.addSection("IsolatedSection")
+
+        // Verify stored in tempDefaults
+        let storedFeeds = tempDefaults.stringArray(forKey: AppSettings.feedURLsKey) ?? []
+        assertTrue(storedFeeds.contains("https://isolated.example.com/rss.xml"), "Injected defaults must receive feedURLs mutations")
+
+        let storedSections = tempDefaults.stringArray(forKey: AppSettings.userSectionsKey) ?? []
+        assertTrue(storedSections.contains("IsolatedSection"), "Injected defaults must receive userSections mutations")
     }
 }
+
 

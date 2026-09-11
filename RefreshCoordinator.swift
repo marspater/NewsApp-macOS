@@ -10,10 +10,11 @@ actor RefreshCoordinator {
     static let shared = RefreshCoordinator()
 
     private var activeTask: Task<Void, Error>?
+    private var currentRunID: UUID?
     private let logger = Logger(subsystem: "com.marspater.news", category: "RefreshCoordinator")
 
     /// Executes the provided refresh work, or joins the active in-flight refresh task
-    /// if one is already running.
+    /// if one is already running. Subsequent callers coalesce onto the in-flight task.
     func executeRefresh(_ work: @Sendable @escaping () async throws -> Void) async throws {
         if let current = activeTask {
             logger.debug("Refresh already in flight; coalescing caller onto active task.")
@@ -21,16 +22,37 @@ actor RefreshCoordinator {
             return
         }
 
-        let task = Task<Void, Error> {
-            try await work()
-        }
-        activeTask = task
+        let runID = UUID()
+        self.currentRunID = runID
 
-        defer {
-            activeTask = nil
+        let task = Task<Void, Error> {
+            do {
+                try await work()
+                self.finishRun(runID: runID)
+            } catch {
+                self.finishRun(runID: runID)
+                throw error
+            }
         }
+
+        self.activeTask = task
 
         try await task.value
+    }
+
+    private func finishRun(runID: UUID) {
+        if self.currentRunID == runID {
+            self.activeTask = nil
+            self.currentRunID = nil
+            logger.debug("Refresh run \(runID) completed and cleared.")
+        }
+    }
+
+    /// Explicitly resets coordinator state (useful for tests or teardown).
+    func reset() {
+        activeTask?.cancel()
+        activeTask = nil
+        currentRunID = nil
     }
 
     /// Whether a refresh is currently running (useful for diagnostics & tests).
@@ -38,3 +60,4 @@ actor RefreshCoordinator {
         activeTask != nil
     }
 }
+

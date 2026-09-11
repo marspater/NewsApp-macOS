@@ -13,6 +13,7 @@ struct SemanticVersion: Equatable, Comparable, Sendable {
     let patch: Int
 
     /// Parses strict SemVer strings formatted as `vX.Y.Z` or `X.Y.Z`.
+    /// Rejects leading zeros (e.g. `001.002.003`) per SemVer 2.0.0 specification.
     /// Rejects non-conforming tags (e.g. `release-2.0.1`, `v2.0`, `foo`).
     static func parse(_ raw: String) -> SemanticVersion? {
         var str = raw.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -21,6 +22,18 @@ struct SemanticVersion: Equatable, Comparable, Sendable {
         }
         let parts = str.split(separator: ".", omittingEmptySubsequences: false)
         guard parts.count == 3 else { return nil }
+
+        // Reject components with leading zeros (e.g. "01", "002") per SemVer 2.0.0
+        for part in parts {
+            guard !part.isEmpty else { return nil }
+            if part.count > 1 && part.first == "0" {
+                return nil
+            }
+            guard part.allSatisfy({ $0.isNumber }) else {
+                return nil
+            }
+        }
+
         guard let maj = Int(parts[0]),
               let min = Int(parts[1]),
               let pat = Int(parts[2]),
@@ -29,6 +42,7 @@ struct SemanticVersion: Equatable, Comparable, Sendable {
         }
         return SemanticVersion(major: maj, minor: min, patch: pat)
     }
+
 
     static func < (lhs: SemanticVersion, rhs: SemanticVersion) -> Bool {
         if lhs.major != rhs.major { return lhs.major < rhs.major }
@@ -174,8 +188,9 @@ final class UpdateChecker: ObservableObject {
             return false
         }
         let path = url.path.lowercased()
-        return path.hasPrefix("/marspater/newsapp-macos/releases")
+        return path == "/marspater/newsapp-macos/releases" || path.hasPrefix("/marspater/newsapp-macos/releases/")
     }
+
 
     /// Securely opens the verified release webpage in the default browser.
     /// NEVER downloads, executes, or replaces local files.
