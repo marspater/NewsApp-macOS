@@ -142,7 +142,7 @@ rm -rf "${TEMP_APP}"
 cp -R "${APP_DIR}" "${TEMP_APP}"
 find "${TEMP_APP}" -exec xattr -c {} \; 2>/dev/null || true
 find "${TEMP_APP}" -exec xattr -d com.apple.FinderInfo {} \; 2>/dev/null || true
-codesign --force --deep --sign - "${TEMP_APP}"
+codesign --force --deep --options runtime --entitlements News.entitlements --sign - "${TEMP_APP}"
 rm -rf "${APP_DIR}"
 cp -R "${TEMP_APP}" "${APP_DIR}"
 rm -rf "${TEMP_APP}"

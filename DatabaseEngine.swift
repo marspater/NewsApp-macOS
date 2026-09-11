@@ -27,9 +27,10 @@ actor DatabaseEngine {
         }
     }
     
-    deinit {
+    func close() {
         if let db = db {
             sqlite3_close(db)
+            self.db = nil
         }
     }
     

@@ -264,82 +264,81 @@ struct ArticleDetailView: View {
     // MARK: - Top Floating Glass Toolbar
     
     private var topGlassToolbar: some View {
-        GlassEffectContainer {
-            HStack(spacing: AppSpacing.sm) {
-                toolbarGlassButton(icon: "chevron.left", help: "Back to list (Esc or ←)") {
-                    if !path.isEmpty { path.removeLast() }
+        HStack(spacing: AppSpacing.sm) {
+            toolbarGlassButton(icon: "chevron.left", help: "Back to list (Esc or ←)") {
+                if !path.isEmpty { path.removeLast() }
+            }
+            
+            Spacer()
+            
+            if !allArticles.isEmpty {
+                toolbarGlassButton(icon: "arrow.up", help: "Previous Article (K or ↑)") {
+                    prevArticle()
                 }
-                
-                Spacer()
-                
-                if !allArticles.isEmpty {
-                    toolbarGlassButton(icon: "arrow.up", help: "Previous Article (K or ↑)") {
-                        prevArticle()
-                    }
-                    toolbarGlassButton(icon: "arrow.down", help: "Next Article (J or ↓)") {
-                        nextArticle()
-                    }
+                toolbarGlassButton(icon: "arrow.down", help: "Next Article (J or ↓)") {
+                    nextArticle()
                 }
-                
-                Picker("", selection: $viewMode) {
-                    Label("Reader", systemImage: "doc.plaintext").tag(DetailViewMode.reader)
-                    Label("Web", systemImage: "safari").tag(DetailViewMode.web)
-                }
-                .pickerStyle(.segmented)
-                .frame(width: 150)
-                .help("Toggle Reader / Web view (W)")
-                
-                toolbarGlassButton(
-                    icon: isSaved ? "bookmark.fill" : "bookmark",
-                    help: "Save Story (S)"
+            }
+            
+            Picker("", selection: $viewMode) {
+                Label("Reader", systemImage: "doc.plaintext").tag(DetailViewMode.reader)
+                Label("Web", systemImage: "safari").tag(DetailViewMode.web)
+            }
+            .pickerStyle(.segmented)
+            .frame(width: 150)
+            .help("Toggle Reader / Web view (W)")
+            
+            toolbarGlassButton(
+                icon: isSaved ? "bookmark.fill" : "bookmark",
+                help: "Save Story (S)"
+            ) {
+                toggleSave()
+            }
+            
+            if let url = URL(string: currentArticle.link) {
+                ShareLink(
+                    item: url,
+                    subject: Text(currentArticle.title),
+                    message: Text(currentArticle.title)
                 ) {
-                    toggleSave()
-                }
-                
-                if let url = URL(string: currentArticle.link) {
-                    ShareLink(
-                        item: url,
-                        subject: Text(currentArticle.title),
-                        message: Text(currentArticle.title)
-                    ) {
-                        Image(systemName: "square.and.arrow.up")
-                            .font(.system(size: 15, weight: .bold))
-                            .foregroundColor(AppColor.textPrimary)
-                            .frame(width: 38, height: 38)
-                            .liquidGlass(in: Circle(), interactive: true)
-                    }
-                    .buttonStyle(.plain)
-                    .help("Share Story")
-                }
-                
-                Menu {
-                    Button {
-                        NSPasteboard.general.clearContents()
-                        NSPasteboard.general.setString(currentArticle.link, forType: .string)
-                    } label: {
-                        Label("Copy Link", systemImage: "link")
-                    }
-                    
-                    Button {
-                        openInBrowser()
-                    } label: {
-                        Label("Open in Browser", systemImage: "safari")
-                    }
-                } label: {
-                    Image(systemName: "ellipsis")
+                    Image(systemName: "square.and.arrow.up")
                         .font(.system(size: 15, weight: .bold))
                         .foregroundColor(AppColor.textPrimary)
                         .frame(width: 38, height: 38)
                         .liquidGlass(in: Circle(), interactive: true)
                 }
                 .buttonStyle(.plain)
-                .menuIndicator(.hidden)
-                .fixedSize()
+                .help("Share Story")
             }
-            .padding(.horizontal, AppSpacing.lg)
-            .padding(.top, 40)
-            .padding(.bottom, AppSpacing.sm)
+            
+            Menu {
+                Button {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(currentArticle.link, forType: .string)
+                } label: {
+                    Label("Copy Link", systemImage: "link")
+                }
+                
+                Button {
+                    openInBrowser()
+                } label: {
+                    Label("Open in Browser", systemImage: "safari")
+                }
+            } label: {
+                Image(systemName: "ellipsis")
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundColor(AppColor.textPrimary)
+                    .frame(width: 38, height: 38)
+                    .liquidGlass(in: Circle(), interactive: true)
+            }
+            .buttonStyle(.plain)
+            .menuIndicator(.hidden)
+            .fixedSize()
         }
+        .padding(.horizontal, AppSpacing.lg)
+        .padding(.top, 40)
+        .padding(.bottom, AppSpacing.sm)
+        .inGlassContainer()
     }
     
     private func toolbarGlassButton(icon: String, help: String, action: @escaping () -> Void) -> some View {

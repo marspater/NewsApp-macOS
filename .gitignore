@@ -6,3 +6,7 @@ xcuserdata/
 *.swp
 test_runner
 main
+.build/
+*.dmg
+*.zip
+*.sha256

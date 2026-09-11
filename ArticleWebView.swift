@@ -36,6 +36,7 @@ struct ArticleWebView: NSViewRepresentable {
         }
     }
 
+    @MainActor
     class Coordinator: NSObject, WKNavigationDelegate {
         var parent: ArticleWebView
         weak var webView: WKWebView?
@@ -45,7 +46,7 @@ struct ArticleWebView: NSViewRepresentable {
             self.parent = parent
         }
 
-        func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+        func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping @MainActor (WKNavigationActionPolicy) -> Void) {
             guard let requestURL = navigationAction.request.url else {
                 decisionHandler(.cancel)
                 return

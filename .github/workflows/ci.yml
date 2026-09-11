@@ -32,27 +32,57 @@ jobs:
 
       - name: Ensure Executable Permissions
         run: |
-          chmod +x test.sh build.sh
+          chmod +x test.sh build.sh build_release.sh package_dmg.sh notarize.sh
 
       - name: Run Unit Tests
         run: |
           ./test.sh
 
-      - name: Build Application Bundle
+      - name: Verify Swift Package Manager Build
         run: |
-          ./build.sh
+          swift build --target News
 
-      - name: Verify Bundle Integrity
+      - name: Build Universal 2 Release Bundle
+        run: |
+          ./build_release.sh
+
+      - name: Verify Bundle Integrity & Hardened Runtime
         run: |
           test -d "News.app" || { echo "Error: News.app directory missing"; exit 1; }
           test -x "News.app/Contents/MacOS/News" || { echo "Error: Executable binary missing"; exit 1; }
           plutil -lint "News.app/Contents/Info.plist"
-          codesign --verify --deep --strict "News.app"
-          echo "✅ Bundle integrity verified successfully."
+          
+          echo "Verifying Universal 2 architectures..."
+          ARCHS=$(lipo -archs "News.app/Contents/MacOS/News")
+          echo "Found architectures: $ARCHS"
+          [[ "$ARCHS" =~ "x86_64" ]] || { echo "Error: x86_64 slice missing"; exit 1; }
+          [[ "$ARCHS" =~ "arm64" ]] || { echo "Error: arm64 slice missing"; exit 1; }
 
-      - name: Archive Application Artifact
+          echo "Verifying Hardened Runtime & Code Signing..."
+          codesign --verify --deep --strict --verbose=2 "News.app"
+          codesign -dvvv --entitlements :- "News.app"
+
+          echo "Gatekeeper assessment (informational for ad-hoc signing):"
+          spctl -a -vvv "News.app" || true
+          echo "✅ Bundle integrity & Hardened Runtime verified successfully."
+
+      - name: Package DMG and Release Archives
+        run: |
+          ./package_dmg.sh
+          test -f "News-Universal2.dmg" || { echo "Error: News-Universal2.dmg missing"; exit 1; }
+          test -f "News-Universal2.zip" || { echo "Error: News-Universal2.zip missing"; exit 1; }
+          shasum -c "News-Universal2.dmg.sha256"
+          shasum -c "News-Universal2.zip.sha256"
+          hdiutil verify "News-Universal2.dmg"
+          echo "✅ DMG and release archives packaged and checksums verified."
+
+      - name: Archive Release Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: News-app-${{ runner.arch }}
-          path: News.app
+          name: News-Universal2-Release
+          path: |
+            News-Universal2.dmg
+            News-Universal2.dmg.sha256
+            News-Universal2.zip
+            News-Universal2.zip.sha256
           if-no-files-found: error

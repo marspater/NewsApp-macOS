@@ -82,7 +82,7 @@ struct MainView: View {
             }
         }
         .navigationSplitViewStyle(.balanced)
-        .backgroundExtensionEffect()
+        .adaptiveBackgroundExtension()
         .frame(minWidth: 900, minHeight: 600)
         .onAppear {
             if feedManager.articles.isEmpty {

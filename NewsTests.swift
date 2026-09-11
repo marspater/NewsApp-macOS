@@ -54,6 +54,7 @@ struct NewsTests {
         await testContentExtractionPipelineDeep()
         await testEnrichmentQueueSchedulingAndPromotion()
         await testDesignSystemAndArticleFilter()
+        await testDistributionAndEntitlementsIntegrity()
         
         print("✅ SUCCESS: All tests passed!")
     }
@@ -852,6 +853,61 @@ struct NewsTests {
         assertTrue(parsed.matches(article: art1, isRead: false, isSaved: false), "Article 1 should match query")
         assertFalse(parsed.matches(article: art1, isRead: true, isSaved: false), "Article 1 should fail because it is read")
         assertFalse(parsed.matches(article: art2, isRead: false, isSaved: false), "Article 2 should fail source/terms match")
+    }
+
+    static func testDistributionAndEntitlementsIntegrity() async {
+        print("  - Testing Distribution, Entitlements & Privacy Manifest Integrity...")
+        
+        let fileManager = FileManager.default
+        let currentDir = fileManager.currentDirectoryPath
+        let entitlementsPath = (currentDir as NSString).appendingPathComponent("News.entitlements")
+        
+        assertTrue(fileManager.fileExists(atPath: entitlementsPath), "News.entitlements must exist in project root")
+        
+        guard let data = fileManager.contents(atPath: entitlementsPath) else {
+            assertEqual(true, false, "Failed to read News.entitlements data")
+            return
+        }
+        
+        do {
+            guard let plist = try PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any] else {
+                assertEqual(true, false, "News.entitlements is not a valid dictionary plist")
+                return
+            }
+            
+            // Validate minimal required entitlements
+            assertEqual(plist["com.apple.security.network.client"] as? Bool, true, "com.apple.security.network.client must be enabled")
+            assertEqual(plist["com.apple.security.files.user-selected.read-write"] as? Bool, true, "com.apple.security.files.user-selected.read-write must be enabled")
+            
+            // Validate that unnecessary/unsafe entitlements are NOT present
+            assertFalse(plist.keys.contains("com.apple.security.network.server"), "com.apple.security.network.server should not be granted")
+            assertFalse(plist.keys.contains("com.apple.security.device.camera"), "Camera entitlement should not be granted")
+            assertFalse(plist.keys.contains("com.apple.security.device.microphone"), "Microphone entitlement should not be granted")
+            assertFalse(plist.keys.contains("com.apple.security.personal-information.location"), "Location entitlement should not be granted")
+            assertFalse(plist.keys.contains("com.apple.security.personal-information.addressbook"), "Contacts entitlement should not be granted")
+            assertFalse(plist.keys.contains("com.apple.security.files.all"), "All files entitlement should not be granted")
+        } catch {
+            assertEqual(true, false, "Failed to parse News.entitlements: \(error)")
+        }
+        
+        // Validate release packaging files exist
+        let releaseBuildScript = (currentDir as NSString).appendingPathComponent("build_release.sh")
+        let packageDmgScript = (currentDir as NSString).appendingPathComponent("package_dmg.sh")
+        let notarizeScript = (currentDir as NSString).appendingPathComponent("notarize.sh")
+        let packageSwift = (currentDir as NSString).appendingPathComponent("Package.swift")
+        let privacyDoc = (currentDir as NSString).appendingPathComponent("PRIVACY.md")
+        
+        assertTrue(fileManager.fileExists(atPath: releaseBuildScript), "build_release.sh must exist")
+        assertTrue(fileManager.isExecutableFile(atPath: releaseBuildScript), "build_release.sh must be executable")
+        
+        assertTrue(fileManager.fileExists(atPath: packageDmgScript), "package_dmg.sh must exist")
+        assertTrue(fileManager.isExecutableFile(atPath: packageDmgScript), "package_dmg.sh must be executable")
+        
+        assertTrue(fileManager.fileExists(atPath: notarizeScript), "notarize.sh must exist")
+        assertTrue(fileManager.isExecutableFile(atPath: notarizeScript), "notarize.sh must be executable")
+        
+        assertTrue(fileManager.fileExists(atPath: packageSwift), "Package.swift must exist")
+        assertTrue(fileManager.fileExists(atPath: privacyDoc), "PRIVACY.md must exist")
     }
 }
 

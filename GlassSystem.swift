@@ -5,6 +5,7 @@ import SwiftUI
 
 // MARK: - App Glass Tokens & Configurations
 
+@available(macOS 26.0, *)
 public enum AppGlass {
     /// Standard glass material for static controls and navigation framing.
     public static let control = Glass.regular
@@ -26,19 +27,21 @@ public struct GlassControlModifier<S: Shape>: ViewModifier {
                 .background(AppColor.surfaceMid, in: shape)
                 .overlay(shape.stroke(Color.primary.opacity(0.15), lineWidth: 1))
         } else {
-            if interactive {
-                content
-                    .glassEffect(AppGlass.interactive, in: shape)
+            if #available(macOS 26.0, *) {
+                if interactive {
+                    content.glassEffect(AppGlass.interactive, in: shape)
+                } else {
+                    content.glassEffect(AppGlass.control, in: shape)
+                }
             } else {
-                content
-                    .glassEffect(AppGlass.control, in: shape)
+                content.background(.ultraThinMaterial, in: shape)
             }
         }
     }
 }
 
 public extension View {
-    /// Applies the native Liquid Glass effect to a control or navigation element.
+    /// Applies the native Liquid Glass effect to a control or navigation element with fallback for earlier macOS versions.
     func liquidGlass<S: Shape>(in shape: S, interactive: Bool = false) -> some View {
         self.modifier(GlassControlModifier(shape: shape, interactive: interactive))
     }
@@ -46,7 +49,21 @@ public extension View {
     /// Grouped glass container helper that allows adjacent glass elements to morph and render efficiently.
     @ViewBuilder
     func inGlassContainer() -> some View {
-        GlassEffectContainer {
+        if #available(macOS 26.0, *) {
+            GlassEffectContainer {
+                self
+            }
+        } else {
+            self
+        }
+    }
+    
+    /// Modern edge-to-edge background extension with backward compatibility.
+    @ViewBuilder
+    func adaptiveBackgroundExtension() -> some View {
+        if #available(macOS 26.0, *) {
+            self.backgroundExtensionEffect()
+        } else {
             self
         }
     }

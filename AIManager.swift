@@ -14,17 +14,9 @@ final class AIManager: Sendable {
         await intelligence.analyzeArticle(title: title, description: description)
     }
 
-    func categorizeArticle(title: String, description: String, rssCategory: String?) -> String? {
-        // Fast synchronous check or extract category name
-        var resultCategory: String?
-        let semaphore = DispatchSemaphore(value: 0)
-        Task {
-            let res = await intelligence.categorizeArticle(title: title, description: description, rssCategory: rssCategory)
-            resultCategory = res?.category
-            semaphore.signal()
-        }
-        semaphore.wait()
-        return resultCategory
+    func categorizeArticle(title: String, description: String, rssCategory: String?) async -> String? {
+        let res = await intelligence.categorizeArticle(title: title, description: description, rssCategory: rssCategory)
+        return res?.category
     }
 
     func cleanExtractedContent(_ rawContent: String) -> String {
