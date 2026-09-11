@@ -35,6 +35,7 @@ struct NewsTests {
         
         await testURLNormalization()
         await testSSRFValidation()
+        await testIsBlockedIPv4()
         await testIPAddressValidatorDeep()
         await testSecureHTTPClientPolicies()
         await testFeedErrorHierarchy()
@@ -102,6 +103,42 @@ struct NewsTests {
         assertFalse(FeedManager.isBlockedLocalAddress("google.com"), "Should allow public hostnames")
         assertFalse(FeedManager.isBlockedLocalAddress("8.8.8.8"), "Should allow public IPs")
         assertFalse(FeedManager.isBlockedLocalAddress("172.15.2.2"), "Should allow public range outside 172.16-31")
+    }
+
+    static func testIsBlockedIPv4() async {
+        print("  - Testing isBlockedIPv4 directly...")
+
+        func makeInAddr(_ ipString: String) -> in_addr {
+            var sin = in_addr()
+            inet_pton(AF_INET, ipString, &sin)
+            return sin
+        }
+
+        // Loopback
+        assertTrue(IPAddressValidator.isBlockedIPv4(makeInAddr("127.0.0.1")) != nil, "127.0.0.1 must be blocked")
+
+        // Current network
+        assertTrue(IPAddressValidator.isBlockedIPv4(makeInAddr("0.0.0.0")) != nil, "0.0.0.0 must be blocked")
+
+        // Private
+        assertTrue(IPAddressValidator.isBlockedIPv4(makeInAddr("10.0.0.1")) != nil, "10.0.0.1 must be blocked")
+        assertTrue(IPAddressValidator.isBlockedIPv4(makeInAddr("172.16.0.1")) != nil, "172.16.0.1 must be blocked")
+        assertTrue(IPAddressValidator.isBlockedIPv4(makeInAddr("192.168.0.1")) != nil, "192.168.0.1 must be blocked")
+
+        // Link-Local
+        assertTrue(IPAddressValidator.isBlockedIPv4(makeInAddr("169.254.0.1")) != nil, "169.254.0.1 must be blocked")
+
+        // Carrier-Grade NAT
+        assertTrue(IPAddressValidator.isBlockedIPv4(makeInAddr("100.64.0.1")) != nil, "100.64.0.1 must be blocked")
+
+        // Multicast
+        assertTrue(IPAddressValidator.isBlockedIPv4(makeInAddr("224.0.0.1")) != nil, "224.0.0.1 must be blocked")
+
+        // Broadcast
+        assertTrue(IPAddressValidator.isBlockedIPv4(makeInAddr("255.255.255.255")) != nil, "255.255.255.255 must be blocked")
+
+        // Valid
+        assertTrue(IPAddressValidator.isBlockedIPv4(makeInAddr("8.8.8.8")) == nil, "8.8.8.8 must be allowed")
     }
 
     static func testIPAddressValidatorDeep() async {
