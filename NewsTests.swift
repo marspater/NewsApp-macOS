@@ -54,6 +54,7 @@ struct NewsTests {
         await testArticleRetentionPolicy()
         await testArticleIntelligenceCapabilities()
         await testContentExtractionPipelineDeep()
+        await testWebContentExtractorFacade()
         await testEnrichmentQueueSchedulingAndPromotion()
         await testDesignSystemAndArticleFilter()
         await testDistributionAndEntitlementsIntegrity()
@@ -871,6 +872,18 @@ struct NewsTests {
         let extractedImage = pipeline.extractLeadImage(from: htmlWithOG)
         assertEqual(extractedImage, "https://example.com/lead-image.jpg", "Should extract og:image meta tag")
     }
+
+    static func testWebContentExtractorFacade() async {
+        print("  - Testing WebContentExtractor facade...")
+
+        // 1. Invalid URL string
+        let invalidResult = await WebContentExtractor.fetchFullContentAndImage(for: "not a url")
+        assertTrue(invalidResult.0 == nil && invalidResult.1 == nil, "Should return nil for invalid URL string")
+
+        // 2. Blocked scheme (will hit SecureHTTPClient rejection or pipeline bail out)
+        let blockedResult = await WebContentExtractor.fetchFullContentAndImage(for: "file:///etc/passwd")
+        assertTrue(blockedResult.0 == nil && blockedResult.1 == nil, "Should return nil for blocked schemes like file://")
+    }
     
     static func testEnrichmentQueueSchedulingAndPromotion() async {
         print("  - Testing EnrichmentQueue Scheduling, Promotion & Cancellation...")
@@ -1193,16 +1206,19 @@ struct NewsTests {
         let completionCounter = TestCounter()
         let waiterTask1 = Task {
             try await cancelCoordinator.executeRefresh {
-                try await Task.sleep(nanoseconds: 60_000_000) // 60ms
+                try await Task.sleep(nanoseconds: 80_000_000) // 80ms
                 await completionCounter.increment()
             }
         }
+        // Yield to allow waiterTask1 to start and become the in-flight refresh task
+        try? await Task.sleep(nanoseconds: 10_000_000) // 10ms
+
         let waiterTask2 = Task {
             try await cancelCoordinator.executeRefresh {
                 await completionCounter.increment()
             }
         }
-        // Cancel waiterTask1 early
+        // Cancel waiterTask1 early (as waiter caller)
         waiterTask1.cancel()
         _ = try? await waiterTask1.value
         _ = try? await waiterTask2.value
