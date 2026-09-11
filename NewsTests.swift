@@ -159,6 +159,53 @@ struct NewsTests {
             print("❌ validateHost('router.internal') was not blocked")
             exit(1)
         }
+        // 6. Socket Address Validation (validateSocketAddress)
+        var sin_loopback = sockaddr_in()
+        sin_loopback.sin_family = sa_family_t(AF_INET)
+        inet_pton(AF_INET, "127.0.0.1", &sin_loopback.sin_addr)
+        let blockedLoopback = withUnsafePointer(to: &sin_loopback) { ptr -> String? in
+            ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPtr in
+                IPAddressValidator.validateSocketAddress(sockaddrPtr)
+            }
+        }
+        assertTrue(blockedLoopback != nil, "127.0.0.1 socket address must be blocked")
+
+        var sin_public = sockaddr_in()
+        sin_public.sin_family = sa_family_t(AF_INET)
+        inet_pton(AF_INET, "8.8.8.8", &sin_public.sin_addr)
+        let allowedPublic = withUnsafePointer(to: &sin_public) { ptr -> String? in
+            ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPtr in
+                IPAddressValidator.validateSocketAddress(sockaddrPtr)
+            }
+        }
+        assertTrue(allowedPublic == nil, "8.8.8.8 socket address must be allowed")
+
+        var sin6_loopback = sockaddr_in6()
+        sin6_loopback.sin6_family = sa_family_t(AF_INET6)
+        inet_pton(AF_INET6, "::1", &sin6_loopback.sin6_addr)
+        let blockedLoopback6 = withUnsafePointer(to: &sin6_loopback) { ptr -> String? in
+            ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPtr in
+                IPAddressValidator.validateSocketAddress(sockaddrPtr)
+            }
+        }
+        assertTrue(blockedLoopback6 != nil, "::1 socket address must be blocked")
+
+        var sin6_public = sockaddr_in6()
+        sin6_public.sin6_family = sa_family_t(AF_INET6)
+        inet_pton(AF_INET6, "2606:4700:4700::1111", &sin6_public.sin6_addr)
+        let allowedPublic6 = withUnsafePointer(to: &sin6_public) { ptr -> String? in
+            ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPtr in
+                IPAddressValidator.validateSocketAddress(sockaddrPtr)
+            }
+        }
+        assertTrue(allowedPublic6 == nil, "2606:4700:4700::1111 socket address must be allowed")
+
+        var sin_unsupported = sockaddr()
+        sin_unsupported.sa_family = sa_family_t(AF_UNIX)
+        let allowedUnsupported = withUnsafePointer(to: &sin_unsupported) { ptr -> String? in
+            IPAddressValidator.validateSocketAddress(ptr)
+        }
+        assertTrue(allowedUnsupported == nil, "Unsupported family socket address must return nil")
     }
 
     static func testSecureHTTPClientPolicies() async {
