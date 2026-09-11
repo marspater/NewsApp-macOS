@@ -32,6 +32,9 @@ swiftc -O -target $(uname -m)-apple-macos${TARGET_MACOS} \
     SavedStoriesManager.swift \
     OPMLManager.swift \
     DesignSystem.swift \
+    RefreshCoordinator.swift \
+    NewsSignposts.swift \
+    UpdateChecker.swift \
     NewsTests.swift \
     -o test_runner
 

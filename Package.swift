@@ -68,7 +68,10 @@ let package = Package(
                 "SettingsView.swift",
                 "SidebarView.swift",
                 "ThemeManager.swift",
-                "WebContentExtractor.swift"
+                "WebContentExtractor.swift",
+                "RefreshCoordinator.swift",
+                "NewsSignposts.swift",
+                "UpdateChecker.swift"
             ]
         )
     ]

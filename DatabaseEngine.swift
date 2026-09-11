@@ -192,6 +192,9 @@ actor DatabaseEngine {
         guard let db = db else { throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Database not open"]) }
         guard !articles.isEmpty else { return }
         
+        let signpostState = NewsSignposts.begin(NewsSignposts.database, name: "DatabaseBatchUpsert", metadata: "count=\(articles.count)")
+        defer { NewsSignposts.end(NewsSignposts.database, name: "DatabaseBatchUpsert", state: signpostState) }
+
         try beginTransaction()
         defer {
             // Note: If an error is thrown, the caller can catch and rollback,

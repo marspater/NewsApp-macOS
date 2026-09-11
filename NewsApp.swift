@@ -37,6 +37,16 @@ struct NewsApp: App {
         .windowStyle(HiddenTitleBarWindowStyle())
         .commands {
             SidebarCommands()
+            CommandGroup(after: .appInfo) {
+                Button("Check for Updates...") {
+                    Task { @MainActor in
+                        await UpdateChecker.shared.checkForUpdates(userInitiated: true)
+                        if UpdateChecker.shared.updateAvailable {
+                            UpdateChecker.shared.openReleasePage()
+                        }
+                    }
+                }
+            }
             CommandGroup(replacing: .importExport) {
                 Button("Import Subscriptions (OPML)...") {
                     OPMLDialogs.importOPML { data in

@@ -13,7 +13,24 @@ final class AppSettings: ObservableObject {
     static let notificationsEnabledKey = "notifications_enabled"
     static let aiEnabledKey = "ai_enabled"
     static let privateNotificationsEnabledKey = "private_notifications_enabled"
+    static let notificationModeKey = "notification_mode"
     static let allowInsecureHTTPKey = "allow_insecure_http"
+
+    enum NotificationMode: String, CaseIterable, Identifiable, Sendable {
+        case full = "full"         // Headlines + snippets + images
+        case `private` = "private" // Generic non-identifying updates
+        case minimal = "minimal"   // Aggregated count only
+
+        var id: String { rawValue }
+
+        var displayName: String {
+            switch self {
+            case .full: return "Full (Headlines & Images)"
+            case .private: return "Private (Generic Alerts)"
+            case .minimal: return "Minimal (Count Only)"
+            }
+        }
+    }
 
     static let defaultSections = [
         "Entertainment", "Politics", "Business", "Tech",
@@ -28,16 +45,19 @@ final class AppSettings: ObservableObject {
 
     // MARK: - Published Properties
 
+    private let defaults: UserDefaults
+
     @Published var feedURLs: [String]
     @Published var userSections: [String]
     @Published var fetchIntervalMinutes: Double
     @Published var notificationsEnabled: Bool
     @Published var aiEnabled: Bool
     @Published var privateNotificationsEnabled: Bool
+    @Published var notificationMode: NotificationMode
     @Published var allowInsecureHTTP: Bool
 
-    init() {
-        let defaults = UserDefaults.standard
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
 
         if let savedUrls = defaults.stringArray(forKey: Self.feedURLsKey) {
             self.feedURLs = savedUrls
@@ -69,10 +89,23 @@ final class AppSettings: ObservableObject {
             self.aiEnabled = true
         }
 
-        if defaults.object(forKey: Self.privateNotificationsEnabledKey) != nil {
-            self.privateNotificationsEnabled = defaults.bool(forKey: Self.privateNotificationsEnabledKey)
+        // Migration semantics:
+        // 1. If notificationMode exists -> use it
+        // 2. If absent and privateNotificationsEnabled == true -> .private
+        // 3. If absent and privateNotificationsEnabled == false -> .full
+        // 4. Persist migrated key to prevent repeating fallback
+        if let modeRaw = defaults.string(forKey: Self.notificationModeKey),
+           let mode = NotificationMode(rawValue: modeRaw) {
+            self.notificationMode = mode
+            self.privateNotificationsEnabled = (mode == .private)
+        } else if defaults.object(forKey: Self.privateNotificationsEnabledKey) != nil && defaults.bool(forKey: Self.privateNotificationsEnabledKey) {
+            self.notificationMode = .private
+            self.privateNotificationsEnabled = true
+            defaults.set(NotificationMode.private.rawValue, forKey: Self.notificationModeKey)
         } else {
+            self.notificationMode = .full
             self.privateNotificationsEnabled = false
+            defaults.set(NotificationMode.full.rawValue, forKey: Self.notificationModeKey)
         }
 
         self.allowInsecureHTTP = defaults.bool(forKey: Self.allowInsecureHTTPKey)
@@ -119,27 +152,33 @@ final class AppSettings: ObservableObject {
 
     func setFetchInterval(minutes: Double) {
         fetchIntervalMinutes = minutes
-        UserDefaults.standard.set(minutes, forKey: Self.fetchIntervalKey)
+        defaults.set(minutes, forKey: Self.fetchIntervalKey)
     }
 
     func setNotificationsEnabled(_ enabled: Bool) {
         notificationsEnabled = enabled
-        UserDefaults.standard.set(enabled, forKey: Self.notificationsEnabledKey)
+        defaults.set(enabled, forKey: Self.notificationsEnabledKey)
     }
 
     func setAIEnabled(_ enabled: Bool) {
         aiEnabled = enabled
-        UserDefaults.standard.set(enabled, forKey: Self.aiEnabledKey)
+        defaults.set(enabled, forKey: Self.aiEnabledKey)
+    }
+
+    func setNotificationMode(_ mode: NotificationMode) {
+        notificationMode = mode
+        privateNotificationsEnabled = (mode == .private)
+        defaults.set(mode.rawValue, forKey: Self.notificationModeKey)
+        defaults.set(mode == .private, forKey: Self.privateNotificationsEnabledKey)
     }
 
     func setPrivateNotificationsEnabled(_ enabled: Bool) {
-        privateNotificationsEnabled = enabled
-        UserDefaults.standard.set(enabled, forKey: Self.privateNotificationsEnabledKey)
+        setNotificationMode(enabled ? .private : .full)
     }
 
     func setAllowInsecureHTTP(_ allowed: Bool) {
         allowInsecureHTTP = allowed
-        UserDefaults.standard.set(allowed, forKey: Self.allowInsecureHTTPKey)
+        defaults.set(allowed, forKey: Self.allowInsecureHTTPKey)
     }
 
     // MARK: - OPML Portability

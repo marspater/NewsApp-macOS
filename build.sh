@@ -102,6 +102,9 @@ swiftc -O -parse-as-library -target $(uname -m)-apple-macos${TARGET_MACOS} \
     SavedStoriesManager.swift \
     OPMLManager.swift \
     ArticleWebView.swift \
+    RefreshCoordinator.swift \
+    NewsSignposts.swift \
+    UpdateChecker.swift \
     NewsApp.swift \
     -o "${MACOS_DIR}/${APP_NAME}"
 

@@ -230,6 +230,9 @@ actor EnrichmentQueue {
             return
         }
 
+        let signpostState = NewsSignposts.begin(NewsSignposts.enrichment, name: "EnrichmentJob", metadata: "source=\(article.source)")
+        defer { NewsSignposts.end(NewsSignposts.enrichment, name: "EnrichmentJob", state: signpostState) }
+
         // 1. NLP Sentiment & Entity Analysis
         let summaryText = await ArticleIntelligence.shared.analyzeArticle(
             title: article.title,

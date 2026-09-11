@@ -89,6 +89,9 @@ final class ArticleStore: ObservableObject {
         guard !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return articles
         }
+        let signpostState = NewsSignposts.begin(NewsSignposts.database, name: "FTSSearch", metadata: "limit=\(limit)")
+        defer { NewsSignposts.end(NewsSignposts.database, name: "FTSSearch", state: signpostState) }
+
         do {
             return try await database.searchArticles(query: query, limit: limit)
         } catch {

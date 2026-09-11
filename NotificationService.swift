@@ -51,46 +51,104 @@ final class NotificationService: Sendable {
         return min(score, 1.0)
     }
 
-    /// NLP-driven triage: scores all new articles, picks the top N most important ones to notify.
+    /// NLP-driven triage: dispatches notifications according to the active NotificationMode.
+    func triageAndNotify(
+        newArticles: [FeedArticle],
+        mode: AppSettings.NotificationMode,
+        maxNotifications: Int = 3
+    ) async {
+        guard !newArticles.isEmpty else { return }
+
+        switch mode {
+        case .minimal:
+            // ALWAYS exactly one coalesced notification with singular/plural grammar
+            await triggerMinimalNotification(for: newArticles)
+
+        case .private:
+            // Exactly one generic notification with ZERO identifying source or headline details
+            await triggerPrivateNotification()
+
+        case .full:
+            var scored: [(article: FeedArticle, score: Double)] = []
+            for article in newArticles {
+                let importance = computeImportance(title: article.title, description: article.description)
+                scored.append((article, importance))
+            }
+
+            scored.sort { $0.score > $1.score }
+            let threshold: Double = 0.45
+            let toNotify = scored.filter { $0.score >= threshold }.prefix(maxNotifications)
+
+            for item in toNotify {
+                await triggerFullNotification(for: item.article)
+            }
+        }
+    }
+
+    /// Backwards-compatibility triage entry point.
     func triageAndNotify(
         newArticles: [FeedArticle],
         privateNotificationsEnabled: Bool,
         maxNotifications: Int = 3
     ) async {
-        var scored: [(article: FeedArticle, score: Double)] = []
-        for article in newArticles {
-            let importance = computeImportance(title: article.title, description: article.description)
-            scored.append((article, importance))
-        }
-
-        scored.sort { $0.score > $1.score }
-        let threshold: Double = 0.45
-        let toNotify = scored.filter { $0.score >= threshold }.prefix(maxNotifications)
-
-        for item in toNotify {
-            await triggerRichNotification(for: item.article, privateNotifications: privateNotificationsEnabled)
-        }
+        let mode: AppSettings.NotificationMode = privateNotificationsEnabled ? .private : .full
+        await triageAndNotify(newArticles: newArticles, mode: mode, maxNotifications: maxNotifications)
     }
 
-    private func triggerRichNotification(for article: FeedArticle, privateNotifications: Bool) async {
+    /// Formats the minimal notification summary string with singular/plural grammar.
+    static func formatMinimalSummary(articleCount: Int, uniqueSourcesCount: Int) -> String {
+        let articleText = articleCount == 1 ? "1 new article" : "\(articleCount) new articles"
+        let sourceText: String
+        if uniqueSourcesCount == 1 {
+            sourceText = "from 1 source"
+        } else {
+            sourceText = "across \(uniqueSourcesCount) sources"
+        }
+        return "\(articleText) \(sourceText)"
+    }
+
+    private func triggerMinimalNotification(for articles: [FeedArticle]) async {
+        let content = UNMutableNotificationContent()
+        content.title = "News Update"
+
+        // Deduplicate unique sources
+        let sources = Set(articles.map {
+            ($0.source.components(separatedBy: "\n").first ?? $0.source)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        }.filter { !$0.isEmpty })
+
+        content.body = Self.formatMinimalSummary(articleCount: articles.count, uniqueSourcesCount: max(1, sources.count))
+        content.sound = .default
+
+        let identifier = "news-minimal-summary"
+        let request = UNNotificationRequest(identifier: identifier, content: content, trigger: nil)
+        try? await UNUserNotificationCenter.current().add(request)
+    }
+
+    private func triggerPrivateNotification() async {
+        let content = UNMutableNotificationContent()
+        content.title = "News Update"
+        content.body = "You have new articles available. Open to read."
+        content.sound = .default
+
+        let identifier = "news-generic-update"
+        let request = UNNotificationRequest(identifier: identifier, content: content, trigger: nil)
+        try? await UNUserNotificationCenter.current().add(request)
+    }
+
+    private func triggerFullNotification(for article: FeedArticle) async {
         let content = UNMutableNotificationContent()
 
         let sourceName = (article.source.components(separatedBy: "\n").first ?? article.source)
             .trimmingCharacters(in: .whitespacesAndNewlines)
 
-        if privateNotifications {
-            content.title = "New Article"
-            content.subtitle = sourceName
-            content.body = "Open the app to read the latest update."
-        } else {
-            content.title = sourceName
-            content.subtitle = article.title
-            content.body = article.description.isEmpty ? "" : String(article.description.prefix(200))
-        }
+        content.title = sourceName
+        content.subtitle = article.title
+        content.body = article.description.isEmpty ? "" : String(article.description.prefix(200))
         content.sound = .default
         content.userInfo = ["articleLink": article.link]
 
-        if !privateNotifications, let imageUrlString = article.imageUrl, let imageUrl = URL(string: imageUrlString) {
+        if let imageUrlString = article.imageUrl, let imageUrl = URL(string: imageUrlString) {
             if let attachment = await downloadNotificationAttachment(from: imageUrl) {
                 content.attachments = [attachment]
             }

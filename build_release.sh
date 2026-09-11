@@ -82,6 +82,9 @@ SWIFT_SOURCES=(
     SavedStoriesManager.swift
     OPMLManager.swift
     ArticleWebView.swift
+    RefreshCoordinator.swift
+    NewsSignposts.swift
+    UpdateChecker.swift
     NewsApp.swift
 )
 

@@ -13,6 +13,7 @@ struct SettingsView: View {
     @State private var selectedTab = 0
     @State private var cacheSize: String = "Calculating..."
     @State private var opmlStatusMessage: String? = nil
+    @ObservedObject private var updateChecker = UpdateChecker.shared
 
     var body: some View {
         TabView(selection: $selectedTab) {
@@ -165,11 +166,21 @@ struct SettingsView: View {
                     .foregroundColor(stTextSecondary)
                 
                 if appSettings.notificationsEnabled {
-                    Toggle("Private Notification Details", isOn: Binding(
-                        get: { appSettings.privateNotificationsEnabled },
-                        set: { appSettings.setPrivateNotificationsEnabled($0) }
-                    ))
-                    Text("Hide article titles and descriptions on notification banners")
+                    Picker("Notification Detail", selection: Binding(
+                        get: { appSettings.notificationMode },
+                        set: { appSettings.setNotificationMode($0) }
+                    )) {
+                        ForEach(AppSettings.NotificationMode.allCases) { mode in
+                            Text(mode.displayName).tag(mode)
+                        }
+                    }
+                    .pickerStyle(.menu)
+
+                    Text(appSettings.notificationMode == .private
+                         ? "Shows generic alerts with no identifying source or headline."
+                         : (appSettings.notificationMode == .minimal
+                            ? "Aggregates alerts into a single count summary."
+                            : "Displays article headline, source, and lead image."))
                         .font(.caption)
                         .foregroundColor(stTextSecondary)
                 }
@@ -196,6 +207,38 @@ struct SettingsView: View {
                 Text("Articles will disappear from filtered views once read")
                     .font(.caption)
                     .foregroundColor(stTextSecondary)
+            }
+
+            Section("Software Updates") {
+                HStack {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("NewsApp v\(updateChecker.currentAppVersion)")
+                            .font(.system(size: 13, weight: .medium))
+                        if let status = updateChecker.statusMessage {
+                            Text(status)
+                                .font(.caption)
+                                .foregroundColor(updateChecker.updateAvailable ? stAccentPink : stTextSecondary)
+                        }
+                    }
+                    Spacer()
+                    if updateChecker.isChecking {
+                        ProgressView()
+                            .scaleEffect(0.7)
+                    } else if updateChecker.updateAvailable {
+                        Button("View Release") {
+                            updateChecker.openReleasePage()
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(stAccentPink)
+                    } else {
+                        Button("Check Now") {
+                            Task {
+                                await updateChecker.checkForUpdates(userInitiated: true)
+                            }
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                }
             }
         }
         .formStyle(.grouped)

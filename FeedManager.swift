@@ -1,10 +1,13 @@
 import Foundation
 import NaturalLanguage
 import UserNotifications
+import os
 
 /// Orchestration layer coordinating feed fetching, article caching, enrichment, and section filtering.
 @MainActor
 class FeedManager: NSObject, ObservableObject {
+    private let logger = Logger(subsystem: "com.marspater.news", category: "FeedManager")
+
     enum FeedStatus: Equatable, Sendable {
         case idle
         case loading
@@ -26,6 +29,7 @@ class FeedManager: NSObject, ObservableObject {
     let articleStore: ArticleStore
 
     private var backgroundTimer: Timer?
+    private var backgroundActivity: NSBackgroundActivityScheduler?
 
     // Backward-compatibility forwarders for existing UI / View bindings
     var feedURLs: [String] { appSettings.feedURLs }
@@ -147,14 +151,41 @@ class FeedManager: NSObject, ObservableObject {
     }
 
     // MARK: - Background Scheduling
+    // macOS schedules opportunistic background refreshes according to the configured interval and system conditions.
 
     func startBackgroundFetch() {
         backgroundTimer?.invalidate()
-        backgroundTimer = Timer.scheduledTimer(withTimeInterval: appSettings.fetchIntervalMinutes * 60, repeats: true) { [weak self] _ in
-            Task { @MainActor in
-                self?.fetchFeeds()
+        backgroundActivity?.invalidate()
+
+        let intervalSeconds = appSettings.fetchIntervalMinutes * 60
+
+        // 1. Foreground Timer: regular updates while application is active
+        backgroundTimer = Timer.scheduledTimer(withTimeInterval: intervalSeconds, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                await self?.fetchFeedsAsync()
             }
         }
+
+        // 2. NSBackgroundActivityScheduler: opportunistic background execution
+        // Stable persistent identifier as required by Apple scheduling heuristics
+        let activity = NSBackgroundActivityScheduler(identifier: "com.marspater.news.feed-refresh")
+        activity.repeats = true
+        activity.interval = intervalSeconds
+        activity.tolerance = max(60, intervalSeconds * 0.2)
+        activity.qualityOfService = .background
+
+        activity.schedule { [weak self] completion in
+            Task { @MainActor in
+                guard let self = self else {
+                    completion(.finished)
+                    return
+                }
+
+                await self.fetchFeedsAsync()
+                completion(.finished)
+            }
+        }
+        self.backgroundActivity = activity
     }
 
     // MARK: - Ingestion Pipeline
@@ -166,6 +197,20 @@ class FeedManager: NSObject, ObservableObject {
     }
 
     func fetchFeedsAsync() async {
+        do {
+            try await RefreshCoordinator.shared.executeRefresh { @Sendable [weak self] in
+                guard let self = self else { return }
+                await self.performRefreshPipeline()
+            }
+        } catch {
+            logger.error("Coordinated feed refresh failed: \(error.localizedDescription)")
+        }
+    }
+
+    private func performRefreshPipeline() async {
+        let signpostState = NewsSignposts.begin(NewsSignposts.feeds, name: "RefreshFeeds", metadata: "feeds=\(appSettings.feedURLs.count)")
+        defer { NewsSignposts.end(NewsSignposts.feeds, name: "RefreshFeeds", state: signpostState) }
+
         for url in appSettings.feedURLs {
             if case .failed(let err) = feedStatuses[url], case .blockedHost = err {
                 continue
@@ -204,7 +249,7 @@ class FeedManager: NSObject, ObservableObject {
         if appSettings.notificationsEnabled && !newArticles.isEmpty {
             await NotificationService.shared.triageAndNotify(
                 newArticles: newArticles,
-                privateNotificationsEnabled: appSettings.privateNotificationsEnabled
+                mode: appSettings.notificationMode
             )
         }
 

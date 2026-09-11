@@ -55,6 +55,10 @@ struct NewsTests {
         await testEnrichmentQueueSchedulingAndPromotion()
         await testDesignSystemAndArticleFilter()
         await testDistributionAndEntitlementsIntegrity()
+        await testStrictSemVerAndReleaseSecurity()
+        await testNotificationModeTriageAndGrammar()
+        await testRefreshCoordinatorSingleFlightCoalescing()
+        await testSignpostHelperExecution()
         
         print("✅ SUCCESS: All tests passed!")
     }
@@ -908,6 +912,135 @@ struct NewsTests {
         
         assertTrue(fileManager.fileExists(atPath: packageSwift), "Package.swift must exist")
         assertTrue(fileManager.fileExists(atPath: privacyDoc), "PRIVACY.md must exist")
+    }
+
+    static func testStrictSemVerAndReleaseSecurity() async {
+        print("  - Testing Strict SemVer Parsing & Release URL Security...")
+
+        // 1. Valid SemVer strings
+        assertEqual(SemanticVersion.parse("v2.0.1"), SemanticVersion(major: 2, minor: 0, patch: 1), "v2.0.1 should parse")
+        assertEqual(SemanticVersion.parse("2.0.1"), SemanticVersion(major: 2, minor: 0, patch: 1), "2.0.1 should parse")
+        assertEqual(SemanticVersion.parse("10.12.3"), SemanticVersion(major: 10, minor: 12, patch: 3), "10.12.3 should parse")
+
+        // 2. Invalid tags should be rejected (ignored)
+        assertEqual(SemanticVersion.parse("release-2.0.1"), nil, "release- prefix should be rejected")
+        assertEqual(SemanticVersion.parse("v2.0"), nil, "Missing patch should be rejected")
+        assertEqual(SemanticVersion.parse("2"), nil, "Single integer should be rejected")
+        assertEqual(SemanticVersion.parse("foo"), nil, "Arbitrary string should be rejected")
+        assertEqual(SemanticVersion.parse("v2.0.1-beta"), nil, "Non-numeric suffix should be rejected")
+
+        // 3. Numeric tuple comparison
+        assertTrue(SemanticVersion(major: 2, minor: 0, patch: 1) > SemanticVersion(major: 2, minor: 0, patch: 0), "2.0.1 > 2.0.0")
+        assertTrue(SemanticVersion(major: 2, minor: 1, patch: 0) > SemanticVersion(major: 2, minor: 0, patch: 9), "2.1.0 > 2.0.9")
+        assertTrue(SemanticVersion(major: 3, minor: 0, patch: 0) > SemanticVersion(major: 2, minor: 9, patch: 9), "3.0.0 > 2.9.9")
+        assertFalse(SemanticVersion(major: 2, minor: 0, patch: 0) > SemanticVersion(major: 2, minor: 0, patch: 1), "2.0.0 is not > 2.0.1")
+        assertEqual(SemanticVersion(major: 2, minor: 0, patch: 0), SemanticVersion(major: 2, minor: 0, patch: 0), "Equality check")
+
+        // 4. Release URL Domain Security
+        let validURL1 = URL(string: "https://github.com/marspater/NewsApp-macOS/releases/tag/v2.1.0")!
+        let validURL2 = URL(string: "https://github.com/marspater/NewsApp-macOS/releases/latest")!
+        let invalidScheme = URL(string: "http://github.com/marspater/NewsApp-macOS/releases/tag/v2.1.0")!
+        let evilDomain = URL(string: "https://evil-github.com/marspater/NewsApp-macOS/releases/tag/v2.1.0")!
+        let otherRepo = URL(string: "https://github.com/malicious/phishing/releases/tag/v2.1.0")!
+
+        assertTrue(UpdateChecker.isValidReleaseURL(validURL1), "Valid release URL should be approved")
+        assertTrue(UpdateChecker.isValidReleaseURL(validURL2), "Valid latest URL should be approved")
+        assertFalse(UpdateChecker.isValidReleaseURL(invalidScheme), "Insecure HTTP release URL must be rejected")
+        assertFalse(UpdateChecker.isValidReleaseURL(evilDomain), "Spoofed domain must be rejected")
+        assertFalse(UpdateChecker.isValidReleaseURL(otherRepo), "Non-matching repository path must be rejected")
+    }
+
+    @MainActor
+    static func testNotificationModeTriageAndGrammar() async {
+        print("  - Testing NotificationMode Triage, Privacy & Singular/Plural Grammar...")
+
+        // 1. Singular/Plural grammar helper
+        assertEqual(NotificationService.formatMinimalSummary(articleCount: 1, uniqueSourcesCount: 1), "1 new article from 1 source", "Singular article and source")
+        assertEqual(NotificationService.formatMinimalSummary(articleCount: 2, uniqueSourcesCount: 1), "2 new articles from 1 source", "Plural articles, singular source")
+        assertEqual(NotificationService.formatMinimalSummary(articleCount: 3, uniqueSourcesCount: 2), "3 new articles across 2 sources", "Plural articles, plural sources")
+        assertEqual(NotificationService.formatMinimalSummary(articleCount: 10, uniqueSourcesCount: 4), "10 new articles across 4 sources", "Multi-source plural formatting")
+
+        // 2. AppSettings Migration Semantics
+        let suiteName = "test.notifications.migration.\(UUID().uuidString)"
+        let tempDefaults = UserDefaults(suiteName: suiteName)!
+        defer { tempDefaults.removePersistentDomain(forName: suiteName) }
+
+        // Case A: legacy privateNotificationsEnabled = true -> migrates to .private
+        tempDefaults.set(true, forKey: AppSettings.privateNotificationsEnabledKey)
+        let settingsA = AppSettings(defaults: tempDefaults)
+        assertEqual(settingsA.notificationMode, AppSettings.NotificationMode.private, "Legacy private flag should migrate to .private mode")
+        assertEqual(tempDefaults.string(forKey: AppSettings.notificationModeKey), "private", "Migrated key should be written to defaults")
+
+        // Case B: legacy privateNotificationsEnabled = false -> migrates to .full
+        let suiteNameB = "test.notifications.migration.b.\(UUID().uuidString)"
+        let tempDefaultsB = UserDefaults(suiteName: suiteNameB)!
+        defer { tempDefaultsB.removePersistentDomain(forName: suiteNameB) }
+        tempDefaultsB.set(false, forKey: AppSettings.privateNotificationsEnabledKey)
+        let settingsB = AppSettings(defaults: tempDefaultsB)
+        assertEqual(settingsB.notificationMode, AppSettings.NotificationMode.full, "Legacy non-private flag should migrate to .full mode")
+        assertEqual(tempDefaultsB.string(forKey: AppSettings.notificationModeKey), "full", "Migrated key should be written to defaults")
+
+        // Case C: mutation API updates both mode and legacy private flag
+        settingsB.setNotificationMode(.minimal)
+        assertEqual(settingsB.notificationMode, AppSettings.NotificationMode.minimal, "Mode should update to .minimal")
+        assertEqual(tempDefaultsB.string(forKey: AppSettings.notificationModeKey), "minimal", "Key should update to minimal")
+        assertFalse(settingsB.privateNotificationsEnabled, "privateNotificationsEnabled should be false for minimal")
+    }
+
+    actor TestCounter {
+        var value: Int = 0
+        func increment() { value += 1 }
+    }
+
+    static func testRefreshCoordinatorSingleFlightCoalescing() async {
+        print("  - Testing RefreshCoordinator Single-Flight Coalescing & Error Handling...")
+
+        let coordinator = RefreshCoordinator()
+        let counter = TestCounter()
+
+        // 1. Single execution
+        try? await coordinator.executeRefresh {
+            await counter.increment()
+        }
+        let count1 = await counter.value
+        assertEqual(count1, 1, "Single refresh execution should succeed")
+
+        // 2. Coalescing: launch two concurrent tasks
+        async let run1: Void = coordinator.executeRefresh {
+            try? await Task.sleep(nanoseconds: 50_000_000) // 50ms
+            await counter.increment()
+        }
+        async let run2: Void = coordinator.executeRefresh {
+            // If called while run1 is in flight, run2 joins run1 and does not execute this block
+            await counter.increment()
+        }
+
+        _ = try? await (run1, run2)
+        let count2 = await counter.value
+        assertEqual(count2, 2, "Concurrent callers should coalesce into single flight rather than duplicating execution")
+    }
+
+    static func testSignpostHelperExecution() async {
+        print("  - Testing OSSignposter Measure Execution & Error Propagation...")
+
+        // 1. Helper executes work and returns result
+        let result = NewsSignposts.measure(signposter: NewsSignposts.database, name: "TestMeasure", metadata: "test=true") {
+            return 42
+        }
+        assertEqual(result, 42, "measure should return work value")
+
+        // 2. Helper propagates thrown errors
+        struct TestError: Error, Equatable {}
+        var caughtError = false
+        do {
+            try NewsSignposts.measure(signposter: NewsSignposts.feeds, name: "TestError") {
+                throw TestError()
+            }
+        } catch is TestError {
+            caughtError = true
+        } catch {}
+
+        assertTrue(caughtError, "measure should propagate thrown error")
     }
 }
 
