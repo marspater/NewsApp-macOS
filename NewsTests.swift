@@ -52,6 +52,7 @@ struct NewsTests {
         await testArticleRetentionPolicy()
         await testArticleIntelligenceCapabilities()
         await testContentExtractionPipelineDeep()
+        await testWebContentExtractorFacade()
         await testEnrichmentQueueSchedulingAndPromotion()
         await testDesignSystemAndArticleFilter()
         await testDistributionAndEntitlementsIntegrity()
@@ -1490,6 +1491,16 @@ struct NewsTests {
         await service.triageAndNotify(newArticles: [sampleArticle], mode: .private)
         await service.triageAndNotify(newArticles: [sampleArticle], mode: .full)
     }
+
+    static func testWebContentExtractorFacade() async {
+        print("  - Testing WebContentExtractor facade...")
+
+        // 1. Invalid URL string
+        let invalidResult = await WebContentExtractor.fetchFullContentAndImage(for: "not a url")
+        assertTrue(invalidResult.0 == nil && invalidResult.1 == nil, "Should return nil for invalid URL string")
+
+        // 2. Blocked scheme (will hit SecureHTTPClient rejection or pipeline bail out)
+        let blockedResult = await WebContentExtractor.fetchFullContentAndImage(for: "file:///etc/passwd")
+        assertTrue(blockedResult.0 == nil && blockedResult.1 == nil, "Should return nil for blocked schemes like file://")
+    }
 }
-
-
