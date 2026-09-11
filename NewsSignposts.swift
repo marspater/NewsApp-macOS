@@ -11,6 +11,7 @@ enum NewsSignposts {
     static let feeds = OSSignposter(subsystem: subsystem, category: "Feeds")
     static let database = OSSignposter(subsystem: subsystem, category: "Database")
     static let enrichment = OSSignposter(subsystem: subsystem, category: "Enrichment")
+    static let intelligence = OSSignposter(subsystem: subsystem, category: "Intelligence")
 
     /// Begins a signpost interval and returns the state token.
     @inline(__always)

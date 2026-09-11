@@ -20,7 +20,7 @@ final class ArticleStore: ObservableObject {
     @Published private(set) var isReady: Bool = false
     
     init(database: DatabaseEngine? = nil) {
-        let db = database ?? DatabaseEngine()
+        let db = database ?? DatabaseEngine.shared
         self.database = db
         self.migrationCoordinator = MigrationCoordinator(database: db)
         
@@ -204,6 +204,69 @@ final class ArticleStore: ObservableObject {
             }
         } catch {
             logger.error("Failed to update enrichment: \(error.localizedDescription)")
+        }
+    }
+    
+    // MARK: - Structured Article Analysis
+    
+    func saveArticleAnalysis(_ analysis: ArticleAnalysis, for articleId: String) async {
+        do {
+            try await database.saveArticleAnalysis(analysis, for: articleId)
+            if let idx = articles.firstIndex(where: { $0.id == articleId }) {
+                var updated = articles[idx]
+                updated.aiSummary = analysis.summary
+                updated.keyPoints = analysis.keyPoints
+                updated.entities = analysis.entities
+                if let s = analysis.sentiment {
+                    updated.sentimentScore = s.score
+                    updated.sentimentLabel = s.label
+                }
+                if let cat = analysis.category {
+                    updated.category = cat
+                }
+                articles[idx] = updated
+            }
+        } catch {
+            logger.error("Failed to save article analysis: \(error.localizedDescription)")
+        }
+    }
+    
+    func fetchArticleAnalysis(for articleId: String) async -> ArticleAnalysis? {
+        await database.fetchArticleAnalysis(for: articleId)
+    }
+
+    // MARK: - Granular Cache Purging
+
+    /// Purges all generated AI analysis data while preserving articles and subscriptions.
+    func clearAIAnalysis() async {
+        do {
+            try await database.clearArticleEnrichment()
+            await refreshState()
+            logger.info("Cleared all AI analysis in ArticleStore.")
+        } catch {
+            logger.error("Failed to clear AI analysis: \(error.localizedDescription)")
+        }
+    }
+
+    /// Clears cached full article content while preserving subscriptions, saved stories, and read history.
+    func clearArticleCache() async {
+        do {
+            try await database.clearArticleCache()
+            await refreshState()
+            logger.info("Cleared article cache in ArticleStore.")
+        } catch {
+            logger.error("Failed to clear article cache: \(error.localizedDescription)")
+        }
+    }
+
+    /// Completely purges all cached articles, state, and enrichment while preserving feeds.
+    func clearAllDatabaseCache() async {
+        do {
+            try await database.clearAllDatabaseCache()
+            await refreshState()
+            logger.info("Cleared all database cache in ArticleStore.")
+        } catch {
+            logger.error("Failed to clear all database cache: \(error.localizedDescription)")
         }
     }
     

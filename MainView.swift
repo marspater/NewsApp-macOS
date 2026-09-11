@@ -74,6 +74,8 @@ struct MainView: View {
                         path: $articlePath
                     )
                     .navigationBarBackButtonHidden(true)
+                    .environmentObject(appSettings)
+                    .environmentObject(articleStore)
                     .environmentObject(feedManager)
                     .environmentObject(savedStories)
                     .environmentObject(readManager)

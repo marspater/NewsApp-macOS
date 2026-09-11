@@ -6,6 +6,7 @@ import os
 /// Manages connection lifecycle, WAL mode, schema versioning, FTS5 full-text indexing,
 /// atomic batch transactions, and retention pruning.
 actor DatabaseEngine {
+    static let shared = DatabaseEngine()
     private let logger = Logger(subsystem: "com.marspater.news", category: "DatabaseEngine")
     private var db: OpaquePointer?
     private let dbPath: String
@@ -99,11 +100,16 @@ actor DatabaseEngine {
             CREATE TABLE IF NOT EXISTS article_enrichment (
                 article_id TEXT PRIMARY KEY REFERENCES articles(id) ON DELETE CASCADE,
                 summary TEXT,
+                key_points TEXT,
+                category TEXT,
+                confidence REAL,
                 sentiment REAL,
                 entities TEXT,
                 topics TEXT,
                 content_fetched INTEGER NOT NULL DEFAULT 0,
-                enriched_at REAL
+                enriched_at REAL,
+                model_identifier TEXT,
+                analysis_version INTEGER DEFAULT 1
             );
 
             CREATE INDEX IF NOT EXISTS idx_articles_canonical_url ON articles(canonical_url);
@@ -141,8 +147,22 @@ actor DatabaseEngine {
             END;
             """
             try executeSimple(schema)
+
+            // Safe column additions for existing installations
+            let migrationCols = [
+                "ALTER TABLE article_enrichment ADD COLUMN key_points TEXT;",
+                "ALTER TABLE article_enrichment ADD COLUMN category TEXT;",
+                "ALTER TABLE article_enrichment ADD COLUMN confidence REAL;",
+                "ALTER TABLE article_enrichment ADD COLUMN model_identifier TEXT;",
+                "ALTER TABLE article_enrichment ADD COLUMN analysis_version INTEGER DEFAULT 1;"
+            ]
+            for colSql in migrationCols {
+                sqlite3_exec(db, colSql, nil, nil, nil)
+            }
+
             try setUserVersion(1)
             logger.info("Database schema migrated to version 1")
+
         }
     }
     
@@ -321,12 +341,14 @@ actor DatabaseEngine {
         SELECT a.id, a.guid, a.canonical_url, a.title, a.description, a.content,
                a.published_at, a.source, a.image_url, a.category,
                ae.summary, ae.content_fetched,
-               s.is_read, s.is_saved
+               s.is_read, s.is_saved,
+               ae.key_points, ae.entities, ae.sentiment
         FROM articles a
         JOIN article_state s ON s.article_id = a.id
         LEFT JOIN article_enrichment ae ON ae.article_id = a.id
         WHERE 1=1
         """
+
         
         var params: [(type: String, val: Any)] = []
         
@@ -419,11 +441,13 @@ actor DatabaseEngine {
         SELECT a.id, a.guid, a.canonical_url, a.title, a.description, a.content,
                a.published_at, a.source, a.image_url, a.category,
                ae.summary, ae.content_fetched,
-               s.is_read, s.is_saved
+               s.is_read, s.is_saved,
+               ae.key_points, ae.entities, ae.sentiment
         FROM articles a
         JOIN article_state s ON s.article_id = a.id
         LEFT JOIN article_enrichment ae ON ae.article_id = a.id
         """
+
         
         var params: [(type: String, val: Any)] = []
         
@@ -707,8 +731,172 @@ actor DatabaseEngine {
         
         sqlite3_step(stmt)
     }
+
+    /// Persists structured ArticleAnalysis into article_enrichment.
+    func saveArticleAnalysis(_ analysis: ArticleAnalysis, for articleId: String) throws {
+        guard let db = db else { throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Database not open"]) }
+
+        let sql = """
+        INSERT INTO article_enrichment (
+            article_id, summary, key_points, category, confidence, sentiment, entities, model_identifier, analysis_version, enriched_at, content_fetched
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+        ON CONFLICT(article_id) DO UPDATE SET
+            summary = excluded.summary,
+            key_points = excluded.key_points,
+            category = coalesce(excluded.category, article_enrichment.category),
+            confidence = coalesce(excluded.confidence, article_enrichment.confidence),
+            sentiment = coalesce(excluded.sentiment, article_enrichment.sentiment),
+            entities = excluded.entities,
+            model_identifier = excluded.model_identifier,
+            analysis_version = excluded.analysis_version,
+            enriched_at = excluded.enriched_at,
+            content_fetched = 1;
+        """
+
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            let msg = String(cString: sqlite3_errmsg(db))
+            throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Prepare failed: \(msg)"])
+        }
+        defer { sqlite3_finalize(stmt) }
+
+        let now = Date().timeIntervalSince1970
+        sqlite3_bind_text(stmt, 1, articleId, -1, Self.SQLITE_TRANSIENT)
+        sqlite3_bind_text(stmt, 2, analysis.summary, -1, Self.SQLITE_TRANSIENT)
+
+        if let kpData = try? JSONEncoder().encode(analysis.keyPoints), let kpStr = String(data: kpData, encoding: .utf8) {
+            sqlite3_bind_text(stmt, 3, kpStr, -1, Self.SQLITE_TRANSIENT)
+        } else {
+            sqlite3_bind_null(stmt, 3)
+        }
+
+        if let cat = analysis.category {
+            sqlite3_bind_text(stmt, 4, cat, -1, Self.SQLITE_TRANSIENT)
+        } else {
+            sqlite3_bind_null(stmt, 4)
+        }
+
+        sqlite3_bind_double(stmt, 5, 0.95)
+
+        if let sent = analysis.sentiment?.score {
+            sqlite3_bind_double(stmt, 6, sent)
+        } else {
+            sqlite3_bind_null(stmt, 6)
+        }
+
+        if let entData = try? JSONEncoder().encode(analysis.entities), let entStr = String(data: entData, encoding: .utf8) {
+            sqlite3_bind_text(stmt, 7, entStr, -1, Self.SQLITE_TRANSIENT)
+        } else {
+            sqlite3_bind_null(stmt, 7)
+        }
+
+        sqlite3_bind_text(stmt, 8, analysis.modelIdentifier, -1, Self.SQLITE_TRANSIENT)
+        sqlite3_bind_int(stmt, 9, Int32(analysis.analysisVersion))
+        sqlite3_bind_double(stmt, 10, now)
+
+        if sqlite3_step(stmt) != SQLITE_DONE {
+            let msg = String(cString: sqlite3_errmsg(db))
+            throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Step failed: \(msg)"])
+        }
+    }
+
+    /// Fetches persisted ArticleAnalysis for an article (if previously analyzed).
+    func fetchArticleAnalysis(for articleId: String) -> ArticleAnalysis? {
+        guard let db = db else { return nil }
+        let sql = """
+        SELECT summary, key_points, category, sentiment, entities, model_identifier, analysis_version
+        FROM article_enrichment
+        WHERE article_id = ? AND summary IS NOT NULL;
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return nil }
+        defer { sqlite3_finalize(stmt) }
+
+        sqlite3_bind_text(stmt, 1, articleId, -1, Self.SQLITE_TRANSIENT)
+        guard sqlite3_step(stmt) == SQLITE_ROW else { return nil }
+
+        guard let summaryCStr = sqlite3_column_text(stmt, 0) else { return nil }
+        let summary = String(cString: summaryCStr)
+
+        var keyPoints: [String] = []
+        if let kpCStr = sqlite3_column_text(stmt, 1) {
+            let kpStr = String(cString: kpCStr)
+            if let data = kpStr.data(using: .utf8), let decoded = try? JSONDecoder().decode([String].self, from: data) {
+                keyPoints = decoded
+            }
+        }
+
+        let category: String? = sqlite3_column_text(stmt, 2).flatMap { String(cString: $0) }
+        var sentiment: SentimentResult? = nil
+        if sqlite3_column_type(stmt, 3) != SQLITE_NULL {
+            let score = sqlite3_column_double(stmt, 3)
+            let label = score > 0.25 ? "Positive" : (score < -0.25 ? "Critical" : "Neutral")
+            sentiment = SentimentResult(score: score, confidence: 0.9, label: label)
+        }
+
+        var entities: [EntityResult] = []
+        if let entCStr = sqlite3_column_text(stmt, 4) {
+            let entStr = String(cString: entCStr)
+            if let data = entStr.data(using: .utf8), let decoded = try? JSONDecoder().decode([EntityResult].self, from: data) {
+                entities = decoded
+            }
+        }
+
+        let modelIdentifier = sqlite3_column_text(stmt, 5).flatMap { String(cString: $0) } ?? "apple.foundation-model"
+        let version = Int(sqlite3_column_int(stmt, 6))
+
+        return ArticleAnalysis(
+            summary: summary,
+            keyPoints: keyPoints,
+            entities: entities,
+            category: category,
+            sentiment: sentiment,
+            modelIdentifier: modelIdentifier,
+            analysisVersion: max(1, version)
+        )
+    }
+
+    // MARK: - Granular Cache Purging
+
+    /// Clears all AI enrichment analysis data (summaries, key points, entities).
+    /// Articles and subscriptions remain completely intact.
+    func clearArticleEnrichment() throws {
+        guard db != nil else { return }
+        try executeSimple("DELETE FROM article_enrichment;")
+        logger.info("Cleared all article enrichment data.")
+    }
+
+    /// Clears persisted article body text from local storage.
+    /// Preserves subscriptions, saved stories, and read history markers.
+    func clearArticleCache() throws {
+        guard db != nil else { return }
+        try executeSimple("""
+        BEGIN TRANSACTION;
+        UPDATE articles SET content = NULL WHERE id NOT IN (SELECT article_id FROM article_state WHERE is_saved = 1);
+        DELETE FROM article_enrichment WHERE article_id NOT IN (SELECT article_id FROM article_state WHERE is_saved = 1);
+        COMMIT;
+        """)
+        logger.info("Cleared non-saved article content cache.")
+    }
+
+    /// Completely purges all cached articles, state, and enrichment.
+    /// Strictly preserves subscribed feed URLs and user settings.
+    func clearAllDatabaseCache() throws {
+        guard db != nil else { return }
+        try executeSimple("""
+        BEGIN TRANSACTION;
+        DELETE FROM article_enrichment;
+        DELETE FROM article_state WHERE is_saved = 0;
+        DELETE FROM articles WHERE id NOT IN (SELECT article_id FROM article_state WHERE is_saved = 1);
+        DELETE FROM articles_fts WHERE article_id NOT IN (SELECT article_id FROM article_state WHERE is_saved = 1);
+        COMMIT;
+        VACUUM;
+        """)
+        logger.info("Executed full database cache purge with VACUUM.")
+    }
     
     // MARK: - Retention Policy & Pruning
+
     
     /// Prunes read articles older than `keepReadDays`.
     /// Never prunes unread articles or saved stories.
@@ -795,6 +983,30 @@ actor DatabaseEngine {
         let category: String? = sqlite3_column_text(stmt, 9).flatMap { String(cString: $0) }
         let aiSummary: String? = sqlite3_column_text(stmt, 10).flatMap { String(cString: $0) }
         let contentFetched = sqlite3_column_int(stmt, 11) == 1
+
+        var keyPoints: [String]?
+        if let kpCStr = sqlite3_column_text(stmt, 14) {
+            let kpStr = String(cString: kpCStr)
+            if let data = kpStr.data(using: .utf8), let decoded = try? JSONDecoder().decode([String].self, from: data) {
+                keyPoints = decoded
+            }
+        }
+
+        var entities: [EntityResult]?
+        if let entCStr = sqlite3_column_text(stmt, 15) {
+            let entStr = String(cString: entCStr)
+            if let data = entStr.data(using: .utf8), let decoded = try? JSONDecoder().decode([EntityResult].self, from: data) {
+                entities = decoded
+            }
+        }
+
+        var sentimentScore: Double?
+        var sentimentLabel: String?
+        if sqlite3_column_type(stmt, 16) != SQLITE_NULL {
+            let score = sqlite3_column_double(stmt, 16)
+            sentimentScore = score
+            sentimentLabel = score > 0.25 ? "Positive" : (score < -0.25 ? "Critical" : "Neutral")
+        }
         
         return FeedArticle(
             title: title,
@@ -807,7 +1019,12 @@ actor DatabaseEngine {
             aiSummary: aiSummary,
             fullContent: content,
             category: category,
-            contentFetched: contentFetched
+            contentFetched: contentFetched,
+            keyPoints: keyPoints,
+            entities: entities,
+            sentimentScore: sentimentScore,
+            sentimentLabel: sentimentLabel
         )
     }
+
 }

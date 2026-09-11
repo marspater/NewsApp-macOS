@@ -46,11 +46,38 @@ public final class CacheManager: @unchecked Sendable {
 
     /// Clears the HTTP network cache and removes temporary web data.
     /// Does NOT touch user articles, bookmarks, or reading history in the database.
-    public func clearAllCache() {
+    public func clearWebCache() {
         URLCache.shared.removeAllCachedResponses()
         let webCacheDir = cacheDirectory.appendingPathComponent("web_cache")
         try? fileManager.removeItem(at: webCacheDir)
         try? fileManager.createDirectory(at: webCacheDir, withIntermediateDirectories: true)
         logger.info("Cleared HTTP network cache and asset directory.")
+    }
+
+    /// Legacy convenience alias for clearWebCache.
+    public func clearAllCache() {
+        clearWebCache()
+    }
+
+    /// Clears all AI enrichment analysis data (summaries, key points, entities).
+    /// Articles and subscriptions remain completely intact.
+    func clearAIAnalysis(database: DatabaseEngine = DatabaseEngine.shared) async throws {
+        try await database.clearArticleEnrichment()
+        logger.info("Cleared AI analysis cache via CacheManager.")
+    }
+
+    /// Clears persisted article body text from local storage.
+    /// Preserves subscriptions, saved stories, and read history markers.
+    func clearArticleCache(database: DatabaseEngine = DatabaseEngine.shared) async throws {
+        try await database.clearArticleCache()
+        logger.info("Cleared article cache via CacheManager.")
+    }
+
+    /// Completely purges web cache and all cached database articles, state, and enrichment.
+    /// Strictly preserves subscribed feed URLs and user settings. Runs VACUUM on SQLite database.
+    func clearEverything(database: DatabaseEngine = DatabaseEngine.shared) async throws {
+        clearWebCache()
+        try await database.clearAllDatabaseCache()
+        logger.info("Cleared all web and database caches via CacheManager.")
     }
 }

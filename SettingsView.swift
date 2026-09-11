@@ -5,6 +5,7 @@ private let stTextSecondary = AppColor.textSecondary
 
 struct SettingsView: View {
     @EnvironmentObject var appSettings: AppSettings
+    @EnvironmentObject var articleStore: ArticleStore
     @EnvironmentObject var feedManager: FeedManager
     @EnvironmentObject var themeManager: ThemeManager
     @EnvironmentObject var readManager: ReadManager
@@ -12,6 +13,7 @@ struct SettingsView: View {
     @State private var newFeedURL: String = ""
     @State private var selectedTab = 0
     @State private var cacheSize: String = "Calculating..."
+    @State private var cacheActionMessage: String? = nil
     @State private var opmlStatusMessage: String? = nil
     @ObservedObject private var updateChecker = UpdateChecker.shared
 
@@ -273,23 +275,99 @@ struct SettingsView: View {
 
     // MARK: - Cache Tab
     private var cacheTab: some View {
-        VStack(spacing: 20) {
-            Spacer()
+        VStack(spacing: 16) {
             Image(systemName: "externaldrive.fill")
-                .font(.system(size: 40))
+                .font(.system(size: 36))
                 .foregroundColor(stTextSecondary)
-            Text("Cached Data")
-                .font(.system(size: 16, weight: .semibold))
-            Text(cacheSize)
-                .font(.system(size: 28, weight: .bold, design: .rounded))
-                .foregroundColor(stAccentPink)
-            Text("Article data and images are cached locally\nfor fast offline access")
-                .font(.system(size: 12))
-                .foregroundColor(stTextSecondary)
-                .multilineTextAlignment(.center)
-            Button("Clear Cache") { clearCache() }
-                .buttonStyle(.bordered)
-                .tint(.red)
+                .padding(.top, 10)
+
+            VStack(spacing: 4) {
+                Text("Storage & Cache Management")
+                    .font(.system(size: 16, weight: .semibold))
+                Text(cacheSize)
+                    .font(.system(size: 24, weight: .bold, design: .rounded))
+                    .foregroundColor(stAccentPink)
+                Text("Manage on-device cache, downloaded articles, and AI models data")
+                    .font(.system(size: 12))
+                    .foregroundColor(stTextSecondary)
+            }
+
+            if let message = cacheActionMessage {
+                Text(message)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(.green)
+                    .transition(.opacity)
+            }
+
+            Divider()
+
+            VStack(spacing: 12) {
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Web & Media Cache")
+                            .font(.system(size: 13, weight: .medium))
+                        Text("Clears HTTP network responses, temporary web data, and cached images.")
+                            .font(.caption)
+                            .foregroundColor(stTextSecondary)
+                    }
+                    Spacer()
+                    Button("Clear Web Cache") {
+                        clearWebCache()
+                    }
+                    .buttonStyle(.bordered)
+                }
+
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("AI Analysis Cache")
+                            .font(.system(size: 13, weight: .medium))
+                        Text("Removes generated summaries, key points, and entities. Subscriptions and articles remain.")
+                            .font(.caption)
+                            .foregroundColor(stTextSecondary)
+                    }
+                    Spacer()
+                    Button("Clear AI Data") {
+                        clearAIData()
+                    }
+                    .buttonStyle(.bordered)
+                }
+
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Article Content Cache")
+                            .font(.system(size: 13, weight: .medium))
+                        Text("Clears cached full article bodies. Feeds, saved stories, and read history are kept.")
+                            .font(.caption)
+                            .foregroundColor(stTextSecondary)
+                    }
+                    Spacer()
+                    Button("Clear Articles") {
+                        clearArticleData()
+                    }
+                    .buttonStyle(.bordered)
+                }
+
+                Divider().padding(.vertical, 4)
+
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Clear Everything")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(.red)
+                        Text("Purges web cache, article content, and AI analysis. Preserves subscriptions.")
+                            .font(.caption)
+                            .foregroundColor(stTextSecondary)
+                    }
+                    Spacer()
+                    Button("Clear Everything") {
+                        clearEverythingData()
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.red)
+                }
+            }
+            .padding(.horizontal, 24)
+
             Spacer()
         }
         .frame(maxWidth: .infinity)
@@ -307,8 +385,46 @@ struct SettingsView: View {
         }
     }
 
-    private func clearCache() {
-        CacheManager.shared.clearAllCache()
-        cacheSize = "0 B"
+    private func clearWebCache() {
+        CacheManager.shared.clearWebCache()
+        calculateCacheSize()
+        showActionMessage("Web and media cache cleared.")
+    }
+
+    private func clearAIData() {
+        Task {
+            await articleStore.clearAIAnalysis()
+            showActionMessage("AI analysis data cleared.")
+        }
+    }
+
+    private func clearArticleData() {
+        Task {
+            await articleStore.clearArticleCache()
+            calculateCacheSize()
+            showActionMessage("Article body cache cleared.")
+        }
+    }
+
+    private func clearEverythingData() {
+        Task {
+            CacheManager.shared.clearWebCache()
+            await articleStore.clearAllDatabaseCache()
+            calculateCacheSize()
+            showActionMessage("All local caches cleared.")
+        }
+    }
+
+    private func showActionMessage(_ msg: String) {
+        withAnimation {
+            cacheActionMessage = msg
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+            withAnimation {
+                if cacheActionMessage == msg {
+                    cacheActionMessage = nil
+                }
+            }
+        }
     }
 }

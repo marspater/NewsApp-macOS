@@ -1,10 +1,12 @@
 import Foundation
 import NaturalLanguage
 import UserNotifications
+import os
 
 /// Manages NLP-based notification triage, rich image attachments, and alert scheduling.
 final class NotificationService: Sendable {
     static let shared = NotificationService()
+    private let logger = Logger(subsystem: "com.marspater.news", category: "NotificationService")
 
     /// Scores article importance using NLP sentiment intensity + named entity density + breaking news signals.
     /// Returns a 0.0–1.0 score.
@@ -120,12 +122,27 @@ final class NotificationService: Sendable {
         content.body = Self.formatMinimalSummary(articleCount: articles.count, uniqueSourcesCount: max(1, sources.count))
         content.sound = .default
 
+        guard Bundle.main.bundleIdentifier != nil else {
+            logger.debug("Skipping notification dispatch in non-bundled environment")
+            return
+        }
+
         let identifier = "news-minimal-summary"
         let request = UNNotificationRequest(identifier: identifier, content: content, trigger: nil)
-        try? await UNUserNotificationCenter.current().add(request)
+        do {
+            try await UNUserNotificationCenter.current().add(request)
+            logger.debug("Successfully scheduled minimal notification: \(identifier)")
+        } catch {
+            logger.error("Failed to schedule minimal notification '\(identifier)': \(error.localizedDescription)")
+        }
     }
 
     private func triggerPrivateNotification() async {
+        guard Bundle.main.bundleIdentifier != nil else {
+            logger.debug("Skipping notification dispatch in non-bundled environment")
+            return
+        }
+
         let content = UNMutableNotificationContent()
         content.title = "News Update"
         content.body = "You have new articles available. Open to read."
@@ -133,10 +150,20 @@ final class NotificationService: Sendable {
 
         let identifier = "news-generic-update"
         let request = UNNotificationRequest(identifier: identifier, content: content, trigger: nil)
-        try? await UNUserNotificationCenter.current().add(request)
+        do {
+            try await UNUserNotificationCenter.current().add(request)
+            logger.debug("Successfully scheduled private notification: \(identifier)")
+        } catch {
+            logger.error("Failed to schedule private notification '\(identifier)': \(error.localizedDescription)")
+        }
     }
 
     private func triggerFullNotification(for article: FeedArticle) async {
+        guard Bundle.main.bundleIdentifier != nil else {
+            logger.debug("Skipping notification dispatch in non-bundled environment")
+            return
+        }
+
         let content = UNMutableNotificationContent()
 
         let sourceName = (article.source.components(separatedBy: "\n").first ?? article.source)
@@ -156,7 +183,12 @@ final class NotificationService: Sendable {
 
         let identifier = "news-\(article.link.hashValue)"
         let request = UNNotificationRequest(identifier: identifier, content: content, trigger: nil)
-        try? await UNUserNotificationCenter.current().add(request)
+        do {
+            try await UNUserNotificationCenter.current().add(request)
+            logger.debug("Successfully scheduled full notification: \(identifier)")
+        } catch {
+            logger.error("Failed to schedule full notification '\(identifier)': \(error.localizedDescription)")
+        }
     }
 
     private func downloadNotificationAttachment(from url: URL) async -> UNNotificationAttachment? {

@@ -15,6 +15,10 @@ struct FeedArticle: Identifiable, Codable, Hashable, Sendable {
     var fullContent: String?
     var category: String?
     var contentFetched: Bool = false
+    var keyPoints: [String]?
+    var entities: [EntityResult]?
+    var sentimentScore: Double?
+    var sentimentLabel: String?
 
     var normalizedLink: String {
         ArticleIdentity.canonicalizeURL(link)
@@ -24,3 +28,4 @@ struct FeedArticle: Identifiable, Codable, Hashable, Sendable {
         ArticleIdentity.canonicalizeURL(urlString)
     }
 }
+

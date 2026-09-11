@@ -15,6 +15,8 @@ struct ArticleDetailView: View {
     let allArticles: [FeedArticle]
     @Binding var path: NavigationPath
     
+    @EnvironmentObject private var appSettings: AppSettings
+    @EnvironmentObject private var articleStore: ArticleStore
     @EnvironmentObject private var feedManager: FeedManager
     @EnvironmentObject private var savedStories: SavedStoriesManager
     @EnvironmentObject private var readManager: ReadManager
@@ -24,6 +26,10 @@ struct ArticleDetailView: View {
     @State private var isWebLoading: Bool = false
     @State private var webCanGoBack: Bool = false
     @State private var webCanGoForward: Bool = false
+    @State private var analysis: ArticleAnalysis? = nil
+    @State private var isAnalyzing: Bool = false
+    @State private var analysisError: String? = nil
+    @State private var analysisTask: Task<Void, Never>? = nil
     
     init(article: FeedArticle, allArticles: [FeedArticle] = [], path: Binding<NavigationPath>) {
         self._activeArticle = State(initialValue: article)
@@ -71,6 +77,12 @@ struct ArticleDetailView: View {
         .onReceive(NotificationCenter.default.publisher(for: .detailToggleViewMode)) { _ in
             viewMode = (viewMode == .reader ? .web : .reader)
         }
+        .task(id: activeArticle.id) {
+            await startArticleAnalysis()
+        }
+        .onDisappear {
+            cancelAnalysis()
+        }
     }
     
     // MARK: - Reader View
@@ -97,18 +109,7 @@ struct ArticleDetailView: View {
                         .tracking(AppTypography.sectionHeaderTracking)
                         .textCase(.uppercase)
                     
-                    if let ai = currentArticle.aiSummary {
-                        HStack(alignment: .top, spacing: AppSpacing.xs) {
-                            Image(systemName: "sparkles")
-                                .foregroundColor(AppColor.accentGold)
-                                .padding(.top, 3)
-                            Text(ai)
-                                .font(.system(size: 14, weight: .medium))
-                                .foregroundColor(AppColor.accentGold)
-                        }
-                        .padding(14)
-                        .liquidGlass(in: RoundedRectangle(cornerRadius: AppRadius.bubble))
-                    }
+                    aiAnalysisSection
                     
                     if currentArticle.contentFetched {
                         articleContentParagraphs
@@ -359,6 +360,7 @@ struct ArticleDetailView: View {
         guard !allArticles.isEmpty,
               let idx = allArticles.firstIndex(where: { $0.id == activeArticle.id }),
               idx + 1 < allArticles.count else { return }
+        cancelAnalysis()
         let next = allArticles[idx + 1]
         activeArticle = next
         readManager.markAsRead(next.id)
@@ -368,6 +370,7 @@ struct ArticleDetailView: View {
         guard !allArticles.isEmpty,
               let idx = allArticles.firstIndex(where: { $0.id == activeArticle.id }),
               idx > 0 else { return }
+        cancelAnalysis()
         let prev = allArticles[idx - 1]
         activeArticle = prev
         readManager.markAsRead(prev.id)
@@ -435,5 +438,216 @@ struct ArticleDetailView: View {
         text.components(separatedBy: "\n\n")
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
+    }
+
+    // MARK: - AI Analysis & Key Points UI
+
+    @ViewBuilder
+    private var aiAnalysisSection: some View {
+        if isAnalyzing {
+            HStack(spacing: AppSpacing.xs) {
+                ProgressView()
+                    .controlSize(.small)
+                    .scaleEffect(0.8)
+                Text("Analyzing article with on-device AI...")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundColor(AppColor.accentGold)
+            }
+            .padding(12)
+            .liquidGlass(in: RoundedRectangle(cornerRadius: AppRadius.bubble))
+        } else if let analysis = analysis {
+            VStack(alignment: .leading, spacing: 14) {
+                // 1-Paragraph Summary
+                HStack(alignment: .top, spacing: AppSpacing.xs) {
+                    Image(systemName: "sparkles")
+                        .foregroundColor(AppColor.accentGold)
+                        .padding(.top, 3)
+                    Text(analysis.summary)
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundColor(AppColor.accentGold)
+                }
+
+                // 3 to 5 Bullet Key Points
+                if !analysis.keyPoints.isEmpty {
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "list.bullet.clipboard")
+                                .foregroundColor(AppColor.accentGold)
+                            Text("Key Takeaways")
+                                .font(.system(size: 13, weight: .bold))
+                                .foregroundColor(AppColor.textPrimary)
+                        }
+                        .padding(.top, 4)
+
+                        ForEach(analysis.keyPoints, id: \.self) { point in
+                            HStack(alignment: .top, spacing: 8) {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .font(.system(size: 11))
+                                    .foregroundColor(AppColor.accentGold)
+                                    .padding(.top, 3)
+                                Text(point)
+                                    .font(.system(size: 13))
+                                    .foregroundColor(AppColor.textPrimary.opacity(0.9))
+                            }
+                        }
+                    }
+                }
+
+                // Entity tags, sentiment badge, category pill
+                HStack(spacing: 8) {
+                    if let sentiment = analysis.sentiment {
+                        HStack(spacing: 4) {
+                            Image(systemName: sentiment.score >= 0.1 ? "hand.thumbsup.fill" : (sentiment.score <= -0.1 ? "hand.thumbsdown.fill" : "minus.circle.fill"))
+                                .font(.system(size: 10))
+                            Text(sentiment.label)
+                                .font(.caption2.bold())
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Capsule().fill(AppColor.accentPink.opacity(0.2)))
+                        .foregroundColor(AppColor.accentPink)
+                    }
+
+                    ForEach(analysis.entities.prefix(4), id: \.name) { entity in
+                        Text(entity.name)
+                            .font(.caption2.weight(.medium))
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(Capsule().fill(AppColor.surfaceMid))
+                            .foregroundColor(AppColor.textSecondary)
+                    }
+
+                    if let cat = analysis.category ?? currentArticle.category {
+                        Text(cat)
+                            .font(.caption2.weight(.bold))
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(Capsule().fill(AppColor.accentBlue.opacity(0.2)))
+                            .foregroundColor(AppColor.accentBlue)
+                    }
+                }
+            }
+            .padding(14)
+            .liquidGlass(in: RoundedRectangle(cornerRadius: AppRadius.bubble))
+        } else if let error = analysisError {
+            HStack(spacing: 10) {
+                Image(systemName: "exclamationmark.triangle")
+                    .foregroundColor(.orange)
+                Text("AI analysis unavailable: \(error)")
+                    .font(.system(size: 12))
+                    .foregroundColor(AppColor.textSecondary)
+                Spacer()
+                Button("Try Again") {
+                    Task { await startArticleAnalysis() }
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            }
+            .padding(12)
+            .liquidGlass(in: RoundedRectangle(cornerRadius: AppRadius.bubble))
+        } else if let ai = currentArticle.aiSummary {
+            HStack(alignment: .top, spacing: AppSpacing.xs) {
+                Image(systemName: "sparkles")
+                    .foregroundColor(AppColor.accentGold)
+                Text(ai)
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundColor(AppColor.accentGold)
+            }
+            .padding(14)
+            .liquidGlass(in: RoundedRectangle(cornerRadius: AppRadius.bubble))
+        }
+    }
+
+    // MARK: - On-Demand Interactive Analysis Lifecycle
+
+    private func startArticleAnalysis() async {
+        cancelAnalysis()
+        analysisError = nil
+
+        // 1. Check if article already has analysis loaded
+        if let keyPoints = currentArticle.keyPoints, !keyPoints.isEmpty,
+           let summary = currentArticle.aiSummary {
+            self.analysis = ArticleAnalysis(
+                summary: summary,
+                keyPoints: keyPoints,
+                entities: currentArticle.entities ?? [],
+                category: currentArticle.category,
+                sentiment: currentArticle.sentimentLabel.map {
+                    SentimentResult(score: currentArticle.sentimentScore ?? 0.0, confidence: 0.9, label: $0)
+                },
+                modelIdentifier: "cached",
+                analysisVersion: 1
+            )
+            return
+        }
+
+        // 2. Check persistent database for existing analysis
+        if let cached = await articleStore.fetchArticleAnalysis(for: activeArticle.id) {
+            self.analysis = cached
+            return
+        }
+
+        // 3. Lazy interactive analysis if enabled
+        guard appSettings.aiEnabled else { return }
+
+        isAnalyzing = true
+        let targetArticle = currentArticle
+        let allowInsecure = appSettings.allowInsecureHTTP
+
+        analysisTask = Task { @MainActor in
+            do {
+                try Task.checkCancellation()
+
+                // Extract web content if needed
+                var contentToAnalyze = targetArticle.fullContent ?? ""
+                if contentToAnalyze.isEmpty {
+                    let extracted = await ContentExtractionPipeline.shared.extractArticle(
+                        from: targetArticle.link,
+                        allowHTTP: allowInsecure
+                    )
+                    try Task.checkCancellation()
+                    if let content = extracted.content, !content.isEmpty {
+                        contentToAnalyze = content
+                        await articleStore.updateEnrichment(
+                            id: targetArticle.id,
+                            content: content,
+                            image: extracted.imageUrl
+                        )
+                    }
+                }
+
+                if contentToAnalyze.isEmpty {
+                    contentToAnalyze = targetArticle.description
+                }
+
+                try Task.checkCancellation()
+
+                let result = try await ArticleAnalyzer.shared.analyze(
+                    title: targetArticle.title,
+                    content: contentToAnalyze,
+                    category: targetArticle.category
+                )
+
+                try Task.checkCancellation()
+
+                await articleStore.saveArticleAnalysis(result, for: targetArticle.id)
+                self.analysis = result
+                self.isAnalyzing = false
+            } catch is CancellationError {
+                self.isAnalyzing = false
+            } catch {
+                if !Task.isCancelled {
+                    self.analysisError = error.localizedDescription
+                    self.isAnalyzing = false
+                }
+            }
+        }
+        await analysisTask?.value
+    }
+
+    private func cancelAnalysis() {
+        analysisTask?.cancel()
+        analysisTask = nil
+        isAnalyzing = false
     }
 }

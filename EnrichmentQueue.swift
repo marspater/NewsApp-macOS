@@ -233,19 +233,9 @@ actor EnrichmentQueue {
         let signpostState = NewsSignposts.begin(NewsSignposts.enrichment, name: "EnrichmentJob", metadata: "source=\(article.source)")
         defer { NewsSignposts.end(NewsSignposts.enrichment, name: "EnrichmentJob", state: signpostState) }
 
-        // 1. NLP Sentiment & Entity Analysis
-        let summaryText = await ArticleIntelligence.shared.analyzeArticle(
-            title: article.title,
-            description: article.description
-        )
-
-        if Task.isCancelled || isJobCancelled(articleId) {
-            markJobState(articleId: articleId, state: .cancelled(.superseded))
-            return
-        }
-
-        // 2. Topic Categorization with confidence
-        let topicResult = await ArticleIntelligence.shared.categorizeArticle(
+        // Background feed ingestion: strictly lightweight topic classification.
+        // Deep semantic analysis (summary, key points, entities) is performed lazily when the user opens an article.
+        let topicResult = await ArticleClassifier.shared.classify(
             title: article.title,
             description: article.description,
             text: article.fullContent,
@@ -257,48 +247,25 @@ actor EnrichmentQueue {
             return
         }
 
-        // 3. Web Scraping / Content Extraction (if missing)
-        var fetchedContent: String?
-        var fetchedImage: String?
-        if article.fullContent == nil || article.fullContent!.isEmpty {
-            let extracted = await ContentExtractionPipeline.shared.extractArticle(from: article.link, allowHTTP: allowHTTP)
-            fetchedContent = extracted.content
-            fetchedImage = extracted.imageUrl
-        }
-
-        if Task.isCancelled || isJobCancelled(articleId) {
-            markJobState(articleId: articleId, state: .cancelled(.superseded))
-            return
-        }
-
-        // 4. Extractive Summarization if full content exists
-        var finalSummary = summaryText
-        if let content = fetchedContent, !content.isEmpty {
-            let extractedSummary = await ArticleIntelligence.shared.summarizeArticle(title: article.title, content: content)
-            if !extractedSummary.text.isEmpty {
-                finalSummary = extractedSummary.text
-            }
-        }
-
         let result = EnrichmentResult(
             articleId: articleId,
-            summary: finalSummary,
-            category: topicResult?.category,
-            confidence: topicResult?.confidence,
-            content: fetchedContent,
-            image: fetchedImage
+            summary: nil,
+            category: topicResult.category,
+            confidence: topicResult.confidence,
+            content: nil,
+            image: nil
         )
 
-        // 5. "Queue computes. Store persists."
+        // Queue computes. Store persists.
         await ArticleStore.shared.updateEnrichment(
             id: result.articleId,
-            summary: result.summary,
+            summary: nil,
             category: result.category,
             sentiment: nil,
             entities: nil,
             topics: nil,
-            content: result.content,
-            image: result.image
+            content: nil,
+            image: nil
         )
 
         markJobState(articleId: articleId, state: .completed)

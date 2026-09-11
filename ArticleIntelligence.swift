@@ -1,91 +1,248 @@
 import Foundation
 import NaturalLanguage
+import os
+#if canImport(FoundationModels)
+import FoundationModels
+#endif
+
+// MARK: - Fixed News Category Taxonomy (12 Standard Categories)
+
+public enum NewsCategory: String, CaseIterable, Sendable, Codable {
+    case technology = "Technology"
+    case science = "Science"
+    case business = "Business"
+    case politics = "Politics"
+    case world = "World"
+    case sports = "Sports"
+    case entertainment = "Entertainment"
+    case health = "Health"
+    case travel = "Travel"
+    case food = "Food"
+    case fashion = "Fashion"
+    case lifestyle = "Lifestyle"
+
+    public static func match(from string: String) -> NewsCategory? {
+        let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
+        for cat in allCases {
+            if cat.rawValue.localizedCaseInsensitiveCompare(trimmed) == .orderedSame {
+                return cat
+            }
+        }
+        // Partial mappings for common synonyms
+        let lower = trimmed.lowercased()
+        if lower.contains("tech") { return .technology }
+        if lower.contains("politic") || lower.contains("gov") || lower.contains("election") { return .politics }
+        if lower.contains("sci") || lower.contains("space") { return .science }
+        if lower.contains("econ") || lower.contains("biz") || lower.contains("finance") || lower.contains("market") { return .business }
+        if lower.contains("sport") { return .sports }
+        if lower.contains("entertain") || lower.contains("movie") || lower.contains("film") || lower.contains("music") { return .entertainment }
+        if lower.contains("health") || lower.contains("med") || lower.contains("wellness") { return .health }
+        if lower.contains("travel") || lower.contains("tourism") { return .travel }
+        if lower.contains("food") || lower.contains("cook") || lower.contains("dining") || lower.contains("culinary") || lower.contains("recipe") { return .food }
+        if lower.contains("style") || lower.contains("fashion") { return .fashion }
+        if lower.contains("global") || lower.contains("world") || lower.contains("international") { return .world }
+        if lower.contains("life") || lower.contains("living") { return .lifestyle }
+        return nil
+    }
+}
+
+// MARK: - Foundation Models Generable Schemas
+
+#if canImport(FoundationModels)
+@available(macOS 26.0, *)
+@Generable
+public enum GenerableNewsCategory: String, CaseIterable, Sendable, Codable {
+    case technology = "Technology"
+    case science = "Science"
+    case business = "Business"
+    case politics = "Politics"
+    case world = "World"
+    case sports = "Sports"
+    case entertainment = "Entertainment"
+    case health = "Health"
+    case travel = "Travel"
+    case food = "Food"
+    case fashion = "Fashion"
+    case lifestyle = "Lifestyle"
+
+    var toDomainCategory: NewsCategory {
+        NewsCategory(rawValue: self.rawValue) ?? .technology
+    }
+}
+
+@available(macOS 26.0, *)
+@Generable
+public struct GenerableClassificationOutput: Sendable, Codable {
+    @Guide(description: "The primary category of the news article from the allowed list.")
+    public var category: GenerableNewsCategory
+
+    @Guide(description: "Confidence level between 0.0 and 1.0", .range(0.0...1.0))
+    public var confidence: Double
+}
+
+@available(macOS 26.0, *)
+@Generable
+public enum GenerableSentimentKind: String, CaseIterable, Sendable, Codable {
+    case positive = "Positive"
+    case neutral = "Neutral"
+    case critical = "Critical"
+}
+
+@available(macOS 26.0, *)
+@Generable
+public struct GenerableEntityItem: Sendable, Codable {
+    @Guide(description: "Name of the entity (e.g. person, organization, or place)")
+    public var name: String
+
+    @Guide(description: "Type of entity (person, organization, place, or unknown)")
+    public var type: String
+}
+
+@available(macOS 26.0, *)
+@Generable
+public struct GenerableArticleAnalysis: Sendable, Codable {
+    @Guide(description: "A single concise paragraph summarizing the article.")
+    public var summary: String
+
+    @Guide(description: "Between 3 and 5 bullet key points summarizing the key takeaways.", .count(3...5))
+    public var keyPoints: [String]
+
+    @Guide(description: "Key named entities mentioned in the article.")
+    public var entities: [GenerableEntityItem]
+
+    @Guide(description: "Overall sentiment of the article.")
+    public var sentiment: GenerableSentimentKind
+}
+#endif
 
 // MARK: - Intelligence Domain Models
 
-enum EntityType: String, Sendable, Codable {
+public enum EntityType: String, Sendable, Codable, Hashable {
     case person
     case organization
     case place
     case unknown
 }
 
-struct EntityResult: Sendable, Equatable, Codable {
-    let name: String
-    let type: EntityType
-    let confidence: Double
+public struct EntityResult: Sendable, Equatable, Codable, Hashable {
+    public let name: String
+    public let type: EntityType
+    public let confidence: Double
 
-    init(name: String, type: EntityType, confidence: Double = 1.0) {
+    public init(name: String, type: EntityType, confidence: Double = 1.0) {
         self.name = name
         self.type = type
         self.confidence = confidence
     }
 }
 
-struct SentimentResult: Sendable, Equatable, Codable {
-    let score: Double        // -1.0 (very negative) to +1.0 (very positive)
-    let confidence: Double   // 0.0 to 1.0
-    let label: String        // "Positive", "Neutral", "Critical"
+public struct SentimentResult: Sendable, Equatable, Codable, Hashable {
+    public let score: Double        // -1.0 (very negative) to +1.0 (very positive)
+    public let confidence: Double   // 0.0 to 1.0
+    public let label: String        // "Positive", "Neutral", "Critical"
 
-    init(score: Double, confidence: Double, label: String) {
+    public init(score: Double, confidence: Double, label: String) {
         self.score = score
         self.confidence = confidence
         self.label = label
     }
 }
 
-struct TopicResult: Sendable, Equatable, Codable {
-    let category: String
-    let confidence: Double   // 0.0 to 1.0
-    let evidence: [String]   // Extracted keywords / entities supporting the category
+public struct TopicResult: Sendable, Equatable, Codable {
+    public let category: String
+    public let confidence: Double   // 0.0 to 1.0
+    public let evidence: [String]   // Extracted keywords / entities supporting the category
 
-    init(category: String, confidence: Double, evidence: [String] = []) {
+    public init(category: String, confidence: Double, evidence: [String] = []) {
         self.category = category
         self.confidence = confidence
         self.evidence = evidence
     }
 }
 
-struct SummaryResult: Sendable, Equatable, Codable {
-    let text: String
-    let sentencesUsed: Int
-    let confidence: Double
+public struct SummaryResult: Sendable, Equatable, Codable {
+    public let text: String
+    public let sentencesUsed: Int
+    public let confidence: Double
 
-    init(text: String, sentencesUsed: Int, confidence: Double) {
+    public init(text: String, sentencesUsed: Int, confidence: Double) {
         self.text = text
         self.sentencesUsed = sentencesUsed
         self.confidence = confidence
     }
 }
 
+/// Structured article intelligence result persisted in SQLite and displayed in the reader UI.
+public struct ArticleAnalysis: Sendable, Equatable, Codable {
+    public let summary: String
+    public let keyPoints: [String]
+    public let entities: [EntityResult]
+    public let category: String?
+    public let sentiment: SentimentResult?
+    public let modelIdentifier: String
+    public let analysisVersion: Int
+
+    public init(
+        summary: String,
+        keyPoints: [String] = [],
+        entities: [EntityResult] = [],
+        category: String? = nil,
+        sentiment: SentimentResult? = nil,
+        modelIdentifier: String = "apple.foundation-model",
+        analysisVersion: Int = 1
+    ) {
+        self.summary = summary
+        self.keyPoints = keyPoints
+        self.entities = entities
+        self.category = category
+        self.sentiment = sentiment
+        self.modelIdentifier = modelIdentifier
+        self.analysisVersion = analysisVersion
+    }
+}
+
+// MARK: - Typed AI Error Domain
+
+public enum AIAnalysisError: Error, Sendable, Equatable {
+    case unavailable(String)
+    case modelNotReady
+    case modelError(String)
+    case contextTooLarge
+    case invalidStructuredOutput
+    case cancelled
+    case contentUnavailable
+    case extractionFailed
+    case persistenceFailed
+}
+
 // MARK: - Capability Protocols (Model-Agnostic)
 
-protocol SentimentAnalyzing: Sendable {
+public protocol SentimentAnalyzing: Sendable {
     func analyzeSentiment(for text: String) async -> SentimentResult
 }
 
-protocol EntityExtracting: Sendable {
+public protocol EntityExtracting: Sendable {
     func extractEntities(from text: String) async -> [EntityResult]
 }
 
-protocol TopicClassifying: Sendable {
+public protocol TopicClassifying: Sendable {
     func classifyTopic(title: String, description: String, text: String?, rssCategory: String?) async -> TopicResult?
 }
 
-protocol ArticleSummarizing: Sendable {
+public protocol ArticleSummarizing: Sendable {
     func summarize(title: String, content: String) async -> SummaryResult
 }
 
-protocol ContentCleaning: Sendable {
+public protocol ContentCleaning: Sendable {
     func cleanContent(_ rawText: String) -> String
 }
 
-// MARK: - NaturalLanguage Implementations
+// MARK: - NaturalLanguage & Deterministic Implementations (M1/M2 Fallback)
 
-final class NaturalLanguageSentimentAnalyzer: SentimentAnalyzing {
-    init() {}
+public final class NaturalLanguageSentimentAnalyzer: SentimentAnalyzing {
+    public init() {}
 
-    func analyzeSentiment(for text: String) async -> SentimentResult {
+    public func analyzeSentiment(for text: String) async -> SentimentResult {
         let tagger = NLTagger(tagSchemes: [.sentimentScore])
         tagger.string = text
         let (sentiment, _) = tagger.tag(at: text.startIndex, unit: .paragraph, scheme: .sentimentScore)
@@ -105,10 +262,13 @@ final class NaturalLanguageSentimentAnalyzer: SentimentAnalyzing {
     }
 }
 
-final class NaturalLanguageEntityExtractor: EntityExtracting {
-    init() {}
+public final class NaturalLanguageEntityExtractor: EntityExtracting {
+    public init() {}
 
-    func extractEntities(from text: String) async -> [EntityResult] {
+    public func extractEntities(from text: String) async -> [EntityResult] {
+        let signpostState = NewsSignposts.begin(NewsSignposts.intelligence, name: "AIEntityExtraction", metadata: "len=\(text.count)")
+        defer { NewsSignposts.end(NewsSignposts.intelligence, name: "AIEntityExtraction", state: signpostState) }
+
         let tagger = NLTagger(tagSchemes: [.nameType])
         tagger.string = text
         let options: NLTagger.Options = [.omitWhitespace, .omitPunctuation, .joinNames]
@@ -140,38 +300,38 @@ final class NaturalLanguageEntityExtractor: EntityExtracting {
     }
 }
 
-final class NaturalLanguageTopicClassifier: TopicClassifying {
-    init() {}
+public final class NaturalLanguageTopicClassifier: TopicClassifying {
+    public init() {}
 
-    private static let taxonomy: [(category: String, keywords: [String])] = [
-        ("Science", ["science", "research", "study", "discovery", "space", "nasa", "physics", "biology", "chemistry", "climate", "species", "quantum", "astronomy", "planet", "genome", "laboratory", "experiment", "rocket", "satellite"]),
-        ("Tech", ["tech", "software", "hardware", "artificial intelligence", "computer", "silicon valley", "cyber", "programming", "developer", "machine learning", "chip", "semiconductor", "startup", "coding", "algorithm", "neural", "apple", "google", "microsoft"]),
-        ("U.S. Politics", ["congress", "senate", "democrat", "republican", "white house", "legislation", "campaign", "electoral", "president", "biden", "trump"]),
-        ("Sports", ["sport", "football", "basketball", "soccer", "baseball", "nfl", "nba", "mlb", "athlete", "championship", "league", "coach", "olympic", "tennis", "golf", "tournament"]),
-        ("Business", ["market", "stock", "economy", "finance", "wall street", "investor", "venture", "ipo", "revenue", "profit", "earnings", "trade", "inflation", "bank"]),
-        ("Health & Wellness", ["health", "medical", "doctor", "hospital", "disease", "treatment", "vaccine", "mental health", "wellness", "fitness", "nutrition", "therapy", "clinical"]),
-        ("Entertainment", ["entertainment", "movie", "film", "celebrity", "music", "television", "hollywood", "streaming", "netflix", "disney", "actor", "actress", "concert", "album", "grammy", "oscar"]),
-        ("World", ["international", "global", "europe", "asia", "africa", "foreign", "united nations", "diplomat", "treaty", "conflict", "war"]),
-        ("Travel", ["travel", "flight", "airline", "hotel", "tourism", "destination", "vacation", "airport", "cruise"]),
-        ("Fashion", ["fashion", "designer", "runway", "clothing", "trend", "outfit", "accessory"])
+    public static let taxonomy: [(category: NewsCategory, keywords: [String])] = [
+        (.technology, ["tech", "software", "hardware", "artificial intelligence", "ai", "computer", "silicon valley", "cyber", "programming", "developer", "machine learning", "chip", "semiconductor", "startup", "coding", "algorithm", "neural", "apple", "google", "microsoft", "nvidia", "intel", "amd", "cloud", "server", "linux", "ios", "macos", "android", "iphone", "macbook"]),
+        (.science, ["science", "research", "study", "discovery", "space", "nasa", "physics", "biology", "chemistry", "climate", "species", "quantum", "astronomy", "planet", "genome", "laboratory", "experiment", "rocket", "satellite", "mars", "telescope", "fossil", "ecosystem"]),
+        (.business, ["market", "stock", "economy", "finance", "wall street", "investor", "venture", "ipo", "revenue", "profit", "earnings", "trade", "inflation", "bank", "gdp", "recession", "shares", "dividend", "crypto", "bitcoin", "central bank", "interest rate", "valuation"]),
+        (.politics, ["congress", "senate", "democrat", "republican", "white house", "legislation", "campaign", "electoral", "president", "biden", "trump", "parliament", "vote", "voter", "lawmaker", "governor", "supreme court", "election", "policy", "sanction"]),
+        (.world, ["international", "global", "europe", "asia", "africa", "middle east", "ukraine", "russia", "china", "foreign", "united nations", "un", "diplomat", "treaty", "conflict", "war", "peace", "nato", "embassy", "border", "refugee", "geopolitics"]),
+        (.sports, ["sport", "football", "basketball", "soccer", "baseball", "nfl", "nba", "mlb", "athlete", "championship", "league", "coach", "olympic", "tennis", "golf", "tournament", "fifa", "premier league", "quarterback", "stadium", "goal", "formula 1", "f1"]),
+        (.entertainment, ["entertainment", "movie", "film", "celebrity", "music", "television", "hollywood", "streaming", "netflix", "disney", "actor", "actress", "concert", "album", "grammy", "oscar", "cinema", "box office", "pop star", "emmy", "broadway"]),
+        (.health, ["health", "medical", "doctor", "hospital", "disease", "treatment", "vaccine", "mental health", "wellness", "fitness", "nutrition", "therapy", "clinical", "virus", "cancer", "surgery", "medicine", "fda", "diet", "workout", "cardio", "pharma"]),
+        (.travel, ["travel", "flight", "airline", "hotel", "tourism", "destination", "vacation", "airport", "cruise", "resort", "backpacking", "passport", "visa", "itinerary", "sightseeing"]),
+        (.food, ["food", "restaurant", "recipe", "cooking", "chef", "dining", "cuisine", "wine", "baking", "cocktail", "flavor", "meal", "coffee", "pastry", "culinary", "ingredient", "dish"]),
+        (.fashion, ["fashion", "designer", "runway", "clothing", "trend", "outfit", "accessory", "vogue", "apparel", "haute couture", "sneaker", "luxury", "footwear", "wardrobe"]),
+        (.lifestyle, ["lifestyle", "home", "garden", "parenting", "relationship", "decor", "mindfulness", "habits", "productivity", "diy", "family", "pets", "minimalism", "culture"])
     ]
 
-    func classifyTopic(title: String, description: String, text: String?, rssCategory: String?) async -> TopicResult? {
-        // 1. Exact or high-confidence match on RSS category
+    public func classifyTopic(title: String, description: String, text: String?, rssCategory: String?) async -> TopicResult? {
+        // 1. Direct match on RSS category hint
         if let rssCat = rssCategory?.trimmingCharacters(in: .whitespacesAndNewlines), !rssCat.isEmpty {
-            for item in Self.taxonomy {
-                if rssCat.localizedCaseInsensitiveContains(item.category) {
-                    return TopicResult(category: item.category, confidence: 0.95, evidence: [rssCat])
-                }
+            if let matched = NewsCategory.match(from: rssCat) {
+                return TopicResult(category: matched.rawValue, confidence: 0.95, evidence: [rssCat])
             }
         }
 
-        // 2. Score title and description against taxonomy with weighted evidence
+        // 2. Score title, description, and body against taxonomy
         let titleLower = title.lowercased()
         let descLower = description.lowercased()
         let bodyLower = (text ?? "").prefix(2000).lowercased()
 
-        var bestCategory: String?
+        var bestCategory: NewsCategory?
         var maxScore = 0.0
         var bestEvidence: [String] = []
 
@@ -202,23 +362,25 @@ final class NaturalLanguageTopicClassifier: TopicClassifying {
 
         if let cat = bestCategory, maxScore >= 2.0 {
             let confidence = min(0.95, 0.5 + (maxScore * 0.08))
-            return TopicResult(category: cat, confidence: confidence, evidence: bestEvidence)
+            return TopicResult(category: cat.rawValue, confidence: confidence, evidence: bestEvidence)
         }
 
         return nil
     }
 }
 
-final class ExtractiveArticleSummarizer: ArticleSummarizing {
-    init() {}
+public final class ExtractiveArticleSummarizer: ArticleSummarizing {
+    public init() {}
 
-    func summarize(title: String, content: String) async -> SummaryResult {
+    public func summarize(title: String, content: String) async -> SummaryResult {
+        let signpostState = NewsSignposts.begin(NewsSignposts.intelligence, name: "AISummarization", metadata: "len=\(content.count)")
+        defer { NewsSignposts.end(NewsSignposts.intelligence, name: "AISummarization", state: signpostState) }
+
         let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
             return SummaryResult(text: title, sentencesUsed: 1, confidence: 0.5)
         }
 
-        // Split content into sentences
         let tokenizer = NLTokenizer(unit: .sentence)
         tokenizer.string = trimmed
         var sentences: [String] = []
@@ -236,27 +398,19 @@ final class ExtractiveArticleSummarizer: ArticleSummarizing {
 
         let titleWords = Set(title.lowercased().components(separatedBy: .whitespacesAndNewlines).filter { $0.count > 3 })
 
-        // Score sentences based on position, title overlap, and length
         var scored: [(sentence: String, score: Double, originalIndex: Int)] = []
         for (idx, sentence) in sentences.enumerated() {
             var score = 0.0
-            // Position weight (earlier sentences in journalism are more informative)
             score += max(0, 5.0 - Double(idx) * 0.5)
-
-            // Title overlap
             let sWords = Set(sentence.lowercased().components(separatedBy: .whitespacesAndNewlines))
             let overlap = titleWords.intersection(sWords).count
             score += Double(overlap) * 2.5
-
-            // Optimal length bonus (80-220 characters)
             if sentence.count >= 80 && sentence.count <= 220 {
                 score += 2.0
             }
-
             scored.append((sentence, score, idx))
         }
 
-        // Pick top 2 most informative sentences, presented in chronological order
         scored.sort { $0.score > $1.score }
         let topCount = min(2, scored.count)
         let selected = scored.prefix(topCount).sorted { $0.originalIndex < $1.originalIndex }
@@ -264,12 +418,52 @@ final class ExtractiveArticleSummarizer: ArticleSummarizing {
 
         return SummaryResult(text: summaryText, sentencesUsed: topCount, confidence: 0.85)
     }
+
+    /// Generates 3 to 5 key points by extracting highest scoring distinct sentences.
+    public func extractKeyPoints(title: String, content: String) async -> [String] {
+        let signpostState = NewsSignposts.begin(NewsSignposts.intelligence, name: "AIKeyPoints", metadata: "len=\(content.count)")
+        defer { NewsSignposts.end(NewsSignposts.intelligence, name: "AIKeyPoints", state: signpostState) }
+
+        let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return [] }
+
+        let tokenizer = NLTokenizer(unit: .sentence)
+        tokenizer.string = trimmed
+        var sentences: [String] = []
+        tokenizer.enumerateTokens(in: trimmed.startIndex..<trimmed.endIndex) { range, _ in
+            let s = String(trimmed[range]).trimmingCharacters(in: .whitespacesAndNewlines)
+            if s.count > 40 && s.count < 280 && !s.hasSuffix("?") {
+                sentences.append(s)
+            }
+            return sentences.count < 50
+        }
+
+        guard sentences.count >= 3 else {
+            return sentences
+        }
+
+        let titleWords = Set(title.lowercased().components(separatedBy: .whitespacesAndNewlines).filter { $0.count > 3 })
+        var scored: [(sentence: String, score: Double, originalIndex: Int)] = []
+        for (idx, s) in sentences.enumerated() {
+            var score = max(0, 4.0 - Double(idx) * 0.3)
+            let sWords = Set(s.lowercased().components(separatedBy: .whitespacesAndNewlines))
+            score += Double(titleWords.intersection(sWords).count) * 2.0
+            scored.append((s, score, idx))
+        }
+
+        scored.sort { $0.score > $1.score }
+        let selected = scored.prefix(min(4, scored.count)).sorted { $0.originalIndex < $1.originalIndex }
+        return selected.map { $0.sentence }
+    }
 }
 
-final class ProseContentCleaner: ContentCleaning {
-    init() {}
+public final class ProseContentCleaner: ContentCleaning {
+    public init() {}
 
-    func cleanContent(_ rawText: String) -> String {
+    public func cleanContent(_ rawText: String) -> String {
+        let signpostState = NewsSignposts.begin(NewsSignposts.intelligence, name: "ContentPreparation", metadata: "len=\(rawText.count)")
+        defer { NewsSignposts.end(NewsSignposts.intelligence, name: "ContentPreparation", state: signpostState) }
+
         let lines = rawText.components(separatedBy: "\n\n")
         var cleanedParagraphs = [String]()
 
@@ -344,24 +538,244 @@ final class ProseContentCleaner: ContentCleaning {
     }
 }
 
-// MARK: - Unified ArticleIntelligence Facade
+// MARK: - ArticleClassifier (Automatic Ingestion Capability)
 
-final class ArticleIntelligence: Sendable {
-    static let shared = ArticleIntelligence()
+/// Dedicated, high-accuracy topic classifier used automatically during feed ingestion.
+/// Multi-stage pipeline: RSS hints -> Apple Foundation Models (when available) -> NaturalLanguage fallback.
+public final class ArticleClassifier: Sendable {
+    public static let shared = ArticleClassifier()
 
-    let sentimentAnalyzer: SentimentAnalyzing
-    let entityExtractor: EntityExtracting
-    let topicClassifier: TopicClassifying
-    let summarizer: ArticleSummarizing
-    let contentCleaner: ContentCleaning
+    private let fallbackClassifier: NaturalLanguageTopicClassifier
 
-    init(
+    public init(fallbackClassifier: NaturalLanguageTopicClassifier = NaturalLanguageTopicClassifier()) {
+        self.fallbackClassifier = fallbackClassifier
+    }
+
+    /// Whether Apple Foundation Models is ready and available on this hardware.
+    public var isFoundationModelsAvailable: Bool {
+        #if canImport(FoundationModels)
+        if #available(macOS 26.0, *) {
+            return SystemLanguageModel.default.availability == .available
+        }
+        #endif
+        return false
+    }
+
+    /// Classifies an article into one of the 12 fixed application categories.
+    public func classify(
+        title: String,
+        description: String,
+        text: String? = nil,
+        rssCategory: String? = nil
+    ) async -> TopicResult {
+        let signpostState = NewsSignposts.begin(NewsSignposts.intelligence, name: "AIClassification", metadata: "title_len=\(title.count)")
+        defer { NewsSignposts.end(NewsSignposts.intelligence, name: "AIClassification", state: signpostState) }
+
+        // Stage 1: Fast deterministic RSS hint
+        if let rssHint = rssCategory?.trimmingCharacters(in: .whitespacesAndNewlines), !rssHint.isEmpty {
+            if let matched = NewsCategory.match(from: rssHint) {
+                return TopicResult(category: matched.rawValue, confidence: 0.95, evidence: [rssHint])
+            }
+        }
+
+        // Stage 2: Foundation Models classification (when available)
+        #if canImport(FoundationModels)
+        if #available(macOS 26.0, *), isFoundationModelsAvailable {
+            do {
+                let session = LanguageModelSession()
+                let prompt = """
+                Classify this news article into exactly one category from the allowed list:
+                Allowed categories: Technology, Science, Business, Politics, World, Sports, Entertainment, Health, Travel, Food, Fashion, Lifestyle.
+
+                Title: \(title)
+                Description: \(description)
+                """
+
+                let response = try await session.respond(to: prompt, generating: GenerableClassificationOutput.self)
+                let modelCategory = response.content.category.toDomainCategory.rawValue
+                let confidence = response.content.confidence
+
+                // Confidence evaluation policy:
+                // >= 0.85: accept directly
+                // 0.60 ..< 0.85: verify against deterministic classifier
+                // < 0.60: fall back
+                if confidence >= 0.85 {
+                    return TopicResult(category: modelCategory, confidence: confidence, evidence: ["foundation_model"])
+                } else if confidence >= 0.60 {
+                    if let deterministic = await fallbackClassifier.classifyTopic(title: title, description: description, text: text, rssCategory: rssCategory) {
+                        if deterministic.category == modelCategory {
+                            return TopicResult(category: modelCategory, confidence: max(confidence, deterministic.confidence), evidence: ["foundation_model_verified"] + deterministic.evidence)
+                        } else if deterministic.confidence > confidence {
+                            return deterministic
+                        }
+                    }
+                    return TopicResult(category: modelCategory, confidence: confidence, evidence: ["foundation_model_unverified"])
+                }
+            } catch {
+                // Foundation Models failure -> fall through to deterministic fallback
+            }
+        }
+        #endif
+
+        // Stage 3: NaturalLanguage & Keyword deterministic fallback
+        if let result = await fallbackClassifier.classifyTopic(title: title, description: description, text: text, rssCategory: rssCategory) {
+            return result
+        }
+
+        // Stage 4: Default generic fallback
+        return TopicResult(category: NewsCategory.world.rawValue, confidence: 0.5, evidence: ["default_fallback"])
+    }
+}
+
+// MARK: - ArticleAnalyzer (Lazy Interactive Reading Capability)
+
+/// Dedicated semantic analyzer invoked lazily and exclusively when the user opens an article.
+/// Fully cancellable when the user navigates away.
+public final class ArticleAnalyzer: Sendable {
+    public static let shared = ArticleAnalyzer()
+
+    private let fallbackSummarizer: ExtractiveArticleSummarizer
+    private let fallbackExtractor: NaturalLanguageEntityExtractor
+    private let fallbackSentiment: NaturalLanguageSentimentAnalyzer
+    private let contentCleaner: ProseContentCleaner
+
+    public init(
+        fallbackSummarizer: ExtractiveArticleSummarizer = ExtractiveArticleSummarizer(),
+        fallbackExtractor: NaturalLanguageEntityExtractor = NaturalLanguageEntityExtractor(),
+        fallbackSentiment: NaturalLanguageSentimentAnalyzer = NaturalLanguageSentimentAnalyzer(),
+        contentCleaner: ProseContentCleaner = ProseContentCleaner()
+    ) {
+        self.fallbackSummarizer = fallbackSummarizer
+        self.fallbackExtractor = fallbackExtractor
+        self.fallbackSentiment = fallbackSentiment
+        self.contentCleaner = contentCleaner
+    }
+
+    /// Analyzes an article on-demand, generating 1-paragraph summary, 3-5 key points, entities, and sentiment.
+    /// Responds cooperatively to Task cancellation.
+    public func analyze(
+        title: String,
+        content: String,
+        category: String? = nil
+    ) async throws -> ArticleAnalysis {
+        let signpostState = NewsSignposts.begin(NewsSignposts.intelligence, name: "AIAnalysis", metadata: "content_len=\(content.count)")
+        defer { NewsSignposts.end(NewsSignposts.intelligence, name: "AIAnalysis", state: signpostState) }
+
+        // Cooperative cancellation check
+        try Task.checkCancellation()
+
+        let cleaned = contentCleaner.cleanContent(content)
+        let effectiveContent = cleaned.isEmpty ? content : cleaned
+
+        // Context budget management: truncate to avoid exceeding model context window (~6000 chars)
+        let contextBudget = 6000
+        let budgetedContent = String(effectiveContent.prefix(contextBudget))
+
+        #if canImport(FoundationModels)
+        if #available(macOS 26.0, *), ArticleClassifier.shared.isFoundationModelsAvailable {
+            do {
+                let session = LanguageModelSession()
+                let prompt = """
+                Analyze the following news article and produce:
+                1. A single concise paragraph summary.
+                2. Between 3 and 5 bullet key points summarizing the primary takeaways.
+                3. Key named entities mentioned.
+                4. Overall sentiment (Positive, Neutral, or Critical).
+
+                Title: \(title)
+
+                Article Content:
+                \(budgetedContent)
+                """
+
+                try Task.checkCancellation()
+
+                let response = try await session.respond(to: prompt, generating: GenerableArticleAnalysis.self)
+                let gen = response.content
+
+                try Task.checkCancellation()
+
+                let entities = gen.entities.map { item in
+                    let type: EntityType
+                    switch item.type.lowercased() {
+                    case "person": type = .person
+                    case "organization", "company": type = .organization
+                    case "place", "location": type = .place
+                    default: type = .unknown
+                    }
+                    return EntityResult(name: item.name, type: type, confidence: 0.95)
+                }
+
+                let sentimentScore: Double
+                switch gen.sentiment {
+                case .positive: sentimentScore = 0.6
+                case .neutral: sentimentScore = 0.0
+                case .critical: sentimentScore = -0.6
+                }
+                let sentimentResult = SentimentResult(score: sentimentScore, confidence: 0.9, label: gen.sentiment.rawValue)
+
+                return ArticleAnalysis(
+                    summary: gen.summary,
+                    keyPoints: gen.keyPoints,
+                    entities: entities,
+                    category: category,
+                    sentiment: sentimentResult,
+                    modelIdentifier: "apple.foundation-model",
+                    analysisVersion: 1
+                )
+            } catch is CancellationError {
+                throw AIAnalysisError.cancelled
+            } catch {
+                // If model fails or throws, fall through to deterministic fallback
+            }
+        }
+        #endif
+
+        try Task.checkCancellation()
+
+        // Fallback: Extractive NaturalLanguage pipeline
+        let summaryResult = await fallbackSummarizer.summarize(title: title, content: budgetedContent)
+        let keyPoints = await fallbackSummarizer.extractKeyPoints(title: title, content: budgetedContent)
+        let entities = await fallbackExtractor.extractEntities(from: budgetedContent)
+        let sentiment = await fallbackSentiment.analyzeSentiment(for: budgetedContent)
+
+        return ArticleAnalysis(
+            summary: summaryResult.text,
+            keyPoints: keyPoints,
+            entities: entities,
+            category: category,
+            sentiment: sentiment,
+            modelIdentifier: "apple.natural-language.fallback",
+            analysisVersion: 1
+        )
+    }
+}
+
+// MARK: - Unified ArticleIntelligence Facade (Backwards Compatibility)
+
+public final class ArticleIntelligence: Sendable {
+    public static let shared = ArticleIntelligence()
+
+    public let classifier: ArticleClassifier
+    public let analyzer: ArticleAnalyzer
+
+    public let sentimentAnalyzer: SentimentAnalyzing
+    public let entityExtractor: EntityExtracting
+    public let topicClassifier: TopicClassifying
+    public let summarizer: ArticleSummarizing
+    public let contentCleaner: ContentCleaning
+
+    public init(
+        classifier: ArticleClassifier = .shared,
+        analyzer: ArticleAnalyzer = .shared,
         sentimentAnalyzer: SentimentAnalyzing = NaturalLanguageSentimentAnalyzer(),
         entityExtractor: EntityExtracting = NaturalLanguageEntityExtractor(),
         topicClassifier: TopicClassifying = NaturalLanguageTopicClassifier(),
         summarizer: ArticleSummarizing = ExtractiveArticleSummarizer(),
         contentCleaner: ContentCleaning = ProseContentCleaner()
     ) {
+        self.classifier = classifier
+        self.analyzer = analyzer
         self.sentimentAnalyzer = sentimentAnalyzer
         self.entityExtractor = entityExtractor
         self.topicClassifier = topicClassifier
@@ -369,8 +783,8 @@ final class ArticleIntelligence: Sendable {
         self.contentCleaner = contentCleaner
     }
 
-    /// Full multi-dimensional analysis generating insight string, entities, and sentiment.
-    func analyzeArticle(title: String, description: String) async -> String {
+    /// Multi-dimensional analysis generating insight string, entities, and sentiment.
+    public func analyzeArticle(title: String, description: String) async -> String {
         let fullText = "\(title). \(description)"
         let sentiment = await sentimentAnalyzer.analyzeSentiment(for: fullText)
         let entities = await entityExtractor.extractEntities(from: fullText)
@@ -384,17 +798,18 @@ final class ArticleIntelligence: Sendable {
     }
 
     /// Categorizes article with confidence score and supporting evidence.
-    func categorizeArticle(title: String, description: String, text: String? = nil, rssCategory: String? = nil) async -> TopicResult? {
-        await topicClassifier.classifyTopic(title: title, description: description, text: text, rssCategory: rssCategory)
+    public func categorizeArticle(title: String, description: String, text: String? = nil, rssCategory: String? = nil) async -> TopicResult? {
+        await classifier.classify(title: title, description: description, text: text, rssCategory: rssCategory)
     }
 
     /// Produces concise extractive summary of full article text.
-    func summarizeArticle(title: String, content: String) async -> SummaryResult {
+    public func summarizeArticle(title: String, content: String) async -> SummaryResult {
         await summarizer.summarize(title: title, content: content)
     }
 
     /// Cleans extracted raw HTML text to remove boilerplate and navigation artifacts.
-    func cleanContent(_ rawText: String) -> String {
+    public func cleanContent(_ rawText: String) -> String {
         contentCleaner.cleanContent(rawText)
     }
 }
+

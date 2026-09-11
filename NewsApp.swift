@@ -127,6 +127,7 @@ struct NewsApp: App {
         Settings {
             SettingsView()
                 .environmentObject(appSettings)
+                .environmentObject(articleStore)
                 .environmentObject(feedManager)
                 .environmentObject(themeManager)
                 .environmentObject(readManager)

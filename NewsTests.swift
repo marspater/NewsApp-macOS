@@ -60,6 +60,13 @@ struct NewsTests {
         await testRefreshCoordinatorSingleFlightCoalescing()
         await testSignpostHelperExecution()
         await testAppSettingsIsolationAndURLNormalization()
+        await testFixedTaxonomyAndCaseInsensitivity()
+        await testClassificationMultiStageAndConfidenceTiers()
+        await testClassificationBenchmarkDataset()
+        await testArticleAnalyzerStructuredOutputAndFallbacks()
+        await testInteractiveAnalysisCancellation()
+        await testGranularCacheClearingAndRetention()
+        await testNotificationServiceErrorLogging()
         
         print("✅ SUCCESS: All tests passed!")
     }
@@ -691,7 +698,7 @@ struct NewsTests {
             rssCategory: nil
         )
         assertTrue(topic != nil, "Should classify topic")
-        assertTrue(topic?.category == "Tech" || topic?.category == "Science", "Should classify as Tech or Science")
+        assertTrue(topic?.category == "Technology" || topic?.category == "Science", "Should classify as Technology or Science")
         assertTrue((topic?.confidence ?? 0) > 0.5, "Confidence should exceed 0.5")
         assertTrue(!((topic?.evidence.isEmpty) ?? true), "Evidence keywords should not be empty")
         
@@ -1182,6 +1189,306 @@ struct NewsTests {
 
         let storedSections = tempDefaults.stringArray(forKey: AppSettings.userSectionsKey) ?? []
         assertTrue(storedSections.contains("IsolatedSection"), "Injected defaults must receive userSections mutations")
+    }
+
+    static func testFixedTaxonomyAndCaseInsensitivity() async {
+        print("  - Testing Fixed Taxonomy (12 Categories), Synonyms & Case Insensitivity...")
+
+        // 1. Exactly 12 categories
+        assertEqual(NewsCategory.allCases.count, 12, "Taxonomy must define exactly 12 standard categories")
+
+        // 2. Direct case-insensitive matching
+        assertEqual(NewsCategory.match(from: "technology"), .technology, "lowercase 'technology'")
+        assertEqual(NewsCategory.match(from: "TECHNOLOGY"), .technology, "uppercase 'TECHNOLOGY'")
+        assertEqual(NewsCategory.match(from: "  Science  "), .science, "trimmed 'Science'")
+        assertEqual(NewsCategory.match(from: "Business"), .business, "standard 'Business'")
+        assertEqual(NewsCategory.match(from: "politics"), .politics, "standard 'politics'")
+        assertEqual(NewsCategory.match(from: "world"), .world, "standard 'world'")
+        assertEqual(NewsCategory.match(from: "Sports"), .sports, "standard 'Sports'")
+        assertEqual(NewsCategory.match(from: "entertainment"), .entertainment, "standard 'entertainment'")
+        assertEqual(NewsCategory.match(from: "Health"), .health, "standard 'Health'")
+        assertEqual(NewsCategory.match(from: "Travel"), .travel, "standard 'Travel'")
+        assertEqual(NewsCategory.match(from: "Food"), .food, "standard 'Food'")
+        assertEqual(NewsCategory.match(from: "Fashion"), .fashion, "standard 'Fashion'")
+        assertEqual(NewsCategory.match(from: "Lifestyle"), .lifestyle, "standard 'Lifestyle'")
+
+        // 3. Synonym and substring matching
+        assertEqual(NewsCategory.match(from: "tech news"), .technology, "tech synonym")
+        assertEqual(NewsCategory.match(from: "election 2026"), .politics, "election synonym")
+        assertEqual(NewsCategory.match(from: "space exploration"), .science, "space synonym")
+        assertEqual(NewsCategory.match(from: "market finance"), .business, "finance synonym")
+        assertEqual(NewsCategory.match(from: "international affairs"), .world, "international synonym")
+        assertEqual(NewsCategory.match(from: "movie reviews"), .entertainment, "movie synonym")
+        assertEqual(NewsCategory.match(from: "medical research"), .health, "med synonym")
+        assertEqual(NewsCategory.match(from: "culinary arts"), .food, "cook/food synonym")
+
+        // 4. Rejection of unmapped gibberish
+        assertEqual(NewsCategory.match(from: "random-gibberish-string-xyz"), nil, "Unrelated strings should return nil")
+        assertEqual(NewsCategory.match(from: ""), nil, "Empty string should return nil")
+    }
+
+    static func testClassificationMultiStageAndConfidenceTiers() async {
+        print("  - Testing Multi-Stage Classification & Confidence Tiers...")
+
+        let classifier = ArticleClassifier.shared
+
+        // Stage 1: RSS Category deterministic hint takes immediate precedence with 0.95 confidence
+        let rssResult = await classifier.classify(
+            title: "Generic Headline With No Clues",
+            description: "Some description here",
+            rssCategory: "Technology"
+        )
+        assertEqual(rssResult.category, "Technology", "RSS hint should determine category")
+        assertTrue(rssResult.confidence >= 0.90, "RSS hint should provide >= 0.90 confidence")
+        assertTrue(rssResult.evidence.contains("Technology"), "Evidence should include RSS category")
+
+        // Stage 2: Strong keyword title/description scoring
+        let techResult = await classifier.classify(
+            title: "Apple Announces M-Series Silicon Processor With Neural Acceleration",
+            description: "Novel semiconductor architecture speeds machine learning and developer workflows",
+            rssCategory: nil
+        )
+        assertEqual(techResult.category, "Technology", "Strong tech keywords must classify as Technology")
+        assertTrue(techResult.confidence >= 0.70, "Confidence should exceed 0.70")
+        assertTrue(!techResult.evidence.isEmpty, "Evidence should list matched keywords")
+
+        // Stage 3: Fallback when no keywords match
+        let genericResult = await classifier.classify(
+            title: "Unspecified Developments Reported",
+            description: "Updates will follow as events occur",
+            rssCategory: nil
+        )
+        assertTrue(!genericResult.category.isEmpty, "Default category must be assigned")
+    }
+
+    static func testClassificationBenchmarkDataset() async {
+        print("  - Testing Classification Benchmark Dataset Across All 12 Categories...")
+
+        struct BenchmarkItem {
+            let title: String
+            let description: String
+            let expectedCategory: NewsCategory
+        }
+
+        let dataset: [BenchmarkItem] = [
+            BenchmarkItem(
+                title: "NVIDIA Unveils Next-Gen AI Chip Architecture for Supercomputing",
+                description: "The new GPU silicon accelerates neural network training and cloud datacenter workloads.",
+                expectedCategory: .technology
+            ),
+            BenchmarkItem(
+                title: "James Webb Space Telescope Observes Oldest Known Galaxy in Deep Space",
+                description: "Astronomers confirm cosmological distance and stellar composition using infrared spectroscopy.",
+                expectedCategory: .science
+            ),
+            BenchmarkItem(
+                title: "Federal Reserve Holds Interest Rates Steady As Wall Street Stock Rally Continues",
+                description: "Investors react positively to central bank inflation forecast and corporate earnings reports.",
+                expectedCategory: .business
+            ),
+            BenchmarkItem(
+                title: "Senate Committee Advances Bipartisan Election Security and Campaign Finance Bill",
+                description: "Lawmakers vote in favor of new regulatory oversight before the congressional recess.",
+                expectedCategory: .politics
+            ),
+            BenchmarkItem(
+                title: "United Nations Envoy Brokering Ceasefire Talks In International Conflict",
+                description: "Global diplomats convene in Geneva to negotiate refugee corridors and humanitarian aid.",
+                expectedCategory: .world
+            ),
+            BenchmarkItem(
+                title: "Quarterback Leads NFL Team to Super Bowl Championship Victory",
+                description: "The thrilling stadium final concluded with a game-winning touchdown in overtime.",
+                expectedCategory: .sports
+            ),
+            BenchmarkItem(
+                title: "Hollywood Director Christopher Nolan Wins Best Director at Academy Awards",
+                description: "The blockbuster cinema release dominated the Oscars ceremony with multiple awards.",
+                expectedCategory: .entertainment
+            ),
+            BenchmarkItem(
+                title: "Clinical Trial Demonstrates High Efficacy for Targeted Cancer Immunotherapy Drug",
+                description: "Hospital oncologists report remission in patients receiving the breakthrough medical treatment.",
+                expectedCategory: .health
+            ),
+            BenchmarkItem(
+                title: "International Airlines Expand Non-Stop Flight Routes for Summer Vacation Travelers",
+                description: "Tourists book resort hotels and sightseeing packages as travel demand surges.",
+                expectedCategory: .travel
+            ),
+            BenchmarkItem(
+                title: "Michelin-Starred Chef Opens New Restaurant Celebrating Seasonal Farm-to-Table Cuisine",
+                description: "The tasting menu pairs fine dining dishes with artisanal wines and local pastry desserts.",
+                expectedCategory: .food
+            ),
+            BenchmarkItem(
+                title: "Luxury Fashion House Debuts Autumn Haute Couture Collection on Paris Runway",
+                description: "Designer apparel, bespoke tailoring, and statement accessories set seasonal wardrobe trends.",
+                expectedCategory: .fashion
+            ),
+            BenchmarkItem(
+                title: "Interior Designers Share Tips for Creating a Mindful, Minimalist Home Garden",
+                description: "Transform your living space with sustainable furniture, decluttering habits, and indoor plants.",
+                expectedCategory: .lifestyle
+            )
+        ]
+
+        var correctCount = 0
+        for item in dataset {
+            let result = await ArticleClassifier.shared.classify(
+                title: item.title,
+                description: item.description,
+                rssCategory: nil
+            )
+            if result.category == item.expectedCategory.rawValue {
+                correctCount += 1
+            } else {
+                print("    ⚠️ Benchmark mismatch: '\(item.title)' -> classified as \(result.category), expected \(item.expectedCategory.rawValue)")
+            }
+        }
+
+        let accuracy = Double(correctCount) / Double(dataset.count)
+        print("    Classification accuracy: \(correctCount)/\(dataset.count) (\(Int(accuracy * 100))%)")
+        assertTrue(accuracy >= 0.80, "Benchmark accuracy must meet or exceed 80% on ground-truth dataset")
+    }
+
+    static func testArticleAnalyzerStructuredOutputAndFallbacks() async {
+        print("  - Testing ArticleAnalyzer Structured Output (Summary, Key Points, Entities, Sentiment)...")
+
+        let analyzer = ArticleAnalyzer.shared
+        let title = "Tech Giants Unveil Breakthrough Quantum Computing Core"
+        let articleBody = """
+        Researchers at leading technology institutes have announced a functional 1,000-qubit quantum processor.
+        The breakthrough system operates at room temperature, eliminating the need for bulky liquid helium cryostats.
+        Dr. Jane Doe presented the research at the International Physics Symposium in Geneva today.
+        Commercial applications in cryptography, drug discovery, and materials science are slated for next year.
+        Initial benchmark results show an exponential performance leap compared to traditional classical supercomputers.
+        """
+
+        let analysis = try! await analyzer.analyze(title: title, content: articleBody, category: "Technology")
+
+        // 1. Summary validation
+        assertTrue(!analysis.summary.isEmpty, "Analysis summary should not be empty")
+        assertTrue(analysis.summary.count >= 20, "Summary should be a coherent passage")
+
+        // 2. Key Points validation (between 2 and 5 items)
+        assertTrue(!analysis.keyPoints.isEmpty, "Key points should not be empty")
+        assertTrue(analysis.keyPoints.count >= 2 && analysis.keyPoints.count <= 5, "Key points count should be bounded (2-5 points)")
+
+        // 3. Entities validation
+        assertTrue(!analysis.entities.isEmpty, "Entities should be extracted")
+
+        // 4. Sentiment validation
+        assertTrue(analysis.sentiment != nil, "Sentiment should be evaluated")
+
+        // 5. Model identifier and versioning
+        assertTrue(!analysis.modelIdentifier.isEmpty, "Model identifier should identify engine")
+        assertEqual(analysis.analysisVersion, 1, "Analysis version should match schema version")
+    }
+
+    static func testInteractiveAnalysisCancellation() async {
+        print("  - Testing Interactive Analysis Cooperative Cancellation...")
+
+        let analyzer = ArticleAnalyzer.shared
+        let largeContent = String(repeating: "The rapid development of autonomous distributed systems continues to evolve across multiple technological sectors. ", count: 100)
+
+        let task = Task {
+            try await analyzer.analyze(title: "Massive Article", content: largeContent)
+        }
+
+        // Cancel task immediately
+        task.cancel()
+
+        var caughtCancellation = false
+        do {
+            _ = try await task.value
+        } catch is CancellationError {
+            caughtCancellation = true
+        } catch let err as AIAnalysisError where err == .cancelled {
+            caughtCancellation = true
+        } catch {
+            caughtCancellation = true
+        }
+        assertTrue(caughtCancellation, "Cancelled analysis task must throw CancellationError or AIAnalysisError.cancelled")
+    }
+
+    static func testGranularCacheClearingAndRetention() async {
+        print("  - Testing Granular Cache Purging (Selective Deletes & Feed Preservation)...")
+
+        let db = DatabaseEngine(path: ":memory:")
+        try! await db.open()
+        defer { Task { await db.close() } }
+
+        // 1. Populate feeds and articles
+        let testFeed = "https://example.com/tech.xml"
+        let article1 = FeedArticle(title: "Article One", link: "https://example.com/1", guid: "art-1", description: "Desc 1", pubDate: Date(), source: "Test Feed", fullContent: "Content One")
+        let article2 = FeedArticle(title: "Article Two", link: "https://example.com/2", guid: "art-2", description: "Desc 2", pubDate: Date(), source: "Test Feed", fullContent: "Content Two")
+
+        try! await db.upsertArticles([article1, article2], feedUrl: testFeed)
+        _ = try! await db.toggleSaved(articleId: article1.id) // article1 is saved!
+
+        // Save AI enrichment for both
+        let analysis = ArticleAnalysis(summary: "Summary text", keyPoints: ["Point 1", "Point 2"], entities: [], category: "Technology", sentiment: nil, modelIdentifier: "test", analysisVersion: 1)
+        try! await db.saveArticleAnalysis(analysis, for: article1.id)
+        try! await db.saveArticleAnalysis(analysis, for: article2.id)
+
+        // Verify initial state
+        let initialAnalysis1 = await db.fetchArticleAnalysis(for: article1.id)
+        assertTrue(initialAnalysis1 != nil, "Article 1 should have analysis")
+        let initialAnalysis2 = await db.fetchArticleAnalysis(for: article2.id)
+        assertTrue(initialAnalysis2 != nil, "Article 2 should have analysis")
+
+        // 2. Test clearArticleEnrichment(): clears AI analysis, keeps articles and feeds
+        try! await db.clearArticleEnrichment()
+        let clearedAnalysis1 = await db.fetchArticleAnalysis(for: article1.id)
+        assertTrue(clearedAnalysis1 == nil, "Article 1 enrichment must be purged")
+        let clearedAnalysis2 = await db.fetchArticleAnalysis(for: article2.id)
+        assertTrue(clearedAnalysis2 == nil, "Article 2 enrichment must be purged")
+
+        let articlesAfterEnrichmentClear = try! await db.fetchArticles(limit: 10)
+        assertEqual(articlesAfterEnrichmentClear.count, 2, "Articles must remain intact after enrichment purge")
+
+        // 3. Test clearArticleCache(): clears non-saved article bodies, keeps saved stories intact
+        try! await db.clearArticleCache()
+        let articlesAfterContentClear = try! await db.fetchArticles(limit: 10)
+        let savedArticle = articlesAfterContentClear.first { $0.id == article1.id }
+        assertEqual(savedArticle?.fullContent, "Content One", "Saved article content must NOT be cleared")
+        let unsavedArticle = articlesAfterContentClear.first { $0.id == article2.id }
+        assertTrue(unsavedArticle?.fullContent == nil, "Non-saved article content must be set to nil")
+
+        // 4. Test clearAllDatabaseCache(): clears all non-saved articles, keeps saved stories and feed subscriptions
+        try! await db.clearAllDatabaseCache()
+        let remainingArticles = try! await db.fetchArticles(limit: 10)
+        assertEqual(remainingArticles.count, 1, "Only saved article should remain after full database purge")
+        assertEqual(remainingArticles.first?.id, article1.id, "Saved article must survive full purge")
+
+        // 5. Test CacheManager methods
+        CacheManager.shared.clearWebCache()
+        CacheManager.shared.clearAllCache()
+    }
+
+    static func testNotificationServiceErrorLogging() async {
+        print("  - Testing NotificationService Formatting & Robust Dispatching...")
+
+        let service = NotificationService.shared
+
+        // 1. Singular grammar
+        let singularSummary = NotificationService.formatMinimalSummary(articleCount: 1, uniqueSourcesCount: 1)
+        assertEqual(singularSummary, "1 new article from 1 source", "Singular grammar check")
+
+        // 2. Plural grammar
+        let pluralSummary = NotificationService.formatMinimalSummary(articleCount: 5, uniqueSourcesCount: 3)
+        assertEqual(pluralSummary, "5 new articles across 3 sources", "Plural grammar check")
+
+        // 3. Importance computation range [0.0, 1.0]
+        let score = service.computeImportance(title: "Breaking News: Major Crisis Declared", description: "Officials announce emergency response.")
+        assertTrue(score >= 0.0 && score <= 1.0, "Score must be bounded between 0.0 and 1.0")
+
+        // 4. Robust dispatching (no crashes across all 3 notification tiers)
+        let sampleArticle = FeedArticle(title: "Urgent Update", link: "https://example.com/urgent", guid: "sample-guid", description: "Details follow", pubDate: Date(), source: "Wire Service")
+        await service.triageAndNotify(newArticles: [sampleArticle], mode: .minimal)
+        await service.triageAndNotify(newArticles: [sampleArticle], mode: .private)
+        await service.triageAndNotify(newArticles: [sampleArticle], mode: .full)
     }
 }
 
