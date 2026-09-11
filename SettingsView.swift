@@ -1,7 +1,5 @@
 import SwiftUI
-
-private let stAccentPink = AppColor.accentPink
-private let stTextSecondary = AppColor.textSecondary
+import AppKit
 
 struct SettingsView: View {
     @EnvironmentObject var appSettings: AppSettings
@@ -12,56 +10,111 @@ struct SettingsView: View {
     
     @State private var newFeedURL: String = ""
     @State private var selectedTab = 0
-    @State private var cacheSize: String = "Calculating..."
+    @State private var webCacheSize: String = "Calculating..."
+    @State private var databaseSize: String = "Calculating..."
+    @State private var totalStorageSize: String = "Calculating..."
     @State private var cacheActionMessage: String? = nil
     @State private var opmlStatusMessage: String? = nil
     @ObservedObject private var updateChecker = UpdateChecker.shared
 
     var body: some View {
         TabView(selection: $selectedTab) {
-            subscriptionsTab
-                .tabItem { Label("Subscriptions", systemImage: "antenna.radiowaves.left.and.right") }
+            generalTab
+                .tabItem { Label("General", systemImage: "gearshape") }
                 .tag(0)
 
-            preferencesTab
-                .tabItem { Label("Preferences", systemImage: "gearshape") }
+            feedsTab
+                .tabItem { Label("Subscriptions", systemImage: "antenna.radiowaves.left.and.right") }
                 .tag(1)
                 
             appearanceTab
                 .tabItem { Label("Appearance", systemImage: "paintbrush") }
                 .tag(2)
 
-            cacheTab
-                .tabItem { Label("Storage", systemImage: "externaldrive") }
+            notificationsTab
+                .tabItem { Label("Notifications", systemImage: "bell") }
                 .tag(3)
+
+            intelligenceTab
+                .tabItem { Label("Intelligence", systemImage: "sparkles") }
+                .tag(4)
+
+            privacyTab
+                .tabItem { Label("Privacy", systemImage: "lock.shield") }
+                .tag(5)
+
+            storageTab
+                .tabItem { Label("Storage", systemImage: "externaldrive") }
+                .tag(6)
+
+            updatesTab
+                .tabItem { Label("Updates", systemImage: "arrow.triangle.2.circlepath") }
+                .tag(7)
         }
-        .frame(width: 560, height: 440)
-        .onAppear { calculateCacheSize() }
+        .frame(width: 620, height: 490)
+        .onAppear { calculateStorageSizes() }
     }
 
-    // MARK: - Subscriptions Tab
-    private var subscriptionsTab: some View {
+    // MARK: - 1. General Tab
+
+    private var generalTab: some View {
+        Form {
+            Section("Feed Refresh & Sync") {
+                Picker("Background Refresh Interval", selection: Binding(
+                    get: { appSettings.fetchIntervalMinutes },
+                    set: { feedManager.setFetchInterval(minutes: $0) }
+                )) {
+                    Text("15 minutes").tag(15.0)
+                    Text("30 minutes").tag(30.0)
+                    Text("1 hour").tag(60.0)
+                    Text("2 hours").tag(120.0)
+                }
+                .pickerStyle(.menu)
+                
+                Text("Periodic feed updates occur in the background when NewsApp is running.")
+                    .font(.caption)
+                    .foregroundColor(AppColor.secondaryText)
+            }
+            
+            Section("Reading Behavior") {
+                Toggle("Auto-Hide Read Articles", isOn: $themeManager.autoHideRead)
+                Text("Articles will disappear from filtered views once marked as read.")
+                    .font(.caption)
+                    .foregroundColor(AppColor.secondaryText)
+            }
+        }
+        .formStyle(.grouped)
+        .padding(AppLayout.pageInset)
+    }
+
+    // MARK: - 2. Subscriptions / Feeds Tab
+
+    private var feedsTab: some View {
         VStack(spacing: 0) {
+            // Add feed row
             HStack(spacing: 10) {
                 Image(systemName: "plus.circle.fill")
-                    .foregroundColor(stAccentPink)
+                    .foregroundColor(AppColor.accent)
                     .font(.system(size: 18))
-                TextField("Enter RSS feed URL", text: $newFeedURL)
+                TextField("Enter RSS / Atom / JSON Feed URL", text: $newFeedURL)
                     .textFieldStyle(.roundedBorder)
                 Button("Subscribe") {
-                    if !newFeedURL.isEmpty {
-                        feedManager.addFeed(url: newFeedURL)
+                    let trimmed = newFeedURL.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !trimmed.isEmpty {
+                        feedManager.addFeed(url: trimmed)
                         newFeedURL = ""
                     }
                 }
                 .buttonStyle(.borderedProminent)
-                .tint(stAccentPink)
+                .tint(AppColor.accent)
                 .controlSize(.small)
+                .disabled(newFeedURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
-            .padding(.horizontal, 20)
-            .padding(.top, 18)
+            .padding(.horizontal, AppLayout.pageInset)
+            .padding(.top, 16)
             .padding(.bottom, 10)
 
+            // OPML actions bar
             HStack(spacing: 10) {
                 Button {
                     OPMLDialogs.importOPML { data in
@@ -89,19 +142,20 @@ struct SettingsView: View {
                 if let msg = opmlStatusMessage {
                     Text(msg)
                         .font(.system(size: 11, weight: .medium))
-                        .foregroundColor(.green)
+                        .foregroundColor(AppColor.success)
                 }
 
                 Spacer()
                 Text("\(feedManager.feedURLs.count) feeds")
                     .font(.caption)
-                    .foregroundColor(stTextSecondary)
+                    .foregroundColor(AppColor.secondaryText)
             }
-            .padding(.horizontal, 20)
+            .padding(.horizontal, AppLayout.pageInset)
             .padding(.bottom, 10)
 
             Divider()
 
+            // Feed list
             List {
                 ForEach(feedManager.feedURLs, id: \.self) { urlString in
                     HStack(spacing: 12) {
@@ -109,8 +163,8 @@ struct SettingsView: View {
                         switch status {
                         case .idle:
                             Image(systemName: "checkmark.circle.fill")
-                                .foregroundColor(.green)
-                                .font(.system(size: 14))
+                                .foregroundColor(AppColor.success)
+                                .font(.system(size: 13))
                                 .help("Feed is active and up to date")
                         case .loading:
                             ProgressView()
@@ -120,55 +174,49 @@ struct SettingsView: View {
                                 .help("Fetching updates...")
                         case .failed(let err):
                             Image(systemName: "exclamationmark.triangle.fill")
-                                .foregroundColor(.red)
-                                .font(.system(size: 14))
+                                .foregroundColor(AppColor.warning)
+                                .font(.system(size: 13))
                                 .help(err.localizedDescription)
                         }
                         Text(urlString)
-                            .font(.system(size: 13, weight: .medium))
+                            .font(.system(size: 12, weight: .medium, design: .monospaced))
                             .lineLimit(1)
+                            .foregroundColor(AppColor.primaryText)
                         Spacer()
-                        Button {
+                        Button(role: .destructive) {
                             feedManager.removeFeed(url: urlString)
                         } label: {
                             Image(systemName: "trash")
-                                .foregroundColor(.red.opacity(0.7))
+                                .font(.system(size: 12))
+                                .foregroundColor(AppColor.danger)
                         }
                         .buttonStyle(.plain)
+                        .help("Unsubscribe from feed")
                     }
-                    .padding(.vertical, 6)
+                    .padding(.vertical, 4)
                 }
             }
             .listStyle(.plain)
         }
     }
 
-    // MARK: - Preferences Tab
-    private var preferencesTab: some View {
+    // MARK: - 3. Notifications Tab
+
+    private var notificationsTab: some View {
         Form {
-            Section {
-                Picker("Background Fetch Interval", selection: Binding(
-                    get: { appSettings.fetchIntervalMinutes },
-                    set: { feedManager.setFetchInterval(minutes: $0) }
-                )) {
-                    Text("15 minutes").tag(15.0)
-                    Text("30 minutes").tag(30.0)
-                    Text("1 hour").tag(60.0)
-                }
-                .pickerStyle(.menu)
-            }
-            
-            Section {
-                Toggle("Push Notifications", isOn: Binding(
+            Section("Notification Delivery") {
+                Toggle("Enable Notifications", isOn: Binding(
                     get: { appSettings.notificationsEnabled },
                     set: { appSettings.setNotificationsEnabled($0) }
                 ))
-                Text("Get alerts for important stories matching your interests")
+                Text("Receive native macOS notification alerts when high-importance news arrives.")
                     .font(.caption)
-                    .foregroundColor(stTextSecondary)
-                
-                if appSettings.notificationsEnabled {
-                    Picker("Notification Detail", selection: Binding(
+                    .foregroundColor(AppColor.secondaryText)
+            }
+            
+            if appSettings.notificationsEnabled {
+                Section("Notification Privacy & Detail") {
+                    Picker("Detail Level", selection: Binding(
                         get: { appSettings.notificationMode },
                         set: { appSettings.setNotificationMode($0) }
                     )) {
@@ -176,224 +224,475 @@ struct SettingsView: View {
                             Text(mode.displayName).tag(mode)
                         }
                     }
-                    .pickerStyle(.menu)
+                    .pickerStyle(.radioGroup)
 
-                    Text(appSettings.notificationMode == .private
-                         ? "Shows generic alerts with no identifying source or headline."
-                         : (appSettings.notificationMode == .minimal
-                            ? "Aggregates alerts into a single count summary."
-                            : "Displays article headline, source, and lead image."))
-                        .font(.caption)
-                        .foregroundColor(stTextSecondary)
-                }
-                    
-                Toggle("AI Article Analysis", isOn: Binding(
-                    get: { appSettings.aiEnabled },
-                    set: { appSettings.setAIEnabled($0) }
-                ))
-                Text("Uses on-device NLP for sentiment scoring and entity extraction")
-                    .font(.caption)
-                    .foregroundColor(stTextSecondary)
-
-                Toggle("Allow Insecure HTTP Feeds", isOn: Binding(
-                    get: { appSettings.allowInsecureHTTP },
-                    set: { appSettings.setAllowInsecureHTTP($0) }
-                ))
-                Text("Permit non-HTTPS feeds (Warning: unencrypted traffic over the network)")
-                    .font(.caption)
-                    .foregroundColor(stTextSecondary)
-            }
-            
-            Section {
-                Toggle("Auto-Hide Read Articles", isOn: $themeManager.autoHideRead)
-                Text("Articles will disappear from filtered views once read")
-                    .font(.caption)
-                    .foregroundColor(stTextSecondary)
-            }
-
-            Section("Software Updates") {
-                HStack {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("NewsApp v\(updateChecker.currentAppVersion)")
-                            .font(.system(size: 13, weight: .medium))
-                        if let status = updateChecker.statusMessage {
-                            Text(status)
-                                .font(.caption)
-                                .foregroundColor(updateChecker.updateAvailable ? stAccentPink : stTextSecondary)
-                        }
+                    HStack(spacing: 8) {
+                        Image(systemName: appSettings.notificationMode == .private ? "lock.fill" : "info.circle")
+                            .foregroundColor(appSettings.notificationMode == .private ? AppColor.success : AppColor.accent)
+                        Text(appSettings.notificationMode == .private
+                             ? "Private mode: Displays generic alerts with no identifying headlines, sources, or preview text."
+                             : (appSettings.notificationMode == .minimal
+                                ? "Minimal mode: Aggregates new stories into a single count summary (e.g., '5 new articles')."
+                                : "Full mode: Displays article headline, source publication, and lead image banner."))
+                            .font(.caption)
+                            .foregroundColor(AppColor.secondaryText)
                     }
-                    Spacer()
-                    if updateChecker.isChecking {
-                        ProgressView()
-                            .scaleEffect(0.7)
-                    } else if updateChecker.updateAvailable {
-                        Button("View Release") {
-                            updateChecker.openReleasePage()
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .tint(stAccentPink)
-                    } else {
-                        Button("Check Now") {
-                            Task {
-                                await updateChecker.checkForUpdates(userInitiated: true)
-                            }
-                        }
-                        .buttonStyle(.bordered)
-                    }
+                    .padding(.top, 4)
                 }
             }
         }
         .formStyle(.grouped)
-        .padding()
+        .padding(AppLayout.pageInset)
+    }
+
+    // MARK: - 4. Intelligence Tab
+
+    private var intelligenceTab: some View {
+        Form {
+            Section("On-Device Intelligence") {
+                Toggle("Enable AI Article Analysis", isOn: Binding(
+                    get: { appSettings.aiEnabled },
+                    set: { appSettings.setAIEnabled($0) }
+                ))
+                Text("Generates executive summaries, key takeaways, entity tags, and sentiment analysis.")
+                    .font(.caption)
+                    .foregroundColor(AppColor.secondaryText)
+            }
+
+            Section("Architecture & Privacy Guarantees") {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(alignment: .top, spacing: 8) {
+                        Image(systemName: "sparkles")
+                            .foregroundColor(AppColor.intelligence)
+                            .padding(.top, 2)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Apple-Native On-Device Models")
+                                .font(AppTypography.label)
+                                .foregroundColor(AppColor.primaryText)
+                            Text("Powered exclusively by Apple NaturalLanguage and on-device FoundationModels when available.")
+                                .font(.caption)
+                                .foregroundColor(AppColor.secondaryText)
+                        }
+                    }
+
+                    HStack(alignment: .top, spacing: 8) {
+                        Image(systemName: "bolt.shield")
+                            .foregroundColor(AppColor.accent)
+                            .padding(.top, 2)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("On-Demand Execution")
+                                .font(AppTypography.label)
+                                .foregroundColor(AppColor.primaryText)
+                            Text("Analysis runs lazily only when you open an article for reading, preserving battery, CPU, and Neural Engine resources.")
+                                .font(.caption)
+                                .foregroundColor(AppColor.secondaryText)
+                        }
+                    }
+
+                    HStack(alignment: .top, spacing: 8) {
+                        Image(systemName: "hand.raised.fill")
+                            .foregroundColor(AppColor.success)
+                            .padding(.top, 2)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Zero Cloud Telemetry")
+                                .font(AppTypography.label)
+                                .foregroundColor(AppColor.primaryText)
+                            Text("No text, prompts, or embeddings are ever transmitted to third-party servers or external AI APIs.")
+                                .font(.caption)
+                                .foregroundColor(AppColor.secondaryText)
+                        }
+                    }
+                }
+                .padding(.vertical, 4)
+            }
+        }
+        .formStyle(.grouped)
+        .padding(AppLayout.pageInset)
+    }
+
+    // MARK: - 5. Privacy & Security Tab
+
+    private var privacyTab: some View {
+        Form {
+            Section("Network Security Boundary") {
+                Toggle("Allow Insecure HTTP Feeds", isOn: Binding(
+                    get: { appSettings.allowInsecureHTTP },
+                    set: { appSettings.setAllowInsecureHTTP($0) }
+                ))
+                
+                if appSettings.allowInsecureHTTP {
+                    HStack(spacing: 6) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundColor(AppColor.warning)
+                        Text("Warning: Unencrypted HTTP feeds transmit data in plain text across your local network and internet providers.")
+                            .font(.caption)
+                            .foregroundColor(AppColor.warning)
+                    }
+                } else {
+                    Text("Enforces strict HTTPS connections for all feed ingestion and remote media assets.")
+                        .font(.caption)
+                        .foregroundColor(AppColor.secondaryText)
+                }
+            }
+
+            Section("Security Standards") {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(alignment: .top, spacing: 8) {
+                        Image(systemName: "shield.lefthalf.filled")
+                            .foregroundColor(AppColor.accent)
+                            .padding(.top, 2)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Hardened Runtime & App Sandbox")
+                                .font(AppTypography.label)
+                                .foregroundColor(AppColor.primaryText)
+                            Text("Restricts file system and process access to NewsApp's isolated container.")
+                                .font(.caption)
+                                .foregroundColor(AppColor.secondaryText)
+                        }
+                    }
+
+                    HStack(alignment: .top, spacing: 8) {
+                        Image(systemName: "network.badge.shield.half.filled")
+                            .foregroundColor(AppColor.success)
+                            .padding(.top, 2)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Direct Connection")
+                                .font(AppTypography.label)
+                                .foregroundColor(AppColor.primaryText)
+                            Text("Fetches feeds directly from publishers without middleman cloud servers, proxy aggregators, or telemetry logging.")
+                                .font(.caption)
+                                .foregroundColor(AppColor.secondaryText)
+                        }
+                    }
+                }
+                .padding(.vertical, 4)
+            }
+        }
+        .formStyle(.grouped)
+        .padding(AppLayout.pageInset)
     }
     
-    // MARK: - Appearance Tab
+    // MARK: - 6. Appearance Tab
+
     private var appearanceTab: some View {
         Form {
-            Section(header: Text("App Theme")) {
-                Picker("Appearance", selection: $themeManager.appearance) {
+            Section("App Appearance") {
+                Picker("Interface Style", selection: $themeManager.appearance) {
                     ForEach(AppAppearance.allCases) { app in
                         Text(app.rawValue).tag(app)
                     }
                 }
                 .pickerStyle(.segmented)
-                .padding(.bottom, 10)
+                
+                Text("Select whether NewsApp follows your macOS system appearance or stays locked to light or dark mode.")
+                    .font(.caption)
+                    .foregroundColor(AppColor.secondaryText)
             }
             
-            Section(header: Text("Article Typography Theme")) {
-                Picker("Theme style", selection: $themeManager.articleTheme) {
+            Section("Article Typography") {
+                Picker("Theme Style", selection: $themeManager.articleTheme) {
                     ForEach(ArticleThemeType.allCases) { theme in
                         Text(theme.rawValue).tag(theme)
                     }
                 }
                 .pickerStyle(.radioGroup)
+                
+                // Typography Preview
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("The quick brown fox jumps over the lazy dog.")
+                        .font(AppTypography.headlineFont(for: themeManager.articleTheme))
+                        .foregroundColor(AppColor.primaryText)
+                    Text("Editorial typography determines the headline and body font families, line spacing, and tracking used in reader mode.")
+                        .font(AppTypography.bodyFont(for: themeManager.articleTheme))
+                        .foregroundColor(AppColor.secondaryText)
+                        .lineSpacing(AppTypography.bodyLineSpacing(for: themeManager.articleTheme))
+                }
+                .padding(12)
+                .background(RoundedRectangle(cornerRadius: AppRadius.control).fill(AppColor.surface))
             }
         }
         .formStyle(.grouped)
-        .padding()
+        .padding(AppLayout.pageInset)
     }
 
-    // MARK: - Cache Tab
-    private var cacheTab: some View {
+    // MARK: - 7. Storage Tab
+
+    private var storageTab: some View {
         VStack(spacing: 16) {
-            Image(systemName: "externaldrive.fill")
-                .font(.system(size: 36))
-                .foregroundColor(stTextSecondary)
-                .padding(.top, 10)
+            // Header stats
+            HStack(spacing: 16) {
+                Image(systemName: "externaldrive.fill")
+                    .font(.system(size: 32))
+                    .foregroundColor(AppColor.secondaryText)
 
-            VStack(spacing: 4) {
-                Text("Storage & Cache Management")
-                    .font(.system(size: 16, weight: .semibold))
-                Text(cacheSize)
-                    .font(.system(size: 24, weight: .bold, design: .rounded))
-                    .foregroundColor(stAccentPink)
-                Text("Manage on-device cache, downloaded articles, and AI models data")
-                    .font(.system(size: 12))
-                    .foregroundColor(stTextSecondary)
-            }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Total Storage Usage")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(AppColor.secondaryText)
+                    Text(totalStorageSize)
+                        .font(.system(size: 22, weight: .bold, design: .rounded))
+                        .foregroundColor(AppColor.primaryText)
+                }
 
-            if let message = cacheActionMessage {
-                Text(message)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(.green)
-                    .transition(.opacity)
+                Spacer()
+
+                if let message = cacheActionMessage {
+                    Text(message)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(AppColor.success)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 4)
+                        .background(RoundedRectangle(cornerRadius: AppRadius.control).fill(AppColor.success.opacity(0.12)))
+                        .transition(.opacity)
+                }
             }
+            .padding(.horizontal, AppLayout.pageInset)
+            .padding(.top, 16)
 
             Divider()
 
+            // Itemized breakdown table
             VStack(spacing: 12) {
+                // Row 1: Web & Media Cache
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Web & Media Cache")
-                            .font(.system(size: 13, weight: .medium))
-                        Text("Clears HTTP network responses, temporary web data, and cached images.")
+                        HStack(spacing: 6) {
+                            Text("Web & Media Cache")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundColor(AppColor.primaryText)
+                            Text(webCacheSize)
+                                .font(.system(size: 12, weight: .medium, design: .monospaced))
+                                .foregroundColor(AppColor.secondaryText)
+                        }
+                        Text("HTTP network responses, temporary web data, and cached images.")
                             .font(.caption)
-                            .foregroundColor(stTextSecondary)
+                            .foregroundColor(AppColor.secondaryText)
                     }
                     Spacer()
-                    Button("Clear Web Cache") {
+                    Button("Clear") {
                         clearWebCache()
                     }
                     .buttonStyle(.bordered)
+                    .controlSize(.small)
                 }
 
+                // Row 2: Article Bodies
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("AI Analysis Cache")
-                            .font(.system(size: 13, weight: .medium))
-                        Text("Removes generated summaries, key points, and entities. Subscriptions and articles remain.")
+                        HStack(spacing: 6) {
+                            Text("Article Content Cache")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundColor(AppColor.primaryText)
+                            Text("\(articleStore.articles.count) articles")
+                                .font(.system(size: 12, weight: .medium, design: .monospaced))
+                                .foregroundColor(AppColor.secondaryText)
+                        }
+                        Text("Cached full article bodies. Subscriptions and saved stories are kept.")
                             .font(.caption)
-                            .foregroundColor(stTextSecondary)
+                            .foregroundColor(AppColor.secondaryText)
                     }
                     Spacer()
-                    Button("Clear AI Data") {
-                        clearAIData()
-                    }
-                    .buttonStyle(.bordered)
-                }
-
-                HStack {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Article Content Cache")
-                            .font(.system(size: 13, weight: .medium))
-                        Text("Clears cached full article bodies. Feeds, saved stories, and read history are kept.")
-                            .font(.caption)
-                            .foregroundColor(stTextSecondary)
-                    }
-                    Spacer()
-                    Button("Clear Articles") {
+                    Button("Clear") {
                         clearArticleData()
                     }
                     .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
+
+                // Row 3: AI Analysis Data
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(spacing: 6) {
+                            Text("AI Analysis Data")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundColor(AppColor.primaryText)
+                            let aiCount = articleStore.articles.filter { $0.aiSummary != nil }.count
+                            Text("\(aiCount) enriched")
+                                .font(.system(size: 12, weight: .medium, design: .monospaced))
+                                .foregroundColor(AppColor.secondaryText)
+                        }
+                        Text("Generated summaries, key points, and entities. Subscriptions and articles remain.")
+                            .font(.caption)
+                            .foregroundColor(AppColor.secondaryText)
+                    }
+                    Spacer()
+                    Button("Clear") {
+                        clearAIData()
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
+
+                // Row 4: Database Storage
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(spacing: 6) {
+                            Text("Local SQLite & FTS5 Index")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundColor(AppColor.primaryText)
+                            Text(databaseSize)
+                                .font(.system(size: 12, weight: .medium, design: .monospaced))
+                                .foregroundColor(AppColor.secondaryText)
+                        }
+                        Text("Persistent WAL database containing subscriptions, history, and search index.")
+                            .font(.caption)
+                            .foregroundColor(AppColor.secondaryText)
+                    }
+                    Spacer()
+                    Text("Active")
+                        .font(.caption.bold())
+                        .foregroundColor(AppColor.secondaryText)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(RoundedRectangle(cornerRadius: AppRadius.control).fill(AppColor.surface))
                 }
 
                 Divider().padding(.vertical, 4)
 
+                // Clear everything
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Clear Everything")
+                        Text("Purge All Caches")
                             .font(.system(size: 13, weight: .semibold))
-                            .foregroundColor(.red)
+                            .foregroundColor(AppColor.danger)
                         Text("Purges web cache, article content, and AI analysis. Preserves subscriptions.")
                             .font(.caption)
-                            .foregroundColor(stTextSecondary)
+                            .foregroundColor(AppColor.secondaryText)
                     }
                     Spacer()
-                    Button("Clear Everything") {
+                    Button(role: .destructive) {
                         clearEverythingData()
+                    } label: {
+                        Text("Clear All")
                     }
                     .buttonStyle(.borderedProminent)
-                    .tint(.red)
+                    .controlSize(.small)
                 }
             }
-            .padding(.horizontal, 24)
+            .padding(.horizontal, AppLayout.pageInset)
 
             Spacer()
+        }
+    }
+
+    // MARK: - 8. Updates Tab
+
+    private var updatesTab: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "arrow.triangle.2.circlepath.circle.fill")
+                .font(.system(size: 44))
+                .foregroundColor(AppColor.accent)
+                .padding(.top, 24)
+
+            VStack(spacing: 4) {
+                Text("NewsApp for macOS")
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundColor(AppColor.primaryText)
+                Text("Version \(updateChecker.currentAppVersion)")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundColor(AppColor.secondaryText)
+            }
+
+            if let status = updateChecker.statusMessage {
+                Text(status)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundColor(updateChecker.updateAvailable ? AppColor.accent : AppColor.secondaryText)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 6)
+                    .background(RoundedRectangle(cornerRadius: AppRadius.control).fill(AppColor.surface))
+            }
+
+            HStack(spacing: 12) {
+                if updateChecker.isChecking {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("Checking for updates...")
+                        .font(.caption)
+                        .foregroundColor(AppColor.secondaryText)
+                } else if updateChecker.updateAvailable {
+                    Button("View Release on GitHub") {
+                        updateChecker.openReleasePage()
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(AppColor.accent)
+                } else {
+                    Button("Check for Updates") {
+                        Task {
+                            await updateChecker.checkForUpdates(userInitiated: true)
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                }
+            }
+            .padding(.top, 8)
+
+            Spacer()
+
+            VStack(spacing: 4) {
+                Text("Direct release channel via GitHub Releases.")
+                    .font(.caption2)
+                    .foregroundColor(AppColor.secondaryText)
+                Text("Native, privacy-first RSS reader with zero telemetry.")
+                    .font(.caption2)
+                    .foregroundColor(AppColor.tertiaryText)
+            }
+            .padding(.bottom, 16)
         }
         .frame(maxWidth: .infinity)
     }
 
-    // MARK: - Helpers
-    private func calculateCacheSize() {
+    // MARK: - Storage & Cache Calculation Helpers
+
+    private func calculateStorageSizes() {
         DispatchQueue.global().async {
-            let totalSize = CacheManager.shared.calculateTotalCacheSize()
-            let formatted: String
-            if totalSize < 1024 { formatted = "\(totalSize) B" }
-            else if totalSize < 1024 * 1024 { formatted = String(format: "%.1f KB", Double(totalSize) / 1024.0) }
-            else { formatted = String(format: "%.1f MB", Double(totalSize) / (1024.0 * 1024.0)) }
-            DispatchQueue.main.async { self.cacheSize = formatted }
+            let webBytes = CacheManager.shared.calculateTotalCacheSize()
+            let dbBytes = calculateDatabaseBytes()
+            let totalBytes = webBytes + dbBytes
+
+            let formattedWeb = Self.formatBytes(webBytes)
+            let formattedDb = Self.formatBytes(dbBytes)
+            let formattedTotal = Self.formatBytes(totalBytes)
+
+            DispatchQueue.main.async {
+                self.webCacheSize = formattedWeb
+                self.databaseSize = formattedDb
+                self.totalStorageSize = formattedTotal
+            }
         }
+    }
+
+    private func calculateDatabaseBytes() -> Int64 {
+        let fileManager = FileManager.default
+        guard let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else { return 0 }
+        let dbDir = appSupport.appendingPathComponent("com.marspater.news", isDirectory: true)
+        let files = ["news.sqlite3", "news.sqlite3-wal", "news.sqlite3-shm"]
+        var total: Int64 = 0
+        for file in files {
+            let path = dbDir.appendingPathComponent(file).path
+            if let attrs = try? fileManager.attributesOfItem(atPath: path),
+               let size = attrs[.size] as? Int64 {
+                total += size
+            }
+        }
+        return total
+    }
+
+    private static func formatBytes(_ bytes: Int64) -> String {
+        if bytes < 1024 { return "\(bytes) B" }
+        if bytes < 1024 * 1024 { return String(format: "%.1f KB", Double(bytes) / 1024.0) }
+        return String(format: "%.1f MB", Double(bytes) / (1024.0 * 1024.0))
     }
 
     private func clearWebCache() {
         CacheManager.shared.clearWebCache()
-        calculateCacheSize()
+        calculateStorageSizes()
         showActionMessage("Web and media cache cleared.")
     }
 
     private func clearAIData() {
         Task {
             await articleStore.clearAIAnalysis()
+            calculateStorageSizes()
             showActionMessage("AI analysis data cleared.")
         }
     }
@@ -401,7 +700,7 @@ struct SettingsView: View {
     private func clearArticleData() {
         Task {
             await articleStore.clearArticleCache()
-            calculateCacheSize()
+            calculateStorageSizes()
             showActionMessage("Article body cache cleared.")
         }
     }
@@ -410,7 +709,7 @@ struct SettingsView: View {
         Task {
             CacheManager.shared.clearWebCache()
             await articleStore.clearAllDatabaseCache()
-            calculateCacheSize()
+            calculateStorageSizes()
             showActionMessage("All local caches cleared.")
         }
     }

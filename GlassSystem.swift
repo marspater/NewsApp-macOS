@@ -24,8 +24,8 @@ public struct GlassControlModifier<S: Shape>: ViewModifier {
     public func body(content: Content) -> some View {
         if reduceTransparency {
             content
-                .background(AppColor.surfaceMid, in: shape)
-                .overlay(shape.stroke(Color.primary.opacity(0.15), lineWidth: 1))
+                .background(AppColor.surface, in: shape)
+                .overlay(shape.stroke(AppColor.borderSubtle, lineWidth: 1))
         } else {
             if #available(macOS 26.0, *) {
                 if interactive {
@@ -34,7 +34,9 @@ public struct GlassControlModifier<S: Shape>: ViewModifier {
                     content.glassEffect(AppGlass.control, in: shape)
                 }
             } else {
-                content.background(.ultraThinMaterial, in: shape)
+                content
+                    .background(.ultraThinMaterial, in: shape)
+                    .overlay(shape.stroke(AppColor.borderSubtle, lineWidth: 0.5))
             }
         }
     }
@@ -44,6 +46,11 @@ public extension View {
     /// Applies the native Liquid Glass effect to a control or navigation element with fallback for earlier macOS versions.
     func liquidGlass<S: Shape>(in shape: S, interactive: Bool = false) -> some View {
         self.modifier(GlassControlModifier(shape: shape, interactive: interactive))
+    }
+    
+    /// Applies the native Liquid Glass effect in a capsule pill shape.
+    func glassPill(interactive: Bool = false) -> some View {
+        self.liquidGlass(in: Capsule(), interactive: interactive)
     }
     
     /// Grouped glass container helper that allows adjacent glass elements to morph and render efficiently.

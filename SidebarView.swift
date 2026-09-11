@@ -18,6 +18,7 @@ struct SidebarView: View {
     @State private var newFeedURL: String = ""
     @State private var isDropTargeted = false
     @State private var dropConfirmationMessage: String? = nil
+    @State private var isSearchSyntaxHelpPresented = false
     
     private let suggestedTopics: [(String, String)] = [
         ("Entertainment", "tv"), ("Science", "atom"),
@@ -61,8 +62,8 @@ struct SidebarView: View {
             handleDrop(providers: providers)
         }
         .overlay(
-            RoundedRectangle(cornerRadius: AppRadius.medium)
-                .stroke(isDropTargeted ? AppColor.accentPink : Color.clear, lineWidth: 2)
+            RoundedRectangle(cornerRadius: AppRadius.control)
+                .stroke(isDropTargeted ? AppColor.accent : Color.clear, lineWidth: 1.5)
                 .padding(AppSpacing.xxs)
                 .animation(AppMotion.quick, value: isDropTargeted)
         )
@@ -73,12 +74,12 @@ struct SidebarView: View {
     private var searchFieldRow: some View {
         HStack(spacing: AppSpacing.xs) {
             Image(systemName: "magnifyingglass")
-                .foregroundColor(AppColor.textTertiary)
+                .foregroundColor(AppColor.secondaryText)
                 .font(.system(size: 13))
             
             TextField("Search articles (e.g. is:unread)", text: $searchText)
                 .textFieldStyle(.plain)
-                .font(.system(size: 13))
+                .font(AppTypography.bodySmall)
                 .accessibilityLabel("Search articles")
             
             if !searchText.isEmpty {
@@ -86,19 +87,67 @@ struct SidebarView: View {
                     searchText = ""
                 } label: {
                     Image(systemName: "xmark.circle.fill")
-                        .foregroundColor(AppColor.textTertiary)
+                        .foregroundColor(AppColor.tertiaryText)
                         .font(.system(size: 12))
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Clear search text")
             }
+            
+            Button {
+                isSearchSyntaxHelpPresented.toggle()
+            } label: {
+                Image(systemName: "questionmark.circle")
+                    .font(.system(size: 12))
+                    .foregroundColor(AppColor.tertiaryText)
+            }
+            .buttonStyle(.plain)
+            .help("Search Syntax & Filter Operators")
+            .popover(isPresented: $isSearchSyntaxHelpPresented) {
+                searchSyntaxHelpView
+            }
         }
-        .padding(AppSpacing.xs)
-        .background(AppColor.badgeBackground)
-        .cornerRadius(AppRadius.medium)
+        .padding(.horizontal, AppSpacing.xs)
+        .padding(.vertical, 6)
+        .background(AppColor.surface)
+        .overlay(
+            RoundedRectangle(cornerRadius: AppRadius.control)
+                .stroke(AppColor.borderSubtle, lineWidth: 1)
+        )
+        .cornerRadius(AppRadius.control)
         .padding(.bottom, 6)
         .listRowBackground(Color.clear)
         .listRowSeparator(.hidden)
+    }
+    
+    private var searchSyntaxHelpView: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Search Filters")
+                .font(AppTypography.headline)
+                .foregroundColor(AppColor.primaryText)
+                .padding(.bottom, 2)
+            
+            Group {
+                syntaxHelpRow("is:unread", "Show unread articles only")
+                syntaxHelpRow("is:read", "Show read articles only")
+                syntaxHelpRow("is:saved", "Show bookmarked articles")
+                syntaxHelpRow("source:<name>", "Filter by feed source name")
+                syntaxHelpRow("category:<topic>", "Filter by article category")
+            }
+        }
+        .padding(12)
+        .frame(width: 250)
+    }
+    
+    private func syntaxHelpRow(_ syntax: String, _ desc: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(syntax)
+                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                .foregroundColor(AppColor.accent)
+            Text(desc)
+                .font(AppTypography.caption)
+                .foregroundColor(AppColor.secondaryText)
+        }
     }
     
     // MARK: - Drop Confirmation Banner
@@ -106,15 +155,15 @@ struct SidebarView: View {
     private func dropConfirmationBanner(_ text: String) -> some View {
         HStack(spacing: 6) {
             Image(systemName: "checkmark.circle.fill")
-                .foregroundColor(AppColor.successGreen)
+                .foregroundColor(AppColor.success)
             Text(text)
-                .font(.system(size: 11, weight: .medium))
-                .foregroundColor(AppColor.textPrimary)
+                .font(AppTypography.caption)
+                .foregroundColor(AppColor.primaryText)
                 .lineLimit(1)
         }
         .padding(AppSpacing.xs)
-        .background(AppColor.successGreen.opacity(0.12))
-        .cornerRadius(AppRadius.small)
+        .background(AppColor.success.opacity(0.12))
+        .cornerRadius(AppRadius.control)
         .listRowBackground(Color.clear)
         .listRowSeparator(.hidden)
     }
@@ -136,18 +185,12 @@ struct SidebarView: View {
                 }
             }
             .accessibilityLabel("Today's Articles")
-            .listRowBackground(
-                selectedTopic == "Today" ? AnyView(AppColor.accentPink.opacity(0.8).cornerRadius(AppRadius.medium)) : AnyView(Color.clear)
-            )
             
             NavigationLink(value: "Unread") {
                 Label("Unread", systemImage: "circle.circle.fill")
             }
             .badge(feedManager.articles.filter { !readManager.isRead($0.id) }.count)
             .accessibilityLabel("Unread Articles")
-            .listRowBackground(
-                selectedTopic == "Unread" ? AnyView(AppColor.accentPink.opacity(0.8).cornerRadius(AppRadius.medium)) : AnyView(Color.clear)
-            )
         }
     }
     
@@ -193,9 +236,11 @@ struct SidebarView: View {
                     } label: {
                         HStack {
                             Label(topic, systemImage: icon)
+                                .foregroundColor(AppColor.secondaryText)
                             Spacer()
-                            Image(systemName: "plus.circle")
-                                .foregroundColor(AppColor.textTertiary)
+                            Image(systemName: "plus")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundColor(AppColor.tertiaryText)
                         }
                     }
                     .buttonStyle(.plain)
@@ -210,7 +255,7 @@ struct SidebarView: View {
     private var subscribePopover: some View {
         VStack(alignment: .leading, spacing: AppSpacing.sm) {
             Text("Subscribe to RSS Feed")
-                .font(.headline)
+                .font(AppTypography.headline)
             
             TextField("https://example.com/feed.xml", text: $newFeedURL)
                 .textFieldStyle(.roundedBorder)
@@ -231,7 +276,7 @@ struct SidebarView: View {
                     }
                 }
                 .buttonStyle(.borderedProminent)
-                .tint(AppColor.accentPink)
+                .tint(AppColor.accent)
             }
         }
         .padding()

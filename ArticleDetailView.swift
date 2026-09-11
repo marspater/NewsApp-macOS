@@ -38,16 +38,30 @@ struct ArticleDetailView: View {
     }
     
     private var currentArticle: FeedArticle {
-        feedManager.articles.first { $0.id == activeArticle.id } ?? activeArticle
+        allArticles.first { $0.id == activeArticle.id } ?? activeArticle
     }
     
     private var isSaved: Bool {
         savedStories.isSaved(currentArticle)
     }
     
+    private var currentArticleIndex: Int? {
+        allArticles.firstIndex(where: { $0.id == activeArticle.id })
+    }
+    
+    private var hasPrevArticle: Bool {
+        guard let idx = currentArticleIndex else { return false }
+        return idx > 0
+    }
+    
+    private var hasNextArticle: Bool {
+        guard let idx = currentArticleIndex else { return false }
+        return idx + 1 < allArticles.count
+    }
+    
     var body: some View {
         ZStack(alignment: .top) {
-            AppColor.surfaceDark.ignoresSafeArea()
+            AppColor.background.ignoresSafeArea()
             
             // Content Layer: Flat, clear, readable reading experience
             if viewMode == .reader {
@@ -97,17 +111,16 @@ struct ArticleDetailView: View {
                 VStack(alignment: .leading, spacing: 20) {
                     Text(currentArticle.title)
                         .font(AppTypography.titleFont(for: themeManager.articleTheme))
-                        .foregroundColor(AppColor.textPrimary)
+                        .foregroundColor(AppColor.primaryText)
                     
                     Text("\(displaySource) · \(currentArticle.pubDate.formatted(date: .long, time: .omitted))")
                         .font(.system(
-                            size: 15,
-                            weight: .semibold,
+                            size: 13,
+                            weight: .medium,
                             design: themeManager.articleTheme == .alto ? .monospaced : .default
                         ))
-                        .foregroundColor(AppColor.accentPink)
-                        .tracking(AppTypography.sectionHeaderTracking)
-                        .textCase(.uppercase)
+                        .foregroundColor(AppColor.secondaryText)
+                        .tracking(AppTypography.sourceEyebrowTracking)
                     
                     aiAnalysisSection
                     
@@ -119,36 +132,36 @@ struct ArticleDetailView: View {
                     
                     Spacer().frame(height: 80)
                 }
-                .padding(.horizontal, 70)
-                .padding(.top, -40)
-                .frame(maxWidth: 860, alignment: .leading)
+                .padding(.horizontal, 48)
+                .padding(.top, 24)
+                .frame(maxWidth: 820, alignment: .leading)
             }
         }
         .ignoresSafeArea(edges: .top)
         .onTapGesture {}
     }
     
+    @ViewBuilder
     private var heroImageHeader: some View {
-        ZStack(alignment: .bottom) {
-            if let imageUrl = currentArticle.imageUrl, let url = URL(string: imageUrl) {
-                AsyncImage(url: url) { phase in
-                    switch phase {
-                    case .success(let image):
-                        image.resizable()
-                            .aspectRatio(contentMode: .fill)
-                            .frame(maxWidth: .infinity, maxHeight: 480)
-                            .clipped()
-                    default:
-                        AppColor.surfaceMid.frame(maxWidth: .infinity).frame(height: 480)
-                    }
+        if let imageUrl = currentArticle.imageUrl, let url = URL(string: imageUrl) {
+            AsyncImage(url: url) { phase in
+                switch phase {
+                case .success(let image):
+                    image.resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(maxWidth: .infinity, maxHeight: 360)
+                        .clipped()
+                        .overlay(
+                            LinearGradient(
+                                colors: [Color.clear, AppColor.background.opacity(0.85), AppColor.background],
+                                startPoint: .center,
+                                endPoint: .bottom
+                            )
+                        )
+                default:
+                    EmptyView()
                 }
             }
-            LinearGradient(
-                colors: [AppColor.surfaceDark.opacity(0), AppColor.surfaceDark.opacity(0.4), AppColor.surfaceDark],
-                startPoint: .center,
-                endPoint: .bottom
-            )
-            .frame(height: 200)
         }
     }
     
@@ -159,13 +172,13 @@ struct ArticleDetailView: View {
                 ForEach(contentParagraphs(content), id: \.self) { paragraph in
                     Text(paragraph)
                         .font(AppTypography.bodyFont(for: themeManager.articleTheme))
-                        .foregroundColor(AppColor.textPrimary.opacity(0.88))
+                        .foregroundColor(AppColor.primaryText.opacity(0.88))
                         .lineSpacing(AppTypography.bodyLineSpacing(for: themeManager.articleTheme))
                 }
             } else {
                 Text(currentArticle.description)
                     .font(AppTypography.bodyFont(for: themeManager.articleTheme))
-                    .foregroundColor(AppColor.textPrimary.opacity(0.88))
+                    .foregroundColor(AppColor.primaryText.opacity(0.88))
                     .lineSpacing(AppTypography.bodyLineSpacing(for: themeManager.articleTheme))
                 
                 Button {
@@ -175,11 +188,11 @@ struct ArticleDetailView: View {
                         Image(systemName: "safari")
                         Text("Open Web View (W)")
                     }
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(.white)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundColor(AppColor.primaryText)
                     .padding(.horizontal, AppSpacing.md)
-                    .padding(.vertical, 10)
-                    .background(Capsule().fill(AppColor.accentPink))
+                    .padding(.vertical, 8)
+                    .glassPill(interactive: true)
                 }
                 .buttonStyle(.plain)
                 .padding(.top, AppSpacing.sm)
@@ -193,7 +206,7 @@ struct ArticleDetailView: View {
             Spacer().frame(height: 40)
             ForEach(0..<3) { _ in
                 RoundedRectangle(cornerRadius: AppRadius.small)
-                    .fill(AppColor.textTertiary.opacity(0.2))
+                    .fill(AppColor.tertiaryText.opacity(0.2))
                     .frame(height: 20)
                     .frame(maxWidth: .infinity)
             }
@@ -203,7 +216,7 @@ struct ArticleDetailView: View {
             
             Text("AI is extracting full content...")
                 .font(.system(size: 13, weight: .medium, design: .monospaced))
-                .foregroundColor(AppColor.accentGold.opacity(0.85))
+                .foregroundColor(AppColor.intelligence.opacity(0.85))
                 .padding(.top, 10)
             
             Button {
@@ -214,7 +227,7 @@ struct ArticleDetailView: View {
                     Text("Switch to Web View (W)")
                 }
                 .font(.system(size: 13, weight: .medium))
-                .foregroundColor(AppColor.accentBlue)
+                .foregroundColor(AppColor.accent)
             }
             .buttonStyle(.plain)
             .padding(.top, 6)
@@ -226,12 +239,12 @@ struct ArticleDetailView: View {
     
     private var webViewContainer: some View {
         VStack(spacing: 0) {
-            Spacer().frame(height: 84)
+            Spacer().frame(height: AppLayout.toolbarHeight + 16)
             
             if isWebLoading {
                 ProgressView()
                     .progressViewStyle(.linear)
-                    .tint(AppColor.accentPink)
+                    .tint(AppColor.accent)
                     .frame(height: 2)
             } else {
                 Divider().opacity(0.2)
@@ -252,7 +265,7 @@ struct ArticleDetailView: View {
                         .font(.system(size: 32))
                         .foregroundColor(AppColor.textSecondary)
                     Text("Invalid article URL")
-                        .font(.system(size: 14, weight: .medium))
+                        .font(AppTypography.headline)
                         .foregroundColor(AppColor.textSecondary)
                     Spacer()
                 }
@@ -266,92 +279,123 @@ struct ArticleDetailView: View {
     
     private var topGlassToolbar: some View {
         HStack(spacing: AppSpacing.sm) {
-            toolbarGlassButton(icon: "chevron.left", help: "Back to list (Esc or ←)") {
+            // 1. Navigation Group: Back Button
+            Button {
                 if !path.isEmpty { path.removeLast() }
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 12, weight: .semibold))
+                    Text("Done")
+                        .font(AppTypography.label)
+                }
+                .foregroundColor(AppColor.primaryText)
+                .padding(.horizontal, 10)
+                .frame(height: AppLayout.controlHeight + 4)
+                .glassPill(interactive: true)
+            }
+            .buttonStyle(.plain)
+            .help("Back to list (Esc or ←)")
+            
+            Spacer()
+            
+            // 2. Center Group: Paging & Mode Switcher
+            HStack(spacing: 8) {
+                if !allArticles.isEmpty {
+                    HStack(spacing: 0) {
+                        Button {
+                            prevArticle()
+                        } label: {
+                            Image(systemName: "chevron.up")
+                                .font(.system(size: 11, weight: .bold))
+                                .foregroundColor(hasPrevArticle ? AppColor.primaryText : AppColor.tertiaryText)
+                                .frame(width: 28, height: AppLayout.controlHeight + 4)
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(!hasPrevArticle)
+                        .help("Previous Article (K or ↑)")
+                        
+                        Divider().frame(height: 14)
+                        
+                        Button {
+                            nextArticle()
+                        } label: {
+                            Image(systemName: "chevron.down")
+                                .font(.system(size: 11, weight: .bold))
+                                .foregroundColor(hasNextArticle ? AppColor.primaryText : AppColor.tertiaryText)
+                                .frame(width: 28, height: AppLayout.controlHeight + 4)
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(!hasNextArticle)
+                        .help("Next Article (J or ↓)")
+                    }
+                    .glassPill(interactive: true)
+                }
+                
+                Picker("", selection: $viewMode) {
+                    Label("Reader", systemImage: "doc.plaintext").tag(DetailViewMode.reader)
+                    Label("Web", systemImage: "safari").tag(DetailViewMode.web)
+                }
+                .pickerStyle(.segmented)
+                .frame(width: 140)
+                .help("Toggle Reader / Web view (W)")
             }
             
             Spacer()
             
-            if !allArticles.isEmpty {
-                toolbarGlassButton(icon: "arrow.up", help: "Previous Article (K or ↑)") {
-                    prevArticle()
-                }
-                toolbarGlassButton(icon: "arrow.down", help: "Next Article (J or ↓)") {
-                    nextArticle()
-                }
-            }
-            
-            Picker("", selection: $viewMode) {
-                Label("Reader", systemImage: "doc.plaintext").tag(DetailViewMode.reader)
-                Label("Web", systemImage: "safari").tag(DetailViewMode.web)
-            }
-            .pickerStyle(.segmented)
-            .frame(width: 150)
-            .help("Toggle Reader / Web view (W)")
-            
-            toolbarGlassButton(
-                icon: isSaved ? "bookmark.fill" : "bookmark",
-                help: "Save Story (S)"
-            ) {
-                toggleSave()
-            }
-            
-            if let url = URL(string: currentArticle.link) {
-                ShareLink(
-                    item: url,
-                    subject: Text(currentArticle.title),
-                    message: Text(currentArticle.title)
-                ) {
-                    Image(systemName: "square.and.arrow.up")
-                        .font(.system(size: 15, weight: .bold))
-                        .foregroundColor(AppColor.textPrimary)
-                        .frame(width: 38, height: 38)
-                        .liquidGlass(in: Circle(), interactive: true)
+            // 3. Action Group: Bookmark, Share, Menu
+            HStack(spacing: 2) {
+                Button {
+                    toggleSave()
+                } label: {
+                    Image(systemName: isSaved ? "bookmark.fill" : "bookmark")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(isSaved ? AppColor.accent : AppColor.primaryText)
+                        .frame(width: 32, height: AppLayout.controlHeight + 4)
                 }
                 .buttonStyle(.plain)
-                .help("Share Story")
-            }
-            
-            Menu {
-                Button {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(currentArticle.link, forType: .string)
-                } label: {
-                    Label("Copy Link", systemImage: "link")
+                .help("Save Story (S)")
+                
+                if let url = URL(string: currentArticle.link) {
+                    ShareLink(item: url, subject: Text(currentArticle.title)) {
+                        Image(systemName: "square.and.arrow.up")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundColor(AppColor.primaryText)
+                            .frame(width: 32, height: AppLayout.controlHeight + 4)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Share Story")
                 }
                 
-                Button {
-                    openInBrowser()
+                Menu {
+                    Button {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(currentArticle.link, forType: .string)
+                    } label: {
+                        Label("Copy Link", systemImage: "link")
+                    }
+                    
+                    Button {
+                        openInBrowser()
+                    } label: {
+                        Label("Open in Browser", systemImage: "safari")
+                    }
                 } label: {
-                    Label("Open in Browser", systemImage: "safari")
+                    Image(systemName: "ellipsis")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(AppColor.primaryText)
+                        .frame(width: 32, height: AppLayout.controlHeight + 4)
                 }
-            } label: {
-                Image(systemName: "ellipsis")
-                    .font(.system(size: 15, weight: .bold))
-                    .foregroundColor(AppColor.textPrimary)
-                    .frame(width: 38, height: 38)
-                    .liquidGlass(in: Circle(), interactive: true)
+                .buttonStyle(.plain)
+                .menuIndicator(.hidden)
+                .fixedSize()
             }
-            .buttonStyle(.plain)
-            .menuIndicator(.hidden)
-            .fixedSize()
+            .glassPill(interactive: true)
         }
-        .padding(.horizontal, AppSpacing.lg)
-        .padding(.top, 40)
-        .padding(.bottom, AppSpacing.sm)
+        .padding(.horizontal, AppLayout.pageInset)
+        .padding(.top, 16)
+        .padding(.bottom, 8)
         .inGlassContainer()
-    }
-    
-    private func toolbarGlassButton(icon: String, help: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: icon)
-                .font(.system(size: 15, weight: .bold))
-                .foregroundColor(AppColor.textPrimary)
-                .frame(width: 38, height: 38)
-                .liquidGlass(in: Circle(), interactive: true)
-        }
-        .buttonStyle(.plain)
-        .help(help)
     }
     
     // MARK: - Navigation & Actions
@@ -451,20 +495,20 @@ struct ArticleDetailView: View {
                     .scaleEffect(0.8)
                 Text("Analyzing article with on-device AI...")
                     .font(.system(size: 13, weight: .medium))
-                    .foregroundColor(AppColor.accentGold)
+                    .foregroundColor(AppColor.intelligence)
             }
             .padding(12)
-            .liquidGlass(in: RoundedRectangle(cornerRadius: AppRadius.bubble))
+            .liquidGlass(in: RoundedRectangle(cornerRadius: AppRadius.container))
         } else if let analysis = analysis {
             VStack(alignment: .leading, spacing: 14) {
                 // 1-Paragraph Summary
                 HStack(alignment: .top, spacing: AppSpacing.xs) {
                     Image(systemName: "sparkles")
-                        .foregroundColor(AppColor.accentGold)
+                        .foregroundColor(AppColor.intelligence)
                         .padding(.top, 3)
                     Text(analysis.summary)
                         .font(.system(size: 14, weight: .medium))
-                        .foregroundColor(AppColor.accentGold)
+                        .foregroundColor(AppColor.primaryText)
                 }
 
                 // 3 to 5 Bullet Key Points
@@ -472,10 +516,10 @@ struct ArticleDetailView: View {
                     VStack(alignment: .leading, spacing: 8) {
                         HStack(spacing: 6) {
                             Image(systemName: "list.bullet.clipboard")
-                                .foregroundColor(AppColor.accentGold)
+                                .foregroundColor(AppColor.intelligence)
                             Text("Key Takeaways")
                                 .font(.system(size: 13, weight: .bold))
-                                .foregroundColor(AppColor.textPrimary)
+                                .foregroundColor(AppColor.primaryText)
                         }
                         .padding(.top, 4)
 
@@ -483,11 +527,11 @@ struct ArticleDetailView: View {
                             HStack(alignment: .top, spacing: 8) {
                                 Image(systemName: "checkmark.circle.fill")
                                     .font(.system(size: 11))
-                                    .foregroundColor(AppColor.accentGold)
+                                    .foregroundColor(AppColor.intelligence)
                                     .padding(.top, 3)
                                 Text(point)
                                     .font(.system(size: 13))
-                                    .foregroundColor(AppColor.textPrimary.opacity(0.9))
+                                    .foregroundColor(AppColor.primaryText.opacity(0.9))
                             }
                         }
                     }
@@ -504,8 +548,8 @@ struct ArticleDetailView: View {
                         }
                         .padding(.horizontal, 8)
                         .padding(.vertical, 4)
-                        .background(Capsule().fill(AppColor.accentPink.opacity(0.2)))
-                        .foregroundColor(AppColor.accentPink)
+                        .background(Capsule().fill(AppColor.surface))
+                        .foregroundColor(AppColor.secondaryText)
                     }
 
                     ForEach(analysis.entities.prefix(4), id: \.name) { entity in
@@ -513,8 +557,8 @@ struct ArticleDetailView: View {
                             .font(.caption2.weight(.medium))
                             .padding(.horizontal, 8)
                             .padding(.vertical, 4)
-                            .background(Capsule().fill(AppColor.surfaceMid))
-                            .foregroundColor(AppColor.textSecondary)
+                            .background(Capsule().fill(AppColor.surface))
+                            .foregroundColor(AppColor.secondaryText)
                     }
 
                     if let cat = analysis.category ?? currentArticle.category {
@@ -522,20 +566,20 @@ struct ArticleDetailView: View {
                             .font(.caption2.weight(.bold))
                             .padding(.horizontal, 8)
                             .padding(.vertical, 4)
-                            .background(Capsule().fill(AppColor.accentBlue.opacity(0.2)))
-                            .foregroundColor(AppColor.accentBlue)
+                            .background(Capsule().fill(AppColor.accent.opacity(0.12)))
+                            .foregroundColor(AppColor.accent)
                     }
                 }
             }
             .padding(14)
-            .liquidGlass(in: RoundedRectangle(cornerRadius: AppRadius.bubble))
+            .liquidGlass(in: RoundedRectangle(cornerRadius: AppRadius.container))
         } else if let error = analysisError {
             HStack(spacing: 10) {
                 Image(systemName: "exclamationmark.triangle")
-                    .foregroundColor(.orange)
+                    .foregroundColor(AppColor.warning)
                 Text("AI analysis unavailable: \(error)")
                     .font(.system(size: 12))
-                    .foregroundColor(AppColor.textSecondary)
+                    .foregroundColor(AppColor.secondaryText)
                 Spacer()
                 Button("Try Again") {
                     Task { await startArticleAnalysis() }
@@ -544,17 +588,17 @@ struct ArticleDetailView: View {
                 .controlSize(.small)
             }
             .padding(12)
-            .liquidGlass(in: RoundedRectangle(cornerRadius: AppRadius.bubble))
+            .liquidGlass(in: RoundedRectangle(cornerRadius: AppRadius.container))
         } else if let ai = currentArticle.aiSummary {
             HStack(alignment: .top, spacing: AppSpacing.xs) {
                 Image(systemName: "sparkles")
-                    .foregroundColor(AppColor.accentGold)
+                    .foregroundColor(AppColor.intelligence)
                 Text(ai)
                     .font(.system(size: 14, weight: .medium))
-                    .foregroundColor(AppColor.accentGold)
+                    .foregroundColor(AppColor.primaryText)
             }
             .padding(14)
-            .liquidGlass(in: RoundedRectangle(cornerRadius: AppRadius.bubble))
+            .liquidGlass(in: RoundedRectangle(cornerRadius: AppRadius.container))
         }
     }
 

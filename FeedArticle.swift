@@ -29,3 +29,16 @@ struct FeedArticle: Identifiable, Codable, Hashable, Sendable {
     }
 }
 
+/// Navigation wrapper that pairs an active article with its contextual collection
+/// (e.g. active filtered search, category, or unread stories).
+struct FeedArticleWrap: Identifiable, Hashable, Sendable {
+    let id: UUID
+    let article: FeedArticle
+    let contextArticles: [FeedArticle]
+    
+    init(article: FeedArticle, contextArticles: [FeedArticle] = []) {
+        self.id = UUID()
+        self.article = article
+        self.contextArticles = contextArticles
+    }
+}

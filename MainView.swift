@@ -5,12 +5,7 @@ import SwiftUI
 import AppKit
 import UniformTypeIdentifiers
 
-// MARK: - Navigation Wrappers & Commands
-
-struct FeedArticleWrap: Identifiable, Hashable {
-    let id = UUID()
-    let article: FeedArticle
-}
+// MARK: - Navigation Notifications & Commands
 
 extension Notification.Name {
     static let detailNextArticle = Notification.Name("detailNextArticle")
@@ -70,7 +65,7 @@ struct MainView: View {
                 .navigationDestination(for: FeedArticleWrap.self) { wrap in
                     ArticleDetailView(
                         article: wrap.article,
-                        allArticles: feedManager.articles,
+                        allArticles: wrap.contextArticles.isEmpty ? feedManager.articles : wrap.contextArticles,
                         path: $articlePath
                     )
                     .navigationBarBackButtonHidden(true)

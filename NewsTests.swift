@@ -71,6 +71,7 @@ struct NewsTests {
         await testGranularCacheClearingAndRetention()
         await testNotificationServiceErrorLogging()
         await testArticleStoreErrorResilience()
+        await testFeedArticleWrapContextNavigation()
         
         print("✅ SUCCESS: All tests passed!")
     }
@@ -940,13 +941,23 @@ struct NewsTests {
         // 2. Radius tokens
         assertEqual(AppRadius.small, 6.0, "AppRadius.small should be 6.0")
         assertEqual(AppRadius.medium, 8.0, "AppRadius.medium should be 8.0")
-        assertEqual(AppRadius.card, 14.0, "AppRadius.card should be 14.0")
+        assertEqual(AppRadius.card, 12.0, "AppRadius.card should be 12.0")
+        assertEqual(AppRadius.control, 6.0, "AppRadius.control should be 6.0")
+        assertEqual(AppRadius.container, 16.0, "AppRadius.container should be 16.0")
         assertEqual(AppRadius.pill, 999.0, "AppRadius.pill should be 999.0")
+
+        // 3. Layout tokens
+        assertEqual(AppLayout.pageInset, 24.0, "AppLayout.pageInset should be 24.0")
+        assertEqual(AppLayout.sidebarInset, 12.0, "AppLayout.sidebarInset should be 12.0")
+        assertEqual(AppLayout.sectionGap, 24.0, "AppLayout.sectionGap should be 24.0")
+        assertEqual(AppLayout.cardGap, 16.0, "AppLayout.cardGap should be 16.0")
+        assertEqual(AppLayout.toolbarHeight, 44.0, "AppLayout.toolbarHeight should be 44.0")
+        assertEqual(AppLayout.controlHeight, 28.0, "AppLayout.controlHeight should be 28.0")
         
-        // 3. Ghost Typography Theme tokens
-        assertEqual(AppTypography.bodyLineSpacing(for: .casper), 12.0, "Casper theme line spacing should be 12")
+        // 4. Ghost Typography Theme tokens
+        assertEqual(AppTypography.bodyLineSpacing(for: .casper), 10.0, "Casper theme line spacing should be 10")
         assertEqual(AppTypography.bodyLineSpacing(for: .edition), 8.0, "Edition theme line spacing should be 8")
-        assertEqual(AppTypography.bodyLineSpacing(for: .alto), 14.0, "Alto theme line spacing should be 14")
+        assertEqual(AppTypography.bodyLineSpacing(for: .alto), 12.0, "Alto theme line spacing should be 12")
         
         // 4. ArticleFilterQuery structured parsing
         let complexQuery = "source:Bloomberg category:Tech is:unread apple silicon"
@@ -1640,6 +1651,50 @@ struct NewsTests {
 
         // 3. markAllAsRead catches error gracefully without crashing (PR #20)
         await store.markAllAsRead()
+    }
+
+    static func testFeedArticleWrapContextNavigation() async {
+        print("  - Testing FeedArticleWrap Context Preservation & Filtered Navigation Boundaries...")
+
+        let artA = FeedArticle(title: "Article A", link: "https://example.com/a", guid: "a", description: "Desc A", pubDate: Date(), source: "Source 1", category: "Technology")
+        let artB = FeedArticle(title: "Article B", link: "https://example.com/b", guid: "b", description: "Desc B", pubDate: Date(), source: "Source 2", category: "Science")
+        let artC = FeedArticle(title: "Article C", link: "https://example.com/c", guid: "c", description: "Desc C", pubDate: Date(), source: "Source 1", category: "Technology")
+        let artD = FeedArticle(title: "Article D", link: "https://example.com/d", guid: "d", description: "Desc D", pubDate: Date(), source: "Source 3", category: "Business")
+
+        let allGlobal = [artA, artB, artC, artD]
+        let techFilter = [artA, artC]
+
+        // 1. Wrap with filtered context
+        let wrap = FeedArticleWrap(article: artA, contextArticles: techFilter)
+        assertEqual(wrap.article.id, artA.id, "Wrapped article ID must match artA")
+        assertEqual(wrap.contextArticles.count, 2, "Filtered context must contain exactly 2 articles")
+        assertEqual(wrap.contextArticles.map(\.id), [artA.id, artC.id], "Filtered context articles must match techFilter")
+
+        // 2. Boundary simulation in filtered context:
+        // In techFilter: artA is index 0. Has next (artC), but NO previous.
+        let idxA = wrap.contextArticles.firstIndex(where: { $0.id == artA.id })
+        assertEqual(idxA, 0, "artA should be at index 0 in filtered context")
+        let hasPrevInFilter = idxA.map { $0 > 0 } ?? false
+        let hasNextInFilter = idxA.map { $0 + 1 < wrap.contextArticles.count } ?? false
+        assertFalse(hasPrevInFilter, "artA must not have previous article in filtered context")
+        assertTrue(hasNextInFilter, "artA must have next article (artC) in filtered context")
+
+        // In techFilter: Next article from artA is artC (skipping artB which is Science!)
+        let nextArt = wrap.contextArticles[idxA! + 1]
+        assertEqual(nextArt.id, artC.id, "Next article in tech filter must be artC, skipping artB")
+
+        // In global context without filter: Next article from artA would have been artB
+        let globalIdxA = allGlobal.firstIndex(where: { $0.id == artA.id })!
+        let globalNext = allGlobal[globalIdxA + 1]
+        assertEqual(globalNext.id, artB.id, "In unfiltered global context, next is artB")
+
+        // 3. Fallback behavior when contextArticles is empty
+        let wrapEmpty = FeedArticleWrap(article: artB)
+        assertTrue(wrapEmpty.contextArticles.isEmpty, "Default contextArticles should be empty")
+
+        // 4. Stable uniqueness of wrap identity
+        let wrap2 = FeedArticleWrap(article: artA, contextArticles: techFilter)
+        assertTrue(wrap.id != wrap2.id, "Each wrap must have a distinct UUID identity for navigation state")
     }
 }
 
