@@ -1,0 +1,6 @@
+[
+    {
+        "comment_id": "5640537123",
+        "reply": "Understood. Acknowledging that the live external DNS lookups violate the offline, deterministic testing constraints outlined in AGENTS.md, and that this PR is being closed. I am stopping work on this task."
+    }
+]
