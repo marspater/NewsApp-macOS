@@ -67,6 +67,7 @@ struct NewsTests {
         await testInteractiveAnalysisCancellation()
         await testGranularCacheClearingAndRetention()
         await testNotificationServiceErrorLogging()
+        await testArticleStoreToggleSaveError()
         
         print("✅ SUCCESS: All tests passed!")
     }
@@ -1493,3 +1494,28 @@ struct NewsTests {
 }
 
 
+
+extension NewsTests {
+    @MainActor
+    static func testArticleStoreToggleSaveError() async {
+        print("  - Testing ArticleStore.toggleSave Error Path...")
+
+        // Use an invalid path so that open() fails or database remains closed.
+        let db = DatabaseEngine(path: "/dev/null/invalid.sqlite")
+        let store = ArticleStore(database: db)
+
+        let art = FeedArticle(
+            title: "Test",
+            link: "https://example.com/test",
+            guid: "test-id",
+            description: "Desc",
+            pubDate: Date(),
+            source: "Test",
+            category: "Test"
+        )
+
+        // toggleSave should fail because DB is not open/invalid and catch the error, returning false.
+        let result = await store.toggleSave(article: art)
+        assertFalse(result, "toggleSave should return false when database throws an error")
+    }
+}
