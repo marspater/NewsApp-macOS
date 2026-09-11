@@ -69,6 +69,7 @@ struct NewsTests {
         await testInteractiveAnalysisCancellation()
         await testGranularCacheClearingAndRetention()
         await testNotificationServiceErrorLogging()
+        await testArticleStoreErrorResilience()
         
         print("✅ SUCCESS: All tests passed!")
     }
@@ -1596,6 +1597,33 @@ struct NewsTests {
         await service.triageAndNotify(newArticles: [sampleArticle], mode: .minimal)
         await service.triageAndNotify(newArticles: [sampleArticle], mode: .private)
         await service.triageAndNotify(newArticles: [sampleArticle], mode: .full)
+    }
+
+    @MainActor
+    static func testArticleStoreErrorResilience() async {
+        print("  - Testing ArticleStore Error Resilience & Database Failures...")
+
+        let db = DatabaseEngine(path: ":memory:")
+        try? await db.open()
+        let store = ArticleStore(database: db)
+        await store.initialize()
+
+        let article = FeedArticle(title: "Test Error Article", link: "https://example.com/error", guid: "test-err-guid", description: "Test", pubDate: Date(), source: "Test")
+        await store.batchUpsert(articles: [article], feedUrl: "https://example.com/feed")
+
+        // Force close the database to trigger failure scenarios
+        await db.close()
+
+        // 1. toggleSave returns false on failure (PR #18)
+        let savedResult = await store.toggleSave(article: article)
+        assertFalse(savedResult, "toggleSave should return false when database throws an error")
+
+        // 2. markAsRead catches error and does not mutate in-memory read state (PR #19)
+        await store.markAsRead(id: "test-err-guid", isRead: true)
+        assertFalse(store.readArticleIDs.contains("test-err-guid"), "readArticleIDs should not contain ID when DB markRead fails")
+
+        // 3. markAllAsRead catches error gracefully without crashing (PR #20)
+        await store.markAllAsRead()
     }
 }
 
