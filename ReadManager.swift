@@ -1,34 +1,54 @@
 import Foundation
+import Combine
 
+/// Manages article read states in memory for instant reactive UI updates,
+/// backed asynchronously by ArticleStore and SQLite persistence.
 @MainActor
 final class ReadManager: ObservableObject {
     static let shared = ReadManager()
     
     @Published var readArticles: Set<String> = []
-    private let storageKey = "com.marspater.news.readArticlesList"
+    private var cancellables = Set<AnyCancellable>()
     
-    init() {
-        if let data = UserDefaults.standard.stringArray(forKey: storageKey) {
-            readArticles = Set(data)
-        }
+    init(articleStore: ArticleStore? = nil) {
+        let store = articleStore ?? ArticleStore.shared
+        self.readArticles = store.readArticleIDs
+        
+        // Keep readArticles in sync with ArticleStore changes
+        store.$readArticleIDs
+            .receive(on: RunLoop.main)
+            .sink { [weak self] updated in
+                self?.readArticles = updated
+            }
+            .store(in: &cancellables)
     }
     
     func markAsRead(_ id: String) {
-        guard !readArticles.contains(id) else { return }
-        readArticles.insert(id)
-        UserDefaults.standard.set(Array(readArticles), forKey: storageKey)
+        let canonicalId = ArticleIdentity.reconcileLegacyId(id)
+        guard !readArticles.contains(canonicalId) else { return }
+        readArticles.insert(canonicalId)
+        Task {
+            await ArticleStore.shared.markAsRead(id: canonicalId, isRead: true)
+        }
     }
     
     func isRead(_ id: String) -> Bool {
-        return readArticles.contains(id)
+        let canonicalId = ArticleIdentity.reconcileLegacyId(id)
+        return readArticles.contains(canonicalId)
     }
     
     func toggleRead(_ id: String) {
-        if readArticles.contains(id) {
-            readArticles.remove(id)
+        let canonicalId = ArticleIdentity.reconcileLegacyId(id)
+        if readArticles.contains(canonicalId) {
+            readArticles.remove(canonicalId)
+            Task {
+                await ArticleStore.shared.markAsRead(id: canonicalId, isRead: false)
+            }
         } else {
-            readArticles.insert(id)
+            readArticles.insert(canonicalId)
+            Task {
+                await ArticleStore.shared.markAsRead(id: canonicalId, isRead: true)
+            }
         }
-        UserDefaults.standard.set(Array(readArticles), forKey: storageKey)
     }
 }

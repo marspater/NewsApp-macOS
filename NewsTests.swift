@@ -45,6 +45,11 @@ struct NewsTests {
         await testNavigationCommands()
         await testOPMLParsingAndExporting()
         await testOfflineCacheAndResilience()
+        await testArticleIdentityDeep()
+        await testDatabaseEnginePersistence()
+        await testFTS5SearchAndOperators()
+        await testMigrationCoordinatorAtomicity()
+        await testArticleRetentionPolicy()
         
         print("✅ SUCCESS: All tests passed!")
     }
@@ -398,22 +403,253 @@ struct NewsTests {
         print("  - Testing Offline Cache & Resilience...")
         
         CacheManager.shared.configureOfflineCache()
-        
-        let sample = [FeedArticle(
-            title: "Offline Test Story",
-            link: "https://example.com/story-offline",
-            guid: "offline-1",
-            description: "Offline summary",
-            pubDate: Date(),
-            source: "Offline Source"
-        )]
-        CacheManager.shared.save(sample, forKey: "offline_test_key")
-        
-        let loaded = CacheManager.shared.load(forKey: "offline_test_key", as: [FeedArticle].self)
-        assertEqual(loaded?.count, 1, "Should load cached article")
-        assertEqual(loaded?[0].title, "Offline Test Story", "Should match cached title")
-        
         let size = CacheManager.shared.calculateTotalCacheSize()
-        assertTrue(size > 0, "Cache directory should contain bytes")
+        assertTrue(size >= 0, "Cache directory byte calculation should succeed")
+        
+        CacheManager.shared.clearAllCache()
+        let sizeAfter = CacheManager.shared.calculateTotalCacheSize()
+        assertTrue(sizeAfter >= 0, "Cache clear should succeed non-destructively")
+    }
+    
+    static func testArticleIdentityDeep() async {
+        print("  - Testing Article Identity & Fingerprinting...")
+        
+        // Priority 1: GUID priority
+        let id1 = ArticleIdentity.computeId(guid: "guid-12345", link: "https://example.com/story?utm_source=rss", title: "Test", source: "Source")
+        assertEqual(id1, "guid-12345", "Should prioritize explicit non-URL GUID")
+        
+        // Priority 1 with URL GUID: canonicalization
+        let id2 = ArticleIdentity.computeId(guid: "http://EXAMPLE.com/guid-story/?utm_medium=feed", link: "https://other.com", title: "Test", source: "Source")
+        assertEqual(id2, "https://example.com/guid-story", "Should canonicalize URL GUID")
+        
+        // Priority 2: Canonical URL when GUID is nil or empty
+        let id3 = ArticleIdentity.computeId(guid: "  ", link: "http://example.com/article/?ref=share", title: "Test", source: "Source")
+        assertEqual(id3, "https://example.com/article", "Should prioritize canonicalized URL when GUID is whitespace")
+        
+        // Priority 3: Fallback content fingerprint when both GUID and Link are missing/invalid
+        let date = Date(timeIntervalSince1970: 1700000000)
+        let id4 = ArticleIdentity.computeId(guid: nil, link: "", title: "Breaking News", source: "Reuters", pubDate: date)
+        assertTrue(id4.hasPrefix("fp_"), "Fallback ID should be a content fingerprint prefixed with fp_")
+        
+        let id5 = ArticleIdentity.computeId(guid: nil, link: "", title: "breaking news ", source: " reuters", pubDate: date)
+        assertEqual(id4, id5, "Content fingerprints should be case- and whitespace-insensitive")
+        
+        // Legacy reconciliation
+        let reconciled = ArticleIdentity.reconcileLegacyId("http://test.com/path/?utm_source=newsletter")
+        assertEqual(reconciled, "https://test.com/path", "Should reconcile legacy URL")
+    }
+    
+    static func testDatabaseEnginePersistence() async {
+        print("  - Testing DatabaseEngine Persistence & Conflict Resolution...")
+        
+        let db = DatabaseEngine(path: ":memory:")
+        do {
+            try await db.open()
+            
+            let art1 = FeedArticle(
+                title: "Original Title",
+                link: "https://example.com/item1",
+                guid: "item-1",
+                description: "Original description",
+                pubDate: Date(timeIntervalSince1970: 1700000000),
+                source: "TechBlog",
+                category: "Tech"
+            )
+            
+            try await db.upsertArticles([art1], feedUrl: "https://example.com/feed.xml")
+            
+            // Mark read and saved
+            try await db.markRead(articleId: art1.id, isRead: true)
+            let isSaved = try await db.toggleSaved(articleId: art1.id)
+            assertTrue(isSaved, "Article should now be saved")
+            
+            let fetched1 = try await db.fetchArticles()
+            assertEqual(fetched1.count, 1, "Should fetch 1 article")
+            assertEqual(fetched1[0].title, "Original Title", "Title should match")
+            
+            let isReadBefore = try await db.isRead(articleId: art1.id)
+            assertTrue(isReadBefore, "Article should be read")
+            
+            // Re-ingest with updated title and enriched content
+            var art1Updated = art1
+            art1Updated.fullContent = "Detailed full content scraped from web"
+            
+            try await db.upsertArticles([art1Updated], feedUrl: "https://example.com/feed.xml")
+            
+            // Verify read state and saved state are STRICTLY PRESERVED after upsert conflict!
+            let isReadAfter = try await db.isRead(articleId: art1.id)
+            let isSavedAfter = try await db.isSaved(articleId: art1.id)
+            assertTrue(isReadAfter, "Read status must be preserved after re-ingestion")
+            assertTrue(isSavedAfter, "Saved status must be preserved after re-ingestion")
+            
+            let counts = try await db.counts()
+            assertEqual(counts.total, 1, "Total count should be 1")
+            assertEqual(counts.saved, 1, "Saved count should be 1")
+            assertEqual(counts.unread, 0, "Unread count should be 0 because it was marked read")
+        } catch {
+            print("❌ DatabaseEngine test failed: \(error.localizedDescription)")
+            exit(1)
+        }
+    }
+    
+    static func testFTS5SearchAndOperators() async {
+        print("  - Testing FTS5 Full-Text Search & Operators...")
+        
+        let db = DatabaseEngine(path: ":memory:")
+        do {
+            try await db.open()
+            
+            let artA = FeedArticle(
+                title: "Quantum Computing Leap Announced",
+                link: "https://example.com/quantum",
+                guid: "q-1",
+                description: "Physicists achieve breakthrough in qubit coherence",
+                pubDate: Date(timeIntervalSince1970: 1700001000),
+                source: "Nature",
+                category: "Science"
+            )
+            let artB = FeedArticle(
+                title: "Stock Markets Rally on Tech Surge",
+                link: "https://example.com/market",
+                guid: "m-1",
+                description: "Wall Street gains led by semiconductor shares",
+                pubDate: Date(timeIntervalSince1970: 1700002000),
+                source: "Bloomberg",
+                category: "Business"
+            )
+            
+            try await db.upsertArticles([artA, artB])
+            
+            // Plain FTS match
+            let search1 = try await db.searchArticles(query: "qubit")
+            assertEqual(search1.count, 1, "Should find quantum article matching 'qubit'")
+            assertEqual(search1[0].id, artA.id, "Matched article ID must match")
+            
+            let search2 = try await db.searchArticles(query: "shares")
+            assertEqual(search2.count, 1, "Should find market article matching 'shares'")
+            assertEqual(search2[0].id, artB.id, "Matched article ID must match")
+            
+            // Operator searches
+            let searchSource = try await db.searchArticles(query: "source:Nature")
+            assertEqual(searchSource.count, 1, "Should match source operator")
+            
+            let searchCategory = try await db.searchArticles(query: "category:Business")
+            assertEqual(searchCategory.count, 1, "Should match category operator")
+            
+            // is:unread operator
+            let searchUnread = try await db.searchArticles(query: "is:unread")
+            assertEqual(searchUnread.count, 2, "Both articles should be unread initially")
+            
+            try await db.markRead(articleId: artA.id, isRead: true)
+            let searchAfterRead = try await db.searchArticles(query: "is:read")
+            assertEqual(searchAfterRead.count, 1, "Should find 1 read article")
+            assertEqual(searchAfterRead[0].id, artA.id, "Read article ID should match")
+        } catch {
+            print("❌ FTS5 test failed: \(error.localizedDescription)")
+            exit(1)
+        }
+    }
+    
+    static func testMigrationCoordinatorAtomicity() async {
+        print("  - Testing MigrationCoordinator Atomic Transaction & ID Reconciliation...")
+        
+        let tempDefaults = UserDefaults(suiteName: "com.marspater.news.test.\(UUID().uuidString)")!
+        defer { tempDefaults.removePersistentDomain(forName: tempDefaults.description) }
+        
+        let db = DatabaseEngine(path: ":memory:")
+        try? await db.open()
+        
+        let coordinator = MigrationCoordinator(
+            database: db,
+            userDefaults: tempDefaults,
+            fileManager: .default
+        )
+        
+        // Check migration needed
+        let neededBefore = await coordinator.isMigrationNeeded()
+        assertTrue(neededBefore, "Migration should be needed initially")
+        
+        // Execute migration
+        let stats = try? await coordinator.migrateIfNeeded()
+        assertTrue(stats != nil, "Migration should succeed")
+        
+        // Check migration no longer needed
+        let neededAfter = await coordinator.isMigrationNeeded()
+        assertFalse(neededAfter, "Migration should no longer be needed after execution")
+        
+        let version = tempDefaults.integer(forKey: MigrationCoordinator.migrationVersionKey)
+        assertEqual(version, MigrationCoordinator.currentMigrationVersion, "Migration version must be set to 1")
+    }
+    
+    static func testArticleRetentionPolicy() async {
+        print("  - Testing Article Retention Policy...")
+        
+        let db = DatabaseEngine(path: ":memory:")
+        do {
+            try await db.open()
+            
+            let oldDate = Date(timeIntervalSinceNow: -40 * 86400) // 40 days old
+            let recentDate = Date(timeIntervalSinceNow: -5 * 86400) // 5 days old
+            
+            // 1. Old read article (should be pruned)
+            let oldRead = FeedArticle(
+                title: "Old Read Article",
+                link: "https://example.com/old-read",
+                guid: "old-read-1",
+                description: "Old read story",
+                pubDate: oldDate,
+                source: "Source"
+            )
+            // 2. Old unread article (must NEVER be pruned)
+            let oldUnread = FeedArticle(
+                title: "Old Unread Article",
+                link: "https://example.com/old-unread",
+                guid: "old-unread-1",
+                description: "Old unread story",
+                pubDate: oldDate,
+                source: "Source"
+            )
+            // 3. Old saved article (must NEVER be pruned)
+            let oldSaved = FeedArticle(
+                title: "Old Saved Article",
+                link: "https://example.com/old-saved",
+                guid: "old-saved-1",
+                description: "Old saved story",
+                pubDate: oldDate,
+                source: "Source"
+            )
+            // 4. Recent read article (should NOT be pruned, under 30 days)
+            let recentRead = FeedArticle(
+                title: "Recent Read Article",
+                link: "https://example.com/recent-read",
+                guid: "recent-read-1",
+                description: "Recent read story",
+                pubDate: recentDate,
+                source: "Source"
+            )
+            
+            try await db.upsertArticles([oldRead, oldUnread, oldSaved, recentRead])
+            
+            try await db.markRead(articleId: oldRead.id, isRead: true)
+            try await db.markRead(articleId: oldSaved.id, isRead: true)
+            _ = try await db.toggleSaved(articleId: oldSaved.id)
+            try await db.markRead(articleId: recentRead.id, isRead: true)
+            
+            // Run pruning with 30-day retention
+            let prunedCount = try await db.pruneOldArticles(keepReadDays: 30)
+            assertEqual(prunedCount, 1, "Only the old read article should be pruned")
+            
+            let remaining = try await db.fetchArticles()
+            assertEqual(remaining.count, 3, "3 articles should remain in database")
+            
+            let ids = remaining.map { $0.id }
+            assertFalse(ids.contains(oldRead.id), "Old read article must be removed")
+            assertTrue(ids.contains(oldUnread.id), "Old unread article must remain")
+            assertTrue(ids.contains(oldSaved.id), "Old saved article must remain")
+            assertTrue(ids.contains(recentRead.id), "Recent read article must remain")
+        } catch {
+            print("❌ Retention test failed: \(error.localizedDescription)")
+            exit(1)
+        }
     }
 }

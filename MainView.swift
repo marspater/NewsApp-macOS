@@ -31,6 +31,7 @@ extension Notification.Name {
 struct MainView: View {
     @State private var selectedTopic: String? = "Today"
     @EnvironmentObject private var appSettings: AppSettings
+    @EnvironmentObject private var articleStore: ArticleStore
     @EnvironmentObject private var feedManager: FeedManager
     @EnvironmentObject private var themeManager: ThemeManager
     @EnvironmentObject private var readManager: ReadManager
@@ -69,10 +70,40 @@ struct MainView: View {
         }
         
         if !searchText.isEmpty {
-            result = result.filter {
-                $0.title.localizedCaseInsensitiveContains(searchText) ||
-                $0.description.localizedCaseInsensitiveContains(searchText) ||
-                $0.source.localizedCaseInsensitiveContains(searchText)
+            let lowerSearch = searchText.lowercased()
+            if lowerSearch.contains("source:") || lowerSearch.contains("category:") || lowerSearch.contains("is:") {
+                var sourceOp: String?
+                var catOp: String?
+                var isReadOp: Bool?
+                var isSavedOp: Bool?
+                var terms: [String] = []
+                for token in searchText.components(separatedBy: .whitespaces) {
+                    let l = token.lowercased()
+                    if l.hasPrefix("source:") { sourceOp = String(token.dropFirst(7)).lowercased() }
+                    else if l.hasPrefix("category:") { catOp = String(token.dropFirst(9)).lowercased() }
+                    else if l == "is:read" { isReadOp = true }
+                    else if l == "is:unread" { isReadOp = false }
+                    else if l == "is:saved" { isSavedOp = true }
+                    else if !token.isEmpty { terms.append(l) }
+                }
+                result = result.filter { article in
+                    if let s = sourceOp, !article.source.lowercased().contains(s) { return false }
+                    if let c = catOp, !(article.category?.lowercased().contains(c) ?? false) { return false }
+                    if let r = isReadOp, readManager.isRead(article.id) != r { return false }
+                    if let sv = isSavedOp, savedStories.isSaved(article) != sv { return false }
+                    if !terms.isEmpty {
+                        let text = "\(article.title) \(article.description) \(article.category ?? "")".lowercased()
+                        return terms.allSatisfy { text.contains($0) }
+                    }
+                    return true
+                }
+            } else {
+                result = result.filter {
+                    $0.title.localizedCaseInsensitiveContains(searchText) ||
+                    $0.description.localizedCaseInsensitiveContains(searchText) ||
+                    $0.source.localizedCaseInsensitiveContains(searchText) ||
+                    ($0.category?.localizedCaseInsensitiveContains(searchText) ?? false)
+                }
             }
         }
         return result

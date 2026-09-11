@@ -23,10 +23,10 @@ class FeedManager: NSObject, ObservableObject {
     @Published var isAnyFeedLoading: Bool = false
 
     let appSettings: AppSettings
+    let articleStore: ArticleStore
 
     private var backgroundTimer: Timer?
     private var enrichmentTask: Task<Void, Never>?
-    private let cacheKey = "feed_articles_cache"
 
     // Backward-compatibility forwarders for existing UI / View bindings
     var feedURLs: [String] { appSettings.feedURLs }
@@ -36,8 +36,9 @@ class FeedManager: NSObject, ObservableObject {
     var aiEnabled: Bool { appSettings.aiEnabled }
     var privateNotificationsEnabled: Bool { appSettings.privateNotificationsEnabled }
 
-    init(settings: AppSettings? = nil) {
+    init(settings: AppSettings? = nil, store: ArticleStore? = nil) {
         self.appSettings = settings ?? AppSettings.shared
+        self.articleStore = store ?? ArticleStore.shared
         super.init()
         loadCachedArticles()
         startBackgroundFetch()
@@ -134,11 +135,15 @@ class FeedManager: NSObject, ObservableObject {
         }
     }
 
-    // MARK: - Caching
+    // MARK: - Caching & Persistence
 
     func loadCachedArticles() {
-        if let cached = CacheManager.shared.load(forKey: cacheKey, as: [FeedArticle].self) {
-            self.articles = cached
+        Task { @MainActor [weak self] in
+            guard let self = self else { return }
+            let loaded = await self.articleStore.fetchArticles()
+            if !loaded.isEmpty {
+                self.articles = loaded
+            }
         }
     }
 
@@ -193,8 +198,9 @@ class FeedManager: NSObject, ObservableObject {
         let existingIds = Set(articles.map { $0.id })
         let newArticles = allParsed.filter { !existingIds.contains($0.id) }
 
-        articles = allParsed
-        CacheManager.shared.save(articles, forKey: cacheKey)
+        await articleStore.batchUpsert(articles: allParsed)
+        let stored = await articleStore.fetchArticles()
+        self.articles = stored.isEmpty ? allParsed : stored
 
         if appSettings.notificationsEnabled && !newArticles.isEmpty {
             await NotificationService.shared.triageAndNotify(
@@ -283,6 +289,13 @@ class FeedManager: NSObject, ObservableObject {
             guard !Task.isCancelled else { return }
 
             for item in enrichedItems {
+                await self.articleStore.updateEnrichment(
+                    id: item.articleId,
+                    summary: item.summary,
+                    category: item.category,
+                    content: item.content,
+                    image: item.image
+                )
                 if let idx = self.articles.firstIndex(where: { $0.id == item.articleId }) {
                     var updated = self.articles[idx]
                     if let s = item.summary { updated.aiSummary = s }
@@ -297,8 +310,6 @@ class FeedManager: NSObject, ObservableObject {
                     self.articles[idx] = updated
                 }
             }
-
-            CacheManager.shared.save(self.articles, forKey: self.cacheKey)
         }
     }
 
