@@ -28,6 +28,14 @@ actor SecureHTTPClient {
         self.session = URLSession(configuration: config, delegate: coordinator, delegateQueue: nil)
     }
 
+#if DEBUG
+    internal init(configuration: URLSessionConfiguration) {
+        let coordinator = SecureSessionDelegateCoordinator()
+        self.delegateCoordinator = coordinator
+        self.session = URLSession(configuration: configuration, delegate: coordinator, delegateQueue: nil)
+    }
+#endif
+
     // MARK: - Public Fetch Ingestion APIs
 
     func fetchFeed(from url: URL, allowHTTP: Bool = false) async throws -> (Data, HTTPURLResponse) {

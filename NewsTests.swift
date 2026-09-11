@@ -2,6 +2,53 @@
 
 import Foundation
 
+// MARK: - MockURLProtocol for Testing
+class MockURLProtocol: URLProtocol, @unchecked Sendable {
+    static var mockData: Data?
+    static var mockResponse: HTTPURLResponse?
+    static var mockError: Error?
+    static var requestHandler: ((URLRequest) throws -> (HTTPURLResponse, Data))?
+
+    override class func canInit(with request: URLRequest) -> Bool {
+        return true
+    }
+
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest {
+        return request
+    }
+
+    override func startLoading() {
+        if let handler = MockURLProtocol.requestHandler {
+            do {
+                let (response, data) = try handler(request)
+                client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+                client?.urlProtocol(self, didLoad: data)
+                client?.urlProtocolDidFinishLoading(self)
+            } catch {
+                client?.urlProtocol(self, didFailWithError: error)
+            }
+            return
+        }
+
+        if let error = MockURLProtocol.mockError {
+            client?.urlProtocol(self, didFailWithError: error)
+            return
+        }
+
+        if let response = MockURLProtocol.mockResponse {
+            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        }
+
+        if let data = MockURLProtocol.mockData {
+            client?.urlProtocol(self, didLoad: data)
+        }
+
+        client?.urlProtocolDidFinishLoading(self)
+    }
+
+    override func stopLoading() {}
+}
+
 func assertEqual<T: Equatable>(_ actual: T, _ expected: T, _ message: String, file: String = #file, line: Int = #line) {
     if actual != expected {
         print("❌ ASSERTION FAILED: \(message)")
@@ -36,6 +83,7 @@ struct NewsTests {
         await testURLNormalization()
         await testSSRFValidation()
         await testIPAddressValidatorDeep()
+        await testSecureHTTPClientFetchImage()
         await testSecureHTTPClientPolicies()
         await testFeedErrorHierarchy()
         await testAppSettingsDecoupling()
@@ -159,6 +207,67 @@ struct NewsTests {
             print("❌ validateHost('router.internal') was not blocked")
             exit(1)
         }
+    }
+
+    static func testSecureHTTPClientFetchImage() async {
+        print("  - Testing SecureHTTPClient fetchImage with MockURLProtocol...")
+
+        // Setup custom configuration with MockURLProtocol
+        let config = URLSessionConfiguration.default
+        config.protocolClasses = [MockURLProtocol.self]
+        let client = SecureHTTPClient(configuration: config)
+
+        let targetURL = URL(string: "https://example.com/test-image.jpg")!
+
+        // Test 1: Successful image fetch
+        let mockData = Data(repeating: 0xAA, count: 1024)
+        MockURLProtocol.requestHandler = { request in
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            return (response, mockData)
+        }
+
+        do {
+            let (data, response) = try await client.fetchImage(from: targetURL)
+            assertEqual(data.count, 1024, "Should download exact mock bytes")
+            assertEqual(response.statusCode, 200, "Should get 200 status code")
+        } catch {
+            print("❌ Unexpected error in fetchImage success test: \(error)")
+            exit(1)
+        }
+
+        // Test 2: Image too large
+        let maxAllowed = Int(SecureHTTPClient.defaultImageLimit)
+        let tooLargeDataSize = maxAllowed + 1024
+        MockURLProtocol.requestHandler = { request in
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Length": "\(tooLargeDataSize)"]
+            )!
+            let largeData = Data(repeating: 0xBB, count: tooLargeDataSize)
+            return (response, largeData)
+        }
+
+        do {
+            _ = try await client.fetchImage(from: targetURL)
+            print("❌ Expected fetchImage to throw responseTooLarge error")
+            exit(1)
+        } catch let error as FeedError {
+            if case .responseTooLarge(let bytes, let maxAllowedLimit) = error {
+                assertEqual(Int(bytes), tooLargeDataSize, "Expected byte size in error")
+                assertEqual(Int(maxAllowedLimit), maxAllowed, "Expected max limit in error")
+            } else {
+                print("❌ Expected responseTooLarge error, got: \(error)")
+                exit(1)
+            }
+        } catch {
+            print("❌ Unexpected error type: \(error)")
+            exit(1)
+        }
+
+        // Cleanup MockURLProtocol state
+        MockURLProtocol.requestHandler = nil
     }
 
     static func testSecureHTTPClientPolicies() async {
