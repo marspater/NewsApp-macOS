@@ -122,12 +122,7 @@ actor MigrationCoordinator {
             }
             
             // Mark saved states
-            for savedId in savedIds {
-                let isAlreadySaved = try await database.isSaved(articleId: savedId)
-                if !isAlreadySaved {
-                    _ = try await database.toggleSaved(articleId: savedId)
-                }
-            }
+            try await database.batchMarkSaved(savedIds)
             
             // COMMIT the transaction
             try await database.commitTransaction()
