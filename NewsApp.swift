@@ -58,6 +58,28 @@ struct NewsApp: App {
                 .keyboardShortcut("r", modifiers: .command)
             }
             CommandMenu("Navigate") {
+                Button("Today") {
+                    NotificationCenter.default.post(name: .jumpToTodayCommand, object: nil)
+                }
+                .keyboardShortcut("1", modifiers: .command)
+
+                Button("Unread") {
+                    NotificationCenter.default.post(name: .jumpToUnreadCommand, object: nil)
+                }
+                .keyboardShortcut("2", modifiers: .command)
+
+                Button("Saved Stories") {
+                    NotificationCenter.default.post(name: .jumpToSavedCommand, object: nil)
+                }
+                .keyboardShortcut("3", modifiers: .command)
+
+                Button("History") {
+                    NotificationCenter.default.post(name: .jumpToHistoryCommand, object: nil)
+                }
+                .keyboardShortcut("4", modifiers: .command)
+
+                Divider()
+
                 Button("Next Article") {
                     NotificationCenter.default.post(name: .nextArticleCommand, object: nil)
                 }

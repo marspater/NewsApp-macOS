@@ -1,7 +1,7 @@
 import SwiftUI
 
-private let stAccentPink = Color(.displayP3, red: 1.0, green: 0.22, blue: 0.50, opacity: 1.0)
-private let stTextSecondary = Color.secondary
+private let stAccentPink = AppColor.accentPink
+private let stTextSecondary = AppColor.textSecondary
 
 struct SettingsView: View {
     @EnvironmentObject var appSettings: AppSettings

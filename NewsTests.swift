@@ -53,6 +53,7 @@ struct NewsTests {
         await testArticleIntelligenceCapabilities()
         await testContentExtractionPipelineDeep()
         await testEnrichmentQueueSchedulingAndPromotion()
+        await testDesignSystemAndArticleFilter()
         
         print("✅ SUCCESS: All tests passed!")
     }
@@ -798,4 +799,59 @@ struct NewsTests {
         let stateA = await queue.state(for: articleA.id)
         assertEqual(stateA, .cancelled(.superseded), "Article A should be cancelled with superseded reason")
     }
+    
+    static func testDesignSystemAndArticleFilter() async {
+        print("  - Testing Phase 4 Design System Tokens and Article Filter Query Parser...")
+        
+        // 1. Spacing tokens
+        assertEqual(AppSpacing.xxs, 4.0, "AppSpacing.xxs should be 4.0")
+        assertEqual(AppSpacing.xs, 8.0, "AppSpacing.xs should be 8.0")
+        assertEqual(AppSpacing.sm, 12.0, "AppSpacing.sm should be 12.0")
+        assertEqual(AppSpacing.md, 16.0, "AppSpacing.md should be 16.0")
+        assertEqual(AppSpacing.lg, 24.0, "AppSpacing.lg should be 24.0")
+        
+        // 2. Radius tokens
+        assertEqual(AppRadius.small, 6.0, "AppRadius.small should be 6.0")
+        assertEqual(AppRadius.medium, 8.0, "AppRadius.medium should be 8.0")
+        assertEqual(AppRadius.card, 14.0, "AppRadius.card should be 14.0")
+        assertEqual(AppRadius.pill, 999.0, "AppRadius.pill should be 999.0")
+        
+        // 3. Ghost Typography Theme tokens
+        assertEqual(AppTypography.bodyLineSpacing(for: .casper), 12.0, "Casper theme line spacing should be 12")
+        assertEqual(AppTypography.bodyLineSpacing(for: .edition), 8.0, "Edition theme line spacing should be 8")
+        assertEqual(AppTypography.bodyLineSpacing(for: .alto), 14.0, "Alto theme line spacing should be 14")
+        
+        // 4. ArticleFilterQuery structured parsing
+        let complexQuery = "source:Bloomberg category:Tech is:unread apple silicon"
+        let parsed = ArticleFilterQuery.parse(complexQuery)
+        assertEqual(parsed.sourceFilter, "bloomberg", "Should parse source: operator")
+        assertEqual(parsed.categoryFilter, "tech", "Should parse category: operator")
+        assertEqual(parsed.isReadFilter, false, "Should parse is:unread operator")
+        assertEqual(parsed.terms, ["apple", "silicon"], "Should extract search terms")
+        
+        // 5. Article matching logic
+        let art1 = FeedArticle(
+            title: "Apple introduces M4 Max Silicon",
+            link: "https://bloomberg.com/news/apple-m4",
+            guid: "test-art-1",
+            description: "New chip delivers record performance",
+            pubDate: Date(),
+            source: "Bloomberg",
+            category: "Technology"
+        )
+        let art2 = FeedArticle(
+            title: "Federal Reserve holds interest rates steady",
+            link: "https://wsj.com/fed-rates",
+            guid: "test-art-2",
+            description: "Central bank maintains current policy stance",
+            pubDate: Date(),
+            source: "Wall Street Journal",
+            category: "Economy"
+        )
+        
+        assertTrue(parsed.matches(article: art1, isRead: false, isSaved: false), "Article 1 should match query")
+        assertFalse(parsed.matches(article: art1, isRead: true, isSaved: false), "Article 1 should fail because it is read")
+        assertFalse(parsed.matches(article: art2, isRead: false, isSaved: false), "Article 2 should fail source/terms match")
+    }
 }
+
