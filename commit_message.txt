@@ -1,0 +1,5 @@
+🔒 Disable JS execution in Web View
+
+🎯 What: The vulnerability fixed is Unrestricted JavaScript Execution in Web View. The `allowsContentJavaScript` property of WKWebpagePreferences was set to `true`, which enabled execution of arbitrary JavaScript from loaded content.
+⚠️ Risk: If left unfixed, this could allow malicious web pages or injected content to execute cross-site scripting (XSS) attacks, potentially compromising user data, executing malicious scripts in the context of the app, or exploiting further vulnerabilities in the native integration.
+🛡️ Solution: The vulnerability was addressed by disabling JavaScript execution in `ArticleWebView`. This was achieved by setting `preferences.allowsContentJavaScript = false`, strictly enforcing a safe, content-only browsing environment for articles.
