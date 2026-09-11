@@ -67,6 +67,7 @@ struct NewsTests {
         await testInteractiveAnalysisCancellation()
         await testGranularCacheClearingAndRetention()
         await testNotificationServiceErrorLogging()
+        await testArticleStoreErrorHandling()
         
         print("✅ SUCCESS: All tests passed!")
     }
@@ -1490,6 +1491,20 @@ struct NewsTests {
         await service.triageAndNotify(newArticles: [sampleArticle], mode: .private)
         await service.triageAndNotify(newArticles: [sampleArticle], mode: .full)
     }
+
+    static func testArticleStoreErrorHandling() async {
+        print("  - Testing ArticleStore Error Handling...")
+        let db = DatabaseEngine(path: ":memory:")
+        try? await db.open()
+        let store = await ArticleStore(database: db)
+
+        // Wait for store initialization
+        try? await Task.sleep(nanoseconds: 100_000_000)
+
+        // Force the db to close so that operations fail
+        await db.close()
+
+        // This should not crash, it should just catch the error and log it
+        await store.markAllAsRead()
+    }
 }
-
-
