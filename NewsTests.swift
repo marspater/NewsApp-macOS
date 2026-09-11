@@ -44,6 +44,7 @@ struct NewsTests {
         await testJSONParsing()
         await testNavigationCommands()
         await testOPMLParsingAndExporting()
+        await testEscapeXML()
         await testOfflineCacheAndResilience()
         await testArticleIdentityDeep()
         await testDatabaseEnginePersistence()
@@ -366,6 +367,14 @@ struct NewsTests {
         assertEqual(sampleArticles[prevIndex].id, "guid-1", "Previous article should be guid-1")
     }
 
+
+    static func testEscapeXML() async {
+        print("  - Testing XML Escaping...")
+        let unescaped = "Ben & Jerry's <Ice Cream> \"Taste Test\""
+        let expectedEscaped = "Ben &amp; Jerry&apos;s &lt;Ice Cream&gt; &quot;Taste Test&quot;"
+        assertEqual(OPMLExporter.escapeXML(unescaped), expectedEscaped, "Strings should be correctly XML escaped")
+    }
+
     static func testOPMLParsingAndExporting() async {
         print("  - Testing OPML Parsing & Exporting...")
         
@@ -415,7 +424,9 @@ struct NewsTests {
         assertEqual(roundtripItems.count, 2, "Roundtrip OPML export should parse back into 2 feeds")
         assertEqual(roundtripItems[0].url, "https://feeds.arstechnica.com/arstechnica/index", "Roundtrip feed 1 URL match")
         assertEqual(roundtripItems[1].url, "https://news.ycombinator.com/rss", "Roundtrip feed 2 URL match")
+
     }
+
     
     static func testOfflineCacheAndResilience() async {
         print("  - Testing Offline Cache & Resilience...")
