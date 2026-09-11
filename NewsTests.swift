@@ -54,6 +54,7 @@ struct NewsTests {
         await testContentExtractionPipelineDeep()
         await testEnrichmentQueueSchedulingAndPromotion()
         await testDesignSystemAndArticleFilter()
+        await testArticleStoreMarkReadErrorPath()
         await testDistributionAndEntitlementsIntegrity()
         await testStrictSemVerAndReleaseSecurity()
         await testNotificationModeTriageAndGrammar()
@@ -1490,6 +1491,26 @@ struct NewsTests {
         await service.triageAndNotify(newArticles: [sampleArticle], mode: .private)
         await service.triageAndNotify(newArticles: [sampleArticle], mode: .full)
     }
+
+    static func testArticleStoreMarkReadErrorPath() async {
+        print("  - Testing ArticleStore markAsRead error path...")
+        let db = DatabaseEngine(path: ":memory:")
+        try! await db.open()
+
+        let store = ArticleStore(database: db)
+        await store.initialize()
+
+        // Insert an article so we have a known state
+        let article = FeedArticle(title: "Test", link: "https://example.com", guid: "test-guid", description: "Test", pubDate: Date(), source: "Test")
+        await store.batchUpsert(articles: [article], feedUrl: "https://example.com/feed")
+
+        // Close the database to force an error
+        await db.close()
+
+        // Attempt to mark as read
+        await store.markAsRead(id: "test-guid", isRead: true)
+
+        // Verify that the article was NOT marked as read in the store because the db operation failed
+        assertTrue(!store.readArticleIDs.contains("test-guid"), "readArticleIDs should not contain the ID if db operation fails")
+    }
 }
-
-
