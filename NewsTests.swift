@@ -1492,6 +1492,7 @@ struct NewsTests {
         await service.triageAndNotify(newArticles: [sampleArticle], mode: .full)
     }
 
+    @MainActor
     static func testArticleStoreMarkReadErrorPath() async {
         print("  - Testing ArticleStore markAsRead error path...")
         let db = DatabaseEngine(path: ":memory:")
@@ -1512,5 +1513,5 @@ struct NewsTests {
 
         // Verify that the article was NOT marked as read in the store because the db operation failed
         assertTrue(!store.readArticleIDs.contains("test-guid"), "readArticleIDs should not contain the ID if db operation fails")
-    }
+
 }
