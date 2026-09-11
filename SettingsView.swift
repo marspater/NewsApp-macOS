@@ -11,6 +11,7 @@ struct SettingsView: View {
     @State private var newFeedURL: String = ""
     @State private var selectedTab = 0
     @State private var cacheSize: String = "Calculating..."
+    @State private var opmlStatusMessage: String? = nil
 
     var body: some View {
         TabView(selection: $selectedTab) {
@@ -53,15 +54,72 @@ struct SettingsView: View {
                 .tint(stAccentPink)
                 .controlSize(.small)
             }
-            .padding(20)
+            .padding(.horizontal, 20)
+            .padding(.top, 18)
+            .padding(.bottom, 10)
+
+            HStack(spacing: 10) {
+                Button {
+                    OPMLDialogs.importOPML { data in
+                        let count = feedManager.importFeeds(from: data)
+                        opmlStatusMessage = "Imported \(count) feed(s)"
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                            opmlStatusMessage = nil
+                        }
+                    }
+                } label: {
+                    Label("Import OPML...", systemImage: "square.and.arrow.down")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+
+                Button {
+                    let opml = feedManager.exportOPML()
+                    OPMLDialogs.exportOPML(xmlString: opml)
+                } label: {
+                    Label("Export OPML...", systemImage: "square.and.arrow.up")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+
+                if let msg = opmlStatusMessage {
+                    Text(msg)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(.green)
+                }
+
+                Spacer()
+                Text("\(feedManager.feedURLs.count) feeds")
+                    .font(.caption)
+                    .foregroundColor(stTextSecondary)
+            }
+            .padding(.horizontal, 20)
+            .padding(.bottom, 10)
 
             Divider()
 
             List {
                 ForEach(feedManager.feedURLs, id: \.self) { urlString in
                     HStack(spacing: 12) {
-                        Image(systemName: "dot.radiowaves.up.forward")
-                            .foregroundColor(stAccentPink)
+                        let status = feedManager.feedStatuses[urlString] ?? .idle
+                        switch status {
+                        case .idle:
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundColor(.green)
+                                .font(.system(size: 14))
+                                .help("Feed is active and up to date")
+                        case .loading:
+                            ProgressView()
+                                .controlSize(.small)
+                                .scaleEffect(0.7)
+                                .frame(width: 14, height: 14)
+                                .help("Fetching updates...")
+                        case .failed(let errMsg):
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundColor(.red)
+                                .font(.system(size: 14))
+                                .help(errMsg)
+                        }
                         Text(urlString)
                             .font(.system(size: 13, weight: .medium))
                             .lineLimit(1)
@@ -104,6 +162,16 @@ struct SettingsView: View {
                 Text("Get alerts for important stories matching your interests")
                     .font(.caption)
                     .foregroundColor(stTextSecondary)
+                
+                if feedManager.notificationsEnabled {
+                    Toggle("Private Notification Details", isOn: Binding(
+                        get: { feedManager.privateNotificationsEnabled },
+                        set: { feedManager.setPrivateNotificationsEnabled($0) }
+                    ))
+                    Text("Hide article titles and descriptions on notification banners")
+                        .font(.caption)
+                        .foregroundColor(stTextSecondary)
+                }
                     
                 Toggle("AI Article Analysis", isOn: Binding(
                     get: { feedManager.aiEnabled },
@@ -178,17 +246,7 @@ struct SettingsView: View {
     // MARK: - Helpers
     private func calculateCacheSize() {
         DispatchQueue.global().async {
-            let fm = FileManager.default
-            let paths = fm.urls(for: .cachesDirectory, in: .userDomainMask)
-            let cacheDir = paths[0].appendingPathComponent("com.marspater.news.cache")
-            var totalSize: Int64 = 0
-            if let enumerator = fm.enumerator(at: cacheDir, includingPropertiesForKeys: [.fileSizeKey]) {
-                for case let fileURL as URL in enumerator {
-                    if let size = try? fileURL.resourceValues(forKeys: [.fileSizeKey]).fileSize {
-                        totalSize += Int64(size)
-                    }
-                }
-            }
+            let totalSize = CacheManager.shared.calculateTotalCacheSize()
             let formatted: String
             if totalSize < 1024 { formatted = "\(totalSize) B" }
             else if totalSize < 1024 * 1024 { formatted = String(format: "%.1f KB", Double(totalSize) / 1024.0) }
@@ -198,13 +256,7 @@ struct SettingsView: View {
     }
 
     private func clearCache() {
-        let fm = FileManager.default
-        let paths = fm.urls(for: .cachesDirectory, in: .userDomainMask)
-        let cacheDir = paths[0].appendingPathComponent("com.marspater.news.cache")
-        try? fm.removeItem(at: cacheDir)
-        try? fm.createDirectory(at: cacheDir, withIntermediateDirectories: true)
+        CacheManager.shared.clearAllCache()
         cacheSize = "0 B"
-        readManager.readArticles.removeAll()
-        UserDefaults.standard.set([], forKey: "com.marspater.news.readArticlesList")
     }
 }

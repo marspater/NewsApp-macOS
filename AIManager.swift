@@ -4,7 +4,7 @@ import NaturalLanguage
 /// Fully async AI analysis using NaturalLanguage framework.
 /// Performs real sentiment scoring, named entity extraction, auto-categorization,
 /// and content cleaning per article.
-class AIManager {
+final class AIManager: Sendable {
     static let shared = AIManager()
 
     // MARK: - Article Intelligence Summary

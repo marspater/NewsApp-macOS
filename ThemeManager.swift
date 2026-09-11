@@ -23,7 +23,8 @@ enum ArticleThemeType: String, CaseIterable, Identifiable {
     var id: String { self.rawValue }
 }
 
-class ThemeManager: ObservableObject {
+@MainActor
+final class ThemeManager: ObservableObject {
     static let shared = ThemeManager()
     
     @AppStorage("appAppearance") var appearance: AppAppearance = .dark {

@@ -2,30 +2,26 @@ import Foundation
 import NaturalLanguage
 import UserNotifications
 
-class FeedManager: NSObject, ObservableObject, XMLParserDelegate {
+@MainActor
+class FeedManager: NSObject, ObservableObject {
+    enum FeedStatus: Equatable, Sendable {
+        case idle
+        case loading
+        case failed(String)
+    }
+
     @Published var articles: [FeedArticle] = []
     @Published var feedURLs: [String] = []
     @Published var userSections: [String] = []
     @Published var fetchIntervalMinutes: Double = 15
     @Published var notificationsEnabled: Bool = true
     @Published var aiEnabled: Bool = true
+    @Published var feedStatuses: [String: FeedStatus] = [:]
+    @Published var isAnyFeedLoading: Bool = false
+    @Published var privateNotificationsEnabled: Bool = false
 
-    // XML parsing state
-    private var currentElement = ""
-    private var currentTitle = ""
-    private var currentDescription = ""
-    private var currentLink = ""
-    private var currentPubDate = ""
-    private var currentImageUrl = ""
-    private var currentCategory = ""
-    private var currentContentEncoded = ""
-    private var insideItem = false
-    private var channelTitle = ""
-    private var parsingChannelTitle = false
-
-    private var parsedArticles: [FeedArticle] = []
-    private var currentFeedSource = ""
     private var backgroundTimer: Timer?
+    private var enrichmentTask: Task<Void, Never>?
 
     /// Maximum notifications per fetch cycle to avoid spamming the user
     private let maxNotificationsPerCycle = 3
@@ -35,6 +31,7 @@ class FeedManager: NSObject, ObservableObject, XMLParserDelegate {
     private let fetchIntervalKey = "feed_fetch_interval_minutes"
     private let notificationsEnabledKey = "notifications_enabled"
     private let aiEnabledKey = "ai_enabled"
+    private let privateNotificationsEnabledKey = "private_notifications_enabled"
 
     private let defaultSections = [
         "Entertainment", "Politics", "Business", "Tech",
@@ -72,6 +69,11 @@ class FeedManager: NSObject, ObservableObject, XMLParserDelegate {
         } else {
             aiEnabled = true
         }
+        if UserDefaults.standard.object(forKey: privateNotificationsEnabledKey) != nil {
+            privateNotificationsEnabled = UserDefaults.standard.bool(forKey: privateNotificationsEnabledKey)
+        } else {
+            privateNotificationsEnabled = false
+        }
         loadCachedArticles()
         startBackgroundFetch()
     }
@@ -85,7 +87,14 @@ class FeedManager: NSObject, ObservableObject, XMLParserDelegate {
         } else if !finalURL.hasPrefix("https://") {
             finalURL = "https://" + finalURL
         }
-        guard URL(string: finalURL) != nil else { return }
+        guard let nsURL = URL(string: finalURL) else { return }
+        
+        // SSRF Block Check
+        if let host = nsURL.host, FeedManager.isBlockedLocalAddress(host) {
+            feedStatuses[finalURL] = .failed("Security Block: Local addresses forbidden")
+            // Add it to feedURLs so user sees it in their subscriptions with the error badge
+        }
+        
         guard !feedURLs.contains(finalURL) else { return }
         feedURLs.append(finalURL)
         UserDefaults.standard.set(feedURLs, forKey: feedURLsKey)
@@ -94,8 +103,47 @@ class FeedManager: NSObject, ObservableObject, XMLParserDelegate {
 
     func removeFeed(url: String) {
         feedURLs.removeAll { $0 == url }
+        feedStatuses.removeValue(forKey: url)
         UserDefaults.standard.set(feedURLs, forKey: feedURLsKey)
         fetchFeeds()
+    }
+
+    // MARK: - OPML Import & Export
+
+    @discardableResult
+    func importFeeds(from opmlData: Data) -> Int {
+        let items = OPMLParser.parse(data: opmlData)
+        var addedCount = 0
+        for item in items {
+            var finalURL = item.url.trimmingCharacters(in: .whitespacesAndNewlines)
+            if finalURL.hasPrefix("http://") {
+                finalURL = finalURL.replacingOccurrences(of: "http://", with: "https://")
+            } else if !finalURL.hasPrefix("https://") {
+                finalURL = "https://" + finalURL
+            }
+            guard let nsURL = URL(string: finalURL) else { continue }
+            if let host = nsURL.host, FeedManager.isBlockedLocalAddress(host) {
+                continue
+            }
+            if !feedURLs.contains(finalURL) {
+                feedURLs.append(finalURL)
+                feedStatuses[finalURL] = .idle
+                addedCount += 1
+            }
+            if let folder = item.folder, !folder.isEmpty, !userSections.contains(folder) {
+                userSections.append(folder)
+            }
+        }
+        if addedCount > 0 {
+            UserDefaults.standard.set(feedURLs, forKey: feedURLsKey)
+            UserDefaults.standard.set(userSections, forKey: userSectionsKey)
+            fetchFeeds()
+        }
+        return addedCount
+    }
+
+    func exportOPML() -> String {
+        return OPMLExporter.generateOPML(feedURLs: feedURLs)
     }
 
     // MARK: - Section Management
@@ -125,6 +173,11 @@ class FeedManager: NSObject, ObservableObject, XMLParserDelegate {
     func setAIEnabled(_ enabled: Bool) {
         aiEnabled = enabled
         UserDefaults.standard.set(enabled, forKey: aiEnabledKey)
+    }
+
+    func setPrivateNotificationsEnabled(_ enabled: Bool) {
+        privateNotificationsEnabled = enabled
+        UserDefaults.standard.set(enabled, forKey: privateNotificationsEnabledKey)
     }
 
     // MARK: - Filtering (keyword-based auto-categorization)
@@ -175,146 +228,232 @@ class FeedManager: NSObject, ObservableObject, XMLParserDelegate {
     func startBackgroundFetch() {
         backgroundTimer?.invalidate()
         backgroundTimer = Timer.scheduledTimer(withTimeInterval: fetchIntervalMinutes * 60, repeats: true) { [weak self] _ in
-            self?.fetchFeeds()
+            Task { @MainActor in
+                self?.fetchFeeds()
+            }
         }
     }
 
     // MARK: - Fetch Pipeline
 
     func fetchFeeds() {
-        let group = DispatchGroup()
-        var allParsed = [FeedArticle]()
-        let lock = NSLock()
-
-        for urlString in feedURLs {
-            guard let url = URL(string: urlString) else { continue }
-            group.enter()
-
-            let request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 15)
-            URLSession.shared.dataTask(with: request) { [weak self] data, _, error in
-                defer { group.leave() }
-                guard let _ = self, let data = data, error == nil else { return }
-
-                // Parse this feed synchronously on the background thread
-                let sniffer = String(data: data.prefix(30), encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-                let articlesRes: [FeedArticle]
-                if sniffer.hasPrefix("{") || sniffer.hasPrefix("[") {
-                    articlesRes = JSONFeedParser.parse(data: data, feedURL: urlString) ?? []
-                } else {
-                    let feedParser = FeedXMLParser(data: data, feedURL: urlString)
-                    articlesRes = feedParser.parse()
-                }
-
-                lock.lock()
-                allParsed.append(contentsOf: articlesRes)
-                lock.unlock()
-            }.resume()
+        Task {
+            await fetchFeedsAsync()
         }
+    }
 
-        group.notify(queue: .main) { [weak self] in
-            guard let self = self else { return }
+    func fetchFeedsAsync() async {
+        for url in feedURLs {
+            if case .failed(let msg) = feedStatuses[url], msg.contains("Security Block") {
+                continue
+            }
+            feedStatuses[url] = .loading
+        }
+        isAnyFeedLoading = true
 
-            // Sort by newest
-            allParsed.sort { $0.pubDate > $1.pubDate }
+        let urlsToFetch = feedURLs
 
-            // Check for new articles — use NLP importance scoring
-            let existingIds = Set(self.articles.map { $0.id })
-            let newArticles = allParsed.filter { !existingIds.contains($0.id) }
-
-            self.articles = allParsed
-            CacheManager.shared.save(self.articles, forKey: self.cacheKey)
-
-            // Fire notifications asynchronously with AI triage
-            if self.notificationsEnabled && !newArticles.isEmpty {
-                Task { [weak self] in
-                    guard let self = self else { return }
-                    await self.triageAndNotify(newArticles)
+        let results: [(urlString: String, articles: [FeedArticle]?, error: String?)] = await withTaskGroup(of: (String, [FeedArticle]?, String?).self) { group in
+            for urlString in urlsToFetch {
+                group.addTask {
+                    guard let url = URL(string: urlString) else {
+                        return (urlString, nil, "Malformed URL")
+                    }
+                    if let host = url.host, FeedManager.isBlockedLocalAddress(host) {
+                        return (urlString, nil, "Security Block: Local addresses forbidden")
+                    }
+                    do {
+                        let request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 15)
+                        let (data, response) = try await URLSession.shared.data(for: request)
+                        if let httpResponse = response as? HTTPURLResponse, !(200...299).contains(httpResponse.statusCode) {
+                            return (urlString, nil, "Server returned status code \(httpResponse.statusCode)")
+                        }
+                        let sniffer = String(data: data.prefix(30), encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                        if sniffer.hasPrefix("{") || sniffer.hasPrefix("[") {
+                            if let parsed = JSONFeedParser.parse(data: data, feedURL: urlString) {
+                                return (urlString, parsed, nil)
+                            } else {
+                                return (urlString, nil, "Failed to parse JSON Feed")
+                            }
+                        } else {
+                            let feedParser = FeedXMLParser(data: data, feedURL: urlString)
+                            return (urlString, feedParser.parse(), nil)
+                        }
+                    } catch {
+                        return (urlString, nil, error.localizedDescription)
+                    }
                 }
             }
-
-            // Async AI enrichment + background content fetching
-            self.enrichArticlesInBackground()
+            var acc = [(String, [FeedArticle]?, String?)]()
+            for await res in group {
+                acc.append(res)
+            }
+            return acc
         }
+
+        var allParsed = [FeedArticle]()
+        for res in results {
+            if let err = res.error {
+                feedStatuses[res.urlString] = .failed(err)
+            } else {
+                feedStatuses[res.urlString] = .idle
+                if let arts = res.articles {
+                    allParsed.append(contentsOf: arts)
+                }
+            }
+        }
+
+        isAnyFeedLoading = false
+
+        // Sort by newest
+        allParsed.sort { $0.pubDate > $1.pubDate }
+
+        // Check for new articles — use NLP importance scoring
+        let existingIds = Set(articles.map { $0.id })
+        let newArticles = allParsed.filter { !existingIds.contains($0.id) }
+
+        articles = allParsed
+        CacheManager.shared.save(articles, forKey: cacheKey)
+
+        // Fire notifications asynchronously with AI triage
+        if notificationsEnabled && !newArticles.isEmpty {
+            await triageAndNotify(newArticles)
+        }
+
+        // Async AI enrichment + background content fetching
+        enrichArticlesInBackground()
+    }
+
+    nonisolated static func isBlockedLocalAddress(_ host: String) -> Bool {
+        let lowerHost = host.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        if lowerHost == "localhost" { return true }
+        if lowerHost.hasPrefix("127.") || lowerHost.hasPrefix("10.") || lowerHost.hasPrefix("169.254.") {
+            return true
+        }
+        if lowerHost.hasPrefix("192.168.") {
+            return true
+        }
+        if lowerHost.hasPrefix("172.") {
+            let parts = lowerHost.components(separatedBy: ".")
+            if parts.count >= 2, let secondOctet = Int(parts[1]), (16...31).contains(secondOctet) {
+                return true
+            }
+        }
+        if lowerHost == "::1" || lowerHost.hasPrefix("fe80:") || lowerHost.hasPrefix("fc00:") || lowerHost.hasPrefix("fd00:") {
+            return true
+        }
+        return false
     }
 
     // MARK: - Background Enrichment (AI + Full Content + Categorization)
 
+    struct EnrichedResult: Sendable {
+        let articleId: String
+        let summary: String?
+        let category: String?
+        let content: String?
+        let image: String?
+    }
+
     private func enrichArticlesInBackground() {
         guard aiEnabled else { return }
-        Task.detached(priority: .userInitiated) { [weak self] in
-            guard let self = self else { return }
-            let snapshot = await MainActor.run { self.articles }
+        enrichmentTask?.cancel()
 
-            for (index, article) in snapshot.enumerated() {
-                // 1. AI summary
-                let summary = await AIManager.shared.analyzeArticle(
-                    title: article.title,
-                    description: article.description
-                )
+        let snapshot = articles
 
-                // 2. AI-powered categorization (NLP first, keyword fallback)
-                let aiCategory = await Task { () -> String? in
-                    AIManager.shared.categorizeArticle(
-                        title: article.title,
-                        description: article.description,
-                        rssCategory: article.category
-                    )
-                }.value
+        enrichmentTask = Task {
+            let enrichedItems: [EnrichedResult] = await withTaskGroup(of: EnrichedResult?.self) { group in
+                var activeCount = 0
+                var collected = [EnrichedResult]()
 
-                // 3. Full content fetch + NLP cleaning
-                var fetchedContent: String?
-                var fetchedImage: String?
-                if article.fullContent == nil || article.fullContent!.isEmpty {
-                    let fetchRes = await self.fetchFullContentAndImage(for: article.link)
-                    fetchedContent = fetchRes.0
-                    fetchedImage = fetchRes.1
-                } else {
-                    fetchedContent = article.fullContent
-                }
+                for article in snapshot {
+                    if Task.isCancelled { break }
+                    if activeCount >= 3 {
+                        if let item = await group.next(), let val = item {
+                            collected.append(val)
+                        }
+                        activeCount -= 1
+                    }
 
-                // Clean content with NLP prose detection
-                if let content = fetchedContent, !content.isEmpty {
-                    let cleaned = AIManager.shared.cleanExtractedContent(content)
-                    if !cleaned.isEmpty {
-                        fetchedContent = cleaned
+                    activeCount += 1
+                    group.addTask {
+                        if Task.isCancelled { return nil }
+
+                        let summary = await AIManager.shared.analyzeArticle(
+                            title: article.title,
+                            description: article.description
+                        )
+                        if Task.isCancelled { return nil }
+
+                        let aiCategory = AIManager.shared.categorizeArticle(
+                            title: article.title,
+                            description: article.description,
+                            rssCategory: article.category
+                        )
+                        if Task.isCancelled { return nil }
+
+                        var fetchedContent: String?
+                        var fetchedImage: String?
+                        if article.fullContent == nil || article.fullContent!.isEmpty {
+                            let fetchRes = await FeedManager.fetchFullContentAndImage(for: article.link)
+                            fetchedContent = fetchRes.0
+                            fetchedImage = fetchRes.1
+                        } else {
+                            fetchedContent = article.fullContent
+                        }
+
+                        if Task.isCancelled { return nil }
+
+                        if let content = fetchedContent, !content.isEmpty {
+                            let cleaned = AIManager.shared.cleanExtractedContent(content)
+                            if !cleaned.isEmpty {
+                                fetchedContent = cleaned
+                            }
+                        }
+
+                        return EnrichedResult(
+                            articleId: article.id,
+                            summary: summary,
+                            category: aiCategory,
+                            content: fetchedContent,
+                            image: fetchedImage
+                        )
                     }
                 }
 
-                let contentResult = fetchedContent
-                let summaryResult = summary
-                let categoryResult = aiCategory
-                let imageResult = fetchedImage
-                await MainActor.run {
-                    guard index < self.articles.count else { return }
-                    self.articles[index].aiSummary = summaryResult
-
-                    // Use AI category if RSS didn't provide one
-                    if self.articles[index].category == nil || self.articles[index].category!.isEmpty {
-                        self.articles[index].category = categoryResult
-                    }
-                    
-                    if (self.articles[index].imageUrl == nil || self.articles[index].imageUrl!.isEmpty), let fImg = imageResult {
-                        self.articles[index].imageUrl = fImg
-                    }
-
-                    if let content = contentResult, !content.isEmpty {
-                        self.articles[index].fullContent = content
-                        self.articles[index].contentFetched = true
-                    } else {
-                        self.articles[index].fullContent = article.description
-                        self.articles[index].contentFetched = true
+                for await item in group {
+                    if let val = item {
+                        collected.append(val)
                     }
                 }
+                return collected
             }
 
-            // Save enriched articles to cache
-            await MainActor.run {
+            if !Task.isCancelled {
+                for item in enrichedItems {
+                    if let idx = self.articles.firstIndex(where: { $0.id == item.articleId }) {
+                        self.articles[idx].aiSummary = item.summary
+                        if self.articles[idx].category == nil || self.articles[idx].category!.isEmpty {
+                            self.articles[idx].category = item.category
+                        }
+                        if (self.articles[idx].imageUrl == nil || self.articles[idx].imageUrl!.isEmpty), let fImg = item.image {
+                            self.articles[idx].imageUrl = fImg
+                        }
+                        if let content = item.content, !content.isEmpty {
+                            self.articles[idx].fullContent = content
+                            self.articles[idx].contentFetched = true
+                        } else {
+                            self.articles[idx].fullContent = self.articles[idx].description
+                            self.articles[idx].contentFetched = true
+                        }
+                    }
+                }
                 CacheManager.shared.save(self.articles, forKey: self.cacheKey)
             }
         }
     }
 
-    private func fetchFullContentAndImage(for link: String) async -> (String?, String?) {
+    static func fetchFullContentAndImage(for link: String) async -> (String?, String?) {
         guard let url = URL(string: link) else { return (nil, nil) }
 
         do {
@@ -368,7 +507,7 @@ class FeedManager: NSObject, ObservableObject, XMLParserDelegate {
     // MARK: - HTML Processing Helpers
 
     /// Remove script, style, nav, footer, aside, header, form blocks
-    private func removeBoilerplateBlocks(from html: String) -> String {
+    private static func removeBoilerplateBlocks(from html: String) -> String {
         var result = html
         for tag in ["script", "style", "nav", "footer", "aside", "header", "form", "noscript", "iframe", "svg", "figcaption"] {
             let pattern = "<\(tag)[\\s>].*?</\(tag)>"
@@ -389,7 +528,7 @@ class FeedManager: NSObject, ObservableObject, XMLParserDelegate {
     }
 
     /// Try to find the main article container using common CSS class/tag patterns
-    private func extractArticleContainer(from html: String) -> String? {
+    private static func extractArticleContainer(from html: String) -> String? {
         // Try <article> first
         if let articleContent = extractFirstTag(from: html, tag: "article") {
             if articleContent.count > 500 { return articleContent }
@@ -420,7 +559,7 @@ class FeedManager: NSObject, ObservableObject, XMLParserDelegate {
         return nil
     }
 
-    private func extractFirstTag(from html: String, tag: String) -> String? {
+    private static func extractFirstTag(from html: String, tag: String) -> String? {
         // Find opening tag
         guard let openPattern = try? NSRegularExpression(pattern: "<\(tag)[\\s>]", options: .caseInsensitive),
               let openMatch = openPattern.firstMatch(in: html, range: NSRange(html.startIndex..., in: html)),
@@ -437,7 +576,7 @@ class FeedManager: NSObject, ObservableObject, XMLParserDelegate {
     }
 
     /// Convert HTML to plain text using NSAttributedString — handles nested tags, entities, everything
-    private func htmlToPlainText(_ html: String) -> String {
+    private static func htmlToPlainText(_ html: String) -> String {
         // Wrap in basic HTML structure so NSAttributedString can parse it
         let wrappedHTML = "<html><body>\(html)</body></html>"
         guard wrappedHTML.data(using: .utf8) != nil else {
@@ -450,7 +589,7 @@ class FeedManager: NSObject, ObservableObject, XMLParserDelegate {
     }
 
     /// Regex-based HTML stripping with comprehensive entity decoding
-    private func stripHTMLRegex(_ html: String) -> String {
+    private static func stripHTMLRegex(_ html: String) -> String {
         var result = html
         // Replace <br> and <br/> with newlines
         result = result.replacingOccurrences(of: "<br[^>]*>", with: "\n", options: .regularExpression)
@@ -587,16 +726,23 @@ class FeedManager: NSObject, ObservableObject, XMLParserDelegate {
         // Clean source name
         let sourceName = (article.source.components(separatedBy: "\n").first ?? article.source)
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        content.title = sourceName
-        content.subtitle = article.title
-        content.body = article.description.isEmpty ? "" : String(article.description.prefix(200))
+        
+        if privateNotificationsEnabled {
+            content.title = "New Article"
+            content.subtitle = sourceName
+            content.body = "Open the app to read the latest update."
+        } else {
+            content.title = sourceName
+            content.subtitle = article.title
+            content.body = article.description.isEmpty ? "" : String(article.description.prefix(200))
+        }
         content.sound = .default
 
         // Embed article link for deep-linking on click
         content.userInfo = ["articleLink": article.link]
 
-        // Attach article image if available
-        if let imageUrlString = article.imageUrl, let imageUrl = URL(string: imageUrlString) {
+        // Attach article image if available (only if private notifications are disabled)
+        if !privateNotificationsEnabled, let imageUrlString = article.imageUrl, let imageUrl = URL(string: imageUrlString) {
             if let attachment = await downloadNotificationAttachment(from: imageUrl) {
                 content.attachments = [attachment]
             }
@@ -642,7 +788,7 @@ class FeedManager: NSObject, ObservableObject, XMLParserDelegate {
 
 // MARK: - Standalone XML Parser (no delegate deadlock risk)
 
-private class FeedXMLParser: NSObject, XMLParserDelegate {
+class FeedXMLParser: NSObject, XMLParserDelegate {
     private let data: Data
     private let feedURL: String
     private var articles = [FeedArticle]()
@@ -655,6 +801,7 @@ private class FeedXMLParser: NSObject, XMLParserDelegate {
     private var itemTitle = ""
     private var itemDescription = ""
     private var itemLink = ""
+    private var itemGuid = ""
     private var itemPubDate = ""
     private var itemImageUrl = ""
     private var itemCategory = ""
@@ -687,6 +834,7 @@ private class FeedXMLParser: NSObject, XMLParserDelegate {
                 if !name.isEmpty {
                     articles[i] = FeedArticle(
                         title: articles[i].title, link: articles[i].link,
+                        guid: articles[i].guid,
                         description: articles[i].description, pubDate: articles[i].pubDate,
                         source: name, imageUrl: articles[i].imageUrl,
                         aiSummary: articles[i].aiSummary, fullContent: articles[i].fullContent,
@@ -727,6 +875,7 @@ private class FeedXMLParser: NSObject, XMLParserDelegate {
             itemTitle = ""
             itemDescription = ""
             itemLink = ""
+            itemGuid = ""
             itemPubDate = ""
             itemImageUrl = ""
             itemCategory = ""
@@ -773,6 +922,7 @@ private class FeedXMLParser: NSObject, XMLParserDelegate {
         case "title": itemTitle += string
         case "description", "summary": itemDescription += string
         case "link": itemLink += string
+        case "guid", "id": itemGuid += string
         case "pubDate", "published", "updated": itemPubDate += string
         case "category", "dc:subject": itemCategory += string
         default: break
@@ -790,6 +940,8 @@ private class FeedXMLParser: NSObject, XMLParserDelegate {
             itemDescription += str
         } else if insideItem && currentElement == "title" {
             itemTitle += str
+        } else if insideItem && (currentElement == "guid" || currentElement == "id") {
+            itemGuid += str
         }
     }
 
@@ -843,9 +995,11 @@ private class FeedXMLParser: NSObject, XMLParserDelegate {
                 itemImageUrl = extractImageFromHTML(itemContentEncoded) ?? ""
             }
 
+            let guidVal = itemGuid.trimmingCharacters(in: .whitespacesAndNewlines)
             let article = FeedArticle(
                 title: itemTitle.trimmingCharacters(in: .whitespacesAndNewlines),
                 link: itemLink.trimmingCharacters(in: .whitespacesAndNewlines),
+                guid: guidVal.isEmpty ? nil : guidVal,
                 description: cleanDesc,
                 pubDate: date,
                 source: sourceName.isEmpty ? "Feed" : sourceName,

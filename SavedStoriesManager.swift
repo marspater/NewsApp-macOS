@@ -3,7 +3,8 @@ import Foundation
 /// Persistent storage for saved stories.
 /// Saved stories are stored separately from the article cache
 /// and are NOT cleared when cache is cleared from Settings.
-class SavedStoriesManager: ObservableObject {
+@MainActor
+final class SavedStoriesManager: ObservableObject {
     static let shared = SavedStoriesManager()
 
     @Published var savedArticles: [FeedArticle] = []

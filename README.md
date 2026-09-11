@@ -5,47 +5,45 @@ A breathtaking, lightning-fast native macOS RSS news reader built purely with Sw
 ## ✨ Features
 
 - **Cinematic, Glassmorphic UI:** Immersive edge-to-edge content, transparent title bars, and a carefully curated P3 wide-gamut dark mode palette that makes imagery pop.
+- **Dual Reader & WebKit Mode:** Seamlessly toggle between custom Ghost typography reader and native in-app WebKit engine (`W`), with trackpad swipe navigation gestures.
+- **Vim & Keyboard-First Navigation:** Fluid `J` / `K` browsing, auto-scroll centering, quick bookmarking (`S`), mark read (`M`), browser handoff (`O`), and menu bar shortcuts.
+- **Subscription Portability (OPML):** Full OPML 2.0 import and export (`⇧⌘I`, `⇧⌘E`) compatible with NetNewsWire, Reeder, Feedly, and Feedbin.
 - **On-Device AI Summaries:** Understand the core of any article instantly with AI-generated insights and summaries seamlessly integrated into the feed.
-- **Seamless RSS Integration:** Subscribe to any `.xml` or RSS feed right from the app using the `+` button in the sidebar. Comes pre-loaded with curated topics like Tech, Science, and World News.
-- **Robust Caching Pipeline:** Fast parsing and persistent local caching utilizing a custom `CacheManager` to minimize network and system load.
-- **Saved Stories & History:** Bookmark your favorite stories to a dedicated offline library to read later.
-- **Zero Dependencies:** Custom-built via `swiftc` without Xcode overhead, using a highly optimized unified bash script. 
+- **Robust 512MB Offline Cache:** Automatic `URLCache` policy, persistent JSON feeds, and isolated cache management that preserves reading history.
+- **Zero Dependencies & Self-Contained:** Custom-built via `swiftc` without Xcode overhead, with an automated test suite (`./test.sh`).
 
 ## 🚀 Getting Started
 
 ### Prerequisites
 
 - Apple Silicon (M-Series) Mac
-- macOS 26.4+ target execution (Configured via `build.sh`)
-- Local Command Line Tools for Xcode (Swift CLI, etc.)
+- macOS 26.4+ / macOS 27.0+ (Automatic host detection via `build.sh`)
+- Local Command Line Tools for Xcode (Swift 6.0+ CLI)
 
-### Building & Running
-
-You don't need Xcode to compile NewsApp. Just use the built-in compiler script:
+### Running Tests & Building
 
 ```bash
-# Clone the repository
-git clone git@github.com:marspater/NewsApp-macOS.git
-cd NewsApp-macOS
+# Run unit test suite
+./test.sh
 
-# Build the App
+# Build & codesign the app bundle
 ./build.sh
-```
 
-Once the script completes, the compiled and signed `News.app` will be automatically generated in the root directory. You can launch it by double-clicking it or using the `open` command:
-
-```bash
+# Launch NewsApp
 open News.app
 ```
 
 ## 🧩 Architecture Snapshot
 
-- **`NewsApp.swift` -** The SwiftUI application wrapper customized with `WindowAccessor` to strip standard window borders for a native glassmorphic feel.
-- **`MainView.swift` -** The core UI loop handling the `NavigationSplitView`, detailed article presentation, and typography.
-- **`FeedManager.swift` -** The engine for XML/RSS parsing, asynchronous state management, and section categorization.
-- **`AIManager.swift` -** Handles local prompt generation and response parsing to extract smart insights for articles.
-- **`CacheManager.swift` -** An intelligent on-disk caching layer for offline availability.
-- **`build.sh` -** A one-click compiler wrapping `sips`, `iconutil`, and `swiftc` to construct a fully functioning `.app` bundle from scratch.
+- **`NewsApp.swift` -** The SwiftUI application wrapper with custom menu bar shortcuts, notification routing, and offline cache initialization.
+- **`MainView.swift` -** The core UI loop handling `NavigationSplitView`, dual reader/WebKit views, keyboard navigation, and theme typography.
+- **`ArticleWebView.swift` -** AppKit/WebKit bridge providing gesture-enabled web rendering.
+- **`FeedManager.swift` -** High-concurrency RSS/Atom/JSON feed engine with SSRF validation, TaskGroup parallelism, and OPML synchronization.
+- **`OPMLManager.swift` -** OPML 2.0 XML parser and serializer for seamless feed subscription portability.
+- **`CacheManager.swift` -** 512MB disk/RAM caching subsystem with safe cache size calculation and cache clearing.
+- **`AIManager.swift` -** On-device NaturalLanguage sentiment scoring and entity extraction.
+- **`NewsTests.swift` -** Unit test suite covering security, date normalization, XML/JSON parsing, keyboard logic, and OPML.
+- **`build.sh` & `test.sh` -** Fast CLI toolchain leveraging `swiftc` and macOS build utilities.
 
 ## 🎨 Asset Generation
 

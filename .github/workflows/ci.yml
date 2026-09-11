@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-and-build:
+    name: Build & Test (macOS)
+    runs-on: macos-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: System Environment Info
+        run: |
+          echo "Host OS: $(sw_vers -productName) $(sw_vers -productVersion) ($(sw_vers -buildVersion))"
+          echo "Architecture: $(uname -m)"
+          echo "Swift CLI: $(swift --version | head -n 1)"
+          if command -v xcodebuild &>/dev/null; then
+            echo "Xcode: $(xcodebuild -version | tr '\n' ' ')"
+          fi
+
+      - name: Ensure Executable Permissions
+        run: |
+          chmod +x test.sh build.sh
+
+      - name: Run Unit Tests
+        run: |
+          ./test.sh
+
+      - name: Build Application Bundle
+        run: |
+          ./build.sh
+
+      - name: Verify Bundle Integrity
+        run: |
+          test -d "News.app" || { echo "Error: News.app directory missing"; exit 1; }
+          test -x "News.app/Contents/MacOS/News" || { echo "Error: Executable binary missing"; exit 1; }
+          plutil -lint "News.app/Contents/Info.plist"
+          codesign --verify --deep --strict "News.app"
+          echo "✅ Bundle integrity verified successfully."
+
+      - name: Archive Application Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: News-app-${{ runner.arch }}
+          path: News.app
+          if-no-files-found: error

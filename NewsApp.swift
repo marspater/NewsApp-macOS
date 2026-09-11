@@ -2,9 +2,16 @@ import SwiftUI
 import AppKit
 import UserNotifications
 
-/// Notification posted when the user clicks a notification banner to open an article.
+/// Notification posted when the user clicks a notification banner or uses keyboard navigation.
 extension Notification.Name {
     static let openArticleFromNotification = Notification.Name("openArticleFromNotification")
+    static let refreshFeedsCommand = Notification.Name("refreshFeedsCommand")
+    static let nextArticleCommand = Notification.Name("nextArticleCommand")
+    static let prevArticleCommand = Notification.Name("prevArticleCommand")
+    static let toggleReadCommand = Notification.Name("toggleReadCommand")
+    static let toggleSaveCommand = Notification.Name("toggleSaveCommand")
+    static let openInBrowserCommand = Notification.Name("openInBrowserCommand")
+    static let toggleViewModeCommand = Notification.Name("toggleViewModeCommand")
 }
 
 @main
@@ -26,6 +33,59 @@ struct NewsApp: App {
         .windowStyle(HiddenTitleBarWindowStyle())
         .commands {
             SidebarCommands()
+            CommandGroup(replacing: .importExport) {
+                Button("Import Subscriptions (OPML)...") {
+                    OPMLDialogs.importOPML { data in
+                        feedManager.importFeeds(from: data)
+                    }
+                }
+                .keyboardShortcut("i", modifiers: [.command, .shift])
+
+                Button("Export Subscriptions (OPML)...") {
+                    let opml = feedManager.exportOPML()
+                    OPMLDialogs.exportOPML(xmlString: opml)
+                }
+                .keyboardShortcut("e", modifiers: [.command, .shift])
+            }
+            CommandGroup(after: .sidebar) {
+                Button("Refresh Feeds") {
+                    NotificationCenter.default.post(name: .refreshFeedsCommand, object: nil)
+                }
+                .keyboardShortcut("r", modifiers: .command)
+            }
+            CommandMenu("Navigate") {
+                Button("Next Article") {
+                    NotificationCenter.default.post(name: .nextArticleCommand, object: nil)
+                }
+                .keyboardShortcut("j", modifiers: .command)
+
+                Button("Previous Article") {
+                    NotificationCenter.default.post(name: .prevArticleCommand, object: nil)
+                }
+                .keyboardShortcut("k", modifiers: .command)
+
+                Divider()
+
+                Button("Toggle Read / Unread") {
+                    NotificationCenter.default.post(name: .toggleReadCommand, object: nil)
+                }
+                .keyboardShortcut("u", modifiers: [.command, .shift])
+
+                Button("Save / Bookmark Article") {
+                    NotificationCenter.default.post(name: .toggleSaveCommand, object: nil)
+                }
+                .keyboardShortcut("s", modifiers: .command)
+
+                Button("Open in Browser") {
+                    NotificationCenter.default.post(name: .openInBrowserCommand, object: nil)
+                }
+                .keyboardShortcut("o", modifiers: .command)
+
+                Button("Toggle Reader / Web View") {
+                    NotificationCenter.default.post(name: .toggleViewModeCommand, object: nil)
+                }
+                .keyboardShortcut("w", modifiers: [.command, .shift])
+            }
         }
         
         Settings {
@@ -38,8 +98,10 @@ struct NewsApp: App {
     }
 }
 
+@MainActor
 class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
+        CacheManager.shared.configureOfflineCache()
         // Request Notification Permissions on App Launch
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { _, _ in
             // Notification authorization handled silently
@@ -48,18 +110,23 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
     }
     
     // Force macOS to show alert even if app is focused
-    func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification, withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
+    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification, withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
         completionHandler([.banner, .sound])
     }
     
     // Handle notification click — deep link to the article
-    func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse, withCompletionHandler completionHandler: @escaping () -> Void) {
+    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse, withCompletionHandler completionHandler: @escaping () -> Void) {
         let userInfo = response.notification.request.content.userInfo
         if let articleLink = userInfo["articleLink"] as? String {
-            // Bring app to front
-            NSApp.activate(ignoringOtherApps: true)
-            // Post notification for MainView to pick up
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            Task { @MainActor in
+                // Bring app to front
+                if #available(macOS 14.0, *) {
+                    NSApp.activate()
+                } else {
+                    NSApp.activate(ignoringOtherApps: true)
+                }
+                // Post notification for MainView to pick up
+                try? await Task.sleep(nanoseconds: 300_000_000)
                 NotificationCenter.default.post(
                     name: .openArticleFromNotification,
                     object: nil,

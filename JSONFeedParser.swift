@@ -67,6 +67,7 @@ class JSONFeedParser {
                 let article = FeedArticle(
                     title: title.trimmingCharacters(in: .whitespacesAndNewlines),
                     link: link,
+                    guid: item.id,
                     description: cleanDesc,
                     pubDate: pubDate,
                     source: sourceName,

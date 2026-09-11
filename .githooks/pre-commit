@@ -1,0 +1,6 @@
+#!/bin/bash
+set -e
+
+echo "🔍 Running pre-commit validation..."
+./test.sh
+echo "✅ All tests passed. Proceeding with commit."

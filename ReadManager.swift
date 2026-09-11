@@ -1,6 +1,7 @@
 import Foundation
 
-class ReadManager: ObservableObject {
+@MainActor
+final class ReadManager: ObservableObject {
     static let shared = ReadManager()
     
     @Published var readArticles: Set<String> = []

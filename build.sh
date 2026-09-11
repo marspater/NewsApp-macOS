@@ -7,7 +7,11 @@ CONTENTS_DIR="${APP_DIR}/Contents"
 MACOS_DIR="${CONTENTS_DIR}/MacOS"
 RESOURCES_DIR="${CONTENTS_DIR}/Resources"
 
-echo "Building ${APP_NAME} v2.0..."
+# Target macOS configuration (defaults to host macOS version or TARGET_MACOS env var)
+HOST_MACOS_VER=$(sw_vers -productVersion 2>/dev/null | cut -d. -f1,2 || echo "27.0")
+TARGET_MACOS="${TARGET_MACOS:-$HOST_MACOS_VER}"
+
+echo "Building ${APP_NAME} v2.0 for macOS ${TARGET_MACOS} ($(uname -m))..."
 
 # Clean old build
 rm -rf "${APP_DIR}"
@@ -63,7 +67,7 @@ if [ -f "Assets/AppIcon.icns" ]; then
 fi
 
 # Compile Swift files (exclude any standalone scripts)
-swiftc -O -parse-as-library -target $(uname -m)-apple-macos26.4 \
+swiftc -O -parse-as-library -target $(uname -m)-apple-macos${TARGET_MACOS} \
     DateParser.swift \
     JSONFeedParser.swift \
     ReadManager.swift \
@@ -75,6 +79,8 @@ swiftc -O -parse-as-library -target $(uname -m)-apple-macos26.4 \
     MainView.swift \
     SettingsView.swift \
     SavedStoriesManager.swift \
+    OPMLManager.swift \
+    ArticleWebView.swift \
     NewsApp.swift \
     -o "${MACOS_DIR}/${APP_NAME}"
 
@@ -99,7 +105,7 @@ cat > "${CONTENTS_DIR}/Info.plist" <<EOF
     <key>CFBundleVersion</key>
     <string>3</string>
     <key>LSMinimumSystemVersion</key>
-    <string>26.4</string>
+    <string>${LS_MIN_VERSION:-14.0}</string>
     <key>NSSupportsAutomaticGraphicsSwitching</key>
     <true/>
 </dict>
