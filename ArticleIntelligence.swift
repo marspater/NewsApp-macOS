@@ -64,10 +64,6 @@ public enum GenerableNewsCategory: String, CaseIterable, Sendable, Codable {
     case food = "Food"
     case fashion = "Fashion"
     case lifestyle = "Lifestyle"
-
-    var toDomainCategory: NewsCategory {
-        NewsCategory(rawValue: self.rawValue) ?? .technology
-    }
 }
 
 @available(macOS 26.0, *)
@@ -592,7 +588,7 @@ public final class ArticleClassifier: Sendable {
                 """
 
                 let response = try await session.respond(to: prompt, generating: GenerableClassificationOutput.self)
-                let modelCategory = response.content.category.toDomainCategory.rawValue
+                let modelCategory = response.content.category.rawValue
                 let confidence = response.content.confidence
 
                 // Confidence evaluation policy:
