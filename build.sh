@@ -69,6 +69,14 @@ fi
 # Compile Swift files (exclude any standalone scripts)
 swiftc -O -parse-as-library -target $(uname -m)-apple-macos${TARGET_MACOS} \
     DateParser.swift \
+    FeedError.swift \
+    IPAddressValidator.swift \
+    SecureHTTPClient.swift \
+    AppSettings.swift \
+    FeedXMLParser.swift \
+    WebContentExtractor.swift \
+    NotificationService.swift \
+    FeedFetcher.swift \
     JSONFeedParser.swift \
     ReadManager.swift \
     ThemeManager.swift \

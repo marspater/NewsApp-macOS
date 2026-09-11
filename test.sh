@@ -7,6 +7,14 @@ TARGET_MACOS="${TARGET_MACOS:-$HOST_MACOS_VER}"
 echo "Compiling tests for macOS ${TARGET_MACOS} ($(uname -m))..."
 swiftc -O -target $(uname -m)-apple-macos${TARGET_MACOS} \
     DateParser.swift \
+    FeedError.swift \
+    IPAddressValidator.swift \
+    SecureHTTPClient.swift \
+    AppSettings.swift \
+    FeedXMLParser.swift \
+    WebContentExtractor.swift \
+    NotificationService.swift \
+    FeedFetcher.swift \
     JSONFeedParser.swift \
     ReadManager.swift \
     ThemeManager.swift \

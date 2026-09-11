@@ -13,6 +13,11 @@ struct ArticleWebView: NSViewRepresentable {
 
     func makeNSView(context: Context) -> WKWebView {
         let configuration = WKWebViewConfiguration()
+        let preferences = WKWebpagePreferences()
+        preferences.allowsContentJavaScript = true
+        configuration.defaultWebpagePreferences = preferences
+        configuration.preferences.isFraudulentWebsiteWarningEnabled = true
+
         let webView = WKWebView(frame: .zero, configuration: configuration)
         webView.allowsBackForwardNavigationGestures = true
         webView.navigationDelegate = context.coordinator
@@ -38,6 +43,41 @@ struct ArticleWebView: NSViewRepresentable {
 
         init(_ parent: ArticleWebView) {
             self.parent = parent
+        }
+
+        func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+            guard let requestURL = navigationAction.request.url else {
+                decisionHandler(.cancel)
+                return
+            }
+
+            // 1. Strict scheme policy: only HTTPS and HTTP
+            guard let scheme = requestURL.scheme?.lowercased(), scheme == "https" || scheme == "http" else {
+                decisionHandler(.cancel)
+                return
+            }
+
+            // 2. Prevent navigation to local or intranet IP hosts
+            if let host = requestURL.host {
+                let cleanHost = host.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                if cleanHost == "localhost" || cleanHost.hasSuffix(".local") || cleanHost.hasSuffix(".internal") {
+                    decisionHandler(.cancel)
+                    return
+                }
+                if IPAddressValidator.checkLiteralIP(cleanHost) != nil {
+                    decisionHandler(.cancel)
+                    return
+                }
+            }
+
+            // 3. Delegate target="_blank" popups to external default browser
+            if navigationAction.targetFrame == nil {
+                NSWorkspace.shared.open(requestURL)
+                decisionHandler(.cancel)
+                return
+            }
+
+            decisionHandler(.allow)
         }
 
         func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {

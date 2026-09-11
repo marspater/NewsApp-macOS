@@ -30,6 +30,7 @@ extension Notification.Name {
 // MARK: - Main View
 struct MainView: View {
     @State private var selectedTopic: String? = "Today"
+    @EnvironmentObject private var appSettings: AppSettings
     @EnvironmentObject private var feedManager: FeedManager
     @EnvironmentObject private var themeManager: ThemeManager
     @EnvironmentObject private var readManager: ReadManager
@@ -284,8 +285,8 @@ struct MainView: View {
                                                     .foregroundColor(.red)
                                             }
                                             ForEach(Array(failedFeeds.keys.prefix(3)), id: \.self) { failedUrl in
-                                                if case .failed(let errMsg) = feedManager.feedStatuses[failedUrl] {
-                                                    Text("\(failedUrl): \(errMsg)")
+                                                if case .failed(let err) = feedManager.feedStatuses[failedUrl] {
+                                                    Text("\(failedUrl): \(err.localizedDescription)")
                                                         .font(.system(size: 11, design: .monospaced))
                                                         .foregroundColor(textSecondary)
                                                         .lineLimit(1)

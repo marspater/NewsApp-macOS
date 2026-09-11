@@ -4,6 +4,7 @@ private let stAccentPink = Color(.displayP3, red: 1.0, green: 0.22, blue: 0.50, 
 private let stTextSecondary = Color.secondary
 
 struct SettingsView: View {
+    @EnvironmentObject var appSettings: AppSettings
     @EnvironmentObject var feedManager: FeedManager
     @EnvironmentObject var themeManager: ThemeManager
     @EnvironmentObject var readManager: ReadManager
@@ -114,11 +115,11 @@ struct SettingsView: View {
                                 .scaleEffect(0.7)
                                 .frame(width: 14, height: 14)
                                 .help("Fetching updates...")
-                        case .failed(let errMsg):
+                        case .failed(let err):
                             Image(systemName: "exclamationmark.triangle.fill")
                                 .foregroundColor(.red)
                                 .font(.system(size: 14))
-                                .help(errMsg)
+                                .help(err.localizedDescription)
                         }
                         Text(urlString)
                             .font(.system(size: 13, weight: .medium))
@@ -144,7 +145,7 @@ struct SettingsView: View {
         Form {
             Section {
                 Picker("Background Fetch Interval", selection: Binding(
-                    get: { feedManager.fetchIntervalMinutes },
+                    get: { appSettings.fetchIntervalMinutes },
                     set: { feedManager.setFetchInterval(minutes: $0) }
                 )) {
                     Text("15 minutes").tag(15.0)
@@ -156,17 +157,17 @@ struct SettingsView: View {
             
             Section {
                 Toggle("Push Notifications", isOn: Binding(
-                    get: { feedManager.notificationsEnabled },
-                    set: { feedManager.setNotificationsEnabled($0) }
+                    get: { appSettings.notificationsEnabled },
+                    set: { appSettings.setNotificationsEnabled($0) }
                 ))
                 Text("Get alerts for important stories matching your interests")
                     .font(.caption)
                     .foregroundColor(stTextSecondary)
                 
-                if feedManager.notificationsEnabled {
+                if appSettings.notificationsEnabled {
                     Toggle("Private Notification Details", isOn: Binding(
-                        get: { feedManager.privateNotificationsEnabled },
-                        set: { feedManager.setPrivateNotificationsEnabled($0) }
+                        get: { appSettings.privateNotificationsEnabled },
+                        set: { appSettings.setPrivateNotificationsEnabled($0) }
                     ))
                     Text("Hide article titles and descriptions on notification banners")
                         .font(.caption)
@@ -174,10 +175,18 @@ struct SettingsView: View {
                 }
                     
                 Toggle("AI Article Analysis", isOn: Binding(
-                    get: { feedManager.aiEnabled },
-                    set: { feedManager.setAIEnabled($0) }
+                    get: { appSettings.aiEnabled },
+                    set: { appSettings.setAIEnabled($0) }
                 ))
                 Text("Uses on-device NLP for sentiment scoring and entity extraction")
+                    .font(.caption)
+                    .foregroundColor(stTextSecondary)
+
+                Toggle("Allow Insecure HTTP Feeds", isOn: Binding(
+                    get: { appSettings.allowInsecureHTTP },
+                    set: { appSettings.setAllowInsecureHTTP($0) }
+                ))
+                Text("Permit non-HTTPS feeds (Warning: unencrypted traffic over the network)")
                     .font(.caption)
                     .foregroundColor(stTextSecondary)
             }
