@@ -661,7 +661,7 @@ struct SettingsView: View {
         }
     }
 
-    nonisolated private func calculateDatabaseBytes() -> Int64 {
+    private func calculateDatabaseBytes() -> Int64 {
         let fileManager = FileManager.default
         guard let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else { return 0 }
         let dbDir = appSupport.appendingPathComponent("com.marspater.news", isDirectory: true)
@@ -677,7 +677,7 @@ struct SettingsView: View {
         return total
     }
 
-    nonisolated private static func formatBytes(_ bytes: Int64) -> String {
+    private static func formatBytes(_ bytes: Int64) -> String {
         if bytes < 1024 { return "\(bytes) B" }
         if bytes < 1024 * 1024 { return String(format: "%.1f KB", Double(bytes) / 1024.0) }
         return String(format: "%.1f MB", Double(bytes) / (1024.0 * 1024.0))

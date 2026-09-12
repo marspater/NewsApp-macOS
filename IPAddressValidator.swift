@@ -96,7 +96,7 @@ struct IPAddressValidator: Sendable {
                     }
                     var addr = sin.sin_addr
                     inet_ntop(AF_INET, &addr, &ipBuffer, socklen_t(INET_ADDRSTRLEN))
-                    resolvedIPs.append(String(cString: ipBuffer))
+                    resolvedIPs.append(ipBuffer.withUnsafeBufferPointer { String(cString: $0.baseAddress!) })
                 } else if family == AF_INET6 {
                     let sin6 = aiAddr.withMemoryRebound(to: sockaddr_in6.self, capacity: 1) { $0.pointee }
                     if let reason = isBlockedIPv6(sin6.sin6_addr) {
@@ -104,7 +104,7 @@ struct IPAddressValidator: Sendable {
                     }
                     var addr6 = sin6.sin6_addr
                     inet_ntop(AF_INET6, &addr6, &ipBuffer, socklen_t(INET6_ADDRSTRLEN))
-                    resolvedIPs.append(String(cString: ipBuffer))
+                    resolvedIPs.append(ipBuffer.withUnsafeBufferPointer { String(cString: $0.baseAddress!) })
                 }
             }
             current = ptr.pointee.ai_next
