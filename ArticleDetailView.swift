@@ -180,10 +180,11 @@ struct ArticleDetailView: View {
     }
 
     private func configureSwipeCoordinator() {
-        swipeCoordinator.onSwipeRight = {
-            if hasPrevArticle {
+        swipeCoordinator.onSwipeRight = { [self] in
+            // Standard macOS swipe-back: return to article list
+            if !path.isEmpty {
                 withAnimation(reduceMotion ? .none : .spring(response: 0.35, dampingFraction: 0.85)) {
-                    prevArticle()
+                    path.removeLast()
                 }
             }
         }
@@ -617,10 +618,8 @@ struct ArticleDetailView: View {
         .background(.ultraThinMaterial, in: Capsule())
         .background(AppColor.surface.opacity(0.65), in: Capsule())
         .overlay(Capsule().stroke(Color.white.opacity(0.18), lineWidth: 0.75))
-        .liquidGlass(in: Capsule(), interactive: false)
-        .inGlassContainer()
         .shadow(color: Color.black.opacity(0.25), radius: 14, x: 0, y: 4)
-        .opacity(isToolbarCompacted && !isToolbarHovered ? 0.7 : 1.0)
+        .opacity(isToolbarCompacted && !isToolbarHovered ? 0.92 : 1.0)
         .onHover { isToolbarHovered = $0 }
         .animation(.easeInOut(duration: 0.2), value: isToolbarCompacted)
         .animation(.easeInOut(duration: 0.15), value: isToolbarHovered)

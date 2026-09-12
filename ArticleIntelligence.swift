@@ -954,19 +954,10 @@ public enum ArticleContentRedactor {
 // MARK: - Article Preview Policy
 
 public enum ArticlePreviewPolicy {
-    /// Binds extracted article content to an editorial preview at clean paragraph boundaries.
-    /// Does not truncate by character count.
-    /// Preserves full description paragraphs if fullContent is absent.
-    /// Avoids leaving 1-paragraph orphans by allowing up to 4 paragraphs without truncation.
+    /// Returns all clean paragraphs for display. The reader shows full extracted content.
+    /// The terminal affordance provides access to the original web page.
     public static func computePreview(paragraphs: [String], isExtracted: Bool) -> [String] {
-        guard isExtracted else {
-            return paragraphs
-        }
-        if paragraphs.count <= 4 {
-            return paragraphs
-        } else {
-            return Array(paragraphs.prefix(3))
-        }
+        return paragraphs
     }
 }
 

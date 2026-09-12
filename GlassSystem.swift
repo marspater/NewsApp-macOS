@@ -27,55 +27,38 @@ public struct GlassControlModifier<S: Shape>: ViewModifier {
                 .background(AppColor.surface, in: shape)
                 .overlay(shape.stroke(AppColor.borderSubtle, lineWidth: 1))
         } else {
-            if #available(macOS 26.0, *) {
-                content
-                    .background {
-                        Color.clear
-                            .glassEffect(interactive ? AppGlass.interactive : AppGlass.control, in: shape)
-                    }
-                    .overlay(
-                        shape.stroke(
-                            LinearGradient(
-                                colors: [
-                                    Color.white.opacity(0.28),
-                                    Color.white.opacity(0.08)
-                                ],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            ),
-                            lineWidth: 0.5
-                        )
-                    )
-            } else {
-                content
-                    .background(.ultraThinMaterial, in: shape)
-                    .background(
+            // Diffuse frosted material for all macOS versions.
+            // The macOS 26 glassEffect() API applies a caustic optical refraction
+            // shader that inverts/mirrors text behind it — so we use ultraThinMaterial
+            // with a diffuse specular gradient fill and rim stroke instead.
+            content
+                .background(.ultraThinMaterial, in: shape)
+                .background(
+                    LinearGradient(
+                        colors: [
+                            Color.white.opacity(0.12),
+                            Color.white.opacity(0.02)
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ),
+                    in: shape
+                )
+                .overlay(
+                    shape.stroke(
                         LinearGradient(
                             colors: [
+                                Color.white.opacity(0.4),
                                 Color.white.opacity(0.12),
-                                Color.white.opacity(0.02)
+                                AppColor.borderSubtle
                             ],
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing
                         ),
-                        in: shape
+                        lineWidth: 0.75
                     )
-                    .overlay(
-                        shape.stroke(
-                            LinearGradient(
-                                colors: [
-                                    Color.white.opacity(0.4),
-                                    Color.white.opacity(0.12),
-                                    AppColor.borderSubtle
-                                ],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            ),
-                            lineWidth: 0.75
-                        )
-                    )
-                    .shadow(color: Color.black.opacity(0.14), radius: 8, x: 0, y: 3)
-            }
+                )
+                .shadow(color: Color.black.opacity(0.14), radius: 8, x: 0, y: 3)
         }
     }
 }

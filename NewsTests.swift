@@ -1746,15 +1746,15 @@ struct NewsTests {
     static func testArticleDetailReadingExperienceOverhaul() async {
         print("  - Testing Article Detail Reading Experience Overhaul...")
 
-        // 1. Preview Truncation Policy
+        // 1. Preview Policy — now shows all content
         let sixParagraphs = (1...6).map { "Paragraph \($0) with substantive content describing current world events." }
-        let truncated = ArticlePreviewPolicy.computePreview(paragraphs: sixParagraphs, isExtracted: true)
-        assertEqual(truncated.count, 3, "Articles with >4 paragraphs should truncate to first 3 paragraphs")
-        assertEqual(truncated.first, "Paragraph 1 with substantive content describing current world events.", "First paragraph should be preserved")
+        let allShown = ArticlePreviewPolicy.computePreview(paragraphs: sixParagraphs, isExtracted: true)
+        assertEqual(allShown.count, 6, "All extracted paragraphs should be shown in reader")
+        assertEqual(allShown.first, "Paragraph 1 with substantive content describing current world events.", "First paragraph should be preserved")
 
         let fourParagraphs = (1...4).map { "Paragraph \($0) with substantive content." }
-        let notTruncatedFour = ArticlePreviewPolicy.computePreview(paragraphs: fourParagraphs, isExtracted: true)
-        assertEqual(notTruncatedFour.count, 4, "Articles with <=4 paragraphs should not leave a 1-paragraph orphan")
+        let allFour = ArticlePreviewPolicy.computePreview(paragraphs: fourParagraphs, isExtracted: true)
+        assertEqual(allFour.count, 4, "All paragraphs should be preserved")
 
         let descriptionParagraphs = ["Brief summary paragraph from RSS feed."]
         let fallbackPreview = ArticlePreviewPolicy.computePreview(paragraphs: descriptionParagraphs, isExtracted: false)
