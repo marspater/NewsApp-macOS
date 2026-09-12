@@ -85,6 +85,7 @@ SWIFT_SOURCES=(
     RefreshCoordinator.swift
     NewsSignposts.swift
     UpdateChecker.swift
+    AppContainer.swift
     NewsApp.swift
 )
 

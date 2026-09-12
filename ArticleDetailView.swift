@@ -102,6 +102,7 @@ struct ArticleDetailView: View {
     @State private var isToolbarHovered: Bool = false
     @State private var articleScrollPositions: [String: CGFloat] = [:]
     @StateObject private var swipeCoordinator = TrackpadSwipeCoordinator()
+    @FocusState private var isViewFocused: Bool
 
     init(article: FeedArticle, allArticles: [FeedArticle] = [], path: Binding<NavigationPath>) {
         self._activeArticle = State(initialValue: article)
@@ -149,6 +150,8 @@ struct ArticleDetailView: View {
             topGlassToolbar
                 .zIndex(100)
         }
+        .focusable()
+        .focused($isViewFocused)
         .onKeyPress { press in
             handleKeyPress(press: press)
         }
@@ -164,7 +167,7 @@ struct ArticleDetailView: View {
             openInBrowser()
         }
         .onReceive(NotificationCenter.default.publisher(for: .detailToggleViewMode)) { _ in
-            viewMode = (viewMode == .reader ? .web : .reader)
+            viewMode = (viewMode == .reader) ? .web : .reader
         }
         .task(id: activeArticle.id) {
             cancelTasks()
@@ -174,6 +177,7 @@ struct ArticleDetailView: View {
             await startArticleAnalysis()
         }
         .onAppear {
+            isViewFocused = true
             configureSwipeCoordinator()
         }
         .onChange(of: viewMode) { _, newMode in
@@ -258,12 +262,14 @@ struct ArticleDetailView: View {
                     Spacer().frame(height: 80)
                 }
                 .padding(.horizontal, 40)
-                .padding(.top, currentArticle.imageUrl != nil ? 18 : (AppLayout.toolbarHeight + 68))
+                .padding(.top, 20)
                 .frame(maxWidth: 740, alignment: .leading)
                 .frame(maxWidth: .infinity, alignment: .center)
             }
         }
-        .ignoresSafeArea(edges: .top)
+        .safeAreaInset(edge: .top) {
+            Color.clear.frame(height: 50)
+        }
         .onScrollGeometryChange(for: CGFloat.self) { geo in
             geo.contentOffset.y
         } action: { _, newOffset in
@@ -487,7 +493,7 @@ struct ArticleDetailView: View {
 
     private var webViewContainer: some View {
         VStack(spacing: 0) {
-            Spacer().frame(height: AppLayout.toolbarHeight + 20)
+            Spacer().frame(height: 50)
 
             if isWebLoading {
                 ProgressView()
@@ -539,7 +545,9 @@ struct ArticleDetailView: View {
                         .font(.system(size: 13, weight: .medium))
                 }
                 .foregroundColor(AppColor.primaryText)
-                .contentShape(Rectangle())
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(AppColor.surface.opacity(0.6), in: RoundedRectangle(cornerRadius: 8))
             }
             .buttonStyle(.plain)
             .keyboardShortcut(.escape, modifiers: [])
@@ -555,11 +563,13 @@ struct ArticleDetailView: View {
                         Image(systemName: "chevron.backward")
                             .font(.system(size: 12, weight: .semibold))
                             .foregroundColor(webCanGoBack ? AppColor.primaryText : AppColor.tertiaryText)
-                            .frame(width: 24, height: 24)
+                            .frame(width: 28, height: 28)
+                            .background(AppColor.surface.opacity(0.5), in: RoundedRectangle(cornerRadius: 6))
                     }
                     .buttonStyle(.plain)
                     .disabled(!webCanGoBack)
                     .help("Browser History Back")
+                    .accessibilityLabel("Browser History Back")
 
                     Button {
                         webAction = .goForward
@@ -567,89 +577,93 @@ struct ArticleDetailView: View {
                         Image(systemName: "chevron.forward")
                             .font(.system(size: 12, weight: .semibold))
                             .foregroundColor(webCanGoForward ? AppColor.primaryText : AppColor.tertiaryText)
-                            .frame(width: 24, height: 24)
+                            .frame(width: 28, height: 28)
+                            .background(AppColor.surface.opacity(0.5), in: RoundedRectangle(cornerRadius: 6))
                     }
                     .buttonStyle(.plain)
                     .disabled(!webCanGoForward)
                     .help("Browser History Forward")
+                    .accessibilityLabel("Browser History Forward")
                 }
             }
 
-            Divider()
-                .frame(height: 16)
-                .opacity(0.3)
+            Spacer()
 
-            // 3. Article Paging (in reader mode)
-            if !allArticles.isEmpty {
-                HStack(spacing: 2) {
-                    Button {
-                        prevArticle()
-                    } label: {
-                        Image(systemName: "chevron.up")
-                            .font(.system(size: 11, weight: .bold))
-                            .foregroundColor(hasPrevArticle ? AppColor.primaryText : AppColor.tertiaryText)
-                            .frame(width: 24, height: 24)
-                    }
-                    .buttonStyle(.plain)
-                    .keyboardShortcut(.upArrow, modifiers: [])
-                    .disabled(!hasPrevArticle)
-                    .help("Previous Article (K or ↑)")
+            // 3. Article Paging & Mode Switcher
+            HStack(spacing: 10) {
+                if !allArticles.isEmpty {
+                    HStack(spacing: 2) {
+                        Button {
+                            prevArticle()
+                        } label: {
+                            Image(systemName: "chevron.up")
+                                .font(.system(size: 11, weight: .bold))
+                                .foregroundColor(hasPrevArticle ? AppColor.primaryText : AppColor.tertiaryText)
+                                .frame(width: 26, height: 26)
+                        }
+                        .buttonStyle(.plain)
+                        .keyboardShortcut(.upArrow, modifiers: [])
+                        .disabled(!hasPrevArticle)
+                        .help("Previous Article (K or ↑)")
+                        .accessibilityLabel("Previous Article")
 
-                    Button {
-                        nextArticle()
-                    } label: {
-                        Image(systemName: "chevron.down")
-                            .font(.system(size: 11, weight: .bold))
-                            .foregroundColor(hasNextArticle ? AppColor.primaryText : AppColor.tertiaryText)
-                            .frame(width: 24, height: 24)
+                        Button {
+                            nextArticle()
+                        } label: {
+                            Image(systemName: "chevron.down")
+                                .font(.system(size: 11, weight: .bold))
+                                .foregroundColor(hasNextArticle ? AppColor.primaryText : AppColor.tertiaryText)
+                                .frame(width: 26, height: 26)
+                        }
+                        .buttonStyle(.plain)
+                        .keyboardShortcut(.downArrow, modifiers: [])
+                        .disabled(!hasNextArticle)
+                        .help("Next Article (J or ↓)")
+                        .accessibilityLabel("Next Article")
                     }
-                    .buttonStyle(.plain)
-                    .keyboardShortcut(.downArrow, modifiers: [])
-                    .disabled(!hasNextArticle)
-                    .help("Next Article (J or ↓)")
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 2)
+                    .background(AppColor.surface.opacity(0.5), in: RoundedRectangle(cornerRadius: 6))
                 }
 
-                Divider()
-                    .frame(height: 16)
-                    .opacity(0.3)
+                Picker("", selection: $viewMode) {
+                    Label("Reader", systemImage: "doc.plaintext").tag(DetailViewMode.reader)
+                    Label("Web", systemImage: "safari").tag(DetailViewMode.web)
+                }
+                .pickerStyle(.segmented)
+                .frame(width: 145)
+                .focusable(false)
+                .help("Toggle Reader / Web view (W)")
             }
 
-            // 4. View Mode Segmented Switcher
-            Picker("", selection: $viewMode) {
-                Label("Reader", systemImage: "doc.plaintext").tag(DetailViewMode.reader)
-                Label("Web", systemImage: "safari").tag(DetailViewMode.web)
-            }
-            .pickerStyle(.segmented)
-            .frame(width: 140)
-            .focusable(false)
-            .help("Toggle Reader / Web view (W)")
+            Spacer()
 
-            Divider()
-                .frame(height: 16)
-                .opacity(0.3)
-
-            // 5. Actions: Bookmark, Share, Menu
-            HStack(spacing: 6) {
+            // 4. Actions: Bookmark, Share, Menu
+            HStack(spacing: 8) {
                 Button {
                     toggleSave()
                 } label: {
                     Image(systemName: isSaved ? "bookmark.fill" : "bookmark")
                         .font(.system(size: 13, weight: .medium))
                         .foregroundColor(isSaved ? AppColor.accent : AppColor.primaryText)
-                        .frame(width: 26, height: 24)
+                        .frame(width: 28, height: 28)
+                        .background(AppColor.surface.opacity(0.5), in: RoundedRectangle(cornerRadius: 6))
                 }
                 .buttonStyle(.plain)
-                .help("Save Story (S)")
+                .help(isSaved ? "Remove from Saved Stories (S)" : "Save Story (S)")
+                .accessibilityLabel(isSaved ? "Remove from Saved Stories" : "Save Story")
 
                 if let url = URL(string: currentArticle.link) {
                     ShareLink(item: url, subject: Text(currentArticle.title)) {
                         Image(systemName: "square.and.arrow.up")
                             .font(.system(size: 13, weight: .medium))
                             .foregroundColor(AppColor.primaryText)
-                            .frame(width: 26, height: 24)
+                            .frame(width: 28, height: 28)
+                            .background(AppColor.surface.opacity(0.5), in: RoundedRectangle(cornerRadius: 6))
                     }
                     .buttonStyle(.plain)
                     .help("Share Story")
+                    .accessibilityLabel("Share Story")
                 }
 
                 Menu {
@@ -669,33 +683,33 @@ struct ArticleDetailView: View {
                     Image(systemName: "ellipsis")
                         .font(.system(size: 13, weight: .medium))
                         .foregroundColor(AppColor.primaryText)
-                        .frame(width: 26, height: 24)
+                        .frame(width: 28, height: 28)
+                        .background(AppColor.surface.opacity(0.5), in: RoundedRectangle(cornerRadius: 6))
                 }
                 .buttonStyle(.plain)
                 .menuIndicator(.hidden)
                 .fixedSize()
+                .help("More Actions")
+                .accessibilityLabel("More Actions")
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 8)
-        .frostedPill(elevation: .control)
+        .padding(.horizontal, 20)
+        .frame(height: 50)
+        .frame(maxWidth: .infinity)
+        .inGlassContainer()
+        .nativeLiquidGlass(in: Rectangle())
         .overlay(alignment: .bottom) {
-            if readingProgress > 0.01 {
+            if readingProgress > 0.005 {
                 GeometryReader { proxy in
-                    Capsule()
+                    Rectangle()
                         .fill(AppColor.accent)
-                        .frame(width: max(8, proxy.size.width * readingProgress), height: 2)
+                        .frame(width: max(4, proxy.size.width * readingProgress), height: 2)
                 }
                 .frame(height: 2)
-                .padding(.horizontal, 16)
-                .padding(.bottom, 2)
+            } else {
+                Divider().opacity(0.25)
             }
         }
-        .opacity(isToolbarCompacted && !isToolbarHovered ? 0.92 : 1.0)
-        .onHover { isToolbarHovered = $0 }
-        .animation(.easeInOut(duration: 0.2), value: isToolbarCompacted)
-        .animation(.easeInOut(duration: 0.15), value: isToolbarHovered)
-        .padding(.top, 56)
     }
 
     // MARK: - Navigation & Actions
@@ -851,30 +865,16 @@ struct ArticleDetailView: View {
                     }
                 }
 
-                // Entity tags, sentiment badge, category pill
+                // Topic category pill, entity tags, and analytical tone badge
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
-                        if let sentiment = analysis.sentiment {
-                            HStack(spacing: 4) {
-                                Image(systemName: sentiment.score >= 0.1 ? "hand.thumbsup.fill" : (sentiment.score <= -0.1 ? "hand.thumbsdown.fill" : "minus.circle.fill"))
-                                    .font(.system(size: 10))
-                                Text(sentiment.label)
-                                    .font(.caption2.bold())
-                                    .lineLimit(1)
-                            }
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .background(Capsule().fill(AppColor.surface))
-                            .foregroundColor(AppColor.secondaryText)
-                        }
-
                         if let cat = displayCategory {
                             Text(cat)
                                 .font(.caption2.weight(.bold))
                                 .lineLimit(1)
-                                .padding(.horizontal, 8)
+                                .padding(.horizontal, 10)
                                 .padding(.vertical, 4)
-                                .background(Capsule().fill(AppColor.accent.opacity(0.12)))
+                                .background(Capsule().fill(AppColor.accent.opacity(0.14)))
                                 .foregroundColor(AppColor.accent)
                         }
 
@@ -889,6 +889,20 @@ struct ArticleDetailView: View {
                                     .background(Capsule().fill(AppColor.surface))
                                     .foregroundColor(AppColor.secondaryText)
                             }
+                        }
+
+                        if let sentiment = analysis.sentiment {
+                            HStack(spacing: 4) {
+                                Image(systemName: "chart.bar.xaxis")
+                                    .font(.system(size: 9))
+                                Text("\(sentiment.label) Tone")
+                                    .font(.caption2.weight(.medium))
+                                    .lineLimit(1)
+                            }
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(Capsule().fill(AppColor.surface))
+                            .foregroundColor(AppColor.secondaryText)
                         }
                     }
                 }

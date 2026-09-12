@@ -24,25 +24,22 @@ struct ArticleListView: View {
     
     var filteredArticles: [FeedArticle] {
         var result: [FeedArticle]
-        if let topic = selectedTopic {
-            if topic == "Saved Stories" {
-                result = savedStories.savedArticles
-            } else if topic == "Unread" {
-                result = feedManager.articles.filter { !readManager.isRead($0.id) }
-            } else if topic == "History" {
-                result = feedManager.articles.filter { readManager.isRead($0.id) }
-            } else {
-                result = feedManager.articles(for: topic)
-            }
+        let currentTopic = selectedTopic ?? "Today"
+        if currentTopic == "Saved Stories" {
+            result = savedStories.savedArticles
+        } else if currentTopic == "Unread" {
+            result = feedManager.articles.filter { !readManager.isRead($0.id) }
+        } else if currentTopic == "History" {
+            result = feedManager.articles.filter { readManager.isRead($0.id) }
         } else {
-            result = feedManager.articles
+            result = feedManager.articles(for: currentTopic)
         }
         
         // Auto-Hide Read
         if themeManager.autoHideRead &&
-            selectedTopic != "Saved Stories" &&
-            selectedTopic != "Unread" &&
-            selectedTopic != "History" {
+            currentTopic != "Saved Stories" &&
+            currentTopic != "Unread" &&
+            currentTopic != "History" {
             result = result.filter { !readManager.isRead($0.id) }
         }
         
@@ -108,7 +105,7 @@ struct ArticleListView: View {
                     }
                 }
             }
-            .onTapGesture {} // Prevents click-through window drag
+            .highPriorityGesture(TapGesture().onEnded { _ in })
         }
     }
     
@@ -136,13 +133,6 @@ struct ArticleListView: View {
             
             Spacer()
             
-            if feedManager.isAnyFeedLoading {
-                ProgressView()
-                    .controlSize(.small)
-                    .scaleEffect(0.8)
-                    .padding(.trailing, 4)
-            }
-            
             Button {
                 isShortcutsHelpPresented.toggle()
             } label: {
@@ -155,21 +145,26 @@ struct ArticleListView: View {
                 shortcutsHelpView
             }
             .help("Keyboard Shortcuts")
+            .accessibilityLabel("Keyboard Shortcuts")
             
             Button {
                 refreshFeeds()
             } label: {
-                Image(systemName: "arrow.clockwise")
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundColor(AppColor.secondaryText)
-                    .rotationEffect(.degrees(feedManager.isAnyFeedLoading ? 360 : 0))
-                    .animation(
-                        feedManager.isAnyFeedLoading ? .linear(duration: 1).repeatForever(autoreverses: false) : .default,
-                        value: feedManager.isAnyFeedLoading
-                    )
+                if feedManager.isAnyFeedLoading {
+                    ProgressView()
+                        .controlSize(.small)
+                        .scaleEffect(0.8)
+                        .frame(width: 18, height: 18)
+                } else {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundColor(AppColor.secondaryText)
+                }
             }
             .buttonStyle(.plain)
+            .disabled(feedManager.isAnyFeedLoading)
             .help("Refresh Feeds (R or ⌘R)")
+            .accessibilityLabel("Refresh Feeds")
         }
         .padding(.horizontal, AppLayout.pageInset)
         .padding(.top, 24)
@@ -216,7 +211,7 @@ struct ArticleListView: View {
                 Text("Refreshing news feeds...")
                     .font(AppTypography.body)
                     .foregroundColor(AppColor.secondaryText)
-            } else if !failedFeeds.isEmpty && filteredArticles.isEmpty {
+            } else if (selectedTopic != "Saved Stories" && selectedTopic != "History") && !failedFeeds.isEmpty && filteredArticles.isEmpty {
                 VStack(spacing: 12) {
                     Image(systemName: "exclamationmark.triangle")
                         .font(.system(size: 32))

@@ -19,6 +19,7 @@ struct SidebarView: View {
     @State private var isDropTargeted = false
     @State private var dropConfirmationMessage: String? = nil
     @State private var isSearchSyntaxHelpPresented = false
+    @FocusState private var isSearchFocused: Bool
     
     private let suggestedTopics: [(String, String)] = [
         ("Entertainment", "tv"), ("Science", "atom"),
@@ -29,7 +30,15 @@ struct SidebarView: View {
     ]
     
     var body: some View {
-        List(selection: $selectedTopic) {
+        List(selection: Binding(
+            get: { selectedTopic ?? "Today" },
+            set: { newTopic in
+                if let newTopic = newTopic {
+                    selectedTopic = newTopic
+                }
+                isSearchFocused = false
+            }
+        )) {
             searchFieldRow
             
             if let confirmation = dropConfirmationMessage {
@@ -77,14 +86,17 @@ struct SidebarView: View {
                 .foregroundColor(AppColor.secondaryText)
                 .font(.system(size: 13))
             
-            TextField("Search articles (e.g. is:unread)", text: $searchText)
+            TextField("Search", text: $searchText)
                 .textFieldStyle(.plain)
                 .font(AppTypography.bodySmall)
+                .focused($isSearchFocused)
+                .onSubmit { isSearchFocused = false }
                 .accessibilityLabel("Search articles")
             
             if !searchText.isEmpty {
                 Button {
                     searchText = ""
+                    isSearchFocused = false
                 } label: {
                     Image(systemName: "xmark.circle.fill")
                         .foregroundColor(AppColor.tertiaryText)
@@ -116,6 +128,7 @@ struct SidebarView: View {
         )
         .cornerRadius(AppRadius.control)
         .padding(.bottom, 6)
+        .onExitCommand { isSearchFocused = false }
         .listRowBackground(Color.clear)
         .listRowSeparator(.hidden)
     }
@@ -170,59 +183,60 @@ struct SidebarView: View {
     
     // MARK: - Sidebar Sections
     
-    private var inboxSection: some View {
-        Section("Inbox") {
-            NavigationLink(value: "Today") {
-                HStack {
-                    Label("Today", systemImage: "newspaper.fill")
-                    Spacer()
-                    if feedManager.isAnyFeedLoading {
-                        ProgressView()
-                            .controlSize(.small)
-                            .scaleEffect(0.7)
-                            .frame(width: 14, height: 14)
-                    }
+    private func topicRow(title: String, icon: String, badge: Int? = nil, isLoading: Bool = false, accessibility: String? = nil) -> some View {
+        Button {
+            selectedTopic = title
+            isSearchFocused = false
+        } label: {
+            HStack {
+                Label(title, systemImage: icon)
+                Spacer()
+                if isLoading {
+                    ProgressView()
+                        .controlSize(.small)
+                        .scaleEffect(0.7)
+                        .frame(width: 14, height: 14)
+                } else if let b = badge, b > 0 {
+                    Text("\(b)")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(selectedTopic == title ? AppColor.primaryText : AppColor.secondaryText)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 1)
+                        .background(Capsule().fill(selectedTopic == title ? AppColor.surface.opacity(0.8) : AppColor.surface))
                 }
             }
-            .accessibilityLabel("Today's Articles")
-            
-            NavigationLink(value: "Unread") {
-                Label("Unread", systemImage: "circle.circle.fill")
-            }
-            .badge(feedManager.articles.filter { !readManager.isRead($0.id) }.count)
-            .accessibilityLabel("Unread Articles")
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .tag(title)
+        .accessibilityLabel(accessibility ?? title)
+    }
+
+    private var inboxSection: some View {
+        Section("Inbox") {
+            topicRow(title: "Today", icon: "newspaper.fill", isLoading: feedManager.isAnyFeedLoading, accessibility: "Today's Articles")
+            topicRow(title: "Unread", icon: "circle.circle.fill", badge: feedManager.articles.filter { !readManager.isRead($0.id) }.count, accessibility: "Unread Articles")
         }
     }
     
     private var librarySection: some View {
         Section("Library") {
-            NavigationLink(value: "Saved Stories") {
-                Label("Saved Stories", systemImage: "bookmark.fill")
-            }
-            .badge(savedStories.savedArticles.isEmpty ? 0 : savedStories.savedArticles.count)
-            .accessibilityLabel("Saved Stories")
-            
-            NavigationLink(value: "History") {
-                Label("History", systemImage: "clock.fill")
-            }
-            .accessibilityLabel("Reading History")
+            topicRow(title: "Saved Stories", icon: "bookmark.fill", badge: savedStories.savedArticles.count, accessibility: "Saved Stories")
+            topicRow(title: "History", icon: "clock.fill", accessibility: "Reading History")
         }
     }
     
     private var userSectionsSection: some View {
         Section("Sections") {
             ForEach(feedManager.userSections, id: \.self) { section in
-                NavigationLink(value: section) {
-                    Label(section, systemImage: iconForSection(section))
-                }
-                .contextMenu {
-                    Button(role: .destructive) {
-                        feedManager.removeSection(section)
-                    } label: {
-                        Label("Remove Section", systemImage: "minus.circle")
+                topicRow(title: section, icon: iconForSection(section), accessibility: "Section \(section)")
+                    .contextMenu {
+                        Button(role: .destructive) {
+                            feedManager.removeSection(section)
+                        } label: {
+                            Label("Remove Section", systemImage: "minus.circle")
+                        }
                     }
-                }
-                .accessibilityLabel("Section \(section)")
             }
         }
     }

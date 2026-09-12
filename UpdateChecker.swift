@@ -126,6 +126,13 @@ final class UpdateChecker: ObservableObject {
                 return
             }
 
+            if httpResponse.statusCode == 404 {
+                statusMessage = "NewsApp is up to date (v\(currentAppVersion))"
+                updateAvailable = false
+                lastCheckDate = Date()
+                return
+            }
+
             guard httpResponse.statusCode == 200 else {
                 statusMessage = "Update check failed (HTTP \(httpResponse.statusCode))"
                 return

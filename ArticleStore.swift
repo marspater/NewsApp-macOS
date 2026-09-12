@@ -148,6 +148,7 @@ final class ArticleStore: ObservableObject {
     @discardableResult
     func toggleSave(article: FeedArticle) async -> Bool {
         do {
+            try await database.upsertArticles([article], feedUrl: nil)
             let nextState = try await database.toggleSaved(articleId: article.id)
             if nextState {
                 if !savedArticles.contains(where: { $0.id == article.id }) {
