@@ -1,11 +1,32 @@
 import SwiftUI
 import WebKit
 
+enum WebNavigationAction: Equatable {
+    case goBack
+    case goForward
+    case reload
+}
+
 struct ArticleWebView: NSViewRepresentable {
     let url: URL
     @Binding var isLoading: Bool
     @Binding var canGoBack: Bool
     @Binding var canGoForward: Bool
+    @Binding var action: WebNavigationAction?
+
+    init(
+        url: URL,
+        isLoading: Binding<Bool>,
+        canGoBack: Binding<Bool>,
+        canGoForward: Binding<Bool>,
+        action: Binding<WebNavigationAction?> = .constant(nil)
+    ) {
+        self.url = url
+        self._isLoading = isLoading
+        self._canGoBack = canGoBack
+        self._canGoForward = canGoForward
+        self._action = action
+    }
 
     func makeCoordinator() -> Coordinator {
         Coordinator(self)
@@ -33,6 +54,19 @@ struct ArticleWebView: NSViewRepresentable {
             context.coordinator.currentRequestedURL = url
             let request = URLRequest(url: url)
             nsView.load(request)
+        }
+        if let currentAction = action {
+            switch currentAction {
+            case .goBack:
+                if nsView.canGoBack { nsView.goBack() }
+            case .goForward:
+                if nsView.canGoForward { nsView.goForward() }
+            case .reload:
+                nsView.reload()
+            }
+            DispatchQueue.main.async {
+                self.action = nil
+            }
         }
     }
 

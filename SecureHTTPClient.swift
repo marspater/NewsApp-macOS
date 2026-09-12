@@ -80,7 +80,7 @@ actor SecureHTTPClient {
 
         // 3. Register Task Security Policy in Delegate Coordinator
         var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: timeout)
-        request.setValue("NewsApp/2.0 (+https://github.com/marspater/NewsApp-macOS)", forHTTPHeaderField: "User-Agent")
+        request.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15 NewsApp/2.0", forHTTPHeaderField: "User-Agent")
 
         // 4. Progressive Byte Streaming Download with Size Enforcement
         let (asyncBytes, rawResponse) = try await session.bytes(for: request)

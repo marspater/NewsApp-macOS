@@ -73,6 +73,7 @@ struct NewsTests {
         await testArticleStoreErrorResilience()
         await testFeedArticleWrapContextNavigation()
         await testArticleContentRedactionAndTypography()
+        await testArticleDetailReadingExperienceOverhaul()
         
         print("✅ SUCCESS: All tests passed!")
     }
@@ -1740,6 +1741,53 @@ struct NewsTests {
         _ = editionLead
         _ = altoLead
         assertTrue(true, "Lead font tokens must be defined for all themes")
+    }
+
+    static func testArticleDetailReadingExperienceOverhaul() async {
+        print("  - Testing Article Detail Reading Experience Overhaul...")
+
+        // 1. Preview Truncation Policy
+        let sixParagraphs = (1...6).map { "Paragraph \($0) with substantive content describing current world events." }
+        let truncated = ArticlePreviewPolicy.computePreview(paragraphs: sixParagraphs, isExtracted: true)
+        assertEqual(truncated.count, 3, "Articles with >4 paragraphs should truncate to first 3 paragraphs")
+        assertEqual(truncated.first, "Paragraph 1 with substantive content describing current world events.", "First paragraph should be preserved")
+
+        let fourParagraphs = (1...4).map { "Paragraph \($0) with substantive content." }
+        let notTruncatedFour = ArticlePreviewPolicy.computePreview(paragraphs: fourParagraphs, isExtracted: true)
+        assertEqual(notTruncatedFour.count, 4, "Articles with <=4 paragraphs should not leave a 1-paragraph orphan")
+
+        let descriptionParagraphs = ["Brief summary paragraph from RSS feed."]
+        let fallbackPreview = ArticlePreviewPolicy.computePreview(paragraphs: descriptionParagraphs, isExtracted: false)
+        assertEqual(fallbackPreview.count, 1, "Fallback description should preserve all paragraphs")
+
+        // 2. Trackpad Swipe Gesture Evaluation
+        let rightwardResult = TrackpadSwipeEvaluator.evaluate(deltaX: 75.0, deltaY: 10.0, threshold: 60.0)
+        assertEqual(rightwardResult, .previous, "Dominant rightward swipe should navigate to previous article")
+
+        let leftwardResult = TrackpadSwipeEvaluator.evaluate(deltaX: -80.0, deltaY: 15.0, threshold: 60.0)
+        assertEqual(leftwardResult, .next, "Dominant leftward swipe should navigate to next article")
+
+        let verticalScrollResult = TrackpadSwipeEvaluator.evaluate(deltaX: 25.0, deltaY: 90.0, threshold: 60.0)
+        assertEqual(verticalScrollResult, .none, "Dominant vertical scroll should not trigger article navigation")
+
+        let smallWobbleResult = TrackpadSwipeEvaluator.evaluate(deltaX: 35.0, deltaY: 5.0, threshold: 60.0)
+        assertEqual(smallWobbleResult, .none, "Sub-threshold horizontal movement should not trigger article navigation")
+
+        // 3. Content Extraction Pipeline Paragraph Extraction
+        let sampleHTML = """
+        <html>
+        <body>
+        <article class="story-body">
+            <p>The space agency announced the discovery of an Earth-sized exoplanet in the habitable zone.</p>
+            <p>Observations with the orbital telescope revealed atmospheric water vapor signatures.</p>
+            <p>Further spectroscopic follow-ups are planned for the upcoming observing cycle.</p>
+        </article>
+        </body>
+        </html>
+        """
+        let extractedParagraphs = ContentExtractionPipeline.shared.extractParagraphs(from: sampleHTML)
+        assertEqual(extractedParagraphs.count, 3, "Should cleanly extract 3 substantive paragraphs from HTML")
+        assertTrue(extractedParagraphs[0].contains("exoplanet"), "Paragraph text should match content")
     }
 }
 

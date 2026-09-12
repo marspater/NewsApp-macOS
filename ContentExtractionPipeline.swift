@@ -23,17 +23,19 @@ final class ContentExtractionPipeline: Sendable {
             // 2. Remove non-content tags & scripts
             let sanitizedHTML = stripNonContentTags(from: html)
 
-            // 3. Extract best candidate container based on readability scoring
+            // 3. Extract semantic paragraphs from candidate container or document
+            let paragraphs = extractParagraphs(from: sanitizedHTML)
+            if paragraphs.count >= 2 {
+                let joined = paragraphs.joined(separator: "\n\n")
+                return (joined, leadImage)
+            }
+
+            // 4. Fallback: Convert candidate HTML to text paragraphs
             let candidateHTML = extractBestContentContainer(from: sanitizedHTML) ?? sanitizedHTML
-
-            // 4. Convert candidate HTML to text paragraphs
             let rawText = htmlToPlainText(candidateHTML)
-
-            // 5. Prose validation & boilerplate stripping via ArticleIntelligence
             let cleanedText = ArticleIntelligence.shared.cleanContent(rawText)
 
-            // Minimum length check (must be substantive prose)
-            if cleanedText.count >= 200 {
+            if cleanedText.count >= 150 {
                 return (cleanedText, leadImage)
             } else {
                 return (nil, leadImage)
@@ -214,6 +216,44 @@ final class ContentExtractionPipeline: Sendable {
         }
 
         return nil
+    }
+
+    /// Extracts clean, substantive paragraphs from semantic containers or body paragraphs.
+    func extractParagraphs(from html: String) -> [String] {
+        let searchHTML = extractBestContentContainer(from: html) ?? html
+        let pPattern = "<p[^>]*>(.*?)</p>"
+        guard let regex = try? NSRegularExpression(pattern: pPattern, options: [.dotMatchesLineSeparators, .caseInsensitive]) else {
+            return []
+        }
+        let matches = regex.matches(in: searchHTML, range: NSRange(searchHTML.startIndex..., in: searchHTML))
+        var paragraphs = [String]()
+        for match in matches {
+            guard let range = Range(match.range(at: 1), in: searchHTML) else { continue }
+            let inner = String(searchHTML[range])
+            let plain = htmlToPlainText(inner).trimmingCharacters(in: .whitespacesAndNewlines)
+            if plain.count > 30 && !ArticleContentRedactor.isBoilerplateLine(plain) {
+                paragraphs.append(plain)
+            }
+        }
+
+        // If semantic container yielded fewer than 2 paragraphs, scan entire sanitized HTML
+        if paragraphs.count < 2 && searchHTML != html {
+            let fallbackMatches = regex.matches(in: html, range: NSRange(html.startIndex..., in: html))
+            var fallbackParas = [String]()
+            for match in fallbackMatches {
+                guard let range = Range(match.range(at: 1), in: html) else { continue }
+                let inner = String(html[range])
+                let plain = htmlToPlainText(inner).trimmingCharacters(in: .whitespacesAndNewlines)
+                if plain.count > 30 && !ArticleContentRedactor.isBoilerplateLine(plain) {
+                    fallbackParas.append(plain)
+                }
+            }
+            if fallbackParas.count >= paragraphs.count {
+                return fallbackParas
+            }
+        }
+
+        return paragraphs
     }
 
     private func extractFirstTag(from html: String, tag: String) -> String? {

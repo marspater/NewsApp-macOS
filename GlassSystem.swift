@@ -27,34 +27,55 @@ public struct GlassControlModifier<S: Shape>: ViewModifier {
                 .background(AppColor.surface, in: shape)
                 .overlay(shape.stroke(AppColor.borderSubtle, lineWidth: 1))
         } else {
-            content
-                .background(.ultraThinMaterial, in: shape)
-                .background(
-                    LinearGradient(
-                        colors: [
-                            Color.white.opacity(0.12),
-                            Color.white.opacity(0.02)
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    ),
-                    in: shape
-                )
-                .overlay(
-                    shape.stroke(
+            if #available(macOS 26.0, *) {
+                content
+                    .background {
+                        Color.clear
+                            .glassEffect(interactive ? AppGlass.interactive : AppGlass.control, in: shape)
+                    }
+                    .overlay(
+                        shape.stroke(
+                            LinearGradient(
+                                colors: [
+                                    Color.white.opacity(0.28),
+                                    Color.white.opacity(0.08)
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            ),
+                            lineWidth: 0.5
+                        )
+                    )
+            } else {
+                content
+                    .background(.ultraThinMaterial, in: shape)
+                    .background(
                         LinearGradient(
                             colors: [
-                                Color.white.opacity(0.4),
                                 Color.white.opacity(0.12),
-                                AppColor.borderSubtle
+                                Color.white.opacity(0.02)
                             ],
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing
                         ),
-                        lineWidth: 0.75
+                        in: shape
                     )
-                )
-                .shadow(color: Color.black.opacity(0.14), radius: 8, x: 0, y: 3)
+                    .overlay(
+                        shape.stroke(
+                            LinearGradient(
+                                colors: [
+                                    Color.white.opacity(0.4),
+                                    Color.white.opacity(0.12),
+                                    AppColor.borderSubtle
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            ),
+                            lineWidth: 0.75
+                        )
+                    )
+                    .shadow(color: Color.black.opacity(0.14), radius: 8, x: 0, y: 3)
+            }
         }
     }
 }
@@ -73,7 +94,13 @@ public extension View {
     /// Grouped glass container helper that provides semantic grouping for adjacent glass controls.
     @ViewBuilder
     func inGlassContainer() -> some View {
-        self
+        if #available(macOS 26.0, *) {
+            GlassEffectContainer {
+                self
+            }
+        } else {
+            self
+        }
     }
     
     /// Modern edge-to-edge background extension with backward compatibility.

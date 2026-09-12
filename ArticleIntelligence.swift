@@ -896,10 +896,13 @@ public enum ArticleContentRedactor {
     public static func isBoilerplateLine(_ text: String) -> Bool {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return true }
-        let stripped = trimmed.trimmingCharacters(in: CharacterSet(charactersIn: ".!-–—()0123456789/ "))
+        let stripped = trimmed.trimmingCharacters(in: CharacterSet(charactersIn: ".!-–—()[]{}•*#0123456789/ "))
         let lower = stripped.lowercased()
 
         if boilerplateLineExact.contains(lower) {
+            return true
+        }
+        if (lower.hasPrefix("comment") || lower.hasSuffix("comments")) && lower.count < 25 {
             return true
         }
         let rawLower = trimmed.lowercased()
@@ -947,5 +950,48 @@ public enum ArticleContentRedactor {
         return paragraphs.isEmpty ? [text] : paragraphs
     }
 }
+
+// MARK: - Article Preview Policy
+
+public enum ArticlePreviewPolicy {
+    /// Binds extracted article content to an editorial preview at clean paragraph boundaries.
+    /// Does not truncate by character count.
+    /// Preserves full description paragraphs if fullContent is absent.
+    /// Avoids leaving 1-paragraph orphans by allowing up to 4 paragraphs without truncation.
+    public static func computePreview(paragraphs: [String], isExtracted: Bool) -> [String] {
+        guard isExtracted else {
+            return paragraphs
+        }
+        if paragraphs.count <= 4 {
+            return paragraphs
+        } else {
+            return Array(paragraphs.prefix(3))
+        }
+    }
+}
+
+// MARK: - Trackpad Swipe Navigation Evaluator
+
+public enum TrackpadSwipeDirection: Equatable, Sendable {
+    case previous
+    case next
+    case none
+}
+
+public enum TrackpadSwipeEvaluator {
+    /// Evaluates accumulated horizontal and vertical trackpad deltas.
+    /// Returns .previous for dominant rightward swipe, .next for dominant leftward swipe,
+    /// and .none if vertical scroll dominates or threshold is not met.
+    public static func evaluate(deltaX: CGFloat, deltaY: CGFloat, threshold: CGFloat = 60.0) -> TrackpadSwipeDirection {
+        let absX = abs(deltaX)
+        let absY = abs(deltaY)
+
+        guard absX >= threshold else { return .none }
+        guard absX > (absY * 1.8) else { return .none }
+
+        return deltaX > 0 ? .previous : .next
+    }
+}
+
 
 
