@@ -71,7 +71,8 @@ let package = Package(
                 "WebContentExtractor.swift",
                 "RefreshCoordinator.swift",
                 "NewsSignposts.swift",
-                "UpdateChecker.swift"
+                "UpdateChecker.swift",
+                "AppContainer.swift"
             ]
         )
     ]

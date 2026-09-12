@@ -18,7 +18,7 @@ enum ArticleContentState: Equatable {
 
 @MainActor
 final class TrackpadSwipeCoordinator: ObservableObject {
-    private var monitor: Any? = nil
+    nonisolated(unsafe) private var monitor: Any? = nil
     var onSwipeLeft: (() -> Void)?
     var onSwipeRight: (() -> Void)?
     var isEnabled: Bool = false
