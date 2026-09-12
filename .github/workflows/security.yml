@@ -2,9 +2,9 @@ name: Security
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   pull_request:
-    branches: [ main ]
+    branches: [main]
   schedule:
     - cron: "17 4 * * 1"
   workflow_dispatch:
@@ -28,17 +28,19 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@v3
+        uses: github/codeql-action/init@v4
         with:
           languages: swift
+          build-mode: manual
           queries: security-extended
 
-      - name: Build
-        run: |
-          swift build --target News
+      # This repository is a Swift Package without an Xcode project/workspace.
+      # Build one architecture so CodeQL can observe the compiled Swift code.
+      - name: Build Swift package for CodeQL
+        run: swift build --target News --arch arm64
 
       - name: Analyze
-        uses: github/codeql-action/analyze@v3
+        uses: github/codeql-action/analyze@v4
         with:
           category: "/language:swift"
 
@@ -62,7 +64,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      security-events: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
