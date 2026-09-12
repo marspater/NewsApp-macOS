@@ -107,7 +107,7 @@ struct ArticleListView: View {
                     }
                 }
             }
-            .onTapGesture {} // Prevents click-through window drag
+            .highPriorityGesture(TapGesture().onEnded { _ in }) // Fix for macOS click-through without triggering title bar bug
         }
     }
     

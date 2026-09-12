@@ -125,7 +125,7 @@ struct ArticleDetailView: View {
             }
         }
         .ignoresSafeArea(edges: .top)
-        .onTapGesture {}
+        .highPriorityGesture(TapGesture().onEnded { _ in })
     }
     
     private var heroImageHeader: some View {
