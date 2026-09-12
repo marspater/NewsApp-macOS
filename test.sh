@@ -29,9 +29,11 @@ swiftc -target $(uname -m)-apple-macos${TARGET_MACOS} \
     CacheManager.swift \
     AIManager.swift \
     FeedManager.swift \
+    AppContainer.swift \
     SavedStoriesManager.swift \
     OPMLManager.swift \
     DesignSystem.swift \
+    GlassSystem.swift \
     RefreshCoordinator.swift \
     NewsSignposts.swift \
     UpdateChecker.swift \

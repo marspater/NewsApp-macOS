@@ -91,6 +91,7 @@ swiftc -O -parse-as-library -target $(uname -m)-apple-macos${TARGET_MACOS} \
     CacheManager.swift \
     AIManager.swift \
     FeedManager.swift \
+    AppContainer.swift \
     DesignSystem.swift \
     GlassSystem.swift \
     SidebarView.swift \

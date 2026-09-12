@@ -10,6 +10,12 @@ enum DetailViewMode: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+enum ArticleContentState: Equatable {
+    case loading
+    case ready
+    case fallback(reason: String)
+}
+
 @MainActor
 final class TrackpadSwipeCoordinator: ObservableObject {
     private var monitor: Any? = nil
@@ -88,6 +94,7 @@ struct ArticleDetailView: View {
     @State private var analysisError: String? = nil
     @State private var analysisTask: Task<Void, Never>? = nil
     @State private var extractionTask: Task<Void, Never>? = nil
+    @State private var contentState: ArticleContentState = .loading
 
     // Toolbar & Scroll interaction states
     @State private var readingProgress: CGFloat = 0.0
@@ -140,9 +147,8 @@ struct ArticleDetailView: View {
 
             // Navigation / Controls Layer: Floating Liquid Glass Toolbar
             topGlassToolbar
+                .zIndex(100)
         }
-        .focusable()
-        .focusEffectDisabled()
         .onKeyPress { press in
             handleKeyPress(press: press)
         }
@@ -188,13 +194,9 @@ struct ArticleDetailView: View {
                 }
             }
         }
-        swipeCoordinator.onSwipeLeft = {
-            if hasNextArticle {
-                withAnimation(reduceMotion ? .none : .spring(response: 0.35, dampingFraction: 0.85)) {
-                    nextArticle()
-                }
-            }
-        }
+        // Swiping horizontally left in reader mode is deactivated to prevent accidental article jumps.
+        // Article pagination remains fully accessible via keyboard (J/K, ↓/↑) and toolbar chevrons.
+        swipeCoordinator.onSwipeLeft = nil
         swipeCoordinator.isEnabled = (viewMode == .reader && !reduceMotion)
         swipeCoordinator.start()
     }
@@ -204,7 +206,7 @@ struct ArticleDetailView: View {
     private var readerView: some View {
         ScrollView {
             VStack(spacing: 0) {
-                // 1. Hero Image Layer with smooth blend into background
+                // 1. Hero Image Layer with smooth atmospheric blend into background
                 heroImageHeader
 
                 // 2. Editorial Content Hierarchy: Eyebrow -> Title -> AI Summary -> Body -> Terminal Affordance
@@ -240,17 +242,25 @@ struct ArticleDetailView: View {
                     // On-device AI Analysis Section
                     aiAnalysisSection
 
-                    // Article Paragraphs (bounded editorial preview)
-                    articleContentParagraphs
+                    // Article Content Section with explicit state handling
+                    switch contentState {
+                    case .loading:
+                        loadingStateView
+                    case .ready:
+                        articleContentParagraphs
+                    case .fallback(let reason):
+                        fallbackStateView(reason: reason)
+                    }
 
-                    // Terminal Affordance: "Continue reading on <source>"
+                    // Terminal Affordance: "Read original article on <source>"
                     terminalAffordance
 
                     Spacer().frame(height: 80)
                 }
-                .padding(.horizontal, 48)
+                .padding(.horizontal, 40)
                 .padding(.top, currentArticle.imageUrl != nil ? 18 : (AppLayout.toolbarHeight + 36))
-                .frame(maxWidth: 820, alignment: .leading)
+                .frame(maxWidth: 740, alignment: .leading)
+                .frame(maxWidth: .infinity, alignment: .center)
             }
         }
         .ignoresSafeArea(edges: .top)
@@ -281,14 +291,15 @@ struct ArticleDetailView: View {
                 case .success(let image):
                     image.resizable()
                         .aspectRatio(contentMode: .fill)
-                        .frame(maxWidth: .infinity, maxHeight: 340)
+                        .frame(maxWidth: .infinity, maxHeight: 330)
                         .clipped()
                         .overlay(
                             LinearGradient(
                                 stops: [
                                     .init(color: .clear, location: 0.0),
-                                    .init(color: .clear, location: 0.4),
-                                    .init(color: AppColor.background.opacity(0.6), location: 0.75),
+                                    .init(color: .clear, location: 0.45),
+                                    .init(color: AppColor.background.opacity(0.35), location: 0.70),
+                                    .init(color: AppColor.background.opacity(0.85), location: 0.90),
                                     .init(color: AppColor.background, location: 1.0)
                                 ],
                                 startPoint: .top,
@@ -302,23 +313,11 @@ struct ArticleDetailView: View {
         }
     }
 
-    private var previewParagraphs: [String] {
-        let hasExtracted = (currentArticle.fullContent != nil && !(currentArticle.fullContent?.isEmpty ?? true))
-        let raw: [String]
-        if hasExtracted, let content = currentArticle.fullContent {
-            raw = ArticleContentRedactor.redactAndSplit(content)
-        } else {
-            raw = ArticleContentRedactor.redactAndSplit(currentArticle.description)
+    private var displayParagraphs: [String] {
+        if let content = currentArticle.fullContent, !content.isEmpty {
+            return ArticleContentRedactor.redactAndSplit(content)
         }
-        return ArticlePreviewPolicy.computePreview(paragraphs: raw, isExtracted: hasExtracted)
-    }
-
-    private var isContentTruncated: Bool {
-        guard let fullContent = currentArticle.fullContent, !fullContent.isEmpty else {
-            return false
-        }
-        let all = ArticleContentRedactor.redactAndSplit(fullContent)
-        return all.count > previewParagraphs.count
+        return ArticleContentRedactor.redactAndSplit(currentArticle.description)
     }
 
     private var readingTimeEstimate: String {
@@ -328,9 +327,88 @@ struct ArticleDetailView: View {
         return "\(minutes) min read"
     }
 
+    private var loadingStateView: some View {
+        HStack(spacing: AppSpacing.sm) {
+            ProgressView()
+                .controlSize(.small)
+            Text("Loading full article…")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundColor(AppColor.secondaryText)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, AppSpacing.lg)
+    }
+
+    private func fallbackStateView(reason: String) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 8) {
+                Image(systemName: "doc.text.magnifyingglass")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundColor(AppColor.secondaryText)
+                Text("Full article unavailable in reader")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(AppColor.primaryText)
+                Spacer()
+                Button {
+                    Task { await ensureContentExtracted() }
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "arrow.clockwise")
+                        Text("Retry")
+                    }
+                    .font(.system(size: 11, weight: .medium))
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+
+                Button {
+                    viewMode = .web
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "safari")
+                        Text("Open Web View (W)")
+                    }
+                    .font(.system(size: 11, weight: .semibold))
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+            }
+
+            Text(reason)
+                .font(.system(size: 12))
+                .foregroundColor(AppColor.secondaryText)
+
+            Divider().opacity(0.15)
+
+            Text("FEED SUMMARY PREVIEW")
+                .font(.system(size: 10, weight: .bold))
+                .tracking(1.0)
+                .foregroundColor(AppColor.tertiaryText)
+
+            articleDescriptionParagraphs
+        }
+        .padding(16)
+        .background(AppColor.surface.opacity(0.55), in: RoundedRectangle(cornerRadius: AppRadius.card))
+        .overlay(RoundedRectangle(cornerRadius: AppRadius.card).stroke(AppColor.borderSubtle, lineWidth: 1))
+    }
+
+    @ViewBuilder
+    private var articleDescriptionParagraphs: some View {
+        let paragraphs = ArticleContentRedactor.redactAndSplit(currentArticle.description)
+        VStack(alignment: .leading, spacing: 14) {
+            ForEach(Array(paragraphs.enumerated()), id: \.offset) { _, paragraph in
+                Text(paragraph)
+                    .font(AppTypography.bodyFont(for: themeManager.articleTheme))
+                    .foregroundColor(AppColor.primaryText.opacity(0.9))
+                    .lineSpacing(AppTypography.bodyLineSpacing(for: themeManager.articleTheme))
+                    .textSelection(.enabled)
+            }
+        }
+    }
+
     @ViewBuilder
     private var articleContentParagraphs: some View {
-        let paragraphs = previewParagraphs
+        let paragraphs = displayParagraphs
         VStack(alignment: .leading, spacing: 22) {
             ForEach(Array(paragraphs.enumerated()), id: \.offset) { index, paragraph in
                 Text(paragraph)
@@ -351,7 +429,7 @@ struct ArticleDetailView: View {
 
             HStack(spacing: AppSpacing.md) {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(isContentTruncated ? "Continue reading on \(displaySource)" : "Read on \(displaySource)")
+                    Text("Read original article on \(displaySource)")
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundColor(AppColor.primaryText)
                     if let host = URL(string: currentArticle.link)?.host {
@@ -464,6 +542,7 @@ struct ArticleDetailView: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .keyboardShortcut(.escape, modifiers: [])
             .help("Back to articles (Esc, Delete, or ←)")
             .accessibilityLabel("Back to articles")
 
@@ -512,6 +591,7 @@ struct ArticleDetailView: View {
                             .frame(width: 24, height: 24)
                     }
                     .buttonStyle(.plain)
+                    .keyboardShortcut(.upArrow, modifiers: [])
                     .disabled(!hasPrevArticle)
                     .help("Previous Article (K or ↑)")
 
@@ -524,6 +604,7 @@ struct ArticleDetailView: View {
                             .frame(width: 24, height: 24)
                     }
                     .buttonStyle(.plain)
+                    .keyboardShortcut(.downArrow, modifiers: [])
                     .disabled(!hasNextArticle)
                     .help("Next Article (J or ↓)")
                 }
@@ -540,6 +621,7 @@ struct ArticleDetailView: View {
             }
             .pickerStyle(.segmented)
             .frame(width: 140)
+            .focusable(false)
             .help("Toggle Reader / Web view (W)")
 
             Divider()
@@ -615,10 +697,7 @@ struct ArticleDetailView: View {
                 }
             }
         }
-        .background(.ultraThinMaterial, in: Capsule())
-        .background(AppColor.surface.opacity(0.65), in: Capsule())
-        .overlay(Capsule().stroke(Color.white.opacity(0.18), lineWidth: 0.75))
-        .shadow(color: Color.black.opacity(0.25), radius: 14, x: 0, y: 4)
+        .frostedPill(elevation: .control)
         .opacity(isToolbarCompacted && !isToolbarHovered ? 0.92 : 1.0)
         .onHover { isToolbarHovered = $0 }
         .animation(.easeInOut(duration: 0.2), value: isToolbarCompacted)
@@ -863,32 +942,55 @@ struct ArticleDetailView: View {
     // MARK: - Independent Extraction & Analysis
 
     private func ensureContentExtracted() async {
-        guard currentArticle.fullContent == nil || currentArticle.fullContent?.isEmpty == true else { return }
+        if let existing = currentArticle.fullContent, !existing.isEmpty {
+            contentState = .ready
+            return
+        }
+
         let link = currentArticle.link
-        guard !link.isEmpty, let url = URL(string: link), url.scheme == "http" || url.scheme == "https" else { return }
+        guard !link.isEmpty, let url = URL(string: link), url.scheme == "http" || url.scheme == "https" else {
+            contentState = .fallback(reason: "Invalid article URL")
+            return
+        }
         let allowInsecure = appSettings.allowInsecureHTTP
         let targetId = currentArticle.id
 
+        contentState = .loading
+
         extractionTask = Task { @MainActor in
-            let extracted = await ContentExtractionPipeline.shared.extractArticle(
+            let outcome = await ContentExtractionPipeline.shared.extractArticleDetailed(
                 from: link,
                 allowHTTP: allowInsecure
             )
             guard !Task.isCancelled else { return }
 
-            if let content = extracted.content, !content.isEmpty {
+            switch outcome {
+            case .success(let content, let imageUrl):
                 await articleStore.updateEnrichment(
                     id: targetId,
                     content: content,
-                    image: extracted.imageUrl
+                    image: imageUrl
                 )
                 var updated = self.activeArticle
                 updated.fullContent = content
                 updated.contentFetched = true
-                if let img = extracted.imageUrl, updated.imageUrl == nil {
+                if let img = imageUrl, updated.imageUrl == nil {
                     updated.imageUrl = img
                 }
                 self.activeArticle = updated
+                self.contentState = .ready
+            case .qualityValidationFailed(let reason):
+                self.contentState = .fallback(reason: "Article quality check not met: \(reason)")
+            case .httpError(let status):
+                self.contentState = .fallback(reason: "Publisher returned HTTP \(status)")
+            case .securityBlocked(let reason):
+                self.contentState = .fallback(reason: "Security policy: \(reason)")
+            case .emptyContent:
+                self.contentState = .fallback(reason: "Publisher returned empty content")
+            case .contentParsingFailed(let reason):
+                self.contentState = .fallback(reason: "Could not extract article body: \(reason)")
+            case .networkError(let reason):
+                self.contentState = .fallback(reason: "Network error: \(reason)")
             }
         }
         await extractionTask?.value

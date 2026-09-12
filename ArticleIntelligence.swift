@@ -24,25 +24,53 @@ public enum NewsCategory: String, CaseIterable, Sendable, Codable {
     public static func match(from string: String) -> NewsCategory? {
         let firstLine = string.components(separatedBy: .newlines).first ?? string
         let trimmed = firstLine.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        // 1. Exact case-insensitive match against canonical enum values
         for cat in allCases {
             if cat.rawValue.localizedCaseInsensitiveCompare(trimmed) == .orderedSame {
                 return cat
             }
         }
-        // Partial mappings for common synonyms
+
         let lower = trimmed.lowercased()
-        if lower.contains("tech") { return .technology }
-        if lower.contains("politic") || lower.contains("gov") || lower.contains("election") { return .politics }
-        if lower.contains("sci") || lower.contains("space") { return .science }
-        if lower.contains("econ") || lower.contains("biz") || lower.contains("finance") || lower.contains("market") { return .business }
-        if lower.contains("sport") { return .sports }
-        if lower.contains("entertain") || lower.contains("movie") || lower.contains("film") || lower.contains("music") { return .entertainment }
-        if lower.contains("health") || lower.contains("med") || lower.contains("wellness") { return .health }
-        if lower.contains("travel") || lower.contains("tourism") { return .travel }
-        if lower.contains("food") || lower.contains("cook") || lower.contains("dining") || lower.contains("culinary") || lower.contains("recipe") { return .food }
-        if lower.contains("style") || lower.contains("fashion") { return .fashion }
-        if lower.contains("global") || lower.contains("world") || lower.contains("international") || lower.contains("war") || lower.contains("conflict") || lower.contains("military") { return .world }
-        if lower.contains("life") || lower.contains("living") { return .lifestyle }
+
+        // 2. High-priority semantic disambiguation for multi-topic overlaps
+        // Health over Technology (e.g., medical AI, clinical devices, vaccines, disease)
+        if lower.contains("health") || lower.contains("medical") || lower.contains("clinical") || lower.contains("hospital") || lower.contains("vaccine") || lower.contains("disease") || lower.contains("pharma") {
+            return .health
+        }
+
+        // Science over Technology (e.g., space mission, telescope, NASA, quantum research, astronomy)
+        if lower.contains("space") || lower.contains("nasa") || lower.contains("astronomy") || lower.contains("quantum") || lower.contains("biology") || lower.contains("physics") || lower.contains("telescope") {
+            return .science
+        }
+
+        // Business over Politics or Tech (e.g., stock market, earnings, inflation, IPO, central bank, revenue)
+        if lower.contains("stock") || lower.contains("wall street") || lower.contains("earnings") || lower.contains("inflation") || lower.contains("investor") || lower.contains("revenue") || lower.contains("recession") || lower.contains("finance") || lower.contains("dividend") {
+            return .business
+        }
+
+        // Politics over World or Business (e.g., congress, senate, election, voter, parliament, campaign)
+        if lower.contains("congress") || lower.contains("senate") || lower.contains("election") || lower.contains("politic") || lower.contains("lawmaker") || lower.contains("parliament") || lower.contains("white house") || lower.contains("governor") || lower.contains("campaign") {
+            return .politics
+        }
+
+        let tokens = Set(lower.components(separatedBy: CharacterSet.alphanumerics.inverted).filter { !$0.isEmpty })
+
+        // 3. Normalized synonym mappings
+        if lower.contains("tech") || lower.contains("software") || lower.contains("hardware") || tokens.contains("ai") || lower.contains("artificial intelligence") || lower.contains("cyber") || lower.contains("chip") { return .technology }
+        if lower.contains("econ") || lower.contains("biz") || lower.contains("market") { return .business }
+        if lower.contains("sport") || lower.contains("football") || lower.contains("basketball") || lower.contains("soccer") || lower.contains("league") { return .sports }
+        if lower.contains("entertain") || lower.contains("movie") || lower.contains("film") || lower.contains("music") || lower.contains("celebrity") || lower.contains("cinema") { return .entertainment }
+        if lower.contains("wellness") || lower.contains("fitness") || lower.contains("nutrition") { return .health }
+        if lower.contains("travel") || lower.contains("tourism") || lower.contains("vacation") || lower.contains("flight") { return .travel }
+        if lower.contains("food") || lower.contains("cook") || lower.contains("dining") || lower.contains("culinary") || lower.contains("recipe") || lower.contains("restaurant") { return .food }
+        if lower.contains("style") || lower.contains("fashion") || lower.contains("runway") || lower.contains("apparel") { return .fashion }
+        if lower.contains("global") || lower.contains("world") || lower.contains("international") || lower.contains("foreign") || lower.contains("geopolitic") || tokens.contains("un") || lower.contains("united nations") || lower.contains("diplomat") { return .world }
+        if lower.contains("life") || lower.contains("living") || lower.contains("lifestyle") || lower.contains("home") || lower.contains("parenting") { return .lifestyle }
+        if lower.contains("sci") || lower.contains("research") { return .science }
+
         return nil
     }
 }
@@ -951,13 +979,21 @@ public enum ArticleContentRedactor {
     }
 }
 
-// MARK: - Article Preview Policy
+// MARK: - Article Content Policy (Full Unabridged Content)
 
-public enum ArticlePreviewPolicy {
-    /// Returns all clean paragraphs for display. The reader shows full extracted content.
-    /// The terminal affordance provides access to the original web page.
-    public static func computePreview(paragraphs: [String], isExtracted: Bool) -> [String] {
+public enum ArticleContentPolicy {
+    /// Returns all verified clean paragraphs for unabridged reading.
+    /// NewsApp displays full extracted article content in the reader without intentional truncation.
+    public static func computeContent(paragraphs: [String]) -> [String] {
         return paragraphs
+    }
+}
+
+// Backward-compatibility alias
+public typealias ArticlePreviewPolicy = ArticleContentPolicy
+public extension ArticleContentPolicy {
+    static func computePreview(paragraphs: [String], isExtracted: Bool = true) -> [String] {
+        return computeContent(paragraphs: paragraphs)
     }
 }
 

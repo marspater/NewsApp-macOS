@@ -74,6 +74,12 @@ struct NewsTests {
         await testFeedArticleWrapContextNavigation()
         await testArticleContentRedactionAndTypography()
         await testArticleDetailReadingExperienceOverhaul()
+        await testBBCExtractionFixture()
+        await testMultiPublisherExtractionFixtures()
+        await testContentQualityValidation()
+        await testExtractionOutcomeDiagnostics()
+        await testCanonicalClassificationDisambiguation()
+        await testAppContainerAndFrostedSurface()
         
         print("✅ SUCCESS: All tests passed!")
     }
@@ -1788,6 +1794,261 @@ struct NewsTests {
         let extractedParagraphs = ContentExtractionPipeline.shared.extractParagraphs(from: sampleHTML)
         assertEqual(extractedParagraphs.count, 3, "Should cleanly extract 3 substantive paragraphs from HTML")
         assertTrue(extractedParagraphs[0].contains("exoplanet"), "Paragraph text should match content")
+    }
+
+    static func testBBCExtractionFixture() async {
+        print("  - Testing BBC News Article Extraction Fixture...")
+
+        let bbcHTML = """
+        <!DOCTYPE html>
+        <html lang="en">
+        <head>
+            <title>Mountaineer Mingma G tells the BBC about high-altitude rescue - BBC News</title>
+            <meta property="og:image" content="https://ichef.bbci.co.uk/news/1024/branded_news/abc12345.jpg">
+        </head>
+        <body>
+            <header role="banner">
+                <nav><a href="/">BBC Home</a><a href="/news">News</a><a href="/sport">Sport</a></nav>
+            </header>
+            <main id="main-content">
+                <article>
+                    <header>
+                        <h1 class="ssrcss-headline">Mountaineer Mingma G tells the BBC about high-altitude rescue</h1>
+                    </header>
+                    <div data-component="text-block" class="ssrcss-text-block">
+                        <p class="ssrcss-1q0x1q5-Paragraph">Mountaineer Mingma G tells the BBC about the dramatic climb up the Himalayan ridge during unprecedented weather conditions.</p>
+                    </div>
+                    <div data-component="text-block" class="ssrcss-text-block">
+                        <p class="ssrcss-1q0x1q5-Paragraph">The seasoned climber coordinated a multi-team summit effort after receiving distress calls from stranded expeditions on the north face.</p>
+                    </div>
+                    <div data-component="text-block" class="ssrcss-text-block">
+                        <p class="ssrcss-1q0x1q5-Paragraph">Despite sub-zero winds and waning daylight, all twelve members were successfully escorted down to base camp without major frostbite.</p>
+                    </div>
+                    <div data-component="text-block" class="ssrcss-text-block">
+                        <p class="ssrcss-1q0x1q5-Paragraph">Local alpine authorities praised the swift mobilization as one of the most effective high-altitude interventions on record in recent decades.</p>
+                    </div>
+                    <aside class="ssrcss-related-topics">
+                        <h2>Related Topics</h2>
+                        <ul><li><a href="/topics/nepal">Nepal</a></li><li><a href="/topics/mountains">Mountaineering</a></li></ul>
+                    </aside>
+                </article>
+            </main>
+            <footer role="contentinfo">
+                <p class="copyright">Copyright 2026 BBC. All rights reserved.</p>
+                <nav><a href="/terms">Terms of Use</a><a href="/about">About the BBC</a></nav>
+            </footer>
+        </body>
+        </html>
+        """
+
+        let outcome = ContentExtractionPipeline.shared.extractFromHTML(bbcHTML)
+        guard case .success(let content, let leadImage) = outcome else {
+            assertTrue(false, "BBC extraction must succeed, got \(outcome)")
+            return
+        }
+
+        let paragraphs = ArticleContentRedactor.redactAndSplit(content)
+        assertEqual(paragraphs.count, 4, "Must extract all 4 BBC story text-block paragraphs")
+        assertTrue(content.contains("Mountaineer Mingma G tells the BBC"), "Paragraph 1 present")
+        assertTrue(content.contains("twelve members were successfully escorted"), "Paragraph 3 present")
+        assertTrue(!content.contains("BBC Home"), "Navigation links must be excluded")
+        assertTrue(!content.contains("Related Topics"), "Related topics section must be excluded")
+        assertTrue(!content.contains("Copyright 2026 BBC"), "Footer copyright must be excluded")
+        assertEqual(leadImage, "https://ichef.bbci.co.uk/news/1024/branded_news/abc12345.jpg", "Lead image must be extracted")
+    }
+
+    static func testMultiPublisherExtractionFixtures() async {
+        print("  - Testing Multi-Publisher Extraction Fixtures (Reuters, Ars, Verge, NYTimes)...")
+
+        // 1. Reuters Style
+        let reutersHTML = """
+        <html><body>
+        <nav><a href="/">Reuters Home</a></nav>
+        <article class="article-body">
+            <div class="article-body__content">
+                <p>Global semiconductor manufacturers reported record quarterly shipments as artificial intelligence demand surged across multiple sectors.</p>
+                <p>Industry analysts noted that supply chain lead times have contracted significantly following major capital investments in fabrication plants.</p>
+                <p>Major enterprise software providers continue to scale computational clusters to support next-generation foundational model training runs.</p>
+            </div>
+        </article>
+        <footer><p>Reuters Thomson Trust Principles</p></footer>
+        </body></html>
+        """
+        let reutersOutcome = ContentExtractionPipeline.shared.extractFromHTML(reutersHTML)
+        guard case .success(let rContent, _) = reutersOutcome else {
+            assertTrue(false, "Reuters extraction must succeed")
+            return
+        }
+        let rParas = ArticleContentRedactor.redactAndSplit(rContent)
+        assertEqual(rParas.count, 3, "Reuters should yield 3 paragraphs")
+        assertTrue(!rContent.contains("Reuters Home"), "Navigation should be excluded")
+
+        // 2. Ars Technica Style
+        let arsHTML = """
+        <html><body>
+        <article class="article-single">
+            <div class="article-content">
+                <p>Researchers at the astrophysics laboratory have mapped the intricate magnetic field lines surrounding a supermassive black hole.</p>
+                <p>Using a globally synchronized array of millimeter-wave radio observatories, the team reconstructed polarimetric signatures at micro-arcsecond resolution.</p>
+                <p>The findings provide critical empirical validation for relativistic magnetohydrodynamic simulations developed over the past decade.</p>
+            </div>
+        </article>
+        </body></html>
+        """
+        let arsOutcome = ContentExtractionPipeline.shared.extractFromHTML(arsHTML)
+        guard case .success(let aContent, _) = arsOutcome else {
+            assertTrue(false, "Ars Technica extraction must succeed")
+            return
+        }
+        assertEqual(ArticleContentRedactor.redactAndSplit(aContent).count, 3, "Ars should yield 3 paragraphs")
+
+        // 3. The Verge Style
+        let vergeHTML = """
+        <html><body>
+        <main id="content">
+            <article>
+                <div class="duet--article--article-body-component">
+                    <p>Electric vehicle charging network operators announced a standardized communication protocol to improve interoperability across metropolitan stations.</p>
+                    <p>The update eliminates proprietary authentication handshakes in favor of universal hardware-level cryptographic key exchange.</p>
+                    <p>Federal transportation regulators hailed the unified specification as an essential milestone for nationwide transit electrification goals.</p>
+                </div>
+            </article>
+        </main>
+        </body></html>
+        """
+        let vergeOutcome = ContentExtractionPipeline.shared.extractFromHTML(vergeHTML)
+        guard case .success(let vContent, _) = vergeOutcome else {
+            assertTrue(false, "The Verge extraction must succeed")
+            return
+        }
+        assertEqual(ArticleContentRedactor.redactAndSplit(vContent).count, 3, "The Verge should yield 3 paragraphs")
+
+        // 4. NYTimes Style
+        let nytHTML = """
+        <html><body>
+        <article id="story">
+            <section name="articleBody">
+                <div class="StoryBodyCompanionColumn">
+                    <p>Central banking officials signaled plans to maintain current policy rates following fresh data on consumer spending and labor market stability.</p>
+                    <p>While headline inflation metrics have cooled toward historical targets, persistent wage growth in services has prompted measured caution among governors.</p>
+                    <p>Financial market participants broadly recalibrated rate cut expectations, with treasury yields consolidating within recent trading ranges.</p>
+                </div>
+            </section>
+        </article>
+        </body></html>
+        """
+        let nytOutcome = ContentExtractionPipeline.shared.extractFromHTML(nytHTML)
+        guard case .success(let nytContent, _) = nytOutcome else {
+            assertTrue(false, "NYTimes extraction must succeed")
+            return
+        }
+        assertEqual(ArticleContentRedactor.redactAndSplit(nytContent).count, 3, "NYTimes should yield 3 paragraphs")
+    }
+
+    static func testContentQualityValidation() async {
+        print("  - Testing ContentQualityValidator Rules...")
+
+        // 1. Valid paragraphs pass
+        let valid = [
+            "The international summit concluded today with landmark agreements on carbon emission reduction targets across all member economies.",
+            "Delegates committed billions in concessional financing to support clean energy transitions in developing nations over the next ten years.",
+            "Independent observers commended the transparency mechanisms embedded within the final treaty text as unprecedented in multilateral diplomacy."
+        ]
+        assertEqual(ContentQualityValidator.validate(paragraphs: valid), .valid, "Substantive article must pass validation")
+
+        // 2. Empty paragraphs rejected
+        assertEqual(ContentQualityValidator.validate(paragraphs: []), .rejected(reason: "No readable paragraphs found"), "Empty paragraphs rejected")
+
+        // 3. Too short rejected
+        let tooShort = ["This is a tiny snippet."]
+        if case .rejected(let reason) = ContentQualityValidator.validate(paragraphs: tooShort) {
+            assertTrue(reason.contains("too short"), "Must reject short snippets")
+        } else {
+            assertTrue(false, "Should reject very short snippets")
+        }
+
+        // 4. High boilerplate rejected
+        let boilerplate = [
+            "The post High Altitude Rescue appeared first on Himalayan News Network.",
+            "Photo credit: Associated Press News Wire Archives / John Doe Photographer.",
+            "Read full article",
+            "A single short paragraph covering the mountain rescue effort in northern Nepal."
+        ]
+        if case .rejected(let reason) = ContentQualityValidator.validate(paragraphs: boilerplate) {
+            assertTrue(reason.contains("boilerplate"), "Must detect high boilerplate ratio")
+        } else {
+            assertTrue(false, "Should reject boilerplate heavy text")
+        }
+
+        // 5. Repetitive syndicated loop rejected
+        let repeated = [
+            "Subscribe to our newsletter for daily updates and breaking news alerts.",
+            "Subscribe to our newsletter for daily updates and breaking news alerts.",
+            "Subscribe to our newsletter for daily updates and breaking news alerts."
+        ]
+        if case .rejected(let reason) = ContentQualityValidator.validate(paragraphs: repeated) {
+            assertTrue(reason.contains("repetitive"), "Must detect duplicate text loop")
+        } else {
+            assertTrue(false, "Should reject repetitive syndication loops")
+        }
+    }
+
+    static func testExtractionOutcomeDiagnostics() async {
+        print("  - Testing ExtractionOutcome Diagnostics & Failure Types...")
+
+        let outcomeSuccess = ExtractionOutcome.success(content: "Article body", imageUrl: "https://example.com/img.jpg")
+        assertTrue(outcomeSuccess.isSuccess, "Must identify success")
+        assertEqual(outcomeSuccess.content, "Article body", "Content accessible")
+        assertEqual(outcomeSuccess.imageUrl, "https://example.com/img.jpg", "Image accessible")
+        assertEqual(outcomeSuccess.failureReason, nil, "No failure reason on success")
+
+        let outcomeHTTP = ExtractionOutcome.httpError(status: 403)
+        assertTrue(!outcomeHTTP.isSuccess, "Not success")
+        assertEqual(outcomeHTTP.failureReason, "HTTP Error 403", "HTTP status failure message")
+
+        let outcomeBlocked = ExtractionOutcome.securityBlocked(reason: "Private IP")
+        assertEqual(outcomeBlocked.failureReason, "Security blocked: Private IP", "Security failure message")
+
+        let outcomeNetwork = ExtractionOutcome.networkError(reason: "Connection timeout")
+        assertEqual(outcomeNetwork.failureReason, "Connection timeout", "Network failure message")
+    }
+
+    static func testCanonicalClassificationDisambiguation() async {
+        print("  - Testing Canonical Classification Disambiguation for Overlapping Topics...")
+
+        // Overlap 1: Health + Technology (AI scanner for hospital patients)
+        assertEqual(NewsCategory.match(from: "medical AI clinical diagnostic scanner"), .health, "Health cue overrides tech")
+
+        // Overlap 2: Science + Technology (NASA satellite mission)
+        assertEqual(NewsCategory.match(from: "NASA telescope deep space observatory"), .science, "Astronomy cue overrides tech")
+
+        // Overlap 3: Business + Politics (Stock market inflation Wall Street)
+        assertEqual(NewsCategory.match(from: "Wall Street stock market inflation revenue"), .business, "Market cues resolve to business")
+
+        // Overlap 4: Politics + World (Senate Congress election)
+        assertEqual(NewsCategory.match(from: "Senate Congress election campaign"), .politics, "Governance cues resolve to politics")
+
+        // Overlap 5: World diplomacy (International foreign global treaty)
+        assertEqual(NewsCategory.match(from: "International global foreign diplomat summit"), .world, "Diplomacy resolves to world")
+    }
+
+    @MainActor
+    static func testAppContainerAndFrostedSurface() async {
+        print("  - Testing AppContainer & Frosted Surface tokens...")
+
+        let container = AppContainer.shared
+        assertTrue(container.appSettings === AppSettings.shared, "AppSettings wired")
+        assertTrue(container.articleStore === ArticleStore.shared, "ArticleStore wired")
+        assertTrue(container.readManager === ReadManager.shared, "ReadManager wired")
+        assertTrue(container.themeManager === ThemeManager.shared, "ThemeManager wired")
+        assertTrue(container.savedStories === SavedStoriesManager.shared, "SavedStories wired")
+
+        let controlElevation = FrostedElevation.control
+        assertEqual(controlElevation.surfaceBackingOpacity, 0.65, "Control backing is translucent (0.65)")
+        assertEqual(controlElevation.shadowRadius, 12.0, "Control shadow radius is 12")
+
+        let cardElevation = FrostedElevation.card
+        assertEqual(cardElevation.surfaceBackingOpacity, 0.38, "Card backing is 0.38")
     }
 }
 
