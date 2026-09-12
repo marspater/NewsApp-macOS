@@ -36,10 +36,11 @@ struct MainView: View {
     @EnvironmentObject private var readManager: ReadManager
     @StateObject private var savedStories = SavedStoriesManager.shared
     
+    @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @State private var isWindowDropTargeted = false
     
     var body: some View {
-        NavigationSplitView(columnVisibility: .constant(.all)) {
+        NavigationSplitView(columnVisibility: $columnVisibility) {
             SidebarView(selectedTopic: $selectedTopic, searchText: $searchText)
                 .environmentObject(appSettings)
                 .environmentObject(feedManager)
@@ -53,7 +54,8 @@ struct MainView: View {
                     ArticleListView(
                         selectedTopic: $selectedTopic,
                         searchText: $searchText,
-                        articlePath: $articlePath
+                        articlePath: $articlePath,
+                        columnVisibility: $columnVisibility
                     )
                     .environmentObject(appSettings)
                     .environmentObject(articleStore)

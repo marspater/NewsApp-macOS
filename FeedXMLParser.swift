@@ -214,6 +214,13 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
             }
 
             let guidVal = itemGuid.trimmingCharacters(in: .whitespacesAndNewlines)
+            let cleanCategory: String? = {
+                let first = itemCategory.components(separatedBy: .newlines)
+                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    .first(where: { !$0.isEmpty })
+                guard let first = first, !first.isEmpty else { return nil }
+                return first
+            }()
             let article = FeedArticle(
                 title: itemTitle.trimmingCharacters(in: .whitespacesAndNewlines),
                 link: itemLink.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -224,7 +231,7 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
                 imageUrl: itemImageUrl.isEmpty ? nil : itemImageUrl,
                 aiSummary: nil,
                 fullContent: fullContent,
-                category: itemCategory.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : itemCategory.trimmingCharacters(in: .whitespacesAndNewlines),
+                category: cleanCategory,
                 contentFetched: fullContent != nil
             )
             articles.append(article)

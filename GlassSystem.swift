@@ -27,17 +27,34 @@ public struct GlassControlModifier<S: Shape>: ViewModifier {
                 .background(AppColor.surface, in: shape)
                 .overlay(shape.stroke(AppColor.borderSubtle, lineWidth: 1))
         } else {
-            if #available(macOS 26.0, *) {
-                if interactive {
-                    content.glassEffect(AppGlass.interactive, in: shape)
-                } else {
-                    content.glassEffect(AppGlass.control, in: shape)
-                }
-            } else {
-                content
-                    .background(.ultraThinMaterial, in: shape)
-                    .overlay(shape.stroke(AppColor.borderSubtle, lineWidth: 0.5))
-            }
+            content
+                .background(.ultraThinMaterial, in: shape)
+                .background(
+                    LinearGradient(
+                        colors: [
+                            Color.white.opacity(0.12),
+                            Color.white.opacity(0.02)
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ),
+                    in: shape
+                )
+                .overlay(
+                    shape.stroke(
+                        LinearGradient(
+                            colors: [
+                                Color.white.opacity(0.4),
+                                Color.white.opacity(0.12),
+                                AppColor.borderSubtle
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        lineWidth: 0.75
+                    )
+                )
+                .shadow(color: Color.black.opacity(0.14), radius: 8, x: 0, y: 3)
         }
     }
 }
@@ -53,16 +70,10 @@ public extension View {
         self.liquidGlass(in: Capsule(), interactive: interactive)
     }
     
-    /// Grouped glass container helper that allows adjacent glass elements to morph and render efficiently.
+    /// Grouped glass container helper that provides semantic grouping for adjacent glass controls.
     @ViewBuilder
     func inGlassContainer() -> some View {
-        if #available(macOS 26.0, *) {
-            GlassEffectContainer {
-                self
-            }
-        } else {
-            self
-        }
+        self
     }
     
     /// Modern edge-to-edge background extension with backward compatibility.

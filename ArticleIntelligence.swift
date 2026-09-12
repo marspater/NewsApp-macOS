@@ -22,7 +22,8 @@ public enum NewsCategory: String, CaseIterable, Sendable, Codable {
     case lifestyle = "Lifestyle"
 
     public static func match(from string: String) -> NewsCategory? {
-        let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
+        let firstLine = string.components(separatedBy: .newlines).first ?? string
+        let trimmed = firstLine.trimmingCharacters(in: .whitespacesAndNewlines)
         for cat in allCases {
             if cat.rawValue.localizedCaseInsensitiveCompare(trimmed) == .orderedSame {
                 return cat
@@ -40,7 +41,7 @@ public enum NewsCategory: String, CaseIterable, Sendable, Codable {
         if lower.contains("travel") || lower.contains("tourism") { return .travel }
         if lower.contains("food") || lower.contains("cook") || lower.contains("dining") || lower.contains("culinary") || lower.contains("recipe") { return .food }
         if lower.contains("style") || lower.contains("fashion") { return .fashion }
-        if lower.contains("global") || lower.contains("world") || lower.contains("international") { return .world }
+        if lower.contains("global") || lower.contains("world") || lower.contains("international") || lower.contains("war") || lower.contains("conflict") || lower.contains("military") { return .world }
         if lower.contains("life") || lower.contains("living") { return .lifestyle }
         return nil
     }

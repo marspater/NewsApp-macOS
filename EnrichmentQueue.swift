@@ -225,7 +225,10 @@ actor EnrichmentQueue {
         }
 
         // Check cancellation before heavy work
-        if Task.isCancelled || isJobCancelled(articleId) {
+        if isJobCancelled(articleId) {
+            return
+        }
+        if Task.isCancelled {
             markJobState(articleId: articleId, state: .cancelled(.superseded))
             return
         }
@@ -242,7 +245,10 @@ actor EnrichmentQueue {
             rssCategory: article.category
         )
 
-        if Task.isCancelled || isJobCancelled(articleId) {
+        if isJobCancelled(articleId) {
+            return
+        }
+        if Task.isCancelled {
             markJobState(articleId: articleId, state: .cancelled(.superseded))
             return
         }

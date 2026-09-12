@@ -8,6 +8,7 @@ struct ArticleListView: View {
     @Binding var selectedTopic: String?
     @Binding var searchText: String
     @Binding var articlePath: NavigationPath
+    @Binding var columnVisibility: NavigationSplitViewVisibility
     
     @EnvironmentObject private var appSettings: AppSettings
     @EnvironmentObject private var articleStore: ArticleStore
@@ -71,6 +72,7 @@ struct ArticleListView: View {
                     }
                 }
                 .focusable()
+                .focusEffectDisabled()
                 .onKeyPress { press in
                     handleKeyPress(press: press, proxy: proxy)
                 }
@@ -113,7 +115,20 @@ struct ArticleListView: View {
     // MARK: - Header Bar
     
     private var headerBar: some View {
-        HStack {
+        HStack(spacing: AppSpacing.sm) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    columnVisibility = (columnVisibility == .detailOnly ? .all : .detailOnly)
+                }
+            } label: {
+                Image(systemName: "sidebar.leading")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundColor(AppColor.secondaryText)
+            }
+            .buttonStyle(.plain)
+            .help("Toggle Sidebar (⌃⌘S)")
+            .accessibilityLabel("Toggle Sidebar")
+            
             Text(selectedTopic ?? "Today")
                 .font(AppTypography.title)
                 .foregroundColor(AppColor.primaryText)

@@ -11,7 +11,9 @@ public final class CacheManager: @unchecked Sendable {
     
     private var cacheDirectory: URL {
         let paths = fileManager.urls(for: .cachesDirectory, in: .userDomainMask)
-        let appCacheDir = paths[0].appendingPathComponent("com.marspater.news.cache")
+        let isTest = ProcessInfo.processInfo.processName.contains("test")
+        let dirName = isTest ? "com.marspater.news.testcache" : "com.marspater.news.cache"
+        let appCacheDir = paths[0].appendingPathComponent(dirName)
         
         if !fileManager.fileExists(atPath: appCacheDir.path) {
             try? fileManager.createDirectory(at: appCacheDir, withIntermediateDirectories: true)
@@ -48,10 +50,7 @@ public final class CacheManager: @unchecked Sendable {
     /// Does NOT touch user articles, bookmarks, or reading history in the database.
     public func clearWebCache() {
         URLCache.shared.removeAllCachedResponses()
-        let webCacheDir = cacheDirectory.appendingPathComponent("web_cache")
-        try? fileManager.removeItem(at: webCacheDir)
-        try? fileManager.createDirectory(at: webCacheDir, withIntermediateDirectories: true)
-        logger.info("Cleared HTTP network cache and asset directory.")
+        logger.info("Cleared HTTP network cache.")
     }
 
     /// Legacy convenience alias for clearWebCache.

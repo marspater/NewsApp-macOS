@@ -38,7 +38,10 @@ struct ArticleDetailView: View {
     }
     
     private var currentArticle: FeedArticle {
-        allArticles.first { $0.id == activeArticle.id } ?? activeArticle
+        articleStore.articles.first { $0.id == activeArticle.id }
+            ?? feedManager.articles.first { $0.id == activeArticle.id }
+            ?? allArticles.first { $0.id == activeArticle.id }
+            ?? activeArticle
     }
     
     private var isSaved: Bool {
@@ -74,6 +77,7 @@ struct ArticleDetailView: View {
             topGlassToolbar
         }
         .focusable()
+        .focusEffectDisabled()
         .onKeyPress { press in
             handleKeyPress(press: press)
         }
@@ -124,11 +128,7 @@ struct ArticleDetailView: View {
                     
                     aiAnalysisSection
                     
-                    if currentArticle.contentFetched {
-                        articleContentParagraphs
-                    } else {
-                        contentLoadingSkeleton
-                    }
+                    articleContentParagraphs
                     
                     Spacer().frame(height: 80)
                 }
@@ -159,9 +159,11 @@ struct ArticleDetailView: View {
                             )
                         )
                 default:
-                    EmptyView()
+                    Spacer().frame(height: AppLayout.toolbarHeight + 44)
                 }
             }
+        } else {
+            Spacer().frame(height: AppLayout.toolbarHeight + 44)
         }
     }
     
@@ -199,40 +201,6 @@ struct ArticleDetailView: View {
             }
         }
         .transition(.opacity.combined(with: .move(edge: .bottom)))
-    }
-    
-    private var contentLoadingSkeleton: some View {
-        VStack(spacing: 20) {
-            Spacer().frame(height: 40)
-            ForEach(0..<3) { _ in
-                RoundedRectangle(cornerRadius: AppRadius.small)
-                    .fill(AppColor.tertiaryText.opacity(0.2))
-                    .frame(height: 20)
-                    .frame(maxWidth: .infinity)
-            }
-            .phaseAnimator([0.5, 1.0]) { content, phase in
-                content.opacity(phase)
-            }
-            
-            Text("AI is extracting full content...")
-                .font(.system(size: 13, weight: .medium, design: .monospaced))
-                .foregroundColor(AppColor.intelligence.opacity(0.85))
-                .padding(.top, 10)
-            
-            Button {
-                viewMode = .web
-            } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: "safari")
-                    Text("Switch to Web View (W)")
-                }
-                .font(.system(size: 13, weight: .medium))
-                .foregroundColor(AppColor.accent)
-            }
-            .buttonStyle(.plain)
-            .padding(.top, 6)
-        }
-        .padding(.top, 20)
     }
     
     // MARK: - Web View Container
@@ -283,19 +251,20 @@ struct ArticleDetailView: View {
             Button {
                 if !path.isEmpty { path.removeLast() }
             } label: {
-                HStack(spacing: 4) {
+                HStack(spacing: 6) {
                     Image(systemName: "chevron.left")
-                        .font(.system(size: 12, weight: .semibold))
-                    Text("Done")
-                        .font(AppTypography.label)
+                        .font(.system(size: 12, weight: .bold))
+                    Text("Back")
+                        .font(.system(size: 13, weight: .semibold))
                 }
                 .foregroundColor(AppColor.primaryText)
-                .padding(.horizontal, 10)
+                .padding(.horizontal, 14)
                 .frame(height: AppLayout.controlHeight + 4)
                 .glassPill(interactive: true)
             }
             .buttonStyle(.plain)
-            .help("Back to list (Esc or ←)")
+            .help("Back to articles (Esc, Delete, or ←)")
+            .accessibilityLabel("Back to articles")
             
             Spacer()
             
@@ -394,7 +363,19 @@ struct ArticleDetailView: View {
         }
         .padding(.horizontal, AppLayout.pageInset)
         .padding(.top, 16)
-        .padding(.bottom, 8)
+        .padding(.bottom, 12)
+        .background(
+            LinearGradient(
+                colors: [
+                    AppColor.background.opacity(0.95),
+                    AppColor.background.opacity(0.85),
+                    AppColor.background.opacity(0.0)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .ignoresSafeArea(edges: .top)
+        )
         .inGlassContainer()
     }
     
@@ -436,7 +417,7 @@ struct ArticleDetailView: View {
     
     private func handleKeyPress(press: KeyPress) -> KeyPress.Result {
         switch press.key {
-        case .escape, .leftArrow:
+        case .escape, .leftArrow, .delete:
             if !path.isEmpty { path.removeLast() }
             return .handled
         case .downArrow:
@@ -446,7 +427,10 @@ struct ArticleDetailView: View {
             prevArticle()
             return .handled
         default:
-            if press.characters == "j" {
+            if press.characters == "b" || press.characters == "h" {
+                if !path.isEmpty { path.removeLast() }
+                return .handled
+            } else if press.characters == "j" {
                 nextArticle()
                 return .handled
             } else if press.characters == "k" {
@@ -476,6 +460,22 @@ struct ArticleDetailView: View {
     private var displaySource: String {
         (currentArticle.source.components(separatedBy: "\n").first ?? currentArticle.source)
             .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+    
+    private var displayCategory: String? {
+        let raw = analysis?.category ?? currentArticle.category
+        guard let raw = raw, !raw.isEmpty else { return nil }
+        let firstLine = raw.components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first(where: { !$0.isEmpty }) ?? ""
+        guard !firstLine.isEmpty else { return nil }
+        if let matched = NewsCategory.match(from: firstLine) {
+            return matched.rawValue
+        }
+        if firstLine.count > 24 {
+            return String(firstLine.prefix(24)) + "…"
+        }
+        return firstLine
     }
     
     private func contentParagraphs(_ text: String) -> [String] {
@@ -538,36 +538,44 @@ struct ArticleDetailView: View {
                 }
 
                 // Entity tags, sentiment badge, category pill
-                HStack(spacing: 8) {
-                    if let sentiment = analysis.sentiment {
-                        HStack(spacing: 4) {
-                            Image(systemName: sentiment.score >= 0.1 ? "hand.thumbsup.fill" : (sentiment.score <= -0.1 ? "hand.thumbsdown.fill" : "minus.circle.fill"))
-                                .font(.system(size: 10))
-                            Text(sentiment.label)
-                                .font(.caption2.bold())
-                        }
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(Capsule().fill(AppColor.surface))
-                        .foregroundColor(AppColor.secondaryText)
-                    }
-
-                    ForEach(analysis.entities.prefix(4), id: \.name) { entity in
-                        Text(entity.name)
-                            .font(.caption2.weight(.medium))
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        if let sentiment = analysis.sentiment {
+                            HStack(spacing: 4) {
+                                Image(systemName: sentiment.score >= 0.1 ? "hand.thumbsup.fill" : (sentiment.score <= -0.1 ? "hand.thumbsdown.fill" : "minus.circle.fill"))
+                                    .font(.system(size: 10))
+                                Text(sentiment.label)
+                                    .font(.caption2.bold())
+                                    .lineLimit(1)
+                            }
                             .padding(.horizontal, 8)
                             .padding(.vertical, 4)
                             .background(Capsule().fill(AppColor.surface))
                             .foregroundColor(AppColor.secondaryText)
-                    }
+                        }
 
-                    if let cat = analysis.category ?? currentArticle.category {
-                        Text(cat)
-                            .font(.caption2.weight(.bold))
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .background(Capsule().fill(AppColor.accent.opacity(0.12)))
-                            .foregroundColor(AppColor.accent)
+                        if let cat = displayCategory {
+                            Text(cat)
+                                .font(.caption2.weight(.bold))
+                                .lineLimit(1)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(Capsule().fill(AppColor.accent.opacity(0.12)))
+                                .foregroundColor(AppColor.accent)
+                        }
+
+                        ForEach(analysis.entities.prefix(4), id: \.name) { entity in
+                            let name = entity.name.components(separatedBy: .newlines).first?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                            if !name.isEmpty {
+                                Text(name)
+                                    .font(.caption2.weight(.medium))
+                                    .lineLimit(1)
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 4)
+                                    .background(Capsule().fill(AppColor.surface))
+                                    .foregroundColor(AppColor.secondaryText)
+                            }
+                        }
                     }
                 }
             }
@@ -657,6 +665,13 @@ struct ArticleDetailView: View {
                             content: content,
                             image: extracted.imageUrl
                         )
+                        var updated = self.activeArticle
+                        updated.fullContent = content
+                        updated.contentFetched = true
+                        if let img = extracted.imageUrl {
+                            updated.imageUrl = img
+                        }
+                        self.activeArticle = updated
                     }
                 }
 
