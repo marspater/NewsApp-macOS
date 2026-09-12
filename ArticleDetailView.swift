@@ -258,7 +258,7 @@ struct ArticleDetailView: View {
                     Spacer().frame(height: 80)
                 }
                 .padding(.horizontal, 40)
-                .padding(.top, currentArticle.imageUrl != nil ? 18 : (AppLayout.toolbarHeight + 36))
+                .padding(.top, currentArticle.imageUrl != nil ? 18 : (AppLayout.toolbarHeight + 68))
                 .frame(maxWidth: 740, alignment: .leading)
                 .frame(maxWidth: .infinity, alignment: .center)
             }
@@ -678,31 +678,24 @@ struct ArticleDetailView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
-        .background {
-            // Subtle 2px reading progress bar at the bottom edge of the capsule
-            GeometryReader { proxy in
-                VStack {
-                    Spacer()
-                    ZStack(alignment: .leading) {
-                        Capsule()
-                            .fill(Color.clear)
-                            .frame(height: 2)
-
-                        if readingProgress > 0.01 {
-                            Capsule()
-                                .fill(AppColor.accent)
-                                .frame(width: max(8, proxy.size.width * readingProgress), height: 2)
-                        }
-                    }
+        .frostedPill(elevation: .control)
+        .overlay(alignment: .bottom) {
+            if readingProgress > 0.01 {
+                GeometryReader { proxy in
+                    Capsule()
+                        .fill(AppColor.accent)
+                        .frame(width: max(8, proxy.size.width * readingProgress), height: 2)
                 }
+                .frame(height: 2)
+                .padding(.horizontal, 16)
+                .padding(.bottom, 2)
             }
         }
-        .frostedPill(elevation: .control)
         .opacity(isToolbarCompacted && !isToolbarHovered ? 0.92 : 1.0)
         .onHover { isToolbarHovered = $0 }
         .animation(.easeInOut(duration: 0.2), value: isToolbarCompacted)
         .animation(.easeInOut(duration: 0.15), value: isToolbarHovered)
-        .padding(.top, 18)
+        .padding(.top, 56)
     }
 
     // MARK: - Navigation & Actions

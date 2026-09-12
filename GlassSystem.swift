@@ -195,10 +195,6 @@ public extension View {
     /// Modern edge-to-edge background extension with backward compatibility.
     @ViewBuilder
     func adaptiveBackgroundExtension() -> some View {
-        if #available(macOS 26.0, *) {
-            self.backgroundExtensionEffect()
-        } else {
-            self
-        }
+        self
     }
 }
