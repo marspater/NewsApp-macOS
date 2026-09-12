@@ -122,6 +122,7 @@ public struct NativeLiquidGlassModifier<S: Shape>: ViewModifier {
                 .background(AppColor.surface, in: shape)
                 .overlay(shape.stroke(AppColor.borderSubtle, lineWidth: 1))
         } else {
+            #if canImport(FoundationModels)
             if #available(macOS 26.0, *) {
                 content
                     .glassEffect(interactive ? Glass.regular.interactive() : Glass.regular, in: shape)
@@ -129,6 +130,10 @@ public struct NativeLiquidGlassModifier<S: Shape>: ViewModifier {
                 content
                     .modifier(FrostedSurfaceModifier(shape: shape, elevation: .control))
             }
+            #else
+            content
+                .modifier(FrostedSurfaceModifier(shape: shape, elevation: .control))
+            #endif
         }
     }
 }
@@ -155,6 +160,7 @@ public extension View {
     /// Grouped glass container helper for macOS 26+.
     @ViewBuilder
     func inGlassContainer() -> some View {
+        #if canImport(FoundationModels)
         if #available(macOS 26.0, *) {
             GlassEffectContainer {
                 self
@@ -162,5 +168,8 @@ public extension View {
         } else {
             self
         }
+        #else
+        self
+        #endif
     }
 }

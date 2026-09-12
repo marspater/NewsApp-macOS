@@ -644,16 +644,16 @@ struct SettingsView: View {
     // MARK: - Storage & Cache Calculation Helpers
 
     private func calculateStorageSizes() {
-        DispatchQueue.global().async {
+        Task.detached(priority: .utility) {
             let webBytes = CacheManager.shared.calculateTotalCacheSize()
-            let dbBytes = calculateDatabaseBytes()
+            let dbBytes = Self.calculateDatabaseBytes()
             let totalBytes = webBytes + dbBytes
 
             let formattedWeb = Self.formatBytes(webBytes)
             let formattedDb = Self.formatBytes(dbBytes)
             let formattedTotal = Self.formatBytes(totalBytes)
 
-            DispatchQueue.main.async {
+            await MainActor.run {
                 self.webCacheSize = formattedWeb
                 self.databaseSize = formattedDb
                 self.totalStorageSize = formattedTotal
@@ -661,7 +661,7 @@ struct SettingsView: View {
         }
     }
 
-    private func calculateDatabaseBytes() -> Int64 {
+    private nonisolated static func calculateDatabaseBytes() -> Int64 {
         let fileManager = FileManager.default
         guard let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else { return 0 }
         let dbDir = appSupport.appendingPathComponent("com.marspater.news", isDirectory: true)
@@ -677,7 +677,7 @@ struct SettingsView: View {
         return total
     }
 
-    private static func formatBytes(_ bytes: Int64) -> String {
+    private nonisolated static func formatBytes(_ bytes: Int64) -> String {
         if bytes < 1024 { return "\(bytes) B" }
         if bytes < 1024 * 1024 { return String(format: "%.1f KB", Double(bytes) / 1024.0) }
         return String(format: "%.1f MB", Double(bytes) / (1024.0 * 1024.0))

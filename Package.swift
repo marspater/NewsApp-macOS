@@ -16,20 +16,18 @@ let package = Package(
             exclude: [
                 "Assets",
                 "News.app",
-                "News-Universal2.dmg",
-                "News-Universal2.zip",
-                "News-Universal2.dmg.sha256",
-                "News-Universal2.zip.sha256",
                 "NewsTests.swift",
                 "build.sh",
                 "build_release.sh",
                 "package_dmg.sh",
                 "notarize.sh",
                 "test.sh",
-                "main",
                 "README.md",
                 "SECURITY.md",
                 "PRIVACY.md",
+                "AGENTS.md",
+                "CONTRIBUTING.md",
+                "JULES.md",
                 "News.entitlements"
             ],
             sources: [
