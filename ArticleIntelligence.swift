@@ -95,7 +95,20 @@ public enum GenerableNewsCategory: String, CaseIterable, Sendable, Codable {
     case lifestyle = "Lifestyle"
 
     var toDomainCategory: NewsCategory {
-        NewsCategory(rawValue: self.rawValue) ?? .technology
+        switch self {
+        case .technology: return .technology
+        case .science: return .science
+        case .business: return .business
+        case .politics: return .politics
+        case .world: return .world
+        case .sports: return .sports
+        case .entertainment: return .entertainment
+        case .health: return .health
+        case .travel: return .travel
+        case .food: return .food
+        case .fashion: return .fashion
+        case .lifestyle: return .lifestyle
+        }
     }
 }
 
