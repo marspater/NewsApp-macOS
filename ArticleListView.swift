@@ -107,7 +107,7 @@ struct ArticleListView: View {
                     }
                 }
             }
-            .onTapGesture {} // Prevents click-through window drag
+            .windowDragBehavior(.disabled) // Prevents clicks from passing through to the window and triggering the title bar bug
         }
     }
     

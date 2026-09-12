@@ -125,7 +125,7 @@ struct ArticleDetailView: View {
             }
         }
         .ignoresSafeArea(edges: .top)
-        .onTapGesture {}
+        .windowDragBehavior(.disabled)
     }
     
     private var heroImageHeader: some View {
