@@ -155,6 +155,7 @@ struct ArticleListView: View {
                 shortcutsHelpView
             }
             .help("Keyboard Shortcuts")
+            .accessibilityLabel("Keyboard Shortcuts")
             
             Button {
                 refreshFeeds()
@@ -170,6 +171,7 @@ struct ArticleListView: View {
             }
             .buttonStyle(.plain)
             .help("Refresh Feeds (R or ⌘R)")
+            .accessibilityLabel("Refresh Feeds")
         }
         .padding(.horizontal, AppLayout.pageInset)
         .padding(.top, 24)

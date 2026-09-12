@@ -560,6 +560,7 @@ struct ArticleDetailView: View {
                     .buttonStyle(.plain)
                     .disabled(!webCanGoBack)
                     .help("Browser History Back")
+                    .accessibilityLabel("Browser History Back")
 
                     Button {
                         webAction = .goForward
@@ -572,6 +573,7 @@ struct ArticleDetailView: View {
                     .buttonStyle(.plain)
                     .disabled(!webCanGoForward)
                     .help("Browser History Forward")
+                    .accessibilityLabel("Browser History Forward")
                 }
             }
 
@@ -594,6 +596,7 @@ struct ArticleDetailView: View {
                     .keyboardShortcut(.upArrow, modifiers: [])
                     .disabled(!hasPrevArticle)
                     .help("Previous Article (K or ↑)")
+                    .accessibilityLabel("Previous Article")
 
                     Button {
                         nextArticle()
@@ -607,6 +610,7 @@ struct ArticleDetailView: View {
                     .keyboardShortcut(.downArrow, modifiers: [])
                     .disabled(!hasNextArticle)
                     .help("Next Article (J or ↓)")
+                    .accessibilityLabel("Next Article")
                 }
 
                 Divider()
@@ -640,6 +644,7 @@ struct ArticleDetailView: View {
                 }
                 .buttonStyle(.plain)
                 .help("Save Story (S)")
+                .accessibilityLabel(isSaved ? "Remove from Saved" : "Save Story")
 
                 if let url = URL(string: currentArticle.link) {
                     ShareLink(item: url, subject: Text(currentArticle.title)) {
@@ -650,6 +655,7 @@ struct ArticleDetailView: View {
                     }
                     .buttonStyle(.plain)
                     .help("Share Story")
+                    .accessibilityLabel("Share Story")
                 }
 
                 Menu {
@@ -674,6 +680,8 @@ struct ArticleDetailView: View {
                 .buttonStyle(.plain)
                 .menuIndicator(.hidden)
                 .fixedSize()
+                .help("More Actions")
+                .accessibilityLabel("More Actions")
             }
         }
         .padding(.horizontal, 16)
