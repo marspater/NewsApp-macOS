@@ -93,15 +93,19 @@ struct ArticleWebView: NSViewRepresentable {
             }
 
             // 2. Prevent navigation to local or intranet IP hosts
-            if let host = requestURL.host {
-                let validationResult = IPAddressValidator.validateHost(host)
-                switch validationResult {
-                case .allowed:
-                    break
-                case .blocked, .unresolvable:
-                    decisionHandler(.cancel)
-                    return
-                }
+            // Since we already enforced HTTP/HTTPS above, the URL MUST have a valid host.
+            guard let host = requestURL.host, !host.isEmpty else {
+                decisionHandler(.cancel)
+                return
+            }
+
+            let validationResult = IPAddressValidator.validateHost(host)
+            switch validationResult {
+            case .allowed:
+                break
+            case .blocked, .unresolvable:
+                decisionHandler(.cancel)
+                return
             }
 
             // 3. Delegate target="_blank" popups to external default browser
