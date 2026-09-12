@@ -8,6 +8,7 @@ struct ArticleListView: View {
     @Binding var selectedTopic: String?
     @Binding var searchText: String
     @Binding var articlePath: NavigationPath
+    @Binding var columnVisibility: NavigationSplitViewVisibility
     
     @EnvironmentObject private var appSettings: AppSettings
     @EnvironmentObject private var articleStore: ArticleStore
@@ -17,7 +18,6 @@ struct ArticleListView: View {
     @EnvironmentObject private var savedStories: SavedStoriesManager
     
     @State private var focusedArticleID: String? = nil
-    @State private var isRefreshing: Bool = false
     @State private var isShortcutsHelpPresented: Bool = false
     
     // MARK: - Filtered Articles
@@ -72,6 +72,7 @@ struct ArticleListView: View {
                     }
                 }
                 .focusable()
+                .focusEffectDisabled()
                 .onKeyPress { press in
                     handleKeyPress(press: press, proxy: proxy)
                 }
@@ -114,17 +115,31 @@ struct ArticleListView: View {
     // MARK: - Header Bar
     
     private var headerBar: some View {
-        HStack {
-            Text(selectedTopic?.uppercased() ?? "TODAY")
-                .font(.system(size: 22, weight: .bold, design: .default))
-                .foregroundColor(AppColor.textPrimary)
+        HStack(spacing: AppSpacing.sm) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    columnVisibility = (columnVisibility == .detailOnly ? .all : .detailOnly)
+                }
+            } label: {
+                Image(systemName: "sidebar.leading")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundColor(AppColor.secondaryText)
+            }
+            .buttonStyle(.plain)
+            .help("Toggle Sidebar (⌃⌘S)")
+            .accessibilityLabel("Toggle Sidebar")
+
+            Text(selectedTopic ?? "Today")
+                .font(AppTypography.title)
+                .foregroundColor(AppColor.primaryText)
                 .tracking(AppTypography.sectionHeaderTracking)
             
             Spacer()
             
-            if isRefreshing {
+            if feedManager.isAnyFeedLoading {
                 ProgressView()
-                    .scaleEffect(0.7)
+                    .controlSize(.small)
+                    .scaleEffect(0.8)
                     .padding(.trailing, 4)
             }
             
@@ -132,8 +147,8 @@ struct ArticleListView: View {
                 isShortcutsHelpPresented.toggle()
             } label: {
                 Image(systemName: "keyboard")
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundColor(AppColor.textSecondary)
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundColor(AppColor.secondaryText)
             }
             .buttonStyle(.plain)
             .popover(isPresented: $isShortcutsHelpPresented) {
@@ -145,28 +160,28 @@ struct ArticleListView: View {
                 refreshFeeds()
             } label: {
                 Image(systemName: "arrow.clockwise")
-                    .font(.system(size: 16, weight: .medium))
-                    .foregroundColor(AppColor.textSecondary)
-                    .rotationEffect(.degrees(isRefreshing ? 360 : 0))
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundColor(AppColor.secondaryText)
+                    .rotationEffect(.degrees(feedManager.isAnyFeedLoading ? 360 : 0))
                     .animation(
-                        isRefreshing ? .linear(duration: 1).repeatForever(autoreverses: false) : .default,
-                        value: isRefreshing
+                        feedManager.isAnyFeedLoading ? .linear(duration: 1).repeatForever(autoreverses: false) : .default,
+                        value: feedManager.isAnyFeedLoading
                     )
             }
             .buttonStyle(.plain)
             .help("Refresh Feeds (R or ⌘R)")
         }
-        .padding(.horizontal, 30)
-        .padding(.top, 30)
-        .padding(.bottom, AppSpacing.md)
+        .padding(.horizontal, AppLayout.pageInset)
+        .padding(.top, 24)
+        .padding(.bottom, AppLayout.cardGap)
     }
     
     // MARK: - Article Grid
     
     private func articleGrid(proxy: ScrollViewProxy) -> some View {
         LazyVGrid(
-            columns: [GridItem(.adaptive(minimum: 320), spacing: AppSpacing.md)],
-            spacing: AppSpacing.md
+            columns: [GridItem(.adaptive(minimum: 300, maximum: 420), spacing: AppLayout.cardGap)],
+            spacing: AppLayout.cardGap
         ) {
             ForEach(filteredArticles) { article in
                 ArticleCardView(
@@ -175,17 +190,13 @@ struct ArticleListView: View {
                 ) {
                     focusedArticleID = article.id
                     readManager.markAsRead(article.id)
-                    articlePath.append(FeedArticleWrap(article: article))
+                    articlePath.append(FeedArticleWrap(article: article, contextArticles: filteredArticles))
                 }
                 .id(article.id)
-                .transition(.asymmetric(
-                    insertion: .opacity.combined(with: .scale(scale: 0.98)),
-                    removal: .opacity
-                ))
+                .transition(.opacity)
             }
         }
-        .animation(AppMotion.responsive, value: filteredArticles)
-        .padding(.horizontal, AppSpacing.lg)
+        .padding(.horizontal, AppLayout.pageInset)
         .padding(.bottom, 30)
     }
     
@@ -193,66 +204,97 @@ struct ArticleListView: View {
     
     private var emptyStateView: some View {
         VStack(spacing: AppSpacing.md) {
-            Image(systemName: emptyStateIcon)
-                .font(.system(size: 44))
-                .foregroundColor(AppColor.textTertiary)
-            
-            Text(emptyStateText)
-                .foregroundColor(AppColor.textTertiary)
-                .font(.system(size: 15))
-                .multilineTextAlignment(.center)
-            
             let failedFeeds = feedManager.feedStatuses.filter {
                 if case .failed = $0.value { return true }
                 return false
             }
             
             if feedManager.isAnyFeedLoading {
-                HStack(spacing: AppSpacing.xs) {
-                    ProgressView().controlSize(.small)
-                    Text("Updating news feeds...")
-                        .font(.system(size: 13, design: .monospaced))
-                        .foregroundColor(AppColor.accentPink.opacity(0.85))
-                }
-                .padding(.top, AppSpacing.sm)
-            } else if !failedFeeds.isEmpty {
-                VStack(spacing: AppSpacing.xs) {
-                    HStack(spacing: 6) {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .foregroundColor(AppColor.errorRed)
-                        Text("Some feeds failed to load:")
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundColor(AppColor.errorRed)
-                    }
+                ProgressView()
+                    .controlSize(.regular)
+                    .padding(.bottom, 4)
+                Text("Refreshing news feeds...")
+                    .font(AppTypography.body)
+                    .foregroundColor(AppColor.secondaryText)
+            } else if !failedFeeds.isEmpty && filteredArticles.isEmpty {
+                VStack(spacing: 12) {
+                    Image(systemName: "exclamationmark.triangle")
+                        .font(.system(size: 32))
+                        .foregroundColor(AppColor.warning)
                     
-                    ForEach(Array(failedFeeds.keys.prefix(3)), id: \.self) { failedUrl in
-                        if case .failed(let err) = feedManager.feedStatuses[failedUrl] {
-                            Text("\(failedUrl): \(err.localizedDescription)")
-                                .font(.system(size: 11, design: .monospaced))
-                                .foregroundColor(AppColor.textSecondary)
-                                .lineLimit(1)
+                    Text("\(failedFeeds.count) feeds couldn't be refreshed")
+                        .font(AppTypography.headline)
+                        .foregroundColor(AppColor.primaryText)
+
+                    VStack(spacing: 4) {
+                        ForEach(Array(failedFeeds.keys.prefix(4)), id: \.self) { urlString in
+                            let host = URL(string: urlString)?.host ?? urlString
+                            Text(host)
+                                .font(AppTypography.bodySmall)
+                                .foregroundColor(AppColor.secondaryText)
                         }
                     }
                     
-                    Button("Retry Feeds") {
+                    HStack(spacing: 10) {
+                        Button("Retry Feeds") {
+                            refreshFeeds()
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(AppColor.accent)
+                        .controlSize(.small)
+                    }
+                    .padding(.top, 4)
+
+                    DisclosureGroup("Technical Details") {
+                        VStack(alignment: .leading, spacing: 6) {
+                            ForEach(Array(failedFeeds.keys), id: \.self) { urlString in
+                                if case .failed(let err) = feedManager.feedStatuses[urlString] {
+                                    Text("\(urlString): \(err.localizedDescription)")
+                                        .font(.system(size: 10, design: .monospaced))
+                                        .foregroundColor(AppColor.secondaryText)
+                                        .lineLimit(2)
+                                }
+                            }
+                        }
+                        .padding(.top, 6)
+                    }
+                    .font(AppTypography.caption)
+                    .foregroundColor(AppColor.tertiaryText)
+                    .frame(maxWidth: 360)
+                }
+                .padding(20)
+                .background(
+                    RoundedRectangle(cornerRadius: AppRadius.container)
+                        .fill(AppColor.surface)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: AppRadius.container)
+                                .stroke(AppColor.borderSubtle, lineWidth: 1)
+                        )
+                )
+                .frame(maxWidth: 420)
+            } else {
+                Image(systemName: emptyStateIcon)
+                    .font(.system(size: 36))
+                    .foregroundColor(AppColor.tertiaryText)
+
+                Text(emptyStateTitle)
+                    .font(AppTypography.headline)
+                    .foregroundColor(AppColor.primaryText)
+
+                Text(emptyStateText)
+                    .font(AppTypography.bodySmall)
+                    .foregroundColor(AppColor.secondaryText)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 340)
+
+                if selectedTopic == "Today" || selectedTopic == "Unread" {
+                    Button("Refresh Feeds") {
                         refreshFeeds()
                     }
                     .buttonStyle(.bordered)
-                    .tint(AppColor.accentPink)
                     .controlSize(.small)
                     .padding(.top, 4)
                 }
-                .padding(14)
-                .background(
-                    RoundedRectangle(cornerRadius: AppRadius.bubble)
-                        .fill(Color.primary.opacity(0.02))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: AppRadius.bubble)
-                                .stroke(AppColor.errorRed.opacity(0.2), lineWidth: 1)
-                        )
-                )
-                .frame(maxWidth: 380)
-                .padding(.top, AppSpacing.sm)
             }
         }
         .frame(maxWidth: .infinity)
@@ -263,17 +305,28 @@ struct ArticleListView: View {
         switch selectedTopic {
         case "Today", "Unread": return "newspaper"
         case "Saved Stories": return "bookmark"
+        case "History": return "clock"
         default: return "tray"
         }
     }
     
+    private var emptyStateTitle: String {
+        switch selectedTopic {
+        case "Today": return "No Articles Yet"
+        case "Unread": return "All Caught Up"
+        case "Saved Stories": return "No Saved Stories"
+        case "History": return "No Reading History"
+        default: return "Nothing in \(selectedTopic ?? "Section")"
+        }
+    }
+
     private var emptyStateText: String {
         switch selectedTopic {
-        case "Today": return "No articles available"
-        case "Unread": return "You're all caught up! No unread articles."
-        case "Saved Stories": return "No saved stories yet.\nSave articles using the bookmark icon."
-        case "History": return "No reading history"
-        default: return "No articles in \"\(selectedTopic ?? "")\"\nArticles are auto-categorized.\nTry adding more RSS feeds."
+        case "Today": return "Subscribe to feeds or click refresh to load the latest stories."
+        case "Unread": return "You've read all stories in your feeds. Check back later for updates."
+        case "Saved Stories": return "Stories you bookmark will be kept here for easy reading."
+        case "History": return "Articles you have opened will appear here."
+        default: return "New articles matching \(selectedTopic ?? "this section") will appear here once your feeds refresh."
         }
     }
     
@@ -351,40 +404,59 @@ struct ArticleListView: View {
         guard let article = articleToOpen else { return }
         focusedArticleID = article.id
         readManager.markAsRead(article.id)
-        articlePath.append(FeedArticleWrap(article: article))
+        articlePath.append(FeedArticleWrap(article: article, contextArticles: filteredArticles))
     }
     
     private func refreshFeeds() {
-        isRefreshing = true
         feedManager.fetchFeeds()
-        DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
-            self.isRefreshing = false
-        }
     }
     
     // MARK: - Shortcuts Help View
     
     private var shortcutsHelpView: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 12) {
             Text("Keyboard Shortcuts")
-                .font(.system(size: 13, weight: .bold))
+                .font(AppTypography.headline)
+                .foregroundColor(AppColor.primaryText)
                 .padding(.bottom, 2)
             
-            Group {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("NAVIGATION")
+                    .font(AppTypography.metadata)
+                    .foregroundColor(AppColor.tertiaryText)
+                    .tracking(AppTypography.sourceEyebrowTracking)
                 shortcutRow("J / ↓", "Next article")
                 shortcutRow("K / ↑", "Previous article")
                 shortcutRow("Space / ↵", "Open focused article")
+                shortcutRow("Esc / ←", "Back to list")
+            }
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("ACTIONS")
+                    .font(AppTypography.metadata)
+                    .foregroundColor(AppColor.tertiaryText)
+                    .tracking(AppTypography.sourceEyebrowTracking)
                 shortcutRow("M", "Toggle read / unread")
                 shortcutRow("S", "Bookmark story")
                 shortcutRow("O", "Open in browser")
-                shortcutRow("R / ⌘R", "Refresh feeds")
-                shortcutRow("W / ⇧⌘W", "Toggle Reader / Web view")
-                shortcutRow("Esc / ←", "Back to list (in detail)")
-                shortcutRow("⌘1 - ⌘4", "Jump to Section")
+                shortcutRow("W", "Toggle Reader / Web view")
+            }
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("GLOBAL")
+                    .font(AppTypography.metadata)
+                    .foregroundColor(AppColor.tertiaryText)
+                    .tracking(AppTypography.sourceEyebrowTracking)
+                shortcutRow("R / ⌘R", "Refresh all feeds")
+                shortcutRow("⌘1 - ⌘4", "Jump to section")
             }
         }
         .padding(14)
-        .frame(width: 260)
+        .frame(width: 270)
     }
     
     private func shortcutRow(_ keys: String, _ desc: String) -> some View {
@@ -397,8 +469,8 @@ struct ArticleListView: View {
                 .cornerRadius(5)
             Spacer()
             Text(desc)
-                .font(.system(size: 11))
-                .foregroundColor(AppColor.textSecondary)
+                .font(AppTypography.caption)
+                .foregroundColor(AppColor.secondaryText)
         }
     }
 }

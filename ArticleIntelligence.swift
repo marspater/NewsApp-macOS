@@ -22,26 +22,55 @@ public enum NewsCategory: String, CaseIterable, Sendable, Codable {
     case lifestyle = "Lifestyle"
 
     public static func match(from string: String) -> NewsCategory? {
-        let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
+        let firstLine = string.components(separatedBy: .newlines).first ?? string
+        let trimmed = firstLine.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        // 1. Exact case-insensitive match against canonical enum values
         for cat in allCases {
             if cat.rawValue.localizedCaseInsensitiveCompare(trimmed) == .orderedSame {
                 return cat
             }
         }
-        // Partial mappings for common synonyms
+
         let lower = trimmed.lowercased()
-        if lower.contains("tech") { return .technology }
-        if lower.contains("politic") || lower.contains("gov") || lower.contains("election") { return .politics }
-        if lower.contains("sci") || lower.contains("space") { return .science }
-        if lower.contains("econ") || lower.contains("biz") || lower.contains("finance") || lower.contains("market") { return .business }
-        if lower.contains("sport") { return .sports }
-        if lower.contains("entertain") || lower.contains("movie") || lower.contains("film") || lower.contains("music") { return .entertainment }
-        if lower.contains("health") || lower.contains("med") || lower.contains("wellness") { return .health }
-        if lower.contains("travel") || lower.contains("tourism") { return .travel }
-        if lower.contains("food") || lower.contains("cook") || lower.contains("dining") || lower.contains("culinary") || lower.contains("recipe") { return .food }
-        if lower.contains("style") || lower.contains("fashion") { return .fashion }
-        if lower.contains("global") || lower.contains("world") || lower.contains("international") { return .world }
-        if lower.contains("life") || lower.contains("living") { return .lifestyle }
+
+        // 2. High-priority semantic disambiguation for multi-topic overlaps
+        // Health over Technology (e.g., medical AI, clinical devices, vaccines, disease)
+        if lower.contains("health") || lower.contains("medical") || lower.contains("clinical") || lower.contains("hospital") || lower.contains("vaccine") || lower.contains("disease") || lower.contains("pharma") {
+            return .health
+        }
+
+        // Science over Technology (e.g., space mission, telescope, NASA, quantum research, astronomy)
+        if lower.contains("space") || lower.contains("nasa") || lower.contains("astronomy") || lower.contains("quantum") || lower.contains("biology") || lower.contains("physics") || lower.contains("telescope") {
+            return .science
+        }
+
+        // Business over Politics or Tech (e.g., stock market, earnings, inflation, IPO, central bank, revenue)
+        if lower.contains("stock") || lower.contains("wall street") || lower.contains("earnings") || lower.contains("inflation") || lower.contains("investor") || lower.contains("revenue") || lower.contains("recession") || lower.contains("finance") || lower.contains("dividend") {
+            return .business
+        }
+
+        // Politics over World or Business (e.g., congress, senate, election, voter, parliament, campaign)
+        if lower.contains("congress") || lower.contains("senate") || lower.contains("election") || lower.contains("politic") || lower.contains("lawmaker") || lower.contains("parliament") || lower.contains("white house") || lower.contains("governor") || lower.contains("campaign") {
+            return .politics
+        }
+
+        let tokens = Set(lower.components(separatedBy: CharacterSet.alphanumerics.inverted).filter { !$0.isEmpty })
+
+        // 3. Normalized synonym mappings
+        if lower.contains("tech") || lower.contains("software") || lower.contains("hardware") || tokens.contains("ai") || lower.contains("artificial intelligence") || lower.contains("cyber") || lower.contains("chip") { return .technology }
+        if lower.contains("econ") || lower.contains("biz") || lower.contains("market") { return .business }
+        if lower.contains("sport") || lower.contains("football") || lower.contains("basketball") || lower.contains("soccer") || lower.contains("league") { return .sports }
+        if lower.contains("entertain") || lower.contains("movie") || lower.contains("film") || lower.contains("music") || lower.contains("celebrity") || lower.contains("cinema") { return .entertainment }
+        if lower.contains("wellness") || lower.contains("fitness") || lower.contains("nutrition") { return .health }
+        if lower.contains("travel") || lower.contains("tourism") || lower.contains("vacation") || lower.contains("flight") { return .travel }
+        if lower.contains("food") || lower.contains("cook") || lower.contains("dining") || lower.contains("culinary") || lower.contains("recipe") || lower.contains("restaurant") { return .food }
+        if lower.contains("style") || lower.contains("fashion") || lower.contains("runway") || lower.contains("apparel") { return .fashion }
+        if lower.contains("global") || lower.contains("world") || lower.contains("international") || lower.contains("foreign") || lower.contains("geopolitic") || tokens.contains("un") || lower.contains("united nations") || lower.contains("diplomat") { return .world }
+        if lower.contains("life") || lower.contains("living") || lower.contains("lifestyle") || lower.contains("home") || lower.contains("parenting") { return .lifestyle }
+        if lower.contains("sci") || lower.contains("research") { return .science }
+
         return nil
     }
 }
@@ -813,3 +842,180 @@ public final class ArticleIntelligence: Sendable {
     }
 }
 
+// MARK: - Article Content Redactor & Formatter
+
+public enum ArticleContentRedactor {
+    private static let boilerplatePatterns: [String] = [
+        // Fused sentence ending, e.g. 'last year.Read full article' or 'last year. Read full article Comments'
+        "(?i)(\\.|!|\\?)\\s*(?:read full article|read more|continue reading|view comments|leave a comment|full story)\\b.*$",
+        // Trailing standalone boilerplate
+        "(?i)[\\s\\.]*\\b(?:read full article|read more|continue reading|view comments|leave a comment|full story)\\b[\\s\\.]*$",
+        // Syndication notices at end of line
+        "(?i)the post .* appeared first on .*\\.?$"
+    ]
+
+    private static let boilerplateLineExact: Set<String> = [
+        "comments", "comment", "read full article", "read more", "continue reading",
+        "view comments", "leave a comment", "share this article", "share this post",
+        "related articles", "source", "read original", "full article", "full story"
+    ]
+
+    /// Cleans boilerplate phrases, syndication notes, and trailing artifacts from text.
+    public static func cleanText(_ rawText: String) -> String {
+        var text = rawText
+
+        for pattern in boilerplatePatterns {
+            if let regex = try? NSRegularExpression(pattern: pattern, options: [.anchorsMatchLines]) {
+                let range = NSRange(text.startIndex..., in: text)
+                if pattern.contains("(\\.|!|\\?)") {
+                    text = regex.stringByReplacingMatches(in: text, options: [], range: range, withTemplate: "$1")
+                } else {
+                    text = regex.stringByReplacingMatches(in: text, options: [], range: range, withTemplate: "")
+                }
+            }
+        }
+
+        return text.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Redacts boilerplate and intelligently splits article content into readable editorial paragraphs.
+    public static func redactAndSplit(_ rawText: String) -> [String] {
+        let normalized = rawText
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+
+        let rawParagraphs: [String]
+        if normalized.contains("\n\n") {
+            rawParagraphs = normalized.components(separatedBy: "\n\n")
+        } else if normalized.contains("\n") {
+            rawParagraphs = normalized.components(separatedBy: "\n")
+        } else {
+            rawParagraphs = [normalized]
+        }
+
+        var result = [String]()
+        for para in rawParagraphs {
+            let cleaned = cleanText(para)
+            guard !cleaned.isEmpty else { continue }
+            if isBoilerplateLine(cleaned) { continue }
+
+            // If a single paragraph is too monolithic (> 450 characters and 3+ sentences), split it
+            if cleaned.count > 450 {
+                let subParagraphs = splitLongParagraph(cleaned)
+                for sub in subParagraphs {
+                    let subCleaned = cleanText(sub)
+                    if !subCleaned.isEmpty && !isBoilerplateLine(subCleaned) {
+                        result.append(subCleaned)
+                    }
+                }
+            } else {
+                result.append(cleaned)
+            }
+        }
+
+        while let last = result.last, isBoilerplateLine(last) {
+            result.removeLast()
+        }
+
+        return result
+    }
+
+    /// Checks if a string is solely a boilerplate phrase or syndication footer.
+    public static func isBoilerplateLine(_ text: String) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return true }
+        let stripped = trimmed.trimmingCharacters(in: CharacterSet(charactersIn: ".!-–—()[]{}•*#0123456789/ "))
+        let lower = stripped.lowercased()
+
+        if boilerplateLineExact.contains(lower) {
+            return true
+        }
+        if (lower.hasPrefix("comment") || lower.hasSuffix("comments")) && lower.count < 25 {
+            return true
+        }
+        let rawLower = trimmed.lowercased()
+        if rawLower.hasPrefix("the post ") && rawLower.contains(" appeared first on ") {
+            return true
+        }
+        if rawLower.hasPrefix("photo by ") || rawLower.hasPrefix("image credit:") || rawLower.hasPrefix("photo credit:") {
+            return true
+        }
+        return false
+    }
+
+    /// Splits a large unsegmented paragraph at sentence boundaries into balanced readable paragraphs.
+    private static func splitLongParagraph(_ text: String) -> [String] {
+        let tokenizer = NLTokenizer(unit: .sentence)
+        tokenizer.string = text
+        var sentences = [String]()
+        tokenizer.enumerateTokens(in: text.startIndex..<text.endIndex) { range, _ in
+            let sentence = text[range].trimmingCharacters(in: .whitespacesAndNewlines)
+            if !sentence.isEmpty {
+                sentences.append(sentence)
+            }
+            return true
+        }
+
+        guard sentences.count > 2 else { return [text] }
+
+        var paragraphs = [String]()
+        var currentPara = ""
+        for sentence in sentences {
+            if !currentPara.isEmpty && (currentPara.count + sentence.count > 320) {
+                paragraphs.append(currentPara)
+                currentPara = sentence
+            } else {
+                if currentPara.isEmpty {
+                    currentPara = sentence
+                } else {
+                    currentPara += " " + sentence
+                }
+            }
+        }
+        if !currentPara.isEmpty {
+            paragraphs.append(currentPara)
+        }
+        return paragraphs.isEmpty ? [text] : paragraphs
+    }
+}
+
+// MARK: - Article Content Policy (Full Unabridged Content)
+
+public enum ArticleContentPolicy {
+    /// Returns all verified clean paragraphs for unabridged reading.
+    /// NewsApp displays full extracted article content in the reader without intentional truncation.
+    public static func computeContent(paragraphs: [String]) -> [String] {
+        return paragraphs
+    }
+}
+
+// Backward-compatibility alias
+public typealias ArticlePreviewPolicy = ArticleContentPolicy
+public extension ArticleContentPolicy {
+    static func computePreview(paragraphs: [String], isExtracted: Bool = true) -> [String] {
+        return computeContent(paragraphs: paragraphs)
+    }
+}
+
+// MARK: - Trackpad Swipe Navigation Evaluator
+
+public enum TrackpadSwipeDirection: Equatable, Sendable {
+    case previous
+    case next
+    case none
+}
+
+public enum TrackpadSwipeEvaluator {
+    /// Evaluates accumulated horizontal and vertical trackpad deltas.
+    /// Returns .previous for dominant rightward swipe, .next for dominant leftward swipe,
+    /// and .none if vertical scroll dominates or threshold is not met.
+    public static func evaluate(deltaX: CGFloat, deltaY: CGFloat, threshold: CGFloat = 60.0) -> TrackpadSwipeDirection {
+        let absX = abs(deltaX)
+        let absY = abs(deltaY)
+
+        guard absX >= threshold else { return .none }
+        guard absX > (absY * 1.8) else { return .none }
+
+        return deltaX > 0 ? .previous : .next
+    }
+}

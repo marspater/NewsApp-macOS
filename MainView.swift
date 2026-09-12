@@ -5,12 +5,7 @@ import SwiftUI
 import AppKit
 import UniformTypeIdentifiers
 
-// MARK: - Navigation Wrappers & Commands
-
-struct FeedArticleWrap: Identifiable, Hashable {
-    let id = UUID()
-    let article: FeedArticle
-}
+// MARK: - Navigation Notifications & Commands
 
 extension Notification.Name {
     static let detailNextArticle = Notification.Name("detailNextArticle")
@@ -41,10 +36,11 @@ struct MainView: View {
     @EnvironmentObject private var readManager: ReadManager
     @StateObject private var savedStories = SavedStoriesManager.shared
     
+    @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @State private var isWindowDropTargeted = false
     
     var body: some View {
-        NavigationSplitView(columnVisibility: .constant(.all)) {
+        NavigationSplitView(columnVisibility: $columnVisibility) {
             SidebarView(selectedTopic: $selectedTopic, searchText: $searchText)
                 .environmentObject(appSettings)
                 .environmentObject(feedManager)
@@ -58,7 +54,8 @@ struct MainView: View {
                     ArticleListView(
                         selectedTopic: $selectedTopic,
                         searchText: $searchText,
-                        articlePath: $articlePath
+                        articlePath: $articlePath,
+                        columnVisibility: $columnVisibility
                     )
                     .environmentObject(appSettings)
                     .environmentObject(articleStore)
@@ -70,7 +67,7 @@ struct MainView: View {
                 .navigationDestination(for: FeedArticleWrap.self) { wrap in
                     ArticleDetailView(
                         article: wrap.article,
-                        allArticles: feedManager.articles,
+                        allArticles: wrap.contextArticles.isEmpty ? feedManager.articles : wrap.contextArticles,
                         path: $articlePath
                     )
                     .navigationBarBackButtonHidden(true)

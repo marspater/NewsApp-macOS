@@ -5,7 +5,7 @@ HOST_MACOS_VER=$(sw_vers -productVersion 2>/dev/null | cut -d. -f1,2 || echo "27
 TARGET_MACOS="${TARGET_MACOS:-$HOST_MACOS_VER}"
 
 echo "Compiling tests for macOS ${TARGET_MACOS} ($(uname -m))..."
-swiftc -O -target $(uname -m)-apple-macos${TARGET_MACOS} \
+swiftc -target $(uname -m)-apple-macos${TARGET_MACOS} \
     DateParser.swift \
     FeedError.swift \
     IPAddressValidator.swift \
@@ -29,9 +29,11 @@ swiftc -O -target $(uname -m)-apple-macos${TARGET_MACOS} \
     CacheManager.swift \
     AIManager.swift \
     FeedManager.swift \
+    AppContainer.swift \
     SavedStoriesManager.swift \
     OPMLManager.swift \
     DesignSystem.swift \
+    GlassSystem.swift \
     RefreshCoordinator.swift \
     NewsSignposts.swift \
     UpdateChecker.swift \

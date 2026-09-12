@@ -1,11 +1,32 @@
 import SwiftUI
 import WebKit
 
+enum WebNavigationAction: Equatable {
+    case goBack
+    case goForward
+    case reload
+}
+
 struct ArticleWebView: NSViewRepresentable {
     let url: URL
     @Binding var isLoading: Bool
     @Binding var canGoBack: Bool
     @Binding var canGoForward: Bool
+    @Binding var action: WebNavigationAction?
+
+    init(
+        url: URL,
+        isLoading: Binding<Bool>,
+        canGoBack: Binding<Bool>,
+        canGoForward: Binding<Bool>,
+        action: Binding<WebNavigationAction?> = .constant(nil)
+    ) {
+        self.url = url
+        self._isLoading = isLoading
+        self._canGoBack = canGoBack
+        self._canGoForward = canGoForward
+        self._action = action
+    }
 
     func makeCoordinator() -> Coordinator {
         Coordinator(self)
@@ -34,6 +55,19 @@ struct ArticleWebView: NSViewRepresentable {
             let request = URLRequest(url: url)
             nsView.load(request)
         }
+        if let currentAction = action {
+            switch currentAction {
+            case .goBack:
+                if nsView.canGoBack { nsView.goBack() }
+            case .goForward:
+                if nsView.canGoForward { nsView.goForward() }
+            case .reload:
+                nsView.reload()
+            }
+            DispatchQueue.main.async {
+                self.action = nil
+            }
+        }
     }
 
     @MainActor
@@ -60,12 +94,11 @@ struct ArticleWebView: NSViewRepresentable {
 
             // 2. Prevent navigation to local or intranet IP hosts
             if let host = requestURL.host {
-                let cleanHost = host.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-                if cleanHost == "localhost" || cleanHost.hasSuffix(".local") || cleanHost.hasSuffix(".internal") {
-                    decisionHandler(.cancel)
-                    return
-                }
-                if IPAddressValidator.checkLiteralIP(cleanHost) != nil {
+                let validationResult = IPAddressValidator.validateHost(host)
+                switch validationResult {
+                case .allowed:
+                    break
+                case .blocked, .unresolvable:
                     decisionHandler(.cancel)
                     return
                 }

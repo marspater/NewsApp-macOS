@@ -24,73 +24,108 @@ struct ArticleCardView: View {
     
     var body: some View {
         Button(action: action) {
-            ZStack(alignment: .bottomLeading) {
-                // Background Image or Flat Surface
-                cardBackgroundLayer
+            VStack(alignment: .leading, spacing: 0) {
+                // Header Image Container
+                cardImageHeader
                 
-                // Legibility Gradient
-                LinearGradient(
-                    colors: [Color.clear, Color.black.opacity(0.85)],
-                    startPoint: .center,
-                    endPoint: .bottom
-                )
-                
-                // Typography & Metadata Content
-                VStack(alignment: .leading, spacing: 5) {
-                    Text(displaySource.uppercased())
-                        .font(.system(size: 10, weight: .heavy))
-                        .foregroundColor(AppColor.accentPink)
-                        .tracking(AppTypography.sourceEyebrowTracking)
-                    
-                    Text(article.title)
-                        .font(.system(size: 17, weight: .bold))
-                        .foregroundColor(.white)
-                        .lineLimit(2)
-                        .shadow(radius: 2)
-                    
-                    if let ai = article.aiSummary {
-                        HStack(spacing: 4) {
-                            Image(systemName: "sparkles")
-                                .font(.system(size: 9))
-                            Text(ai)
-                                .font(.system(size: 10, weight: .medium))
-                                .lineLimit(1)
+                // Content Body Container
+                VStack(alignment: .leading, spacing: 6) {
+                    // Eyebrow Row: Source + Badges
+                    HStack(spacing: 6) {
+                        Text(displaySource.uppercased())
+                            .font(AppTypography.metadata)
+                            .foregroundColor(AppColor.secondaryText)
+                            .tracking(AppTypography.sourceEyebrowTracking)
+                            .lineLimit(1)
+
+                        Spacer()
+
+                        if isSaved {
+                            Image(systemName: "bookmark.fill")
+                                .font(.system(size: 10))
+                                .foregroundColor(AppColor.accent)
                         }
-                        .foregroundColor(AppColor.accentGold)
+
+                        if !isRead {
+                            Circle()
+                                .fill(AppColor.accent)
+                                .frame(width: 6, height: 6)
+                                .accessibilityLabel("Unread")
+                        }
                     }
                     
-                    Text(article.description)
-                        .font(.system(size: 12))
-                        .foregroundColor(Color.white.opacity(0.72))
+                    // Headline
+                    Text(article.title)
+                        .font(AppTypography.headline)
+                        .foregroundColor(isRead ? AppColor.secondaryText : AppColor.primaryText)
                         .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+                    
+                    // Description
+                    if !article.description.isEmpty {
+                        let cleanDesc = ArticleContentRedactor.cleanText(article.description)
+                        if !cleanDesc.isEmpty {
+                            Text(cleanDesc)
+                                .font(AppTypography.bodySmall)
+                                .foregroundColor(AppColor.secondaryText.opacity(0.85))
+                                .lineLimit(2)
+                                .multilineTextAlignment(.leading)
+                        }
+                    }
+                    
+                    Spacer(minLength: 4)
+
+                    // Footer Row: Timestamp & Optional AI Badge
+                    HStack(spacing: 8) {
+                        Text(article.pubDate.formatted(date: .abbreviated, time: .omitted))
+                            .font(AppTypography.caption)
+                            .foregroundColor(AppColor.tertiaryText)
+
+                        Spacer()
+
+                        if article.aiSummary != nil {
+                            HStack(spacing: 3) {
+                                Text("✦")
+                                    .font(.system(size: 8))
+                                Text("AI")
+                                    .font(.system(size: 9, weight: .bold))
+                            }
+                            .foregroundColor(AppColor.intelligence)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Capsule().fill(AppColor.intelligence.opacity(0.12)))
+                            .help("AI summary available")
+                        }
+                    }
                 }
-                .padding(AppSpacing.md)
+                .padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .frame(height: 240)
+            .background(AppColor.surface)
             .clipShape(RoundedRectangle(cornerRadius: AppRadius.card))
             .overlay(
                 RoundedRectangle(cornerRadius: AppRadius.card)
                     .stroke(
                         isSelected
-                            ? AppColor.accentPink
-                            : (isHovered ? AppColor.accentPink.opacity(0.4) : Color.primary.opacity(0.08)),
-                        lineWidth: isSelected ? 2.5 : (isHovered ? 1.5 : 0.5)
+                            ? AppColor.accent
+                            : (isHovered ? AppColor.accent.opacity(0.4) : AppColor.borderSubtle),
+                        lineWidth: isSelected ? 1.5 : (isHovered ? 1.0 : 0.5)
                     )
             )
             .shadow(
                 color: isSelected
-                    ? AppShadow.cardSelectedGlow
+                    ? AppShadow.cardFocusRingColor
                     : (isHovered ? AppShadow.cardHoverColor : AppShadow.cardRestingColor),
                 radius: isSelected
-                    ? AppShadow.cardSelectedRadius
+                    ? AppShadow.cardFocusRingRadius
                     : (isHovered ? AppShadow.cardHoverRadius : AppShadow.cardRestingRadius),
                 x: 0,
                 y: isSelected
-                    ? AppShadow.cardSelectedY
+                    ? AppShadow.cardFocusRingY
                     : (isHovered ? AppShadow.cardHoverY : AppShadow.cardRestingY)
             )
-            .animation(reduceMotion ? nil : AppMotion.responsive, value: isHovered || isSelected)
-            .opacity(isRead ? 0.45 : 1.0)
+            .animation(reduceMotion ? nil : AppMotion.state, value: isHovered || isSelected)
+            .opacity(isRead ? 0.90 : 1.0)
             .onHover { hovering in
                 isHovered = hovering
             }
@@ -157,28 +192,40 @@ struct ArticleCardView: View {
     // MARK: - Subviews & Helpers
     
     @ViewBuilder
-    private var cardBackgroundLayer: some View {
+    private var cardImageHeader: some View {
         if let imageUrl = article.imageUrl, let url = URL(string: imageUrl) {
             AsyncImage(url: url) { phase in
                 switch phase {
                 case .success(let image):
                     image.resizable()
                         .aspectRatio(contentMode: .fill)
-                        .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: 240)
-                        .brightness(-0.04)
-                        .contrast(1.05)
-                        .saturation(1.08)
+                        .frame(height: 140)
+                        .frame(maxWidth: .infinity)
                         .clipped()
+                        .saturation(isRead ? 0.92 : 1.0)
                 default:
-                    Rectangle()
-                        .fill(AppColor.surfaceMid)
-                        .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: 240)
+                    editorialFallbackHeader
                 }
             }
         } else {
-            Rectangle()
-                .fill(AppColor.surfaceMid)
-                .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: 240)
+            editorialFallbackHeader
+        }
+    }
+
+    private var editorialFallbackHeader: some View {
+        ZStack(alignment: .bottomLeading) {
+            LinearGradient(
+                colors: [AppColor.surface, AppColor.elevatedSurface],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            .frame(height: 54)
+            .frame(maxWidth: .infinity)
+
+            Image(systemName: "newspaper")
+                .font(.system(size: 18))
+                .foregroundColor(AppColor.tertiaryText.opacity(0.35))
+                .padding(10)
         }
     }
     

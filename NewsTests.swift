@@ -2,6 +2,53 @@
 
 import Foundation
 
+// MARK: - MockURLProtocol for Testing
+class MockURLProtocol: URLProtocol, @unchecked Sendable {
+    static var mockData: Data?
+    static var mockResponse: HTTPURLResponse?
+    static var mockError: Error?
+    static var requestHandler: ((URLRequest) throws -> (HTTPURLResponse, Data))?
+
+    override class func canInit(with request: URLRequest) -> Bool {
+        return true
+    }
+
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest {
+        return request
+    }
+
+    override func startLoading() {
+        if let handler = MockURLProtocol.requestHandler {
+            do {
+                let (response, data) = try handler(request)
+                client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+                client?.urlProtocol(self, didLoad: data)
+                client?.urlProtocolDidFinishLoading(self)
+            } catch {
+                client?.urlProtocol(self, didFailWithError: error)
+            }
+            return
+        }
+
+        if let error = MockURLProtocol.mockError {
+            client?.urlProtocol(self, didFailWithError: error)
+            return
+        }
+
+        if let response = MockURLProtocol.mockResponse {
+            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        }
+
+        if let data = MockURLProtocol.mockData {
+            client?.urlProtocol(self, didLoad: data)
+        }
+
+        client?.urlProtocolDidFinishLoading(self)
+    }
+
+    override func stopLoading() {}
+}
+
 func assertEqual<T: Equatable>(_ actual: T, _ expected: T, _ message: String, file: String = #file, line: Int = #line) {
     if actual != expected {
         print("❌ ASSERTION FAILED: \(message)")
@@ -35,7 +82,9 @@ struct NewsTests {
         
         await testURLNormalization()
         await testSSRFValidation()
+        await testIsBlockedIPv4()
         await testIPAddressValidatorDeep()
+        await testSecureHTTPClientFetchImage()
         await testSecureHTTPClientPolicies()
         await testFeedErrorHierarchy()
         await testAppSettingsDecoupling()
@@ -43,6 +92,7 @@ struct NewsTests {
         await testXMLParsing()
         await testJSONParsing()
         await testNavigationCommands()
+        await testEscapeXML()
         await testOPMLParsingAndExporting()
         await testOfflineCacheAndResilience()
         await testArticleIdentityDeep()
@@ -52,6 +102,7 @@ struct NewsTests {
         await testArticleRetentionPolicy()
         await testArticleIntelligenceCapabilities()
         await testContentExtractionPipelineDeep()
+        await testWebContentExtractorFacade()
         await testEnrichmentQueueSchedulingAndPromotion()
         await testDesignSystemAndArticleFilter()
         await testDistributionAndEntitlementsIntegrity()
@@ -67,6 +118,16 @@ struct NewsTests {
         await testInteractiveAnalysisCancellation()
         await testGranularCacheClearingAndRetention()
         await testNotificationServiceErrorLogging()
+        await testArticleStoreErrorResilience()
+        await testFeedArticleWrapContextNavigation()
+        await testArticleContentRedactionAndTypography()
+        await testArticleDetailReadingExperienceOverhaul()
+        await testBBCExtractionFixture()
+        await testMultiPublisherExtractionFixtures()
+        await testContentQualityValidation()
+        await testExtractionOutcomeDiagnostics()
+        await testCanonicalClassificationDisambiguation()
+        await testAppContainerAndFrostedSurface()
         
         print("✅ SUCCESS: All tests passed!")
     }
@@ -104,6 +165,42 @@ struct NewsTests {
         assertFalse(FeedManager.isBlockedLocalAddress("172.15.2.2"), "Should allow public range outside 172.16-31")
     }
 
+    static func testIsBlockedIPv4() async {
+        print("  - Testing isBlockedIPv4 directly...")
+
+        func makeInAddr(_ ipString: String) -> in_addr {
+            var sin = in_addr()
+            inet_pton(AF_INET, ipString, &sin)
+            return sin
+        }
+
+        // Loopback
+        assertTrue(IPAddressValidator.isBlockedIPv4(makeInAddr("127.0.0.1")) != nil, "127.0.0.1 must be blocked")
+
+        // Current network
+        assertTrue(IPAddressValidator.isBlockedIPv4(makeInAddr("0.0.0.0")) != nil, "0.0.0.0 must be blocked")
+
+        // Private
+        assertTrue(IPAddressValidator.isBlockedIPv4(makeInAddr("10.0.0.1")) != nil, "10.0.0.1 must be blocked")
+        assertTrue(IPAddressValidator.isBlockedIPv4(makeInAddr("172.16.0.1")) != nil, "172.16.0.1 must be blocked")
+        assertTrue(IPAddressValidator.isBlockedIPv4(makeInAddr("192.168.0.1")) != nil, "192.168.0.1 must be blocked")
+
+        // Link-Local
+        assertTrue(IPAddressValidator.isBlockedIPv4(makeInAddr("169.254.0.1")) != nil, "169.254.0.1 must be blocked")
+
+        // Carrier-Grade NAT
+        assertTrue(IPAddressValidator.isBlockedIPv4(makeInAddr("100.64.0.1")) != nil, "100.64.0.1 must be blocked")
+
+        // Multicast
+        assertTrue(IPAddressValidator.isBlockedIPv4(makeInAddr("224.0.0.1")) != nil, "224.0.0.1 must be blocked")
+
+        // Broadcast
+        assertTrue(IPAddressValidator.isBlockedIPv4(makeInAddr("255.255.255.255")) != nil, "255.255.255.255 must be blocked")
+
+        // Valid
+        assertTrue(IPAddressValidator.isBlockedIPv4(makeInAddr("8.8.8.8")) == nil, "8.8.8.8 must be allowed")
+    }
+
     static func testIPAddressValidatorDeep() async {
         print("  - Testing IPAddressValidator (IPv4, IPv6, mapped IPv6, DNS)...")
 
@@ -125,7 +222,7 @@ struct NewsTests {
         assertTrue(IPAddressValidator.checkLiteralIP("8.8.8.8") == nil, "8.8.8.8 public IP must be allowed")
 
         // 3. Literal IPv6 Loopback, ULA, Link-Local
-        assertTrue(IPAddressValidator.checkLiteralIP("::1") != nil, "::1 must be blocked")
+        assertTrue(IPAddressValidator.checkLiteralIP("::1") == "IPv6 loopback (::1)", "::1 must be blocked")
         assertTrue(IPAddressValidator.checkLiteralIP("::") != nil, ":: must be blocked")
         assertTrue(IPAddressValidator.checkLiteralIP("fe80::1") != nil, "fe80::1 link-local must be blocked")
         assertTrue(IPAddressValidator.checkLiteralIP("fc00::1") != nil, "fc00::1 ULA must be blocked")
@@ -138,7 +235,13 @@ struct NewsTests {
         assertTrue(IPAddressValidator.checkLiteralIP("::ffff:10.0.0.1") != nil, "::ffff:10.0.0.1 mapped private must be blocked")
         assertTrue(IPAddressValidator.checkLiteralIP("::ffff:93.184.216.34") == nil, "::ffff:93.184.216.34 mapped public must be allowed")
 
-        // 5. Hostname string validation
+        // 5. NAT64 IPv6 normalization
+        assertTrue(IPAddressValidator.checkLiteralIP("64:ff9b::127.0.0.1") == "NAT64 IPv6 (IPv4 loopback address (127.0.0.0/8))", "64:ff9b::127.0.0.1 NAT64 loopback must be blocked")
+        assertTrue(IPAddressValidator.checkLiteralIP("64:ff9b::192.168.1.1") == "NAT64 IPv6 (RFC 1918 private network (192.168.0.0/16))", "64:ff9b::192.168.1.1 NAT64 private must be blocked")
+        assertTrue(IPAddressValidator.checkLiteralIP("64:ff9b::10.0.0.1") == "NAT64 IPv6 (RFC 1918 private network (10.0.0.0/8))", "64:ff9b::10.0.0.1 NAT64 private must be blocked")
+        assertTrue(IPAddressValidator.checkLiteralIP("64:ff9b::93.184.216.34") == nil, "64:ff9b::93.184.216.34 NAT64 public must be allowed")
+
+        // 6. Hostname string validation
         if case .blocked = IPAddressValidator.validateHost("localhost") {
             // expected
         } else {
@@ -159,6 +262,115 @@ struct NewsTests {
             print("❌ validateHost('router.internal') was not blocked")
             exit(1)
         }
+
+        // 7. Socket Address Validation (validateSocketAddress)
+        var sin_loopback = sockaddr_in()
+        sin_loopback.sin_family = sa_family_t(AF_INET)
+        inet_pton(AF_INET, "127.0.0.1", &sin_loopback.sin_addr)
+        let blockedLoopback = withUnsafePointer(to: &sin_loopback) { ptr -> String? in
+            ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPtr in
+                IPAddressValidator.validateSocketAddress(sockaddrPtr)
+            }
+        }
+        assertTrue(blockedLoopback != nil, "127.0.0.1 socket address must be blocked")
+
+        var sin_public = sockaddr_in()
+        sin_public.sin_family = sa_family_t(AF_INET)
+        inet_pton(AF_INET, "8.8.8.8", &sin_public.sin_addr)
+        let allowedPublic = withUnsafePointer(to: &sin_public) { ptr -> String? in
+            ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPtr in
+                IPAddressValidator.validateSocketAddress(sockaddrPtr)
+            }
+        }
+        assertTrue(allowedPublic == nil, "8.8.8.8 socket address must be allowed")
+
+        var sin6_loopback = sockaddr_in6()
+        sin6_loopback.sin6_family = sa_family_t(AF_INET6)
+        inet_pton(AF_INET6, "::1", &sin6_loopback.sin6_addr)
+        let blockedLoopback6 = withUnsafePointer(to: &sin6_loopback) { ptr -> String? in
+            ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPtr in
+                IPAddressValidator.validateSocketAddress(sockaddrPtr)
+            }
+        }
+        assertTrue(blockedLoopback6 != nil, "::1 socket address must be blocked")
+
+        var sin6_public = sockaddr_in6()
+        sin6_public.sin6_family = sa_family_t(AF_INET6)
+        inet_pton(AF_INET6, "2606:4700:4700::1111", &sin6_public.sin6_addr)
+        let allowedPublic6 = withUnsafePointer(to: &sin6_public) { ptr -> String? in
+            ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPtr in
+                IPAddressValidator.validateSocketAddress(sockaddrPtr)
+            }
+        }
+        assertTrue(allowedPublic6 == nil, "2606:4700:4700::1111 socket address must be allowed")
+
+        var sin_unsupported = sockaddr()
+        sin_unsupported.sa_family = sa_family_t(AF_UNIX)
+        let allowedUnsupported = withUnsafePointer(to: &sin_unsupported) { ptr -> String? in
+            IPAddressValidator.validateSocketAddress(ptr)
+        }
+        assertTrue(allowedUnsupported == nil, "Unsupported family socket address must return nil")
+    }
+
+    static func testSecureHTTPClientFetchImage() async {
+        print("  - Testing SecureHTTPClient fetchImage with MockURLProtocol...")
+
+        // Setup custom configuration with MockURLProtocol
+        let config = URLSessionConfiguration.default
+        config.protocolClasses = [MockURLProtocol.self]
+        let client = SecureHTTPClient(configuration: config)
+
+        let targetURL = URL(string: "https://example.com/test-image.jpg")!
+
+        // Test 1: Successful image fetch
+        let mockData = Data(repeating: 0xAA, count: 1024)
+        MockURLProtocol.requestHandler = { request in
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            return (response, mockData)
+        }
+
+        do {
+            let (data, response) = try await client.fetchImage(from: targetURL)
+            assertEqual(data.count, 1024, "Should download exact mock bytes")
+            assertEqual(response.statusCode, 200, "Should get 200 status code")
+        } catch {
+            print("❌ Unexpected error in fetchImage success test: \(error)")
+            exit(1)
+        }
+
+        // Test 2: Image too large
+        let maxAllowed = Int(SecureHTTPClient.defaultImageLimit)
+        let tooLargeDataSize = maxAllowed + 1024
+        MockURLProtocol.requestHandler = { request in
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Length": "\(tooLargeDataSize)"]
+            )!
+            let largeData = Data(repeating: 0xBB, count: tooLargeDataSize)
+            return (response, largeData)
+        }
+
+        do {
+            _ = try await client.fetchImage(from: targetURL)
+            print("❌ Expected fetchImage to throw responseTooLarge error")
+            exit(1)
+        } catch let error as FeedError {
+            if case .responseTooLarge(let bytes, let maxAllowedLimit) = error {
+                assertEqual(Int(bytes), tooLargeDataSize, "Expected byte size in error")
+                assertEqual(Int(maxAllowedLimit), maxAllowed, "Expected max limit in error")
+            } else {
+                print("❌ Expected responseTooLarge error, got: \(error)")
+                exit(1)
+            }
+        } catch {
+            print("❌ Unexpected error type: \(error)")
+            exit(1)
+        }
+
+        // Cleanup MockURLProtocol state
+        MockURLProtocol.requestHandler = nil
     }
 
     static func testSecureHTTPClientPolicies() async {
@@ -364,6 +576,13 @@ struct NewsTests {
         let prevIndex = max(currentIndex - 1, 0)
         assertEqual(prevIndex, 1, "Previous index should be 1")
         assertEqual(sampleArticles[prevIndex].id, "guid-1", "Previous article should be guid-1")
+    }
+
+    static func testEscapeXML() async {
+        print("  - Testing XML Escaping...")
+        let unescaped = "Ben & Jerry's <Ice Cream> \"Taste Test\""
+        let expectedEscaped = "Ben &amp; Jerry&apos;s &lt;Ice Cream&gt; &quot;Taste Test&quot;"
+        assertEqual(OPMLExporter.escapeXML(unescaped), expectedEscaped, "Strings should be correctly XML escaped")
     }
 
     static func testOPMLParsingAndExporting() async {
@@ -771,6 +990,18 @@ struct NewsTests {
         let extractedImage = pipeline.extractLeadImage(from: htmlWithOG)
         assertEqual(extractedImage, "https://example.com/lead-image.jpg", "Should extract og:image meta tag")
     }
+
+    static func testWebContentExtractorFacade() async {
+        print("  - Testing WebContentExtractor facade...")
+
+        // 1. Invalid URL string
+        let invalidResult = await WebContentExtractor.fetchFullContentAndImage(for: "not a url")
+        assertTrue(invalidResult.0 == nil && invalidResult.1 == nil, "Should return nil for invalid URL string")
+
+        // 2. Blocked scheme (will hit SecureHTTPClient rejection or pipeline bail out)
+        let blockedResult = await WebContentExtractor.fetchFullContentAndImage(for: "file:///etc/passwd")
+        assertTrue(blockedResult.0 == nil && blockedResult.1 == nil, "Should return nil for blocked schemes like file://")
+    }
     
     static func testEnrichmentQueueSchedulingAndPromotion() async {
         print("  - Testing EnrichmentQueue Scheduling, Promotion & Cancellation...")
@@ -827,13 +1058,23 @@ struct NewsTests {
         // 2. Radius tokens
         assertEqual(AppRadius.small, 6.0, "AppRadius.small should be 6.0")
         assertEqual(AppRadius.medium, 8.0, "AppRadius.medium should be 8.0")
-        assertEqual(AppRadius.card, 14.0, "AppRadius.card should be 14.0")
+        assertEqual(AppRadius.card, 12.0, "AppRadius.card should be 12.0")
+        assertEqual(AppRadius.control, 6.0, "AppRadius.control should be 6.0")
+        assertEqual(AppRadius.container, 16.0, "AppRadius.container should be 16.0")
         assertEqual(AppRadius.pill, 999.0, "AppRadius.pill should be 999.0")
+
+        // 3. Layout tokens
+        assertEqual(AppLayout.pageInset, 24.0, "AppLayout.pageInset should be 24.0")
+        assertEqual(AppLayout.sidebarInset, 12.0, "AppLayout.sidebarInset should be 12.0")
+        assertEqual(AppLayout.sectionGap, 24.0, "AppLayout.sectionGap should be 24.0")
+        assertEqual(AppLayout.cardGap, 16.0, "AppLayout.cardGap should be 16.0")
+        assertEqual(AppLayout.toolbarHeight, 44.0, "AppLayout.toolbarHeight should be 44.0")
+        assertEqual(AppLayout.controlHeight, 28.0, "AppLayout.controlHeight should be 28.0")
         
-        // 3. Ghost Typography Theme tokens
-        assertEqual(AppTypography.bodyLineSpacing(for: .casper), 12.0, "Casper theme line spacing should be 12")
+        // 4. Ghost Typography Theme tokens
+        assertEqual(AppTypography.bodyLineSpacing(for: .casper), 10.0, "Casper theme line spacing should be 10")
         assertEqual(AppTypography.bodyLineSpacing(for: .edition), 8.0, "Edition theme line spacing should be 8")
-        assertEqual(AppTypography.bodyLineSpacing(for: .alto), 14.0, "Alto theme line spacing should be 14")
+        assertEqual(AppTypography.bodyLineSpacing(for: .alto), 12.0, "Alto theme line spacing should be 12")
         
         // 4. ArticleFilterQuery structured parsing
         let complexQuery = "source:Bloomberg category:Tech is:unread apple silicon"
@@ -980,6 +1221,9 @@ struct NewsTests {
         assertEqual(NotificationService.formatMinimalSummary(articleCount: 2, uniqueSourcesCount: 1), "2 new articles from 1 source", "Plural articles, singular source")
         assertEqual(NotificationService.formatMinimalSummary(articleCount: 3, uniqueSourcesCount: 2), "3 new articles across 2 sources", "Plural articles, plural sources")
         assertEqual(NotificationService.formatMinimalSummary(articleCount: 10, uniqueSourcesCount: 4), "10 new articles across 4 sources", "Multi-source plural formatting")
+        assertEqual(NotificationService.formatMinimalSummary(articleCount: 1, uniqueSourcesCount: 0), "1 new article across 0 sources", "Edge case: 1 article, 0 sources")
+        assertEqual(NotificationService.formatMinimalSummary(articleCount: 0, uniqueSourcesCount: 0), "0 new articles across 0 sources", "Edge case: 0 articles, 0 sources")
+        assertEqual(NotificationService.formatMinimalSummary(articleCount: 0, uniqueSourcesCount: 1), "0 new articles from 1 source", "Edge case: 0 articles, 1 source")
 
         // 2. AppSettings Migration Semantics
         let suiteName = "test.notifications.migration.\(UUID().uuidString)"
@@ -1090,16 +1334,19 @@ struct NewsTests {
         let completionCounter = TestCounter()
         let waiterTask1 = Task {
             try await cancelCoordinator.executeRefresh {
-                try await Task.sleep(nanoseconds: 60_000_000) // 60ms
+                try await Task.sleep(nanoseconds: 80_000_000) // 80ms
                 await completionCounter.increment()
             }
         }
+        // Yield to allow waiterTask1 to start and become the in-flight refresh task
+        try? await Task.sleep(nanoseconds: 10_000_000) // 10ms
+
         let waiterTask2 = Task {
             try await cancelCoordinator.executeRefresh {
                 await completionCounter.increment()
             }
         }
-        // Cancel waiterTask1 early
+        // Cancel waiterTask1 early (as waiter caller)
         waiterTask1.cancel()
         _ = try? await waiterTask1.value
         _ = try? await waiterTask2.value
@@ -1480,6 +1727,11 @@ struct NewsTests {
         let pluralSummary = NotificationService.formatMinimalSummary(articleCount: 5, uniqueSourcesCount: 3)
         assertEqual(pluralSummary, "5 new articles across 3 sources", "Plural grammar check")
 
+        // Edge cases
+        assertEqual(NotificationService.formatMinimalSummary(articleCount: 1, uniqueSourcesCount: 0), "1 new article across 0 sources", "Edge case: 1 article, 0 sources")
+        assertEqual(NotificationService.formatMinimalSummary(articleCount: 0, uniqueSourcesCount: 0), "0 new articles across 0 sources", "Edge case: 0 articles, 0 sources")
+        assertEqual(NotificationService.formatMinimalSummary(articleCount: 0, uniqueSourcesCount: 1), "0 new articles from 1 source", "Edge case: 0 articles, 1 source")
+
         // 3. Importance computation range [0.0, 1.0]
         let score = service.computeImportance(title: "Breaking News: Major Crisis Declared", description: "Officials announce emergency response.")
         assertTrue(score >= 0.0 && score <= 1.0, "Score must be bounded between 0.0 and 1.0")
@@ -1489,6 +1741,423 @@ struct NewsTests {
         await service.triageAndNotify(newArticles: [sampleArticle], mode: .minimal)
         await service.triageAndNotify(newArticles: [sampleArticle], mode: .private)
         await service.triageAndNotify(newArticles: [sampleArticle], mode: .full)
+    }
+
+    @MainActor
+    static func testArticleStoreErrorResilience() async {
+        print("  - Testing ArticleStore Error Resilience & Database Failures...")
+
+        let db = DatabaseEngine(path: ":memory:")
+        try? await db.open()
+        let store = ArticleStore(database: db)
+        await store.initialize()
+
+        let article = FeedArticle(title: "Test Error Article", link: "https://example.com/error", guid: "test-err-guid", description: "Test", pubDate: Date(), source: "Test")
+        await store.batchUpsert(articles: [article], feedUrl: "https://example.com/feed")
+
+        // Force close the database to trigger failure scenarios
+        await db.close()
+
+        // 1. toggleSave returns false on failure (PR #18)
+        let savedResult = await store.toggleSave(article: article)
+        assertFalse(savedResult, "toggleSave should return false when database throws an error")
+
+        // 2. markAsRead catches error and does not mutate in-memory read state (PR #19)
+        await store.markAsRead(id: "test-err-guid", isRead: true)
+        assertFalse(store.readArticleIDs.contains("test-err-guid"), "readArticleIDs should not contain ID when DB markRead fails")
+
+        // 3. markAllAsRead catches error gracefully without crashing (PR #20)
+        await store.markAllAsRead()
+    }
+
+    static func testFeedArticleWrapContextNavigation() async {
+        print("  - Testing FeedArticleWrap Context Preservation & Filtered Navigation Boundaries...")
+
+        let artA = FeedArticle(title: "Article A", link: "https://example.com/a", guid: "a", description: "Desc A", pubDate: Date(), source: "Source 1", category: "Technology")
+        let artB = FeedArticle(title: "Article B", link: "https://example.com/b", guid: "b", description: "Desc B", pubDate: Date(), source: "Source 2", category: "Science")
+        let artC = FeedArticle(title: "Article C", link: "https://example.com/c", guid: "c", description: "Desc C", pubDate: Date(), source: "Source 1", category: "Technology")
+        let artD = FeedArticle(title: "Article D", link: "https://example.com/d", guid: "d", description: "Desc D", pubDate: Date(), source: "Source 3", category: "Business")
+
+        let allGlobal = [artA, artB, artC, artD]
+        let techFilter = [artA, artC]
+
+        // 1. Wrap with filtered context
+        let wrap = FeedArticleWrap(article: artA, contextArticles: techFilter)
+        assertEqual(wrap.article.id, artA.id, "Wrapped article ID must match artA")
+        assertEqual(wrap.contextArticles.count, 2, "Filtered context must contain exactly 2 articles")
+        assertEqual(wrap.contextArticles.map(\.id), [artA.id, artC.id], "Filtered context articles must match techFilter")
+
+        // 2. Boundary simulation in filtered context:
+        // In techFilter: artA is index 0. Has next (artC), but NO previous.
+        let idxA = wrap.contextArticles.firstIndex(where: { $0.id == artA.id })
+        assertEqual(idxA, 0, "artA should be at index 0 in filtered context")
+        let hasPrevInFilter = idxA.map { $0 > 0 } ?? false
+        let hasNextInFilter = idxA.map { $0 + 1 < wrap.contextArticles.count } ?? false
+        assertFalse(hasPrevInFilter, "artA must not have previous article in filtered context")
+        assertTrue(hasNextInFilter, "artA must have next article (artC) in filtered context")
+
+        // In techFilter: Next article from artA is artC (skipping artB which is Science!)
+        let nextArt = wrap.contextArticles[idxA! + 1]
+        assertEqual(nextArt.id, artC.id, "Next article in tech filter must be artC, skipping artB")
+
+        // In global context without filter: Next article from artA would have been artB
+        let globalIdxA = allGlobal.firstIndex(where: { $0.id == artA.id })!
+        let globalNext = allGlobal[globalIdxA + 1]
+        assertEqual(globalNext.id, artB.id, "In unfiltered global context, next is artB")
+
+        // 3. Fallback behavior when contextArticles is empty
+        let wrapEmpty = FeedArticleWrap(article: artB)
+        assertTrue(wrapEmpty.contextArticles.isEmpty, "Default contextArticles should be empty")
+
+        // 4. Stable uniqueness of wrap identity
+        let wrap2 = FeedArticleWrap(article: artA, contextArticles: techFilter)
+        assertTrue(wrap.id != wrap2.id, "Each wrap must have a distinct UUID identity for navigation state")
+    }
+
+    static func testArticleContentRedactionAndTypography() async {
+        print("  - Testing ArticleContentRedactor and Typography...")
+
+        // 1. Test trailing and fused boilerplate removal (e.g. '...last year.Read full article\nComments')
+        let rawJunk = "The launcher delivered a batch of CubeSats to low-Earth orbit from a spaceport in northern Norway, and Isar tasted success after its first test flight ended in failure last year.Read full article\nComments"
+        let cleaned = ArticleContentRedactor.redactAndSplit(rawJunk)
+        assertEqual(cleaned.count, 1, "Should filter boilerplate lines and clean fused text")
+        assertEqual(cleaned.first, "The launcher delivered a batch of CubeSats to low-Earth orbit from a spaceport in northern Norway, and Isar tasted success after its first test flight ended in failure last year.", "Should strip .Read full article and drop Comments")
+
+        // 2. Test syndication footers and standalone boilerplate lines
+        let syndicationText = """
+        Apple has introduced a new capability in Swift.
+
+        The post Apple Announces New Swift Features appeared first on 9to5Mac.
+
+        Comments
+        """
+        let cleanedSyndication = ArticleContentRedactor.redactAndSplit(syndicationText)
+        assertEqual(cleanedSyndication.count, 1, "Should strip syndication notice and comments line")
+        assertEqual(cleanedSyndication.first, "Apple has introduced a new capability in Swift.", "Content should match without syndication")
+
+        // 3. Test preservation of legitimate words in content
+        let normalText = "The spokesperson declined to make any further comments on the ongoing investigation."
+        let cleanedNormal = ArticleContentRedactor.cleanText(normalText)
+        assertEqual(cleanedNormal, normalText, "Should not redact 'comments' inside a legitimate sentence")
+
+        // 4. Test paragraph splitting for long unformatted RSS blocks (> 650 chars)
+        let longBlock = "SpaceX is dialing back its Falcon 9 launch program, and there is no certainty about when SpaceX's reusable next-generation super-heavy-lift rocket will carry payloads. " +
+            "Customers in any sector will usually welcome competition. Theoretically, competition will lead to lower prices and allow the best to rise to the top. " +
+            "So it's no surprise satellite operators are cheering the success of a new launch provider. This was especially the case when Germany's Isar Aerospace reached orbit for the first time with its Spectrum rocket. " +
+            "The launcher delivered a batch of CubeSats to low-Earth orbit from a spaceport in northern Norway, marking a milestone."
+        let splitParagraphs = ArticleContentRedactor.redactAndSplit(longBlock)
+        assertTrue(splitParagraphs.count >= 2, "Monolithic text should be split into multiple paragraphs at sentence boundaries")
+
+        // 5. Test Typography Lead Font Tokens
+        let casperLead = AppTypography.leadFont(for: .casper)
+        let editionLead = AppTypography.leadFont(for: .edition)
+        let altoLead = AppTypography.leadFont(for: .alto)
+        _ = casperLead
+        _ = editionLead
+        _ = altoLead
+        assertTrue(true, "Lead font tokens must be defined for all themes")
+    }
+
+    static func testArticleDetailReadingExperienceOverhaul() async {
+        print("  - Testing Article Detail Reading Experience Overhaul...")
+
+        // 1. Preview Policy — now shows all content
+        let sixParagraphs = (1...6).map { "Paragraph \($0) with substantive content describing current world events." }
+        let allShown = ArticlePreviewPolicy.computePreview(paragraphs: sixParagraphs, isExtracted: true)
+        assertEqual(allShown.count, 6, "All extracted paragraphs should be shown in reader")
+        assertEqual(allShown.first, "Paragraph 1 with substantive content describing current world events.", "First paragraph should be preserved")
+
+        let fourParagraphs = (1...4).map { "Paragraph \($0) with substantive content." }
+        let allFour = ArticlePreviewPolicy.computePreview(paragraphs: fourParagraphs, isExtracted: true)
+        assertEqual(allFour.count, 4, "All paragraphs should be preserved")
+
+        let descriptionParagraphs = ["Brief summary paragraph from RSS feed."]
+        let fallbackPreview = ArticlePreviewPolicy.computePreview(paragraphs: descriptionParagraphs, isExtracted: false)
+        assertEqual(fallbackPreview.count, 1, "Fallback description should preserve all paragraphs")
+
+        // 2. Trackpad Swipe Gesture Evaluation
+        let rightwardResult = TrackpadSwipeEvaluator.evaluate(deltaX: 75.0, deltaY: 10.0, threshold: 60.0)
+        assertEqual(rightwardResult, .previous, "Dominant rightward swipe should navigate to previous article")
+
+        let leftwardResult = TrackpadSwipeEvaluator.evaluate(deltaX: -80.0, deltaY: 15.0, threshold: 60.0)
+        assertEqual(leftwardResult, .next, "Dominant leftward swipe should navigate to next article")
+
+        let verticalScrollResult = TrackpadSwipeEvaluator.evaluate(deltaX: 25.0, deltaY: 90.0, threshold: 60.0)
+        assertEqual(verticalScrollResult, .none, "Dominant vertical scroll should not trigger article navigation")
+
+        let smallWobbleResult = TrackpadSwipeEvaluator.evaluate(deltaX: 35.0, deltaY: 5.0, threshold: 60.0)
+        assertEqual(smallWobbleResult, .none, "Sub-threshold horizontal movement should not trigger article navigation")
+
+        // 3. Content Extraction Pipeline Paragraph Extraction
+        let sampleHTML = """
+        <html>
+        <body>
+        <article class="story-body">
+            <p>The space agency announced the discovery of an Earth-sized exoplanet in the habitable zone.</p>
+            <p>Observations with the orbital telescope revealed atmospheric water vapor signatures.</p>
+            <p>Further spectroscopic follow-ups are planned for the upcoming observing cycle.</p>
+        </article>
+        </body>
+        </html>
+        """
+        let extractedParagraphs = ContentExtractionPipeline.shared.extractParagraphs(from: sampleHTML)
+        assertEqual(extractedParagraphs.count, 3, "Should cleanly extract 3 substantive paragraphs from HTML")
+        assertTrue(extractedParagraphs[0].contains("exoplanet"), "Paragraph text should match content")
+    }
+
+    static func testBBCExtractionFixture() async {
+        print("  - Testing BBC News Article Extraction Fixture...")
+
+        let bbcHTML = """
+        <!DOCTYPE html>
+        <html lang="en">
+        <head>
+            <title>Mountaineer Mingma G tells the BBC about high-altitude rescue - BBC News</title>
+            <meta property="og:image" content="https://ichef.bbci.co.uk/news/1024/branded_news/abc12345.jpg">
+        </head>
+        <body>
+            <header role="banner">
+                <nav><a href="/">BBC Home</a><a href="/news">News</a><a href="/sport">Sport</a></nav>
+            </header>
+            <main id="main-content">
+                <article>
+                    <header>
+                        <h1 class="ssrcss-headline">Mountaineer Mingma G tells the BBC about high-altitude rescue</h1>
+                    </header>
+                    <div data-component="text-block" class="ssrcss-text-block">
+                        <p class="ssrcss-1q0x1q5-Paragraph">Mountaineer Mingma G tells the BBC about the dramatic climb up the Himalayan ridge during unprecedented weather conditions.</p>
+                    </div>
+                    <div data-component="text-block" class="ssrcss-text-block">
+                        <p class="ssrcss-1q0x1q5-Paragraph">The seasoned climber coordinated a multi-team summit effort after receiving distress calls from stranded expeditions on the north face.</p>
+                    </div>
+                    <div data-component="text-block" class="ssrcss-text-block">
+                        <p class="ssrcss-1q0x1q5-Paragraph">Despite sub-zero winds and waning daylight, all twelve members were successfully escorted down to base camp without major frostbite.</p>
+                    </div>
+                    <div data-component="text-block" class="ssrcss-text-block">
+                        <p class="ssrcss-1q0x1q5-Paragraph">Local alpine authorities praised the swift mobilization as one of the most effective high-altitude interventions on record in recent decades.</p>
+                    </div>
+                    <aside class="ssrcss-related-topics">
+                        <h2>Related Topics</h2>
+                        <ul><li><a href="/topics/nepal">Nepal</a></li><li><a href="/topics/mountains">Mountaineering</a></li></ul>
+                    </aside>
+                </article>
+            </main>
+            <footer role="contentinfo">
+                <p class="copyright">Copyright 2026 BBC. All rights reserved.</p>
+                <nav><a href="/terms">Terms of Use</a><a href="/about">About the BBC</a></nav>
+            </footer>
+        </body>
+        </html>
+        """
+
+        let outcome = ContentExtractionPipeline.shared.extractFromHTML(bbcHTML)
+        guard case .success(let content, let leadImage) = outcome else {
+            assertTrue(false, "BBC extraction must succeed, got \(outcome)")
+            return
+        }
+
+        let paragraphs = ArticleContentRedactor.redactAndSplit(content)
+        assertEqual(paragraphs.count, 4, "Must extract all 4 BBC story text-block paragraphs")
+        assertTrue(content.contains("Mountaineer Mingma G tells the BBC"), "Paragraph 1 present")
+        assertTrue(content.contains("twelve members were successfully escorted"), "Paragraph 3 present")
+        assertTrue(!content.contains("BBC Home"), "Navigation links must be excluded")
+        assertTrue(!content.contains("Related Topics"), "Related topics section must be excluded")
+        assertTrue(!content.contains("Copyright 2026 BBC"), "Footer copyright must be excluded")
+        assertEqual(leadImage, "https://ichef.bbci.co.uk/news/1024/branded_news/abc12345.jpg", "Lead image must be extracted")
+    }
+
+    static func testMultiPublisherExtractionFixtures() async {
+        print("  - Testing Multi-Publisher Extraction Fixtures (Reuters, Ars, Verge, NYTimes)...")
+
+        // 1. Reuters Style
+        let reutersHTML = """
+        <html><body>
+        <nav><a href="/">Reuters Home</a></nav>
+        <article class="article-body">
+            <div class="article-body__content">
+                <p>Global semiconductor manufacturers reported record quarterly shipments as artificial intelligence demand surged across multiple sectors.</p>
+                <p>Industry analysts noted that supply chain lead times have contracted significantly following major capital investments in fabrication plants.</p>
+                <p>Major enterprise software providers continue to scale computational clusters to support next-generation foundational model training runs.</p>
+            </div>
+        </article>
+        <footer><p>Reuters Thomson Trust Principles</p></footer>
+        </body></html>
+        """
+        let reutersOutcome = ContentExtractionPipeline.shared.extractFromHTML(reutersHTML)
+        guard case .success(let rContent, _) = reutersOutcome else {
+            assertTrue(false, "Reuters extraction must succeed")
+            return
+        }
+        let rParas = ArticleContentRedactor.redactAndSplit(rContent)
+        assertEqual(rParas.count, 3, "Reuters should yield 3 paragraphs")
+        assertTrue(!rContent.contains("Reuters Home"), "Navigation should be excluded")
+
+        // 2. Ars Technica Style
+        let arsHTML = """
+        <html><body>
+        <article class="article-single">
+            <div class="article-content">
+                <p>Researchers at the astrophysics laboratory have mapped the intricate magnetic field lines surrounding a supermassive black hole.</p>
+                <p>Using a globally synchronized array of millimeter-wave radio observatories, the team reconstructed polarimetric signatures at micro-arcsecond resolution.</p>
+                <p>The findings provide critical empirical validation for relativistic magnetohydrodynamic simulations developed over the past decade.</p>
+            </div>
+        </article>
+        </body></html>
+        """
+        let arsOutcome = ContentExtractionPipeline.shared.extractFromHTML(arsHTML)
+        guard case .success(let aContent, _) = arsOutcome else {
+            assertTrue(false, "Ars Technica extraction must succeed")
+            return
+        }
+        assertEqual(ArticleContentRedactor.redactAndSplit(aContent).count, 3, "Ars should yield 3 paragraphs")
+
+        // 3. The Verge Style
+        let vergeHTML = """
+        <html><body>
+        <main id="content">
+            <article>
+                <div class="duet--article--article-body-component">
+                    <p>Electric vehicle charging network operators announced a standardized communication protocol to improve interoperability across metropolitan stations.</p>
+                    <p>The update eliminates proprietary authentication handshakes in favor of universal hardware-level cryptographic key exchange.</p>
+                    <p>Federal transportation regulators hailed the unified specification as an essential milestone for nationwide transit electrification goals.</p>
+                </div>
+            </article>
+        </main>
+        </body></html>
+        """
+        let vergeOutcome = ContentExtractionPipeline.shared.extractFromHTML(vergeHTML)
+        guard case .success(let vContent, _) = vergeOutcome else {
+            assertTrue(false, "The Verge extraction must succeed")
+            return
+        }
+        assertEqual(ArticleContentRedactor.redactAndSplit(vContent).count, 3, "The Verge should yield 3 paragraphs")
+
+        // 4. NYTimes Style
+        let nytHTML = """
+        <html><body>
+        <article id="story">
+            <section name="articleBody">
+                <div class="StoryBodyCompanionColumn">
+                    <p>Central banking officials signaled plans to maintain current policy rates following fresh data on consumer spending and labor market stability.</p>
+                    <p>While headline inflation metrics have cooled toward historical targets, persistent wage growth in services has prompted measured caution among governors.</p>
+                    <p>Financial market participants broadly recalibrated rate cut expectations, with treasury yields consolidating within recent trading ranges.</p>
+                </div>
+            </section>
+        </article>
+        </body></html>
+        """
+        let nytOutcome = ContentExtractionPipeline.shared.extractFromHTML(nytHTML)
+        guard case .success(let nytContent, _) = nytOutcome else {
+            assertTrue(false, "NYTimes extraction must succeed")
+            return
+        }
+        assertEqual(ArticleContentRedactor.redactAndSplit(nytContent).count, 3, "NYTimes should yield 3 paragraphs")
+    }
+
+    static func testContentQualityValidation() async {
+        print("  - Testing ContentQualityValidator Rules...")
+
+        // 1. Valid paragraphs pass
+        let valid = [
+            "The international summit concluded today with landmark agreements on carbon emission reduction targets across all member economies.",
+            "Delegates committed billions in concessional financing to support clean energy transitions in developing nations over the next ten years.",
+            "Independent observers commended the transparency mechanisms embedded within the final treaty text as unprecedented in multilateral diplomacy."
+        ]
+        assertEqual(ContentQualityValidator.validate(paragraphs: valid), .valid, "Substantive article must pass validation")
+
+        // 2. Empty paragraphs rejected
+        assertEqual(ContentQualityValidator.validate(paragraphs: []), .rejected(reason: "No readable paragraphs found"), "Empty paragraphs rejected")
+
+        // 3. Too short rejected
+        let tooShort = ["This is a tiny snippet."]
+        if case .rejected(let reason) = ContentQualityValidator.validate(paragraphs: tooShort) {
+            assertTrue(reason.contains("too short"), "Must reject short snippets")
+        } else {
+            assertTrue(false, "Should reject very short snippets")
+        }
+
+        // 4. High boilerplate rejected
+        let boilerplate = [
+            "The post High Altitude Rescue appeared first on Himalayan News Network.",
+            "Photo credit: Associated Press News Wire Archives / John Doe Photographer.",
+            "Read full article",
+            "A single short paragraph covering the mountain rescue effort in northern Nepal."
+        ]
+        if case .rejected(let reason) = ContentQualityValidator.validate(paragraphs: boilerplate) {
+            assertTrue(reason.contains("boilerplate"), "Must detect high boilerplate ratio")
+        } else {
+            assertTrue(false, "Should reject boilerplate heavy text")
+        }
+
+        // 5. Repetitive syndicated loop rejected
+        let repeated = [
+            "Subscribe to our newsletter for daily updates and breaking news alerts.",
+            "Subscribe to our newsletter for daily updates and breaking news alerts.",
+            "Subscribe to our newsletter for daily updates and breaking news alerts."
+        ]
+        if case .rejected(let reason) = ContentQualityValidator.validate(paragraphs: repeated) {
+            assertTrue(reason.contains("repetitive"), "Must detect duplicate text loop")
+        } else {
+            assertTrue(false, "Should reject repetitive syndication loops")
+        }
+    }
+
+    static func testExtractionOutcomeDiagnostics() async {
+        print("  - Testing ExtractionOutcome Diagnostics & Failure Types...")
+
+        let outcomeSuccess = ExtractionOutcome.success(content: "Article body", imageUrl: "https://example.com/img.jpg")
+        assertTrue(outcomeSuccess.isSuccess, "Must identify success")
+        assertEqual(outcomeSuccess.content, "Article body", "Content accessible")
+        assertEqual(outcomeSuccess.imageUrl, "https://example.com/img.jpg", "Image accessible")
+        assertEqual(outcomeSuccess.failureReason, nil, "No failure reason on success")
+
+        let outcomeHTTP = ExtractionOutcome.httpError(status: 403)
+        assertTrue(!outcomeHTTP.isSuccess, "Not success")
+        assertEqual(outcomeHTTP.failureReason, "HTTP Error 403", "HTTP status failure message")
+
+        let outcomeBlocked = ExtractionOutcome.securityBlocked(reason: "Private IP")
+        assertEqual(outcomeBlocked.failureReason, "Security blocked: Private IP", "Security failure message")
+
+        let outcomeNetwork = ExtractionOutcome.networkError(reason: "Connection timeout")
+        assertEqual(outcomeNetwork.failureReason, "Connection timeout", "Network failure message")
+    }
+
+    static func testCanonicalClassificationDisambiguation() async {
+        print("  - Testing Canonical Classification Disambiguation for Overlapping Topics...")
+
+        // Overlap 1: Health + Technology (AI scanner for hospital patients)
+        assertEqual(NewsCategory.match(from: "medical AI clinical diagnostic scanner"), .health, "Health cue overrides tech")
+
+        // Overlap 2: Science + Technology (NASA satellite mission)
+        assertEqual(NewsCategory.match(from: "NASA telescope deep space observatory"), .science, "Astronomy cue overrides tech")
+
+        // Overlap 3: Business + Politics (Stock market inflation Wall Street)
+        assertEqual(NewsCategory.match(from: "Wall Street stock market inflation revenue"), .business, "Market cues resolve to business")
+
+        // Overlap 4: Politics + World (Senate Congress election)
+        assertEqual(NewsCategory.match(from: "Senate Congress election campaign"), .politics, "Governance cues resolve to politics")
+
+        // Overlap 5: World diplomacy (International foreign global treaty)
+        assertEqual(NewsCategory.match(from: "International global foreign diplomat summit"), .world, "Diplomacy resolves to world")
+    }
+
+    @MainActor
+    static func testAppContainerAndFrostedSurface() async {
+        print("  - Testing AppContainer & Frosted Surface tokens...")
+
+        let container = AppContainer.shared
+        assertTrue(container.appSettings === AppSettings.shared, "AppSettings wired")
+        assertTrue(container.articleStore === ArticleStore.shared, "ArticleStore wired")
+        assertTrue(container.readManager === ReadManager.shared, "ReadManager wired")
+        assertTrue(container.themeManager === ThemeManager.shared, "ThemeManager wired")
+        assertTrue(container.savedStories === SavedStoriesManager.shared, "SavedStories wired")
+
+        let controlElevation = FrostedElevation.control
+        assertEqual(controlElevation.surfaceBackingOpacity, 0.65, "Control backing is translucent (0.65)")
+        assertEqual(controlElevation.shadowRadius, 12.0, "Control shadow radius is 12")
+
+        let cardElevation = FrostedElevation.card
+        assertEqual(cardElevation.surfaceBackingOpacity, 0.38, "Card backing is 0.38")
     }
 }
 

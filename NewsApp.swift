@@ -17,6 +17,7 @@ extension Notification.Name {
 @main
 struct NewsApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
+    @StateObject private var appContainer = AppContainer.shared
     @StateObject private var appSettings = AppSettings.shared
     @StateObject private var articleStore = ArticleStore.shared
     @StateObject private var feedManager = FeedManager()
@@ -26,6 +27,7 @@ struct NewsApp: App {
     var body: some Scene {
         Window("News", id: "main") {
             MainView()
+                .environmentObject(appContainer)
                 .environmentObject(appSettings)
                 .environmentObject(articleStore)
                 .environmentObject(feedManager)

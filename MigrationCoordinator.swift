@@ -117,17 +117,10 @@ actor MigrationCoordinator {
             try await database.upsertArticles(allArticlesToImport)
             
             // Mark read states
-            for readId in legacyReadIDs {
-                try await database.markRead(articleId: readId, isRead: true)
-            }
+            try await database.markReadBatch(articleIds: Array(legacyReadIDs), isRead: true)
             
             // Mark saved states
-            for savedId in savedIds {
-                let isAlreadySaved = try await database.isSaved(articleId: savedId)
-                if !isAlreadySaved {
-                    _ = try await database.toggleSaved(articleId: savedId)
-                }
-            }
+            try await database.batchMarkSaved(savedIds)
             
             // COMMIT the transaction
             try await database.commitTransaction()
