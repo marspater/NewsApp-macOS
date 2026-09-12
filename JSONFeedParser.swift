@@ -86,17 +86,21 @@ class JSONFeedParser {
     }
     
     private static func stripSimpleHTML(_ html: String) -> String {
-        var str = html.replacingOccurrences(of: "<br[^>]*>", with: "\n", options: .regularExpression)
-        str = str.replacingOccurrences(of: "</p>", with: "\n\n", options: .caseInsensitive)
-        str = str.replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
+        var str = html.replacingOccurrences(of: "(?i)</(p|div|blockquote|h[1-6]|li|tr)>", with: "\n\n", options: .regularExpression)
+        str = str.replacingOccurrences(of: "(?i)<(br|hr)\\s*/?>", with: "\n", options: .regularExpression)
+        str = str.replacingOccurrences(of: "<[^>]+>", with: " ", options: .regularExpression)
         
         let entities: [(String, String)] = [
             ("&nbsp;", " "), ("&amp;", "&"), ("&quot;", "\""), ("&apos;", "'"),
-            ("&#39;", "'"), ("&lt;", "<"), ("&gt;", ">")
+            ("&#39;", "'"), ("&lt;", "<"), ("&gt;", ">"), ("&#8217;", "\u{2019}"),
+            ("&#8220;", "\u{201C}"), ("&#8221;", "\u{201D}"), ("&#8212;", "\u{2014}"),
+            ("&mdash;", "\u{2014}"), ("&#8211;", "\u{2013}"), ("&ndash;", "\u{2013}")
         ]
         for (entity, replacement) in entities {
             str = str.replacingOccurrences(of: entity, with: replacement, options: .caseInsensitive)
         }
-        return str.trimmingCharacters(in: .whitespacesAndNewlines)
+        str = str.replacingOccurrences(of: "[ \\t]+", with: " ", options: .regularExpression)
+        str = str.replacingOccurrences(of: "\\n{3,}", with: "\n\n", options: .regularExpression)
+        return ArticleContentRedactor.cleanText(str.trimmingCharacters(in: .whitespacesAndNewlines))
     }
 }

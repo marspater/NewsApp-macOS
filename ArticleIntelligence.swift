@@ -814,3 +814,138 @@ public final class ArticleIntelligence: Sendable {
     }
 }
 
+// MARK: - Article Content Redactor & Formatter
+
+public enum ArticleContentRedactor {
+    private static let boilerplatePatterns: [String] = [
+        // Fused sentence ending, e.g. 'last year.Read full article' or 'last year. Read full article Comments'
+        "(?i)(\\.|!|\\?)\\s*(?:read full article|read more|continue reading|view comments|leave a comment|full story)\\b.*$",
+        // Trailing standalone boilerplate
+        "(?i)[\\s\\.]*\\b(?:read full article|read more|continue reading|view comments|leave a comment|full story)\\b[\\s\\.]*$",
+        // Syndication notices at end of line
+        "(?i)the post .* appeared first on .*\\.?$"
+    ]
+
+    private static let boilerplateLineExact: Set<String> = [
+        "comments", "comment", "read full article", "read more", "continue reading",
+        "view comments", "leave a comment", "share this article", "share this post",
+        "related articles", "source", "read original", "full article", "full story"
+    ]
+
+    /// Cleans boilerplate phrases, syndication notes, and trailing artifacts from text.
+    public static func cleanText(_ rawText: String) -> String {
+        var text = rawText
+        
+        for pattern in boilerplatePatterns {
+            if let regex = try? NSRegularExpression(pattern: pattern, options: [.anchorsMatchLines]) {
+                let range = NSRange(text.startIndex..., in: text)
+                if pattern.contains("(\\.|!|\\?)") {
+                    text = regex.stringByReplacingMatches(in: text, options: [], range: range, withTemplate: "$1")
+                } else {
+                    text = regex.stringByReplacingMatches(in: text, options: [], range: range, withTemplate: "")
+                }
+            }
+        }
+        
+        return text.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Redacts boilerplate and intelligently splits article content into readable editorial paragraphs.
+    public static func redactAndSplit(_ rawText: String) -> [String] {
+        let normalized = rawText
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+
+        let rawParagraphs: [String]
+        if normalized.contains("\n\n") {
+            rawParagraphs = normalized.components(separatedBy: "\n\n")
+        } else if normalized.contains("\n") {
+            rawParagraphs = normalized.components(separatedBy: "\n")
+        } else {
+            rawParagraphs = [normalized]
+        }
+
+        var result = [String]()
+        for para in rawParagraphs {
+            let cleaned = cleanText(para)
+            guard !cleaned.isEmpty else { continue }
+            if isBoilerplateLine(cleaned) { continue }
+
+            // If a single paragraph is too monolithic (> 450 characters and 3+ sentences), split it
+            if cleaned.count > 450 {
+                let subParagraphs = splitLongParagraph(cleaned)
+                for sub in subParagraphs {
+                    let subCleaned = cleanText(sub)
+                    if !subCleaned.isEmpty && !isBoilerplateLine(subCleaned) {
+                        result.append(subCleaned)
+                    }
+                }
+            } else {
+                result.append(cleaned)
+            }
+        }
+
+        while let last = result.last, isBoilerplateLine(last) {
+            result.removeLast()
+        }
+
+        return result
+    }
+
+    /// Checks if a string is solely a boilerplate phrase or syndication footer.
+    public static func isBoilerplateLine(_ text: String) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return true }
+        let stripped = trimmed.trimmingCharacters(in: CharacterSet(charactersIn: ".!-–—()0123456789/ "))
+        let lower = stripped.lowercased()
+
+        if boilerplateLineExact.contains(lower) {
+            return true
+        }
+        let rawLower = trimmed.lowercased()
+        if rawLower.hasPrefix("the post ") && rawLower.contains(" appeared first on ") {
+            return true
+        }
+        if rawLower.hasPrefix("photo by ") || rawLower.hasPrefix("image credit:") || rawLower.hasPrefix("photo credit:") {
+            return true
+        }
+        return false
+    }
+
+    /// Splits a large unsegmented paragraph at sentence boundaries into balanced readable paragraphs.
+    private static func splitLongParagraph(_ text: String) -> [String] {
+        let tokenizer = NLTokenizer(unit: .sentence)
+        tokenizer.string = text
+        var sentences = [String]()
+        tokenizer.enumerateTokens(in: text.startIndex..<text.endIndex) { range, _ in
+            let sentence = text[range].trimmingCharacters(in: .whitespacesAndNewlines)
+            if !sentence.isEmpty {
+                sentences.append(sentence)
+            }
+            return true
+        }
+
+        guard sentences.count > 2 else { return [text] }
+
+        var paragraphs = [String]()
+        var currentPara = ""
+        for sentence in sentences {
+            if !currentPara.isEmpty && (currentPara.count + sentence.count > 320) {
+                paragraphs.append(currentPara)
+                currentPara = sentence
+            } else {
+                if currentPara.isEmpty {
+                    currentPara = sentence
+                } else {
+                    currentPara += " " + sentence
+                }
+            }
+        }
+        if !currentPara.isEmpty {
+            paragraphs.append(currentPara)
+        }
+        return paragraphs.isEmpty ? [text] : paragraphs
+    }
+}
+
+

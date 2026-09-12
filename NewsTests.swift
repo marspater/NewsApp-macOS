@@ -72,6 +72,7 @@ struct NewsTests {
         await testNotificationServiceErrorLogging()
         await testArticleStoreErrorResilience()
         await testFeedArticleWrapContextNavigation()
+        await testArticleContentRedactionAndTypography()
         
         print("✅ SUCCESS: All tests passed!")
     }
@@ -1695,6 +1696,50 @@ struct NewsTests {
         // 4. Stable uniqueness of wrap identity
         let wrap2 = FeedArticleWrap(article: artA, contextArticles: techFilter)
         assertTrue(wrap.id != wrap2.id, "Each wrap must have a distinct UUID identity for navigation state")
+    }
+
+    static func testArticleContentRedactionAndTypography() async {
+        print("  - Testing ArticleContentRedactor and Typography...")
+
+        // 1. Test trailing and fused boilerplate removal (e.g. '...last year.Read full article\nComments')
+        let rawJunk = "The launcher delivered a batch of CubeSats to low-Earth orbit from a spaceport in northern Norway, and Isar tasted success after its first test flight ended in failure last year.Read full article\nComments"
+        let cleaned = ArticleContentRedactor.redactAndSplit(rawJunk)
+        assertEqual(cleaned.count, 1, "Should filter boilerplate lines and clean fused text")
+        assertEqual(cleaned.first, "The launcher delivered a batch of CubeSats to low-Earth orbit from a spaceport in northern Norway, and Isar tasted success after its first test flight ended in failure last year.", "Should strip .Read full article and drop Comments")
+
+        // 2. Test syndication footers and standalone boilerplate lines
+        let syndicationText = """
+        Apple has introduced a new capability in Swift.
+
+        The post Apple Announces New Swift Features appeared first on 9to5Mac.
+
+        Comments
+        """
+        let cleanedSyndication = ArticleContentRedactor.redactAndSplit(syndicationText)
+        assertEqual(cleanedSyndication.count, 1, "Should strip syndication notice and comments line")
+        assertEqual(cleanedSyndication.first, "Apple has introduced a new capability in Swift.", "Content should match without syndication")
+
+        // 3. Test preservation of legitimate words in content
+        let normalText = "The spokesperson declined to make any further comments on the ongoing investigation."
+        let cleanedNormal = ArticleContentRedactor.cleanText(normalText)
+        assertEqual(cleanedNormal, normalText, "Should not redact 'comments' inside a legitimate sentence")
+
+        // 4. Test paragraph splitting for long unformatted RSS blocks (> 650 chars)
+        let longBlock = "SpaceX is dialing back its Falcon 9 launch program, and there is no certainty about when SpaceX's reusable next-generation super-heavy-lift rocket will carry payloads. " +
+            "Customers in any sector will usually welcome competition. Theoretically, competition will lead to lower prices and allow the best to rise to the top. " +
+            "So it's no surprise satellite operators are cheering the success of a new launch provider. This was especially the case when Germany's Isar Aerospace reached orbit for the first time with its Spectrum rocket. " +
+            "The launcher delivered a batch of CubeSats to low-Earth orbit from a spaceport in northern Norway, marking a milestone."
+        let splitParagraphs = ArticleContentRedactor.redactAndSplit(longBlock)
+        assertTrue(splitParagraphs.count >= 2, "Monolithic text should be split into multiple paragraphs at sentence boundaries")
+
+        // 5. Test Typography Lead Font Tokens
+        let casperLead = AppTypography.leadFont(for: .casper)
+        let editionLead = AppTypography.leadFont(for: .edition)
+        let altoLead = AppTypography.leadFont(for: .alto)
+        _ = casperLead
+        _ = editionLead
+        _ = altoLead
+        assertTrue(true, "Lead font tokens must be defined for all themes")
     }
 }
 

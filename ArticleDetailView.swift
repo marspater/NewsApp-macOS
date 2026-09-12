@@ -117,7 +117,7 @@ struct ArticleDetailView: View {
                         .font(AppTypography.titleFont(for: themeManager.articleTheme))
                         .foregroundColor(AppColor.primaryText)
                     
-                    Text("\(displaySource) · \(currentArticle.pubDate.formatted(date: .long, time: .omitted))")
+                    Text("\(displaySource) · \(currentArticle.pubDate.formatted(date: .long, time: .omitted)) · \(readingTimeEstimate)")
                         .font(.system(
                             size: 13,
                             weight: .medium,
@@ -167,21 +167,57 @@ struct ArticleDetailView: View {
         }
     }
     
+    private var formattedParagraphs: [String] {
+        if let content = currentArticle.fullContent, !content.isEmpty {
+            let paragraphs = ArticleContentRedactor.redactAndSplit(content)
+            if !paragraphs.isEmpty { return paragraphs }
+        }
+        return ArticleContentRedactor.redactAndSplit(currentArticle.description)
+    }
+
+    private var readingTimeEstimate: String {
+        let text = currentArticle.fullContent ?? currentArticle.description
+        let words = text.split { $0.isWhitespace || $0.isNewline }.count
+        let minutes = max(1, Int(ceil(Double(words) / 200.0)))
+        return "\(minutes) min read"
+    }
+
     @ViewBuilder
     private var articleContentParagraphs: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            if let content = currentArticle.fullContent, !content.isEmpty {
-                ForEach(contentParagraphs(content), id: \.self) { paragraph in
-                    Text(paragraph)
-                        .font(AppTypography.bodyFont(for: themeManager.articleTheme))
-                        .foregroundColor(AppColor.primaryText.opacity(0.88))
-                        .lineSpacing(AppTypography.bodyLineSpacing(for: themeManager.articleTheme))
-                }
-            } else {
-                Text(currentArticle.description)
-                    .font(AppTypography.bodyFont(for: themeManager.articleTheme))
-                    .foregroundColor(AppColor.primaryText.opacity(0.88))
+        let paragraphs = formattedParagraphs
+        VStack(alignment: .leading, spacing: 22) {
+            ForEach(Array(paragraphs.enumerated()), id: \.offset) { index, paragraph in
+                Text(paragraph)
+                    .font(index == 0 ? AppTypography.leadFont(for: themeManager.articleTheme) : AppTypography.bodyFont(for: themeManager.articleTheme))
+                    .foregroundColor(AppColor.primaryText.opacity(index == 0 ? 0.95 : 0.88))
                     .lineSpacing(AppTypography.bodyLineSpacing(for: themeManager.articleTheme))
+                    .textSelection(.enabled)
+            }
+            
+            articleEditorialFooter
+        }
+        .transition(.opacity.combined(with: .move(edge: .bottom)))
+    }
+
+    private var articleEditorialFooter: some View {
+        VStack(alignment: .leading, spacing: AppSpacing.md) {
+            Divider()
+                .opacity(0.15)
+                .padding(.vertical, AppSpacing.sm)
+            
+            HStack(spacing: AppSpacing.sm) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Source: \(displaySource)")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(AppColor.primaryText)
+                    if let host = URL(string: currentArticle.link)?.host {
+                        Text(host)
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundColor(AppColor.secondaryText)
+                    }
+                }
+                
+                Spacer()
                 
                 Button {
                     viewMode = .web
@@ -190,17 +226,16 @@ struct ArticleDetailView: View {
                         Image(systemName: "safari")
                         Text("Open Web View (W)")
                     }
-                    .font(.system(size: 13, weight: .medium))
+                    .font(.system(size: 12, weight: .medium))
                     .foregroundColor(AppColor.primaryText)
                     .padding(.horizontal, AppSpacing.md)
                     .padding(.vertical, 8)
                     .glassPill(interactive: true)
                 }
                 .buttonStyle(.plain)
-                .padding(.top, AppSpacing.sm)
             }
         }
-        .transition(.opacity.combined(with: .move(edge: .bottom)))
+        .padding(.top, AppSpacing.md)
     }
     
     // MARK: - Web View Container
@@ -479,9 +514,7 @@ struct ArticleDetailView: View {
     }
     
     private func contentParagraphs(_ text: String) -> [String] {
-        text.components(separatedBy: "\n\n")
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
+        ArticleContentRedactor.redactAndSplit(text)
     }
 
     // MARK: - AI Analysis & Key Points UI

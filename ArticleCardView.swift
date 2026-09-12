@@ -63,11 +63,14 @@ struct ArticleCardView: View {
                     
                     // Description
                     if !article.description.isEmpty {
-                        Text(article.description)
-                            .font(AppTypography.bodySmall)
-                            .foregroundColor(AppColor.secondaryText.opacity(0.85))
-                            .lineLimit(2)
-                            .multilineTextAlignment(.leading)
+                        let cleanDesc = ArticleContentRedactor.cleanText(article.description)
+                        if !cleanDesc.isEmpty {
+                            Text(cleanDesc)
+                                .font(AppTypography.bodySmall)
+                                .foregroundColor(AppColor.secondaryText.opacity(0.85))
+                                .lineLimit(2)
+                                .multilineTextAlignment(.leading)
+                        }
                     }
                     
                     Spacer(minLength: 4)

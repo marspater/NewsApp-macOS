@@ -239,17 +239,41 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
     }
 
     private func stripHTMLSimple(_ html: String) -> String {
-        html.replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
+        var text = html.replacingOccurrences(
+            of: "(?i)</(p|div|blockquote|h[1-6]|li|tr)>",
+            with: "\n\n",
+            options: .regularExpression
+        )
+        text = text.replacingOccurrences(
+            of: "(?i)<(br|hr)\\s*/?>",
+            with: "\n",
+            options: .regularExpression
+        )
+        text = text.replacingOccurrences(
+            of: "<[^>]+>",
+            with: " ",
+            options: .regularExpression
+        )
+        text = text
             .replacingOccurrences(of: "&nbsp;", with: " ")
             .replacingOccurrences(of: "&amp;", with: "&")
             .replacingOccurrences(of: "&quot;", with: "\"")
             .replacingOccurrences(of: "&#39;", with: "'")
+            .replacingOccurrences(of: "&apos;", with: "'")
             .replacingOccurrences(of: "&lt;", with: "<")
             .replacingOccurrences(of: "&gt;", with: ">")
             .replacingOccurrences(of: "&#8217;", with: "\u{2019}")
             .replacingOccurrences(of: "&#8220;", with: "\u{201C}")
             .replacingOccurrences(of: "&#8221;", with: "\u{201D}")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "&#8212;", with: "\u{2014}")
+            .replacingOccurrences(of: "&mdash;", with: "\u{2014}")
+            .replacingOccurrences(of: "&#8211;", with: "\u{2013}")
+            .replacingOccurrences(of: "&ndash;", with: "\u{2013}")
+        
+        text = text.replacingOccurrences(of: "[ \\t]+", with: " ", options: .regularExpression)
+        text = text.replacingOccurrences(of: "\\n{3,}", with: "\n\n", options: .regularExpression)
+
+        return ArticleContentRedactor.cleanText(text.trimmingCharacters(in: .whitespacesAndNewlines))
     }
 
     private func extractImageFromHTML(_ html: String) -> String? {

@@ -119,6 +119,14 @@ enum AppTypography {
         }
     }
     
+    static func leadFont(for theme: ArticleThemeType) -> Font {
+        switch theme {
+        case .casper: return .system(size: 20, weight: .regular, design: .serif)
+        case .edition: return .system(size: 18, weight: .regular, design: .default)
+        case .alto: return .system(size: 16, weight: .medium, design: .monospaced)
+        }
+    }
+    
     static func bodyFont(for theme: ArticleThemeType) -> Font {
         switch theme {
         case .casper: return .system(size: 18, weight: .regular, design: .serif)
