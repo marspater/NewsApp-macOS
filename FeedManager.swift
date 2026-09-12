@@ -37,7 +37,6 @@ class FeedManager: NSObject, ObservableObject {
     var fetchIntervalMinutes: Double { appSettings.fetchIntervalMinutes }
     var notificationsEnabled: Bool { appSettings.notificationsEnabled }
     var aiEnabled: Bool { appSettings.aiEnabled }
-    var privateNotificationsEnabled: Bool { appSettings.privateNotificationsEnabled }
 
     init(settings: AppSettings? = nil, store: ArticleStore? = nil) {
         self.appSettings = settings ?? AppSettings.shared

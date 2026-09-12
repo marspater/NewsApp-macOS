@@ -87,17 +87,6 @@ final class NotificationService: Sendable {
         }
     }
 
-    /// Backwards-compatibility triage entry point.
-    @available(*, deprecated, message: "Use triageAndNotify(newArticles:mode:maxNotifications:) instead")
-    func triageAndNotify(
-        newArticles: [FeedArticle],
-        privateNotificationsEnabled: Bool,
-        maxNotifications: Int = 3
-    ) async {
-        let mode: AppSettings.NotificationMode = privateNotificationsEnabled ? .private : .full
-        await triageAndNotify(newArticles: newArticles, mode: mode, maxNotifications: maxNotifications)
-    }
-
     /// Formats the minimal notification summary string with singular/plural grammar.
     static func formatMinimalSummary(articleCount: Int, uniqueSourcesCount: Int) -> String {
         let articleText = articleCount == 1 ? "1 new article" : "\(articleCount) new articles"

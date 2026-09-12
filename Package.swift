@@ -27,14 +27,12 @@ let package = Package(
                 "notarize.sh",
                 "test.sh",
                 "main",
-                "PROJECT_REVIEW.md",
                 "README.md",
                 "SECURITY.md",
                 "PRIVACY.md",
                 "News.entitlements"
             ],
             sources: [
-                "AIManager.swift",
                 "AppSettings.swift",
                 "ArticleCardView.swift",
                 "ArticleDetailView.swift",

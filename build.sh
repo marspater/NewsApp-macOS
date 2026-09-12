@@ -89,7 +89,6 @@ swiftc -O -parse-as-library -target $(uname -m)-apple-macos${TARGET_MACOS} \
     ThemeManager.swift \
     FeedArticle.swift \
     CacheManager.swift \
-    AIManager.swift \
     FeedManager.swift \
     AppContainer.swift \
     DesignSystem.swift \

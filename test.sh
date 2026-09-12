@@ -27,7 +27,6 @@ swiftc -target $(uname -m)-apple-macos${TARGET_MACOS} \
     ThemeManager.swift \
     FeedArticle.swift \
     CacheManager.swift \
-    AIManager.swift \
     FeedManager.swift \
     AppContainer.swift \
     SavedStoriesManager.swift \

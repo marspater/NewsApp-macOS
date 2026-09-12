@@ -53,11 +53,6 @@ public final class CacheManager: @unchecked Sendable {
         logger.info("Cleared HTTP network cache.")
     }
 
-    /// Legacy convenience alias for clearWebCache.
-    public func clearAllCache() {
-        clearWebCache()
-    }
-
     /// Clears all AI enrichment analysis data (summaries, key points, entities).
     /// Articles and subscriptions remain completely intact.
     func clearAIAnalysis(database: DatabaseEngine = DatabaseEngine.shared) async throws {

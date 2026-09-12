@@ -36,7 +36,6 @@ The current codebase already contains feed ingestion, SQLite persistence, FTS5 s
 - `ContentExtractionPipeline.swift`, `WebContentExtractor.swift`: article content extraction.
 - `ArticleIntelligence.swift`: article classification, sentiment, entities, summarization and content-cleaning capabilities.
 - `EnrichmentQueue.swift`: actor-isolated background enrichment scheduling.
-- `AIManager.swift`: compatibility adapter into `ArticleIntelligence`.
 - Current intelligence code uses `NaturalLanguage` and conditionally `FoundationModels`, with typed `@Generable` outputs and a fixed 12-category taxonomy.
 
 ### Platform / distribution
@@ -91,7 +90,7 @@ Feed and article URLs are hostile input. Preserve all existing SSRF and redirect
 The project targets Universal 2 distribution and Hardened Runtime signing. Release changes should preserve both Apple Silicon and Intel support where the current build configuration supports them. Do not casually raise the deployment target or add entitlements.
 
 ## Known historical issues
-`PROJECT_REVIEW.md` documents previously identified areas such as settings wiring, background fetch cadence, feature flags, history behavior, service decomposition, deterministic parsing/categorization tests, loading/error states, URL identity stability, enrichment resource controls, accessibility, and security hardening. Treat that file as historical context, not permission to implement every recommendation blindly.
+Early project reviews documented previously identified areas such as settings wiring, background fetch cadence, feature flags, history behavior, service decomposition, deterministic parsing/categorization tests, loading/error states, URL identity stability, enrichment resource controls, accessibility, and security hardening. Treat those areas as historical context, not permission to implement every recommendation blindly.
 
 ## How Jules should approach a task
 Inspect the relevant files and existing abstractions first. Reuse the established path. Prefer a small coherent change over a broad rewrite. Add tests for behavior changes. Run the repository's validation scripts when the environment supports them. Review the resulting diff for concurrency, memory, security, accessibility, and regression risks before finishing.

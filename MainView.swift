@@ -49,7 +49,7 @@ struct MainView: View {
         } detail: {
             NavigationStack(path: $articlePath) {
                 ZStack {
-                    AppColor.surfaceDark.ignoresSafeArea()
+                    AppColor.background.ignoresSafeArea()
                     
                     ArticleListView(
                         selectedTopic: $selectedTopic,
@@ -81,7 +81,6 @@ struct MainView: View {
             }
         }
         .navigationSplitViewStyle(.balanced)
-        .adaptiveBackgroundExtension()
         .frame(minWidth: 900, minHeight: 600)
         .onAppear {
             if feedManager.articles.isEmpty {

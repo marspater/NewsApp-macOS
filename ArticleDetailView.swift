@@ -98,9 +98,6 @@ struct ArticleDetailView: View {
 
     // Toolbar & Scroll interaction states
     @State private var readingProgress: CGFloat = 0.0
-    @State private var isToolbarCompacted: Bool = false
-    @State private var isToolbarHovered: Bool = false
-    @State private var articleScrollPositions: [String: CGFloat] = [:]
     @StateObject private var swipeCoordinator = TrackpadSwipeCoordinator()
     @FocusState private var isViewFocused: Bool
 
@@ -172,7 +169,6 @@ struct ArticleDetailView: View {
         .task(id: activeArticle.id) {
             cancelTasks()
             readingProgress = 0.0
-            isToolbarCompacted = false
             await ensureContentExtracted()
             await startArticleAnalysis()
         }
@@ -269,17 +265,6 @@ struct ArticleDetailView: View {
         }
         .safeAreaInset(edge: .top) {
             Color.clear.frame(height: 50)
-        }
-        .onScrollGeometryChange(for: CGFloat.self) { geo in
-            geo.contentOffset.y
-        } action: { _, newOffset in
-            let shouldCompact = newOffset > 150
-            if shouldCompact != isToolbarCompacted {
-                withAnimation(.easeInOut(duration: 0.2)) {
-                    isToolbarCompacted = shouldCompact
-                }
-            }
-            articleScrollPositions[activeArticle.id] = newOffset
         }
         .onScrollGeometryChange(for: CGFloat.self) { geo in
             let scrollable = geo.contentSize.height - geo.containerSize.height
@@ -518,10 +503,10 @@ struct ArticleDetailView: View {
                     Spacer()
                     Image(systemName: "exclamationmark.triangle")
                         .font(.system(size: 32))
-                        .foregroundColor(AppColor.textSecondary)
+                        .foregroundColor(AppColor.secondaryText)
                     Text("Invalid article URL")
                         .font(AppTypography.headline)
-                        .foregroundColor(AppColor.textSecondary)
+                        .foregroundColor(AppColor.secondaryText)
                     Spacer()
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -825,7 +810,7 @@ struct ArticleDetailView: View {
                     .foregroundColor(AppColor.intelligence)
             }
             .padding(12)
-            .liquidGlass(in: RoundedRectangle(cornerRadius: AppRadius.container))
+            .frostedSurface(in: RoundedRectangle(cornerRadius: AppRadius.container), elevation: .card)
         } else if let analysis = analysis {
             VStack(alignment: .leading, spacing: 14) {
                 // Section Header: Restrained Summary
@@ -908,7 +893,7 @@ struct ArticleDetailView: View {
                 }
             }
             .padding(14)
-            .liquidGlass(in: RoundedRectangle(cornerRadius: AppRadius.container))
+            .frostedSurface(in: RoundedRectangle(cornerRadius: AppRadius.container), elevation: .card)
         } else if let error = analysisError {
             HStack(spacing: 10) {
                 Image(systemName: "exclamationmark.triangle")
@@ -924,7 +909,7 @@ struct ArticleDetailView: View {
                 .controlSize(.small)
             }
             .padding(12)
-            .liquidGlass(in: RoundedRectangle(cornerRadius: AppRadius.container))
+            .frostedSurface(in: RoundedRectangle(cornerRadius: AppRadius.container), elevation: .card)
         } else if let ai = currentArticle.aiSummary {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 6) {
@@ -942,7 +927,7 @@ struct ArticleDetailView: View {
                     .lineSpacing(AppTypography.bodyLineSpacing(for: themeManager.articleTheme))
             }
             .padding(14)
-            .liquidGlass(in: RoundedRectangle(cornerRadius: AppRadius.container))
+            .frostedSurface(in: RoundedRectangle(cornerRadius: AppRadius.container), elevation: .card)
         }
     }
 

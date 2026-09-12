@@ -69,7 +69,6 @@ SWIFT_SOURCES=(
     ThemeManager.swift
     FeedArticle.swift
     CacheManager.swift
-    AIManager.swift
     FeedManager.swift
     DesignSystem.swift
     GlassSystem.swift

@@ -30,23 +30,6 @@ enum AppColor {
     static let focusRing = Color.accentColor.opacity(0.65)
     static let badgeBackground = Color.secondary.opacity(0.12)
     static let unreadDot = Color.accentColor
-    
-    // Backward Compatibility Aliases
-    static var tint: Color { accent }
-    static let surfaceDark = background
-    static let surfaceMid = surface
-    static let surfaceElevated = elevatedSurface
-    static let textPrimary = primaryText
-    static let textSecondary = secondaryText
-    static let textTertiary = tertiaryText
-    static let errorRed = danger
-    static let successGreen = success
-    static let warningYellow = warning
-    
-    // Secondary Accent Palette (Retained for thematic variations / backward compatibility)
-    static let accentPink = Color(.displayP3, red: 1.0, green: 0.22, blue: 0.50, opacity: 1.0)
-    static let accentGold = intelligence
-    static let accentBlue = Color(.displayP3, red: 0.30, green: 0.55, blue: 1.0, opacity: 1.0)
 }
 
 // MARK: - App Layout

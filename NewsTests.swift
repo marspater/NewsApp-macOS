@@ -643,7 +643,7 @@ struct NewsTests {
         let size = CacheManager.shared.calculateTotalCacheSize()
         assertTrue(size >= 0, "Cache directory byte calculation should succeed")
         
-        CacheManager.shared.clearAllCache()
+        CacheManager.shared.clearWebCache()
         let sizeAfter = CacheManager.shared.calculateTotalCacheSize()
         assertTrue(sizeAfter >= 0, "Cache clear should succeed non-destructively")
     }
@@ -1711,7 +1711,6 @@ struct NewsTests {
 
         // 5. Test CacheManager methods
         CacheManager.shared.clearWebCache()
-        CacheManager.shared.clearAllCache()
     }
 
     static func testNotificationServiceErrorLogging() async {

@@ -133,22 +133,6 @@ public struct NativeLiquidGlassModifier<S: Shape>: ViewModifier {
     }
 }
 
-// MARK: - Backward Compatibility Wrapper
-
-public struct GlassControlModifier<S: Shape>: ViewModifier {
-    let shape: S
-    let interactive: Bool
-
-    public init(shape: S, interactive: Bool = false) {
-        self.shape = shape
-        self.interactive = interactive
-    }
-
-    public func body(content: Content) -> some View {
-        content.modifier(FrostedSurfaceModifier(shape: shape, elevation: .card))
-    }
-}
-
 // MARK: - View Extensions
 
 public extension View {
@@ -168,18 +152,6 @@ public extension View {
         self.modifier(NativeLiquidGlassModifier(shape: shape, interactive: interactive))
     }
 
-    // MARK: - Backward Compatibility Aliases
-
-    /// Backward-compatible alias for liquidGlass, now routed to the stable frosted surface.
-    func liquidGlass<S: Shape>(in shape: S, interactive: Bool = false) -> some View {
-        self.frostedSurface(in: shape, elevation: .card)
-    }
-
-    /// Backward-compatible alias for glassPill.
-    func glassPill(interactive: Bool = false) -> some View {
-        self.frostedPill()
-    }
-
     /// Grouped glass container helper for macOS 26+.
     @ViewBuilder
     func inGlassContainer() -> some View {
@@ -190,11 +162,5 @@ public extension View {
         } else {
             self
         }
-    }
-
-    /// Modern edge-to-edge background extension with backward compatibility.
-    @ViewBuilder
-    func adaptiveBackgroundExtension() -> some View {
-        self
     }
 }
