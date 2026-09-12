@@ -35,6 +35,7 @@ let package = Package(
             ],
             sources: [
                 "AIManager.swift",
+                "AppContainer.swift",
                 "AppSettings.swift",
                 "ArticleCardView.swift",
                 "ArticleDetailView.swift",

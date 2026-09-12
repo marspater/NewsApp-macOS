@@ -63,10 +63,10 @@ final class TrackpadSwipeCoordinator: ObservableObject {
         }
     }
 
-    deinit {
-        if let m = monitor {
-            NSEvent.removeMonitor(m)
-        }
+    nonisolated deinit {
+        // Cannot access non-Sendable `monitor` from `nonisolated deinit`.
+        // The `stop()` method should be called explicitly before deallocation,
+        // e.g. using `onDisappear`.
     }
 }
 
