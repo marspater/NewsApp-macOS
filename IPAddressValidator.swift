@@ -76,7 +76,7 @@ struct IPAddressValidator: Sendable {
         var res: UnsafeMutablePointer<addrinfo>?
         let status = getaddrinfo(host, nil, &hints, &res)
         guard status == 0, let firstAddr = res else {
-            let errorMsg = String(validatingUTF8: gai_strerror(status)) ?? "Unknown error"
+            let errorMsg = String(validatingCString: gai_strerror(status)) ?? "Unknown error"
             return .unresolvable(reason: errorMsg)
         }
         defer { freeaddrinfo(res) }
@@ -96,7 +96,7 @@ struct IPAddressValidator: Sendable {
                     }
                     var addr = sin.sin_addr
                     inet_ntop(AF_INET, &addr, &ipBuffer, socklen_t(INET_ADDRSTRLEN))
-                    resolvedIPs.append(String(validatingUTF8: ipBuffer) ?? "")
+                    resolvedIPs.append(String(validatingCString: ipBuffer) ?? "")
                 } else if family == AF_INET6 {
                     let sin6 = aiAddr.withMemoryRebound(to: sockaddr_in6.self, capacity: 1) { $0.pointee }
                     if let reason = isBlockedIPv6(sin6.sin6_addr) {
@@ -104,7 +104,7 @@ struct IPAddressValidator: Sendable {
                     }
                     var addr6 = sin6.sin6_addr
                     inet_ntop(AF_INET6, &addr6, &ipBuffer, socklen_t(INET6_ADDRSTRLEN))
-                    resolvedIPs.append(String(validatingUTF8: ipBuffer) ?? "")
+                    resolvedIPs.append(String(validatingCString: ipBuffer) ?? "")
                 }
             }
             current = ptr.pointee.ai_next
