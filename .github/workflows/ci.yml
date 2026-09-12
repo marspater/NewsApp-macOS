@@ -11,12 +11,14 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-jobs:
-  test-and-build:
-    name: Build & Test (macOS)
-    runs-on: macos-latest
-    timeout-minutes: 15
+permissions:
+  contents: read
 
+jobs:
+  test-arm64:
+    name: Test (Apple Silicon)
+    runs-on: macos-15
+    timeout-minutes: 15
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -26,55 +28,58 @@ jobs:
           echo "Host OS: $(sw_vers -productName) $(sw_vers -productVersion) ($(sw_vers -buildVersion))"
           echo "Architecture: $(uname -m)"
           echo "Swift CLI: $(swift --version | head -n 1)"
-          if command -v xcodebuild &>/dev/null; then
-            echo "Xcode: $(xcodebuild -version | tr '\n' ' ')"
-          fi
+          echo "Xcode: $(xcodebuild -version | tr '\n' ' ')"
 
       - name: Ensure Executable Permissions
-        run: |
-          chmod +x test.sh build.sh build_release.sh package_dmg.sh notarize.sh
+        run: chmod +x test.sh build.sh build_release.sh package_dmg.sh notarize.sh
 
       - name: Run Unit Tests
-        run: |
-          ./test.sh
+        run: ./test.sh
 
       - name: Verify Swift Package Manager Build
-        run: |
-          swift build --target News
+        run: swift build --target News
+
+  release-universal:
+    name: Build & Package (Universal 2)
+    runs-on: macos-15
+    timeout-minutes: 20
+    needs: test-arm64
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Ensure Executable Permissions
+        run: chmod +x build_release.sh package_dmg.sh notarize.sh
 
       - name: Build Universal 2 Release Bundle
-        run: |
-          ./build_release.sh
+        run: ./build_release.sh
 
       - name: Verify Bundle Integrity & Hardened Runtime
         run: |
-          test -d "News.app" || { echo "Error: News.app directory missing"; exit 1; }
-          test -x "News.app/Contents/MacOS/News" || { echo "Error: Executable binary missing"; exit 1; }
+          set -euo pipefail
+          test -d "News.app"
+          test -x "News.app/Contents/MacOS/News"
           plutil -lint "News.app/Contents/Info.plist"
-          
-          echo "Verifying Universal 2 architectures..."
+
           ARCHS=$(lipo -archs "News.app/Contents/MacOS/News")
           echo "Found architectures: $ARCHS"
-          [[ "$ARCHS" =~ "x86_64" ]] || { echo "Error: x86_64 slice missing"; exit 1; }
-          [[ "$ARCHS" =~ "arm64" ]] || { echo "Error: arm64 slice missing"; exit 1; }
+          [[ "$ARCHS" =~ x86_64 ]]
+          [[ "$ARCHS" =~ arm64 ]]
 
-          echo "Verifying Hardened Runtime & Code Signing..."
           codesign --verify --deep --strict --verbose=2 "News.app"
           codesign -dvvv --entitlements :- "News.app"
 
           echo "Gatekeeper assessment (informational for ad-hoc signing):"
           spctl -a -vvv "News.app" || true
-          echo "✅ Bundle integrity & Hardened Runtime verified successfully."
 
       - name: Package DMG and Release Archives
         run: |
           ./package_dmg.sh
-          test -f "News-Universal2.dmg" || { echo "Error: News-Universal2.dmg missing"; exit 1; }
-          test -f "News-Universal2.zip" || { echo "Error: News-Universal2.zip missing"; exit 1; }
+          test -f "News-Universal2.dmg"
+          test -f "News-Universal2.zip"
           shasum -c "News-Universal2.dmg.sha256"
           shasum -c "News-Universal2.zip.sha256"
           hdiutil verify "News-Universal2.dmg"
-          echo "✅ DMG and release archives packaged and checksums verified."
 
       - name: Archive Release Artifacts
         uses: actions/upload-artifact@v4
@@ -86,3 +91,15 @@ jobs:
             News-Universal2.zip
             News-Universal2.zip.sha256
           if-no-files-found: error
+
+  test-intel:
+    name: Test (Intel)
+    runs-on: macos-15-intel
+    timeout-minutes: 15
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+      - name: Ensure Executable Permissions
+        run: chmod +x test.sh
+      - name: Run Unit Tests
+        run: TARGET_MACOS=15.0 ./test.sh
