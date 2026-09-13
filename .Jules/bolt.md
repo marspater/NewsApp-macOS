@@ -15,3 +15,9 @@
 **Learning:** CI test `testRefreshCoordinatorSingleFlightCoalescing` failed because it expected a background task to complete for remaining waiters even if the first waiter was cancelled. `RefreshCoordinator.executeRefresh` was using `Task { ... }`, which inherits the cancellation context of the caller. If the first caller cancels its execution, the entire single-flight background refresh task would incorrectly cancel, breaking the refresh for other active waiters.
 
 **Action:** Replaced `Task { ... }` with `Task.detached { ... }` in `RefreshCoordinator.swift`. This ensures the single-flight refresh operation runs independently of the initial caller's lifecycle and will correctly fulfill the results for all other coalesced callers, even if one cancels.
+
+## 2024-10-24 - Handle GitHub Advanced Security Copilot SWE Agent CI failures
+
+**Learning:** CI check failures in `github-advanced-security` showing `CAPIError: 400 The requested model is not supported` are infrastructure errors in the agentic PR reviewer environment (Copilot SWE agent) and require no codebase changes. They are unrelated to the actual code modifications.
+
+**Action:** Ignore these CI failures as they are infrastructure-related. Do not attempt to modify unrelated files to fix them.
