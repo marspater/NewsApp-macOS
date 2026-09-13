@@ -21,3 +21,5 @@
 **Learning:** CI check failures in `github-advanced-security` showing `CAPIError: 400 The requested model is not supported` are infrastructure errors in the agentic PR reviewer environment (Copilot SWE agent) and require no codebase changes. They are unrelated to the actual code modifications.
 
 **Action:** Ignore these CI failures as they are infrastructure-related. Do not attempt to modify unrelated files to fix them.
+
+**Action:** Re-submitting the PR to force GitHub Actions to retry the `github-advanced-security` check, as this error `CAPIError: 400 The requested model is not supported` is a known intermittent Copilot infrastructure issue.
