@@ -23,6 +23,9 @@ public final class OPMLParser: NSObject, XMLParserDelegate, @unchecked Sendable 
         let parser = OPMLParser()
         let xmlParser = XMLParser(data: data)
         xmlParser.delegate = parser
+        xmlParser.shouldProcessNamespaces = false
+        xmlParser.shouldReportNamespacePrefixes = false
+        xmlParser.shouldResolveExternalEntities = false
         xmlParser.parse()
         return parser.items
     }
