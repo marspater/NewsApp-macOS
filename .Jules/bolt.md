@@ -23,3 +23,5 @@
 **Action:** Ignore these CI failures as they are infrastructure-related. Do not attempt to modify unrelated files to fix them.
 
 **Action:** Re-submitting the PR to force GitHub Actions to retry the `github-advanced-security` check, as this error `CAPIError: 400 The requested model is not supported` is a known intermittent Copilot infrastructure issue.
+
+**Action:** Re-submitting the PR again to force GitHub Actions to retry the `github-advanced-security` check, as this error `CAPIError: 400 The requested model is not supported` is still consistently failing due to the Copilot infrastructure outage. No codebase changes are necessary.
