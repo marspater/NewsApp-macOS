@@ -9,3 +9,9 @@
 **Learning:** The `ReadManager` performs legacy ID reconciliation (`ArticleIdentity.reconcileLegacyId`) inside `isRead`, which involves parsing URLs with `URLComponents`. Because `isRead` is called continuously during SwiftUI re-evaluations (in loops over hundreds of articles in `ArticleListView` and `ArticleCardView`), this redundant computation blocks the main thread and impacts scrolling and typing performance. Simply deleting the reconciliation call would introduce a functional regression (breaking matching for older saved/read items).
 
 **Action:** Introduced a lightweight internal caching mechanism (`reconciledIdCache: NSCache<NSString, NSString>`) directly inside `ReadManager`. Since the same article IDs are repeatedly checked during a session, the cache effectively turns all subsequent `isRead` checks into near O(1) operations. `NSCache` is thread-safe and memory-pressure aware, avoiding crashes if `isRead` is hit concurrently from background processing, while drastically reducing main thread string allocation and CPU overhead.
+
+## 2024-10-24 - Prevent Task Cancellation Leak in RefreshCoordinator using Task.detached
+
+**Learning:** CI test `testRefreshCoordinatorSingleFlightCoalescing` failed because it expected a background task to complete for remaining waiters even if the first waiter was cancelled. `RefreshCoordinator.executeRefresh` was using `Task { ... }`, which inherits the cancellation context of the caller. If the first caller cancels its execution, the entire single-flight background refresh task would incorrectly cancel, breaking the refresh for other active waiters.
+
+**Action:** Replaced `Task { ... }` with `Task.detached { ... }` in `RefreshCoordinator.swift`. This ensures the single-flight refresh operation runs independently of the initial caller's lifecycle and will correctly fulfill the results for all other coalesced callers, even if one cancels.

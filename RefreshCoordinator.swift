@@ -25,12 +25,12 @@ actor RefreshCoordinator {
         let runID = UUID()
         self.currentRunID = runID
 
-        let task = Task<Void, Error> {
+        let task = Task.detached(priority: .userInitiated) {
             do {
                 try await work()
-                self.finishRun(runID: runID)
+                await self.finishRun(runID: runID)
             } catch {
-                self.finishRun(runID: runID)
+                await self.finishRun(runID: runID)
                 throw error
             }
         }
@@ -40,7 +40,7 @@ actor RefreshCoordinator {
         try await task.value
     }
 
-    private func finishRun(runID: UUID) {
+    private func finishRun(runID: UUID) async {
         if self.currentRunID == runID {
             self.activeTask = nil
             self.currentRunID = nil
