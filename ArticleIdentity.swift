@@ -5,7 +5,7 @@ import CryptoKit
 /// and legacy ID reconciliation across syndication formats.
 struct ArticleIdentity: Sendable {
 
-    private static let canonicalURLCache = NSCache<NSString, NSString>()
+    nonisolated(unsafe) private static let canonicalURLCache = NSCache<NSString, NSString>()
 
     /// Normalizes and canonicalizes a URL string.
     /// - Strips whitespace and newlines.
