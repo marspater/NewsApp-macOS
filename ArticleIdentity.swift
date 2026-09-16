@@ -20,7 +20,9 @@ struct ArticleIdentity: Sendable {
         }
         let trimmed = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let url = URL(string: trimmed), var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
-            return trimmed
+            let result = trimmed
+            canonicalURLCache.setObject(result as NSString, forKey: key)
+            return result
         }
         
         components.host = components.host?.lowercased()
