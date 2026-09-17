@@ -5,6 +5,8 @@ import CryptoKit
 /// and legacy ID reconciliation across syndication formats.
 struct ArticleIdentity: Sendable {
 
+    nonisolated(unsafe) private static let urlCache = NSCache<NSString, NSString>()
+
     /// Normalizes and canonicalizes a URL string.
     /// - Strips whitespace and newlines.
     /// - Lowercases hostname.
@@ -12,8 +14,13 @@ struct ArticleIdentity: Sendable {
     /// - Strips advertising, referral, and analytics tracking parameters.
     /// - Strips trailing slash on path.
     static func canonicalizeURL(_ urlString: String) -> String {
+        if let cached = urlCache.object(forKey: urlString as NSString) {
+            return cached as String
+        }
+
         let trimmed = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let url = URL(string: trimmed), var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
+            urlCache.setObject(trimmed as NSString, forKey: urlString as NSString)
             return trimmed
         }
         
@@ -40,7 +47,9 @@ struct ArticleIdentity: Sendable {
             components.path = path
         }
         
-        return components.url?.absoluteString ?? trimmed
+        let result = components.url?.absoluteString ?? trimmed
+        urlCache.setObject(result as NSString, forKey: urlString as NSString)
+        return result
     }
 
     /// Computes a fallback content fingerprint using SHA-256.
