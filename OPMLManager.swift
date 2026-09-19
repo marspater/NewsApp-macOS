@@ -23,6 +23,7 @@ public final class OPMLParser: NSObject, XMLParserDelegate, @unchecked Sendable 
         let parser = OPMLParser()
         let xmlParser = XMLParser(data: data)
         xmlParser.delegate = parser
+        xmlParser.shouldResolveExternalEntities = false
         xmlParser.parse()
         return parser.items
     }
