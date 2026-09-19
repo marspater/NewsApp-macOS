@@ -115,6 +115,7 @@ struct SidebarView: View {
             }
             .buttonStyle(.plain)
             .help("Search Syntax & Filter Operators")
+            .accessibilityLabel("Search Syntax & Filter Operators")
             .popover(isPresented: $isSearchSyntaxHelpPresented) {
                 searchSyntaxHelpView
             }
