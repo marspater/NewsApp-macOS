@@ -10,6 +10,12 @@ final class ReadManager: ObservableObject {
     @Published var readArticles: Set<String> = []
     private var cancellables = Set<AnyCancellable>()
     
+    nonisolated(unsafe) private let legacyIdCache: NSCache<NSString, NSString> = {
+        let cache = NSCache<NSString, NSString>()
+        cache.countLimit = 5000
+        return cache
+    }()
+
     init(articleStore: ArticleStore? = nil) {
         let store = articleStore ?? ArticleStore.shared
         self.readArticles = store.readArticleIDs
@@ -23,8 +29,18 @@ final class ReadManager: ObservableObject {
             .store(in: &cancellables)
     }
     
+    private func canonicalId(for id: String) -> String {
+        let nsId = id as NSString
+        if let cached = legacyIdCache.object(forKey: nsId) {
+            return cached as String
+        }
+        let canonical = ArticleIdentity.reconcileLegacyId(id)
+        legacyIdCache.setObject(canonical as NSString, forKey: nsId)
+        return canonical
+    }
+
     func markAsRead(_ id: String) {
-        let canonicalId = ArticleIdentity.reconcileLegacyId(id)
+        let canonicalId = canonicalId(for: id)
         guard !readArticles.contains(canonicalId) else { return }
         readArticles.insert(canonicalId)
         Task {
@@ -33,12 +49,12 @@ final class ReadManager: ObservableObject {
     }
     
     func isRead(_ id: String) -> Bool {
-        let canonicalId = ArticleIdentity.reconcileLegacyId(id)
+        let canonicalId = canonicalId(for: id)
         return readArticles.contains(canonicalId)
     }
     
     func toggleRead(_ id: String) {
-        let canonicalId = ArticleIdentity.reconcileLegacyId(id)
+        let canonicalId = canonicalId(for: id)
         if readArticles.contains(canonicalId) {
             readArticles.remove(canonicalId)
             Task {
