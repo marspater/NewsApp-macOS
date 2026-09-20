@@ -449,6 +449,7 @@ struct ArticleDetailView: View {
                 }
                 .buttonStyle(.plain)
                 .help("Open Web View (W)")
+                .accessibilityLabel("Open Web View")
 
                 if URL(string: currentArticle.link) != nil {
                     Button {
@@ -468,6 +469,7 @@ struct ArticleDetailView: View {
                     }
                     .buttonStyle(.plain)
                     .help("Open in default web browser (O)")
+                    .accessibilityLabel("Open in default web browser")
                 }
             }
         }
@@ -619,6 +621,7 @@ struct ArticleDetailView: View {
                 .frame(width: 145)
                 .focusable(false)
                 .help("Toggle Reader / Web view (W)")
+                .accessibilityLabel("Toggle Reader or Web view")
             }
 
             Spacer()
