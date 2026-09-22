@@ -25,12 +25,12 @@ actor RefreshCoordinator {
         let runID = UUID()
         self.currentRunID = runID
 
-        let task = Task<Void, Error> {
+        let task = Task.detached<Void, Error> {
             do {
                 try await work()
-                self.finishRun(runID: runID)
+                await self.finishRun(runID: runID)
             } catch {
-                self.finishRun(runID: runID)
+                await self.finishRun(runID: runID)
                 throw error
             }
         }
