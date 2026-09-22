@@ -44,17 +44,17 @@ open News.app
 
 ## 🧩 Architecture Snapshot
 
-- **`NewsApp.swift` -** SwiftUI application entry point with native menu bar commands, notification routing, and offline cache initialization.
-- **`MainView.swift` -** Coordinator orchestrating `SidebarView`, `ArticleListView`, and `ArticleDetailView`.
-- **`DesignSystem.swift` & `GlassSystem.swift` -** Semantic design tokens (`AppColor`, `AppSpacing`, `AppRadius`, `AppTypography`, `AppShadow`, `ArticleFilterQuery`) and platform Liquid Glass integration.
-- **`DatabaseEngine.swift` & `ArticleStore.swift` -** SQLite3 database engine with WAL mode, FTS5 full-text index, automatic schema triggers, and domain store.
-- **`ArticleIntelligence.swift` & `EnrichmentQueue.swift` -** Capability-driven NaturalLanguage pipeline and actor-isolated priority background scheduler.
-- **`SecureHTTPClient.swift` & `IPAddressValidator.swift` -** Actor-isolated HTTP client with strict SSRF defense, RFC 1918 blocking, and bounded streaming responses.
-- **`ArticleWebView.swift` -** AppKit/WebKit bridge providing gesture-enabled web rendering and intranet navigation protection.
-- **`FeedManager.swift` -** RSS/Atom/JSON feed engine with TaskGroup concurrency and OPML synchronization.
-- **`OPMLManager.swift` -** OPML 2.0 XML parser and serializer for seamless feed subscription portability.
-- **`CacheManager.swift` -** 512MB disk/RAM HTTP cache subsystem decoupled from durable article storage.
-- **`NewsTests.swift` -** 22 unit test suites validating security, parsing, persistence, FTS5, AI, and distribution integrity.
+- **`Sources/App/NewsApp.swift` -** SwiftUI application entry point with native menu bar commands, notification routing, and offline cache initialization.
+- **`Sources/Views/MainView.swift` -** Coordinator orchestrating `SidebarView`, `ArticleListView`, and `ArticleDetailView`.
+- **`Sources/Views/DesignSystem.swift` & `GlassSystem.swift` -** Semantic design tokens (`AppColor`, `AppSpacing`, `AppRadius`, `AppTypography`, `AppShadow`, `ArticleFilterQuery`) and platform Liquid Glass integration.
+- **`Sources/Storage/DatabaseEngine.swift` & `ArticleStore.swift` -** SQLite3 database engine with WAL mode, FTS5 full-text index, automatic schema triggers, and domain store.
+- **`Sources/Intelligence/ArticleIntelligence.swift` & `EnrichmentQueue.swift` -** Capability-driven NaturalLanguage pipeline and actor-isolated priority background scheduler.
+- **`Sources/Services/SecureHTTPClient.swift` & `IPAddressValidator.swift` -** Actor-isolated HTTP client with strict SSRF defense, RFC 1918 blocking, and bounded streaming responses.
+- **`Sources/Views/ArticleWebView.swift` -** AppKit/WebKit bridge providing gesture-enabled web rendering and intranet navigation protection.
+- **`Sources/Coordinators/FeedManager.swift` -** RSS/Atom/JSON feed engine with TaskGroup concurrency and OPML synchronization.
+- **`Sources/Services/OPMLManager.swift` -** OPML 2.0 XML parser and serializer for seamless feed subscription portability.
+- **`Sources/Storage/CacheManager.swift` -** 512MB disk/RAM HTTP cache subsystem decoupled from durable article storage.
+- **`Tests/NewsTests.swift` -** 22 unit test suites validating security, parsing, persistence, FTS5, AI, and distribution integrity.
 - **`build_release.sh` & `package_dmg.sh` -** Universal 2 compilation, Hardened Runtime signing, and compressed DMG release packaging.
 
 ## 🎨 Asset Generation

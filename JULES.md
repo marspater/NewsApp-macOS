@@ -7,36 +7,45 @@ The current codebase already contains feed ingestion, SQLite persistence, FTS5 s
 
 ## Current architecture map
 
-### App / UI
-- `NewsApp.swift`: application lifecycle, scenes, commands, notification routing, window configuration.
-- `MainView.swift`: top-level UI coordinator.
-- `SidebarView.swift`, `ArticleListView.swift`, `ArticleCardView.swift`: navigation and list presentation.
-- `ArticleDetailView.swift`, `ArticleWebView.swift`: article reading and WebKit rendering.
-- `SettingsView.swift`: user settings.
-- `DesignSystem.swift`, `GlassSystem.swift`: semantic design tokens and Liquid Glass integration.
-- `ThemeManager.swift`: appearance/theme state.
+### App / UI (`Sources/App/`, `Sources/Views/`)
+- `Sources/App/NewsApp.swift`: application lifecycle, scenes, commands, notification routing, window configuration.
+- `Sources/App/AppContainer.swift`: app dependency injection container.
+- `Sources/App/AppSettings.swift`: user settings and defaults persistence.
+- `Sources/App/ThemeManager.swift`: appearance/theme state.
+- `Sources/App/UpdateChecker.swift`: GitHub release version verification.
+- `Sources/App/NewsSignposts.swift`: OSSignposter telemetry.
+- `Sources/Views/MainView.swift`: top-level UI coordinator.
+- `Sources/Views/SidebarView.swift`, `ArticleListView.swift`, `ArticleCardView.swift`: navigation and list presentation.
+- `Sources/Views/ArticleDetailView.swift`, `ArticleWebView.swift`: article reading and WebKit rendering.
+- `Sources/Views/SettingsView.swift`: user settings.
+- `Sources/Views/DesignSystem.swift`, `GlassSystem.swift`: semantic design tokens and Liquid Glass integration.
 
-### Data / persistence
-- `DatabaseEngine.swift`: SQLite engine, schema, WAL/FTS5 responsibilities.
-- `ArticleStore.swift`: article domain persistence.
-- `MigrationCoordinator.swift`: database migrations.
-- `FeedArticle.swift`, `ArticleIdentity.swift`: article/domain identity models.
-- `ReadManager.swift`, `SavedStoriesManager.swift`: reading and saved-story state.
-- `CacheManager.swift`: HTTP cache, intentionally separate from durable user state.
+### Data / persistence (`Sources/Storage/`, `Sources/Models/`)
+- `Sources/Storage/DatabaseEngine.swift`: SQLite engine, schema, WAL/FTS5 responsibilities.
+- `Sources/Storage/ArticleStore.swift`: article domain persistence.
+- `Sources/Storage/MigrationCoordinator.swift`: database migrations.
+- `Sources/Storage/ReadManager.swift`, `SavedStoriesManager.swift`: reading and saved-story state.
+- `Sources/Storage/CacheManager.swift`: HTTP cache, intentionally separate from durable user state.
+- `Sources/Models/FeedArticle.swift`, `ArticleIdentity.swift`: article/domain identity models.
+- `Sources/Models/FeedError.swift`: feed error types.
 
-### Feed / networking
-- `FeedManager.swift`: feed orchestration and synchronization.
-- `FeedFetcher.swift`, `SecureHTTPClient.swift`: network fetching and security boundaries.
-- `FeedXMLParser.swift`, `JSONFeedParser.swift`, `DateParser.swift`: feed parsing.
-- `IPAddressValidator.swift`: SSRF/IP validation.
-- `OPMLManager.swift`: OPML portability.
-- `RefreshCoordinator.swift`: refresh lifecycle.
+### Feed / networking (`Sources/Services/`, `Sources/Coordinators/`)
+- `Sources/Coordinators/FeedManager.swift`: feed orchestration and synchronization.
+- `Sources/Coordinators/RefreshCoordinator.swift`: refresh lifecycle.
+- `Sources/Coordinators/NotificationService.swift`: user notification triage.
+- `Sources/Services/FeedFetcher.swift`, `SecureHTTPClient.swift`: network fetching and security boundaries.
+- `Sources/Services/FeedXMLParser.swift`, `JSONFeedParser.swift`, `DateParser.swift`: feed parsing.
+- `Sources/Services/IPAddressValidator.swift`: SSRF/IP validation.
+- `Sources/Services/OPMLManager.swift`: OPML portability.
 
-### Content / intelligence
-- `ContentExtractionPipeline.swift`, `WebContentExtractor.swift`: article content extraction.
-- `ArticleIntelligence.swift`: article classification, sentiment, entities, summarization and content-cleaning capabilities.
-- `EnrichmentQueue.swift`: actor-isolated background enrichment scheduling.
+### Content / intelligence (`Sources/Intelligence/`)
+- `Sources/Intelligence/ContentExtractionPipeline.swift`, `WebContentExtractor.swift`: article content extraction.
+- `Sources/Intelligence/ArticleIntelligence.swift`: article classification, sentiment, entities, summarization and content-cleaning capabilities.
+- `Sources/Intelligence/EnrichmentQueue.swift`: actor-isolated background enrichment scheduling.
 - Current intelligence code uses `NaturalLanguage` and conditionally `FoundationModels`, with typed `@Generable` outputs and a fixed 12-category taxonomy.
+
+### Tests (`Tests/`)
+- `Tests/NewsTests.swift`: automated test runner and unit test suites.
 
 ### Platform / distribution
 - `News.entitlements`: sandbox/runtime capabilities.
