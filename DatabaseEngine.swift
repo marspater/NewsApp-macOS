@@ -584,29 +584,37 @@ actor DatabaseEngine {
         guard let db = db else { throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Database not open"]) }
         guard !articleIds.isEmpty else { return }
 
-        let sql = """
-        INSERT INTO article_state (article_id, is_read, is_saved, read_at, saved_at)
-        VALUES (?, 0, 1, NULL, ?)
-        ON CONFLICT(article_id) DO UPDATE SET
-            is_saved = 1,
-            saved_at = coalesce(article_state.saved_at, excluded.saved_at);
-        """
+        try beginTransaction()
+        do {
+            let sql = """
+            INSERT INTO article_state (article_id, is_read, is_saved, read_at, saved_at)
+            VALUES (?, 0, 1, NULL, ?)
+            ON CONFLICT(article_id) DO UPDATE SET
+                is_saved = 1,
+                saved_at = coalesce(article_state.saved_at, excluded.saved_at);
+            """
 
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
-            throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to prepare batchMarkSaved statement"])
-        }
-        defer { sqlite3_finalize(stmt) }
-
-        let now = Date().timeIntervalSince1970
-        for articleId in articleIds {
-            sqlite3_reset(stmt)
-            sqlite3_bind_text(stmt, 1, articleId, -1, Self.SQLITE_TRANSIENT)
-            sqlite3_bind_double(stmt, 2, now)
-
-            if sqlite3_step(stmt) != SQLITE_DONE {
-                throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to execute batchMarkSaved for \(articleId)"])
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+                throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to prepare batchMarkSaved statement"])
             }
+            defer { sqlite3_finalize(stmt) }
+
+            let now = Date().timeIntervalSince1970
+            for articleId in articleIds {
+                sqlite3_reset(stmt)
+                sqlite3_bind_text(stmt, 1, articleId, -1, Self.SQLITE_TRANSIENT)
+                sqlite3_bind_double(stmt, 2, now)
+
+                if sqlite3_step(stmt) != SQLITE_DONE {
+                    throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to execute batchMarkSaved for \(articleId)"])
+                }
+            }
+
+            try commitTransaction()
+        } catch {
+            try rollbackTransaction()
+            throw error
         }
     }
     
