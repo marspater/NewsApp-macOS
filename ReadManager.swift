@@ -9,7 +9,7 @@ final class ReadManager: ObservableObject {
     
     @Published var readArticles: Set<String> = []
     private var cancellables = Set<AnyCancellable>()
-    nonisolated(unsafe) private let legacyIdCache = NSCache<NSString, NSString>()
+    private let legacyIdCache = NSCache<NSString, NSString>()
     
     init(articleStore: ArticleStore? = nil) {
         let store = articleStore ?? ArticleStore.shared
