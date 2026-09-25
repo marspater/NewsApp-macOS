@@ -70,7 +70,7 @@ jobs:
         with:
           fetch-depth: 0
       - name: TruffleHog OSS
-        uses: trufflesecurity/trufflehog@v3.82.0
+        uses: trufflesecurity/trufflehog@v3
         with:
           extra_args: --results=verified,unknown
 
