@@ -6,11 +6,3 @@
 **Learning:** URL parsing differences between foundation frameworks (like Swift's `URL`) and browser engines (like WebKit) can lead to filter bypasses. If a filter relies on a component of a URL (like the host) being present, it must explicitly reject the request if that component is missing or invalid, rather than failing open (skipping the check).
 
 **Prevention:** When validating URLs, especially for SSRF or navigation control, always use a `guard` statement to require the necessary components (like a non-empty host for HTTP/HTTPS requests) and fail securely (cancel the request) if they are absent.
-
-## 2024-05-24 - XXE Vulnerability in OPML Parsing
-
-**Vulnerability:** The `XMLParser` in `OPMLManager.swift` did not explicitly disable external entity resolution, leaving the application vulnerable to XML External Entity (XXE) injection when parsing user-imported OPML files.
-
-**Learning:** `XMLParser` in Foundation may process external entities by default. When processing untrusted XML inputs, such as user-provided OPML files, this behavior must be explicitly disabled to prevent potential local file disclosure and server-side request forgery (SSRF).
-
-**Prevention:** Always set `shouldResolveExternalEntities = false` immediately after initializing `XMLParser` for any untrusted XML data.
