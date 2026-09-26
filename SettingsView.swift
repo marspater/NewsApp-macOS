@@ -166,17 +166,20 @@ struct SettingsView: View {
                                 .foregroundColor(AppColor.success)
                                 .font(.system(size: 13))
                                 .help("Feed is active and up to date")
+                                .accessibilityLabel("Feed is active and up to date")
                         case .loading:
                             ProgressView()
                                 .controlSize(.small)
                                 .scaleEffect(0.7)
                                 .frame(width: 14, height: 14)
                                 .help("Fetching updates...")
+                                .accessibilityLabel("Fetching updates...")
                         case .failed(let err):
                             Image(systemName: "exclamationmark.triangle.fill")
                                 .foregroundColor(AppColor.warning)
                                 .font(.system(size: 13))
                                 .help(err.localizedDescription)
+                                .accessibilityLabel(err.localizedDescription)
                         }
                         Text(urlString)
                             .font(.system(size: 12, weight: .medium, design: .monospaced))
@@ -192,6 +195,7 @@ struct SettingsView: View {
                         }
                         .buttonStyle(.plain)
                         .help("Unsubscribe from feed")
+                        .accessibilityLabel("Unsubscribe from feed")
                     }
                     .padding(.vertical, 4)
                 }
