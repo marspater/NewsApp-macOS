@@ -561,6 +561,9 @@ actor DatabaseEngine {
         }
         defer { sqlite3_finalize(stmt) }
 
+        try beginTransaction()
+        var success = false
+        defer { if !success { try? rollbackTransaction() } }
         let now = Date().timeIntervalSince1970
         let readInt: Int32 = isRead ? 1 : 0
 
@@ -578,6 +581,8 @@ actor DatabaseEngine {
                 throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to execute markReadBatch for id: \(articleId)"])
             }
         }
+        try commitTransaction()
+        success = true
     }
 
     func batchMarkSaved(_ articleIds: Set<String>) throws {
@@ -598,6 +603,9 @@ actor DatabaseEngine {
         }
         defer { sqlite3_finalize(stmt) }
 
+        try beginTransaction()
+        var success = false
+        defer { if !success { try? rollbackTransaction() } }
         let now = Date().timeIntervalSince1970
         for articleId in articleIds {
             sqlite3_reset(stmt)
@@ -608,6 +616,8 @@ actor DatabaseEngine {
                 throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to execute batchMarkSaved for \(articleId)"])
             }
         }
+        try commitTransaction()
+        success = true
     }
     
     func markAllRead(feedUrl: String? = nil) throws {
