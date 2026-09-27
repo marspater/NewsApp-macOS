@@ -229,6 +229,7 @@ actor DatabaseEngine {
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
             title = excluded.title,
+            source = excluded.source,
             description = excluded.description,
             content = coalesce(excluded.content, articles.content),
             image_url = coalesce(excluded.image_url, articles.image_url),

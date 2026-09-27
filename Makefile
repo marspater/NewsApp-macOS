@@ -12,8 +12,8 @@ release:
 	@mkdir -p $(SCRATCH_PATH)
 	swift build -c release --scratch-path $(SCRATCH_PATH)
 
-run: build
-	$(SCRATCH_PATH)/debug/News
+run:
+	./script/build_and_run.sh
 
 app:
 	./build.sh

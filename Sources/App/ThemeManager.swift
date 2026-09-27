@@ -27,7 +27,7 @@ enum ArticleThemeType: String, CaseIterable, Identifiable {
 final class ThemeManager: ObservableObject {
     static let shared = ThemeManager()
     
-    @AppStorage("appAppearance") var appearance: AppAppearance = .dark {
+    @AppStorage("appAppearance") var appearance: AppAppearance = .system {
         willSet { objectWillChange.send() }
     }
     

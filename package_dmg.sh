@@ -6,7 +6,7 @@ APP_DIR="${APP_NAME}.app"
 DMG_NAME="News-Universal2.dmg"
 ZIP_NAME="News-Universal2.zip"
 VOLUME_NAME="News"
-STAGING_DIR="/tmp/news_dmg_staging"
+STAGING_DIR=$(mktemp -d "${TMPDIR:-/tmp}/news-package.XXXXXX")
 
 echo "=================================================="
 echo "📦 Packaging Distribution Artifacts for ${APP_NAME}"
@@ -17,6 +17,12 @@ if [ ! -d "${APP_DIR}" ]; then
     echo "⚠️ ${APP_DIR} not found. Running ./build_release.sh first..."
     ./build_release.sh
 fi
+
+# Reject a host-only or invalid bundle before labelling artifacts Universal 2.
+for architecture in arm64 x86_64; do
+    lipo "${APP_DIR}/Contents/MacOS/${APP_NAME}" -verify_arch "$architecture"
+done
+codesign --verify --deep --strict "${APP_DIR}"
 
 # Clean previous distribution artifacts
 rm -rf "${DMG_NAME}" "${ZIP_NAME}" "${DMG_NAME}.sha256" "${ZIP_NAME}.sha256" "${STAGING_DIR}"

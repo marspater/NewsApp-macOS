@@ -165,7 +165,9 @@ final class SecureSessionDelegateCoordinator: NSObject, URLSessionTaskDelegate, 
         // 2. Validate redirect destination
         guard let targetURL = request.url,
               let targetScheme = targetURL.scheme?.lowercased(),
-              let targetHost = targetURL.host else {
+              let targetHost = targetURL.host,
+              targetScheme == "https" || targetScheme == "http",
+              [80, 443, 8080, 8443].contains(targetURL.port ?? (targetScheme == "https" ? 443 : 80)) else {
             completionHandler(nil)
             return
         }

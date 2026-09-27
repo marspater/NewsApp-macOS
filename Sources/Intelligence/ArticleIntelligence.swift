@@ -608,7 +608,8 @@ public final class ArticleClassifier: Sendable {
         title: String,
         description: String,
         text: String? = nil,
-        rssCategory: String? = nil
+        rssCategory: String? = nil,
+        allowFoundationModels: Bool = true
     ) async -> TopicResult {
         let signpostState = NewsSignposts.begin(NewsSignposts.intelligence, name: "AIClassification", metadata: "title_len=\(title.count)")
         defer { NewsSignposts.end(NewsSignposts.intelligence, name: "AIClassification", state: signpostState) }
@@ -622,7 +623,7 @@ public final class ArticleClassifier: Sendable {
 
         // Stage 2: Foundation Models classification (when available)
         #if canImport(FoundationModels)
-        if #available(macOS 26.0, *), isFoundationModelsAvailable {
+        if #available(macOS 26.0, *), allowFoundationModels, isFoundationModelsAvailable {
             do {
                 let session = LanguageModelSession()
                 let prompt = """

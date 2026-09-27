@@ -41,13 +41,12 @@ class JSONFeedParser {
             let sourceName = feed.title ?? baseSource
             
             var articles = [FeedArticle]()
-            for item in feed.items {
+            for item in feed.items.prefix(500) {
                 let link = item.url ?? item.link ?? item.id ?? ""
                 if link.isEmpty { continue }
                 
                 let title = item.title ?? "Untitled"
                 let desc = item.summary ?? item.description ?? ""
-                let content = item.content_html ?? item.content_text
                 
                 let rawDate = item.date_published ?? item.pubDate ?? ""
                 let pubDate = DateParser.parse(rawDate)
@@ -62,7 +61,8 @@ class JSONFeedParser {
                 }
                 
                 let cleanDesc = stripSimpleHTML(desc)
-                let cleanContent = content != nil ? stripSimpleHTML(content!) : nil
+                let cleanContent = item.content_html.map(stripSimpleHTML) ?? item.content_text
+                let readableContent = cleanContent.flatMap { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0 }
 
                 let article = FeedArticle(
                     title: title.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -73,9 +73,9 @@ class JSONFeedParser {
                     source: sourceName,
                     imageUrl: imageUrl,
                     aiSummary: nil,
-                    fullContent: cleanContent,
+                    fullContent: readableContent,
                     category: category,
-                    contentFetched: cleanContent != nil && cleanContent!.count > 100
+                    contentFetched: readableContent != nil
                 )
                 articles.append(article)
             }

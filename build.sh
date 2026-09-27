@@ -7,9 +7,11 @@ CONTENTS_DIR="${APP_DIR}/Contents"
 MACOS_DIR="${CONTENTS_DIR}/MacOS"
 RESOURCES_DIR="${CONTENTS_DIR}/Resources"
 
-# Target macOS configuration (defaults to host macOS version or TARGET_MACOS env var)
-HOST_MACOS_VER=$(sw_vers -productVersion 2>/dev/null | cut -d. -f1,2 || echo "27.0")
-TARGET_MACOS="${TARGET_MACOS:-$HOST_MACOS_VER}"
+# Deployment target is independent of the SDK and host OS.
+TARGET_MACOS="${TARGET_MACOS:-15.0}"
+export CLANG_MODULE_CACHE_PATH="${CLANG_MODULE_CACHE_PATH:-${TMPDIR:-/tmp}/news-module-cache}"
+export SWIFT_MODULECACHE_PATH="$CLANG_MODULE_CACHE_PATH"
+
 
 echo "Building ${APP_NAME} v2.0 for macOS ${TARGET_MACOS} ($(uname -m))..."
 
@@ -21,53 +23,15 @@ mkdir -p "${MACOS_DIR}"
 mkdir -p "${RESOURCES_DIR}"
 mkdir -p Assets
 
-# --- Icon Generation ---
-# Use the RGBA PNG (converted from the JPEG-encoded original)
-ICON_SRC="Assets/AppIcon_alpha.png"
-if [ ! -f "$ICON_SRC" ]; then
-    echo "Warning: $ICON_SRC not found, attempting conversion..."
-    # Fallback: compile converter and run
-    if [ -f "/tmp/convert_icon" ]; then
-        /tmp/convert_icon Assets/AppIcon.png Assets/AppIcon_alpha.png
-    else
-        ICON_SRC="Assets/AppIcon.png"
-    fi
-fi
+cp container-migration.plist PrivacyInfo.xcprivacy "${RESOURCES_DIR}/"
 
-if [ -f "$ICON_SRC" ]; then
-    echo "Generating app icon from $ICON_SRC..."
-
-    rm -rf Assets/AppIcon.iconset
-    mkdir -p Assets/AppIcon.iconset
-    sips -z 16 16     "$ICON_SRC" --out Assets/AppIcon.iconset/icon_16x16.png     2>/dev/null
-    sips -z 32 32     "$ICON_SRC" --out Assets/AppIcon.iconset/icon_16x16@2x.png  2>/dev/null
-    sips -z 32 32     "$ICON_SRC" --out Assets/AppIcon.iconset/icon_32x32.png     2>/dev/null
-    sips -z 64 64     "$ICON_SRC" --out Assets/AppIcon.iconset/icon_32x32@2x.png  2>/dev/null
-    sips -z 128 128   "$ICON_SRC" --out Assets/AppIcon.iconset/icon_128x128.png   2>/dev/null
-    sips -z 256 256   "$ICON_SRC" --out Assets/AppIcon.iconset/icon_128x128@2x.png 2>/dev/null
-    sips -z 256 256   "$ICON_SRC" --out Assets/AppIcon.iconset/icon_256x256.png   2>/dev/null
-    sips -z 512 512   "$ICON_SRC" --out Assets/AppIcon.iconset/icon_256x256@2x.png 2>/dev/null
-    sips -z 512 512   "$ICON_SRC" --out Assets/AppIcon.iconset/icon_512x512.png   2>/dev/null
-    sips -z 1024 1024 "$ICON_SRC" --out Assets/AppIcon.iconset/icon_512x512@2x.png 2>/dev/null
-
-    # Remove extended attributes from iconset files
-    xattr -cr Assets/AppIcon.iconset 2>/dev/null || true
-
-    iconutil -c icns Assets/AppIcon.iconset -o Assets/AppIcon.icns 2>/dev/null && \
-        echo "AppIcon.icns generated successfully." || \
-        echo "Warning: iconutil failed, icon may not display."
-
-    # Clean up iconset intermediates
-    rm -rf Assets/AppIcon.iconset
-fi
-
-# Copy AppIcon to Resources
-if [ -f "Assets/AppIcon.icns" ]; then
-    cp Assets/AppIcon.icns "${RESOURCES_DIR}/AppIcon.icns"
-fi
+# Compile the editable Icon Composer source, including legacy macOS fallback.
+xcrun actool Assets/AppIcon.icon --compile "${RESOURCES_DIR}" \
+    --platform macosx --minimum-deployment-target "${TARGET_MACOS}" \
+    --app-icon AppIcon --output-partial-info-plist "${CONTENTS_DIR}/IconInfo.plist"
 
 # Compile Swift files (exclude any standalone scripts)
-swiftc -O -parse-as-library -target $(uname -m)-apple-macos${TARGET_MACOS} \
+swiftc -swift-version 6 -O -parse-as-library -target $(uname -m)-apple-macos${TARGET_MACOS} \
     Sources/Services/DateParser.swift \
     Sources/Models/FeedError.swift \
     Sources/Services/IPAddressValidator.swift \
@@ -114,6 +78,10 @@ cat > "${CONTENTS_DIR}/Info.plist" <<EOF
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>NSPrincipalClass</key>
+    <string>NSApplication</string>
     <key>CFBundleExecutable</key>
     <string>${APP_NAME}</string>
     <key>CFBundleIdentifier</key>
@@ -129,7 +97,7 @@ cat > "${CONTENTS_DIR}/Info.plist" <<EOF
     <key>CFBundleVersion</key>
     <string>3</string>
     <key>LSMinimumSystemVersion</key>
-    <string>${LS_MIN_VERSION:-14.0}</string>
+    <string>${TARGET_MACOS}</string>
     <key>NSSupportsAutomaticGraphicsSwitching</key>
     <true/>
 </dict>
@@ -140,15 +108,15 @@ echo "Signing binary..."
 find "${APP_DIR}" -name ".DS_Store" -delete
 
 # Sign from /tmp to avoid iCloud Drive extended attribute interference
-TEMP_APP="/tmp/${APP_DIR}"
-rm -rf "${TEMP_APP}"
+SIGN_TMP=$(mktemp -d "${TMPDIR:-/tmp}/news-sign.XXXXXX")
+TEMP_APP="${SIGN_TMP}/${APP_DIR}"
 cp -R "${APP_DIR}" "${TEMP_APP}"
 find "${TEMP_APP}" -exec xattr -c {} \; 2>/dev/null || true
 find "${TEMP_APP}" -exec xattr -d com.apple.FinderInfo {} \; 2>/dev/null || true
 codesign --force --deep --options runtime --entitlements News.entitlements --sign - "${TEMP_APP}"
 rm -rf "${APP_DIR}"
 cp -R "${TEMP_APP}" "${APP_DIR}"
-rm -rf "${TEMP_APP}"
+rm -rf "${SIGN_TMP}"
 
 # Force Finder to refresh the app icon cache
 touch "${APP_DIR}"

@@ -89,6 +89,8 @@ struct NewsTests {
         await testFeedErrorHierarchy()
         await testAppSettingsDecoupling()
         await testDateParsing()
+        await testReaderParsingRegressions()
+        await testReaderStoreUpdates()
         await testXMLParsing()
         await testJSONParsing()
         await testNavigationCommands()
@@ -129,10 +131,93 @@ struct NewsTests {
         await testCanonicalClassificationDisambiguation()
         await testAppContainerAndFrostedSurface()
         
+        if ProcessInfo.processInfo.environment["NEWS_LIVE_READER_CHECK"] == "1" {
+            await testLiveReader()
+        }
         print("✅ SUCCESS: All tests passed!")
     }
 
     
+    @MainActor
+    static func testReaderStoreUpdates() async {
+        let suiteName = "test.reader.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let store = ArticleStore(database: DatabaseEngine(path: ":memory:"))
+        await store.initialize()
+        let manager = FeedManager(settings: AppSettings(defaults: defaults), store: store)
+        let article = FeedArticle(title: "Report", link: "https://example.com/report", guid: "reader-test", description: "Preview", pubDate: Date(), source: "Publisher")
+        await store.batchUpsert(articles: [article])
+        await store.updateEnrichment(id: article.id, category: "Science", content: "The complete publisher article.")
+        assertEqual(manager.articles.first?.fullContent, "The complete publisher article.", "Feed views receive extracted text immediately")
+        assertEqual(manager.articles.first?.category, "Science", "Category changes propagate without another feed refresh")
+
+        let delegate = SecureSessionDelegateCoordinator()
+        let request = URLRequest(url: URL(string: "https://example.com")!)
+        let task = URLSession.shared.dataTask(with: request)
+        let response = HTTPURLResponse(url: request.url!, statusCode: 302, httpVersion: nil, headerFields: nil)!
+        for destination in ["file:///etc/passwd", "https://example.com:22/story", "http://example.com/story"] {
+            var rejected = false
+            delegate.urlSession(.shared, task: task, willPerformHTTPRedirection: response, newRequest: URLRequest(url: URL(string: destination)!)) { redirected in
+                rejected = redirected == nil
+            }
+            assertTrue(rejected, "Unsafe redirect must be rejected before connection")
+        }
+        task.cancel()
+    }
+
+    static func testLiveReader() async {
+        for url in ["https://www.theguardian.com/world/rss", "https://feeds.arstechnica.com/arstechnica/index", "https://www.nasa.gov/feed/"] {
+            let result = await FeedFetcher.shared.fetchSingleFeed(urlString: url)
+            assertTrue(result.error == nil, "Live feed fetch must succeed for \(url)")
+            guard let article = result.articles?.first else {
+                assertTrue(false, "Live feed must contain an article")
+                continue
+            }
+            let outcome = await ContentExtractionPipeline.shared.extractArticleDetailed(from: article.link)
+            let content = article.fullContent ?? outcome.content ?? ""
+            assertFalse(ArticleContentRedactor.redactAndSplit(content).isEmpty, "Live publisher article must provide readable prose for \(url)")
+            print("  - Live reader: \(URL(string: url)!.host!), \(result.articles!.count) items, \(content.count) body characters; extraction success: \(outcome.isSuccess)")
+        }
+    }
+
+    static func testReaderParsingRegressions() async {
+        let topic = await ArticleClassifier.shared.classify(title: "NASA launches space telescope", description: "Astronomy mission", allowFoundationModels: false)
+        assertEqual(topic.category, "Science", "Cheap ingestion classification works without generative inference")
+        let pipeline = ContentExtractionPipeline.shared
+        let inline = "<p>The <strong>central bank</strong> raised <a href='/rate'>rates</a> today.</p>"
+        assertEqual(HTMLDOMBuilder.parse(html: inline).combinedText(), "The central bank raised rates today.", "Inline text retains publisher order and punctuation")
+        let prose = "The central bank published its quarterly report with detailed forecasts for inflation and employment across the economy."
+        let second = "Independent economists reviewed the figures and described the outlook as stable, with further updates expected next month."
+        let html = "<SCRIPT>ignored()</SCRIPT><ARTICLE><P>\(prose)<P>\(second)</ARTICLE>"
+        assertEqual(pipeline.extractFromHTML(html).content, "\(prose)\n\n\(second)", "Uppercase raw tags and optional paragraph endings preserve the body")
+        assertTrue(pipeline.extractFromHTML("<article><div>\(prose)</div><div>\(second)</div></article>").isSuccess, "Div-only articles remain readable")
+        let hiddenHTML = "<article><p>\(prose)</p><p>\(second)</p><div hidden><p>Hidden subscription announcement that should never appear in a reader.</p></div><div aria-hidden='true'>Another hidden panel with a substantial amount of text.</div><button>Follow this publisher for personalized updates and notifications.</button></article>"
+        assertEqual(pipeline.extractFromHTML(hiddenHTML).content, "\(prose)\n\n\(second)", "Hidden panels and button labels cannot leak into publisher prose")
+        let atom = """
+        <atom:feed xmlns:atom="http://www.w3.org/2005/Atom"><atom:title>Daily</atom:title><atom:entry>
+        <atom:id>item-1</atom:id><atom:title>Report</atom:title>
+        <atom:link href="/report"/><atom:link rel="self" href="/api/report"/>
+        <atom:published>2026-09-20T10:00:00Z</atom:published><atom:updated>2026-09-21T10:00:00Z</atom:updated>
+        <atom:content type="xhtml"><div xmlns="http://www.w3.org/1999/xhtml"><p>First <b>important</b> paragraph.</p><p>Second paragraph.</p></div></atom:content>
+        </atom:entry></atom:feed>
+        """
+        let article = FeedXMLParser(data: Data(atom.utf8), feedURL: "https://example.com/feed").parse().first
+        assertEqual(article?.link, "https://example.com/report", "Atom self links cannot replace article links")
+        assertEqual(article?.fullContent, "First important paragraph.\n\nSecond paragraph.", "Atom XHTML preserves paragraph boundaries")
+        assertEqual(article?.pubDate, DateParser.parse("2026-09-20T10:00:00Z"), "Published and updated dates are not concatenated")
+        let rss = "<rss><channel><title>News</title><image><title>News logo</title></image><item><title>Story</title><link>https://example.com/story</link></item></channel></rss>"
+        assertEqual(FeedXMLParser(data: Data(rss.utf8)).parse().first?.source, "News", "Feed image title cannot contaminate publisher name")
+        let broken = FeedXMLParser(data: Data("<rss><channel><item>".utf8))
+        assertTrue(broken.parse().isEmpty && broken.parseError != nil, "Malformed feeds report a parsing failure")
+        let json = """
+        {"version":"https://jsonfeed.org/version/1.1","items":[{"id":"1","url":"https://example.com/1","content_text":"Use x < y and y > z."}]}
+        """
+        let textArticle = JSONFeedParser.parse(data: Data(json.utf8), feedURL: "https://example.com/feed")?.first
+        assertEqual(textArticle?.fullContent, "Use x < y and y > z.", "JSON plain text must never pass through HTML stripping")
+        assertEqual(textArticle?.contentFetched, true, "Short explicit feed content is readable")
+    }
+
     static func testURLNormalization() async {
         print("  - Testing URL Normalization...")
         
@@ -1006,7 +1091,8 @@ struct NewsTests {
     static func testEnrichmentQueueSchedulingAndPromotion() async {
         print("  - Testing EnrichmentQueue Scheduling, Promotion & Cancellation...")
         
-        let queue = EnrichmentQueue()
+        let store = await ArticleStore(database: DatabaseEngine(path: ":memory:"))
+        let queue = EnrichmentQueue(store: store)
         
         let articleA = FeedArticle(
             title: "Artificial Intelligence in Healthcare Diagnosis",
@@ -1043,6 +1129,12 @@ struct NewsTests {
         await queue.cancelAll(reason: .superseded)
         let stateA = await queue.state(for: articleA.id)
         assertEqual(stateA, .cancelled(.superseded), "Article A should be cancelled with superseded reason")
+        for _ in 0..<10 {
+            await queue.enqueue(article: articleA, priority: .background)
+            await queue.cancelAll(reason: .superseded)
+            let active = await queue.activeJobCount()
+            assertTrue(active <= 3, "Rapid replacement cannot exceed the concurrency bound")
+        }
     }
     
     static func testDesignSystemAndArticleFilter() async {
@@ -1117,6 +1209,11 @@ struct NewsTests {
         let entitlementsPath = (currentDir as NSString).appendingPathComponent("News.entitlements")
         
         assertTrue(fileManager.fileExists(atPath: entitlementsPath), "News.entitlements must exist in project root")
+        for file in ["PrivacyInfo.xcprivacy", "container-migration.plist"] {
+            let data = fileManager.contents(atPath: (currentDir as NSString).appendingPathComponent(file))
+            let plist = data.flatMap { try? PropertyListSerialization.propertyList(from: $0, options: [], format: nil) }
+            assertTrue(plist is [String: Any], "Distribution manifest must be a valid property list: \(file)")
+        }
         
         guard let data = fileManager.contents(atPath: entitlementsPath) else {
             assertEqual(true, false, "Failed to read News.entitlements data")
@@ -1129,6 +1226,7 @@ struct NewsTests {
                 return
             }
             
+            assertEqual(plist["com.apple.security.app-sandbox"] as? Bool, true, "Sandbox must be enabled")
             // Validate minimal required entitlements
             assertEqual(plist["com.apple.security.network.client"] as? Bool, true, "com.apple.security.network.client must be enabled")
             assertEqual(plist["com.apple.security.files.user-selected.read-write"] as? Bool, true, "com.apple.security.files.user-selected.read-write must be enabled")

@@ -13,19 +13,22 @@ struct ArticleWebView: NSViewRepresentable {
     @Binding var canGoBack: Bool
     @Binding var canGoForward: Bool
     @Binding var action: WebNavigationAction?
+    @Binding var loadError: String?
 
     init(
         url: URL,
         isLoading: Binding<Bool>,
         canGoBack: Binding<Bool>,
         canGoForward: Binding<Bool>,
-        action: Binding<WebNavigationAction?> = .constant(nil)
+        action: Binding<WebNavigationAction?> = .constant(nil),
+        loadError: Binding<String?> = .constant(nil)
     ) {
         self.url = url
         self._isLoading = isLoading
         self._canGoBack = canGoBack
         self._canGoForward = canGoForward
         self._action = action
+        self._loadError = loadError
     }
 
     func makeCoordinator() -> Coordinator {
@@ -50,6 +53,7 @@ struct ArticleWebView: NSViewRepresentable {
     }
 
     func updateNSView(_ nsView: WKWebView, context: Context) {
+        context.coordinator.parent = self
         if context.coordinator.currentRequestedURL != url {
             context.coordinator.currentRequestedURL = url
             let request = URLRequest(url: url)
@@ -68,6 +72,11 @@ struct ArticleWebView: NSViewRepresentable {
                 self.action = nil
             }
         }
+    }
+
+    static func dismantleNSView(_ nsView: WKWebView, coordinator: Coordinator) {
+        nsView.stopLoading()
+        nsView.navigationDelegate = nil
     }
 
     @MainActor
@@ -120,6 +129,7 @@ struct ArticleWebView: NSViewRepresentable {
 
         func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
             DispatchQueue.main.async {
+                self.parent.loadError = nil
                 self.parent.isLoading = true
                 self.parent.canGoBack = webView.canGoBack
                 self.parent.canGoForward = webView.canGoForward
@@ -137,12 +147,18 @@ struct ArticleWebView: NSViewRepresentable {
         func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
             DispatchQueue.main.async {
                 self.parent.isLoading = false
+                if (error as NSError).code != NSURLErrorCancelled {
+                    self.parent.loadError = "The publisher page could not be loaded. Try reloading or return to Reader."
+                }
             }
         }
 
         func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
             DispatchQueue.main.async {
                 self.parent.isLoading = false
+                if (error as NSError).code != NSURLErrorCancelled {
+                    self.parent.loadError = "The publisher page could not be loaded. Try reloading or return to Reader."
+                }
             }
         }
     }

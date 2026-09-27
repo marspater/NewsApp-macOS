@@ -1,66 +1,59 @@
-# 🗞 NewsApp for macOS
+# News for macOS
 
-A breathtaking, lightning-fast native macOS RSS news reader built purely with Swift & SwiftUI. NewsApp delivers a cinematic, ad-free reading experience, combining the power of modern glassmorphic design and on-device artificial intelligence for a personalized daily news workflow.
+A native, local-first RSS, Atom and JSON Feed reader built with SwiftUI, WebKit, SQLite and Apple's on-device intelligence frameworks. No cloud AI services or telemetry.
 
-## ✨ Features
+## Reading
 
-- **Cinematic, Glassmorphic UI:** Immersive edge-to-edge content, transparent title bars, and a carefully curated P3 wide-gamut dark mode palette adopting macOS Liquid Glass for controls and navigation.
-- **Dual Reader & WebKit Mode:** Seamlessly toggle between custom Ghost typography reader (`Casper`, `Edition`, `Alto`) and native in-app WebKit engine (`W`), with trackpad swipe navigation gestures.
-- **Vim & Keyboard-First Navigation:** Fluid `J` / `K` browsing, auto-scroll centering, quick bookmarking (`S`), mark read (`M`), browser handoff (`O`), section jumps (`⌘1`–`⌘4`), and native menu bar shortcuts.
-- **Local-First SQLite Persistence:** High-performance SQLite3 storage (`news_v2.sqlite`) running Write-Ahead Logging (WAL) and FTS5 full-text indexing with query operators (`source:`, `category:`, `is:read`, `is:unread`, `is:saved`).
-- **Subscription Portability (OPML):** Full OPML 2.0 import and export (`⇧⌘I`, `⇧⌘E`), plus drag-and-drop subscription of OPML files and URLs directly onto the sidebar.
-- **On-Device AI Intelligence:** Protocol-oriented NaturalLanguage capabilities (sentiment scoring, entity extraction, categorization, and summarization) scheduled via an actor-isolated priority queue (`EnrichmentQueue`).
-- **Robust 512MB Offline Cache:** Ephemeral `URLCache` strictly segregated from durable SQLite user state, preserving bookmarks and read history.
-- **Universal 2 & Hardened Runtime:** Native fat binaries (`arm64` + `x86_64`) signed with minimal App Sandbox entitlements and zero telemetry ([`PRIVACY.md`](PRIVACY.md)).
+- An editorial list with an optional grid, system light/dark appearance, keyboard navigation and native glass controls.
+- Publisher content appears in a selectable, paragraph-based reader. AI-generated summaries are labelled and collapsible.
+- Full feed content is used immediately. For summary-only feeds, the app fetches the article when opened; failed extraction leaves the feed preview and an explicit reason, with an in-app Web view and external browser option. Use **More Actions → Reload Reader Content** to refresh older cached extractions without clearing the library.
+- Atom namespaces, XHTML paragraphs, alternate links, relative URLs and distinct publication/update dates are supported. JSON `content_text` remains plain text.
+- Local SQLite persistence preserves saved stories, read history and extracted content. OPML imports and exports subscriptions.
+- Ingestion uses cheap deterministic topic classification. Generative summaries run when an article is opened and AI is enabled, with deterministic fallbacks when Foundation Models is unavailable.
 
-## 🚀 Getting Started
+A valid feed does not guarantee that the publisher exposes a full article. Paywalls, authentication, access restrictions and JavaScript-only pages can prevent reader extraction. The app does not generate replacement article text or bypass publisher restrictions.
 
-### Prerequisites
+## Requirements
 
-- macOS 26.4+ / macOS 27.0+ (Universal 2: Apple Silicon or Intel Mac)
-- Local Command Line Tools for Xcode (Swift 6.0+ CLI)
+- Runtime: macOS 15 or later. Newer glass and Foundation Models features use availability checks.
+- Build: Xcode 27 with its macOS SDK and bundled Icon Composer, selected with `xcode-select`.
+- Release: Universal 2 (`arm64` and `x86_64`), Swift 6, Hardened Runtime and App Sandbox. Building an Intel slice does not verify execution on Intel hardware.
 
-### Running Tests & Building
+## Build and test
 
-```bash
-# Run unit test suite (22 automated test suites)
-./test.sh
-
-# Build local debug app bundle
-./build.sh
-
-# Build Universal 2 Release bundle with Hardened Runtime
-./build_release.sh
-
-# Package compressed read-only DMG, ZIP, and SHA-256 digests
-./package_dmg.sh
-
-# Native Swift Package Manager build
-swift build --target News
-
-# Launch NewsApp
-open News.app
+```sh
+./test.sh                         # Deterministic regression suite
+NEWS_LIVE_READER_CHECK=1 ./test.sh # Optional public-publisher network checks
+./build.sh                        # Host architecture, News.app
+./build_release.sh                # Universal 2, News.app
+./script/build_and_run.sh --verify
+swift build --target News         # SwiftPM compiler check; not an app bundle
 ```
 
-## 🧩 Architecture Snapshot
+`make run` and the Codex Run action use the app-bundle launcher. `TARGET_MACOS` defaults to `15.0`; SDK selection follows the selected Xcode. Local builds use ad-hoc signing. Set `DEVELOPER_ID` for a distribution release, then use the existing packaging/notarization scripts with your signing credentials. Local validation is not App Store approval or notarization.
 
-- **`Sources/App/NewsApp.swift` -** SwiftUI application entry point with native menu bar commands, notification routing, and offline cache initialization.
-- **`Sources/Views/MainView.swift` -** Coordinator orchestrating `SidebarView`, `ArticleListView`, and `ArticleDetailView`.
-- **`Sources/Views/DesignSystem.swift` & `GlassSystem.swift` -** Semantic design tokens (`AppColor`, `AppSpacing`, `AppRadius`, `AppTypography`, `AppShadow`, `ArticleFilterQuery`) and platform Liquid Glass integration.
-- **`Sources/Storage/DatabaseEngine.swift` & `ArticleStore.swift` -** SQLite3 database engine with WAL mode, FTS5 full-text index, automatic schema triggers, and domain store.
-- **`Sources/Intelligence/ArticleIntelligence.swift` & `EnrichmentQueue.swift` -** Capability-driven NaturalLanguage pipeline and actor-isolated priority background scheduler.
-- **`Sources/Services/SecureHTTPClient.swift` & `IPAddressValidator.swift` -** Actor-isolated HTTP client with strict SSRF defense, RFC 1918 blocking, and bounded streaming responses.
-- **`Sources/Views/ArticleWebView.swift` -** AppKit/WebKit bridge providing gesture-enabled web rendering and intranet navigation protection.
-- **`Sources/Coordinators/FeedManager.swift` -** RSS/Atom/JSON feed engine with TaskGroup concurrency and OPML synchronization.
-- **`Sources/Services/OPMLManager.swift` -** OPML 2.0 XML parser and serializer for seamless feed subscription portability.
-- **`Sources/Storage/CacheManager.swift` -** 512MB disk/RAM HTTP cache subsystem decoupled from durable article storage.
-- **`Tests/NewsTests.swift` -** 22 unit test suites validating security, parsing, persistence, FTS5, AI, and distribution integrity.
-- **`build_release.sh` & `package_dmg.sh` -** Universal 2 compilation, Hardened Runtime signing, and compressed DMG release packaging.
+## Icon Composer
 
-## 🎨 Asset Generation
+Open `Assets/AppIcon.icon` in Xcode's **Open Developer Tool → Icon Composer**. The editable newspaper layer and its glass appearance are stored in the document. Both build scripts compile it with Apple's `actool` into `Assets.car` and the legacy `.icns` fallback; builds do not rewrite the source artwork.
 
-App icons are generated dynamically from base `.png` files during the build phase via macOS binary tools. This ensures crisp resolution all the way up to 1024x1024 without bloating the repository with `.icns` files.
+## Storage and migration
 
----
+The sandbox database is located at:
 
-**Crafted with ❤️ for macOS by marspater.**
+```text
+~/Library/Containers/com.marspater.news/Data/Library/Application Support/com.marspater.news/news.sqlite3
+```
+
+`container-migration.plist` asks macOS to migrate the previous application-support directory, cache and preferences on the first sandboxed launch. SQLite uses WAL and FTS5. Cache-clearing operations remain separate from saved stories and read history.
+
+## Source layout
+
+- `Sources/App`: entry point, settings, theme and update checks.
+- `Sources/Views`: sidebar, list/grid, reader, WebKit and semantic design tokens.
+- `Sources/Services`: feed parsers, OPML, dates and secure HTTP ingestion.
+- `Sources/Storage`: SQLite, migrations and observable stores.
+- `Sources/Intelligence`: extraction, deterministic taxonomy, on-device analysis and bounded enrichment queue.
+- `Sources/Coordinators`: feed refresh and notifications.
+- `Tests/NewsTests.swift`: parsing, security, persistence, classification and state regression checks.
+
+See [the implementation and validation report](AUDIT.md) and [privacy policy](PRIVACY.md).

@@ -1,8 +1,10 @@
 #!/bin/bash
 set -e
 
-HOST_MACOS_VER=$(sw_vers -productVersion 2>/dev/null | cut -d. -f1,2 || echo "27.0")
-TARGET_MACOS="${TARGET_MACOS:-$HOST_MACOS_VER}"
+TARGET_MACOS="${TARGET_MACOS:-15.0}"
+export CLANG_MODULE_CACHE_PATH="${CLANG_MODULE_CACHE_PATH:-${TMPDIR:-/tmp}/news-module-cache}"
+export SWIFT_MODULECACHE_PATH="$CLANG_MODULE_CACHE_PATH"
+
 
 echo "Compiling tests for macOS ${TARGET_MACOS} ($(uname -m))..."
 swiftc -target $(uname -m)-apple-macos${TARGET_MACOS} \

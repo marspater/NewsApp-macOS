@@ -1,14 +1,14 @@
 # Privacy Architecture & Data Policy
 
-NewsApp is engineered with a **local-first, zero-telemetry architecture**. Your reading habits, article feeds, saved stories, and AI intelligence analysis remain strictly confidential and never leave your Mac.
+NewsApp is engineered with a **local-first, zero-telemetry architecture**. Reading state, saved stories and generated analysis are stored on your Mac and are not sent to telemetry or cloud AI providers. Feed, article and image requests go directly to publishers, which receive your IP address and the requested URLs. Pages opened in Web view can load publisher-controlled third-party resources.
 
 ---
 
 ## 1. Local-First Storage Architecture
 
-* **Database Engine**: All application state—including subscribed feeds, articles, read state, bookmarks, and full-text search indexes—is stored locally in SQLite (`news_v2.sqlite`) using Write-Ahead Logging (WAL) and `NORMAL` synchronous mode in your user application support directory:
+* **Database Engine**: All application state—including subscribed feeds, articles, read state, bookmarks, and full-text search indexes—is stored locally in SQLite (`news.sqlite3`) using Write-Ahead Logging (WAL) and `NORMAL` synchronous mode in your user application support directory:
   ```text
-  ~/Library/Application Support/News/news_v2.sqlite
+  ~/Library/Containers/com.marspater.news/Data/Library/Application Support/com.marspater.news/news.sqlite3
   ```
 * **Separation of Concerns**: Ephemeral HTTP response caches (`URLCache`) are strictly segregated from durable user data. Clearing the HTTP cache does not alter bookmarks, read markers, or custom feed hierarchies.
 * **No Account Required**: The application does not require user registration, account creation, or cloud authentication.
@@ -20,7 +20,7 @@ NewsApp is engineered with a **local-first, zero-telemetry architecture**. Your 
 * **No Analytics or Tracking**: NewsApp contains zero telemetry SDKs, zero user tracking scripts, and zero third-party diagnostic reporters (e.g., no Google Analytics, no Firebase, no Sentry, no Mixpanel).
 * **Direct Network Access**: Outgoing HTTP/HTTPS network requests are made directly from your Mac to the specific RSS, Atom, or JSON feed hosts that you choose to subscribe to, and to the original web pages you view. No intermediate proxy, relay server, or cloud scraper is utilized.
 * **Server-Side Request Forgery (SSRF) Protection**:
-  All network requests pass through `SecureHTTPClient` and `IPAddressValidator` prior to connection initiation:
+  Feed, extraction and article-image requests pass through `SecureHTTPClient` and `IPAddressValidator` before connection initiation. WebKit renders publisher pages separately and validates top-level navigation hosts; publisher pages may load their own third-party resources:
   * **Loopback Prevention**: `127.0.0.0/8`, `::1`
   * **Private Network (RFC 1918) Prevention**: `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `fc00::/7`
   * **Link-Local / Cloud Metadata Prevention**: `169.254.0.0/16`, `fe80::/10`, AWS/GCP metadata (`169.254.169.254`)
@@ -41,7 +41,7 @@ NewsApp provides three distinct notification privacy modes with clear network an
 
 ## 4. On-Device Intelligence & Natural Language Processing
 
-* **Local Machine Learning**: All article intelligence operations—topic categorization, sentiment scoring, named entity extraction, and content summarization—are executed locally on-device using Apple's `NaturalLanguage` framework.
+* **Local Machine Learning**: All article intelligence operations—topic categorization, sentiment scoring, named entity extraction, and content summarization—are executed locally on-device using Apple's `NaturalLanguage` and, when available, `FoundationModels` frameworks.
 * **Zero Cloud AI Egress**: Article content, summaries, and extracted metadata are never transmitted to third-party AI or cloud LLM APIs.
 
 ---
