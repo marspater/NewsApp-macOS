@@ -565,19 +565,26 @@ actor DatabaseEngine {
         let now = Date().timeIntervalSince1970
         let readInt: Int32 = isRead ? 1 : 0
 
-        for articleId in articleIds {
-            sqlite3_reset(stmt)
-            sqlite3_bind_text(stmt, 1, articleId, -1, Self.SQLITE_TRANSIENT)
-            sqlite3_bind_int(stmt, 2, readInt)
-            if isRead {
-                sqlite3_bind_double(stmt, 3, now)
-            } else {
-                sqlite3_bind_null(stmt, 3)
-            }
+        try beginTransaction()
+        do {
+            for articleId in articleIds {
+                sqlite3_reset(stmt)
+                sqlite3_bind_text(stmt, 1, articleId, -1, Self.SQLITE_TRANSIENT)
+                sqlite3_bind_int(stmt, 2, readInt)
+                if isRead {
+                    sqlite3_bind_double(stmt, 3, now)
+                } else {
+                    sqlite3_bind_null(stmt, 3)
+                }
 
-            if sqlite3_step(stmt) != SQLITE_DONE {
-                throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to execute markReadBatch for id: \(articleId)"])
+                if sqlite3_step(stmt) != SQLITE_DONE {
+                    throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to execute markReadBatch for id: \(articleId)"])
+                }
             }
+            try commitTransaction()
+        } catch {
+            try? rollbackTransaction()
+            throw error
         }
     }
 
@@ -600,14 +607,21 @@ actor DatabaseEngine {
         defer { sqlite3_finalize(stmt) }
 
         let now = Date().timeIntervalSince1970
-        for articleId in articleIds {
-            sqlite3_reset(stmt)
-            sqlite3_bind_text(stmt, 1, articleId, -1, Self.SQLITE_TRANSIENT)
-            sqlite3_bind_double(stmt, 2, now)
+        try beginTransaction()
+        do {
+            for articleId in articleIds {
+                sqlite3_reset(stmt)
+                sqlite3_bind_text(stmt, 1, articleId, -1, Self.SQLITE_TRANSIENT)
+                sqlite3_bind_double(stmt, 2, now)
 
-            if sqlite3_step(stmt) != SQLITE_DONE {
-                throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to execute batchMarkSaved for \(articleId)"])
+                if sqlite3_step(stmt) != SQLITE_DONE {
+                    throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to execute batchMarkSaved for \(articleId)"])
+                }
             }
+            try commitTransaction()
+        } catch {
+            try? rollbackTransaction()
+            throw error
         }
     }
     

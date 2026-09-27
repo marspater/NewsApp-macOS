@@ -103,6 +103,7 @@ struct ArticleCardView: View {
                             .padding(.vertical, 2)
                             .background(Capsule().fill(AppColor.intelligence.opacity(0.12)))
                             .help("AI summary available")
+                            .accessibilityLabel("AI summary available")
                         }
                     }
                 }

@@ -372,6 +372,9 @@ public final class NaturalLanguageTopicClassifier: TopicClassifying {
         let titleLower = title.lowercased()
         let descLower = description.lowercased()
         let bodyLower = (text ?? "").prefix(2000).lowercased()
+        let hasTitle = !titleLower.isEmpty
+        let hasDesc = !descLower.isEmpty
+        let hasBody = !bodyLower.isEmpty
 
         var bestCategory: NewsCategory?
         var maxScore = 0.0
@@ -382,15 +385,15 @@ public final class NaturalLanguageTopicClassifier: TopicClassifying {
             var matched: [String] = []
 
             for kw in item.keywords {
-                if titleLower.contains(kw) {
+                if hasTitle && titleLower.contains(kw) {
                     score += 3.0
                     matched.append(kw)
                 }
-                if descLower.contains(kw) {
+                if hasDesc && descLower.contains(kw) {
                     score += 1.5
                     matched.append(kw)
                 }
-                if bodyLower.contains(kw) {
+                if hasBody && bodyLower.contains(kw) {
                     score += 0.5
                 }
             }

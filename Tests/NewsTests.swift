@@ -130,6 +130,7 @@ struct NewsTests {
         await testExtractionOutcomeDiagnostics()
         await testCanonicalClassificationDisambiguation()
         await testAppContainerAndFrostedSurface()
+        await testReadManagerReconciliationCache()
         
         if ProcessInfo.processInfo.environment["NEWS_LIVE_READER_CHECK"] == "1" {
             await testLiveReader()
@@ -719,6 +720,23 @@ struct NewsTests {
         assertEqual(roundtripItems.count, 2, "Roundtrip OPML export should parse back into 2 feeds")
         assertEqual(roundtripItems[0].url, "https://feeds.arstechnica.com/arstechnica/index", "Roundtrip feed 1 URL match")
         assertEqual(roundtripItems[1].url, "https://news.ycombinator.com/rss", "Roundtrip feed 2 URL match")
+
+        // XXE injection test
+        let xxePayload = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <!DOCTYPE opml [
+            <!ENTITY xxe SYSTEM "file:///etc/passwd">
+        ]>
+        <opml version="2.0">
+            <body>
+                <outline text="&xxe;" title="&xxe;" type="rss" xmlUrl="https://example.com/rss"/>
+            </body>
+        </opml>
+        """.data(using: .utf8)!
+        let xxeItems = OPMLParser.parse(data: xxePayload)
+        if let item = xxeItems.first {
+            assertTrue(!item.title.contains("root:"), "OPMLParser must not resolve external file entities")
+        }
     }
     
     static func testOfflineCacheAndResilience() async {
@@ -808,6 +826,19 @@ struct NewsTests {
             assertEqual(counts.total, 1, "Total count should be 1")
             assertEqual(counts.saved, 1, "Saved count should be 1")
             assertEqual(counts.unread, 0, "Unread count should be 0 because it was marked read")
+
+            // Test batch operations with explicit transactions
+            let art2 = FeedArticle(title: "Batch Article 2", link: "https://example.com/art2", guid: "g2", description: "", pubDate: Date(), source: "Test")
+            let art3 = FeedArticle(title: "Batch Article 3", link: "https://example.com/art3", guid: "g3", description: "", pubDate: Date(), source: "Test")
+            try await db.upsertArticles([art2, art3], feedUrl: "https://example.com/feed.xml")
+
+            try await db.markReadBatch(articleIds: [art2.id, art3.id], isRead: true)
+            assertTrue(try await db.isRead(articleId: art2.id), "art2 should be marked read via batch")
+            assertTrue(try await db.isRead(articleId: art3.id), "art3 should be marked read via batch")
+
+            try await db.batchMarkSaved([art2.id, art3.id])
+            assertTrue(try await db.isSaved(articleId: art2.id), "art2 should be marked saved via batch")
+            assertTrue(try await db.isSaved(articleId: art3.id), "art3 should be marked saved via batch")
         } catch {
             print("❌ DatabaseEngine test failed: \(error.localizedDescription)")
             exit(1)
@@ -2255,6 +2286,18 @@ struct NewsTests {
 
         let cardElevation = FrostedElevation.card
         assertEqual(cardElevation.surfaceBackingOpacity, 0.38, "Card backing is 0.38")
+    }
+
+    @MainActor
+    static func testReadManagerReconciliationCache() async {
+        print("  - Testing ReadManager Reconciliation Cache...")
+        let rm = ReadManager.shared
+        let rawId = "http://example.com/test-article-perf?utm_source=news&utm_medium=rss"
+        let isReadInitial = rm.isRead(rawId)
+        // Repeat query to verify cached resolution works idempotently
+        assertEqual(rm.isRead(rawId), isReadInitial, "Cached resolution matches initial read state")
+        rm.markAsRead(rawId)
+        assertTrue(rm.isRead(rawId), "Marked as read should reflect in cached lookup")
     }
 }
 
