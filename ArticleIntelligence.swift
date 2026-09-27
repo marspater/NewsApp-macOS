@@ -377,28 +377,36 @@ public final class NaturalLanguageTopicClassifier: TopicClassifying {
         var maxScore = 0.0
         var bestEvidence: [String] = []
 
+        let hasTitle = !titleLower.isEmpty
+        let hasDesc = !descLower.isEmpty
+        let hasBody = !bodyLower.isEmpty
+
         for item in Self.taxonomy {
             var score = 0.0
             var matched: [String] = []
 
             for kw in item.keywords {
-                if titleLower.contains(kw) {
+                var isMatched = false
+                if hasTitle && titleLower.contains(kw) {
                     score += 3.0
-                    matched.append(kw)
+                    isMatched = true
                 }
-                if descLower.contains(kw) {
+                if hasDesc && descLower.contains(kw) {
                     score += 1.5
-                    matched.append(kw)
+                    isMatched = true
                 }
-                if bodyLower.contains(kw) {
+                if hasBody && bodyLower.contains(kw) {
                     score += 0.5
+                }
+                if isMatched {
+                    matched.append(kw)
                 }
             }
 
             if score > maxScore {
                 maxScore = score
                 bestCategory = item.category
-                bestEvidence = Array(Set(matched))
+                bestEvidence = matched
             }
         }
 
