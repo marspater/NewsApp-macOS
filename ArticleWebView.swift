@@ -35,7 +35,7 @@ struct ArticleWebView: NSViewRepresentable {
     func makeNSView(context: Context) -> WKWebView {
         let configuration = WKWebViewConfiguration()
         let preferences = WKWebpagePreferences()
-        preferences.allowsContentJavaScript = true
+        preferences.allowsContentJavaScript = false
         configuration.defaultWebpagePreferences = preferences
         configuration.preferences.isFraudulentWebsiteWarningEnabled = true
 
