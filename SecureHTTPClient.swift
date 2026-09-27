@@ -170,7 +170,11 @@ final class SecureSessionDelegateCoordinator: NSObject, URLSessionTaskDelegate, 
             return
         }
 
-        // 3. Prohibit HTTPS -> HTTP downgrade
+        // 3. Restrict redirects to HTTP/HTTPS and prohibit HTTPS -> HTTP downgrade
+        guard targetScheme == "https" || targetScheme == "http" else {
+            completionHandler(nil)
+            return
+        }
         if state.initialScheme == "https" && targetScheme == "http" {
             completionHandler(nil)
             return
