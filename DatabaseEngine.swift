@@ -561,6 +561,8 @@ actor DatabaseEngine {
         }
         defer { sqlite3_finalize(stmt) }
 
+        try beginTransaction()
+
         let now = Date().timeIntervalSince1970
         let readInt: Int32 = isRead ? 1 : 0
 
@@ -575,9 +577,12 @@ actor DatabaseEngine {
             }
 
             if sqlite3_step(stmt) != SQLITE_DONE {
+                try? rollbackTransaction()
                 throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to execute markReadBatch for id: \(articleId)"])
             }
         }
+
+        try commitTransaction()
     }
 
     func batchMarkSaved(_ articleIds: Set<String>) throws {
