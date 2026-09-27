@@ -8,6 +8,13 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
     private var articles = [FeedArticle]()
 
     private var currentElement = ""
+    private var elementStack: [String] = []
+    private var contentDepth: Int?
+    private var baseURLs: [URL?] = []
+    private var itemContentIsPlainText = false
+    private var recognizedFeed = false
+    private var itemUpdated = ""
+    private(set) var parseError: String?
     private var insideItem = false
     private var channelTitle = ""
     private var parsingChannelTitle = false
@@ -34,11 +41,18 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
     func parse() -> [FeedArticle] {
         let parser = XMLParser(data: data)
         parser.delegate = self
-        parser.shouldProcessNamespaces = false
+        parser.shouldProcessNamespaces = true
         parser.shouldReportNamespacePrefixes = false
         parser.shouldResolveExternalEntities = false
-        parser.parse()
+        if !parser.parse() {
+            parseError = "Malformed XML feed"
+            return []
+        }
 
+        guard recognizedFeed else {
+            parseError = "The XML document is not an RSS or Atom feed"
+            return []
+        }
         // Post-parse: if channelTitle is still empty, extract from feedURL
         if channelTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             channelTitle = extractSourceFromURL(feedURL)
@@ -88,6 +102,11 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
             return
         }
 
+        let elementName = normalizedElement(elementName, namespaceURI: namespaceURI)
+        let parentBase = baseURLs.last.flatMap { $0 } ?? URL(string: feedURL)
+        baseURLs.append(attributeDict["xml:base"].flatMap { URL(string: $0, relativeTo: parentBase)?.absoluteURL } ?? parentBase)
+        if ["rss", "feed", "RDF"].contains(elementName), currentNestingDepth == 1 { recognizedFeed = true }
+        elementStack.append(elementName)
         currentElement = elementName
 
         if elementName == "channel" || elementName == "feed" {
@@ -102,14 +121,26 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
             itemLink = ""
             itemGuid = ""
             itemPubDate = ""
+            itemUpdated = ""
+            contentDepth = nil
+            itemContentIsPlainText = false
+            isCollectingContentEncoded = false
             itemImageUrl = ""
             itemCategory = ""
             itemContentEncoded = ""
         }
 
-        if elementName == "content:encoded" || (elementName == "content" && insideItem) {
+        if insideItem && (elementName == "content:encoded" || elementName == "content") && contentDepth == nil {
             isCollectingContentEncoded = true
             itemContentEncoded = ""
+            contentDepth = currentNestingDepth
+            itemContentIsPlainText = elementName == "content" && (attributeDict["type"] ?? "text") == "text"
+        } else if isCollectingContentEncoded && ["p", "div", "br", "li", "h1", "h2", "blockquote"].contains(elementName) {
+            itemContentEncoded += "\n\n"
+        }
+
+        if insideItem && elementName == "category", let term = attributeDict["term"], itemCategory.isEmpty {
+            itemCategory = term
         }
 
         if insideItem && (elementName == "enclosure" || elementName == "media:content" || elementName == "media:thumbnail") {
@@ -123,8 +154,9 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
         }
 
         if insideItem && elementName == "link" {
-            if let href = attributeDict["href"] {
-                itemLink = href
+            let relation = attributeDict["rel"] ?? "alternate"
+            if let href = attributeDict["href"], relation == "alternate", itemLink.isEmpty {
+                itemLink = URL(string: href, relativeTo: baseURLs.last.flatMap { $0 })?.absoluteURL.absoluteString ?? href
             }
         }
     }
@@ -135,17 +167,19 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
             return
         }
 
-        if !insideItem && parsingChannelTitle && currentElement == "title" {
+        if !insideItem && parsingChannelTitle && currentElement == "title" && ["channel", "feed"].contains(elementStack.dropLast().last ?? "") {
             channelTitle += string
         }
 
         guard insideItem else { return }
-        switch currentElement {
+        let field = elementStack.last(where: { ["title", "description", "summary", "link", "guid", "id", "pubDate", "published", "updated", "category", "dc:subject"].contains($0) }) ?? currentElement
+        switch field {
         case "title": itemTitle += string
         case "description", "summary": itemDescription += string
         case "link": itemLink += string
         case "guid", "id": itemGuid += string
-        case "pubDate", "published", "updated": itemPubDate += string
+        case "pubDate", "published": itemPubDate += string
+        case "updated": itemUpdated += string
         case "category", "dc:subject": itemCategory += string
         default: break
         }
@@ -154,38 +188,35 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
     func parser(_ parser: XMLParser, foundCDATA CDATABlock: Data) {
         guard let str = String(data: CDATABlock, encoding: .utf8) else { return }
 
-        if isCollectingContentEncoded {
-            itemContentEncoded += str
-        } else if !insideItem && parsingChannelTitle && currentElement == "title" {
-            channelTitle += str
-        } else if insideItem && currentElement == "description" {
-            itemDescription += str
-        } else if insideItem && currentElement == "title" {
-            itemTitle += str
-        } else if insideItem && (currentElement == "guid" || currentElement == "id") {
-            itemGuid += str
-        }
+        self.parser(parser, foundCharacters: str)
     }
 
     func parser(_ parser: XMLParser, didEndElement elementName: String, namespaceURI: String?, qualifiedName qName: String?) {
-        currentNestingDepth = max(0, currentNestingDepth - 1)
-
-        if elementName == "content:encoded" || (elementName == "content" && isCollectingContentEncoded) {
+        let elementName = normalizedElement(elementName, namespaceURI: namespaceURI)
+        if contentDepth == currentNestingDepth {
             isCollectingContentEncoded = false
+            contentDepth = nil
+        } else if isCollectingContentEncoded && ["p", "div", "li", "blockquote"].contains(elementName) {
+            itemContentEncoded += "\n\n"
         }
+        currentNestingDepth = max(0, currentNestingDepth - 1)
+        _ = elementStack.popLast()
+        _ = baseURLs.popLast()
+        currentElement = elementStack.last ?? ""
 
         if elementName == "item" || elementName == "entry" {
             insideItem = false
 
             guard articles.count < maxArticlesPerFeed else { return }
 
-            let date = DateParser.parse(itemPubDate)
+            let date = DateParser.parse(itemPubDate.isEmpty ? itemUpdated : itemPubDate)
             let cleanDesc = stripHTMLSimple(itemDescription).trimmingCharacters(in: .whitespacesAndNewlines)
 
             var fullContent: String? = nil
             let trimmedContent = itemContentEncoded.trimmingCharacters(in: .whitespacesAndNewlines)
             if !trimmedContent.isEmpty {
-                fullContent = stripHTMLSimple(trimmedContent)
+                let cleaned = itemContentIsPlainText ? trimmedContent : stripHTMLSimple(trimmedContent)
+                fullContent = cleaned.isEmpty ? nil : cleaned
             }
 
             var sourceName = channelTitle.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -223,12 +254,12 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
             }()
             let article = FeedArticle(
                 title: itemTitle.trimmingCharacters(in: .whitespacesAndNewlines),
-                link: itemLink.trimmingCharacters(in: .whitespacesAndNewlines),
+                link: resolvedURL(itemLink),
                 guid: guidVal.isEmpty ? nil : guidVal,
                 description: cleanDesc,
                 pubDate: date,
                 source: sourceName.isEmpty ? "Feed" : sourceName,
-                imageUrl: itemImageUrl.isEmpty ? nil : itemImageUrl,
+                imageUrl: itemImageUrl.isEmpty ? nil : resolvedURL(itemImageUrl),
                 aiSummary: nil,
                 fullContent: fullContent,
                 category: cleanCategory,
@@ -236,6 +267,21 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
             )
             articles.append(article)
         }
+    }
+
+    private func normalizedElement(_ name: String, namespaceURI: String?) -> String {
+        switch namespaceURI {
+        case "http://purl.org/rss/1.0/modules/content/": return "content:" + name
+        case "http://search.yahoo.com/mrss/": return "media:" + name
+        case "http://purl.org/dc/elements/1.1/": return "dc:" + name
+        default: return name
+        }
+    }
+
+    private func resolvedURL(_ value: String) -> String {
+        let value = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty else { return "" }
+        return URL(string: value, relativeTo: URL(string: feedURL))?.absoluteURL.absoluteString ?? value
     }
 
     private func stripHTMLSimple(_ html: String) -> String {

@@ -1,4 +1,5 @@
 import Foundation
+import Combine
 import NaturalLanguage
 import UserNotifications
 import os
@@ -28,6 +29,7 @@ class FeedManager: NSObject, ObservableObject {
     let appSettings: AppSettings
     let articleStore: ArticleStore
 
+    private var storeUpdates: AnyCancellable?
     private var backgroundTimer: Timer?
     private var backgroundActivity: NSBackgroundActivityScheduler?
 
@@ -42,6 +44,9 @@ class FeedManager: NSObject, ObservableObject {
         self.appSettings = settings ?? AppSettings.shared
         self.articleStore = store ?? ArticleStore.shared
         super.init()
+        storeUpdates = articleStore.$articles.sink { [weak self] articles in
+            self?.articles = articles
+        }
         loadCachedArticles()
         startBackgroundFetch()
     }
@@ -267,9 +272,9 @@ class FeedManager: NSObject, ObservableObject {
             // Cancel previous background backlog on new ingest
             await EnrichmentQueue.shared.cancelAll(reason: .superseded)
 
-            // Enqueue top 5 unread articles as high priority, rest as background
-            for (index, article) in snapshot.enumerated() {
-                let priority: EnrichmentPriority = (index < 5) ? .high : .background
+            // Cheap deterministic classification for ingestion; generative analysis stays on demand.
+            for article in snapshot {
+                let priority: EnrichmentPriority = .background
                 await EnrichmentQueue.shared.enqueue(
                     article: article,
                     priority: priority,

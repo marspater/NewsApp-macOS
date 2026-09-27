@@ -372,6 +372,9 @@ public final class NaturalLanguageTopicClassifier: TopicClassifying {
         let titleLower = title.lowercased()
         let descLower = description.lowercased()
         let bodyLower = (text ?? "").prefix(2000).lowercased()
+        let hasTitle = !titleLower.isEmpty
+        let hasDesc = !descLower.isEmpty
+        let hasBody = !bodyLower.isEmpty
 
         var bestCategory: NewsCategory?
         var maxScore = 0.0
@@ -382,15 +385,15 @@ public final class NaturalLanguageTopicClassifier: TopicClassifying {
             var matched: [String] = []
 
             for kw in item.keywords {
-                if titleLower.contains(kw) {
+                if hasTitle && titleLower.contains(kw) {
                     score += 3.0
                     matched.append(kw)
                 }
-                if descLower.contains(kw) {
+                if hasDesc && descLower.contains(kw) {
                     score += 1.5
                     matched.append(kw)
                 }
-                if bodyLower.contains(kw) {
+                if hasBody && bodyLower.contains(kw) {
                     score += 0.5
                 }
             }
@@ -608,7 +611,8 @@ public final class ArticleClassifier: Sendable {
         title: String,
         description: String,
         text: String? = nil,
-        rssCategory: String? = nil
+        rssCategory: String? = nil,
+        allowFoundationModels: Bool = true
     ) async -> TopicResult {
         let signpostState = NewsSignposts.begin(NewsSignposts.intelligence, name: "AIClassification", metadata: "title_len=\(title.count)")
         defer { NewsSignposts.end(NewsSignposts.intelligence, name: "AIClassification", state: signpostState) }
@@ -622,7 +626,7 @@ public final class ArticleClassifier: Sendable {
 
         // Stage 2: Foundation Models classification (when available)
         #if canImport(FoundationModels)
-        if #available(macOS 26.0, *), isFoundationModelsAvailable {
+        if #available(macOS 26.0, *), allowFoundationModels, isFoundationModelsAvailable {
             do {
                 let session = LanguageModelSession()
                 let prompt = """

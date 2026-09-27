@@ -10,3 +10,7 @@ main
 *.dmg
 *.zip
 *.sha256
+Centauri/
+FTABHarvest/
+powerlog/
+.sourcekit-lsp/

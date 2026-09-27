@@ -137,13 +137,18 @@ final class DOMElementNode: Sendable {
         attributes["data-component"]?.lowercased() ?? ""
     }
 
-    /// Recursively collects all text from this node and its children.
+    private var isHidden: Bool {
+        attributes["hidden"] != nil || attributes["aria-hidden"]?.lowercased() == "true"
+            || className.split(whereSeparator: { $0.isWhitespace }).contains("visually-hidden")
+    }
+
+    /// Recursively collects visible text from this node and its children.
     func combinedText() -> String {
+        guard !isHidden else { return "" }
         var result = text
         for child in children {
             let childText = child.combinedText()
             if !childText.isEmpty {
-                if !result.isEmpty { result += " " }
                 result += childText
             }
         }
@@ -162,15 +167,32 @@ final class DOMElementNode: Sendable {
         return results
     }
 
+    func readingBlocks(allowDivFallback: Bool = true) -> [DOMElementNode] {
+        guard !isHidden else { return [] }
+        let auxiliary = ["related", "related-content", "links-block", "newsletter", "byline", "timestamp-block"]
+        let identifiers = (className + " " + idValue + " " + dataComponent).split(whereSeparator: { $0.isWhitespace })
+        guard !identifiers.contains(where: { auxiliary.contains(String($0)) }) else { return [] }
+        if ["p", "h2", "h3", "li", "blockquote", "pre"].contains(tag) { return [self] }
+        let blocks = children.flatMap { $0.readingBlocks(allowDivFallback: false) }
+        if !blocks.isEmpty || !allowDivFallback { return blocks }
+        let divs = children.flatMap { $0.readingBlocks() }
+        if !divs.isEmpty { return divs }
+        if ["div", "article", "main", "section"].contains(tag),
+           combinedText().trimmingCharacters(in: .whitespacesAndNewlines).count >= 25 {
+            return [self]
+        }
+        return []
+    }
+
     /// Computes link density: ratio of text inside <a> tags versus total combined text.
     func computeLinkDensity() -> Double {
-        let allText = combinedText().trimmingCharacters(in: .whitespacesAndNewlines)
+        let allText = combinedText().filter { !$0.isWhitespace }
         guard !allText.isEmpty else { return 0.0 }
 
         let aNodes = findNodes(tag: "a")
         var linkTextCount = 0
         for a in aNodes {
-            linkTextCount += a.combinedText().trimmingCharacters(in: .whitespacesAndNewlines).count
+            linkTextCount += a.combinedText().filter { !$0.isWhitespace }.count
         }
 
         return min(1.0, Double(linkTextCount) / Double(allText.count))
@@ -187,7 +209,7 @@ enum HTMLDOMBuilder {
 
     private static let ignoredTags: Set<String> = [
         "script", "style", "noscript", "iframe", "svg", "nav", "footer",
-        "header", "form", "aside", "dialog"
+        "header", "form", "aside", "dialog", "figure", "figcaption", "time", "button"
     ]
 
     /// Parses clean HTML into a DOM tree while filtering non-content containers.
@@ -237,12 +259,24 @@ enum HTMLDOMBuilder {
 
                         if ignoredTags.contains(tagName) {
                             // Skip content until closing tag
-                            let closePattern = "</\(tagName)>"
-                            _ = scanner.scanUpToString(closePattern)
-                            _ = scanner.scanString(closePattern)
+                            if let closing = cleanHTML.range(
+                                of: "</\(tagName)\\s*>", options: [.regularExpression, .caseInsensitive],
+                                range: scanner.currentIndex..<cleanHTML.endIndex
+                            ) {
+                                scanner.currentIndex = closing.upperBound
+                            }
                             continue
                         }
 
+                        // HTML permits omitted paragraph end tags.
+                        if tagName == "p", let index = stack.lastIndex(where: { $0.tag == "p" }) {
+                            while stack.count > index {
+                                let node = stack.removeLast().build()
+                                stack.last?.children.append(node)
+                            }
+                        }
+                        // Bound recursion for hostile or malformed publisher HTML.
+                        guard stack.count < 128 else { continue }
                         let isSelfClosing = parsed.isSelfClosing || voidTags.contains(tagName)
                         let elementBuilder = DOMElementBuilder(tag: tagName, attributes: parsed.attributes, isSelfClosing: isSelfClosing)
 
@@ -258,9 +292,7 @@ enum HTMLDOMBuilder {
                 // Text node
                 if let textContent = scanner.scanUpToString("<") {
                     let decoded = ContentExtractionPipeline.shared.decodeHTMLEntities(textContent)
-                    if !decoded.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        stack.last?.textPieces.append(decoded)
-                    }
+                    stack.last?.children.append(DOMElementNode(tag: "#text", text: decoded))
                 }
             }
         }
@@ -287,12 +319,15 @@ enum HTMLDOMBuilder {
             trimmed = String(trimmed.dropLast()).trimmingCharacters(in: .whitespacesAndNewlines)
         }
 
-        let parts = trimmed.split(separator: " ", maxSplits: 1, omittingEmptySubsequences: true)
+        let parts = trimmed.split(maxSplits: 1, omittingEmptySubsequences: true, whereSeparator: { $0.isWhitespace })
         let tag = parts.first.map(String.init) ?? "div"
         var attributes = [String: String]()
 
         if parts.count > 1 {
             let attrString = String(parts[1])
+            if attrString.range(of: "(?:^|\\s)hidden(?:\\s|=|$)", options: [.regularExpression, .caseInsensitive]) != nil {
+                attributes["hidden"] = ""
+            }
             let attrPattern = "([a-zA-Z0-9_-]+)\\s*=\\s*[\"']([^\"']*)[\"']"
             if let regex = try? NSRegularExpression(pattern: attrPattern) {
                 let matches = regex.matches(in: attrString, range: NSRange(attrString.startIndex..., in: attrString))
@@ -314,7 +349,6 @@ enum HTMLDOMBuilder {
         let tag: String
         var attributes: [String: String]
         var children: [DOMElementNode] = []
-        var textPieces: [String] = []
         let isSelfClosing: Bool
 
         init(tag: String, attributes: [String: String] = [:], isSelfClosing: Bool = false) {
@@ -324,12 +358,11 @@ enum HTMLDOMBuilder {
         }
 
         func build() -> DOMElementNode {
-            let combined = textPieces.joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
             return DOMElementNode(
                 tag: tag,
                 attributes: attributes,
                 children: children,
-                text: combined,
+                text: tag == "br" || tag == "hr" ? "\n" : "",
                 isSelfClosing: isSelfClosing
             )
         }
@@ -349,7 +382,7 @@ final class ContentExtractionPipeline: Sendable {
     /// Detailed extraction entry point returning structured outcome for diagnostics.
     func extractArticleDetailed(from link: String, allowHTTP: Bool = false) async -> ExtractionOutcome {
         guard let url = URL(string: link) else {
-            logger.error("[Extraction] Malformed URL string: \(link, privacy: .public)")
+            logger.error("[Extraction] Malformed article URL")
             return .contentParsingFailed(reason: "Malformed URL: \(link)")
         }
 
@@ -386,6 +419,8 @@ final class ContentExtractionPipeline: Sendable {
             return outcome
         } catch let error as FeedError {
             switch error {
+            case .httpStatus(let status):
+                return .httpError(status: status)
             case .blockedHost(let h, let reason):
                 logger.warning("[Extraction] Host \(h, privacy: .public) blocked: \(reason, privacy: .public)")
                 return .securityBlocked(reason: "Blocked host: \(reason)")
@@ -483,11 +518,11 @@ final class ContentExtractionPipeline: Sendable {
     }
 
     private func scoreContainer(_ container: DOMElementNode) -> (Double, [String]) {
-        let pNodes = container.findNodes(tag: "p")
+        let pNodes = container.readingBlocks()
         var substantiveParagraphs = [String]()
 
         for p in pNodes {
-            let plain = p.combinedText().trimmingCharacters(in: .whitespacesAndNewlines)
+            let plain = p.combinedText().replacingOccurrences(of: "[ \\t\\r\\n]+", with: " ", options: .regularExpression).trimmingCharacters(in: .whitespacesAndNewlines)
             if plain.count >= 25 && !ArticleContentRedactor.isBoilerplateLine(plain) {
                 substantiveParagraphs.append(plain)
             }
@@ -550,10 +585,10 @@ final class ContentExtractionPipeline: Sendable {
     }
 
     private func extractDocumentParagraphs(from root: DOMElementNode) -> [String] {
-        let pNodes = root.findNodes(tag: "p")
+        let pNodes = root.readingBlocks()
         var substantive = [String]()
         for p in pNodes {
-            let plain = p.combinedText().trimmingCharacters(in: .whitespacesAndNewlines)
+            let plain = p.combinedText().replacingOccurrences(of: "[ \\t\\r\\n]+", with: " ", options: .regularExpression).trimmingCharacters(in: .whitespacesAndNewlines)
             if plain.count >= 30 && !ArticleContentRedactor.isBoilerplateLine(plain) {
                 substantive.append(plain)
             }
@@ -594,7 +629,7 @@ final class ContentExtractionPipeline: Sendable {
             }
         }
 
-        if let asciiPrefix = String(data: data.prefix(2048), encoding: .ascii) {
+        if let asciiPrefix = String(data: data.prefix(2048), encoding: .isoLatin1) {
             if let charset = extractCharsetFromMeta(asciiPrefix) {
                 if let decoded = decode(data: data, charset: charset) {
                     return decoded

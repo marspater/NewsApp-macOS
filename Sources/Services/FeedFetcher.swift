@@ -22,6 +22,9 @@ actor FeedFetcher {
             } else {
                 let xmlParser = FeedXMLParser(data: data, feedURL: urlString)
                 let parsed = xmlParser.parse()
+                if let error = xmlParser.parseError {
+                    return (urlString, nil, .parseFailed(error))
+                }
                 return (urlString, parsed, nil)
             }
         } catch let error as FeedError {
@@ -33,7 +36,9 @@ actor FeedFetcher {
 
     func fetchAllFeeds(urls: [String], allowHTTP: Bool = false) async -> [(urlString: String, articles: [FeedArticle]?, error: FeedError?)] {
         await withTaskGroup(of: (String, [FeedArticle]?, FeedError?).self) { group in
-            for urlString in urls {
+            var remaining = urls.makeIterator()
+            for _ in 0..<min(6, urls.count) {
+                guard let urlString = remaining.next() else { break }
                 group.addTask {
                     await self.fetchSingleFeed(urlString: urlString, allowHTTP: allowHTTP)
                 }
@@ -41,6 +46,9 @@ actor FeedFetcher {
             var results = [(String, [FeedArticle]?, FeedError?)]()
             for await result in group {
                 results.append(result)
+                if !Task.isCancelled, let next = remaining.next() {
+                    group.addTask { await self.fetchSingleFeed(urlString: next, allowHTTP: allowHTTP) }
+                }
             }
             return results
         }

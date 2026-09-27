@@ -62,6 +62,7 @@ actor EnrichmentQueue {
 
     private struct Job: Identifiable {
         let id: String // article.id
+        let generation = UUID()
         let article: FeedArticle
         let allowHTTP: Bool
         var priority: EnrichmentPriority
@@ -74,7 +75,11 @@ actor EnrichmentQueue {
     private var activeCount: Int = 0
     private var jobs: [String: Job] = [:] // Indexed by articleId
 
-    init() {}
+    private let store: ArticleStore?
+
+    init(store: ArticleStore? = nil) {
+        self.store = store
+    }
 
     // MARK: - Enqueue & Promotion
 
@@ -155,7 +160,7 @@ actor EnrichmentQueue {
             job.state = .cancelled(reason)
             jobs[id] = job
         }
-        activeCount = 0
+        // Cancelled tasks occupy slots until their deferred cleanup runs.
         logger.info("Cancelled all enrichment jobs: \(reason.rawValue)")
     }
 
@@ -206,17 +211,18 @@ actor EnrichmentQueue {
             let id = job.id
             let article = job.article
             let allowHTTP = job.allowHTTP
+            let generation = job.generation
 
             let task = Task { [weak self] in
                 guard let self = self else { return }
-                await self.executeJob(article: article, allowHTTP: allowHTTP)
+                await self.executeJob(article: article, allowHTTP: allowHTTP, generation: generation)
             }
             job.task = task
             jobs[id] = job
         }
     }
 
-    private func executeJob(article: FeedArticle, allowHTTP: Bool) async {
+    private func executeJob(article: FeedArticle, allowHTTP: Bool, generation: UUID) async {
         let articleId = article.id
 
         defer {
@@ -225,7 +231,7 @@ actor EnrichmentQueue {
         }
 
         // Check cancellation before heavy work
-        if isJobCancelled(articleId) {
+        if jobs[articleId]?.generation != generation || isJobCancelled(articleId) {
             return
         }
         if Task.isCancelled {
@@ -242,10 +248,11 @@ actor EnrichmentQueue {
             title: article.title,
             description: article.description,
             text: article.fullContent,
-            rssCategory: article.category
+            rssCategory: article.category,
+            allowFoundationModels: false
         )
 
-        if isJobCancelled(articleId) {
+        if jobs[articleId]?.generation != generation || isJobCancelled(articleId) {
             return
         }
         if Task.isCancelled {
@@ -263,7 +270,9 @@ actor EnrichmentQueue {
         )
 
         // Queue computes. Store persists.
-        await ArticleStore.shared.updateEnrichment(
+        let destination: ArticleStore
+        if let store { destination = store } else { destination = await ArticleStore.shared }
+        await destination.updateEnrichment(
             id: result.articleId,
             summary: nil,
             category: result.category,
@@ -274,6 +283,7 @@ actor EnrichmentQueue {
             image: nil
         )
 
+        guard jobs[articleId]?.generation == generation, !Task.isCancelled else { return }
         markJobState(articleId: articleId, state: .completed)
     }
 

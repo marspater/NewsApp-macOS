@@ -71,7 +71,7 @@ final class TrackpadSwipeCoordinator: ObservableObject {
 }
 
 struct ArticleDetailView: View {
-    @State var activeArticle: FeedArticle
+    @State private var activeArticle: FeedArticle
     let allArticles: [FeedArticle]
     @Binding var path: NavigationPath
 
@@ -87,6 +87,7 @@ struct ArticleDetailView: View {
     @State private var isWebLoading: Bool = false
     @State private var webCanGoBack: Bool = false
     @State private var webCanGoForward: Bool = false
+    @State private var webLoadError: String?
     @State private var webAction: WebNavigationAction? = nil
 
     @State private var analysis: ArticleAnalysis? = nil
@@ -108,7 +109,10 @@ struct ArticleDetailView: View {
     }
 
     private var currentArticle: FeedArticle {
-        articleStore.articles.first { $0.id == activeArticle.id }
+        if let content = activeArticle.fullContent, !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return activeArticle
+        }
+        return articleStore.articles.first { $0.id == activeArticle.id }
             ?? feedManager.articles.first { $0.id == activeArticle.id }
             ?? allArticles.first { $0.id == activeArticle.id }
             ?? activeArticle
@@ -138,7 +142,7 @@ struct ArticleDetailView: View {
 
             // Content Layer
             if viewMode == .reader {
-                readerView
+                readerView.id(activeArticle.id)
             } else {
                 webViewContainer
             }
@@ -169,7 +173,10 @@ struct ArticleDetailView: View {
         .task(id: activeArticle.id) {
             cancelTasks()
             readingProgress = 0.0
+            analysis = nil
+            analysisError = nil
             await ensureContentExtracted()
+            guard !Task.isCancelled else { return }
             await startArticleAnalysis()
         }
         .onAppear {
@@ -181,6 +188,8 @@ struct ArticleDetailView: View {
         }
         .onDisappear {
             swipeCoordinator.stop()
+            swipeCoordinator.onSwipeRight = nil
+            swipeCoordinator.onSwipeLeft = nil
             cancelTasks()
         }
     }
@@ -240,12 +249,17 @@ struct ArticleDetailView: View {
                         .lineSpacing(3)
 
                     // On-device AI Analysis Section
-                    aiAnalysisSection
+                    DisclosureGroup("On-device summary") {
+                        aiAnalysisSection.padding(.top, AppSpacing.sm)
+                    }
+                    .font(AppTypography.bodySmall)
+                    .foregroundStyle(AppColor.secondaryText)
 
                     // Article Content Section with explicit state handling
                     switch contentState {
                     case .loading:
                         loadingStateView
+                        articleDescriptionParagraphs
                     case .ready:
                         articleContentParagraphs
                     case .fallback(let reason):
@@ -277,7 +291,7 @@ struct ArticleDetailView: View {
     @ViewBuilder
     private var heroImageHeader: some View {
         if let imageUrl = currentArticle.imageUrl, let url = URL(string: imageUrl) {
-            AsyncImage(url: url) { phase in
+            ArticleRemoteImage(url: url) { phase in
                 switch phase {
                 case .success(let image):
                     image.resizable()
@@ -371,7 +385,7 @@ struct ArticleDetailView: View {
 
             Divider().opacity(0.15)
 
-            Text("FEED SUMMARY PREVIEW")
+            Text(currentArticle.fullContent == nil ? "FEED SUMMARY PREVIEW" : "PREVIOUSLY SAVED TEXT")
                 .font(.system(size: 10, weight: .bold))
                 .tracking(1.0)
                 .foregroundColor(AppColor.tertiaryText)
@@ -385,7 +399,7 @@ struct ArticleDetailView: View {
 
     @ViewBuilder
     private var articleDescriptionParagraphs: some View {
-        let paragraphs = ArticleContentRedactor.redactAndSplit(currentArticle.description)
+        let paragraphs = displayParagraphs
         VStack(alignment: .leading, spacing: 14) {
             ForEach(Array(paragraphs.enumerated()), id: \.offset) { _, paragraph in
                 Text(paragraph)
@@ -409,7 +423,7 @@ struct ArticleDetailView: View {
                     .textSelection(.enabled)
             }
         }
-        .transition(.opacity.combined(with: .move(edge: .bottom)))
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var terminalAffordance: some View {
@@ -480,6 +494,14 @@ struct ArticleDetailView: View {
         VStack(spacing: 0) {
             Spacer().frame(height: 50)
 
+            if let webLoadError {
+                HStack {
+                    Label(webLoadError, systemImage: "exclamationmark.triangle")
+                    Button("Reload") { webAction = .reload }
+                }
+                .font(AppTypography.bodySmall)
+                .padding(AppSpacing.sm)
+            }
             if isWebLoading {
                 ProgressView()
                     .progressViewStyle(.linear)
@@ -495,7 +517,8 @@ struct ArticleDetailView: View {
                     isLoading: $isWebLoading,
                     canGoBack: $webCanGoBack,
                     canGoForward: $webCanGoForward,
-                    action: $webAction
+                    action: $webAction,
+                    loadError: $webLoadError
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
@@ -652,6 +675,13 @@ struct ArticleDetailView: View {
                 }
 
                 Menu {
+                    Button {
+                        Task { await ensureContentExtracted(forceRefresh: true) }
+                    } label: {
+                        Label("Reload Reader Content", systemImage: "arrow.clockwise")
+                    }
+                    .disabled(contentState == .loading)
+
                     Button {
                         NSPasteboard.general.clearContents()
                         NSPasteboard.general.setString(currentArticle.link, forType: .string)
@@ -818,7 +848,7 @@ struct ArticleDetailView: View {
                     Image(systemName: "sparkles")
                         .font(.system(size: 12))
                         .foregroundColor(AppColor.intelligence)
-                    Text("Summary")
+                    Text("AI-generated summary")
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundColor(AppColor.primaryText)
                 }
@@ -916,7 +946,7 @@ struct ArticleDetailView: View {
                     Image(systemName: "sparkles")
                         .font(.system(size: 12))
                         .foregroundColor(AppColor.intelligence)
-                    Text("Summary")
+                    Text("AI-generated summary")
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundColor(AppColor.primaryText)
                 }
@@ -933,8 +963,8 @@ struct ArticleDetailView: View {
 
     // MARK: - Independent Extraction & Analysis
 
-    private func ensureContentExtracted() async {
-        if let existing = currentArticle.fullContent, !existing.isEmpty {
+    private func ensureContentExtracted(forceRefresh: Bool = false) async {
+        if !forceRefresh, let existing = currentArticle.fullContent, !ArticleContentRedactor.redactAndSplit(existing).isEmpty {
             contentState = .ready
             return
         }
@@ -947,6 +977,7 @@ struct ArticleDetailView: View {
         let allowInsecure = appSettings.allowInsecureHTTP
         let targetId = currentArticle.id
 
+        extractionTask?.cancel()
         contentState = .loading
 
         extractionTask = Task { @MainActor in
@@ -954,7 +985,7 @@ struct ArticleDetailView: View {
                 from: link,
                 allowHTTP: allowInsecure
             )
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled, activeArticle.id == targetId else { return }
 
             switch outcome {
             case .success(let content, let imageUrl):
@@ -963,6 +994,7 @@ struct ArticleDetailView: View {
                     content: content,
                     image: imageUrl
                 )
+                guard !Task.isCancelled, activeArticle.id == targetId else { return }
                 var updated = self.activeArticle
                 updated.fullContent = content
                 updated.contentFetched = true
@@ -989,6 +1021,8 @@ struct ArticleDetailView: View {
     }
 
     private func startArticleAnalysis() async {
+        guard !Task.isCancelled else { return }
+        let targetID = activeArticle.id
         analysisError = nil
 
         // 1. Check if article already has analysis loaded
@@ -1010,12 +1044,13 @@ struct ArticleDetailView: View {
 
         // 2. Check persistent database for existing analysis
         if let cached = await articleStore.fetchArticleAnalysis(for: activeArticle.id) {
+            guard !Task.isCancelled, activeArticle.id == targetID else { return }
             self.analysis = cached
             return
         }
 
         // 3. Lazy interactive analysis if enabled
-        guard appSettings.aiEnabled else { return }
+        guard !Task.isCancelled, activeArticle.id == targetID, appSettings.aiEnabled else { return }
 
         isAnalyzing = true
         let targetArticle = currentArticle
@@ -1040,6 +1075,7 @@ struct ArticleDetailView: View {
                 try Task.checkCancellation()
 
                 await articleStore.saveArticleAnalysis(result, for: targetArticle.id)
+                guard !Task.isCancelled, activeArticle.id == targetArticle.id else { return }
                 self.analysis = result
                 self.isAnalyzing = false
             } catch is CancellationError {

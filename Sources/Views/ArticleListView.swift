@@ -17,6 +17,7 @@ struct ArticleListView: View {
     @EnvironmentObject private var readManager: ReadManager
     @EnvironmentObject private var savedStories: SavedStoriesManager
     
+    @AppStorage("articleGridLayout") private var gridLayout = false
     @State private var focusedArticleID: String? = nil
     @State private var isShortcutsHelpPresented: Bool = false
     
@@ -105,7 +106,6 @@ struct ArticleListView: View {
                     }
                 }
             }
-            .highPriorityGesture(TapGesture().onEnded { _ in })
         }
     }
     
@@ -126,13 +126,27 @@ struct ArticleListView: View {
             .help("Toggle Sidebar (⌃⌘S)")
             .accessibilityLabel("Toggle Sidebar")
             
-            Text(selectedTopic ?? "Today")
-                .font(AppTypography.title)
-                .foregroundColor(AppColor.primaryText)
-                .tracking(AppTypography.sectionHeaderTracking)
+            VStack(alignment: .leading, spacing: AppSpacing.xxs) {
+                Text(selectedTopic ?? "Today")
+                    .font(AppTypography.display)
+                    .foregroundStyle(AppColor.primaryText)
+                Text("\(filteredArticles.count) stories · Your personal edition")
+                    .font(AppTypography.caption)
+                    .foregroundStyle(AppColor.secondaryText)
+            }
             
             Spacer()
             
+            Picker("Article layout", selection: $gridLayout) {
+                Image(systemName: "list.bullet").tag(false)
+                    .accessibilityLabel("List")
+                Image(systemName: "square.grid.2x2").tag(true)
+                    .accessibilityLabel("Grid")
+            }
+            .pickerStyle(.segmented)
+            .frame(width: 80)
+            .help("Choose list or grid layout")
+
             Button {
                 isShortcutsHelpPresented.toggle()
             } label: {
@@ -174,27 +188,35 @@ struct ArticleListView: View {
     // MARK: - Article Grid
     
     private func articleGrid(proxy: ScrollViewProxy) -> some View {
-        LazyVGrid(
-            columns: [GridItem(.adaptive(minimum: 300, maximum: 420), spacing: AppLayout.cardGap)],
-            spacing: AppLayout.cardGap
-        ) {
-            ForEach(filteredArticles) { article in
-                ArticleCardView(
-                    article: article,
-                    isSelected: article.id == focusedArticleID
-                ) {
-                    focusedArticleID = article.id
-                    readManager.markAsRead(article.id)
-                    articlePath.append(FeedArticleWrap(article: article, contextArticles: filteredArticles))
+        Group {
+            if gridLayout {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 300, maximum: 420), spacing: AppLayout.cardGap)], spacing: AppLayout.cardGap) {
+                    articleCards
                 }
-                .id(article.id)
-                .transition(.opacity)
+            } else {
+                LazyVStack(spacing: AppSpacing.sm) {
+                    articleCards
+                }
+                .frame(maxWidth: 1000)
+                .frame(maxWidth: .infinity)
             }
         }
         .padding(.horizontal, AppLayout.pageInset)
-        .padding(.bottom, 30)
+        .padding(.bottom, AppSpacing.xl)
     }
-    
+
+    private var articleCards: some View {
+        ForEach(filteredArticles) { article in
+            ArticleCardView(article: article, isSelected: article.id == focusedArticleID, compact: !gridLayout) {
+                focusedArticleID = article.id
+                let context = filteredArticles
+                readManager.markAsRead(article.id)
+                articlePath.append(FeedArticleWrap(article: article, contextArticles: context))
+            }
+            .id(article.id)
+        }
+    }
+
     // MARK: - Empty States & Diagnostics
     
     private var emptyStateView: some View {

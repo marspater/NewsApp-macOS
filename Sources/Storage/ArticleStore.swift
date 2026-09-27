@@ -194,6 +194,7 @@ final class ArticleStore: ObservableObject {
             if let idx = articles.firstIndex(where: { $0.id == id }) {
                 var updated = articles[idx]
                 if let s = summary { updated.aiSummary = s }
+                if let category { updated.category = category }
                 if let c = content {
                     updated.fullContent = c
                     updated.contentFetched = true

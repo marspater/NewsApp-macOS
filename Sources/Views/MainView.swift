@@ -90,6 +90,9 @@ struct MainView: View {
         .onDrop(of: [.fileURL], isTargeted: $isWindowDropTargeted) { providers in
             handleWindowOPMLDrop(providers: providers)
         }
+        .onChange(of: selectedTopic) { _, _ in
+            articlePath = NavigationPath()
+        }
         // Notification Deep Link & Section Jump Routing
         .onReceive(NotificationCenter.default.publisher(for: .jumpToTodayCommand)) { _ in
             selectedTopic = "Today"

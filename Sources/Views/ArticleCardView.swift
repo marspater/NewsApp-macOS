@@ -7,6 +7,7 @@ import AppKit
 struct ArticleCardView: View {
     let article: FeedArticle
     var isSelected: Bool = false
+    var compact: Bool = false
     let action: () -> Void
     
     @EnvironmentObject private var readManager: ReadManager
@@ -22,11 +23,18 @@ struct ArticleCardView: View {
         savedStories.isSaved(article)
     }
     
+    private var cardLayout: AnyLayout {
+        compact ? AnyLayout(HStackLayout(alignment: .center, spacing: 0))
+                : AnyLayout(VStackLayout(alignment: .leading, spacing: 0))
+    }
+
     var body: some View {
         Button(action: action) {
-            VStack(alignment: .leading, spacing: 0) {
+            cardLayout {
                 // Header Image Container
                 cardImageHeader
+                    .frame(width: compact ? 170 : nil)
+                    .accessibilityHidden(true)
                 
                 // Content Body Container
                 VStack(alignment: .leading, spacing: 6) {
@@ -56,7 +64,7 @@ struct ArticleCardView: View {
                     
                     // Headline
                     Text(article.title)
-                        .font(AppTypography.headline)
+                        .font(compact ? .system(size: 20, weight: .semibold, design: .serif) : AppTypography.headline)
                         .foregroundColor(isRead ? AppColor.secondaryText : AppColor.primaryText)
                         .lineLimit(2)
                         .multilineTextAlignment(.leading)
@@ -95,12 +103,14 @@ struct ArticleCardView: View {
                             .padding(.vertical, 2)
                             .background(Capsule().fill(AppColor.intelligence.opacity(0.12)))
                             .help("AI summary available")
+                            .accessibilityLabel("AI summary available")
                         }
                     }
                 }
-                .padding(12)
+                .padding(compact ? AppSpacing.lg : AppSpacing.sm)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
+            .frame(height: compact ? 170 : nil)
             .background(AppColor.surface)
             .clipShape(RoundedRectangle(cornerRadius: AppRadius.card))
             .overlay(
@@ -194,12 +204,12 @@ struct ArticleCardView: View {
     @ViewBuilder
     private var cardImageHeader: some View {
         if let imageUrl = article.imageUrl, let url = URL(string: imageUrl) {
-            AsyncImage(url: url) { phase in
+            ArticleRemoteImage(url: url) { phase in
                 switch phase {
                 case .success(let image):
                     image.resizable()
                         .aspectRatio(contentMode: .fill)
-                        .frame(height: 140)
+                        .frame(height: compact ? 170 : 140)
                         .frame(maxWidth: .infinity)
                         .clipped()
                         .saturation(isRead ? 0.92 : 1.0)
@@ -219,7 +229,7 @@ struct ArticleCardView: View {
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )
-            .frame(height: 54)
+            .frame(height: compact ? 170 : 54)
             .frame(maxWidth: .infinity)
             
             Image(systemName: "newspaper")
@@ -239,5 +249,31 @@ struct ArticleCardView: View {
         let savedState = isSaved ? ", saved in your library" : ""
         let dateFormatted = article.pubDate.formatted(date: .abbreviated, time: .omitted)
         return "\(article.title), from \(displaySource), published \(dateFormatted). \(readState)\(savedState)."
+    }
+}
+
+// Feed image URLs use the same bounded, validated network path as article content.
+struct ArticleRemoteImage<Content: View>: View {
+    let url: URL
+    @ViewBuilder var content: (AsyncImagePhase) -> Content
+    @State private var phase: AsyncImagePhase = .empty
+
+    var body: some View {
+        content(phase)
+            .task(id: url) {
+                phase = .empty
+                do {
+                    let (data, _) = try await SecureHTTPClient.shared.fetchImage(from: url)
+                    try Task.checkCancellation()
+                    if let image = NSImage(data: data) {
+                        phase = .success(Image(nsImage: image))
+                    } else {
+                        phase = .failure(URLError(.cannotDecodeContentData))
+                    }
+                } catch {
+                    guard !Task.isCancelled else { return }
+                    phase = .failure(error)
+                }
+            }
     }
 }
