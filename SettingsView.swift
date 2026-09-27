@@ -192,6 +192,7 @@ struct SettingsView: View {
                         }
                         .buttonStyle(.plain)
                         .help("Unsubscribe from feed")
+                        .accessibilityLabel("Unsubscribe from feed")
                     }
                     .padding(.vertical, 4)
                 }
