@@ -483,7 +483,7 @@ struct ArticleListView: View {
                 .padding(.horizontal, 6)
                 .padding(.vertical, 3)
                 .background(AppColor.badgeBackground)
-                .cornerRadius(5)
+                .clipShape(RoundedRectangle(cornerRadius: AppRadius.control))
             Spacer()
             Text(desc)
                 .font(AppTypography.caption)
