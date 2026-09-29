@@ -555,7 +555,7 @@ struct ArticleDetailView: View {
                 .foregroundColor(AppColor.primaryText)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 6)
-                .background(AppColor.surface.opacity(0.6), in: RoundedRectangle(cornerRadius: 8))
+                .background(AppColor.surface.opacity(0.6), in: RoundedRectangle(cornerRadius: AppRadius.control))
             }
             .buttonStyle(.plain)
             .keyboardShortcut(.escape, modifiers: [])
@@ -572,7 +572,7 @@ struct ArticleDetailView: View {
                             .font(.system(size: 12, weight: .semibold))
                             .foregroundColor(webCanGoBack ? AppColor.primaryText : AppColor.tertiaryText)
                             .frame(width: 28, height: 28)
-                            .background(AppColor.surface.opacity(0.5), in: RoundedRectangle(cornerRadius: 6))
+                            .background(AppColor.surface.opacity(0.5), in: RoundedRectangle(cornerRadius: AppRadius.control))
                     }
                     .buttonStyle(.plain)
                     .disabled(!webCanGoBack)
@@ -586,7 +586,7 @@ struct ArticleDetailView: View {
                             .font(.system(size: 12, weight: .semibold))
                             .foregroundColor(webCanGoForward ? AppColor.primaryText : AppColor.tertiaryText)
                             .frame(width: 28, height: 28)
-                            .background(AppColor.surface.opacity(0.5), in: RoundedRectangle(cornerRadius: 6))
+                            .background(AppColor.surface.opacity(0.5), in: RoundedRectangle(cornerRadius: AppRadius.control))
                     }
                     .buttonStyle(.plain)
                     .disabled(!webCanGoForward)
@@ -631,7 +631,7 @@ struct ArticleDetailView: View {
                     }
                     .padding(.horizontal, 4)
                     .padding(.vertical, 2)
-                    .background(AppColor.surface.opacity(0.5), in: RoundedRectangle(cornerRadius: 6))
+                    .background(AppColor.surface.opacity(0.5), in: RoundedRectangle(cornerRadius: AppRadius.control))
                 }
 
                 Picker("", selection: $viewMode) {
@@ -655,7 +655,7 @@ struct ArticleDetailView: View {
                         .font(.system(size: 13, weight: .medium))
                         .foregroundColor(isSaved ? AppColor.accent : AppColor.primaryText)
                         .frame(width: 28, height: 28)
-                        .background(AppColor.surface.opacity(0.5), in: RoundedRectangle(cornerRadius: 6))
+                        .background(AppColor.surface.opacity(0.5), in: RoundedRectangle(cornerRadius: AppRadius.control))
                 }
                 .buttonStyle(.plain)
                 .help(isSaved ? "Remove from Saved Stories (S)" : "Save Story (S)")
@@ -667,7 +667,7 @@ struct ArticleDetailView: View {
                             .font(.system(size: 13, weight: .medium))
                             .foregroundColor(AppColor.primaryText)
                             .frame(width: 28, height: 28)
-                            .background(AppColor.surface.opacity(0.5), in: RoundedRectangle(cornerRadius: 6))
+                            .background(AppColor.surface.opacity(0.5), in: RoundedRectangle(cornerRadius: AppRadius.control))
                     }
                     .buttonStyle(.plain)
                     .help("Share Story")
@@ -699,7 +699,7 @@ struct ArticleDetailView: View {
                         .font(.system(size: 13, weight: .medium))
                         .foregroundColor(AppColor.primaryText)
                         .frame(width: 28, height: 28)
-                        .background(AppColor.surface.opacity(0.5), in: RoundedRectangle(cornerRadius: 6))
+                        .background(AppColor.surface.opacity(0.5), in: RoundedRectangle(cornerRadius: AppRadius.control))
                 }
                 .buttonStyle(.plain)
                 .menuIndicator(.hidden)
