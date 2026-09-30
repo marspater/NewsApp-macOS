@@ -1,7 +1,8 @@
 import Foundation
+import Network
 
 /// Centralized, hardened HTTP client for all remote network ingestion.
-/// Enforces strict scheme/port rules, DNS resolution validation, anti-rebinding socket checks,
+/// Enforces strict scheme/port rules, DNS resolution validation, socket-level public-address enforcement,
 /// redirect validation with HTTPS downgrade protection, and progressive streaming response bounds.
 actor SecureHTTPClient {
     static let shared = SecureHTTPClient()
@@ -12,26 +13,34 @@ actor SecureHTTPClient {
     static let defaultTimeout: TimeInterval = 15.0
     static let maxRedirects: Int = 5
 
-    private let session: URLSession
+    private var session: URLSession?
     private let delegateCoordinator: SecureSessionDelegateCoordinator
 
     private init() {
         let coordinator = SecureSessionDelegateCoordinator()
         self.delegateCoordinator = coordinator
-
-        let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest = Self.defaultTimeout
-        config.timeoutIntervalForResource = Self.defaultTimeout * 2
-        config.requestCachePolicy = .reloadIgnoringLocalCacheData
-        config.httpShouldSetCookies = false
-
-        self.session = URLSession(configuration: config, delegate: coordinator, delegateQueue: nil)
     }
 
     internal init(configuration: URLSessionConfiguration) {
         let coordinator = SecureSessionDelegateCoordinator()
         self.delegateCoordinator = coordinator
         self.session = URLSession(configuration: configuration, delegate: coordinator, delegateQueue: nil)
+    }
+
+    private func protectedSession() async throws -> URLSession {
+        if let session { return session }
+        let proxy = try await NetworkBoundaryProxy.shared.configuration()
+        // Another caller may have configured the session while listener readiness was awaited.
+        if let session { return session }
+        let configuration = URLSessionConfiguration.default
+        configuration.timeoutIntervalForRequest = Self.defaultTimeout
+        configuration.timeoutIntervalForResource = Self.defaultTimeout * 2
+        configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+        configuration.httpShouldSetCookies = false
+        configuration.proxyConfigurations = [proxy]
+        let session = URLSession(configuration: configuration, delegate: delegateCoordinator, delegateQueue: nil)
+        self.session = session
+        return session
     }
 
     // MARK: - Public Fetch Ingestion APIs
@@ -48,14 +57,8 @@ actor SecureHTTPClient {
         try await fetchData(from: url, maxBytes: Self.defaultImageLimit, timeout: Self.defaultTimeout, allowHTTP: allowHTTP)
     }
 
-    // MARK: - Core Secure Fetch
-
-    func fetchData(
-        from url: URL,
-        maxBytes: Int64,
-        timeout: TimeInterval = defaultTimeout,
-        allowHTTP: Bool = false
-    ) async throws -> (Data, HTTPURLResponse) {
+    /// Shared navigation/ingestion preflight. DNS work stays on this actor, off the UI actor.
+    func validateDestination(_ url: URL, allowHTTP: Bool = false) throws {
         // 1. Scheme & Port Validation
         guard let scheme = url.scheme?.lowercased() else {
             throw FeedError.malformedURL(url.absoluteString)
@@ -84,6 +87,18 @@ actor SecureHTTPClient {
             throw FeedError.network("Host '\(host)' unresolvable: \(reason)")
         }
 
+    }
+
+    // MARK: - Core Secure Fetch
+
+    func fetchData(
+        from url: URL,
+        maxBytes: Int64,
+        timeout: TimeInterval = defaultTimeout,
+        allowHTTP: Bool = false
+    ) async throws -> (Data, HTTPURLResponse) {
+        try validateDestination(url, allowHTTP: allowHTTP)
+
         // 3. Register Task Security Policy in Delegate Coordinator
         var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: timeout)
         request.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.3 Safari/605.1.15", forHTTPHeaderField: "User-Agent")
@@ -95,6 +110,7 @@ actor SecureHTTPClient {
         request.setValue("?1", forHTTPHeaderField: "Sec-Fetch-User")
 
         // 4. Progressive Byte Streaming Download with Size Enforcement
+        let session = try await protectedSession()
         let (asyncBytes, rawResponse) = try await session.bytes(for: request)
 
         guard let httpResponse = rawResponse as? HTTPURLResponse else {
@@ -192,7 +208,7 @@ final class SecureSessionDelegateCoordinator: NSObject, URLSessionTaskDelegate, 
         states.removeValue(forKey: task.taskIdentifier)
         lock.unlock()
 
-        // Anti-DNS Rebinding: check final socket address if metrics provide it
+        // Diagnostic only: metrics arrive after the request; this cannot prevent rebinding.
         for metric in metrics.transactionMetrics {
             if let remoteIP = metric.remoteAddress {
                 if let reason = IPAddressValidator.checkLiteralIP(remoteIP) {

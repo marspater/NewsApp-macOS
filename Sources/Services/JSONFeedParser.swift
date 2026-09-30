@@ -46,7 +46,6 @@ class JSONFeedParser {
                 if link.isEmpty { continue }
                 
                 let title = item.title ?? "Untitled"
-                let desc = item.summary ?? item.description ?? ""
                 
                 let rawDate = item.date_published ?? item.pubDate ?? ""
                 let pubDate = DateParser.parse(rawDate)
@@ -60,7 +59,7 @@ class JSONFeedParser {
                     category = cats.first
                 }
                 
-                let cleanDesc = stripSimpleHTML(desc)
+                let cleanDesc = item.summary ?? stripSimpleHTML(item.description ?? "")
                 let cleanContent = item.content_html.map(stripSimpleHTML) ?? item.content_text
                 let readableContent = cleanContent.flatMap { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0 }
 

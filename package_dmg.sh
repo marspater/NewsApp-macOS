@@ -3,8 +3,8 @@ set -e
 
 APP_NAME="News"
 APP_DIR="${APP_NAME}.app"
-DMG_NAME="News-Universal2.dmg"
-ZIP_NAME="News-Universal2.zip"
+DMG_NAME="News-arm64.dmg"
+ZIP_NAME="News-arm64.zip"
 VOLUME_NAME="News"
 STAGING_DIR=$(mktemp -d "${TMPDIR:-/tmp}/news-package.XXXXXX")
 
@@ -18,10 +18,8 @@ if [ ! -d "${APP_DIR}" ]; then
     ./build_release.sh
 fi
 
-# Reject a host-only or invalid bundle before labelling artifacts Universal 2.
-for architecture in arm64 x86_64; do
-    lipo "${APP_DIR}/Contents/MacOS/${APP_NAME}" -verify_arch "$architecture"
-done
+# Verify the supported development architecture.
+lipo "${APP_DIR}/Contents/MacOS/${APP_NAME}" -verify_arch arm64
 codesign --verify --deep --strict "${APP_DIR}"
 
 # Clean previous distribution artifacts

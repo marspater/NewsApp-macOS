@@ -20,11 +20,17 @@ public final class OPMLParser: NSObject, XMLParserDelegate, @unchecked Sendable 
     private var outlineStack: [Bool] = []
 
     public static func parse(data: Data) -> [OPMLItem] {
+        (try? parseValidated(data: data)) ?? []
+    }
+
+    public static func parseValidated(data: Data) throws -> [OPMLItem] {
         let parser = OPMLParser()
         let xmlParser = XMLParser(data: data)
         xmlParser.shouldResolveExternalEntities = false
         xmlParser.delegate = parser
-        xmlParser.parse()
+        guard xmlParser.parse() else {
+            throw xmlParser.parserError ?? NSError(domain: "OPML", code: 1, userInfo: [NSLocalizedDescriptionKey: "The OPML file is incomplete or malformed."])
+        }
         return parser.items
     }
 
@@ -118,8 +124,9 @@ public enum OPMLDialogs {
         } else {
             panel.allowedContentTypes = [.xml]
         }
-        if panel.runModal() == .OK, let url = panel.url, let data = try? Data(contentsOf: url) {
-            onImport(data)
+        if panel.runModal() == .OK, let url = panel.url {
+            do { onImport(try Data(contentsOf: url)) }
+            catch { NSAlert(error: error).runModal() }
         }
     }
 
@@ -134,7 +141,8 @@ public enum OPMLDialogs {
             panel.allowedContentTypes = [.xml]
         }
         if panel.runModal() == .OK, let url = panel.url {
-            try? xmlString.write(to: url, atomically: true, encoding: .utf8)
+            do { try xmlString.write(to: url, atomically: true, encoding: .utf8) }
+            catch { NSAlert(error: error).runModal() }
         }
     }
 }

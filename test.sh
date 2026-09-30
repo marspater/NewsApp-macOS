@@ -18,6 +18,8 @@ swiftc -target $(uname -m)-apple-macos${TARGET_MACOS} \
     Sources/Intelligence/ArticleIntelligence.swift \
     Sources/Intelligence/ContentExtractionPipeline.swift \
     Sources/Intelligence/EnrichmentQueue.swift \
+    Sources/Services/NetworkBoundaryProxy.swift \
+    Sources/Views/WebPreviewPolicy.swift \
     Sources/Services/SecureHTTPClient.swift \
     Sources/App/AppSettings.swift \
     Sources/Services/FeedXMLParser.swift \

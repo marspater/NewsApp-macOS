@@ -21,54 +21,49 @@ struct ArticleListView: View {
     @State private var focusedArticleID: String? = nil
     @State private var isShortcutsHelpPresented: Bool = false
     
-    // MARK: - Filtered Articles
-    
-    var filteredArticles: [FeedArticle] {
-        var result: [FeedArticle]
-        let currentTopic = selectedTopic ?? "Today"
-        if currentTopic == "Saved Stories" {
-            result = savedStories.savedArticles
-        } else if currentTopic == "Unread" {
-            result = feedManager.articles.filter { !readManager.isRead($0.id) }
-        } else if currentTopic == "History" {
-            result = feedManager.articles.filter { readManager.isRead($0.id) }
-        } else {
-            result = feedManager.articles(for: currentTopic)
-        }
-        
-        // Auto-Hide Read
-        if themeManager.autoHideRead &&
-            currentTopic != "Saved Stories" &&
-            currentTopic != "Unread" &&
-            currentTopic != "History" {
-            result = result.filter { !readManager.isRead($0.id) }
-        }
-        
-        // Structured Filter Query
-        if !searchText.isEmpty {
-            let query = ArticleFilterQuery.parse(searchText)
-            result = result.filter { article in
-                let isRead = readManager.isRead(article.id)
-                let isSaved = savedStories.isSaved(article)
-                return query.matches(article: article, isRead: isRead, isSaved: isSaved)
-            }
-        }
-        
-        return result
+    @State private var databaseResults: [FeedArticle] = []
+    @State private var pageRequest = 0
+    @State private var cursor: ArticleQueryCursor?
+    @State private var loadedQuery: String?
+    @State private var loadedRevision: UInt64?
+    @State private var queryRunID = UUID()
+    @State private var isLoadingPage = false
+    @State private var hasMoreResults = false
+    @State private var queryError: String?
+
+    private var queryIdentity: String {
+        "\(selectedTopic ?? "Today"):\(searchText):\(themeManager.autoHideRead)"
     }
-    
+
+    var filteredArticles: [FeedArticle] { databaseResults }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            headerBar
-            
             ScrollViewReader { proxy in
                 ScrollView {
-                    if filteredArticles.isEmpty {
+                    if filteredArticles.isEmpty && isLoadingPage {
+                        ProgressView("Loading articles…").padding(AppSpacing.xl)
+                    } else if filteredArticles.isEmpty && queryError != nil {
+                        ContentUnavailableView("Couldn’t Load Articles", systemImage: "exclamationmark.triangle")
+                    } else if filteredArticles.isEmpty {
                         emptyStateView
                     } else {
                         articleGrid(proxy: proxy)
+                        if hasMoreResults {
+                            Button("Load more articles") { pageRequest += 1 }
+                                .disabled(isLoadingPage)
+                                .padding(.bottom, AppSpacing.lg)
+                        }
+                    }
+                    if let queryError {
+                        VStack(spacing: AppSpacing.sm) {
+                            Text(queryError).foregroundStyle(AppColor.secondaryText)
+                            Button("Retry") { pageRequest += 1 }
+                        }.padding()
                     }
                 }
+                .safeAreaInset(edge: .top, spacing: 0) { headerBar }
+                .softScrollEdge()
                 .focusable()
                 .focusEffectDisabled()
                 .onKeyPress { press in
@@ -107,8 +102,48 @@ struct ArticleListView: View {
                 }
             }
         }
+        .task(id: "\(queryIdentity):\(articleStore.revision):\(pageRequest)") {
+            let identity = queryIdentity
+            let runID = UUID()
+            queryRunID = runID
+            let replacesPage = cursor == nil || loadedQuery != identity || loadedRevision != articleStore.revision
+            if loadedQuery != identity { databaseResults = [] }
+            if replacesPage {
+                cursor = nil
+                hasMoreResults = false
+                loadedQuery = identity
+                loadedRevision = articleStore.revision
+            }
+            queryError = nil
+            isLoadingPage = true
+            defer { if queryRunID == runID { isLoadingPage = false } }
+            do {
+                if cursor == nil { try await Task.sleep(for: .milliseconds(180)) }
+                let fetched: [FeedArticle]
+                if !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    fetched = try await articleStore.database.searchArticles(query: searchText, limit: 201, after: cursor)
+                } else {
+                    let topic = selectedTopic ?? "Today"
+                    let read: Bool? = topic == "History" ? true :
+                        (topic == "Unread" || (themeManager.autoHideRead && topic != "Saved Stories") ? false : nil)
+                    fetched = try await articleStore.database.fetchArticles(
+                        section: topic, isRead: read, isSaved: topic == "Saved Stories" ? true : nil,
+                        limit: 201, after: cursor)
+                }
+                try Task.checkCancellation()
+                let page = Array(fetched.prefix(200))
+                if replacesPage { databaseResults = page }
+                else { databaseResults.append(contentsOf: page) }
+                cursor = page.last.map(ArticleQueryCursor.init)
+                hasMoreResults = fetched.count > 200
+            } catch is CancellationError {
+                // A newer query owns the results.
+            } catch {
+                if queryRunID == runID { queryError = "Could not load articles. Please try again." }
+            }
+        }
     }
-    
+
     // MARK: - Header Bar
     
     private var headerBar: some View {
@@ -127,7 +162,7 @@ struct ArticleListView: View {
             .accessibilityLabel("Toggle Sidebar")
             
             VStack(alignment: .leading, spacing: AppSpacing.xxs) {
-                Text(selectedTopic ?? "Today")
+                Text(searchText.isEmpty ? (selectedTopic ?? "Today") : "Search")
                     .font(AppTypography.display)
                     .foregroundStyle(AppColor.primaryText)
                 Text("\(filteredArticles.count) stories · Your personal edition")
@@ -144,6 +179,8 @@ struct ArticleListView: View {
                     .accessibilityLabel("Grid")
             }
             .pickerStyle(.segmented)
+            .labelsHidden()
+            .fixedSize()
             .frame(width: 80)
             .help("Choose list or grid layout")
 
@@ -208,10 +245,7 @@ struct ArticleListView: View {
     private var articleCards: some View {
         ForEach(filteredArticles) { article in
             ArticleCardView(article: article, isSelected: article.id == focusedArticleID, compact: !gridLayout) {
-                focusedArticleID = article.id
-                let context = filteredArticles
-                readManager.markAsRead(article.id)
-                articlePath.append(FeedArticleWrap(article: article, contextArticles: context))
+                openArticle(article)
             }
             .id(article.id)
         }
@@ -350,7 +384,8 @@ struct ArticleListView: View {
     // MARK: - Keyboard Handling
     
     private func handleKeyPress(press: KeyPress, proxy: ScrollViewProxy) -> KeyPress.Result {
-        guard articlePath.isEmpty else { return .ignored }
+        guard articlePath.isEmpty,
+              press.modifiers.intersection([.command, .control, .option]).isEmpty else { return .ignored }
         
         switch press.key {
         case .downArrow:
@@ -419,9 +454,14 @@ struct ArticleListView: View {
             articleToOpen = filteredArticles.first
         }
         guard let article = articleToOpen else { return }
+        openArticle(article)
+    }
+
+    private func openArticle(_ article: FeedArticle) {
+        let context = filteredArticles
         focusedArticleID = article.id
         readManager.markAsRead(article.id)
-        articlePath.append(FeedArticleWrap(article: article, contextArticles: filteredArticles))
+        articlePath.append(FeedArticleWrap(article: article, contextArticles: context))
     }
     
     private func refreshFeeds() {

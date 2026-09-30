@@ -51,12 +51,19 @@ actor DatabaseEngine {
         
         self.db = openDb
         
-        // Optimize SQLite for high concurrency and safety
-        try executeSimple("PRAGMA journal_mode = WAL;")
-        try executeSimple("PRAGMA synchronous = NORMAL;")
-        try executeSimple("PRAGMA foreign_keys = ON;")
-        
-        try migrateSchemaIfNeeded()
+        do {
+            // Optimize SQLite for high concurrency and safety
+            try executeSimple("PRAGMA journal_mode = WAL;")
+            try executeSimple("PRAGMA synchronous = NORMAL;")
+            try executeSimple("PRAGMA foreign_keys = ON;")
+
+            try migrateSchemaIfNeeded()
+        } catch {
+            sqlite3_close(openDb)
+            self.db = nil
+            throw error
+        }
+
     }
     
     private func migrateSchemaIfNeeded() throws {
@@ -148,21 +155,69 @@ actor DatabaseEngine {
             """
             try executeSimple(schema)
 
-            // Safe column additions for existing installations
-            let migrationCols = [
-                "ALTER TABLE article_enrichment ADD COLUMN key_points TEXT;",
-                "ALTER TABLE article_enrichment ADD COLUMN category TEXT;",
-                "ALTER TABLE article_enrichment ADD COLUMN confidence REAL;",
-                "ALTER TABLE article_enrichment ADD COLUMN model_identifier TEXT;",
-                "ALTER TABLE article_enrichment ADD COLUMN analysis_version INTEGER DEFAULT 1;"
-            ]
-            for colSql in migrationCols {
-                sqlite3_exec(db, colSql, nil, nil, nil)
-            }
-
             try setUserVersion(1)
             logger.info("Database schema migrated to version 1")
 
+        }
+        if version < 2 {
+            try beginTransaction()
+            do {
+                try executeSimple("ALTER TABLE articles ADD COLUMN reader_document TEXT;")
+                try setUserVersion(2)
+                try commitTransaction()
+            } catch {
+                try? rollbackTransaction()
+                throw error
+            }
+        }
+        if version < 3 {
+            try beginTransaction()
+            do {
+                try executeSimple("""
+                CREATE TABLE article_feeds (
+                    article_id TEXT NOT NULL REFERENCES articles(id) ON DELETE CASCADE,
+                    feed_url TEXT NOT NULL,
+                    PRIMARY KEY (article_id, feed_url)
+                );
+                CREATE INDEX idx_article_feeds_url ON article_feeds(feed_url, article_id);
+                INSERT INTO article_feeds SELECT id, feed_url FROM articles WHERE feed_url IS NOT NULL;
+                """)
+                try setUserVersion(3)
+                try commitTransaction()
+            } catch {
+                try? rollbackTransaction()
+                throw error
+            }
+        }
+        if version < 4 {
+            try beginTransaction()
+            do {
+                var statement: OpaquePointer?
+                guard sqlite3_prepare_v2(db, "PRAGMA table_info(article_enrichment);", -1, &statement, nil) == SQLITE_OK else {
+                    throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Cannot inspect enrichment schema"])
+                }
+                var columns = Set<String>()
+                var status = sqlite3_step(statement)
+                while status == SQLITE_ROW {
+                    if let name = sqlite3_column_text(statement, 1) { columns.insert(String(cString: name)) }
+                    status = sqlite3_step(statement)
+                }
+                sqlite3_finalize(statement)
+                guard status == SQLITE_DONE else {
+                    throw NSError(domain: "DatabaseEngine", code: Int(status), userInfo: [NSLocalizedDescriptionKey: "Cannot read enrichment schema"])
+                }
+                for (name, definition) in [
+                    ("key_points", "TEXT"), ("category", "TEXT"), ("confidence", "REAL"),
+                    ("model_identifier", "TEXT"), ("analysis_version", "INTEGER DEFAULT 1")
+                ] where !columns.contains(name) {
+                    try executeSimple("ALTER TABLE article_enrichment ADD COLUMN \(name) \(definition);")
+                }
+                try setUserVersion(4)
+                try commitTransaction()
+            } catch {
+                try? rollbackTransaction()
+                throw error
+            }
         }
     }
     
@@ -217,23 +272,25 @@ actor DatabaseEngine {
 
         try beginTransaction()
         defer {
-            // Note: If an error is thrown, the caller can catch and rollback,
-            // or the transaction will auto-rollback on error.
+            if sqlite3_get_autocommit(db) == 0 { try? rollbackTransaction() }
         }
         
         let articleSql = """
         INSERT INTO articles (
             id, guid, canonical_url, title, description, content,
             published_at, source, image_url, category, feed_url,
-            created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            created_at, updated_at, reader_document
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
             title = excluded.title,
             source = excluded.source,
             description = excluded.description,
-            content = coalesce(excluded.content, articles.content),
+            content = CASE WHEN articles.reader_document IS NOT NULL AND excluded.reader_document IS NULL
+                THEN articles.content ELSE coalesce(excluded.content, articles.content) END,
+            reader_document = coalesce(excluded.reader_document, articles.reader_document),
             image_url = coalesce(excluded.image_url, articles.image_url),
             category = coalesce(excluded.category, articles.category),
+            feed_url = coalesce(articles.feed_url, excluded.feed_url),
             updated_at = excluded.updated_at;
         """
         
@@ -256,6 +313,7 @@ actor DatabaseEngine {
         var artStmt: OpaquePointer?
         var stateStmt: OpaquePointer?
         var enrichStmt: OpaquePointer?
+        var feedStmt: OpaquePointer?
         
         guard sqlite3_prepare_v2(db, articleSql, -1, &artStmt, nil) == SQLITE_OK,
               sqlite3_prepare_v2(db, stateSql, -1, &stateStmt, nil) == SQLITE_OK,
@@ -273,13 +331,18 @@ actor DatabaseEngine {
             sqlite3_finalize(enrichStmt)
         }
         
+        guard sqlite3_prepare_v2(db, "INSERT OR IGNORE INTO article_feeds(article_id, feed_url) VALUES (?, ?);", -1, &feedStmt, nil) == SQLITE_OK else {
+            throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to prepare feed association"])
+        }
+        defer { sqlite3_finalize(feedStmt) }
         let now = Date().timeIntervalSince1970
-        
+
         for article in articles {
+            try Task.checkCancellation()
             let id = article.id
             let canonical = article.normalizedLink
             let pubDate = article.pubDate.timeIntervalSince1970
-            
+
             // 1. Insert/Update Article
             sqlite3_reset(artStmt)
             sqlite3_bind_text(artStmt, 1, id, -1, Self.SQLITE_TRANSIENT)
@@ -295,12 +358,25 @@ actor DatabaseEngine {
             if let f = feedUrl { sqlite3_bind_text(artStmt, 11, f, -1, Self.SQLITE_TRANSIENT) } else { sqlite3_bind_null(artStmt, 11) }
             sqlite3_bind_double(artStmt, 12, now)
             sqlite3_bind_double(artStmt, 13, now)
-            
+            if let document = article.readerDocument {
+                let encoded = String(decoding: try JSONEncoder().encode(document), as: UTF8.self)
+                sqlite3_bind_text(artStmt, 14, encoded, -1, Self.SQLITE_TRANSIENT)
+            } else { sqlite3_bind_null(artStmt, 14) }
+
             if sqlite3_step(artStmt) != SQLITE_DONE {
                 try rollbackTransaction()
                 throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to step article insert"])
             }
-            
+
+            if let feedUrl {
+                sqlite3_reset(feedStmt)
+                sqlite3_bind_text(feedStmt, 1, id, -1, Self.SQLITE_TRANSIENT)
+                sqlite3_bind_text(feedStmt, 2, feedUrl, -1, Self.SQLITE_TRANSIENT)
+                guard sqlite3_step(feedStmt) == SQLITE_DONE else {
+                    throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to persist feed association"])
+                }
+            }
+
             // 2. Insert State (preserves existing read/saved state on conflict)
             sqlite3_reset(stateStmt)
             sqlite3_bind_text(stateStmt, 1, id, -1, Self.SQLITE_TRANSIENT)
@@ -308,7 +384,7 @@ actor DatabaseEngine {
                 try rollbackTransaction()
                 throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to step state insert"])
             }
-            
+
             // 3. Insert Enrichment
             sqlite3_reset(enrichStmt)
             sqlite3_bind_text(enrichStmt, 1, id, -1, Self.SQLITE_TRANSIENT)
@@ -325,6 +401,7 @@ actor DatabaseEngine {
             }
         }
         
+        try Task.checkCancellation()
         try commitTransaction()
     }
     
@@ -334,7 +411,8 @@ actor DatabaseEngine {
         section: String? = nil,
         isRead: Bool? = nil,
         isSaved: Bool? = nil,
-        limit: Int? = 500
+        limit: Int? = 500,
+        after: ArticleQueryCursor? = nil
     ) throws -> [FeedArticle] {
         guard let db = db else { throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Database not open"]) }
         
@@ -343,7 +421,7 @@ actor DatabaseEngine {
                a.published_at, a.source, a.image_url, a.category,
                ae.summary, ae.content_fetched,
                s.is_read, s.is_saved,
-               ae.key_points, ae.entities, ae.sentiment
+               ae.key_points, ae.entities, ae.sentiment, a.reader_document
         FROM articles a
         JOIN article_state s ON s.article_id = a.id
         LEFT JOIN article_enrichment ae ON ae.article_id = a.id
@@ -363,14 +441,17 @@ actor DatabaseEngine {
             params.append(("int", saved ? 1 : 0))
         }
         
-        if let sec = section, sec != "Today" && sec != "Unread" && sec != "Saved Stories" && sec != "History" {
-            query += " AND (a.category = ? OR a.title LIKE ? OR a.description LIKE ?)"
-            params.append(("text", sec))
-            params.append(("text", "%\(sec)%"))
-            params.append(("text", "%\(sec)%"))
+        if let sec = section, !["Today", "Unread", "Saved Stories", "History"].contains(sec) {
+            let terms = ArticleSection.keywords[sec] ?? [sec.lowercased()]
+            query += " AND (" + terms.map { _ in "instr(lower(a.title || ' ' || coalesce(a.description, '') || ' ' || coalesce(a.category, '')), ?) > 0" }.joined(separator: " OR ") + ")"
+            params += terms.map { ("text", $0) }
         }
-        
-        query += " ORDER BY a.published_at DESC"
+        if let after {
+            query += " AND (a.published_at < ? OR (a.published_at = ? AND a.id > ?))"
+            params += [("double", after.value), ("double", after.value), ("text", after.id)]
+        }
+
+        query += " ORDER BY a.published_at DESC, a.id"
         
         if let lim = limit {
             query += " LIMIT ?"
@@ -388,16 +469,22 @@ actor DatabaseEngine {
             let col = Int32(idx + 1)
             if p.type == "int", let v = p.val as? Int {
                 sqlite3_bind_int(stmt, col, Int32(v))
+            } else if p.type == "double", let v = p.val as? Double {
+                sqlite3_bind_double(stmt, col, v)
             } else if p.type == "text", let v = p.val as? String {
                 sqlite3_bind_text(stmt, col, v, -1, Self.SQLITE_TRANSIENT)
             }
         }
         
         var results: [FeedArticle] = []
-        while sqlite3_step(stmt) == SQLITE_ROW {
-            if let article = parseArticleRow(stmt) {
-                results.append(article)
-            }
+        var status = sqlite3_step(stmt)
+        while status == SQLITE_ROW {
+            try Task.checkCancellation()
+            if let article = parseArticleRow(stmt) { results.append(article) }
+            status = sqlite3_step(stmt)
+        }
+        guard status == SQLITE_DONE else {
+            throw NSError(domain: "DatabaseEngine", code: Int(status), userInfo: [NSLocalizedDescriptionKey: String(cString: sqlite3_errmsg(db))])
         }
         
         return results
@@ -407,49 +494,33 @@ actor DatabaseEngine {
     
     func searchArticles(
         query: String,
-        limit: Int = 100
+        limit: Int = 100,
+        after: ArticleQueryCursor? = nil
     ) throws -> [FeedArticle] {
         guard let db = db else { throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Database not open"]) }
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return [] }
         
-        // Parse search operators (e.g., source:bbc, category:tech, is:read, is:unread, is:saved)
-        var sourceFilter: String?
-        var categoryFilter: String?
-        var readFilter: Bool?
-        var savedFilter: Bool?
-        var cleanTerms: [String] = []
-        
-        let tokens = trimmed.components(separatedBy: .whitespaces)
-        for token in tokens {
-            let lower = token.lowercased()
-            if lower.hasPrefix("source:") {
-                sourceFilter = String(token.dropFirst(7))
-            } else if lower.hasPrefix("category:") {
-                categoryFilter = String(token.dropFirst(9))
-            } else if lower == "is:read" {
-                readFilter = true
-            } else if lower == "is:unread" {
-                readFilter = false
-            } else if lower == "is:saved" {
-                savedFilter = true
-            } else {
-                cleanTerms.append(token)
-            }
-        }
-        
+        let parsed = ArticleFilterQuery.parse(trimmed)
+        let sourceFilter = parsed.sourceFilter
+        let categoryFilter = parsed.categoryFilter
+        let readFilter = parsed.isReadFilter
+        let savedFilter = parsed.isSavedFilter
+        let cleanTerms = parsed.terms
+
         var sql = """
         SELECT a.id, a.guid, a.canonical_url, a.title, a.description, a.content,
                a.published_at, a.source, a.image_url, a.category,
                ae.summary, ae.content_fetched,
                s.is_read, s.is_saved,
-               ae.key_points, ae.entities, ae.sentiment
+               ae.key_points, ae.entities, ae.sentiment, a.reader_document
         FROM articles a
         JOIN article_state s ON s.article_id = a.id
         LEFT JOIN article_enrichment ae ON ae.article_id = a.id
         """
 
         
+        sql = sql.replacingOccurrences(of: "a.reader_document\n", with: "a.reader_document, " + (cleanTerms.isEmpty ? "a.published_at" : "fts.rank") + "\n")
         var params: [(type: String, val: Any)] = []
         
         let hasFTS = !cleanTerms.isEmpty
@@ -458,7 +529,7 @@ actor DatabaseEngine {
             // Sanitize FTS search term: wrap terms with quotes or escape special FTS characters
             let sanitizedFtsTerm = cleanTerms.map { term in
                 let cleaned = term.replacingOccurrences(of: "\"", with: "")
-                return "\"\(cleaned)*\""
+                return "\"\(cleaned)\"*"
             }.joined(separator: " ")
             params.append(("text", sanitizedFtsTerm))
         } else {
@@ -482,10 +553,18 @@ actor DatabaseEngine {
             params.append(("int", sv ? 1 : 0))
         }
         
+        if let after {
+            if hasFTS {
+                sql += " AND (fts.rank > ? OR (fts.rank = ? AND a.id > ?))"
+            } else {
+                sql += " AND (a.published_at < ? OR (a.published_at = ? AND a.id > ?))"
+            }
+            params += [("double", after.value), ("double", after.value), ("text", after.id)]
+        }
         if hasFTS {
-            sql += " ORDER BY fts.rank LIMIT ?"
+            sql += " ORDER BY fts.rank, a.id LIMIT ?"
         } else {
-            sql += " ORDER BY a.published_at DESC LIMIT ?"
+            sql += " ORDER BY a.published_at DESC, a.id LIMIT ?"
         }
         params.append(("int", limit))
         
@@ -500,16 +579,25 @@ actor DatabaseEngine {
             let col = Int32(idx + 1)
             if p.type == "int", let v = p.val as? Int {
                 sqlite3_bind_int(stmt, col, Int32(v))
+            } else if p.type == "double", let v = p.val as? Double {
+                sqlite3_bind_double(stmt, col, v)
             } else if p.type == "text", let v = p.val as? String {
                 sqlite3_bind_text(stmt, col, v, -1, Self.SQLITE_TRANSIENT)
             }
         }
         
         var results: [FeedArticle] = []
-        while sqlite3_step(stmt) == SQLITE_ROW {
-            if let article = parseArticleRow(stmt) {
+        var status = sqlite3_step(stmt)
+        while status == SQLITE_ROW {
+            try Task.checkCancellation()
+            if var article = parseArticleRow(stmt) {
+                article.queryOrderValue = sqlite3_column_double(stmt, 18)
                 results.append(article)
             }
+            status = sqlite3_step(stmt)
+        }
+        guard status == SQLITE_DONE else {
+            throw NSError(domain: "DatabaseEngine", code: Int(status), userInfo: [NSLocalizedDescriptionKey: String(cString: sqlite3_errmsg(db))])
         }
         return results
     }
@@ -627,33 +715,28 @@ actor DatabaseEngine {
     
     func markAllRead(feedUrl: String? = nil) throws {
         guard let db = db else { throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Database not open"]) }
-        let now = Date().timeIntervalSince1970
-        var sql = "UPDATE article_state SET is_read = 1, read_at = ?"
-        if let f = feedUrl {
-            sql += " WHERE article_id IN (SELECT id FROM articles WHERE feed_url = ?);"
-            var stmt: OpaquePointer?
-            if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
-                defer { sqlite3_finalize(stmt) }
-                sqlite3_bind_double(stmt, 1, now)
-                sqlite3_bind_text(stmt, 2, f, -1, Self.SQLITE_TRANSIENT)
-                sqlite3_step(stmt)
-            }
-        } else {
-            sql += ";"
-            var stmt: OpaquePointer?
-            if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
-                defer { sqlite3_finalize(stmt) }
-                sqlite3_bind_double(stmt, 1, now)
-                sqlite3_step(stmt)
-            }
+        let sql = "UPDATE article_state SET is_read = 1, read_at = ?" +
+            (feedUrl == nil ? ";" : " WHERE article_id IN (SELECT article_id FROM article_feeds WHERE feed_url = ?);")
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw NSError(domain: "DatabaseEngine", code: Int(sqlite3_errcode(db)), userInfo: [NSLocalizedDescriptionKey: String(cString: sqlite3_errmsg(db))])
+        }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_double(stmt, 1, Date().timeIntervalSince1970)
+        if let feedUrl { sqlite3_bind_text(stmt, 2, feedUrl, -1, Self.SQLITE_TRANSIENT) }
+        guard sqlite3_step(stmt) == SQLITE_DONE else {
+            throw NSError(domain: "DatabaseEngine", code: Int(sqlite3_errcode(db)), userInfo: [NSLocalizedDescriptionKey: String(cString: sqlite3_errmsg(db))])
         }
     }
     
     func toggleSaved(articleId: String) throws -> Bool {
+        let next = try !isSaved(articleId: articleId)
+        try setSaved(articleId: articleId, isSaved: next)
+        return next
+    }
+
+    func setSaved(articleId: String, isSaved: Bool) throws {
         guard let db = db else { throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Database not open"]) }
-        let current = try isSaved(articleId: articleId)
-        let next = !current
-        
         let sql = """
         INSERT INTO article_state (article_id, is_read, is_saved, read_at, saved_at)
         VALUES (?, 0, ?, NULL, ?)
@@ -669,8 +752,8 @@ actor DatabaseEngine {
         
         let now = Date().timeIntervalSince1970
         sqlite3_bind_text(stmt, 1, articleId, -1, Self.SQLITE_TRANSIENT)
-        sqlite3_bind_int(stmt, 2, next ? 1 : 0)
-        if next {
+        sqlite3_bind_int(stmt, 2, isSaved ? 1 : 0)
+        if isSaved {
             sqlite3_bind_double(stmt, 3, now)
         } else {
             sqlite3_bind_null(stmt, 3)
@@ -679,7 +762,6 @@ actor DatabaseEngine {
         if sqlite3_step(stmt) != SQLITE_DONE {
             throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to execute toggleSaved"])
         }
-        return next
     }
     
     func isRead(articleId: String) throws -> Bool {
@@ -740,7 +822,8 @@ actor DatabaseEngine {
         entities: [String]? = nil,
         topics: [String]? = nil,
         content: String? = nil,
-        image: String? = nil
+        image: String? = nil,
+        readerDocument: ReaderDocument? = nil
     ) throws {
         guard let db = db else { throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Database not open"]) }
         
@@ -755,6 +838,12 @@ actor DatabaseEngine {
             if let c = content {
                 updates.append("content = ?")
                 params.append(("text", c))
+                if let readerDocument {
+                    updates.append("reader_document = ?")
+                    params.append(("text", String(decoding: try JSONEncoder().encode(readerDocument), as: UTF8.self)))
+                } else {
+                    updates.append("reader_document = NULL")
+                }
             }
             if let img = image {
                 updates.append("image_url = coalesce(image_url, ?)")
@@ -762,7 +851,7 @@ actor DatabaseEngine {
             }
             updates.append("updated_at = ?")
             params.append(("double", Date().timeIntervalSince1970))
-            
+
             let artSql = "UPDATE articles SET \(updates.joined(separator: ", ")) WHERE id = ?;"
             var artStmt: OpaquePointer?
             if sqlite3_prepare_v2(db, artSql, -1, &artStmt, nil) == SQLITE_OK {
@@ -950,32 +1039,30 @@ actor DatabaseEngine {
     /// Clears persisted article body text from local storage.
     /// Preserves subscriptions, saved stories, and read history markers.
     func clearArticleCache() throws {
-        guard db != nil else { return }
-        try executeSimple("""
-        BEGIN TRANSACTION;
-        UPDATE articles SET content = NULL WHERE id NOT IN (SELECT article_id FROM article_state WHERE is_saved = 1);
-        DELETE FROM article_enrichment WHERE article_id NOT IN (SELECT article_id FROM article_state WHERE is_saved = 1);
-        COMMIT;
-        """)
-        logger.info("Cleared non-saved article content cache.")
+        try beginTransaction()
+        do {
+            try executeSimple("UPDATE articles SET content = NULL, reader_document = NULL WHERE id NOT IN (SELECT article_id FROM article_state WHERE is_saved = 1);")
+            try executeSimple("DELETE FROM article_enrichment WHERE article_id NOT IN (SELECT article_id FROM article_state WHERE is_saved = 1);")
+            try commitTransaction()
+        } catch {
+            try? rollbackTransaction()
+            throw error
+        }
     }
 
-    /// Completely purges all cached articles, state, and enrichment.
-    /// Strictly preserves subscribed feed URLs and user settings.
+    /// Clears replaceable data; article headers, read history and saved bodies are user data.
     func clearAllDatabaseCache() throws {
-        guard db != nil else { return }
-        try executeSimple("""
-        BEGIN TRANSACTION;
-        DELETE FROM article_enrichment;
-        DELETE FROM article_state WHERE is_saved = 0;
-        DELETE FROM articles WHERE id NOT IN (SELECT article_id FROM article_state WHERE is_saved = 1);
-        DELETE FROM articles_fts WHERE article_id NOT IN (SELECT article_id FROM article_state WHERE is_saved = 1);
-        COMMIT;
-        VACUUM;
-        """)
-        logger.info("Executed full database cache purge with VACUUM.")
+        try beginTransaction()
+        do {
+            try executeSimple("DELETE FROM article_enrichment;")
+            try executeSimple("UPDATE articles SET content = NULL, reader_document = NULL WHERE id NOT IN (SELECT article_id FROM article_state WHERE is_saved = 1);")
+            try commitTransaction()
+        } catch {
+            try? rollbackTransaction()
+            throw error
+        }
     }
-    
+
     // MARK: - Retention Policy & Pruning
 
     
@@ -1104,7 +1191,10 @@ actor DatabaseEngine {
             keyPoints: keyPoints,
             entities: entities,
             sentimentScore: sentimentScore,
-            sentimentLabel: sentimentLabel
+            sentimentLabel: sentimentLabel,
+            readerDocument: sqlite3_column_text(stmt, 17).flatMap {
+                try? JSONDecoder().decode(ReaderDocument.self, from: Data(String(cString: $0).utf8))
+            }
         )
     }
 

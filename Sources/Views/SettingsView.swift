@@ -119,7 +119,7 @@ struct SettingsView: View {
                 Button {
                     OPMLDialogs.importOPML { data in
                         let count = feedManager.importFeeds(from: data)
-                        opmlStatusMessage = "Imported \(count) feed(s)"
+                        opmlStatusMessage = count > 0 ? "Imported \(count) feed(s)" : "No new feeds imported."
                         DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
                             opmlStatusMessage = nil
                         }
@@ -559,7 +559,7 @@ struct SettingsView: View {
                         Text("Purge All Caches")
                             .font(.system(size: 13, weight: .semibold))
                             .foregroundColor(AppColor.danger)
-                        Text("Purges web cache, article content, and AI analysis. Preserves subscriptions.")
+                        Text("Purges web cache, article content, and AI analysis. Preserves subscriptions, saved stories, and read history.")
                             .font(.caption)
                             .foregroundColor(AppColor.secondaryText)
                     }
@@ -695,26 +695,38 @@ struct SettingsView: View {
 
     private func clearAIData() {
         Task {
-            await articleStore.clearAIAnalysis()
-            calculateStorageSizes()
-            showActionMessage("AI analysis data cleared.")
+            do {
+                try await articleStore.clearAIAnalysis()
+                calculateStorageSizes()
+                showActionMessage("AI analysis data cleared.")
+            } catch {
+                showActionMessage("Cache cleanup failed: \(error.localizedDescription)")
+            }
         }
     }
 
     private func clearArticleData() {
         Task {
-            await articleStore.clearArticleCache()
-            calculateStorageSizes()
-            showActionMessage("Article body cache cleared.")
+            do {
+                try await articleStore.clearArticleCache()
+                calculateStorageSizes()
+                showActionMessage("Article body cache cleared.")
+            } catch {
+                showActionMessage("Cache cleanup failed: \(error.localizedDescription)")
+            }
         }
     }
 
     private func clearEverythingData() {
         Task {
             CacheManager.shared.clearWebCache()
-            await articleStore.clearAllDatabaseCache()
-            calculateStorageSizes()
-            showActionMessage("All local caches cleared.")
+            do {
+                try await articleStore.clearAllDatabaseCache()
+                calculateStorageSizes()
+                showActionMessage("All local caches cleared.")
+            } catch {
+                showActionMessage("Cache cleanup failed: \(error.localizedDescription)")
+            }
         }
     }
 

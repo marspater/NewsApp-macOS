@@ -67,8 +67,8 @@ public final class CacheManager: @unchecked Sendable {
         logger.info("Cleared article cache via CacheManager.")
     }
 
-    /// Completely purges web cache and all cached database articles, state, and enrichment.
-    /// Strictly preserves subscribed feed URLs and user settings. Runs VACUUM on SQLite database.
+    /// Clears replaceable network, body and analysis caches.
+    /// Preserves subscriptions, article headers, read history and saved bodies.
     func clearEverything(database: DatabaseEngine = DatabaseEngine.shared) async throws {
         clearWebCache()
         try await database.clearAllDatabaseCache()

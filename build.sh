@@ -13,7 +13,7 @@ export CLANG_MODULE_CACHE_PATH="${CLANG_MODULE_CACHE_PATH:-${TMPDIR:-/tmp}/news-
 export SWIFT_MODULECACHE_PATH="$CLANG_MODULE_CACHE_PATH"
 
 
-echo "Building ${APP_NAME} v2.0 for macOS ${TARGET_MACOS} ($(uname -m))..."
+echo "Building ${APP_NAME} v2.0 for macOS ${TARGET_MACOS} (arm64)..."
 
 # Clean old build
 rm -rf "${APP_DIR}"
@@ -26,12 +26,12 @@ mkdir -p Assets
 cp container-migration.plist PrivacyInfo.xcprivacy "${RESOURCES_DIR}/"
 
 # Compile the editable Icon Composer source, including legacy macOS fallback.
-xcrun actool Assets/AppIcon.icon --compile "${RESOURCES_DIR}" \
+xcrun actool "$(pwd)/Assets/AppIcon.icon" --compile "$(pwd)/${RESOURCES_DIR}" \
     --platform macosx --minimum-deployment-target "${TARGET_MACOS}" \
-    --app-icon AppIcon --output-partial-info-plist "${CONTENTS_DIR}/IconInfo.plist"
+    --app-icon AppIcon --output-partial-info-plist "$(pwd)/${CONTENTS_DIR}/IconInfo.plist"
 
 # Compile Swift files (exclude any standalone scripts)
-swiftc -swift-version 6 -O -parse-as-library -target $(uname -m)-apple-macos${TARGET_MACOS} \
+swiftc -swift-version 6 -O -parse-as-library -target arm64-apple-macos${TARGET_MACOS} \
     Sources/Services/DateParser.swift \
     Sources/Models/FeedError.swift \
     Sources/Services/IPAddressValidator.swift \
@@ -42,6 +42,8 @@ swiftc -swift-version 6 -O -parse-as-library -target $(uname -m)-apple-macos${TA
     Sources/Intelligence/ArticleIntelligence.swift \
     Sources/Intelligence/ContentExtractionPipeline.swift \
     Sources/Intelligence/EnrichmentQueue.swift \
+    Sources/Services/NetworkBoundaryProxy.swift \
+    Sources/Views/WebPreviewPolicy.swift \
     Sources/Services/SecureHTTPClient.swift \
     Sources/App/AppSettings.swift \
     Sources/Services/FeedXMLParser.swift \
@@ -120,5 +122,7 @@ rm -rf "${SIGN_TMP}"
 
 # Force Finder to refresh the app icon cache
 touch "${APP_DIR}"
+
+codesign --verify --deep --strict "${APP_DIR}"
 
 echo "Build complete. App is ready at ${APP_DIR}!"

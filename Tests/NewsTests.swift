@@ -1,6 +1,9 @@
 // NewsTests.swift
 
 import Foundation
+import Network
+import WebKit
+import SQLite3
 
 // MARK: - MockURLProtocol for Testing
 class MockURLProtocol: URLProtocol, @unchecked Sendable {
@@ -90,7 +93,9 @@ struct NewsTests {
         await testAppSettingsDecoupling()
         await testDateParsing()
         await testReaderParsingRegressions()
+        await testStructuredReaderAndTags()
         await testReaderStoreUpdates()
+        await testProductionFollowupRegressions()
         await testXMLParsing()
         await testJSONParsing()
         await testNavigationCommands()
@@ -110,7 +115,9 @@ struct NewsTests {
         await testDistributionAndEntitlementsIntegrity()
         await testStrictSemVerAndReleaseSecurity()
         await testNotificationModeTriageAndGrammar()
+        await testSocketNetworkBoundary()
         await testRefreshCoordinatorSingleFlightCoalescing()
+        await testFeedRemovalAndShutdown()
         await testSignpostHelperExecution()
         await testAppSettingsIsolationAndURLNormalization()
         await testFixedTaxonomyAndCaseInsensitivity()
@@ -135,6 +142,15 @@ struct NewsTests {
         if ProcessInfo.processInfo.environment["NEWS_LIVE_READER_CHECK"] == "1" {
             await testLiveReader()
         }
+        if let snapshot = ProcessInfo.processInfo.environment["NEWS_SNAPSHOT_DB"] {
+            let database = DatabaseEngine(path: snapshot)
+            try! await database.open()
+            let articles = try! await database.fetchArticles(limit: 500)
+            assertFalse(articles.isEmpty, "Migrated snapshot must display stored articles")
+            let counts = try! await database.counts()
+            print("  - Migrated isolated snapshot: \(counts.total) stories, \(counts.saved) saved")
+            await database.close()
+        }
         print("✅ SUCCESS: All tests passed!")
     }
 
@@ -146,7 +162,7 @@ struct NewsTests {
         defer { defaults.removePersistentDomain(forName: suiteName) }
         let store = ArticleStore(database: DatabaseEngine(path: ":memory:"))
         await store.initialize()
-        let manager = FeedManager(settings: AppSettings(defaults: defaults), store: store)
+        let manager = FeedManager(settings: AppSettings(defaults: defaults), store: store, schedulesRefresh: false)
         let article = FeedArticle(title: "Report", link: "https://example.com/report", guid: "reader-test", description: "Preview", pubDate: Date(), source: "Publisher")
         await store.batchUpsert(articles: [article])
         await store.updateEnrichment(id: article.id, category: "Science", content: "The complete publisher article.")
@@ -167,7 +183,107 @@ struct NewsTests {
         task.cancel()
     }
 
+    @MainActor
+    static func testProductionFollowupRegressions() async {
+        print("  - Testing cache rollback, ordered mutations, saved analysis and update failures...")
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try! FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let path = directory.appendingPathComponent("regression.sqlite").path
+        let db = DatabaseEngine(path: path)
+        let store = ArticleStore(database: db)
+        await store.initialize()
+        assertTrue(store.migrationCoordinator == nil, "Injected stores must not migrate real user defaults or caches")
+        let article = FeedArticle(title: "Archived report", link: "https://example.com/archive", guid: "archived", description: "Preview", pubDate: .distantPast, source: "Publisher", fullContent: "Preserve this body")
+        await store.batchUpsert(articles: [article], feedUrl: "https://example.com/rss")
+        let reads = ReadManager(articleStore: store)
+        let saves = SavedStoriesManager(articleStore: store)
+        for _ in 0..<20 {
+            reads.toggleRead(article.id)
+            saves.save(article)
+            saves.remove(article)
+        }
+        reads.markAsRead(article.id)
+        saves.save(article)
+        await reads.waitForPendingChanges()
+        await saves.waitForPendingChanges()
+        assertTrue(try! await db.isSaved(articleId: article.id), "Latest rapid save intent persists")
+        assertTrue(try! await db.getReadArticleIDs().contains(article.id), "Latest rapid read intent persists")
+        let analysis = ArticleAnalysis(summary: "New summary", keyPoints: ["Finding"], entities: [], category: "Science", sentiment: nil, modelIdentifier: "test", analysisVersion: 2)
+        await store.saveArticleAnalysis(analysis, for: article.id)
+        assertEqual(store.savedArticles.first?.aiSummary, "New summary", "Saved snapshot receives new analysis")
+        await store.setSaved(article: article, isSaved: false)
+        var connection: OpaquePointer?
+        assertEqual(sqlite3_open(path, &connection), SQLITE_OK, "Open isolated failure-injection database")
+        defer { sqlite3_close(connection) }
+        assertEqual(sqlite3_exec(connection, "CREATE TRIGGER fail_cache BEFORE DELETE ON article_enrichment BEGIN SELECT RAISE(ABORT, 'simulated disk failure'); END;", nil, nil, nil), SQLITE_OK, "Install rollback regression trigger")
+        do {
+            try await store.clearArticleCache()
+            assertTrue(false, "Cache failures must reach the caller")
+        } catch {}
+        let restored = try! await db.fetchArticles(limit: 10)
+        assertEqual(restored.first?.fullContent, "Preserve this body", "Failed cleanup rolls back the preceding content update")
+        assertEqual(sqlite3_exec(connection, "DROP TRIGGER fail_cache;", nil, nil, nil), SQLITE_OK, "Remove isolated failure trigger")
+        try! await store.clearAllDatabaseCache()
+        assertTrue(try! await db.getReadArticleIDs().contains(article.id), "All-cache cleanup preserves read history")
+        try! await db.markAllRead(feedUrl: "https://example.com/rss")
+
+        var recent: [FeedArticle] = []
+        for number in 0..<510 {
+            recent.append(FeedArticle(title: "Recent \(number)", link: "https://example.com/\(number)", guid: "recent-\(number)", description: "Recent", pubDate: Date(), source: "Publisher"))
+        }
+        try! await db.upsertArticles(recent)
+        let history = try! await db.fetchArticles(isRead: true, limit: 200)
+        assertTrue(history.contains(where: { $0.id == article.id }), "History queries include stories beyond the recent 500")
+        let found = try! await db.searchArticles(query: "Archived", limit: 200)
+        assertEqual(found.first?.id, article.id, "Search reaches archived stories")
+        assertEqual(try! await db.searchArticles(query: "Archiv", limit: 200).first?.id, article.id, "FTS prefix search matches unfinished words")
+        try! await db.markRead(articleId: article.id, isRead: false)
+        try! await db.upsertArticles([article], feedUrl: "https://example.com/second-rss")
+        try! await db.markAllRead(feedUrl: "https://example.com/rss")
+        assertTrue(try! await db.getReadArticleIDs().contains(article.id), "Duplicate ingestion preserves original feed provenance")
+        try! await db.markRead(articleId: article.id, isRead: false)
+        try! await db.markAllRead(feedUrl: "https://example.com/second-rss")
+        assertTrue(try! await db.getReadArticleIDs().contains(article.id), "Shared stories belong to every originating feed")
+        let firstPage = try! await db.fetchArticles(limit: 200)
+        let secondPage = try! await db.fetchArticles(limit: 200, after: ArticleQueryCursor(firstPage.last!))
+        let thirdPage = try! await db.fetchArticles(limit: 200, after: ArticleQueryCursor(secondPage.last!))
+        assertEqual(Set((firstPage + secondPage + thirdPage).map(\.id)).count, 511, "Keyset pages include all stories without duplicates at tied dates")
+        let searchPage = try! await db.searchArticles(query: "Recent", limit: 200)
+        let searchNext = try! await db.searchArticles(query: "Recent", limit: 400, after: ArticleQueryCursor(searchPage.last!))
+        assertEqual(Set((searchPage + searchNext).map(\.id)).count, 510, "FTS rank cursor handles tied ranks without omissions")
+        await db.close()
+
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [MockURLProtocol.self]
+        let session = URLSession(configuration: config)
+        defer { session.invalidateAndCancel(); MockURLProtocol.requestHandler = nil }
+        let checker = UpdateChecker(session: session)
+        checker.updateAvailable = true
+        checker.verifiedReleaseURL = URL(string: "https://github.com/marspater/NewsApp-macOS/releases/latest")
+        MockURLProtocol.requestHandler = { _ in throw URLError(.notConnectedToInternet) }
+        await checker.checkForUpdates(userInitiated: true)
+        assertFalse(checker.updateAvailable, "Failed update checks clear stale availability")
+        assertTrue(checker.verifiedReleaseURL == nil, "Failed update checks clear stale release links")
+        MockURLProtocol.requestHandler = { request in
+            (HTTPURLResponse(url: request.url!, statusCode: 404, httpVersion: nil, headerFields: nil)!, Data())
+        }
+        await checker.checkForUpdates(userInitiated: true)
+        assertEqual(checker.statusMessage, "No published release is available to compare.", "Missing releases are not reported as up to date")
+    }
+
     static func testLiveReader() async {
+        for link in ["https://www.bbc.co.uk/news/articles/c6jdvmy1287yo", "https://www.bbc.co.uk/news/articles/cm750pyz5r0eo"] {
+            let outcome = await ContentExtractionPipeline.shared.extractArticleDetailed(from: link)
+            guard case .success(let content, _, let document) = outcome else {
+                assertTrue(false, "BBC reader regression must extract publisher prose")
+                continue
+            }
+            assertTrue(document != nil, "Live publisher retains reader structure")
+            assertFalse(content.contains("Get in touch"), "BBC contact furniture excluded")
+            assertFalse(content.contains("17:45 weekdays"), "BBC listening promotion excluded")
+        }
+
         for url in ["https://www.theguardian.com/world/rss", "https://feeds.arstechnica.com/arstechnica/index", "https://www.nasa.gov/feed/"] {
             let result = await FeedFetcher.shared.fetchSingleFeed(urlString: url)
             assertTrue(result.error == nil, "Live feed fetch must succeed for \(url)")
@@ -212,11 +328,96 @@ struct NewsTests {
         let broken = FeedXMLParser(data: Data("<rss><channel><item>".utf8))
         assertTrue(broken.parse().isEmpty && broken.parseError != nil, "Malformed feeds report a parsing failure")
         let json = """
-        {"version":"https://jsonfeed.org/version/1.1","items":[{"id":"1","url":"https://example.com/1","content_text":"Use x < y and y > z."}]}
+        {"version":"https://jsonfeed.org/version/1.1","items":[{"id":"1","url":"https://example.com/1","content_text":"Use x < y and y > z.","summary":"Use x < y and y > z. Keep &amp; literal."},{"id":"2","url":"https://example.com/2","description":"<p>Legacy <b>HTML</b> &amp; text.</p>"}]}
         """
         let textArticle = JSONFeedParser.parse(data: Data(json.utf8), feedURL: "https://example.com/feed")?.first
         assertEqual(textArticle?.fullContent, "Use x < y and y > z.", "JSON plain text must never pass through HTML stripping")
         assertEqual(textArticle?.contentFetched, true, "Short explicit feed content is readable")
+        assertEqual(textArticle?.description, "Use x < y and y > z. Keep &amp; literal.", "JSON summaries preserve plain text comparisons and literal entities")
+        let legacyArticle = JSONFeedParser.parse(data: Data(json.utf8), feedURL: "https://example.com/feed")?.last
+        assertEqual(legacyArticle?.description, "Legacy HTML & text.", "Legacy JSON descriptions retain HTML cleanup")
+    }
+
+    static func testStructuredReaderAndTags() async {
+        let first = "The central bank published its quarterly report with detailed forecasts for inflation and employment across the economy."
+        let second = "Independent economists reviewed the figures and described the outlook as stable, with further updates expected next month."
+        let html = """
+        <main><article><p>\(first)</p><h2>What changes?</h2><p>\(second)</p>
+        <ol start="3"><li>Lower fees</li><li>Faster payments</li></ol>
+        <blockquote><p>The outlook remains stable.</p><p>We will review it in December.</p></blockquote>
+        <pre>let rate = 2\nprint(rate)</pre>
+        <div class="reader-comments"><div class="article-body"><p>\(first) USER COMMENT MUST NOT APPEAR.</p></div></div>
+        <div data-component="links-block"><h2>Related reports</h2><p><a href="/other">Other report headline</a>17 hours ago</p></div>
+        <p><a href="/another">Another report headline about employment and the economy</a><span>1 day ago</span></p>
+        <p>Sign up for our Economics newsletter to keep up with the news.</p>
+        <div data-block="eventPromo"><p>PODCAST PROMOTION that does not belong in publisher prose.</p></div>
+        <div data-block="topicList"><h2>Related topics</h2><p>Topic navigation that does not belong in publisher prose.</p></div>
+        <div data-block="promoList"><h2>More on this story</h2><p>More publisher teasers that do not belong in the body.</p></div>
+        <div data-block="uploaderEmbed"><h2>Get in touch</h2><p>What are your views on the triple lock?</p></div>
+        <p>Listen to Newsbeat <a href="/sounds/play/live:bbc_radio_one">live</a> at 12:45 and 17:45 weekdays - or listen back <a href="/programmes/b006wkry/episodes/player">here</a>.</p>
+        <p>Listen to Newsbeat was the instruction discussed by the researcher in the report.</p>
+        <section class="commentary"><p>\(second) Editorial commentary belongs here.</p></section>
+        </article></main>
+        """
+        let outcome = ContentExtractionPipeline.shared.extractFromHTML(html)
+        guard case .success(let content, _, let document) = outcome, let document else {
+            assertTrue(false, "Structured reader fixture must extract successfully")
+            return
+        }
+        assertEqual(document.blocks.filter { $0.kind == .heading }.map(\.text), ["What changes?"], "Short publisher headings survive")
+        assertEqual(document.blocks.filter { $0.kind == .listItem }.map(\.ordinal), [3, 4], "Ordered lists retain numbering")
+        assertTrue(document.blocks.contains { $0.kind == .quote && $0.text.contains("stable. We") }, "Quote paragraphs retain word boundaries")
+        assertTrue(document.blocks.contains { $0.kind == .code && $0.text.contains("\n") }, "Code retains line breaks")
+        for unwanted in ["USER COMMENT", "Other report", "Another report", "newsletter", "PODCAST", "Related topics", "More on this story", "Get in touch", "views on the triple lock", "17:45 weekdays"] {
+            assertFalse(content.contains(unwanted), "Publisher furniture excluded: \(unwanted)")
+        }
+        assertTrue(content.contains("instruction discussed by the researcher"), "Editorial references to a programme remain eligible")
+        assertTrue(content.contains("Editorial commentary"), "Comment filtering must not remove editorial commentary")
+        let extremeList = HTMLDOMBuilder.parse(html: "<ol start='\(Int.max)'><li>First</li><li>Second</li></ol>")
+        assertEqual(extremeList.readingBlocks().count, 2, "Untrusted extreme list numbering must not overflow")
+        let tags = EntityResult.readerTags(from: [
+            EntityResult(name: "Healey", type: .person), EntityResult(name: "John Healey", type: .person),
+            EntityResult(name: " JOHN  HEALEY ", type: .person), EntityResult(name: "Stanford University", type: .organization),
+            EntityResult(name: "AI on Employment Among Recent College Graduates", type: .unknown)
+        ])
+        assertEqual(tags.map(\.name), ["John Healey", "Stanford University"], "Tags resolve aliases and reject document-title fragments")
+        let ambiguous = EntityResult.readerTags(from: [EntityResult(name: "Smith", type: .person), EntityResult(name: "John Smith", type: .person), EntityResult(name: "Jane Smith", type: .person)])
+        assertEqual(ambiguous.count, 3, "An ambiguous surname must not be merged into a guessed identity")
+
+        let path = FileManager.default.temporaryDirectory.appendingPathComponent("news-reader-\(UUID().uuidString).sqlite3").path
+        defer { for suffix in ["", "-wal", "-shm"] { try? FileManager.default.removeItem(atPath: path + suffix) } }
+        let database = DatabaseEngine(path: path)
+        do {
+            try await database.open()
+            var article = FeedArticle(title: "Report", link: "https://example.com/structured", guid: "reader-structure", description: "Preview", pubDate: Date(), source: "Test", fullContent: content)
+            try await database.upsertArticles([article])
+            try await database.markRead(articleId: article.id, isRead: true)
+            try await database.setSaved(articleId: article.id, isSaved: true)
+            await database.close()
+            var handle: OpaquePointer?
+            assertEqual(sqlite3_open(path, &handle), SQLITE_OK, "Open migration fixture")
+            assertEqual(sqlite3_exec(handle, "DROP TABLE article_feeds; ALTER TABLE articles DROP COLUMN reader_document; ALTER TABLE article_enrichment DROP COLUMN key_points; ALTER TABLE article_enrichment DROP COLUMN category; ALTER TABLE article_enrichment DROP COLUMN confidence; ALTER TABLE article_enrichment DROP COLUMN model_identifier; ALTER TABLE article_enrichment DROP COLUMN analysis_version; PRAGMA user_version = 1;", nil, nil, nil), SQLITE_OK, "Prepare v1 fixture")
+            sqlite3_close(handle)
+            try await database.open()
+            let migrated = try await database.fetchArticles()
+            assertEqual(migrated.first?.fullContent, content, "Migration preserves old body text")
+            assertTrue(try await database.isSaved(articleId: article.id), "Migration preserves saved state")
+            assertTrue(try await database.isRead(articleId: article.id), "Migration preserves read state")
+            try await database.updateEnrichment(articleId: article.id, content: content, readerDocument: document)
+            article.fullContent = "A later feed teaser must not overwrite the extracted document."
+            try await database.upsertArticles([article])
+            await database.close()
+            try await database.open()
+            let restored = try await database.fetchArticles()
+            assertEqual(restored.first?.readerDocument, document, "Reader structure survives reopen and feed refresh")
+            assertEqual(restored.first?.fullContent, content, "Body and structure remain consistent after feed refresh")
+            let search = try await database.searchArticles(query: "inflation")
+            assertEqual(search.first?.readerDocument, document, "FTS results retain reader structure")
+            await database.close()
+        } catch {
+            await database.close()
+            assertTrue(false, "Structured persistence failed: \(error)")
+        }
     }
 
     static func testURLNormalization() async {
@@ -690,6 +891,8 @@ struct NewsTests {
         </opml>
         """.data(using: .utf8)!
         
+        let malformed = Data("<opml><body><outline xmlUrl=\"https://example.com/feed\"/></body>".utf8)
+        assertTrue(OPMLParser.parse(data: malformed).isEmpty, "Malformed OPML must not import partial subscriptions")
         let items = OPMLParser.parse(data: opmlSample)
         assertEqual(items.count, 3, "Should parse all 3 feeds from flat and nested outlines")
         
@@ -1263,7 +1466,7 @@ struct NewsTests {
             assertEqual(plist["com.apple.security.files.user-selected.read-write"] as? Bool, true, "com.apple.security.files.user-selected.read-write must be enabled")
             
             // Validate that unnecessary/unsafe entitlements are NOT present
-            assertFalse(plist.keys.contains("com.apple.security.network.server"), "com.apple.security.network.server should not be granted")
+            assertEqual(plist["com.apple.security.network.server"] as? Bool, true, "Loopback gateway requires listener permission")
             assertFalse(plist.keys.contains("com.apple.security.device.camera"), "Camera entitlement should not be granted")
             assertFalse(plist.keys.contains("com.apple.security.device.microphone"), "Microphone entitlement should not be granted")
             assertFalse(plist.keys.contains("com.apple.security.personal-information.location"), "Location entitlement should not be granted")
@@ -1379,6 +1582,259 @@ struct NewsTests {
         assertEqual(settingsB.notificationMode, AppSettings.NotificationMode.minimal, "Mode should update to .minimal")
         assertEqual(tempDefaultsB.string(forKey: AppSettings.notificationModeKey), "minimal", "Key should update to minimal")
         assertFalse(settingsB.privateNotificationsEnabled, "privateNotificationsEnabled should be false for minimal")
+    }
+
+    actor FeedDeliveryGate {
+        private var continuation: CheckedContinuation<Void, Never>?
+        var started = false
+        func wait() async {
+            started = true
+            await withCheckedContinuation { continuation = $0 }
+        }
+        func deliver() { continuation?.resume(); continuation = nil }
+    }
+
+    @MainActor
+    static func testFeedRemovalAndShutdown() async {
+        let suite = "test.feed-lifecycle.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = AppSettings(defaults: defaults)
+        settings.feedURLs = ["https://example.com/feed"]
+        settings.aiEnabled = false
+        settings.notificationsEnabled = false
+        let db = DatabaseEngine(path: ":memory:")
+        let store = ArticleStore(database: db)
+        await store.initialize()
+        let article = FeedArticle(title: "Late delivery", link: "https://example.com/late", guid: "late", description: "Report", pubDate: Date(), source: "Test")
+        for shutdown in [false, true] {
+            settings.feedURLs = ["https://example.com/feed"]
+            let gate = FeedDeliveryGate()
+            let manager = FeedManager(settings: settings, store: store, schedulesRefresh: false,
+                fetchBatch: { urls, _ in
+                    guard let url = urls.first else { return [] }
+                    await gate.wait()
+                    return [(url, [article], nil)]
+                })
+            let refresh = Task { await manager.fetchFeedsAsync() }
+            while !(await gate.started) { await Task.yield() }
+            if shutdown { manager.stopBackgroundWork() }
+            else { manager.removeFeed(url: "https://example.com/feed") }
+            await gate.deliver()
+            await refresh.value
+            assertTrue(try! await db.fetchArticles().isEmpty, "Late feed delivery after removal or shutdown must not be stored")
+            manager.stopBackgroundWork()
+        }
+        let cancelled = Task {
+            do { try await db.upsertArticles([article]); return false }
+            catch is CancellationError { return true }
+            catch { return false }
+        }
+        cancelled.cancel()
+        assertTrue(await cancelled.value, "Cancelled database ingestion propagates cancellation")
+        assertTrue(try! await db.fetchArticles().isEmpty, "Cancelled ingestion rolls back its transaction")
+        await db.close()
+    }
+
+    final class SocketObservation: @unchecked Sendable {
+        private let lock = NSLock()
+        private var targets: [String] = []
+        private var completed = false
+        func recordText(_ value: String) { lock.withLock { targets.append(value) } }
+        func record(_ host: NWEndpoint.Host) { lock.withLock { targets.append(String(describing: host)) } }
+        var count: Int { lock.withLock { targets.count } }
+        var hosts: [String] { lock.withLock { targets } }
+        func claim() -> Bool { lock.withLock { if completed { return false }; completed = true; return true } }
+    }
+
+    static func socketSend(_ connection: NWConnection, _ data: Data) async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            connection.send(content: data, completion: .contentProcessed { error in
+                if let error { continuation.resume(throwing: error) } else { continuation.resume() }
+            })
+        }
+    }
+
+    static func socketRead(_ connection: NWConnection, count: Int) async throws -> Data {
+        var data = Data()
+        while data.count < count {
+            let next: Data = try await withCheckedThrowingContinuation { continuation in
+                let once = SocketObservation()
+                DispatchQueue.global().asyncAfter(deadline: .now() + 5) {
+                    if once.claim() { connection.cancel(); continuation.resume(throwing: FeedError.timeout) }
+                }
+                connection.receive(minimumIncompleteLength: 1, maximumLength: count - data.count) { bytes, _, eof, error in
+                    guard once.claim() else { return }
+                    if let error { continuation.resume(throwing: error) }
+                    else if let bytes, !bytes.isEmpty { continuation.resume(returning: bytes) }
+                    else { continuation.resume(throwing: eof ? FeedError.network("EOF") : FeedError.timeout) }
+                }
+            }
+            data.append(next)
+        }
+        return data
+    }
+
+    static func socksConnect(_ proxy: NetworkBoundaryProxy, host: String, command: UInt8 = 1, port: UInt16 = 80) async throws -> (NWConnection, Data) {
+        let endpoint = try await proxy.port()
+        let client = NWConnection(host: "127.0.0.1", port: NWEndpoint.Port(rawValue: endpoint)!, using: .tcp)
+        client.start(queue: .global())
+        try await socketSend(client, Data([5, 1, 0]))
+        assertEqual(try await socketRead(client, count: 2), Data([5, 0]), "SOCKS greeting succeeds")
+        let hostBytes = Data(host.utf8)
+        var request = Data([5, command, 0, 3, UInt8(hostBytes.count)])
+        request.append(hostBytes)
+        request.append(contentsOf: [UInt8(port >> 8), UInt8(port & 255)])
+        // Fragment across every protocol boundary, not just a single network packet.
+        try await socketSend(client, Data(request.prefix(1)))
+        try await socketSend(client, Data(request.dropFirst()))
+        return (client, try await socketRead(client, count: 10))
+    }
+
+    @MainActor
+    final class WebBoundaryProbe: NSObject, WKNavigationDelegate {
+        let once = SocketObservation()
+        var complete: ((Result<Void, Error>) -> Void)?
+        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            if once.claim() { complete?(.success(())) }
+        }
+        func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+            if once.claim() { complete?(.failure(error)) }
+        }
+    }
+
+    @MainActor
+    static func verifyWebKitBoundary(proxy: ProxyConfiguration) async throws {
+        let configuration = WKWebViewConfiguration()
+        configuration.defaultWebpagePreferences.allowsContentJavaScript = false
+        configuration.websiteDataStore = .nonPersistent()
+        configuration.websiteDataStore.proxyConfigurations = [proxy]
+        let view = WKWebView(frame: .zero, configuration: configuration)
+        view.configuration.userContentController.add(try await WebPreviewPolicy.contentRules())
+        let probe = WebBoundaryProbe()
+        view.navigationDelegate = probe
+        defer { view.stopLoading(); view.navigationDelegate = nil }
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            probe.complete = { continuation.resume(with: $0) }
+            Task { @MainActor in
+                try? await Task.sleep(for: .seconds(10))
+                if probe.once.claim() { view.stopLoading(); continuation.resume(throwing: FeedError.timeout) }
+            }
+            view.load(URLRequest(url: URL(string: "http://rebind.invalid/page")!))
+        }
+    }
+
+    static func testSocketNetworkBoundary() async {
+        print("  - Testing socket boundary: pinning, mixed DNS, loopback, malformed commands and fail-closed proxy...")
+        let upstream = try! NWListener(using: .tcp, on: .any)
+        let upstreamQueue = DispatchQueue(label: "test.proxy.upstream")
+        let receivedRequests = SocketObservation()
+        let live = ProcessInfo.processInfo.environment["NEWS_LIVE_READER_CHECK"] == "1"
+        if live {
+            assertTrue({ if case .blocked = IPAddressValidator.validateHost("localtest.me") { return true }; return false }(), "Live DNS-alias control resolves to a private address")
+        }
+        upstream.newConnectionHandler = { connection in
+            connection.start(queue: upstreamQueue)
+            connection.receive(minimumIncompleteLength: 1, maximumLength: 32768) { data, _, _, _ in
+                let response: Data
+                if data?.starts(with: Data("GET ".utf8)) == true {
+                    let request = String(decoding: data!, as: UTF8.self).components(separatedBy: "\r\n").first ?? ""
+                    receivedRequests.recordText(request)
+                    if request.contains("/redirect.css ") {
+                        let redirect = Data("HTTP/1.1 302 Found\r\nLocation: http://127.0.0.1:\(upstream.port!.rawValue)/forbidden-redirect\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".utf8)
+                        connection.send(content: redirect, isComplete: true, completion: .contentProcessed { _ in connection.cancel() })
+                        return
+                    }
+                    let body: String
+                    if request.contains("/page ") {
+                        body = "<html><head><link rel='stylesheet' href='http://assets.invalid/style.css'><link rel='stylesheet' href='http://assets.invalid/redirect.css'></head><body>Publisher prose<img src='http://assets.invalid/image.svg'><img src='http://127.0.0.1:\(upstream.port!.rawValue)/forbidden'><img src='http://localhost:\(upstream.port!.rawValue)/forbidden-localhost'><img src='http://2130706433:\(upstream.port!.rawValue)/forbidden-decimal'><img src='http://0x7f000001:\(upstream.port!.rawValue)/forbidden-hex'><img src='http://127.1:\(upstream.port!.rawValue)/forbidden-short'><img src='http://0x7f.0.0.1:\(upstream.port!.rawValue)/forbidden-mixed-hex'><img src='http://0177.0.0.1:\(upstream.port!.rawValue)/forbidden-octal'><img src='http://%31%32%37.0.0.1:\(upstream.port!.rawValue)/forbidden-encoded'><img src='http://user@127.0.0.1:\(upstream.port!.rawValue)/forbidden-userinfo'><img src='http://127.0.0.1.:\(upstream.port!.rawValue)/forbidden-trailing-dot'>\(live ? "<img src='http://localtest.me:\(upstream.port!.rawValue)/forbidden-dns'>" : "")</body></html>"
+                    } else if request.contains("/image.svg ") {
+                        body = "<svg xmlns='http://www.w3.org/2000/svg' width='1' height='1'></svg>"
+                    } else if request.contains("/style.css ") { body = "body { color: black; }" }
+                    else { body = "OK" }
+                    let mime = request.contains(".svg ") ? "image/svg+xml" : (request.contains(".css ") ? "text/css" : "text/html")
+                    response = Data("HTTP/1.1 200 OK\r\nContent-Type: \(mime)\r\nContent-Length: \(body.utf8.count)\r\nConnection: close\r\n\r\n\(body)".utf8)
+                } else { response = data ?? Data() }
+                connection.send(content: response, isComplete: true, completion: .contentProcessed { _ in connection.cancel() })
+            }
+        }
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            let once = SocketObservation()
+            upstream.stateUpdateHandler = { state in
+                if case .ready = state, once.claim() { continuation.resume() }
+            }
+            upstream.start(queue: upstreamQueue)
+        }
+        defer { upstream.cancel() }
+        let fixturePort = upstream.port!
+        let observed = SocketObservation()
+        let connector: NetworkBoundaryProxy.Connector = { host, _ in
+            observed.record(host)
+            return NWConnection(host: "127.0.0.1", port: fixturePort, using: .tcp)
+        }
+        let mixed = NetworkBoundaryProxy(resolver: { _ in .allowed(ips: ["93.184.216.34", "127.0.0.1"]) }, connector: connector)
+        let (mixedClient, mixedReply) = try! await socksConnect(mixed, host: "mixed.invalid")
+        assertEqual(mixedReply[1], 2, "Mixed public/private DNS answers are rejected before connecting")
+        mixedClient.cancel()
+        await mixed.stop()
+        let production = NetworkBoundaryProxy(connector: connector)
+        for host in ["127.0.0.1", "localhost", "2130706433", "0x7f000001", "localhost.", "test.local.", "intranet", "::1", "fe80::1%en0"] {
+            let (client, reply) = try! await socksConnect(production, host: host)
+            assertEqual(reply[1], 2, "Private/alternate/scoped address denied at the socket boundary")
+            client.cancel()
+        }
+        let (udpClient, udpReply) = try! await socksConnect(production, host: "93.184.216.34", command: 3)
+        assertEqual(udpReply[1], 2, "UDP ASSOCIATE is denied")
+        udpClient.cancel()
+        let (portClient, portReply) = try! await socksConnect(production, host: "93.184.216.34", port: 22)
+        assertEqual(portReply[1], 2, "Unapproved ports denied")
+        portClient.cancel()
+        assertEqual(observed.count, 0, "Rejected requests never construct an upstream connection")
+        await production.stop()
+        let allowed = NetworkBoundaryProxy(resolver: { host in
+            ["rebind.invalid", "93.184.216.34", "assets.invalid"].contains(host) ? .allowed(ips: ["93.184.216.34"]) : IPAddressValidator.validateHost(host)
+        }, connector: connector)
+        let (client, reply) = try! await socksConnect(allowed, host: "rebind.invalid")
+        assertEqual(reply[1], 0, "Approved destinations connect")
+        try! await socketSend(client, Data("relay proof".utf8))
+        assertEqual(try! await socketRead(client, count: 11), Data("relay proof".utf8), "Tunnel forwards data without rewriting it")
+        client.cancel()
+        assertEqual(observed.hosts, ["93.184.216.34"], "Connector receives the validated numeric IP, never the DNS hostname")
+        let configuration = URLSessionConfiguration.ephemeral
+        let proxy = try! await allowed.configuration()
+        assertFalse(proxy.allowFailover, "Native proxy may not fall back to direct connections")
+        configuration.proxyConfigurations = [proxy]
+        configuration.timeoutIntervalForRequest = 2
+        let session = URLSession(configuration: configuration)
+        let (body, _) = try! await session.data(from: URL(string: "http://93.184.216.34/")!)
+        assertEqual(String(decoding: body, as: UTF8.self), "OK", "Native URLSession uses the protected SOCKS tunnel")
+        try! await verifyWebKitBoundary(proxy: proxy)
+        let paths = receivedRequests.hosts
+        assertTrue(paths.contains { $0.contains("/style.css ") }, "WebKit stylesheet traverses the protected proxy")
+        assertTrue(paths.contains { $0.contains("/image.svg ") }, "WebKit image traverses the protected proxy")
+        assertFalse(paths.contains { $0.contains("/forbidden") }, "WebKit does not contact the reachable private fixture")
+        await allowed.stop()
+        let requestCount = receivedRequests.count
+        do {
+            _ = try await session.data(from: URL(string: "http://rebind.invalid/forbidden-after-stop")!)
+            assertTrue(false, "Stopped gateway must not fall back to direct transport")
+        } catch {}
+        assertEqual(receivedRequests.count, requestCount, "Stopped proxy never falls back to a reachable direct endpoint")
+        if live {
+            let publicURL = URL(string: "https://www.nasa.gov/feed/")!
+            let directControl = URLSession(configuration: .ephemeral)
+            let (controlBody, _) = try! await directControl.data(from: publicURL)
+            assertFalse(controlBody.isEmpty, "Public control is reachable without the stopped proxy")
+            directControl.invalidateAndCancel()
+            do {
+                _ = try await session.data(from: publicURL)
+                assertTrue(false, "Stopped proxy cannot fall back to a proven reachable public host")
+            } catch {}
+        }
+        session.invalidateAndCancel()
+        for host in ["::127.0.0.1", "2002:7f00:1::", "2001::1", "2001:db8::1", "198.18.0.1", "192.0.2.1"] {
+            assertTrue(IPAddressValidator.checkLiteralIP(host) != nil, "Transition/reserved addresses cannot escape the public boundary")
+        }
     }
 
     actor TestCounter {
@@ -1759,7 +2215,7 @@ struct NewsTests {
 
         // 5. Model identifier and versioning
         assertTrue(!analysis.modelIdentifier.isEmpty, "Model identifier should identify engine")
-        assertEqual(analysis.analysisVersion, 1, "Analysis version should match schema version")
+        assertEqual(analysis.analysisVersion, 2, "Analysis version invalidates summaries from the old extraction pipeline")
     }
 
     static func testInteractiveAnalysisCancellation() async {
@@ -1832,14 +2288,16 @@ struct NewsTests {
         let unsavedArticle = articlesAfterContentClear.first { $0.id == article2.id }
         assertTrue(unsavedArticle?.fullContent == nil, "Non-saved article content must be set to nil")
 
-        // 4. Test clearAllDatabaseCache(): clears all non-saved articles, keeps saved stories and feed subscriptions
+        // Cache cleanup must not delete user history.
+        try! await db.markRead(articleId: article2.id, isRead: true)
         try! await db.clearAllDatabaseCache()
         let remainingArticles = try! await db.fetchArticles(limit: 10)
-        assertEqual(remainingArticles.count, 1, "Only saved article should remain after full database purge")
-        assertEqual(remainingArticles.first?.id, article1.id, "Saved article must survive full purge")
+        assertEqual(remainingArticles.count, 2, "Cache cleanup must preserve article headers and history")
+        assertEqual(remainingArticles.first(where: { $0.id == article1.id })?.fullContent, "Content One", "Saved body survives cache cleanup")
+        assertTrue(try! await db.getReadArticleIDs().contains(article2.id), "Read history survives cache cleanup")
 
         // 5. Test CacheManager methods
-        CacheManager.shared.clearWebCache()
+        // Do not clear the user's WebKit cache from a unit test.
     }
 
     static func testNotificationServiceErrorLogging() async {
@@ -2079,7 +2537,7 @@ struct NewsTests {
         """
 
         let outcome = ContentExtractionPipeline.shared.extractFromHTML(bbcHTML)
-        guard case .success(let content, let leadImage) = outcome else {
+        guard case .success(let content, let leadImage, _) = outcome else {
             assertTrue(false, "BBC extraction must succeed, got \(outcome)")
             return
         }
@@ -2112,7 +2570,7 @@ struct NewsTests {
         </body></html>
         """
         let reutersOutcome = ContentExtractionPipeline.shared.extractFromHTML(reutersHTML)
-        guard case .success(let rContent, _) = reutersOutcome else {
+        guard case .success(let rContent, _, _) = reutersOutcome else {
             assertTrue(false, "Reuters extraction must succeed")
             return
         }
@@ -2133,7 +2591,7 @@ struct NewsTests {
         </body></html>
         """
         let arsOutcome = ContentExtractionPipeline.shared.extractFromHTML(arsHTML)
-        guard case .success(let aContent, _) = arsOutcome else {
+        guard case .success(let aContent, _, _) = arsOutcome else {
             assertTrue(false, "Ars Technica extraction must succeed")
             return
         }
@@ -2154,7 +2612,7 @@ struct NewsTests {
         </body></html>
         """
         let vergeOutcome = ContentExtractionPipeline.shared.extractFromHTML(vergeHTML)
-        guard case .success(let vContent, _) = vergeOutcome else {
+        guard case .success(let vContent, _, _) = vergeOutcome else {
             assertTrue(false, "The Verge extraction must succeed")
             return
         }
@@ -2175,7 +2633,7 @@ struct NewsTests {
         </body></html>
         """
         let nytOutcome = ContentExtractionPipeline.shared.extractFromHTML(nytHTML)
-        guard case .success(let nytContent, _) = nytOutcome else {
+        guard case .success(let nytContent, _, _) = nytOutcome else {
             assertTrue(false, "NYTimes extraction must succeed")
             return
         }
@@ -2219,9 +2677,9 @@ struct NewsTests {
 
         // 5. Repetitive syndicated loop rejected
         let repeated = [
-            "Subscribe to our newsletter for daily updates and breaking news alerts.",
-            "Subscribe to our newsletter for daily updates and breaking news alerts.",
-            "Subscribe to our newsletter for daily updates and breaking news alerts."
+            "The council published a detailed report on local transport improvements and future investment.",
+            "The council published a detailed report on local transport improvements and future investment.",
+            "The council published a detailed report on local transport improvements and future investment."
         ]
         if case .rejected(let reason) = ContentQualityValidator.validate(paragraphs: repeated) {
             assertTrue(reason.contains("repetitive"), "Must detect duplicate text loop")
@@ -2273,12 +2731,19 @@ struct NewsTests {
     static func testAppContainerAndFrostedSurface() async {
         print("  - Testing AppContainer & Frosted Surface tokens...")
 
-        let container = AppContainer.shared
-        assertTrue(container.appSettings === AppSettings.shared, "AppSettings wired")
-        assertTrue(container.articleStore === ArticleStore.shared, "ArticleStore wired")
-        assertTrue(container.readManager === ReadManager.shared, "ReadManager wired")
-        assertTrue(container.themeManager === ThemeManager.shared, "ThemeManager wired")
-        assertTrue(container.savedStories === SavedStoriesManager.shared, "SavedStories wired")
+        let suite = "test.container.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = AppSettings(defaults: defaults)
+        let store = ArticleStore(database: DatabaseEngine(path: ":memory:"))
+        let feeds = FeedManager(settings: settings, store: store, schedulesRefresh: false)
+        let reads = ReadManager(articleStore: store)
+        let saved = SavedStoriesManager(articleStore: store)
+        let container = AppContainer(appSettings: settings, articleStore: store, feedManager: feeds, readManager: reads, savedStories: saved)
+        assertTrue(container.appSettings === settings, "Injected settings wired")
+        assertTrue(container.articleStore === store, "Injected store wired")
+        assertTrue(container.readManager === reads, "Injected read manager wired")
+        assertTrue(container.savedStories === saved, "Injected saved manager wired")
 
         let controlElevation = FrostedElevation.control
         assertEqual(controlElevation.surfaceBackingOpacity, 0.65, "Control backing is translucent (0.65)")
@@ -2291,14 +2756,40 @@ struct NewsTests {
     @MainActor
     static func testReadManagerReconciliationCache() async {
         print("  - Testing ReadManager Reconciliation Cache...")
-        let rm = ReadManager.shared
+        let store = ArticleStore(database: DatabaseEngine(path: ":memory:"))
+        await store.initialize()
+        let rm = ReadManager(articleStore: store)
         let rawId = "http://example.com/test-article-perf?utm_source=news&utm_medium=rss"
+        await store.batchUpsert(articles: [FeedArticle(title: "Read", link: rawId, guid: ArticleIdentity.reconcileLegacyId(rawId), description: "Text", pubDate: Date(), source: "Test")])
         let isReadInitial = rm.isRead(rawId)
         // Repeat query to verify cached resolution works idempotently
         assertEqual(rm.isRead(rawId), isReadInitial, "Cached resolution matches initial read state")
         rm.markAsRead(rawId)
         assertTrue(rm.isRead(rawId), "Marked as read should reflect in cached lookup")
+        for _ in 0..<100 {
+            if store.isRead(ArticleIdentity.reconcileLegacyId(rawId)) { break }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        assertTrue(store.isRead(ArticleIdentity.reconcileLegacyId(rawId)), "Read writes use the injected store")
+
+        let article = FeedArticle(title: "Saved", link: "https://example.com/saved", guid: "isolated-save", description: "Text", pubDate: Date(), source: "Test")
+        let saved = SavedStoriesManager(articleStore: store)
+        saved.save(article)
+        for _ in 0..<100 {
+            if store.isSaved(article) { break }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        assertTrue(store.isSaved(article), "Save writes use the injected store")
+        saved.remove(article)
+        saved.remove(article)
+        for _ in 0..<100 {
+            if !store.isSaved(article) { break }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        assertFalse(store.isSaved(article), "Repeated removal cannot re-save an article")
+        _ = await store.setSaved(article: article, isSaved: false)
+        let persistedSaved = try! await store.database.isSaved(articleId: article.id)
+        assertFalse(persistedSaved, "Explicit unsave is idempotent in SQLite")
     }
 }
-
 

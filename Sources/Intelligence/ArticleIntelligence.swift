@@ -178,6 +178,29 @@ public struct EntityResult: Sendable, Equatable, Codable, Hashable {
     }
 }
 
+extension EntityResult {
+    /// Collapse exact duplicates and unambiguous person surnames, including cached analyses.
+    public static func readerTags(from entities: [EntityResult]) -> [EntityResult] {
+        var seen = Set<String>()
+        let normalized = entities.compactMap { entity -> EntityResult? in
+            let name = entity.name.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+            let key = name.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: Locale(identifier: "en_US_POSIX"))
+            // ponytail: short named-entity labels only; a richer entity resolver can handle document titles later.
+            guard !name.isEmpty, name.count <= 60, name.split(separator: " ").count <= 6,
+                  entity.confidence >= 0.5, seen.insert(key).inserted else { return nil }
+            return EntityResult(name: name, type: entity.type, confidence: entity.confidence)
+        }
+        return normalized.filter { entity in
+            guard entity.type == .person, !entity.name.contains(" ") else { return true }
+            let matches = normalized.filter {
+                $0.type == .person && $0.name.contains(" ") &&
+                $0.name.split(separator: " ").last?.localizedCaseInsensitiveCompare(entity.name) == .orderedSame
+            }
+            return matches.count != 1
+        }
+    }
+}
+
 public struct SentimentResult: Sendable, Equatable, Codable, Hashable {
     public let score: Double        // -1.0 (very negative) to +1.0 (very positive)
     public let confidence: Double   // 0.0 to 1.0
@@ -235,7 +258,7 @@ public struct ArticleAnalysis: Sendable, Equatable, Codable {
     ) {
         self.summary = summary
         self.keyPoints = keyPoints
-        self.entities = entities
+        self.entities = EntityResult.readerTags(from: entities)
         self.category = category
         self.sentiment = sentiment
         self.modelIdentifier = modelIdentifier
@@ -767,7 +790,7 @@ public final class ArticleAnalyzer: Sendable {
                     category: category,
                     sentiment: sentimentResult,
                     modelIdentifier: "apple.foundation-model",
-                    analysisVersion: 1
+                    analysisVersion: 2
                 )
             } catch is CancellationError {
                 throw AIAnalysisError.cancelled
@@ -792,7 +815,7 @@ public final class ArticleAnalyzer: Sendable {
             category: category,
             sentiment: sentiment,
             modelIdentifier: "apple.natural-language.fallback",
-            analysisVersion: 1
+            analysisVersion: 2
         )
     }
 }
@@ -874,7 +897,7 @@ public enum ArticleContentRedactor {
     private static let boilerplateLineExact: Set<String> = [
         "comments", "comment", "read full article", "read more", "continue reading",
         "view comments", "leave a comment", "share this article", "share this post",
-        "related articles", "source", "read original", "full article", "full story"
+        "related articles", "related topics", "more on this story", "source", "read original", "full article", "full story"
     ]
 
     /// Cleans boilerplate phrases, syndication notes, and trailing artifacts from text.
@@ -944,6 +967,7 @@ public enum ArticleContentRedactor {
         let stripped = trimmed.trimmingCharacters(in: CharacterSet(charactersIn: ".!-–—()[]{}•*#0123456789/ "))
         let lower = stripped.lowercased()
 
+        if rawNewsletterCTA(trimmed) { return true }
         if boilerplateLineExact.contains(lower) {
             return true
         }
@@ -958,6 +982,10 @@ public enum ArticleContentRedactor {
             return true
         }
         return false
+    }
+
+    private static func rawNewsletterCTA(_ text: String) -> Bool {
+        text.range(of: "(?i)^(?:sign up|subscribe) (?:for|to) (?:our|the) .*newsletter\\b", options: .regularExpression) != nil
     }
 
     /// Splits a large unsegmented paragraph at sentence boundaries into balanced readable paragraphs.

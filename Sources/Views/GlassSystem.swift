@@ -141,6 +141,16 @@ public struct NativeLiquidGlassModifier<S: Shape>: ViewModifier {
 // MARK: - View Extensions
 
 public extension View {
+    @ViewBuilder
+    func softScrollEdge() -> some View {
+        if #available(macOS 26.0, *) {
+            self.scrollEdgeEffectStyle(.soft, for: .top)
+                .scrollEdgeEffectHidden(false, for: .top)
+        } else {
+            self
+        }
+    }
+
     /// Applies the refined frosted diffused surface to a control, toolbar, or container.
     /// Diffuses content underneath without optical inversion or caustic mirroring.
     func frostedSurface<S: Shape>(in shape: S, elevation: FrostedElevation = .control) -> some View {

@@ -13,13 +13,21 @@ struct IPAddressValidator: Sendable {
 
     /// Comprehensive pre-flight check for a given hostname or IP string.
     static func validateHost(_ rawHost: String) -> ValidationResult {
-        let host = rawHost.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        var host = rawHost.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if host.hasSuffix(".") { host.removeLast() }
         
+        guard !host.contains("%"), !host.contains("\0") else { return .blocked(reason: "Scoped or malformed address") }
+
         // 1. Literal hostname checks
         if host == "localhost" || host.hasSuffix(".localhost") || host.hasSuffix(".local") || host.hasSuffix(".internal") {
             return .blocked(reason: "Localhost or internal domain name")
         }
         
+        // Single-label names may implicitly bypass native proxy routing.
+        guard host.contains(".") || host.contains(":") else {
+            return .blocked(reason: "Single-label network host")
+        }
+
         // 2. Direct IP address check (if user provided literal IP)
         if let directBlockReason = checkLiteralIP(host) {
             return .blocked(reason: directBlockReason)
@@ -31,6 +39,7 @@ struct IPAddressValidator: Sendable {
 
     /// Checks whether an individual literal IP string (IPv4 or IPv6) is forbidden.
     static func checkLiteralIP(_ ipString: String) -> String? {
+        if ipString.contains("%") { return "Scoped IP address" }
         var cleanIP = ipString
         if cleanIP.hasPrefix("[") && cleanIP.hasSuffix("]") {
             cleanIP = String(cleanIP.dropFirst().dropLast())
@@ -51,7 +60,7 @@ struct IPAddressValidator: Sendable {
         return nil
     }
 
-    /// Validates an active socket address (e.g. from URLSessionTaskMetrics) to prevent DNS rebinding.
+    /// Validates an active socket address (e.g. from URLSessionTaskMetrics) for diagnostics; connection-time enforcement uses validated numeric endpoints.
     static func validateSocketAddress(_ sockaddrPtr: UnsafePointer<sockaddr>) -> String? {
         switch sockaddrPtr.pointee.sa_family {
         case UInt8(AF_INET):
@@ -124,6 +133,7 @@ struct IPAddressValidator: Sendable {
 
         let b1 = UInt8((ip >> 24) & 0xFF)
         let b2 = UInt8((ip >> 16) & 0xFF)
+        let b3 = UInt8((ip >> 8) & 0xFF)
 
         // 127.0.0.0/8 — Loopback
         if b1 == 127 { return "IPv4 loopback address (127.0.0.0/8)" }
@@ -145,6 +155,11 @@ struct IPAddressValidator: Sendable {
 
         // 100.64.0.0/10 — Carrier-Grade NAT
         if b1 == 100 && (b2 >= 64 && b2 <= 127) { return "Carrier-grade NAT (100.64.0.0/10)" }
+
+        if b1 == 192 && b2 == 0 && (b3 == 0 || b3 == 2) { return "IPv4 protocol/documentation network" }
+        if b1 == 192 && b2 == 88 && b3 == 99 { return "IPv4 transition network" }
+        if b1 == 198 && (b2 == 18 || b2 == 19) { return "IPv4 benchmarking network" }
+        if (b1 == 198 && b2 == 51 && b3 == 100) || (b1 == 203 && b2 == 0 && b3 == 113) { return "IPv4 documentation network" }
 
         // 224.0.0.0/4 — Multicast
         if b1 >= 224 && b1 <= 239 { return "Multicast address (224.0.0.0/4)" }
@@ -214,6 +229,14 @@ struct IPAddressValidator: Sendable {
             }
         }
 
+        if isIPv4Mapped || isNAT64 { return nil }
+        // Refuse transition mechanisms that can embed a separately routed IPv4 destination.
+        if bytes[0] == 0x20 && bytes[1] == 0x02 { return "6to4 transition address" }
+        if bytes[0] == 0x20 && bytes[1] == 0x01 && bytes[2] == 0 && bytes[3] == 0 { return "Teredo transition address" }
+        if bytes[0] == 0x20 && bytes[1] == 0x01 && bytes[2] == 0x0d && bytes[3] == 0xb8 { return "IPv6 documentation address" }
+        if bytes[0] == 0x20 && bytes[1] == 0x01 && bytes[2] < 2 { return "IPv6 special-purpose network" }
+        if bytes[0] == 0x3f && bytes[1] == 0xff && bytes[2] & 0xf0 == 0 { return "IPv6 documentation address" }
+        guard bytes[0] & 0xe0 == 0x20 else { return "Non-global IPv6 address" }
         return nil
     }
 }

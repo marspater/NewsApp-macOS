@@ -1,4 +1,5 @@
 import Foundation
+import AppKit
 import Combine
 import NaturalLanguage
 import UserNotifications
@@ -29,7 +30,15 @@ class FeedManager: NSObject, ObservableObject {
     let appSettings: AppSettings
     let articleStore: ArticleStore
 
+    typealias FeedBatch = [(urlString: String, articles: [FeedArticle]?, error: FeedError?)]
+    private let fetchBatch: @Sendable ([String], Bool) async -> FeedBatch
+    private let enrichmentQueue: EnrichmentQueue
+    private var isStopped = false
     private var storeUpdates: AnyCancellable?
+    private var terminationObserver: AnyCancellable?
+    private var refreshTask: Task<Void, Never>?
+    private var refreshRunID: UUID?
+    private var enrichmentTask: Task<Void, Never>?
     private var backgroundTimer: Timer?
     private var backgroundActivity: NSBackgroundActivityScheduler?
 
@@ -40,27 +49,38 @@ class FeedManager: NSObject, ObservableObject {
     var notificationsEnabled: Bool { appSettings.notificationsEnabled }
     var aiEnabled: Bool { appSettings.aiEnabled }
 
-    init(settings: AppSettings? = nil, store: ArticleStore? = nil) {
+    init(settings: AppSettings? = nil, store: ArticleStore? = nil, schedulesRefresh: Bool = true,
+         fetchBatch: @escaping @Sendable ([String], Bool) async -> FeedBatch = { urls, allowHTTP in
+             await FeedFetcher.shared.fetchAllFeeds(urls: urls, allowHTTP: allowHTTP)
+         }) {
         self.appSettings = settings ?? AppSettings.shared
         self.articleStore = store ?? ArticleStore.shared
+        self.fetchBatch = fetchBatch
+        self.enrichmentQueue = EnrichmentQueue(store: self.articleStore)
         super.init()
         storeUpdates = articleStore.$articles.sink { [weak self] articles in
             self?.articles = articles
         }
+        terminationObserver = NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)
+            .sink { [weak self] _ in
+                MainActor.assumeIsolated { self?.stopBackgroundWork() }
+            }
         loadCachedArticles()
-        startBackgroundFetch()
+        if schedulesRefresh { startBackgroundFetch() }
     }
 
     // MARK: - Feed URL Management (delegates to AppSettings)
 
     func addFeed(url: String) {
         if let added = appSettings.addFeed(url: url) {
+            cancelRefresh()
             feedStatuses[added] = .idle
             fetchFeeds()
         }
     }
 
     func removeFeed(url: String) {
+        cancelRefresh()
         appSettings.removeFeed(url: url)
         feedStatuses.removeValue(forKey: url)
         fetchFeeds()
@@ -70,8 +90,14 @@ class FeedManager: NSObject, ObservableObject {
 
     @discardableResult
     func importFeeds(from opmlData: Data) -> Int {
+        do { _ = try OPMLParser.parseValidated(data: opmlData) }
+        catch {
+            articleStore.operationError = "The OPML file could not be imported because it is incomplete or malformed. No subscriptions were changed."
+            return 0
+        }
         let count = appSettings.importFeeds(from: opmlData)
         if count > 0 {
+            cancelRefresh()
             fetchFeeds()
         }
         return count
@@ -110,26 +136,10 @@ class FeedManager: NSObject, ObservableObject {
 
     // MARK: - Section Keyword Matching
 
-    private static let sectionKeywords: [String: [String]] = [
-        "Entertainment": ["entertainment", "movie", "film", "celebrity", "music", "tv show", "television", "hollywood", "streaming", "netflix", "disney", "actor", "actress", "box office", "concert", "album", "grammy", "oscar", "emmy"],
-        "Politics": ["politic", "congress", "senate", "democrat", "republican", "election", "vote", "legislation", "government", "white house", "parliament", "policy", "campaign", "liberal", "conservative"],
-        "U.S. Politics": ["politic", "congress", "senate", "democrat", "republican", "election", "vote", "legislation", "white house", "biden", "trump", "campaign"],
-        "Business": ["business", "market", "stock", "economy", "finance", "wall street", "investor", "startup", "venture", "ipo", "revenue", "profit", "earnings", "trade", "inflation", "bank"],
-        "Tech": ["tech", "software", "hardware", "ai ", "artificial intelligence", "computer", "digital", "startup", "silicon valley", "apple", "google", "microsoft", "amazon", "cyber", "programming", "developer", "app ", "gadget", "robot", "machine learning", "chip", "semiconductor"],
-        "Food": ["food", "recipe", "restaurant", "chef", "cooking", "culinary", "dining", "meal", "cuisine", "ingredient"],
-        "Health & Wellness": ["health", "medical", "doctor", "hospital", "disease", "treatment", "vaccine", "mental health", "wellness", "fitness", "exercise", "nutrition", "diet", "therapy", "clinical"],
-        "Lifestyle": ["lifestyle", "fashion", "travel", "home", "design", "decor", "beauty", "style", "trend", "luxury", "wellness"],
-        "Science": ["science", "research", "study", "discovery", "space", "nasa", "physics", "biology", "chemistry", "climate", "environment", "species", "experiment", "laboratory", "quantum", "astronomy", "mars", "planet", "genome"],
-        "Fashion": ["fashion", "style", "designer", "runway", "clothing", "brand", "trend", "model", "outfit", "accessory"],
-        "Travel": ["travel", "flight", "airline", "hotel", "tourism", "destination", "vacation", "trip", "airport", "cruise"],
-        "Sports": ["sport", "football", "basketball", "soccer", "baseball", "nfl", "nba", "mlb", "athlete", "championship", "match", "team", "league", "coach", "score", "olympic", "tennis", "golf"],
-        "World": ["world", "international", "global", "europe", "asia", "africa", "foreign", "nation", "united nations", "war", "conflict", "diplomat", "treaty"]
-    ]
-
     func articles(for section: String) -> [FeedArticle] {
         if section == "Today" || section == "Saved Stories" || section == "History" { return articles }
 
-        guard let keywords = Self.sectionKeywords[section] else {
+        guard let keywords = ArticleSection.keywords[section] else {
             return articles.filter { article in
                 let text = "\(article.title) \(article.description) \(article.category ?? "")".lowercased()
                 return text.contains(section.lowercased())
@@ -158,6 +168,7 @@ class FeedManager: NSObject, ObservableObject {
     // macOS schedules opportunistic background refreshes according to the configured interval and system conditions.
 
     func startBackgroundFetch() {
+        guard !isStopped else { return }
         backgroundTimer?.invalidate()
         backgroundActivity?.invalidate()
 
@@ -200,14 +211,45 @@ class FeedManager: NSObject, ObservableObject {
         }
     }
 
+    private func cancelRefresh() {
+        refreshTask?.cancel()
+        refreshTask = nil
+        refreshRunID = nil
+    }
+
+    func stopBackgroundWork() {
+        isStopped = true
+        backgroundTimer?.invalidate()
+        backgroundTimer = nil
+        backgroundActivity?.invalidate()
+        backgroundActivity = nil
+        cancelRefresh()
+        enrichmentTask?.cancel()
+        enrichmentTask = nil
+        isAnyFeedLoading = false
+        let queue = enrichmentQueue
+        Task { await queue.cancelAll(reason: .user) }
+    }
+
     func fetchFeedsAsync() async {
-        do {
-            try await RefreshCoordinator.shared.executeRefresh { @Sendable [weak self] in
-                guard let self = self else { return }
-                await self.performRefreshPipeline()
-            }
-        } catch {
-            logger.error("Coordinated feed refresh failed: \(error.localizedDescription)")
+        guard !isStopped else { return }
+        if let refreshTask {
+            await refreshTask.value
+            return
+        }
+        let runID = UUID()
+        refreshRunID = runID
+        let task = Task<Void, Never> { [weak self] in
+            guard let self else { return }
+            await self.performRefreshPipeline()
+        }
+        // Retain the work itself so subscription changes cancel ingestion as well as fetching.
+        refreshTask = task
+        await task.value
+        if refreshRunID == runID {
+            refreshTask = nil
+            refreshRunID = nil
+            isAnyFeedLoading = false
         }
     }
 
@@ -223,31 +265,32 @@ class FeedManager: NSObject, ObservableObject {
         }
         isAnyFeedLoading = true
 
-        let results = await FeedFetcher.shared.fetchAllFeeds(
-            urls: appSettings.feedURLs,
-            allowHTTP: appSettings.allowInsecureHTTP
-        )
 
+        let results = await fetchBatch(appSettings.feedURLs, appSettings.allowInsecureHTTP)
+
+        let existingIds = Set(articles.map { $0.id })
         var allParsed = [FeedArticle]()
         for res in results {
+            guard !Task.isCancelled else { return }
+            guard appSettings.feedURLs.contains(res.urlString) else { continue }
             if let err = res.error {
                 feedStatuses[res.urlString] = .failed(err)
             } else {
                 feedStatuses[res.urlString] = .idle
                 if let arts = res.articles {
                     allParsed.append(contentsOf: arts)
+                    await articleStore.batchUpsert(articles: arts, feedUrl: res.urlString)
                 }
             }
         }
 
-        isAnyFeedLoading = false
+        guard !Task.isCancelled else { return }
         allParsed.sort { $0.pubDate > $1.pubDate }
 
-        let existingIds = Set(articles.map { $0.id })
         let newArticles = allParsed.filter { !existingIds.contains($0.id) }
 
-        await articleStore.batchUpsert(articles: allParsed)
         let stored = await articleStore.fetchArticles()
+        guard !Task.isCancelled else { return }
         self.articles = stored.isEmpty ? allParsed : stored
 
         if appSettings.notificationsEnabled && !newArticles.isEmpty {
@@ -257,25 +300,28 @@ class FeedManager: NSObject, ObservableObject {
             )
         }
 
+        guard !Task.isCancelled else { return }
         enrichArticlesInBackground()
     }
 
     // MARK: - Background Enrichment
 
     private func enrichArticlesInBackground() {
+        enrichmentTask?.cancel()
         guard appSettings.aiEnabled else { return }
 
         let snapshot = articles
         let allowHTTP = appSettings.allowInsecureHTTP
 
-        Task {
+        enrichmentTask = Task {
             // Cancel previous background backlog on new ingest
-            await EnrichmentQueue.shared.cancelAll(reason: .superseded)
+            await enrichmentQueue.cancelAll(reason: .superseded)
 
             // Cheap deterministic classification for ingestion; generative analysis stays on demand.
             for article in snapshot {
+                guard !Task.isCancelled else { return }
                 let priority: EnrichmentPriority = .background
-                await EnrichmentQueue.shared.enqueue(
+                await enrichmentQueue.enqueue(
                     article: article,
                     priority: priority,
                     allowHTTP: allowHTTP

@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-DMG_FILE="News-Universal2.dmg"
+DMG_FILE="News-arm64.dmg"
 
 echo "=================================================="
 echo "🛡️ Apple Notarization Pipeline (Optional / Future)"

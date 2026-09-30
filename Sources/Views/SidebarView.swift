@@ -52,6 +52,7 @@ struct SidebarView: View {
         }
         .listStyle(.sidebar)
         .scrollContentBackground(.visible)
+        .softScrollEdge()
         .navigationSplitViewColumnWidth(min: 220, ideal: 240, max: 300)
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
@@ -122,12 +123,7 @@ struct SidebarView: View {
         }
         .padding(.horizontal, AppSpacing.xs)
         .padding(.vertical, 6)
-        .background(AppColor.surface)
-        .overlay(
-            RoundedRectangle(cornerRadius: AppRadius.control)
-                .stroke(AppColor.borderSubtle, lineWidth: 1)
-        )
-        .cornerRadius(AppRadius.control)
+        .nativeLiquidGlass(in: RoundedRectangle(cornerRadius: AppRadius.control), interactive: true)
         .padding(.bottom, 6)
         .onExitCommand { isSearchFocused = false }
         .listRowBackground(Color.clear)
@@ -312,7 +308,7 @@ struct SidebarView: View {
                                 let countBefore = self.feedManager.feedURLs.count
                                 self.feedManager.importFeeds(from: fileData)
                                 let added = self.feedManager.feedURLs.count - countBefore
-                                self.showConfirmation(added > 0 ? "Imported \(added) feed(s) from OPML" : "OPML feeds up to date")
+                                self.showConfirmation(added > 0 ? "Imported \(added) feed(s) from OPML" : "No new feeds imported")
                             }
                         }
                     } else if !url.isFileURL && (url.scheme == "http" || url.scheme == "https") {

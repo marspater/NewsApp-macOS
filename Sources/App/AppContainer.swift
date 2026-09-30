@@ -25,9 +25,9 @@ final class AppContainer: ObservableObject {
     ) {
         self.appSettings = appSettings ?? AppSettings.shared
         self.articleStore = articleStore ?? ArticleStore.shared
-        self.feedManager = feedManager ?? FeedManager()
-        self.readManager = readManager ?? ReadManager.shared
-        self.savedStories = savedStories ?? SavedStoriesManager.shared
+        self.feedManager = feedManager ?? FeedManager(settings: self.appSettings, store: self.articleStore)
+        self.readManager = readManager ?? ReadManager(articleStore: self.articleStore)
+        self.savedStories = savedStories ?? SavedStoriesManager(articleStore: self.articleStore)
         self.themeManager = themeManager ?? ThemeManager.shared
     }
 }

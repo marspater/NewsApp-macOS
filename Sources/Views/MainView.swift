@@ -8,13 +8,6 @@ import UniformTypeIdentifiers
 // MARK: - Navigation Notifications & Commands
 
 extension Notification.Name {
-    static let detailNextArticle = Notification.Name("detailNextArticle")
-    static let detailPrevArticle = Notification.Name("detailPrevArticle")
-    static let detailToggleRead = Notification.Name("detailToggleRead")
-    static let detailToggleSave = Notification.Name("detailToggleSave")
-    static let detailOpenInBrowser = Notification.Name("detailOpenInBrowser")
-    static let detailToggleViewMode = Notification.Name("detailToggleViewMode")
-    
     // Section Jump Commands
     static let jumpToTodayCommand = Notification.Name("jumpToTodayCommand")
     static let jumpToUnreadCommand = Notification.Name("jumpToUnreadCommand")
@@ -34,7 +27,7 @@ struct MainView: View {
     @EnvironmentObject private var feedManager: FeedManager
     @EnvironmentObject private var themeManager: ThemeManager
     @EnvironmentObject private var readManager: ReadManager
-    @StateObject private var savedStories = SavedStoriesManager.shared
+    @EnvironmentObject private var savedStories: SavedStoriesManager
     
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @State private var isWindowDropTargeted = false
@@ -49,7 +42,7 @@ struct MainView: View {
         } detail: {
             NavigationStack(path: $articlePath) {
                 ZStack {
-                    AppColor.background.ignoresSafeArea()
+                    AppColor.background
                     
                     ArticleListView(
                         selectedTopic: $selectedTopic,
@@ -80,7 +73,16 @@ struct MainView: View {
                 }
             }
         }
+        .alert("Operation failed", isPresented: Binding(
+            get: { articleStore.operationError != nil },
+            set: { if !$0 { articleStore.operationError = nil } }
+        )) {
+            Button("OK") { articleStore.operationError = nil }
+        } message: {
+            Text(articleStore.operationError ?? "Please try again.")
+        }
         .navigationSplitViewStyle(.balanced)
+        .softScrollEdge()
         .frame(minWidth: 900, minHeight: 600)
         .onAppear {
             if feedManager.articles.isEmpty {
@@ -92,6 +94,9 @@ struct MainView: View {
         }
         .onChange(of: selectedTopic) { _, _ in
             articlePath = NavigationPath()
+        }
+        .onChange(of: searchText) { _, _ in
+            if !articlePath.isEmpty { articlePath = NavigationPath() }
         }
         // Notification Deep Link & Section Jump Routing
         .onReceive(NotificationCenter.default.publisher(for: .jumpToTodayCommand)) { _ in

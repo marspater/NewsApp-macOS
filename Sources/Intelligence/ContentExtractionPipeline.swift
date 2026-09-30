@@ -4,7 +4,7 @@ import os
 // MARK: - Extraction Outcome & Diagnostics
 
 public enum ExtractionOutcome: Equatable, Sendable {
-    case success(content: String, imageUrl: String?)
+    case success(content: String, imageUrl: String?, document: ReaderDocument? = nil)
     case networkError(reason: String)
     case httpError(status: Int)
     case securityBlocked(reason: String)
@@ -18,12 +18,12 @@ public enum ExtractionOutcome: Equatable, Sendable {
     }
 
     public var content: String? {
-        if case .success(let c, _) = self { return c }
+        if case .success(let c, _, _) = self { return c }
         return nil
     }
 
     public var imageUrl: String? {
-        if case .success(_, let img) = self { return img }
+        if case .success(_, let img, _) = self { return img }
         return nil
     }
 
@@ -144,11 +144,13 @@ final class DOMElementNode: Sendable {
 
     /// Recursively collects visible text from this node and its children.
     func combinedText() -> String {
-        guard !isHidden else { return "" }
+        guard !isReaderExcluded else { return "" }
+        if tag == "br" { return "\n" }
         var result = text
         for child in children {
             let childText = child.combinedText()
             if !childText.isEmpty {
+                if ["p", "div", "li"].contains(child.tag), !result.isEmpty { result += "\n" }
                 result += childText
             }
         }
@@ -167,12 +169,39 @@ final class DOMElementNode: Sendable {
         return results
     }
 
+    var isReaderExcluded: Bool {
+        if isHidden { return true }
+        // BBC renders this listening CTA as ordinary prose; require its exact media links.
+        if tag == "p" {
+            let links = findNodes(tag: "a").compactMap { $0.attributes["href"] }
+            let prose = (text + children.map { $0.combinedText() }.joined()).trimmingCharacters(in: .whitespacesAndNewlines)
+            if prose.hasPrefix("Listen to Newsbeat"),
+               links.contains("/sounds/play/live:bbc_radio_one"),
+               links.contains("/programmes/b006wkry/episodes/player") { return true }
+        }
+        let identifiers = [className, idValue, dataComponent, attributes["data-testid"] ?? "", attributes["data-block"] ?? "", attributes["role"] ?? ""]
+        return identifiers.contains {
+            Self.auxiliaryPattern.firstMatch(in: $0, range: NSRange($0.startIndex..., in: $0)) != nil
+        }
+    }
+
+    // Token boundaries keep editorial "commentary" distinct from comment widgets.
+    private static let auxiliaryPattern = try! NSRegularExpression(pattern: "(?i)(?:^|[^a-z0-9])(?:comments?|comment-thread|disqus|related(?:-content|-stories|-articles)?|links-block|newsletter|byline|timestamp-block|recommendations?|social-share|share-tools|promo|advertisement|outbrain|taboola|eventpromo|promolist|topiclist|uploaderembed)(?:$|[^a-z0-9])")
+
     func readingBlocks(allowDivFallback: Bool = true) -> [DOMElementNode] {
-        guard !isHidden else { return [] }
-        let auxiliary = ["related", "related-content", "links-block", "newsletter", "byline", "timestamp-block"]
-        let identifiers = (className + " " + idValue + " " + dataComponent).split(whereSeparator: { $0.isWhitespace })
-        guard !identifiers.contains(where: { auxiliary.contains(String($0)) }) else { return [] }
-        if ["p", "h2", "h3", "li", "blockquote", "pre"].contains(tag) { return [self] }
+        guard !isReaderExcluded else { return [] }
+        if tag == "ol" {
+            var ordinal = Int(attributes["start"] ?? "") ?? 1
+            return children.flatMap { child -> [DOMElementNode] in
+                guard child.tag == "li", !child.isReaderExcluded else { return child.readingBlocks() }
+                ordinal = Int(child.attributes["value"] ?? "") ?? ordinal
+                var attributes = child.attributes
+                attributes["reader-ordinal"] = String(ordinal)
+                if ordinal < Int.max { ordinal += 1 }
+                return [DOMElementNode(tag: child.tag, attributes: attributes, children: child.children, text: child.text)]
+            }
+        }
+        if ["p", "h2", "h3", "h4", "h5", "h6", "li", "blockquote", "pre"].contains(tag) { return [self] }
         let blocks = children.flatMap { $0.readingBlocks(allowDivFallback: false) }
         if !blocks.isEmpty || !allowDivFallback { return blocks }
         let divs = children.flatMap { $0.readingBlocks() }
@@ -182,6 +211,26 @@ final class DOMElementNode: Sendable {
             return [self]
         }
         return []
+    }
+
+    var readerBlock: ReaderBlock? {
+        guard !isReaderExcluded else { return nil }
+        let plain = combinedText().replacingOccurrences(of: "[ \t\r\n]+", with: " ", options: .regularExpression).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !plain.isEmpty, !ArticleContentRedactor.isBoilerplateLine(plain) else { return nil }
+        let kind: ReaderBlock.Kind
+        switch tag {
+        case "h2": kind = .heading
+        case "h3", "h4", "h5", "h6": kind = .subheading
+        case "li": kind = .listItem
+        case "blockquote": kind = .quote
+        case "pre": kind = .code
+        default: kind = .paragraph
+        }
+        // Standalone linked teasers are navigation, while inline citations remain part of prose.
+        guard computeLinkDensity() < 0.8 else { return nil }
+        guard kind != .paragraph || plain.count >= 25 else { return nil }
+        return ReaderBlock(kind: kind, text: kind == .code ? combinedText().trimmingCharacters(in: .whitespacesAndNewlines) : plain,
+                           ordinal: attributes["reader-ordinal"].flatMap(Int.init))
     }
 
     /// Computes link density: ratio of text inside <a> tags versus total combined text.
@@ -406,7 +455,7 @@ final class ContentExtractionPipeline: Sendable {
             let outcome = extractFromHTML(html, baseUrl: link, leadImage: leadImage)
 
             switch outcome {
-            case .success(let content, _):
+            case .success(let content, _, _):
                 logger.info("[Extraction] Host: \(host, privacy: .public) | Success: \(content.count) characters extracted")
             case .qualityValidationFailed(let reason):
                 logger.notice("[Extraction] Host: \(host, privacy: .public) | Quality rejected: \(reason, privacy: .public)")
@@ -446,7 +495,7 @@ final class ContentExtractionPipeline: Sendable {
     func extractArticle(from link: String, allowHTTP: Bool = false) async -> (content: String?, imageUrl: String?) {
         let outcome = await extractArticleDetailed(from: link, allowHTTP: allowHTTP)
         switch outcome {
-        case .success(let content, let image):
+        case .success(let content, let image, _):
             return (content, image)
         default:
             return (nil, nil)
@@ -473,11 +522,11 @@ final class ContentExtractionPipeline: Sendable {
         }
 
         // 4. Validate Content Quality
-        let validation = ContentQualityValidator.validate(paragraphs: candidateParagraphs)
+        let validation = ContentQualityValidator.validate(paragraphs: candidateParagraphs.filter { $0.kind == .paragraph || $0.kind == .quote || $0.kind == .listItem }.map(\.text))
         switch validation {
         case .valid:
-            let joined = candidateParagraphs.joined(separator: "\n\n")
-            return .success(content: joined, imageUrl: effectiveImage)
+            let joined = candidateParagraphs.map(\.text).joined(separator: "\n\n")
+            return .success(content: joined, imageUrl: effectiveImage, document: ReaderDocument(blocks: candidateParagraphs))
         case .rejected(let reason):
             return .qualityValidationFailed(reason: reason)
         }
@@ -485,12 +534,12 @@ final class ContentExtractionPipeline: Sendable {
 
     // MARK: - Container Scoring Engine
 
-    private func scoreAndExtractBestParagraphs(from root: DOMElementNode) -> [String] {
+    private func scoreAndExtractBestParagraphs(from root: DOMElementNode) -> [ReaderBlock] {
         var candidateContainers = [DOMElementNode]()
         collectCandidateContainers(from: root, into: &candidateContainers)
 
         var bestScore: Double = -1000.0
-        var bestParagraphs: [String] = []
+        var bestParagraphs: [ReaderBlock] = []
 
         for container in candidateContainers {
             let (score, paragraphs) = scoreContainer(container)
@@ -508,6 +557,7 @@ final class ContentExtractionPipeline: Sendable {
     }
 
     private func collectCandidateContainers(from node: DOMElementNode, into results: inout [DOMElementNode]) {
+        guard !node.isReaderExcluded else { return }
         let tag = node.tag
         if tag == "article" || tag == "main" || tag == "section" || tag == "div" {
             results.append(node)
@@ -517,16 +567,8 @@ final class ContentExtractionPipeline: Sendable {
         }
     }
 
-    private func scoreContainer(_ container: DOMElementNode) -> (Double, [String]) {
-        let pNodes = container.readingBlocks()
-        var substantiveParagraphs = [String]()
-
-        for p in pNodes {
-            let plain = p.combinedText().replacingOccurrences(of: "[ \\t\\r\\n]+", with: " ", options: .regularExpression).trimmingCharacters(in: .whitespacesAndNewlines)
-            if plain.count >= 25 && !ArticleContentRedactor.isBoilerplateLine(plain) {
-                substantiveParagraphs.append(plain)
-            }
-        }
+    private func scoreContainer(_ container: DOMElementNode) -> (Double, [ReaderBlock]) {
+        let substantiveParagraphs = container.readingBlocks().compactMap(\.readerBlock)
 
         guard !substantiveParagraphs.isEmpty else {
             return (-1000.0, [])
@@ -536,7 +578,7 @@ final class ContentExtractionPipeline: Sendable {
 
         // Paragraph count & text length contribution
         score += Double(substantiveParagraphs.count) * 30.0
-        let totalChars = substantiveParagraphs.reduce(0) { $0 + $1.count }
+        let totalChars = substantiveParagraphs.reduce(0) { $0 + $1.text.count }
         score += Double(totalChars) / 35.0
 
         // Tag Priority Bonus
@@ -584,16 +626,8 @@ final class ContentExtractionPipeline: Sendable {
         return (score, substantiveParagraphs)
     }
 
-    private func extractDocumentParagraphs(from root: DOMElementNode) -> [String] {
-        let pNodes = root.readingBlocks()
-        var substantive = [String]()
-        for p in pNodes {
-            let plain = p.combinedText().replacingOccurrences(of: "[ \\t\\r\\n]+", with: " ", options: .regularExpression).trimmingCharacters(in: .whitespacesAndNewlines)
-            if plain.count >= 30 && !ArticleContentRedactor.isBoilerplateLine(plain) {
-                substantive.append(plain)
-            }
-        }
-        return substantive
+    private func extractDocumentParagraphs(from root: DOMElementNode) -> [ReaderBlock] {
+        root.readingBlocks().compactMap(\.readerBlock)
     }
 
     /// Legacy helper returning semantic paragraphs from HTML string.
@@ -601,9 +635,9 @@ final class ContentExtractionPipeline: Sendable {
         let dom = HTMLDOMBuilder.parse(html: html)
         let scored = scoreAndExtractBestParagraphs(from: dom)
         if scored.count >= 2 {
-            return scored
+            return scored.map(\.text)
         }
-        return extractDocumentParagraphs(from: dom)
+        return extractDocumentParagraphs(from: dom).map(\.text)
     }
 
     /// Computes link density: ratio of text inside <a> tags versus total plain text.

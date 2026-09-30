@@ -20,9 +20,10 @@ struct NewsApp: App {
     @StateObject private var appContainer = AppContainer.shared
     @StateObject private var appSettings = AppSettings.shared
     @StateObject private var articleStore = ArticleStore.shared
-    @StateObject private var feedManager = FeedManager()
+    @StateObject private var feedManager = AppContainer.shared.feedManager
     @StateObject private var themeManager = ThemeManager.shared
-    @StateObject private var readManager = ReadManager.shared
+    @StateObject private var readManager = AppContainer.shared.readManager
+    @StateObject private var savedStories = AppContainer.shared.savedStories
     
     var body: some Scene {
         Window("News", id: "main") {
@@ -33,10 +34,10 @@ struct NewsApp: App {
                 .environmentObject(feedManager)
                 .environmentObject(themeManager)
                 .environmentObject(readManager)
+                .environmentObject(savedStories)
                 .preferredColorScheme(themeManager.appearance.colorScheme)
-                .background(WindowAccessor().frame(width: 0, height: 0))
         }
-        .windowStyle(HiddenTitleBarWindowStyle())
+        .windowToolbarStyle(.unified)
         .commands {
             SidebarCommands()
             CommandGroup(after: .appInfo) {
@@ -133,6 +134,7 @@ struct NewsApp: App {
                 .environmentObject(feedManager)
                 .environmentObject(themeManager)
                 .environmentObject(readManager)
+                .environmentObject(savedStories)
                 .preferredColorScheme(themeManager.appearance.colorScheme)
         }
     }
@@ -175,37 +177,5 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
             }
         }
         completionHandler()
-    }
-}
-
-// Accessor to deeply customize the NSWindow for Glassmorphism & Edge-to-Edge feel
-struct WindowAccessor: NSViewRepresentable {
-    func makeNSView(context: Context) -> NSView {
-        let view = NSView()
-        DispatchQueue.main.async {
-            guard let window = view.window else { return }
-            window.titlebarAppearsTransparent = true
-            window.titleVisibility = .hidden
-            window.styleMask.insert(.fullSizeContentView)
-            window.isMovableByWindowBackground = true
-            window.titlebarSeparatorStyle = .none
-            
-            // Force the sidebar divider to render cleanly
-            if let splitView = findSplitView(in: window.contentView) {
-                splitView.dividerStyle = .thin
-            }
-        }
-        return view
-    }
-
-    func updateNSView(_ nsView: NSView, context: Context) {}
-    
-    private func findSplitView(in view: NSView?) -> NSSplitView? {
-        guard let view = view else { return nil }
-        if let splitView = view as? NSSplitView { return splitView }
-        for subview in view.subviews {
-            if let found = findSplitView(in: subview) { return found }
-        }
-        return nil
     }
 }
