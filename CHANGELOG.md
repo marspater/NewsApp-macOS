@@ -4,6 +4,8 @@
 
 ### Fixed
 
+- Keep undated stories visible using stable ingestion-time ordering, with matching archive/search cursors and retention.
+
 - Preserve the visible library on database read failures and notify only for committed new article IDs across the full archive.
 - Apply valid publisher URL/date corrections without replacing known metadata with missing or malformed values; keep undated stories stable across refreshes.
 - Reconcile bookmark removal against saved URL-equivalent IDs and exclude empty links from bookmark equivalence.

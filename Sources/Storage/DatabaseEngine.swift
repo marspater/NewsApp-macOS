@@ -430,6 +430,9 @@ actor DatabaseEngine {
         return insertedIDs
     }
     
+    // Unknown publisher dates retain their identity sentinel; ingestion time orders them.
+    private static let articleDateOrder = "CASE WHEN a.published_at = \(DateParser.unknownDate.timeIntervalSince1970) THEN a.created_at ELSE a.published_at END"
+
     // MARK: - Article Queries
     
     func fetchArticles(
@@ -448,7 +451,7 @@ actor DatabaseEngine {
                a.published_at, a.source, a.image_url, a.category,
                ae.summary, ae.content_fetched,
                s.is_read, s.is_saved,
-               ae.key_points, ae.entities, ae.sentiment, a.reader_document
+               ae.key_points, ae.entities, ae.sentiment, a.reader_document, \(Self.articleDateOrder)
         FROM articles a
         JOIN article_state s ON s.article_id = a.id
         LEFT JOIN article_enrichment ae ON ae.article_id = a.id
@@ -482,11 +485,11 @@ actor DatabaseEngine {
             params += terms.map { ("text", $0) }
         }
         if let after {
-            query += " AND (a.published_at < ? OR (a.published_at = ? AND a.id > ?))"
+            query += " AND (\(Self.articleDateOrder) < ? OR (\(Self.articleDateOrder) = ? AND a.id > ?))"
             params += [("double", after.value), ("double", after.value), ("text", after.id)]
         }
 
-        query += " ORDER BY a.published_at DESC, a.id"
+        query += " ORDER BY \(Self.articleDateOrder) DESC, a.id"
         
         if let lim = limit {
             query += " LIMIT ?"
@@ -515,7 +518,10 @@ actor DatabaseEngine {
         var status = sqlite3_step(stmt)
         while status == SQLITE_ROW {
             try Task.checkCancellation()
-            if let article = parseArticleRow(stmt) { results.append(article) }
+            if var article = parseArticleRow(stmt) {
+                article.queryOrderValue = sqlite3_column_double(stmt, 18)
+                results.append(article)
+            }
             status = sqlite3_step(stmt)
         }
         guard status == SQLITE_DONE else {
@@ -555,7 +561,7 @@ actor DatabaseEngine {
         """
 
         
-        sql = sql.replacingOccurrences(of: "a.reader_document\n", with: "a.reader_document, " + (cleanTerms.isEmpty ? "a.published_at" : "fts.rank") + "\n")
+        sql = sql.replacingOccurrences(of: "a.reader_document\n", with: "a.reader_document, " + (cleanTerms.isEmpty ? Self.articleDateOrder : "fts.rank") + "\n")
         var params: [(type: String, val: Any)] = []
         
         let hasFTS = !cleanTerms.isEmpty
@@ -592,14 +598,14 @@ actor DatabaseEngine {
             if hasFTS {
                 sql += " AND (fts.rank > ? OR (fts.rank = ? AND a.id > ?))"
             } else {
-                sql += " AND (a.published_at < ? OR (a.published_at = ? AND a.id > ?))"
+                sql += " AND (\(Self.articleDateOrder) < ? OR (\(Self.articleDateOrder) = ? AND a.id > ?))"
             }
             params += [("double", after.value), ("double", after.value), ("text", after.id)]
         }
         if hasFTS {
             sql += " ORDER BY fts.rank, a.id LIMIT ?"
         } else {
-            sql += " ORDER BY a.published_at DESC, a.id LIMIT ?"
+            sql += " ORDER BY \(Self.articleDateOrder) DESC, a.id LIMIT ?"
         }
         params.append(("int", limit))
         
@@ -1130,7 +1136,7 @@ actor DatabaseEngine {
             JOIN article_state s ON s.article_id = a.id
             WHERE s.is_read = 1
               AND s.is_saved = 0
-              AND a.published_at < ?
+              AND \(Self.articleDateOrder) < ?
         );
         """
         var stmt: OpaquePointer?

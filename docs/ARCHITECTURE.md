@@ -14,6 +14,7 @@ Native macOS, local-first RSS reader. This document defines the supported techno
 
 - Keep UI concerns out of database, networking and domain layers. Preserve actor isolation, avoid main-actor database work, bound batch concurrency/memory, and avoid lifecycle retain cycles.
 - Propagate cancellation through feed, extraction and enrichment work. Shared refresh work survives an individual waiter cancelling; explicit reset cancels that shared work. Unstructured tasks require explicit lifecycle ownership.
+- Undated articles retain the unknown publication-date sentinel for identity/display; archive and filter-only search order and paginate by their original ingestion time. Retention uses the same date fallback.
 - SQLite schema changes require migrations. Preserve WAL/FTS5, saved stories, read history and user settings; use transactions where multi-step writes must be atomic.
 - Publication dates that are missing or malformed use a stable `Date.distantPast` sentinel; undated stories sort behind dated stories. Upserts apply valid URL/date corrections while retaining known values when incoming metadata is invalid. New-story notifications use IDs inserted by a committed SQLite transaction, not the 500-story UI snapshot.
 - Notification navigation requests remain in `ArticleStore` until storage is ready and resolve via SQLite by stable ID, with canonical URL fallback for older notifications.

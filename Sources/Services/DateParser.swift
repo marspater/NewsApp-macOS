@@ -1,7 +1,7 @@
 import Foundation
 
 struct DateParser {
-    /// Unknown publication dates sort behind dated stories and remain stable across refreshes.
+    /// Unknown publication dates remain stable across refreshes; storage orders them by ingestion time.
     static let unknownDate = Date.distantPast
 
     static func parse(_ dateString: String) -> Date? {
