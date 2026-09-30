@@ -58,12 +58,11 @@ actor MigrationCoordinator {
         let cacheDir = fileManager.urls(for: .cachesDirectory, in: .userDomainMask).first?
             .appendingPathComponent("com.marspater.news.cache")
         if let cacheFile = cacheDir?.appendingPathComponent(legacyCacheKey),
-           fileManager.fileExists(atPath: cacheFile.path) {
-            if let data = try? Data(contentsOf: cacheFile),
-               let decoded = try? JSONDecoder().decode([FeedArticle].self, from: data) {
-                legacyArticles = decoded
-                stats.articlesFound = decoded.count
-            }
+           fileManager.fileExists(atPath: cacheFile.path),
+           let data = try? Data(contentsOf: cacheFile),
+           let decoded = try? JSONDecoder().decode([FeedArticle].self, from: data) {
+            legacyArticles = decoded
+            stats.articlesFound = decoded.count
         }
         
         // 2. Load legacy saved stories

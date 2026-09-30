@@ -11,8 +11,8 @@ actor DatabaseEngine {
     private var db: OpaquePointer?
     private let dbPath: String
     
-    // SQLITE_TRANSIENT destructor constant (-1 converted to unsafe pointer)
-    private static let SQLITE_TRANSIENT = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+    // sqliteTransient destructor constant (-1 converted to unsafe pointer)
+    private static let sqliteTransient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
     
     init(path: String? = nil) {
         if let customPath = path {
@@ -345,22 +345,22 @@ actor DatabaseEngine {
 
             // 1. Insert/Update Article
             sqlite3_reset(artStmt)
-            sqlite3_bind_text(artStmt, 1, id, -1, Self.SQLITE_TRANSIENT)
-            if let g = article.guid { sqlite3_bind_text(artStmt, 2, g, -1, Self.SQLITE_TRANSIENT) } else { sqlite3_bind_null(artStmt, 2) }
-            sqlite3_bind_text(artStmt, 3, canonical, -1, Self.SQLITE_TRANSIENT)
-            sqlite3_bind_text(artStmt, 4, article.title, -1, Self.SQLITE_TRANSIENT)
-            sqlite3_bind_text(artStmt, 5, article.description, -1, Self.SQLITE_TRANSIENT)
-            if let c = article.fullContent { sqlite3_bind_text(artStmt, 6, c, -1, Self.SQLITE_TRANSIENT) } else { sqlite3_bind_null(artStmt, 6) }
+            sqlite3_bind_text(artStmt, 1, id, -1, Self.sqliteTransient)
+            if let g = article.guid { sqlite3_bind_text(artStmt, 2, g, -1, Self.sqliteTransient) } else { sqlite3_bind_null(artStmt, 2) }
+            sqlite3_bind_text(artStmt, 3, canonical, -1, Self.sqliteTransient)
+            sqlite3_bind_text(artStmt, 4, article.title, -1, Self.sqliteTransient)
+            sqlite3_bind_text(artStmt, 5, article.description, -1, Self.sqliteTransient)
+            if let c = article.fullContent { sqlite3_bind_text(artStmt, 6, c, -1, Self.sqliteTransient) } else { sqlite3_bind_null(artStmt, 6) }
             sqlite3_bind_double(artStmt, 7, pubDate)
-            sqlite3_bind_text(artStmt, 8, article.source, -1, Self.SQLITE_TRANSIENT)
-            if let img = article.imageUrl { sqlite3_bind_text(artStmt, 9, img, -1, Self.SQLITE_TRANSIENT) } else { sqlite3_bind_null(artStmt, 9) }
-            if let cat = article.category { sqlite3_bind_text(artStmt, 10, cat, -1, Self.SQLITE_TRANSIENT) } else { sqlite3_bind_null(artStmt, 10) }
-            if let f = feedUrl { sqlite3_bind_text(artStmt, 11, f, -1, Self.SQLITE_TRANSIENT) } else { sqlite3_bind_null(artStmt, 11) }
+            sqlite3_bind_text(artStmt, 8, article.source, -1, Self.sqliteTransient)
+            if let img = article.imageUrl { sqlite3_bind_text(artStmt, 9, img, -1, Self.sqliteTransient) } else { sqlite3_bind_null(artStmt, 9) }
+            if let cat = article.category { sqlite3_bind_text(artStmt, 10, cat, -1, Self.sqliteTransient) } else { sqlite3_bind_null(artStmt, 10) }
+            if let f = feedUrl { sqlite3_bind_text(artStmt, 11, f, -1, Self.sqliteTransient) } else { sqlite3_bind_null(artStmt, 11) }
             sqlite3_bind_double(artStmt, 12, now)
             sqlite3_bind_double(artStmt, 13, now)
             if let document = article.readerDocument {
                 let encoded = String(decoding: try JSONEncoder().encode(document), as: UTF8.self)
-                sqlite3_bind_text(artStmt, 14, encoded, -1, Self.SQLITE_TRANSIENT)
+                sqlite3_bind_text(artStmt, 14, encoded, -1, Self.sqliteTransient)
             } else { sqlite3_bind_null(artStmt, 14) }
 
             if sqlite3_step(artStmt) != SQLITE_DONE {
@@ -370,8 +370,8 @@ actor DatabaseEngine {
 
             if let feedUrl {
                 sqlite3_reset(feedStmt)
-                sqlite3_bind_text(feedStmt, 1, id, -1, Self.SQLITE_TRANSIENT)
-                sqlite3_bind_text(feedStmt, 2, feedUrl, -1, Self.SQLITE_TRANSIENT)
+                sqlite3_bind_text(feedStmt, 1, id, -1, Self.sqliteTransient)
+                sqlite3_bind_text(feedStmt, 2, feedUrl, -1, Self.sqliteTransient)
                 guard sqlite3_step(feedStmt) == SQLITE_DONE else {
                     throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to persist feed association"])
                 }
@@ -379,7 +379,7 @@ actor DatabaseEngine {
 
             // 2. Insert State (preserves existing read/saved state on conflict)
             sqlite3_reset(stateStmt)
-            sqlite3_bind_text(stateStmt, 1, id, -1, Self.SQLITE_TRANSIENT)
+            sqlite3_bind_text(stateStmt, 1, id, -1, Self.sqliteTransient)
             if sqlite3_step(stateStmt) != SQLITE_DONE {
                 try rollbackTransaction()
                 throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to step state insert"])
@@ -387,8 +387,8 @@ actor DatabaseEngine {
 
             // 3. Insert Enrichment
             sqlite3_reset(enrichStmt)
-            sqlite3_bind_text(enrichStmt, 1, id, -1, Self.SQLITE_TRANSIENT)
-            if let s = article.aiSummary { sqlite3_bind_text(enrichStmt, 2, s, -1, Self.SQLITE_TRANSIENT) } else { sqlite3_bind_null(enrichStmt, 2) }
+            sqlite3_bind_text(enrichStmt, 1, id, -1, Self.sqliteTransient)
+            if let s = article.aiSummary { sqlite3_bind_text(enrichStmt, 2, s, -1, Self.sqliteTransient) } else { sqlite3_bind_null(enrichStmt, 2) }
             sqlite3_bind_int(enrichStmt, 3, article.contentFetched ? 1 : 0)
             if article.aiSummary != nil || article.contentFetched {
                 sqlite3_bind_double(enrichStmt, 4, now)
@@ -472,7 +472,7 @@ actor DatabaseEngine {
             } else if p.type == "double", let v = p.val as? Double {
                 sqlite3_bind_double(stmt, col, v)
             } else if p.type == "text", let v = p.val as? String {
-                sqlite3_bind_text(stmt, col, v, -1, Self.SQLITE_TRANSIENT)
+                sqlite3_bind_text(stmt, col, v, -1, Self.sqliteTransient)
             }
         }
         
@@ -582,7 +582,7 @@ actor DatabaseEngine {
             } else if p.type == "double", let v = p.val as? Double {
                 sqlite3_bind_double(stmt, col, v)
             } else if p.type == "text", let v = p.val as? String {
-                sqlite3_bind_text(stmt, col, v, -1, Self.SQLITE_TRANSIENT)
+                sqlite3_bind_text(stmt, col, v, -1, Self.sqliteTransient)
             }
         }
         
@@ -620,7 +620,7 @@ actor DatabaseEngine {
         defer { sqlite3_finalize(stmt) }
         
         let now = Date().timeIntervalSince1970
-        sqlite3_bind_text(stmt, 1, articleId, -1, Self.SQLITE_TRANSIENT)
+        sqlite3_bind_text(stmt, 1, articleId, -1, Self.sqliteTransient)
         sqlite3_bind_int(stmt, 2, isRead ? 1 : 0)
         if isRead {
             sqlite3_bind_double(stmt, 3, now)
@@ -657,7 +657,7 @@ actor DatabaseEngine {
         do {
             for articleId in articleIds {
                 sqlite3_reset(stmt)
-                sqlite3_bind_text(stmt, 1, articleId, -1, Self.SQLITE_TRANSIENT)
+                sqlite3_bind_text(stmt, 1, articleId, -1, Self.sqliteTransient)
                 sqlite3_bind_int(stmt, 2, readInt)
                 if isRead {
                     sqlite3_bind_double(stmt, 3, now)
@@ -699,7 +699,7 @@ actor DatabaseEngine {
         do {
             for articleId in articleIds {
                 sqlite3_reset(stmt)
-                sqlite3_bind_text(stmt, 1, articleId, -1, Self.SQLITE_TRANSIENT)
+                sqlite3_bind_text(stmt, 1, articleId, -1, Self.sqliteTransient)
                 sqlite3_bind_double(stmt, 2, now)
 
                 if sqlite3_step(stmt) != SQLITE_DONE {
@@ -723,7 +723,7 @@ actor DatabaseEngine {
         }
         defer { sqlite3_finalize(stmt) }
         sqlite3_bind_double(stmt, 1, Date().timeIntervalSince1970)
-        if let feedUrl { sqlite3_bind_text(stmt, 2, feedUrl, -1, Self.SQLITE_TRANSIENT) }
+        if let feedUrl { sqlite3_bind_text(stmt, 2, feedUrl, -1, Self.sqliteTransient) }
         guard sqlite3_step(stmt) == SQLITE_DONE else {
             throw NSError(domain: "DatabaseEngine", code: Int(sqlite3_errcode(db)), userInfo: [NSLocalizedDescriptionKey: String(cString: sqlite3_errmsg(db))])
         }
@@ -751,7 +751,7 @@ actor DatabaseEngine {
         defer { sqlite3_finalize(stmt) }
         
         let now = Date().timeIntervalSince1970
-        sqlite3_bind_text(stmt, 1, articleId, -1, Self.SQLITE_TRANSIENT)
+        sqlite3_bind_text(stmt, 1, articleId, -1, Self.sqliteTransient)
         sqlite3_bind_int(stmt, 2, isSaved ? 1 : 0)
         if isSaved {
             sqlite3_bind_double(stmt, 3, now)
@@ -771,7 +771,7 @@ actor DatabaseEngine {
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return false }
         defer { sqlite3_finalize(stmt) }
         
-        sqlite3_bind_text(stmt, 1, articleId, -1, Self.SQLITE_TRANSIENT)
+        sqlite3_bind_text(stmt, 1, articleId, -1, Self.sqliteTransient)
         if sqlite3_step(stmt) == SQLITE_ROW {
             return sqlite3_column_int(stmt, 0) == 1
         }
@@ -785,7 +785,7 @@ actor DatabaseEngine {
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return false }
         defer { sqlite3_finalize(stmt) }
         
-        sqlite3_bind_text(stmt, 1, articleId, -1, Self.SQLITE_TRANSIENT)
+        sqlite3_bind_text(stmt, 1, articleId, -1, Self.sqliteTransient)
         if sqlite3_step(stmt) == SQLITE_ROW {
             return sqlite3_column_int(stmt, 0) == 1
         }
@@ -812,19 +812,34 @@ actor DatabaseEngine {
         return try fetchArticles(isSaved: true)
     }
     
+    private static func sentimentLabel(for score: Double) -> String {
+        if score > 0.25 { return "Positive" }
+        if score < -0.25 { return "Critical" }
+        return "Neutral"
+    }
+
     // MARK: - Enrichment Update
     
-    func updateEnrichment(
-        articleId: String,
-        summary: String? = nil,
-        category: String? = nil,
-        sentiment: Double? = nil,
-        entities: [String]? = nil,
-        topics: [String]? = nil,
-        content: String? = nil,
-        image: String? = nil,
-        readerDocument: ReaderDocument? = nil
-    ) throws {
+    struct EnrichmentUpdate: Sendable {
+        var summary: String? = nil
+        var category: String? = nil
+        var sentiment: Double? = nil
+        var entities: [String]? = nil
+        var topics: [String]? = nil
+        var content: String? = nil
+        var image: String? = nil
+        var readerDocument: ReaderDocument? = nil
+    }
+
+    func updateEnrichment(articleId: String, update: EnrichmentUpdate) throws {
+        let summary = update.summary
+        let category = update.category
+        let sentiment = update.sentiment
+        let entities = update.entities
+        let topics = update.topics
+        let content = update.content
+        let image = update.image
+        let readerDocument = update.readerDocument
         guard let db = db else { throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Database not open"]) }
         
         // 1. Update article table content, category & image if provided
@@ -859,12 +874,12 @@ actor DatabaseEngine {
                 for (idx, p) in params.enumerated() {
                     let col = Int32(idx + 1)
                     if p.type == "text", let v = p.val as? String {
-                        sqlite3_bind_text(artStmt, col, v, -1, Self.SQLITE_TRANSIENT)
+                        sqlite3_bind_text(artStmt, col, v, -1, Self.sqliteTransient)
                     } else if p.type == "double", let v = p.val as? Double {
                         sqlite3_bind_double(artStmt, col, v)
                     }
                 }
-                sqlite3_bind_text(artStmt, Int32(params.count + 1), articleId, -1, Self.SQLITE_TRANSIENT)
+                sqlite3_bind_text(artStmt, Int32(params.count + 1), articleId, -1, Self.sqliteTransient)
                 sqlite3_step(artStmt)
             }
         }
@@ -887,14 +902,14 @@ actor DatabaseEngine {
         defer { sqlite3_finalize(stmt) }
         
         let now = Date().timeIntervalSince1970
-        sqlite3_bind_text(stmt, 1, articleId, -1, Self.SQLITE_TRANSIENT)
-        if let s = summary { sqlite3_bind_text(stmt, 2, s, -1, Self.SQLITE_TRANSIENT) } else { sqlite3_bind_null(stmt, 2) }
+        sqlite3_bind_text(stmt, 1, articleId, -1, Self.sqliteTransient)
+        if let s = summary { sqlite3_bind_text(stmt, 2, s, -1, Self.sqliteTransient) } else { sqlite3_bind_null(stmt, 2) }
         if let sent = sentiment { sqlite3_bind_double(stmt, 3, sent) } else { sqlite3_bind_null(stmt, 3) }
         if let ent = entities, let data = try? JSONEncoder().encode(ent), let str = String(data: data, encoding: .utf8) {
-            sqlite3_bind_text(stmt, 4, str, -1, Self.SQLITE_TRANSIENT)
+            sqlite3_bind_text(stmt, 4, str, -1, Self.sqliteTransient)
         } else { sqlite3_bind_null(stmt, 4) }
         if let top = topics, let data = try? JSONEncoder().encode(top), let str = String(data: data, encoding: .utf8) {
-            sqlite3_bind_text(stmt, 5, str, -1, Self.SQLITE_TRANSIENT)
+            sqlite3_bind_text(stmt, 5, str, -1, Self.sqliteTransient)
         } else { sqlite3_bind_null(stmt, 5) }
         sqlite3_bind_int(stmt, 6, content != nil ? 1 : 0)
         sqlite3_bind_double(stmt, 7, now)
@@ -931,17 +946,17 @@ actor DatabaseEngine {
         defer { sqlite3_finalize(stmt) }
 
         let now = Date().timeIntervalSince1970
-        sqlite3_bind_text(stmt, 1, articleId, -1, Self.SQLITE_TRANSIENT)
-        sqlite3_bind_text(stmt, 2, analysis.summary, -1, Self.SQLITE_TRANSIENT)
+        sqlite3_bind_text(stmt, 1, articleId, -1, Self.sqliteTransient)
+        sqlite3_bind_text(stmt, 2, analysis.summary, -1, Self.sqliteTransient)
 
         if let kpData = try? JSONEncoder().encode(analysis.keyPoints), let kpStr = String(data: kpData, encoding: .utf8) {
-            sqlite3_bind_text(stmt, 3, kpStr, -1, Self.SQLITE_TRANSIENT)
+            sqlite3_bind_text(stmt, 3, kpStr, -1, Self.sqliteTransient)
         } else {
             sqlite3_bind_null(stmt, 3)
         }
 
         if let cat = analysis.category {
-            sqlite3_bind_text(stmt, 4, cat, -1, Self.SQLITE_TRANSIENT)
+            sqlite3_bind_text(stmt, 4, cat, -1, Self.sqliteTransient)
         } else {
             sqlite3_bind_null(stmt, 4)
         }
@@ -955,12 +970,12 @@ actor DatabaseEngine {
         }
 
         if let entData = try? JSONEncoder().encode(analysis.entities), let entStr = String(data: entData, encoding: .utf8) {
-            sqlite3_bind_text(stmt, 7, entStr, -1, Self.SQLITE_TRANSIENT)
+            sqlite3_bind_text(stmt, 7, entStr, -1, Self.sqliteTransient)
         } else {
             sqlite3_bind_null(stmt, 7)
         }
 
-        sqlite3_bind_text(stmt, 8, analysis.modelIdentifier, -1, Self.SQLITE_TRANSIENT)
+        sqlite3_bind_text(stmt, 8, analysis.modelIdentifier, -1, Self.sqliteTransient)
         sqlite3_bind_int(stmt, 9, Int32(analysis.analysisVersion))
         sqlite3_bind_double(stmt, 10, now)
 
@@ -982,7 +997,7 @@ actor DatabaseEngine {
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return nil }
         defer { sqlite3_finalize(stmt) }
 
-        sqlite3_bind_text(stmt, 1, articleId, -1, Self.SQLITE_TRANSIENT)
+        sqlite3_bind_text(stmt, 1, articleId, -1, Self.sqliteTransient)
         guard sqlite3_step(stmt) == SQLITE_ROW else { return nil }
 
         guard let summaryCStr = sqlite3_column_text(stmt, 0) else { return nil }
@@ -1000,7 +1015,7 @@ actor DatabaseEngine {
         var sentiment: SentimentResult? = nil
         if sqlite3_column_type(stmt, 3) != SQLITE_NULL {
             let score = sqlite3_column_double(stmt, 3)
-            let label = score > 0.25 ? "Positive" : (score < -0.25 ? "Critical" : "Neutral")
+            let label = Self.sentimentLabel(for: score)
             sentiment = SentimentResult(score: score, confidence: 0.9, label: label)
         }
 
@@ -1173,7 +1188,7 @@ actor DatabaseEngine {
         if sqlite3_column_type(stmt, 16) != SQLITE_NULL {
             let score = sqlite3_column_double(stmt, 16)
             sentimentScore = score
-            sentimentLabel = score > 0.25 ? "Positive" : (score < -0.25 ? "Critical" : "Neutral")
+            sentimentLabel = Self.sentimentLabel(for: score)
         }
         
         return FeedArticle(

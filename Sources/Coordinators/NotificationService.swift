@@ -66,7 +66,7 @@ final class NotificationService: Sendable {
             // ALWAYS exactly one coalesced notification with singular/plural grammar
             await triggerMinimalNotification(for: newArticles)
 
-        case .private:
+        case .privacy:
             // Exactly one generic notification with ZERO identifying source or headline details
             await triggerPrivateNotification()
 
@@ -165,10 +165,9 @@ final class NotificationService: Sendable {
         content.sound = .default
         content.userInfo = ["articleLink": article.link]
 
-        if let imageUrlString = article.imageUrl, let imageUrl = URL(string: imageUrlString) {
-            if let attachment = await downloadNotificationAttachment(from: imageUrl) {
-                content.attachments = [attachment]
-            }
+        if let imageUrlString = article.imageUrl, let imageUrl = URL(string: imageUrlString),
+           let attachment = await downloadNotificationAttachment(from: imageUrl) {
+            content.attachments = [attachment]
         }
 
         let identifier = "news-\(article.link.hashValue)"

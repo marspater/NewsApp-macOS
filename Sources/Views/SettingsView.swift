@@ -231,13 +231,9 @@ struct SettingsView: View {
                     .pickerStyle(.radioGroup)
 
                     HStack(spacing: 8) {
-                        Image(systemName: appSettings.notificationMode == .private ? "lock.fill" : "info.circle")
-                            .foregroundColor(appSettings.notificationMode == .private ? AppColor.success : AppColor.accent)
-                        Text(appSettings.notificationMode == .private
-                             ? "Private mode: Displays generic alerts with no identifying headlines, sources, or preview text."
-                             : (appSettings.notificationMode == .minimal
-                                ? "Minimal mode: Aggregates new stories into a single count summary (e.g., '5 new articles')."
-                                : "Full mode: Displays article headline, source publication, and lead image banner."))
+                        Image(systemName: appSettings.notificationMode == .privacy ? "lock.fill" : "info.circle")
+                            .foregroundColor(appSettings.notificationMode == .privacy ? AppColor.success : AppColor.accent)
+                        Text(appSettings.notificationMode.detail)
                             .font(.caption)
                             .foregroundColor(AppColor.secondaryText)
                     }

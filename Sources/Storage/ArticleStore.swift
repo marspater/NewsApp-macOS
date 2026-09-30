@@ -206,14 +206,9 @@ final class ArticleStore: ObservableObject {
         do {
             try await database.updateEnrichment(
                 articleId: id,
-                summary: summary,
-                category: category,
-                sentiment: sentiment,
-                entities: entities,
-                topics: topics,
-                content: content,
-                image: image,
-                readerDocument: readerDocument
+                update: .init(summary: summary, category: category, sentiment: sentiment,
+                              entities: entities, topics: topics, content: content,
+                              image: image, readerDocument: readerDocument)
             )
             
             // Update in-memory articles array

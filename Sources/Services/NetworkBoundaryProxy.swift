@@ -155,13 +155,17 @@ private final class SOCKSTunnel: @unchecked Sendable {
         client.start(queue: queue)
         read(2) { [weak self] greeting in
             guard let self, let greeting, greeting[0] == 5, greeting[1] > 0 else { self?.finish(); return }
-            self.read(Int(greeting[1])) { [weak self] methods in
-                guard let self, let methods, methods.contains(0) else { self?.finish(); return }
-                self.client.send(content: Data([5, 0]), completion: .contentProcessed { [weak self] error in
-                    guard let self, error == nil else { self?.finish(); return }
-                    self.readRequest()
-                })
-            }
+            self.readMethods(Int(greeting[1]))
+        }
+    }
+
+    private func readMethods(_ count: Int) {
+        read(count) { [weak self] methods in
+            guard let self, let methods, methods.contains(0) else { self?.finish(); return }
+            self.client.send(content: Data([5, 0]), completion: .contentProcessed { [weak self] error in
+                guard let self, error == nil else { self?.finish(); return }
+                self.readRequest()
+            })
         }
     }
 
@@ -178,24 +182,25 @@ private final class SOCKSTunnel: @unchecked Sendable {
     }
 
     private func readRequest() {
-        read(4) { [weak self] header in
-            guard let self, let header, header[0] == 5, header[1] == 1, header[2] == 0 else {
-                self?.reject(); return
-            }
-            switch header[3] {
-            case 1:
-                self.read(4) { [weak self] bytes in self?.readPort(host: bytes.flatMap { IPv4Address($0)?.debugDescription }) }
-            case 4:
-                self.read(16) { [weak self] bytes in self?.readPort(host: bytes.flatMap { IPv6Address($0)?.debugDescription }) }
-            case 3:
-                self.read(1) { [weak self] length in
-                    guard let self, let length, length[0] > 0 else { self?.reject(); return }
-                    self.read(Int(length[0])) { [weak self] bytes in
-                        self?.readPort(host: bytes.flatMap { String(data: $0, encoding: .utf8) })
-                    }
+        read(4) { [weak self] header in self?.handleRequestHeader(header) }
+    }
+
+    private func handleRequestHeader(_ header: Data?) {
+        guard let header, header[0] == 5, header[1] == 1, header[2] == 0 else { reject(); return }
+        switch header[3] {
+        case 1:
+            read(4) { [weak self] bytes in self?.readPort(host: bytes.flatMap { IPv4Address($0)?.debugDescription }) }
+        case 4:
+            read(16) { [weak self] bytes in self?.readPort(host: bytes.flatMap { IPv6Address($0)?.debugDescription }) }
+        case 3:
+            read(1) { [weak self] length in
+                guard let self, let length, length[0] > 0 else { self?.reject(); return }
+                self.read(Int(length[0])) { [weak self] bytes in
+                    guard let bytes, let host = String(data: bytes, encoding: .utf8) else { self?.reject(); return }
+                    self?.readPort(host: host)
                 }
-            default: self.reject()
             }
+        default: reject()
         }
     }
 
@@ -206,19 +211,25 @@ private final class SOCKSTunnel: @unchecked Sendable {
             guard let self, let bytes else { self?.reject(); return }
             let port = UInt16(bytes[0]) << 8 | UInt16(bytes[1])
             guard [80, 443, 8080, 8443].contains(port) else { self.reject(); return }
-            let resolver = self.resolver
-            self.resolving = Task.detached { [weak self] in
-                let result = await resolver.resolve(host)
-                guard !Task.isCancelled else { return }
-                self?.queue.async { [weak self] in
-                    guard let self, !self.finished else { return }
-                    guard case .allowed(let addresses) = result, !addresses.isEmpty,
-                          addresses.allSatisfy({ IPAddressValidator.checkLiteralIP($0) == nil &&
-                              (IPv4Address($0) != nil || IPv6Address($0) != nil) && !$0.contains("%") }) else {
-                        self.reject(); return
-                    }
-                    self.connect(addresses: addresses[...], port: port)
-                }
+            self.resolve(host: host, port: port)
+        }
+    }
+
+    private static func isPublicAddress(_ address: String) -> Bool {
+        IPAddressValidator.checkLiteralIP(address) == nil &&
+            (IPv4Address(address) != nil || IPv6Address(address) != nil) && !address.contains("%")
+    }
+
+    private func resolve(host: String, port: UInt16) {
+        let resolver = self.resolver
+        resolving = Task.detached { [weak self] in
+            let result = await resolver.resolve(host)
+            guard !Task.isCancelled else { return }
+            self?.queue.async { [weak self] in
+                guard let self, !self.finished else { return }
+                guard case .allowed(let addresses) = result, !addresses.isEmpty,
+                      addresses.allSatisfy(Self.isPublicAddress) else { self.reject(); return }
+                self.connect(addresses: addresses[...], port: port)
             }
         }
     }

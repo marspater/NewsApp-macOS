@@ -28,6 +28,16 @@ struct ArticleCardView: View {
                 : AnyLayout(VStackLayout(alignment: .leading, spacing: 0))
     }
 
+    private var appearance: (border: Color, width: CGFloat, shadow: Color, radius: CGFloat, y: CGFloat) {
+        if isSelected {
+            return (AppColor.accent, 1.5, AppShadow.cardFocusRingColor, AppShadow.cardFocusRingRadius, AppShadow.cardFocusRingY)
+        }
+        if isHovered {
+            return (AppColor.accent.opacity(0.4), 1.0, AppShadow.cardHoverColor, AppShadow.cardHoverRadius, AppShadow.cardHoverY)
+        }
+        return (AppColor.borderSubtle, 0.5, AppShadow.cardRestingColor, AppShadow.cardRestingRadius, AppShadow.cardRestingY)
+    }
+
     var body: some View {
         Button(action: action) {
             cardLayout {
@@ -115,25 +125,9 @@ struct ArticleCardView: View {
             .clipShape(RoundedRectangle(cornerRadius: AppRadius.card))
             .overlay(
                 RoundedRectangle(cornerRadius: AppRadius.card)
-                    .stroke(
-                        isSelected
-                            ? AppColor.accent
-                            : (isHovered ? AppColor.accent.opacity(0.4) : AppColor.borderSubtle),
-                        lineWidth: isSelected ? 1.5 : (isHovered ? 1.0 : 0.5)
-                    )
+                    .stroke(appearance.border, lineWidth: appearance.width)
             )
-            .shadow(
-                color: isSelected
-                    ? AppShadow.cardFocusRingColor
-                    : (isHovered ? AppShadow.cardHoverColor : AppShadow.cardRestingColor),
-                radius: isSelected
-                    ? AppShadow.cardFocusRingRadius
-                    : (isHovered ? AppShadow.cardHoverRadius : AppShadow.cardRestingRadius),
-                x: 0,
-                y: isSelected
-                    ? AppShadow.cardFocusRingY
-                    : (isHovered ? AppShadow.cardHoverY : AppShadow.cardRestingY)
-            )
+            .shadow(color: appearance.shadow, radius: appearance.radius, x: 0, y: appearance.y)
             .animation(reduceMotion ? nil : AppMotion.state, value: isHovered || isSelected)
             .opacity(isRead ? 0.90 : 1.0)
             .onHover { hovering in

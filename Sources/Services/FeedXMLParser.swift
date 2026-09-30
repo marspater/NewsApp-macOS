@@ -95,7 +95,7 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
 
     // MARK: - XMLParserDelegate
 
-    func parser(_ parser: XMLParser, didStartElement elementName: String, namespaceURI: String?, qualifiedName qName: String?, attributes attributeDict: [String: String] = [:]) {
+    func parser(_ parser: XMLParser, didStartElement elementName: String, namespaceURI: String?, qualifiedName _: String?, attributes attributeDict: [String: String] = [:]) {
         currentNestingDepth += 1
         if currentNestingDepth > maxNestingDepth {
             parser.abortParsing()
@@ -143,13 +143,12 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
             itemCategory = term
         }
 
-        if insideItem && (elementName == "enclosure" || elementName == "media:content" || elementName == "media:thumbnail") {
-            if let url = attributeDict["url"], !url.isEmpty {
-                if let type = attributeDict["type"], type.hasPrefix("image") {
-                    itemImageUrl = url
-                } else if itemImageUrl.isEmpty {
-                    itemImageUrl = url
-                }
+        if insideItem && (elementName == "enclosure" || elementName == "media:content" || elementName == "media:thumbnail"),
+           let url = attributeDict["url"], !url.isEmpty {
+            if let type = attributeDict["type"], type.hasPrefix("image") {
+                itemImageUrl = url
+            } else if itemImageUrl.isEmpty {
+                itemImageUrl = url
             }
         }
 
@@ -161,7 +160,7 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
         }
     }
 
-    func parser(_ parser: XMLParser, foundCharacters string: String) {
+    func parser(_ _: XMLParser, foundCharacters string: String) {
         if isCollectingContentEncoded {
             itemContentEncoded += string
             return
@@ -191,7 +190,7 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
         self.parser(parser, foundCharacters: str)
     }
 
-    func parser(_ parser: XMLParser, didEndElement elementName: String, namespaceURI: String?, qualifiedName qName: String?) {
+    func parser(_ _: XMLParser, didEndElement elementName: String, namespaceURI: String?, qualifiedName _: String?) {
         let elementName = normalizedElement(elementName, namespaceURI: namespaceURI)
         if contentDepth == currentNestingDepth {
             isCollectingContentEncoded = false

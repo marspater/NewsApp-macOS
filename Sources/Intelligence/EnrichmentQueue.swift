@@ -132,13 +132,11 @@ actor EnrichmentQueue {
 
     /// Explicitly promotes an article to interactive priority (e.g. user clicked).
     func promote(articleId: String, to priority: EnrichmentPriority = .interactive) {
-        if var job = jobs[articleId], case .queued(let cur) = job.state {
-            if priority > cur {
-                job.priority = priority
-                job.state = .queued(priority)
-                jobs[articleId] = job
-                processNextJobs()
-            }
+        if var job = jobs[articleId], case .queued(let cur) = job.state, priority > cur {
+            job.priority = priority
+            job.state = .queued(priority)
+            jobs[articleId] = job
+            processNextJobs()
         }
     }
 
@@ -222,7 +220,7 @@ actor EnrichmentQueue {
         }
     }
 
-    private func executeJob(article: FeedArticle, allowHTTP: Bool, generation: UUID) async {
+    private func executeJob(article: FeedArticle, allowHTTP _: Bool, generation: UUID) async {
         let articleId = article.id
 
         defer {

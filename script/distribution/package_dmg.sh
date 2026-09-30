@@ -1,6 +1,8 @@
 #!/bin/bash
 set -e
 
+SECTION_SEPARATOR="=================================================="
+
 APP_NAME="News"
 APP_DIR="${APP_NAME}.app"
 DMG_NAME="News-arm64.dmg"
@@ -8,12 +10,12 @@ ZIP_NAME="News-arm64.zip"
 VOLUME_NAME="News"
 STAGING_DIR=$(mktemp -d "${TMPDIR:-/tmp}/news-package.XXXXXX")
 
-echo "=================================================="
+echo "$SECTION_SEPARATOR"
 echo "📦 Packaging Distribution Artifacts for ${APP_NAME}"
-echo "=================================================="
+echo "$SECTION_SEPARATOR"
 
 # Ensure release app exists
-if [ ! -d "${APP_DIR}" ]; then
+if [[ ! -d "${APP_DIR}" ]]; then
     echo "⚠️ ${APP_DIR} not found. Running ./build_release.sh first..."
     ./build_release.sh
 fi
@@ -54,9 +56,9 @@ shasum -a 256 "${DMG_NAME}" > "${DMG_NAME}.sha256"
 shasum -a 256 "${ZIP_NAME}" > "${ZIP_NAME}.sha256"
 
 echo ""
-echo "=================================================="
+echo "$SECTION_SEPARATOR"
 echo "✅ Distribution Packaging Complete!"
-echo "=================================================="
+echo "$SECTION_SEPARATOR"
 echo "DMG:    ${DMG_NAME} ($(du -h "${DMG_NAME}" | cut -f1))"
 echo "ZIP:    ${ZIP_NAME} ($(du -h "${ZIP_NAME}" | cut -f1))"
 echo "DMG SHA-256: $(cat "${DMG_NAME}.sha256" | cut -d' ' -f1)"

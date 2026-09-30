@@ -12,7 +12,7 @@ class MockURLProtocol: URLProtocol, @unchecked Sendable {
     static var mockError: Error?
     static var requestHandler: ((URLRequest) throws -> (HTTPURLResponse, Data))?
 
-    override class func canInit(with request: URLRequest) -> Bool {
+    override class func canInit(with _: URLRequest) -> Bool {
         return true
     }
 
@@ -49,7 +49,9 @@ class MockURLProtocol: URLProtocol, @unchecked Sendable {
         client?.urlProtocolDidFinishLoading(self)
     }
 
-    override func stopLoading() {}
+    override func stopLoading() {
+        // Responses are delivered synchronously; this mock has no pending load to cancel.
+    }
 }
 
 func assertEqual<T: Equatable>(_ actual: T, _ expected: T, _ message: String, file: String = #file, line: Int = #line) {
@@ -81,6 +83,15 @@ func assertFalse(_ condition: Bool, _ message: String, file: String = #file, lin
 @main
 struct NewsTests {
     static func main() async {
+        do {
+            try await runTests()
+        } catch {
+            print("❌ TEST FAILED with unexpected error: \(error)")
+            exit(1)
+        }
+    }
+
+    static func runTests() async throws {
         print("🏃 Running NewsApp Unit Tests...")
         
         await testURLNormalization()
@@ -95,7 +106,7 @@ struct NewsTests {
         await testReaderParsingRegressions()
         await testStructuredReaderAndTags()
         await testReaderStoreUpdates()
-        await testProductionFollowupRegressions()
+        try await testProductionFollowupRegressions()
         await testXMLParsing()
         await testJSONParsing()
         await testNavigationCommands()
@@ -115,17 +126,17 @@ struct NewsTests {
         await testDistributionAndEntitlementsIntegrity()
         await testStrictSemVerAndReleaseSecurity()
         await testNotificationModeTriageAndGrammar()
-        await testSocketNetworkBoundary()
+        try await testSocketNetworkBoundary()
         await testRefreshCoordinatorSingleFlightCoalescing()
-        await testFeedRemovalAndShutdown()
+        try await testFeedRemovalAndShutdown()
         await testSignpostHelperExecution()
         await testAppSettingsIsolationAndURLNormalization()
         await testFixedTaxonomyAndCaseInsensitivity()
         await testClassificationMultiStageAndConfidenceTiers()
         await testClassificationBenchmarkDataset()
-        await testArticleAnalyzerStructuredOutputAndFallbacks()
+        try await testArticleAnalyzerStructuredOutputAndFallbacks()
         await testInteractiveAnalysisCancellation()
-        await testGranularCacheClearingAndRetention()
+        try await testGranularCacheClearingAndRetention()
         await testNotificationServiceErrorLogging()
         await testArticleStoreErrorResilience()
         await testFeedArticleWrapContextNavigation()
@@ -137,17 +148,17 @@ struct NewsTests {
         await testExtractionOutcomeDiagnostics()
         await testCanonicalClassificationDisambiguation()
         await testAppContainerAndFrostedSurface()
-        await testReadManagerReconciliationCache()
+        try await testReadManagerReconciliationCache()
         
         if ProcessInfo.processInfo.environment["NEWS_LIVE_READER_CHECK"] == "1" {
             await testLiveReader()
         }
         if let snapshot = ProcessInfo.processInfo.environment["NEWS_SNAPSHOT_DB"] {
             let database = DatabaseEngine(path: snapshot)
-            try! await database.open()
-            let articles = try! await database.fetchArticles(limit: 500)
+            try await database.open()
+            let articles = try await database.fetchArticles(limit: 500)
             assertFalse(articles.isEmpty, "Migrated snapshot must display stored articles")
-            let counts = try! await database.counts()
+            let counts = try await database.counts()
             print("  - Migrated isolated snapshot: \(counts.total) stories, \(counts.saved) saved")
             await database.close()
         }
@@ -184,10 +195,10 @@ struct NewsTests {
     }
 
     @MainActor
-    static func testProductionFollowupRegressions() async {
+    static func testProductionFollowupRegressions() async throws {
         print("  - Testing cache rollback, ordered mutations, saved analysis and update failures...")
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        try! FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
         let path = directory.appendingPathComponent("regression.sqlite").path
         let db = DatabaseEngine(path: path)
@@ -207,8 +218,8 @@ struct NewsTests {
         saves.save(article)
         await reads.waitForPendingChanges()
         await saves.waitForPendingChanges()
-        assertTrue(try! await db.isSaved(articleId: article.id), "Latest rapid save intent persists")
-        assertTrue(try! await db.getReadArticleIDs().contains(article.id), "Latest rapid read intent persists")
+        assertTrue(try await db.isSaved(articleId: article.id), "Latest rapid save intent persists")
+        assertTrue(try await db.getReadArticleIDs().contains(article.id), "Latest rapid read intent persists")
         let analysis = ArticleAnalysis(summary: "New summary", keyPoints: ["Finding"], entities: [], category: "Science", sentiment: nil, modelIdentifier: "test", analysisVersion: 2)
         await store.saveArticleAnalysis(analysis, for: article.id)
         assertEqual(store.savedArticles.first?.aiSummary, "New summary", "Saved snapshot receives new analysis")
@@ -220,37 +231,39 @@ struct NewsTests {
         do {
             try await store.clearArticleCache()
             assertTrue(false, "Cache failures must reach the caller")
-        } catch {}
-        let restored = try! await db.fetchArticles(limit: 10)
+        } catch {
+            // Failure is expected: the preceding assertion rejects an unexpected success.
+        }
+        let restored = try await db.fetchArticles(limit: 10)
         assertEqual(restored.first?.fullContent, "Preserve this body", "Failed cleanup rolls back the preceding content update")
         assertEqual(sqlite3_exec(connection, "DROP TRIGGER fail_cache;", nil, nil, nil), SQLITE_OK, "Remove isolated failure trigger")
-        try! await store.clearAllDatabaseCache()
-        assertTrue(try! await db.getReadArticleIDs().contains(article.id), "All-cache cleanup preserves read history")
-        try! await db.markAllRead(feedUrl: "https://example.com/rss")
+        try await store.clearAllDatabaseCache()
+        assertTrue(try await db.getReadArticleIDs().contains(article.id), "All-cache cleanup preserves read history")
+        try await db.markAllRead(feedUrl: "https://example.com/rss")
 
         var recent: [FeedArticle] = []
         for number in 0..<510 {
             recent.append(FeedArticle(title: "Recent \(number)", link: "https://example.com/\(number)", guid: "recent-\(number)", description: "Recent", pubDate: Date(), source: "Publisher"))
         }
-        try! await db.upsertArticles(recent)
-        let history = try! await db.fetchArticles(isRead: true, limit: 200)
+        try await db.upsertArticles(recent)
+        let history = try await db.fetchArticles(isRead: true, limit: 200)
         assertTrue(history.contains(where: { $0.id == article.id }), "History queries include stories beyond the recent 500")
-        let found = try! await db.searchArticles(query: "Archived", limit: 200)
+        let found = try await db.searchArticles(query: "Archived", limit: 200)
         assertEqual(found.first?.id, article.id, "Search reaches archived stories")
-        assertEqual(try! await db.searchArticles(query: "Archiv", limit: 200).first?.id, article.id, "FTS prefix search matches unfinished words")
-        try! await db.markRead(articleId: article.id, isRead: false)
-        try! await db.upsertArticles([article], feedUrl: "https://example.com/second-rss")
-        try! await db.markAllRead(feedUrl: "https://example.com/rss")
-        assertTrue(try! await db.getReadArticleIDs().contains(article.id), "Duplicate ingestion preserves original feed provenance")
-        try! await db.markRead(articleId: article.id, isRead: false)
-        try! await db.markAllRead(feedUrl: "https://example.com/second-rss")
-        assertTrue(try! await db.getReadArticleIDs().contains(article.id), "Shared stories belong to every originating feed")
-        let firstPage = try! await db.fetchArticles(limit: 200)
-        let secondPage = try! await db.fetchArticles(limit: 200, after: ArticleQueryCursor(firstPage.last!))
-        let thirdPage = try! await db.fetchArticles(limit: 200, after: ArticleQueryCursor(secondPage.last!))
+        assertEqual(try await db.searchArticles(query: "Archiv", limit: 200).first?.id, article.id, "FTS prefix search matches unfinished words")
+        try await db.markRead(articleId: article.id, isRead: false)
+        try await db.upsertArticles([article], feedUrl: "https://example.com/second-rss")
+        try await db.markAllRead(feedUrl: "https://example.com/rss")
+        assertTrue(try await db.getReadArticleIDs().contains(article.id), "Duplicate ingestion preserves original feed provenance")
+        try await db.markRead(articleId: article.id, isRead: false)
+        try await db.markAllRead(feedUrl: "https://example.com/second-rss")
+        assertTrue(try await db.getReadArticleIDs().contains(article.id), "Shared stories belong to every originating feed")
+        let firstPage = try await db.fetchArticles(limit: 200)
+        let secondPage = try await db.fetchArticles(limit: 200, after: ArticleQueryCursor(firstPage.last!))
+        let thirdPage = try await db.fetchArticles(limit: 200, after: ArticleQueryCursor(secondPage.last!))
         assertEqual(Set((firstPage + secondPage + thirdPage).map(\.id)).count, 511, "Keyset pages include all stories without duplicates at tied dates")
-        let searchPage = try! await db.searchArticles(query: "Recent", limit: 200)
-        let searchNext = try! await db.searchArticles(query: "Recent", limit: 400, after: ArticleQueryCursor(searchPage.last!))
+        let searchPage = try await db.searchArticles(query: "Recent", limit: 200)
+        let searchNext = try await db.searchArticles(query: "Recent", limit: 400, after: ArticleQueryCursor(searchPage.last!))
         assertEqual(Set((searchPage + searchNext).map(\.id)).count, 510, "FTS rank cursor handles tied ranks without omissions")
         await db.close()
 
@@ -403,7 +416,7 @@ struct NewsTests {
             assertEqual(migrated.first?.fullContent, content, "Migration preserves old body text")
             assertTrue(try await database.isSaved(articleId: article.id), "Migration preserves saved state")
             assertTrue(try await database.isRead(articleId: article.id), "Migration preserves read state")
-            try await database.updateEnrichment(articleId: article.id, content: content, readerDocument: document)
+            try await database.updateEnrichment(articleId: article.id, update: .init(content: content, readerDocument: document))
             article.fullContent = "A later feed teaser must not overwrite the extracted document."
             try await database.upsertArticles([article])
             await database.close()
@@ -551,20 +564,20 @@ struct NewsTests {
         }
 
         // 7. Socket Address Validation (validateSocketAddress)
-        var sin_loopback = sockaddr_in()
-        sin_loopback.sin_family = sa_family_t(AF_INET)
-        inet_pton(AF_INET, "127.0.0.1", &sin_loopback.sin_addr)
-        let blockedLoopback = withUnsafePointer(to: &sin_loopback) { ptr -> String? in
+        var loopbackAddress = sockaddr_in()
+        loopbackAddress.sin_family = sa_family_t(AF_INET)
+        inet_pton(AF_INET, "127.0.0.1", &loopbackAddress.sin_addr)
+        let blockedLoopback = withUnsafePointer(to: &loopbackAddress) { ptr -> String? in
             ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPtr in
                 IPAddressValidator.validateSocketAddress(sockaddrPtr)
             }
         }
         assertTrue(blockedLoopback != nil, "127.0.0.1 socket address must be blocked")
 
-        var sin_public = sockaddr_in()
-        sin_public.sin_family = sa_family_t(AF_INET)
-        inet_pton(AF_INET, "8.8.8.8", &sin_public.sin_addr)
-        let allowedPublic = withUnsafePointer(to: &sin_public) { ptr -> String? in
+        var publicAddress = sockaddr_in()
+        publicAddress.sin_family = sa_family_t(AF_INET)
+        inet_pton(AF_INET, "8.8.8.8", &publicAddress.sin_addr)
+        let allowedPublic = withUnsafePointer(to: &publicAddress) { ptr -> String? in
             ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPtr in
                 IPAddressValidator.validateSocketAddress(sockaddrPtr)
             }
@@ -581,19 +594,19 @@ struct NewsTests {
         }
         assertTrue(blockedLoopback6 != nil, "::1 socket address must be blocked")
 
-        var sin6_public = sockaddr_in6()
-        sin6_public.sin6_family = sa_family_t(AF_INET6)
-        inet_pton(AF_INET6, "2606:4700:4700::1111", &sin6_public.sin6_addr)
-        let allowedPublic6 = withUnsafePointer(to: &sin6_public) { ptr -> String? in
+        var publicIPv6Address = sockaddr_in6()
+        publicIPv6Address.sin6_family = sa_family_t(AF_INET6)
+        inet_pton(AF_INET6, "2606:4700:4700::1111", &publicIPv6Address.sin6_addr)
+        let allowedPublic6 = withUnsafePointer(to: &publicIPv6Address) { ptr -> String? in
             ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPtr in
                 IPAddressValidator.validateSocketAddress(sockaddrPtr)
             }
         }
         assertTrue(allowedPublic6 == nil, "2606:4700:4700::1111 socket address must be allowed")
 
-        var sin_unsupported = sockaddr()
-        sin_unsupported.sa_family = sa_family_t(AF_UNIX)
-        let allowedUnsupported = withUnsafePointer(to: &sin_unsupported) { ptr -> String? in
+        var unsupportedAddress = sockaddr()
+        unsupportedAddress.sa_family = sa_family_t(AF_UNIX)
+        let allowedUnsupported = withUnsafePointer(to: &unsupportedAddress) { ptr -> String? in
             IPAddressValidator.validateSocketAddress(ptr)
         }
         assertTrue(allowedUnsupported == nil, "Unsupported family socket address must return nil")
@@ -1565,7 +1578,7 @@ struct NewsTests {
         // Case A: legacy privateNotificationsEnabled = true -> migrates to .private
         tempDefaults.set(true, forKey: AppSettings.privateNotificationsEnabledKey)
         let settingsA = AppSettings(defaults: tempDefaults)
-        assertEqual(settingsA.notificationMode, AppSettings.NotificationMode.private, "Legacy private flag should migrate to .private mode")
+        assertEqual(settingsA.notificationMode, AppSettings.NotificationMode.privacy, "Legacy private flag should migrate to .private mode")
         assertEqual(tempDefaults.string(forKey: AppSettings.notificationModeKey), "private", "Migrated key should be written to defaults")
 
         // Case B: legacy privateNotificationsEnabled = false -> migrates to .full
@@ -1595,7 +1608,7 @@ struct NewsTests {
     }
 
     @MainActor
-    static func testFeedRemovalAndShutdown() async {
+    static func testFeedRemovalAndShutdown() async throws {
         let suite = "test.feed-lifecycle.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
@@ -1622,7 +1635,7 @@ struct NewsTests {
             else { manager.removeFeed(url: "https://example.com/feed") }
             await gate.deliver()
             await refresh.value
-            assertTrue(try! await db.fetchArticles().isEmpty, "Late feed delivery after removal or shutdown must not be stored")
+            assertTrue(try await db.fetchArticles().isEmpty, "Late feed delivery after removal or shutdown must not be stored")
             manager.stopBackgroundWork()
         }
         let cancelled = Task {
@@ -1632,7 +1645,7 @@ struct NewsTests {
         }
         cancelled.cancel()
         assertTrue(await cancelled.value, "Cancelled database ingestion propagates cancellation")
-        assertTrue(try! await db.fetchArticles().isEmpty, "Cancelled ingestion rolls back its transaction")
+        assertTrue(try await db.fetchArticles().isEmpty, "Cancelled ingestion rolls back its transaction")
         await db.close()
     }
 
@@ -1697,7 +1710,7 @@ struct NewsTests {
             url.scheme == "http" && url.host == "rebind.invalid" && url.path == "/page"
                 && (url.port == nil || url.port == 80) && url.user == nil && url.password == nil
         }
-        func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
+        func webView(_ _: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
                      decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void) {
             guard let url = navigationAction.request.url, Self.permitsNavigation(url) else {
                 decisionHandler(.cancel)
@@ -1707,10 +1720,10 @@ struct NewsTests {
         }
         let once = SocketObservation()
         var complete: ((Result<Void, Error>) -> Void)?
-        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        func webView(_ _: WKWebView, didFinish _: WKNavigation!) {
             if once.claim() { complete?(.success(())) }
         }
-        func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+        func webView(_ _: WKWebView, didFailProvisionalNavigation _: WKNavigation!, withError error: Error) {
             if once.claim() { complete?(.failure(error)) }
         }
     }
@@ -1740,9 +1753,36 @@ struct NewsTests {
         }
     }
 
-    static func testSocketNetworkBoundary() async {
+    static func respondToFixture(_ connection: NWConnection, data: Data?, port: UInt16,
+                                 receivedRequests: SocketObservation, live: Bool) {
+        let response: Data
+        if data?.starts(with: Data("GET ".utf8)) == true {
+            let request = String(decoding: data!, as: UTF8.self).components(separatedBy: "\r\n").first ?? ""
+            receivedRequests.recordText(request)
+            if request.contains("/redirect.css ") {
+                let redirect = Data("HTTP/1.1 302 Found\r\nLocation: http://127.0.0.1:\(port)/forbidden-redirect\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".utf8)
+                connection.send(content: redirect, isComplete: true, completion: .contentProcessed { _ in connection.cancel() })
+                return
+            }
+            let body: String
+            if request.contains("/page ") {
+                body = "<html><head><link rel='stylesheet' href='http://assets.invalid/style.css'><link rel='stylesheet' href='http://assets.invalid/redirect.css'></head><body>Publisher prose<img src='http://assets.invalid/image.svg'><img src='http://127.0.0.1:\(port)/forbidden'><img src='http://localhost:\(port)/forbidden-localhost'><img src='http://2130706433:\(port)/forbidden-decimal'><img src='http://0x7f000001:\(port)/forbidden-hex'><img src='http://127.1:\(port)/forbidden-short'><img src='http://0x7f.0.0.1:\(port)/forbidden-mixed-hex'><img src='http://0177.0.0.1:\(port)/forbidden-octal'><img src='http://%31%32%37.0.0.1:\(port)/forbidden-encoded'><img src='http://user@127.0.0.1:\(port)/forbidden-userinfo'><img src='http://127.0.0.1.:\(port)/forbidden-trailing-dot'>\(live ? "<img src='http://localtest.me:\(port)/forbidden-dns'>" : "")</body></html>"
+            } else if request.contains("/image.svg ") {
+                body = "<svg xmlns='http://www.w3.org/2000/svg' width='1' height='1'></svg>"
+            } else if request.contains("/style.css ") { body = "body { color: black; }" }
+            else { body = "OK" }
+            let mime: String
+        if request.contains(".svg ") { mime = "image/svg+xml" }
+        else if request.contains(".css ") { mime = "text/css" }
+        else { mime = "text/html" }
+            response = Data("HTTP/1.1 200 OK\r\nContent-Type: \(mime)\r\nContent-Length: \(body.utf8.count)\r\nConnection: close\r\n\r\n\(body)".utf8)
+        } else { response = data ?? Data() }
+        connection.send(content: response, isComplete: true, completion: .contentProcessed { _ in connection.cancel() })
+    }
+
+    static func testSocketNetworkBoundary() async throws {
         print("  - Testing socket boundary: pinning, mixed DNS, loopback, malformed commands and fail-closed proxy...")
-        let upstream = try! NWListener(using: .tcp, on: .any)
+        let upstream = try NWListener(using: .tcp, on: .any)
         let upstreamQueue = DispatchQueue(label: "test.proxy.upstream")
         let receivedRequests = SocketObservation()
         let live = ProcessInfo.processInfo.environment["NEWS_LIVE_READER_CHECK"] == "1"
@@ -1752,26 +1792,8 @@ struct NewsTests {
         upstream.newConnectionHandler = { connection in
             connection.start(queue: upstreamQueue)
             connection.receive(minimumIncompleteLength: 1, maximumLength: 32768) { data, _, _, _ in
-                let response: Data
-                if data?.starts(with: Data("GET ".utf8)) == true {
-                    let request = String(decoding: data!, as: UTF8.self).components(separatedBy: "\r\n").first ?? ""
-                    receivedRequests.recordText(request)
-                    if request.contains("/redirect.css ") {
-                        let redirect = Data("HTTP/1.1 302 Found\r\nLocation: http://127.0.0.1:\(upstream.port!.rawValue)/forbidden-redirect\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".utf8)
-                        connection.send(content: redirect, isComplete: true, completion: .contentProcessed { _ in connection.cancel() })
-                        return
-                    }
-                    let body: String
-                    if request.contains("/page ") {
-                        body = "<html><head><link rel='stylesheet' href='http://assets.invalid/style.css'><link rel='stylesheet' href='http://assets.invalid/redirect.css'></head><body>Publisher prose<img src='http://assets.invalid/image.svg'><img src='http://127.0.0.1:\(upstream.port!.rawValue)/forbidden'><img src='http://localhost:\(upstream.port!.rawValue)/forbidden-localhost'><img src='http://2130706433:\(upstream.port!.rawValue)/forbidden-decimal'><img src='http://0x7f000001:\(upstream.port!.rawValue)/forbidden-hex'><img src='http://127.1:\(upstream.port!.rawValue)/forbidden-short'><img src='http://0x7f.0.0.1:\(upstream.port!.rawValue)/forbidden-mixed-hex'><img src='http://0177.0.0.1:\(upstream.port!.rawValue)/forbidden-octal'><img src='http://%31%32%37.0.0.1:\(upstream.port!.rawValue)/forbidden-encoded'><img src='http://user@127.0.0.1:\(upstream.port!.rawValue)/forbidden-userinfo'><img src='http://127.0.0.1.:\(upstream.port!.rawValue)/forbidden-trailing-dot'>\(live ? "<img src='http://localtest.me:\(upstream.port!.rawValue)/forbidden-dns'>" : "")</body></html>"
-                    } else if request.contains("/image.svg ") {
-                        body = "<svg xmlns='http://www.w3.org/2000/svg' width='1' height='1'></svg>"
-                    } else if request.contains("/style.css ") { body = "body { color: black; }" }
-                    else { body = "OK" }
-                    let mime = request.contains(".svg ") ? "image/svg+xml" : (request.contains(".css ") ? "text/css" : "text/html")
-                    response = Data("HTTP/1.1 200 OK\r\nContent-Type: \(mime)\r\nContent-Length: \(body.utf8.count)\r\nConnection: close\r\n\r\n\(body)".utf8)
-                } else { response = data ?? Data() }
-                connection.send(content: response, isComplete: true, completion: .contentProcessed { _ in connection.cancel() })
+                respondToFixture(connection, data: data, port: upstream.port!.rawValue,
+                                 receivedRequests: receivedRequests, live: live)
             }
         }
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
@@ -1789,20 +1811,20 @@ struct NewsTests {
             return NWConnection(host: "127.0.0.1", port: fixturePort, using: .tcp)
         }
         let mixed = NetworkBoundaryProxy(resolver: { _ in .allowed(ips: ["93.184.216.34", "127.0.0.1"]) }, connector: connector)
-        let (mixedClient, mixedReply) = try! await socksConnect(mixed, host: "mixed.invalid")
+        let (mixedClient, mixedReply) = try await socksConnect(mixed, host: "mixed.invalid")
         assertEqual(mixedReply[1], 2, "Mixed public/private DNS answers are rejected before connecting")
         mixedClient.cancel()
         await mixed.stop()
         let production = NetworkBoundaryProxy(connector: connector)
         for host in ["127.0.0.1", "localhost", "2130706433", "0x7f000001", "localhost.", "test.local.", "intranet", "::1", "fe80::1%en0"] {
-            let (client, reply) = try! await socksConnect(production, host: host)
+            let (client, reply) = try await socksConnect(production, host: host)
             assertEqual(reply[1], 2, "Private/alternate/scoped address denied at the socket boundary")
             client.cancel()
         }
-        let (udpClient, udpReply) = try! await socksConnect(production, host: "93.184.216.34", command: 3)
+        let (udpClient, udpReply) = try await socksConnect(production, host: "93.184.216.34", command: 3)
         assertEqual(udpReply[1], 2, "UDP ASSOCIATE is denied")
         udpClient.cancel()
-        let (portClient, portReply) = try! await socksConnect(production, host: "93.184.216.34", port: 22)
+        let (portClient, portReply) = try await socksConnect(production, host: "93.184.216.34", port: 22)
         assertEqual(portReply[1], 2, "Unapproved ports denied")
         portClient.cancel()
         assertEqual(observed.count, 0, "Rejected requests never construct an upstream connection")
@@ -1810,21 +1832,21 @@ struct NewsTests {
         let allowed = NetworkBoundaryProxy(resolver: { host in
             ["rebind.invalid", "93.184.216.34", "assets.invalid"].contains(host) ? .allowed(ips: ["93.184.216.34"]) : IPAddressValidator.validateHost(host)
         }, connector: connector)
-        let (client, reply) = try! await socksConnect(allowed, host: "rebind.invalid")
+        let (client, reply) = try await socksConnect(allowed, host: "rebind.invalid")
         assertEqual(reply[1], 0, "Approved destinations connect")
-        try! await socketSend(client, Data("relay proof".utf8))
-        assertEqual(try! await socketRead(client, count: 11), Data("relay proof".utf8), "Tunnel forwards data without rewriting it")
+        try await socketSend(client, Data("relay proof".utf8))
+        assertEqual(try await socketRead(client, count: 11), Data("relay proof".utf8), "Tunnel forwards data without rewriting it")
         client.cancel()
         assertEqual(observed.hosts, ["93.184.216.34"], "Connector receives the validated numeric IP, never the DNS hostname")
         let configuration = URLSessionConfiguration.ephemeral
-        let proxy = try! await allowed.configuration()
+        let proxy = try await allowed.configuration()
         assertFalse(proxy.allowFailover, "Native proxy may not fall back to direct connections")
         configuration.proxyConfigurations = [proxy]
         configuration.timeoutIntervalForRequest = 2
         let session = URLSession(configuration: configuration)
-        let (body, _) = try! await session.data(from: URL(string: "http://93.184.216.34/")!)
+        let (body, _) = try await session.data(from: URL(string: "http://93.184.216.34/")!)
         assertEqual(String(decoding: body, as: UTF8.self), "OK", "Native URLSession uses the protected SOCKS tunnel")
-        try! await verifyWebKitBoundary(proxy: proxy)
+        try await verifyWebKitBoundary(proxy: proxy)
         let paths = receivedRequests.hosts
         assertTrue(paths.contains { $0.contains("/style.css ") }, "WebKit stylesheet traverses the protected proxy")
         assertTrue(paths.contains { $0.contains("/image.svg ") }, "WebKit image traverses the protected proxy")
@@ -1834,18 +1856,22 @@ struct NewsTests {
         do {
             _ = try await session.data(from: URL(string: "http://rebind.invalid/forbidden-after-stop")!)
             assertTrue(false, "Stopped gateway must not fall back to direct transport")
-        } catch {}
+        } catch {
+            // Failure is expected: the preceding assertion rejects an unexpected success.
+        }
         assertEqual(receivedRequests.count, requestCount, "Stopped proxy never falls back to a reachable direct endpoint")
         if live {
             let publicURL = URL(string: "https://www.nasa.gov/feed/")!
             let directControl = URLSession(configuration: .ephemeral)
-            let (controlBody, _) = try! await directControl.data(from: publicURL)
+            let (controlBody, _) = try await directControl.data(from: publicURL)
             assertFalse(controlBody.isEmpty, "Public control is reachable without the stopped proxy")
             directControl.invalidateAndCancel()
             do {
                 _ = try await session.data(from: publicURL)
                 assertTrue(false, "Stopped proxy cannot fall back to a proven reachable public host")
-            } catch {}
+            } catch {
+                // The stopped proxy must reject the otherwise reachable public endpoint.
+            }
         }
         session.invalidateAndCancel()
         for host in ["::127.0.0.1", "2002:7f00:1::", "2001::1", "2001:db8::1", "198.18.0.1", "192.0.2.1"] {
@@ -1978,7 +2004,9 @@ struct NewsTests {
             }
         } catch is TestError {
             caughtError = true
-        } catch {}
+        } catch {
+            assertTrue(false, "measure must preserve the original error type")
+        }
         assertTrue(caughtError, "measure should propagate thrown error")
 
         // 3. Asynchronous helper executes async work and returns result
@@ -1997,7 +2025,9 @@ struct NewsTests {
             }
         } catch is TestError {
             caughtAsyncError = true
-        } catch {}
+        } catch {
+            assertTrue(false, "async measure must preserve the original error type")
+        }
         assertTrue(caughtAsyncError, "async measure should propagate thrown error")
     }
 
@@ -2206,7 +2236,7 @@ struct NewsTests {
         assertTrue(accuracy >= 0.80, "Benchmark accuracy must meet or exceed 80% on ground-truth dataset")
     }
 
-    static func testArticleAnalyzerStructuredOutputAndFallbacks() async {
+    static func testArticleAnalyzerStructuredOutputAndFallbacks() async throws {
         print("  - Testing ArticleAnalyzer Structured Output (Summary, Key Points, Entities, Sentiment)...")
 
         let analyzer = ArticleAnalyzer.shared
@@ -2219,7 +2249,7 @@ struct NewsTests {
         Initial benchmark results show an exponential performance leap compared to traditional classical supercomputers.
         """
 
-        let analysis = try! await analyzer.analyze(title: title, content: articleBody, category: "Technology", allowFoundationModels: false)
+        let analysis = try await analyzer.analyze(title: title, content: articleBody, category: "Technology", allowFoundationModels: false)
 
         // 1. Summary validation
         assertTrue(!analysis.summary.isEmpty, "Analysis summary should not be empty")
@@ -2266,11 +2296,11 @@ struct NewsTests {
         assertTrue(caughtCancellation, "Cancelled analysis task must throw CancellationError or AIAnalysisError.cancelled")
     }
 
-    static func testGranularCacheClearingAndRetention() async {
+    static func testGranularCacheClearingAndRetention() async throws {
         print("  - Testing Granular Cache Purging (Selective Deletes & Feed Preservation)...")
 
         let db = DatabaseEngine(path: ":memory:")
-        try! await db.open()
+        try await db.open()
         defer { Task { await db.close() } }
 
         // 1. Populate feeds and articles
@@ -2278,13 +2308,13 @@ struct NewsTests {
         let article1 = FeedArticle(title: "Article One", link: "https://example.com/1", guid: "art-1", description: "Desc 1", pubDate: Date(), source: "Test Feed", fullContent: "Content One")
         let article2 = FeedArticle(title: "Article Two", link: "https://example.com/2", guid: "art-2", description: "Desc 2", pubDate: Date(), source: "Test Feed", fullContent: "Content Two")
 
-        try! await db.upsertArticles([article1, article2], feedUrl: testFeed)
-        _ = try! await db.toggleSaved(articleId: article1.id) // article1 is saved!
+        try await db.upsertArticles([article1, article2], feedUrl: testFeed)
+        _ = try await db.toggleSaved(articleId: article1.id) // article1 is saved!
 
         // Save AI enrichment for both
         let analysis = ArticleAnalysis(summary: "Summary text", keyPoints: ["Point 1", "Point 2"], entities: [], category: "Technology", sentiment: nil, modelIdentifier: "test", analysisVersion: 1)
-        try! await db.saveArticleAnalysis(analysis, for: article1.id)
-        try! await db.saveArticleAnalysis(analysis, for: article2.id)
+        try await db.saveArticleAnalysis(analysis, for: article1.id)
+        try await db.saveArticleAnalysis(analysis, for: article2.id)
 
         // Verify initial state
         let initialAnalysis1 = await db.fetchArticleAnalysis(for: article1.id)
@@ -2293,30 +2323,30 @@ struct NewsTests {
         assertTrue(initialAnalysis2 != nil, "Article 2 should have analysis")
 
         // 2. Test clearArticleEnrichment(): clears AI analysis, keeps articles and feeds
-        try! await db.clearArticleEnrichment()
+        try await db.clearArticleEnrichment()
         let clearedAnalysis1 = await db.fetchArticleAnalysis(for: article1.id)
         assertTrue(clearedAnalysis1 == nil, "Article 1 enrichment must be purged")
         let clearedAnalysis2 = await db.fetchArticleAnalysis(for: article2.id)
         assertTrue(clearedAnalysis2 == nil, "Article 2 enrichment must be purged")
 
-        let articlesAfterEnrichmentClear = try! await db.fetchArticles(limit: 10)
+        let articlesAfterEnrichmentClear = try await db.fetchArticles(limit: 10)
         assertEqual(articlesAfterEnrichmentClear.count, 2, "Articles must remain intact after enrichment purge")
 
         // 3. Test clearArticleCache(): clears non-saved article bodies, keeps saved stories intact
-        try! await db.clearArticleCache()
-        let articlesAfterContentClear = try! await db.fetchArticles(limit: 10)
+        try await db.clearArticleCache()
+        let articlesAfterContentClear = try await db.fetchArticles(limit: 10)
         let savedArticle = articlesAfterContentClear.first { $0.id == article1.id }
         assertEqual(savedArticle?.fullContent, "Content One", "Saved article content must NOT be cleared")
         let unsavedArticle = articlesAfterContentClear.first { $0.id == article2.id }
         assertTrue(unsavedArticle?.fullContent == nil, "Non-saved article content must be set to nil")
 
         // Cache cleanup must not delete user history.
-        try! await db.markRead(articleId: article2.id, isRead: true)
-        try! await db.clearAllDatabaseCache()
-        let remainingArticles = try! await db.fetchArticles(limit: 10)
+        try await db.markRead(articleId: article2.id, isRead: true)
+        try await db.clearAllDatabaseCache()
+        let remainingArticles = try await db.fetchArticles(limit: 10)
         assertEqual(remainingArticles.count, 2, "Cache cleanup must preserve article headers and history")
         assertEqual(remainingArticles.first(where: { $0.id == article1.id })?.fullContent, "Content One", "Saved body survives cache cleanup")
-        assertTrue(try! await db.getReadArticleIDs().contains(article2.id), "Read history survives cache cleanup")
+        assertTrue(try await db.getReadArticleIDs().contains(article2.id), "Read history survives cache cleanup")
 
         // 5. Test CacheManager methods
         // Do not clear the user's WebKit cache from a unit test.
@@ -2347,7 +2377,7 @@ struct NewsTests {
         // 4. Robust dispatching (no crashes across all 3 notification tiers)
         let sampleArticle = FeedArticle(title: "Urgent Update", link: "https://example.com/urgent", guid: "sample-guid", description: "Details follow", pubDate: Date(), source: "Wire Service")
         await service.triageAndNotify(newArticles: [sampleArticle], mode: .minimal)
-        await service.triageAndNotify(newArticles: [sampleArticle], mode: .private)
+        await service.triageAndNotify(newArticles: [sampleArticle], mode: .privacy)
         await service.triageAndNotify(newArticles: [sampleArticle], mode: .full)
     }
 
@@ -2776,7 +2806,7 @@ struct NewsTests {
     }
 
     @MainActor
-    static func testReadManagerReconciliationCache() async {
+    static func testReadManagerReconciliationCache() async throws {
         print("  - Testing ReadManager Reconciliation Cache...")
         let store = ArticleStore(database: DatabaseEngine(path: ":memory:"))
         await store.initialize()
@@ -2810,7 +2840,7 @@ struct NewsTests {
         }
         assertFalse(store.isSaved(article), "Repeated removal cannot re-save an article")
         _ = await store.setSaved(article: article, isSaved: false)
-        let persistedSaved = try! await store.database.isSaved(articleId: article.id)
+        let persistedSaved = try await store.database.isSaved(articleId: article.id)
         assertFalse(persistedSaved, "Explicit unsave is idempotent in SQLite")
     }
 }

@@ -385,10 +385,9 @@ public final class NaturalLanguageTopicClassifier: TopicClassifying {
 
     public func classifyTopic(title: String, description: String, text: String?, rssCategory: String?) async -> TopicResult? {
         // 1. Direct match on RSS category hint
-        if let rssCat = rssCategory?.trimmingCharacters(in: .whitespacesAndNewlines), !rssCat.isEmpty {
-            if let matched = NewsCategory.match(from: rssCat) {
-                return TopicResult(category: matched.rawValue, confidence: 0.95, evidence: [rssCat])
-            }
+        if let rssCat = rssCategory?.trimmingCharacters(in: .whitespacesAndNewlines), !rssCat.isEmpty,
+           let matched = NewsCategory.match(from: rssCat) {
+            return TopicResult(category: matched.rawValue, confidence: 0.95, evidence: [rssCat])
         }
 
         // 2. Score title, description, and body against taxonomy
@@ -641,10 +640,9 @@ public final class ArticleClassifier: Sendable {
         defer { NewsSignposts.end(NewsSignposts.intelligence, name: "AIClassification", state: signpostState) }
 
         // Stage 1: Fast deterministic RSS hint
-        if let rssHint = rssCategory?.trimmingCharacters(in: .whitespacesAndNewlines), !rssHint.isEmpty {
-            if let matched = NewsCategory.match(from: rssHint) {
-                return TopicResult(category: matched.rawValue, confidence: 0.95, evidence: [rssHint])
-            }
+        if let rssHint = rssCategory?.trimmingCharacters(in: .whitespacesAndNewlines), !rssHint.isEmpty,
+           let matched = NewsCategory.match(from: rssHint) {
+            return TopicResult(category: matched.rawValue, confidence: 0.95, evidence: [rssHint])
         }
 
         // Stage 2: Foundation Models classification (when available)
@@ -1039,7 +1037,7 @@ public enum ArticleContentPolicy {
 // Backward-compatibility alias
 public typealias ArticlePreviewPolicy = ArticleContentPolicy
 public extension ArticleContentPolicy {
-    static func computePreview(paragraphs: [String], isExtracted: Bool = true) -> [String] {
+    static func computePreview(paragraphs: [String], isExtracted _: Bool = true) -> [String] {
         return computeContent(paragraphs: paragraphs)
     }
 }

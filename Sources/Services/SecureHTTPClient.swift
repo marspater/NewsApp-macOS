@@ -156,9 +156,9 @@ final class SecureSessionDelegateCoordinator: NSObject, URLSessionTaskDelegate, 
     private var states = [Int: TaskSecurityState]()
 
     func urlSession(
-        _ session: URLSession,
+        _ _: URLSession,
         task: URLSessionTask,
-        willPerformHTTPRedirection response: HTTPURLResponse,
+        willPerformHTTPRedirection _: HTTPURLResponse,
         newRequest request: URLRequest,
         completionHandler: @escaping (URLRequest?) -> Void
     ) {
@@ -203,18 +203,15 @@ final class SecureSessionDelegateCoordinator: NSObject, URLSessionTaskDelegate, 
         }
     }
 
-    func urlSession(_ session: URLSession, task: URLSessionTask, didFinishCollecting metrics: URLSessionTaskMetrics) {
+    func urlSession(_ _: URLSession, task: URLSessionTask, didFinishCollecting metrics: URLSessionTaskMetrics) {
         lock.lock()
         states.removeValue(forKey: task.taskIdentifier)
         lock.unlock()
 
         // Diagnostic only: metrics arrive after the request; this cannot prevent rebinding.
         for metric in metrics.transactionMetrics {
-            if let remoteIP = metric.remoteAddress {
-                if let reason = IPAddressValidator.checkLiteralIP(remoteIP) {
-                    task.cancel()
-                    _ = reason
-                }
+            if let remoteIP = metric.remoteAddress, IPAddressValidator.checkLiteralIP(remoteIP) != nil {
+                task.cancel()
             }
         }
     }

@@ -10,10 +10,10 @@ struct JSONFeedItem: Decodable {
     let id: String?
     let url: String?
     let title: String?
-    let content_html: String?
-    let content_text: String?
+    let contentHTML: String?
+    let contentText: String?
     let summary: String?
-    let date_published: String?
+    let datePublished: String?
     let image: String?
     let tags: [String]?
     
@@ -23,6 +23,13 @@ struct JSONFeedItem: Decodable {
     let description: String?
     let thumbnail: String?
     let categories: [String]?
+
+    enum CodingKeys: String, CodingKey {
+        case id, url, title, summary, image, tags, link, pubDate, description, thumbnail, categories
+        case contentHTML = "content_html"
+        case contentText = "content_text"
+        case datePublished = "date_published"
+    }
 }
 
 class JSONFeedParser {
@@ -47,7 +54,7 @@ class JSONFeedParser {
                 
                 let title = item.title ?? "Untitled"
                 
-                let rawDate = item.date_published ?? item.pubDate ?? ""
+                let rawDate = item.datePublished ?? item.pubDate ?? ""
                 let pubDate = DateParser.parse(rawDate)
                 
                 let imageUrl = item.image ?? item.thumbnail
@@ -60,7 +67,7 @@ class JSONFeedParser {
                 }
                 
                 let cleanDesc = item.summary ?? stripSimpleHTML(item.description ?? "")
-                let cleanContent = item.content_html.map(stripSimpleHTML) ?? item.content_text
+                let cleanContent = item.contentHTML.map(stripSimpleHTML) ?? item.contentText
                 let readableContent = cleanContent.flatMap { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0 }
 
                 let article = FeedArticle(

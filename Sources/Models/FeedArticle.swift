@@ -121,21 +121,15 @@ struct ArticleFilterQuery: Equatable, Sendable {
     func matches(article: FeedArticle, isRead: Bool, isSaved: Bool) -> Bool {
         if isEmpty { return true }
 
-        if let s = sourceFilter, !s.isEmpty {
-            if !article.source.lowercased().contains(s) { return false }
-        }
+        if let s = sourceFilter, !s.isEmpty, !article.source.lowercased().contains(s) { return false }
 
         if let c = categoryFilter, !c.isEmpty {
             guard let cat = article.category?.lowercased(), cat.contains(c) else { return false }
         }
 
-        if let r = isReadFilter {
-            if isRead != r { return false }
-        }
+        if let r = isReadFilter, isRead != r { return false }
 
-        if let sv = isSavedFilter {
-            if isSaved != sv { return false }
-        }
+        if let sv = isSavedFilter, isSaved != sv { return false }
 
         if !terms.isEmpty {
             let combined = "\(article.title) \(article.description) \(article.category ?? "")".lowercased()

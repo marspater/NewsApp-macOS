@@ -613,39 +613,37 @@ struct ArticleDetailView: View {
 
     private func handleKeyPress(press: KeyPress) -> KeyPress.Result {
         guard press.modifiers.intersection([.command, .control, .option]).isEmpty else { return .ignored }
-        switch press.key {
-        case .escape:
+        if press.key == .escape {
             if !path.isEmpty { path.removeLast() }
             return .handled
-        default:
-            if press.characters == "b" || press.characters == "h" {
-                if !path.isEmpty { path.removeLast() }
-                return .handled
-            } else if press.characters == "j" {
-                nextArticle()
-                return .handled
-            } else if press.characters == "k" {
-                prevArticle()
-                return .handled
-            } else if press.characters == "m" {
-                readManager.toggleRead(currentArticle.id)
-                return .handled
-            } else if press.characters == "s" {
-                toggleSave()
-                return .handled
-            } else if press.characters == "o" {
-                openInBrowser()
-                return .handled
-            } else if press.characters == "c" {
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(currentArticle.link, forType: .string)
-                return .handled
-            } else if press.characters == "w" {
-                viewMode = (viewMode == .reader ? .web : .reader)
-                return .handled
-            }
-            return .ignored
         }
+        if press.characters == "b" || press.characters == "h" {
+            if !path.isEmpty { path.removeLast() }
+            return .handled
+        } else if press.characters == "j" {
+            nextArticle()
+            return .handled
+        } else if press.characters == "k" {
+            prevArticle()
+            return .handled
+        } else if press.characters == "m" {
+            readManager.toggleRead(currentArticle.id)
+            return .handled
+        } else if press.characters == "s" {
+            toggleSave()
+            return .handled
+        } else if press.characters == "o" {
+            openInBrowser()
+            return .handled
+        } else if press.characters == "c" {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(currentArticle.link, forType: .string)
+            return .handled
+        } else if press.characters == "w" {
+            viewMode = (viewMode == .reader ? .web : .reader)
+            return .handled
+        }
+        return .ignored
     }
 
     private var displaySource: String {
@@ -903,11 +901,11 @@ struct ArticleDetailView: View {
 private struct ReaderTagLayout: Layout {
     let spacing: CGFloat
 
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache _: inout ()) -> CGSize {
         arrange(width: proposal.width ?? 600, subviews: subviews).size
     }
 
-    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+    func placeSubviews(in bounds: CGRect, proposal _: ProposedViewSize, subviews: Subviews, cache _: inout ()) {
         let layout = arrange(width: bounds.width, subviews: subviews)
         for (index, item) in layout.items.enumerated() {
             subviews[index].place(at: CGPoint(x: bounds.minX + item.minX, y: bounds.minY + item.minY),

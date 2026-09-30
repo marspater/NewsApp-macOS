@@ -134,11 +134,10 @@ struct MainView: View {
                 _ = provider.loadObject(ofClass: URL.self) { item, _ in
                     guard let url = item else { return }
                     
-                    if url.isFileURL && (url.pathExtension.lowercased() == "opml" || url.pathExtension.lowercased() == "xml") {
-                        if let fileData = try? Data(contentsOf: url) {
-                            Task { @MainActor in
-                                self.feedManager.importFeeds(from: fileData)
-                            }
+                    if url.isFileURL && (url.pathExtension.lowercased() == "opml" || url.pathExtension.lowercased() == "xml"),
+                       let fileData = try? Data(contentsOf: url) {
+                        Task { @MainActor in
+                            self.feedManager.importFeeds(from: fileData)
                         }
                     }
                 }

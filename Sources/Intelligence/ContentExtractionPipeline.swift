@@ -181,12 +181,12 @@ final class DOMElementNode: Sendable {
         }
         let identifiers = [className, idValue, dataComponent, attributes["data-testid"] ?? "", attributes["data-block"] ?? "", attributes["role"] ?? ""]
         return identifiers.contains {
-            Self.auxiliaryPattern.firstMatch(in: $0, range: NSRange($0.startIndex..., in: $0)) != nil
+            $0.firstMatch(of: Self.auxiliaryPattern) != nil
         }
     }
 
     // Token boundaries keep editorial "commentary" distinct from comment widgets.
-    private static let auxiliaryPattern = try! NSRegularExpression(pattern: "(?i)(?:^|[^a-z0-9])(?:comments?|comment-thread|disqus|related(?:-content|-stories|-articles)?|links-block|newsletter|byline|timestamp-block|recommendations?|social-share|share-tools|promo|advertisement|outbrain|taboola|eventpromo|promolist|topiclist|uploaderembed)(?:$|[^a-z0-9])")
+    private static var auxiliaryPattern: Regex<Substring> { #/(?i)(?:^|[^a-z0-9])(?:comments?|comment-thread|disqus|related(?:-content|-stories|-articles)?|links-block|newsletter|byline|timestamp-block|recommendations?|social-share|share-tools|promo|advertisement|outbrain|taboola|eventpromo|promolist|topiclist|uploaderembed)(?:$|[^a-z0-9])/# }
 
     func readingBlocks(allowDivFallback: Bool = true) -> [DOMElementNode] {
         guard !isReaderExcluded else { return [] }
@@ -282,15 +282,13 @@ enum HTMLDOMBuilder {
                     if let closeTag = scanner.scanUpToString(">") {
                         _ = scanner.scanString(">")
                         let tagClean = closeTag.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-                        if stack.count > 1 {
-                            // Match nearest open tag of this name
-                            if let idx = stack.lastIndex(where: { $0.tag == tagClean }) {
-                                while stack.count > idx {
-                                    let popped = stack.removeLast()
-                                    let node = popped.build()
-                                    if !stack.isEmpty {
-                                        stack.last?.children.append(node)
-                                    }
+                        // Match nearest open tag of this name.
+                        if stack.count > 1, let idx = stack.lastIndex(where: { $0.tag == tagClean }) {
+                            while stack.count > idx {
+                                let popped = stack.removeLast()
+                                let node = popped.build()
+                                if !stack.isEmpty {
+                                    stack.last?.children.append(node)
                                 }
                             }
                         }
@@ -503,7 +501,7 @@ final class ContentExtractionPipeline: Sendable {
     }
 
     /// Core DOM-aware extraction engine that processes HTML into structured article prose.
-    func extractFromHTML(_ html: String, baseUrl: String? = nil, leadImage: String? = nil) -> ExtractionOutcome {
+    func extractFromHTML(_ html: String, baseUrl _: String? = nil, leadImage: String? = nil) -> ExtractionOutcome {
         let effectiveImage = leadImage ?? extractLeadImage(from: html)
 
         // 1. Build DOM Tree
@@ -655,20 +653,16 @@ final class ContentExtractionPipeline: Sendable {
     // MARK: - Character Encoding Normalization
 
     func decodeHTML(data: Data, response: HTTPURLResponse? = nil) -> String {
-        if let contentType = response?.value(forHTTPHeaderField: "Content-Type") {
-            if let charset = extractCharset(from: contentType) {
-                if let decoded = decode(data: data, charset: charset) {
-                    return decoded
-                }
-            }
+        if let contentType = response?.value(forHTTPHeaderField: "Content-Type"),
+           let charset = extractCharset(from: contentType),
+           let decoded = decode(data: data, charset: charset) {
+            return decoded
         }
 
-        if let asciiPrefix = String(data: data.prefix(2048), encoding: .isoLatin1) {
-            if let charset = extractCharsetFromMeta(asciiPrefix) {
-                if let decoded = decode(data: data, charset: charset) {
-                    return decoded
-                }
-            }
+        if let asciiPrefix = String(data: data.prefix(2048), encoding: .isoLatin1),
+           let charset = extractCharsetFromMeta(asciiPrefix),
+           let decoded = decode(data: data, charset: charset) {
+            return decoded
         }
 
         if let utf8 = String(data: data, encoding: .utf8) {

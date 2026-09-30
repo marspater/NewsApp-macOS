@@ -18,15 +18,23 @@ final class AppSettings: ObservableObject {
 
     enum NotificationMode: String, CaseIterable, Identifiable, Sendable {
         case full = "full"         // Headlines + snippets + images
-        case `private` = "private" // Generic non-identifying updates
+        case privacy = "private" // Generic non-identifying updates
         case minimal = "minimal"   // Aggregated count only
 
         var id: String { rawValue }
 
+        var detail: String {
+            switch self {
+            case .privacy: return "Private mode: Displays generic alerts with no identifying headlines, sources, or preview text."
+            case .minimal: return "Minimal mode: Aggregates new stories into a single count summary (e.g., '5 new articles')."
+            case .full: return "Full mode: Displays article headline, source publication, and lead image banner."
+            }
+        }
+
         var displayName: String {
             switch self {
             case .full: return "Full (Headlines & Images)"
-            case .private: return "Private (Generic Alerts)"
+            case .privacy: return "Private (Generic Alerts)"
             case .minimal: return "Minimal (Count Only)"
             }
         }
@@ -91,17 +99,17 @@ final class AppSettings: ObservableObject {
 
         // Migration semantics:
         // 1. If notificationMode exists -> use it
-        // 2. If absent and privateNotificationsEnabled == true -> .private
+        // 2. If absent and privateNotificationsEnabled == true -> .privacy
         // 3. If absent and privateNotificationsEnabled == false -> .full
         // 4. Persist migrated key to prevent repeating fallback
         if let modeRaw = defaults.string(forKey: Self.notificationModeKey),
            let mode = NotificationMode(rawValue: modeRaw) {
             self.notificationMode = mode
-            self.privateNotificationsEnabled = (mode == .private)
+            self.privateNotificationsEnabled = (mode == .privacy)
         } else if defaults.object(forKey: Self.privateNotificationsEnabledKey) != nil && defaults.bool(forKey: Self.privateNotificationsEnabledKey) {
-            self.notificationMode = .private
+            self.notificationMode = .privacy
             self.privateNotificationsEnabled = true
-            defaults.set(NotificationMode.private.rawValue, forKey: Self.notificationModeKey)
+            defaults.set(NotificationMode.privacy.rawValue, forKey: Self.notificationModeKey)
         } else {
             self.notificationMode = .full
             self.privateNotificationsEnabled = false
@@ -195,13 +203,13 @@ final class AppSettings: ObservableObject {
 
     func setNotificationMode(_ mode: NotificationMode) {
         notificationMode = mode
-        privateNotificationsEnabled = (mode == .private)
+        privateNotificationsEnabled = (mode == .privacy)
         defaults.set(mode.rawValue, forKey: Self.notificationModeKey)
-        defaults.set(mode == .private, forKey: Self.privateNotificationsEnabledKey)
+        defaults.set(mode == .privacy, forKey: Self.privateNotificationsEnabledKey)
     }
 
     func setPrivateNotificationsEnabled(_ enabled: Bool) {
-        setNotificationMode(enabled ? .private : .full)
+        setNotificationMode(enabled ? .privacy : .full)
     }
 
     func setAllowInsecureHTTP(_ allowed: Bool) {

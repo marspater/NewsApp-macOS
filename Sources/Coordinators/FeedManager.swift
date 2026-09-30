@@ -333,9 +333,7 @@ class FeedManager: NSObject, ObservableObject {
     // MARK: - Legacy Helper Forwarder
 
     nonisolated static func isBlockedLocalAddress(_ host: String) -> Bool {
-        switch IPAddressValidator.validateHost(host) {
-        case .blocked: return true
-        default: return false
-        }
+        if case .blocked = IPAddressValidator.validateHost(host) { return true }
+        return false
     }
 }

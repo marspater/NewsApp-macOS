@@ -8,7 +8,7 @@ echo "🛡️ Apple Notarization Pipeline (Optional / Future)"
 echo "=================================================="
 
 # Check if target DMG exists
-if [ ! -f "${DMG_FILE}" ]; then
+if [[ ! -f "${DMG_FILE}" ]]; then
     echo "⚠️ Target package ${DMG_FILE} not found."
     echo "Please run ./script/distribution/package_dmg.sh first."
     exit 1
@@ -17,10 +17,10 @@ fi
 # Detect authentication credentials
 # Option 1: Keychain profile (recommended by Apple)
 # Option 2: Apple ID + App-specific password + Team ID
-if [ -n "${KEYCHAIN_PROFILE}" ]; then
+if [[ -n "${KEYCHAIN_PROFILE}" ]]; then
     echo "🔑 Using Keychain Profile: ${KEYCHAIN_PROFILE}"
     AUTH_ARGS=(--keychain-profile "${KEYCHAIN_PROFILE}")
-elif [ -n "${APPLE_ID}" ] && [ -n "${APPLE_ID_PASSWORD}" ] && [ -n "${TEAM_ID}" ]; then
+elif [[ -n "${APPLE_ID}" ]] && [[ -n "${APPLE_ID_PASSWORD}" ]] && [[ -n "${TEAM_ID}" ]]; then
     echo "🔑 Using Apple ID credentials for team: ${TEAM_ID}"
     AUTH_ARGS=(--apple-id "${APPLE_ID}" --password "${APPLE_ID_PASSWORD}" --team-id "${TEAM_ID}")
 else

@@ -34,7 +34,7 @@ public final class OPMLParser: NSObject, XMLParserDelegate, @unchecked Sendable 
         return parser.items
     }
 
-    public func parser(_ parser: XMLParser, didStartElement elementName: String, namespaceURI: String?, qualifiedName qName: String?, attributes attributeDict: [String : String] = [:]) {
+    public func parser(_ _: XMLParser, didStartElement elementName: String, namespaceURI _: String?, qualifiedName _: String?, attributes attributeDict: [String : String] = [:]) {
         guard elementName.lowercased() == "outline" else { return }
 
         var xmlUrl: String?
@@ -59,7 +59,7 @@ public final class OPMLParser: NSObject, XMLParserDelegate, @unchecked Sendable 
         }
     }
 
-    public func parser(_ parser: XMLParser, didEndElement elementName: String, namespaceURI: String?, qualifiedName qName: String?) {
+    public func parser(_ _: XMLParser, didEndElement elementName: String, namespaceURI _: String?, qualifiedName _: String?) {
         guard elementName.lowercased() == "outline" else { return }
         if let isFolder = outlineStack.popLast(), isFolder {
             _ = folderStack.popLast()

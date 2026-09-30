@@ -124,8 +124,10 @@ struct ArticleListView: View {
                     fetched = try await articleStore.database.searchArticles(query: searchText, limit: 201, after: cursor)
                 } else {
                     let topic = selectedTopic ?? "Today"
-                    let read: Bool? = topic == "History" ? true :
-                        (topic == "Unread" || (themeManager.autoHideRead && topic != "Saved Stories") ? false : nil)
+                    let read: Bool?
+                    if topic == "History" { read = true }
+                    else if topic == "Unread" || (themeManager.autoHideRead && topic != "Saved Stories") { read = false }
+                    else { read = nil }
                     fetched = try await articleStore.database.fetchArticles(
                         section: topic, isRead: read, isSaved: topic == "Saved Stories" ? true : nil,
                         limit: 201, after: cursor)
@@ -224,7 +226,7 @@ struct ArticleListView: View {
     
     // MARK: - Article Grid
     
-    private func articleGrid(proxy: ScrollViewProxy) -> some View {
+    private func articleGrid(proxy _: ScrollViewProxy) -> some View {
         Group {
             if gridLayout {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 300, maximum: 420), spacing: AppLayout.cardGap)], spacing: AppLayout.cardGap) {
