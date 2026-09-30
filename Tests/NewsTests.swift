@@ -91,7 +91,7 @@ struct NewsTests {
         }
     }
 
-    static func runTests() async throws {
+    static func runTests(fixtureRoot: URL = URL(string: "https://example.com")!) async throws {
         print("🏃 Running NewsApp Unit Tests...")
         
         await testURLNormalization()
@@ -103,9 +103,9 @@ struct NewsTests {
         await testFeedErrorHierarchy()
         await testAppSettingsDecoupling()
         await testDateParsing()
-        try await testAuditParsingAndSettingsRegressions()
-        try await testAuditPersistenceAndRoutingRegressions()
-        try await testAuditRefreshRegressions()
+        try await testAuditParsingAndSettingsRegressions(fixtureRoot: fixtureRoot)
+        try await testAuditPersistenceAndRoutingRegressions(fixtureRoot: fixtureRoot)
+        try await testAuditRefreshRegressions(fixtureRoot: fixtureRoot)
         try await testUndatedArticleOrdering()
         await testReaderParsingRegressions()
         await testStructuredReaderAndTags()
@@ -774,8 +774,7 @@ struct NewsTests {
     }
     
     @MainActor
-    static func testAuditParsingAndSettingsRegressions() async throws {
-        let fixtureRoot = URL(string: "https://example.com")!
+    static func testAuditParsingAndSettingsRegressions(fixtureRoot: URL) async throws {
         print("  - Testing unknown dates, GUID permalinks and folder-only OPML imports...")
         assertEqual(DateParser.parse(""), nil, "Missing publication dates are unknown")
         assertEqual(DateParser.parse("definitely-not-a-date"), nil, "Malformed dates are unknown")
@@ -821,8 +820,7 @@ struct NewsTests {
     }
 
     @MainActor
-    static func testAuditPersistenceAndRoutingRegressions() async throws {
-        let fixtureRoot = URL(string: "https://example.com")!
+    static func testAuditPersistenceAndRoutingRegressions(fixtureRoot: URL) async throws {
         print("  - Testing corrected metadata, alias saves and startup notification requests...")
         let db = DatabaseEngine(path: ":memory:")
         let store = ArticleStore(database: db)
@@ -886,8 +884,7 @@ struct NewsTests {
     }
 
     @MainActor
-    static func testAuditRefreshRegressions() async throws {
-        let fixtureRoot = URL(string: "https://example.com")!
+    static func testAuditRefreshRegressions(fixtureRoot: URL) async throws {
         print("  - Testing notification deduplication beyond the snapshot and failed refresh storage...")
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

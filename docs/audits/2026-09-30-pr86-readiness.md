@@ -6,7 +6,7 @@ Reviewed PR head `734e99d` against fetched main `e627ff1` on macOS 27.0.1, arm64
 
 - Confirmed the undated-story visibility bug. `published_at` retains the stable unknown-date sentinel; SQLite now orders those rows by their original `created_at`. The projected cursor value, archive ordering, filter-only search ordering and cursor predicates agree. FTS relevance ordering stays intact.
 - Applied the same fallback to retention so marking a new undated story read does not immediately make it eligible for age-based deletion. Refresh does not replace its ingestion timestamp.
-- Replaced the ten SonarCloud flagged test URL call sites with URLs derived from explicit fixture roots. These remain deterministic, non-production fixtures; test coverage is retained.
+- Replaced the ten SonarCloud flagged test URL call sites with URLs derived from an explicit fixture root passed through the test runner. These remain deterministic, non-production fixtures; test coverage is retained.
 - The reported `github-advanced-security` failure originates in GitHub's managed agent session requesting an unsupported model. No such model setting exists in this repository's workflows. This external configuration failure is not repaired by the source changes. The repository's advanced CodeQL workflow remains separate.
 
 ## Completed local checks
