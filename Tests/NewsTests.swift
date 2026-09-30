@@ -91,7 +91,11 @@ struct NewsTests {
         }
     }
 
-    static func runTests(fixtureRoot: URL = URL(string: "https://example.com")!) async throws {
+    static func runTests(fixtureHost: String = "example.com") async throws {
+        var fixtureURL = URLComponents()
+        fixtureURL.scheme = "https"
+        fixtureURL.host = fixtureHost
+        let fixtureRoot = fixtureURL.url!
         print("🏃 Running NewsApp Unit Tests...")
         
         await testURLNormalization()
