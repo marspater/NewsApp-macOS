@@ -584,10 +584,10 @@ struct NewsTests {
         }
         assertTrue(allowedPublic == nil, "8.8.8.8 socket address must be allowed")
 
-        var sin6_loopback = sockaddr_in6()
-        sin6_loopback.sin6_family = sa_family_t(AF_INET6)
-        inet_pton(AF_INET6, "::1", &sin6_loopback.sin6_addr)
-        let blockedLoopback6 = withUnsafePointer(to: &sin6_loopback) { ptr -> String? in
+        var loopbackIPv6Address = sockaddr_in6()
+        loopbackIPv6Address.sin6_family = sa_family_t(AF_INET6)
+        inet_pton(AF_INET6, "::1", &loopbackIPv6Address.sin6_addr)
+        let blockedLoopback6 = withUnsafePointer(to: &loopbackIPv6Address) { ptr -> String? in
             ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPtr in
                 IPAddressValidator.validateSocketAddress(sockaddrPtr)
             }

@@ -184,8 +184,8 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
         }
     }
 
-    func parser(_ parser: XMLParser, foundCDATA CDATABlock: Data) {
-        guard let str = String(data: CDATABlock, encoding: .utf8) else { return }
+    func parser(_ parser: XMLParser, foundCDATA cdataBlock: Data) {
+        guard let str = String(data: cdataBlock, encoding: .utf8) else { return }
 
         self.parser(parser, foundCharacters: str)
     }
