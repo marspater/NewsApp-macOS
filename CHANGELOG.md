@@ -39,6 +39,8 @@
 
 ### Changed
 
+- Add layered glass sheets, a raised newspaper face and folded corner to the editable News app icon, with tuned light and dark appearances.
+
 - Use native window toolbar controls, Liquid Glass search and supported soft scroll edges with accessibility fallbacks.
 - Generate on-device summaries only on explicit expansion; lightweight feed ingestion stays deterministic.
 - Build and verify Apple-silicon arm64 bundles with ad-hoc signing. CI no longer builds/tests Intel or packages distribution releases; notarization remains outside scope.
