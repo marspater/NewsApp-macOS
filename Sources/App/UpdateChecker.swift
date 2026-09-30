@@ -113,19 +113,18 @@ final class UpdateChecker: ObservableObject {
             return
         }
 
-        let customHeaders = [
-            "Accept": "application/vnd.github+json",
-            "User-Agent": "NewsApp/\(currentAppVersion)"
-        ]
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.timeoutInterval = 10.0
+        request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+        request.setValue("NewsApp/\(currentAppVersion)", forHTTPHeaderField: "User-Agent")
 
         do {
-            let (data, httpResponse) = try await SecureHTTPClient.shared.fetchData(
-                from: url,
-                maxBytes: 5 * 1024 * 1024,
-                timeout: 10.0,
-                allowHTTP: false,
-                customHeaders: customHeaders
-            )
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let httpResponse = response as? HTTPURLResponse else {
+                statusMessage = "Invalid server response"
+                return
+            }
 
             if httpResponse.statusCode == 404 {
                 statusMessage = "NewsApp is up to date (v\(currentAppVersion))"
