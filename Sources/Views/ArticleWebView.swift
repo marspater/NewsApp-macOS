@@ -127,25 +127,37 @@ struct ArticleWebView: NSViewRepresentable {
             self.parent = parent
         }
 
-        func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction) async -> WKNavigationActionPolicy {
-            guard let requestURL = navigationAction.request.url else { return .cancel }
+        func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
+                     decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void) {
+            guard let requestURL = navigationAction.request.url else {
+                decisionHandler(.cancel)
+                return
+            }
             let generation = requestGeneration
             let allowHTTP = parent.allowHTTP
-            do {
-                // Navigation delegates cover documents, not WebKit subresource traffic.
-                try await SecureHTTPClient.shared.validateDestination(requestURL, allowHTTP: allowHTTP)
-                guard !Task.isCancelled, self.webView === webView,
-                      requestGeneration == generation else { return .cancel }
-                if navigationAction.targetFrame == nil {
-                    NSWorkspace.shared.open(requestURL)
-                    return .cancel
+            let opensNewWindow = navigationAction.targetFrame == nil
+            Task { @MainActor [weak self, weak webView] in
+                do {
+                    // Navigation delegates cover documents, not WebKit subresource traffic.
+                    try await SecureHTTPClient.shared.validateDestination(requestURL, allowHTTP: allowHTTP)
+                    guard !Task.isCancelled, let self, let webView, self.webView === webView,
+                          self.requestGeneration == generation else {
+                        decisionHandler(.cancel)
+                        return
+                    }
+                    if opensNewWindow {
+                        NSWorkspace.shared.open(requestURL)
+                        decisionHandler(.cancel)
+                        return
+                    }
+                    decisionHandler(.allow)
+                } catch {
+                    if let self, let webView, self.webView === webView, self.requestGeneration == generation {
+                        self.parent.loadError = "This address was blocked by the app’s network policy. Open the publisher in your browser if needed."
+                        self.parent.isLoading = false
+                    }
+                    decisionHandler(.cancel)
                 }
-                return .allow
-            } catch {
-                guard self.webView === webView, requestGeneration == generation else { return .cancel }
-                parent.loadError = "This address was blocked by the app’s network policy. Open the publisher in your browser if needed."
-                parent.isLoading = false
-                return .cancel
             }
         }
 

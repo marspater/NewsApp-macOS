@@ -37,7 +37,7 @@ jobs:
         run: ./test.sh
 
       - name: Verify Swift Package Manager Build
-        run: swift build --target News
+        run: swift build --force-resolved-versions --target News
 
   build-arm64:
     name: Build Verification (Apple Silicon)

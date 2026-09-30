@@ -1693,6 +1693,18 @@ struct NewsTests {
 
     @MainActor
     final class WebBoundaryProbe: NSObject, WKNavigationDelegate {
+        static func permitsNavigation(_ url: URL) -> Bool {
+            url.scheme == "http" && url.host == "rebind.invalid" && url.path == "/page"
+                && (url.port == nil || url.port == 80) && url.user == nil && url.password == nil
+        }
+        func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
+                     decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void) {
+            guard let url = navigationAction.request.url, Self.permitsNavigation(url) else {
+                decisionHandler(.cancel)
+                return
+            }
+            decisionHandler(.allow)
+        }
         let once = SocketObservation()
         var complete: ((Result<Void, Error>) -> Void)?
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
@@ -1705,6 +1717,10 @@ struct NewsTests {
 
     @MainActor
     static func verifyWebKitBoundary(proxy: ProxyConfiguration) async throws {
+        for address in ["http://127.0.0.1/page", "https://rebind.invalid/page", "http://rebind.invalid/other", "http://rebind.invalid:8080/page", "http://user@rebind.invalid/page"] {
+            assertFalse(WebBoundaryProbe.permitsNavigation(URL(string: address)!), "Probe rejects navigation outside its exact fixture")
+        }
+        assertTrue(WebBoundaryProbe.permitsNavigation(URL(string: "http://rebind.invalid/page")!), "Probe allows its controlled fixture")
         let configuration = WKWebViewConfiguration()
         configuration.defaultWebpagePreferences.allowsContentJavaScript = false
         configuration.websiteDataStore = .nonPersistent()

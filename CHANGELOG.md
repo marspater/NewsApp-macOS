@@ -5,7 +5,7 @@
 ### Fixed
 
 - Compile boilerplate-cleaning regexes once and use the semantic control radius for shortcut badges (reviewed proposals #83/#84).
-- Use the arm64 app build for CodeQL extraction and retain Swift plus Actions coverage in one advanced configuration.
+- Extract the arm64 SwiftPM app target with a stable toolchain and retain Swift plus Actions coverage in one advanced configuration.
 
 - Repair historical enrichment schemas that prevented stored articles from loading; failed database initialization can retry.
 - Keep cached stories visible during refresh and prevent stale query tasks from changing current loading/error state.
@@ -19,6 +19,8 @@
 - Use absolute Icon Composer paths and verify final signatures to prevent stale asset-cache outputs.
 
 ### Security
+
+- Make WebKit navigation decisions explicit, restrict the network test probe to its fixture, require locked dependency resolution in CI and scope security-event write access to CodeQL jobs.
 
 - Add a loopback-only native network gateway that rejects non-public DNS answers and pins connections to validated numeric IPs.
 - Route feeds, extraction, images, update checks and protected Web previews through the gateway without direct failover.

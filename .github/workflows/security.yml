@@ -11,7 +11,6 @@ on:
 
 permissions:
   contents: read
-  security-events: write
 
 concurrency:
   group: security-${{ github.workflow }}-${{ github.ref }}
@@ -20,6 +19,9 @@ concurrency:
 jobs:
   codeql:
     name: CodeQL (Swift)
+    permissions:
+      contents: read
+      security-events: write
     # Keep extraction on a supported stable toolchain; normal CI tests Xcode 27.
     runs-on: macos-26
     env:
@@ -46,7 +48,7 @@ jobs:
       # Disable only compiler subprocess sandboxing on this disposable runner;
       # application sandbox entitlements remain unchanged.
       - name: Build arm64 sources for CodeQL
-        run: swift build --target News --arch arm64 --jobs 3 --disable-sandbox -Xswiftc -disable-sandbox
+        run: swift build --force-resolved-versions --target News --arch arm64 --jobs 3 --disable-sandbox -Xswiftc -disable-sandbox
 
       - name: Analyze
         uses: github/codeql-action/analyze@v4
@@ -55,6 +57,9 @@ jobs:
 
   codeql-actions:
     name: CodeQL (Actions)
+    permissions:
+      contents: read
+      security-events: write
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
