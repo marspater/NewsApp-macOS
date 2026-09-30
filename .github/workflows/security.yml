@@ -24,7 +24,7 @@ jobs:
     runs-on: macos-26
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
-    timeout-minutes: 20
+    timeout-minutes: 30
 
     steps:
       - name: Checkout
@@ -42,10 +42,11 @@ jobs:
           build-mode: manual
           queries: security-extended
 
-      # Trace the arm64 app compiler directly: traced SwiftPM manifest execution
-      # fails with Bad CPU type on the Apple-silicon Xcode 27 runner.
-      - name: Build arm64 app for CodeQL
-        run: ./build.sh
+      # Extract all app sources without release optimization or bundle packaging.
+      # Disable only compiler subprocess sandboxing on this disposable runner;
+      # application sandbox entitlements remain unchanged.
+      - name: Build arm64 sources for CodeQL
+        run: swift build --target News --arch arm64 --jobs 3 --disable-sandbox -Xswiftc -disable-sandbox
 
       - name: Analyze
         uses: github/codeql-action/analyze@v4
