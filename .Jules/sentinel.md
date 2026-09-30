@@ -14,3 +14,11 @@
 **Learning:** Creating a new `URLSession` per request is an anti-pattern that breaks HTTP connection pooling, prevents TLS session resumption, and often introduces memory leaks (as `URLSession` strongly retains its delegate until `finishTasksAndInvalidate()` is explicitly called).
 
 **Prevention:** To secure one-off requests while maintaining performance and correct memory management, extend existing centralized abstractions (e.g. `SecureHTTPClient`) to support dynamic inputs (like `customHeaders`) and route the request through the shared, securely configured session instance.
+
+## 2024-05-24 - Unstructured Task Cancellation Inheritance
+
+**Vulnerability:** In `RefreshCoordinator.swift`, the shared refresh task was created using `Task { ... }`. Unstructured tasks inherit the cancellation context of their caller. If multiple clients wait on the same shared task and the original caller is cancelled (e.g. by navigating away), the shared task is automatically cancelled. This can cause partial execution, data corruption, or repeated failed operations for other clients still waiting.
+
+**Learning:** `Task { ... }` is not fully detached; it inherits task-local values and cancellation status.
+
+**Prevention:** When creating shared background operations that serve multiple independent clients and should outlive any single caller, use `Task.detached { ... }` to sever the cancellation hierarchy, and manually `await` actor methods inside the closure to regain isolation safely.

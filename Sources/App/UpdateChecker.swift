@@ -119,14 +119,13 @@ final class UpdateChecker: ObservableObject {
         ]
 
         do {
-            let (data, response) = try await SecureHTTPClient.shared.fetchData(
+            let (data, httpResponse) = try await SecureHTTPClient.shared.fetchData(
                 from: url,
                 maxBytes: 5 * 1024 * 1024,
                 timeout: 10.0,
                 allowHTTP: false,
                 customHeaders: customHeaders
             )
-            let httpResponse = response
 
             if httpResponse.statusCode == 404 {
                 statusMessage = "NewsApp is up to date (v\(currentAppVersion))"
