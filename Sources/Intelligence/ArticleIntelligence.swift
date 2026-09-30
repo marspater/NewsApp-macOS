@@ -725,7 +725,8 @@ public final class ArticleAnalyzer: Sendable {
     public func analyze(
         title: String,
         content: String,
-        category: String? = nil
+        category: String? = nil,
+        allowFoundationModels: Bool = true
     ) async throws -> ArticleAnalysis {
         let signpostState = NewsSignposts.begin(NewsSignposts.intelligence, name: "AIAnalysis", metadata: "content_len=\(content.count)")
         defer { NewsSignposts.end(NewsSignposts.intelligence, name: "AIAnalysis", state: signpostState) }
@@ -741,7 +742,7 @@ public final class ArticleAnalyzer: Sendable {
         let budgetedContent = String(effectiveContent.prefix(contextBudget))
 
         #if canImport(FoundationModels)
-        if #available(macOS 26.0, *), ArticleClassifier.shared.isFoundationModelsAvailable {
+        if #available(macOS 26.0, *), allowFoundationModels, ArticleClassifier.shared.isFoundationModelsAvailable {
             do {
                 let session = LanguageModelSession()
                 let prompt = """

@@ -1233,7 +1233,7 @@ struct NewsTests {
             title: "Breakthrough in Quantum Computing Processor Architecture",
             description: "Physicists develop novel cryogenic semiconductor chip",
             text: nil,
-            rssCategory: nil
+            rssCategory: "Technology"
         )
         assertTrue(topic != nil, "Should classify topic")
         assertTrue(topic?.category == "Technology" || topic?.category == "Science", "Should classify as Technology or Science")
@@ -2068,7 +2068,8 @@ struct NewsTests {
         let rssResult = await classifier.classify(
             title: "Generic Headline With No Clues",
             description: "Some description here",
-            rssCategory: "Technology"
+            rssCategory: "Technology",
+            allowFoundationModels: false
         )
         assertEqual(rssResult.category, "Technology", "RSS hint should determine category")
         assertTrue(rssResult.confidence >= 0.90, "RSS hint should provide >= 0.90 confidence")
@@ -2078,7 +2079,8 @@ struct NewsTests {
         let techResult = await classifier.classify(
             title: "Apple Announces M-Series Silicon Processor With Neural Acceleration",
             description: "Novel semiconductor architecture speeds machine learning and developer workflows",
-            rssCategory: nil
+            rssCategory: nil,
+            allowFoundationModels: false
         )
         assertEqual(techResult.category, "Technology", "Strong tech keywords must classify as Technology")
         assertTrue(techResult.confidence >= 0.70, "Confidence should exceed 0.70")
@@ -2088,7 +2090,8 @@ struct NewsTests {
         let genericResult = await classifier.classify(
             title: "Unspecified Developments Reported",
             description: "Updates will follow as events occur",
-            rssCategory: nil
+            rssCategory: nil,
+            allowFoundationModels: false
         )
         assertTrue(!genericResult.category.isEmpty, "Default category must be assigned")
     }
@@ -2170,7 +2173,8 @@ struct NewsTests {
             let result = await ArticleClassifier.shared.classify(
                 title: item.title,
                 description: item.description,
-                rssCategory: nil
+                rssCategory: nil,
+                allowFoundationModels: false
             )
             if result.category == item.expectedCategory.rawValue {
                 correctCount += 1
@@ -2197,7 +2201,7 @@ struct NewsTests {
         Initial benchmark results show an exponential performance leap compared to traditional classical supercomputers.
         """
 
-        let analysis = try! await analyzer.analyze(title: title, content: articleBody, category: "Technology")
+        let analysis = try! await analyzer.analyze(title: title, content: articleBody, category: "Technology", allowFoundationModels: false)
 
         // 1. Summary validation
         assertTrue(!analysis.summary.isEmpty, "Analysis summary should not be empty")
