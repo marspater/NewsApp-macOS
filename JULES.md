@@ -1,5 +1,5 @@
-# Jules entry point
+# Instructions for the Jules agent
 
-Read [AGENTS.md](AGENTS.md) for the canonical project instructions, [CONTRIBUTING.md](CONTRIBUTING.md) for validation commands and [the architecture map](docs/ARCHITECTURE.md) for source responsibilities.
+Follow [AGENTS.md](AGENTS.md) for coding-agent workflow. Project technology, architecture and validation requirements are maintained in the contributor documents linked there; do not redefine them in this file.
 
-Project rules are maintained in AGENTS.md rather than duplicated here.
+Keep PRs focused, compare proposed changes with current main, and omit unrelated helper scripts or agent journals from product changes. Report failed checks accurately and do not assume a stale PR failure is caused by its patch.

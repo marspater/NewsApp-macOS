@@ -1,6 +1,24 @@
 # Architecture
 
-Native macOS, local-first RSS reader. Project policy lives in [AGENTS.md](../AGENTS.md).
+Native macOS, local-first RSS reader. This document defines the supported technology and implementation constraints for all contributors. Validation and contribution workflow live in [CONTRIBUTING.md](../CONTRIBUTING.md); security reporting and boundaries live in [SECURITY.md](../SECURITY.md).
+
+## Technology and product constraints
+
+- Swift 6, SwiftUI, and narrow AppKit/WebKit integration; minimum deployment target macOS 15. Gate newer APIs without raising the minimum casually.
+- Native Apple frameworks: Foundation, Network, SQLite3, NaturalLanguage, conditional FoundationModels, OSLog/signposts and Swift Concurrency. Prefer existing services and native APIs; third-party dependencies need a concrete requirement without a reasonable native solution.
+- Local-first storage, no cloud backend, remote AI, custom AI models, telemetry or analytics SDKs. OSLog/signposts are local diagnostics. See [PRIVACY.md](../PRIVACY.md).
+- Current development and verification builds are Apple silicon (arm64), ad-hoc signed with App Sandbox and Hardened Runtime. Intel/universal builds and notarization are outside current development scope.
+- Native keyboard and trackpad interaction, accessibility, shared semantic design tokens and restrained Liquid Glass. Avoid fixed-display layout hacks and gratuitous animation.
+
+## Implementation invariants
+
+- Keep UI concerns out of database, networking and domain layers. Preserve actor isolation, avoid main-actor database work, bound batch concurrency/memory, and avoid lifecycle retain cycles.
+- Propagate cancellation through feed, extraction and enrichment work. Shared refresh work survives an individual waiter cancelling; explicit reset cancels that shared work. Unstructured tasks require explicit lifecycle ownership.
+- SQLite schema changes require migrations. Preserve WAL/FTS5, saved stories, read history and user settings; use transactions where multi-step writes must be atomic.
+- Ingestion remains cheap. Expensive extraction and analysis run on demand or under explicit bounded enrichment rules. Prefer extracted publisher content; distinguish it from generated summaries and never invent article facts.
+- FoundationModels classification uses structured outputs and the supported deterministic taxonomy. Preserve model identifiers/analysis versions and deterministic fallbacks when models are unavailable. Persist only intelligence required by product behavior.
+- Treat URLs, feed bodies, publisher HTML, redirects and OPML as untrusted. Route remote fetching through the shared protected networking path; preserve destination validation, numeric-IP pinning, response bounds and cancellation.
+- Keep app entitlements intact. Render sanitized reader HTML; protected WebKit previews disable publisher scripts and block local resources. Do not log secrets, article contents, credentials or full sensitive URLs.
 
 ## Current architecture map
 
