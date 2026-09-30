@@ -34,15 +34,33 @@ jobs:
           build-mode: manual
           queries: security-extended
 
-      # This repository is a Swift Package without an Xcode project/workspace.
-      # Build one architecture so CodeQL can observe the compiled Swift code.
-      - name: Build Swift package for CodeQL
-        run: swift build --target News --arch arm64
+      # Trace the arm64 app compiler directly: traced SwiftPM manifest execution
+      # fails with Bad CPU type on the Apple-silicon Xcode 27 runner.
+      - name: Build arm64 app for CodeQL
+        run: ./build.sh
 
       - name: Analyze
         uses: github/codeql-action/analyze@v4
         with:
           category: "/language:swift"
+
+  codeql-actions:
+    name: CodeQL (Actions)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: actions
+          build-mode: none
+          queries: security-extended
+      - name: Analyze
+        uses: github/codeql-action/analyze@v4
+        with:
+          category: "/language:actions"
 
   dependency-review:
     name: Dependency Review

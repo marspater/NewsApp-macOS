@@ -901,19 +901,20 @@ public enum ArticleContentRedactor {
         "related articles", "related topics", "more on this story", "source", "read original", "full article", "full story"
     ]
 
+    private static let compiledBoilerplateRegexes: [(regex: NSRegularExpression, template: String)] = {
+        boilerplatePatterns.compactMap { pattern in
+            guard let regex = try? NSRegularExpression(pattern: pattern, options: [.anchorsMatchLines]) else { return nil }
+            return (regex, pattern.contains("(\\.|!|\\?)") ? "$1" : "")
+        }
+    }()
+
     /// Cleans boilerplate phrases, syndication notes, and trailing artifacts from text.
     public static func cleanText(_ rawText: String) -> String {
         var text = rawText
         
-        for pattern in boilerplatePatterns {
-            if let regex = try? NSRegularExpression(pattern: pattern, options: [.anchorsMatchLines]) {
-                let range = NSRange(text.startIndex..., in: text)
-                if pattern.contains("(\\.|!|\\?)") {
-                    text = regex.stringByReplacingMatches(in: text, options: [], range: range, withTemplate: "$1")
-                } else {
-                    text = regex.stringByReplacingMatches(in: text, options: [], range: range, withTemplate: "")
-                }
-            }
+        for compiled in compiledBoilerplateRegexes {
+            let range = NSRange(text.startIndex..., in: text)
+            text = compiled.regex.stringByReplacingMatches(in: text, options: [], range: range, withTemplate: compiled.template)
         }
         
         return text.trimmingCharacters(in: .whitespacesAndNewlines)
