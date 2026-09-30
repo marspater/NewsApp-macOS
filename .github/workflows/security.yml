@@ -27,6 +27,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
+      # CodeQL tracing requires Rosetta on Apple Silicon, including compiler
+      # subprocesses. The application itself is still compiled only for arm64.
+      - name: Prepare CodeQL tracing runtime
+        run: sudo softwareupdate --install-rosetta --agree-to-license
+
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v4
         with:
