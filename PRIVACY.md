@@ -69,5 +69,5 @@ No access is requested or granted for:
 
 * **Retention Policies**: Configurable automatic pruning keeps local SQLite storage lightweight without removing bookmarked articles.
 * **Exportability**: You can export your entire feed library at any time via the standard OPML 2.0 format (`File > Export OPML...`).
-* **Complete Erasure**: Deleting the `~/Library/Application Support/News` and `~/Library/Caches/com.marspater.news.cache` directories completely purges all application state from your machine.
+* **Complete Erasure**: Current application data is stored under `~/Library/Containers/com.marspater.news/`. Quit the app before manually removing its sandbox container. Removing that container does not erase exported OPML files or historical backups stored elsewhere.
 

@@ -4,6 +4,9 @@
 
 ### Fixed
 
+- Compile boilerplate-cleaning regexes once and use the semantic control radius for shortcut badges (reviewed proposals #83/#84).
+- Use the arm64 app build for CodeQL extraction and retain Swift plus Actions coverage in one advanced configuration.
+
 - Repair historical enrichment schemas that prevented stored articles from loading; failed database initialization can retry.
 - Keep cached stories visible during refresh and prevent stale query tasks from changing current loading/error state.
 - Preserve publisher structure and remove recognized comments, newsletters, related links and promotional containers from Reader.

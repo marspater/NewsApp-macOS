@@ -10,7 +10,7 @@ echo "=================================================="
 # Check if target DMG exists
 if [ ! -f "${DMG_FILE}" ]; then
     echo "⚠️ Target package ${DMG_FILE} not found."
-    echo "Please run ./package_dmg.sh first."
+    echo "Please run ./script/distribution/package_dmg.sh first."
     exit 1
 fi
 
@@ -29,13 +29,13 @@ else
     echo "To notarize with an active Apple Developer Program membership:"
     echo "  Method 1 (Keychain Profile):"
     echo "    xcrun notarytool store-credentials \"notary-profile\" --apple-id <ID> --team-id <TEAM> --password <PWD>"
-    echo "    KEYCHAIN_PROFILE=\"notary-profile\" ./notarize.sh"
+    echo "    KEYCHAIN_PROFILE=\"notary-profile\" ./script/distribution/notarize.sh"
     echo ""
     echo "  Method 2 (Environment Variables):"
     echo "    APPLE_ID=\"user@example.com\" \\"
     echo "    APPLE_ID_PASSWORD=\"xxxx-xxxx-xxxx-xxxx\" \\"
     echo "    TEAM_ID=\"ABC1234XYZ\" \\"
-    echo "    ./notarize.sh"
+    echo "    ./script/distribution/notarize.sh"
     echo ""
     echo "⏭️ Skipping notarization (developer-account-independent pipeline)."
     exit 0

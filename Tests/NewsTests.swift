@@ -1478,8 +1478,8 @@ struct NewsTests {
         
         // Validate release packaging files exist
         let releaseBuildScript = (currentDir as NSString).appendingPathComponent("build_release.sh")
-        let packageDmgScript = (currentDir as NSString).appendingPathComponent("package_dmg.sh")
-        let notarizeScript = (currentDir as NSString).appendingPathComponent("notarize.sh")
+        let packageDmgScript = (currentDir as NSString).appendingPathComponent("script/distribution/package_dmg.sh")
+        let notarizeScript = (currentDir as NSString).appendingPathComponent("script/distribution/notarize.sh")
         let packageSwift = (currentDir as NSString).appendingPathComponent("Package.swift")
         let privacyDoc = (currentDir as NSString).appendingPathComponent("PRIVACY.md")
         

@@ -14,7 +14,7 @@ A native, local-first RSS, Atom and JSON Feed reader built with SwiftUI, WebKit,
 - Use native toolbar, Liquid Glass search and scroll-edge effects where supported.
 - Verify arm64-only, ad-hoc-signed builds locally and in CI. Notarization and Intel builds are outside the development scope.
 
-See the [changelog](CHANGELOG.md), [current validation report](PRODUCTION_AUDIT.md) and [privacy policy](PRIVACY.md).
+See the [changelog](CHANGELOG.md), [current validation report](docs/audits/2026-09-30-production-readiness.md) and [privacy policy](PRIVACY.md).
 
 ## Reading
 
@@ -64,6 +64,10 @@ The sandbox database is located at:
 
 `container-migration.plist` asks macOS to migrate the previous application-support directory, cache and preferences on the first sandboxed launch. SQLite uses WAL and FTS5. Cache-clearing operations remain separate from saved stories and read history.
 
+## Repository layout
+
+Standard project, contribution, privacy and security documents stay at the root. Architecture and dated audit evidence live under `docs/`; inactive packaging/notarization helpers live under `script/distribution/`. Active build and test commands retain their root paths.
+
 ## Source layout
 
 - `Sources/App`: entry point, settings, theme and update checks.
@@ -74,4 +78,4 @@ The sandbox database is located at:
 - `Sources/Coordinators`: feed refresh and notifications.
 - `Tests/NewsTests.swift`: parsing, security, persistence, classification and state regression checks.
 
-See the [current validation report](PRODUCTION_AUDIT.md), [earlier modernization report](AUDIT.md) and [security policy](SECURITY.md).
+See the [current validation report](docs/audits/2026-09-30-production-readiness.md), [earlier modernization report](docs/audits/2026-09-27-reader-modernization.md) and [security policy](SECURITY.md).
