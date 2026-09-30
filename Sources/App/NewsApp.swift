@@ -159,6 +159,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
     // Handle notification click — deep link to the article
     nonisolated func userNotificationCenter(_ _: UNUserNotificationCenter, didReceive response: UNNotificationResponse, withCompletionHandler completionHandler: @escaping () -> Void) {
         let userInfo = response.notification.request.content.userInfo
+        let articleID = userInfo["articleID"] as? String
         if let articleLink = userInfo["articleLink"] as? String {
             Task { @MainActor in
                 // Bring app to front
@@ -167,12 +168,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
                 } else {
                     NSApp.activate(ignoringOtherApps: true)
                 }
-                // Post notification for MainView to pick up
-                try? await Task.sleep(nanoseconds: 300_000_000)
-                NotificationCenter.default.post(
-                    name: .openArticleFromNotification,
-                    object: nil,
-                    userInfo: ["articleLink": articleLink]
+                ArticleStore.shared.pendingNavigation = .init(
+                    articleID: articleID,
+                    link: articleLink
                 )
             }
         }

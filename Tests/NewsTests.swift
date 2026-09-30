@@ -91,7 +91,11 @@ struct NewsTests {
         }
     }
 
-    static func runTests() async throws {
+    static func runTests(fixtureHost: String = "example.com") async throws {
+        var fixtureURL = URLComponents()
+        fixtureURL.scheme = "https"
+        fixtureURL.host = fixtureHost
+        let fixtureRoot = fixtureURL.url!
         print("🏃 Running NewsApp Unit Tests...")
         
         await testURLNormalization()
@@ -103,6 +107,10 @@ struct NewsTests {
         await testFeedErrorHierarchy()
         await testAppSettingsDecoupling()
         await testDateParsing()
+        try await testAuditParsingAndSettingsRegressions(fixtureRoot: fixtureRoot)
+        try await testAuditPersistenceAndRoutingRegressions(fixtureRoot: fixtureRoot)
+        try await testAuditRefreshRegressions(fixtureRoot: fixtureRoot)
+        try await testUndatedArticleOrdering()
         await testReaderParsingRegressions()
         await testStructuredReaderAndTags()
         await testReaderStoreUpdates()
@@ -769,16 +777,211 @@ struct NewsTests {
         settings.setAllowInsecureHTTP(false)
     }
     
+    @MainActor
+    static func testAuditParsingAndSettingsRegressions(fixtureRoot: URL) async throws {
+        print("  - Testing unknown dates, GUID permalinks and folder-only OPML imports...")
+        assertEqual(DateParser.parse(""), nil, "Missing publication dates are unknown")
+        assertEqual(DateParser.parse("definitely-not-a-date"), nil, "Malformed dates are unknown")
+        let undatedXML = Data("<rss><channel><title>Publisher</title><item><title>Undated</title></item></channel></rss>".utf8)
+        let first = FeedXMLParser(data: undatedXML).parse().first!
+        let second = FeedXMLParser(data: undatedXML).parse().first!
+        assertEqual(first.pubDate, DateParser.unknownDate, "Undated XML stories do not become breaking news")
+        assertEqual(first.publicationDateText, "Date unavailable", "Unknown dates have an honest display label")
+        assertEqual(first.id, second.id, "Undated stories without GUID or link retain a stable fingerprint")
+        let json = Data(#"{"items":[{"id":"undated","url":"\#(fixtureRoot.appendingPathComponent("story").absoluteString)","date_published":"broken"}]}"#.utf8)
+        assertEqual(JSONFeedParser.parse(data: json, feedURL: fixtureRoot.appendingPathComponent("feed").absoluteString)?.first?.pubDate,
+                    DateParser.unknownDate, "Malformed JSON dates use the same stable fallback")
+        for attribute in ["", " isPermaLink=\"true\"", " isPermaLink=\"false\""] {
+            let xml = Data("<rss><channel><item><title>Permalink</title><guid\(attribute)>\(fixtureRoot.appendingPathComponent("permalink").absoluteString)</guid></item></channel></rss>".utf8)
+            let article = FeedXMLParser(data: xml).parse().first!
+            assertEqual(article.link, attribute.contains("false") ? "" : fixtureRoot.appendingPathComponent("permalink").absoluteString,
+                        "RSS GUID fallback respects explicit non-permalink identifiers")
+        }
+        let suite = "test.audit.settings.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = AppSettings(defaults: defaults)
+        let feed = fixtureRoot.appendingPathComponent("rss").absoluteString
+        assertEqual(settings.addFeed(url: feed), feed, "New feed reports addition")
+        assertEqual(settings.addFeed(url: feed), nil, "Duplicate feed reports no addition")
+        let opml = Data("<opml><body><outline text=\"Archive Folder\"><outline xmlUrl=\"\(feed)\"/></outline></body></opml>".utf8)
+        assertEqual(settings.importFeeds(from: opml), 0, "Folder-only import adds no duplicate subscription")
+        let reloaded = AppSettings(defaults: defaults)
+        assertTrue(reloaded.userSections.contains("Archive Folder"), "Imported folders survive settings reload")
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: url) }
+        try opml.write(to: url)
+        assertEqual(try await OPMLFileReader.read(url), opml, "Async file import preserves data")
+        try Data(repeating: 32, count: OPMLFileReader.maximumBytes + 1).write(to: url)
+        do {
+            _ = try await OPMLFileReader.read(url)
+            assertTrue(false, "Oversized OPML files must be rejected")
+        } catch { /* Expected bounded read failure. */ }
+        do {
+            _ = try OPMLParser.parseValidated(data: Data(repeating: 32, count: OPMLFileReader.maximumBytes + 1))
+            assertTrue(false, "In-memory OPML imports must enforce the same size bound")
+        } catch { /* Expected validation failure. */ }
+    }
+
+    @MainActor
+    static func testAuditPersistenceAndRoutingRegressions(fixtureRoot: URL) async throws {
+        print("  - Testing corrected metadata, alias saves and startup notification requests...")
+        let db = DatabaseEngine(path: ":memory:")
+        let store = ArticleStore(database: db)
+        let original = FeedArticle(title: "Story", link: fixtureRoot.appendingPathComponent("old").absoluteString, guid: "stable-guid",
+                                   description: "Preview", pubDate: Date(timeIntervalSince1970: 100), source: "Publisher")
+        let pending = ArticleStore.NavigationRequest(articleID: original.id, link: original.link)
+        store.pendingNavigation = pending
+        await store.initialize()
+        assertEqual(store.pendingNavigation, pending, "Initialization retains requests received before the UI mounts")
+        assertEqual(try await db.upsertArticles([original, original]), Set([original.id]), "Duplicate batch rows count as one insertion")
+        try await db.markRead(articleId: original.id, isRead: true)
+        try await db.setSaved(articleId: original.id, isSaved: true)
+        let corrected = FeedArticle(title: original.title, link: fixtureRoot.appendingPathComponent("corrected").absoluteString, guid: original.guid,
+                                    description: original.description, pubDate: Date(timeIntervalSince1970: 200), source: original.source)
+        assertTrue(try await db.upsertArticles([corrected]).isEmpty, "Corrected GUID metadata is an update, not a new story")
+        let restored = try await db.fetchArticles(id: original.id).first!
+        assertEqual(restored.link, corrected.link, "Corrected URL is persisted")
+        assertEqual(restored.pubDate, corrected.pubDate, "Corrected publication date is persisted")
+        assertTrue(try await db.isRead(articleId: original.id), "Metadata correction preserves reading history")
+        assertTrue(try await db.isSaved(articleId: original.id), "Metadata correction preserves saved state")
+        let incomplete = FeedArticle(title: original.title, link: "javascript:broken", guid: original.guid,
+                                     description: original.description, pubDate: DateParser.unknownDate, source: original.source)
+        try await db.upsertArticles([incomplete])
+        let retained = try await db.fetchArticles(id: original.id).first!
+        assertEqual(retained.link, corrected.link, "Malformed incoming URL cannot erase a working URL")
+        assertEqual(retained.pubDate, corrected.pubDate, "Unknown incoming date cannot erase a known publication date")
+        let archive = (0..<501).map { index in
+            FeedArticle(title: "Recent \(index)", link: "https://example.com/recent/\(index)", guid: "recent-\(index)",
+                        description: "Preview", pubDate: Date(timeIntervalSince1970: Double(1000 + index)), source: "Publisher")
+        }
+        try await db.upsertArticles(archive)
+        await store.refreshState()
+        assertFalse(store.articles.contains { $0.id == original.id }, "Notification fixture lies outside the 500-story snapshot")
+        assertEqual(try await store.articleForNavigation(pending)?.id, original.id, "Stable ID routes old notifications after URL corrections")
+        let legacyRequest = ArticleStore.NavigationRequest(articleID: nil, link: corrected.link + "?utm_source=rss")
+        assertEqual(try await store.articleForNavigation(legacyRequest)?.id, original.id, "Old link-only notifications resolve normalized URLs")
+        let saves = SavedStoriesManager(articleStore: store)
+        let alias = FeedArticle(title: "Alias", link: corrected.link + "?utm_source=alias", guid: "different-guid",
+                                description: "Preview", pubDate: corrected.pubDate, source: "Other publisher")
+        assertTrue(saves.isSaved(alias), "URL-equivalent feed records share visible bookmark state")
+        saves.remove(alias)
+        await saves.waitForPendingChanges()
+        assertFalse(try await db.isSaved(articleId: original.id), "Removing alias unsaves the actual saved database ID")
+        assertFalse(saves.isSaved(alias), "Alias bookmark does not bounce back after reconciliation")
+        saves.save(corrected)
+        saves.remove(alias)
+        saves.save(alias)
+        await saves.waitForPendingChanges()
+        assertFalse(try await db.isSaved(articleId: original.id), "Rapid alias mutations retain the original unsave intent")
+        assertTrue(try await db.isSaved(articleId: alias.id), "Rapid alias mutations retain the latest save intent")
+        let emptyLink = FeedArticle(title: "No link", link: "", guid: "empty-one", description: "", pubDate: .distantPast, source: "Publisher")
+        let otherEmptyLink = FeedArticle(title: "Different story", link: "", guid: "empty-two", description: "", pubDate: .distantPast, source: "Publisher")
+        saves.save(emptyLink)
+        assertFalse(saves.isSaved(otherEmptyLink), "Missing URLs do not alias unrelated stories")
+        await saves.waitForPendingChanges()
+        await db.close()
+        do {
+            _ = try await store.fetchArticles()
+            assertTrue(false, "Storage read failure must propagate rather than return an empty library")
+        } catch { /* Expected closed-database error. */ }
+    }
+
+    @MainActor
+    static func testAuditRefreshRegressions(fixtureRoot: URL) async throws {
+        print("  - Testing notification deduplication beyond the snapshot and failed refresh storage...")
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let path = directory.appendingPathComponent("audit.sqlite").path
+        let db = DatabaseEngine(path: path)
+        let store = ArticleStore(database: db)
+        await store.initialize()
+        let archived = FeedArticle(title: "Archive", link: fixtureRoot.appendingPathComponent("archive").absoluteString, guid: "archive",
+                                   description: "", pubDate: Date(timeIntervalSince1970: 0), source: "Publisher")
+        let recent = (0..<501).map { index in
+            FeedArticle(title: "Recent \(index)", link: "https://example.com/\(index)", guid: "item-\(index)",
+                        description: "", pubDate: Date(timeIntervalSince1970: Double(index)), source: "Publisher")
+        }
+        await store.batchUpsert(articles: [archived] + recent)
+        let fresh = FeedArticle(title: "Fresh", link: fixtureRoot.appendingPathComponent("fresh").absoluteString, guid: "fresh",
+                                description: "", pubDate: DateParser.unknownDate, source: "Publisher")
+        let suite = "test.audit.refresh.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = AppSettings(defaults: defaults)
+        settings.feedURLs = [fixtureRoot.appendingPathComponent("rss").absoluteString, fixtureRoot.appendingPathComponent("second").absoluteString]
+        settings.aiEnabled = false
+        settings.notificationsEnabled = true
+        var notified: [String] = []
+        let manager = FeedManager(settings: settings, store: store, schedulesRefresh: false,
+            fetchBatch: { urls, _ in urls.map { ($0, [archived, fresh, fresh], nil) } },
+            notifyBatch: { articles, _ in notified.append(contentsOf: articles.map { $0.id }) })
+        await manager.fetchFeedsAsync()
+        assertTrue(manager.articles.contains { $0.id == fresh.id }, "Notified undated story remains in the visible snapshot")
+        assertEqual(notified, [fresh.id], "Only committed new IDs notify once, across duplicate rows and feeds")
+        await manager.fetchFeedsAsync()
+        assertEqual(notified, [fresh.id], "Repeat refresh does not re-notify stored stories")
+        manager.stopBackgroundWork()
+        var connection: OpaquePointer?
+        assertEqual(sqlite3_open(path, &connection), SQLITE_OK, "Open isolated refresh failure fixture")
+        defer { sqlite3_close(connection) }
+        assertEqual(sqlite3_exec(connection, "CREATE TRIGGER fail_ingest BEFORE INSERT ON articles BEGIN SELECT RAISE(ABORT, 'simulated ingestion failure'); END;", nil, nil, nil), SQLITE_OK, "Install failed-ingestion trigger")
+        let failed = FeedArticle(title: "Failed", link: fixtureRoot.appendingPathComponent("failed").absoluteString, guid: "failed", description: "", pubDate: Date(), source: "Publisher")
+        let failureManager = FeedManager(settings: settings, store: store, schedulesRefresh: false,
+            fetchBatch: { urls, _ in urls.map { ($0, [failed], nil) } },
+            notifyBatch: { articles, _ in notified.append(contentsOf: articles.map { $0.id }) })
+        await failureManager.fetchFeedsAsync()
+        assertEqual(notified, [fresh.id], "Failed ingestion cannot send new-story notifications")
+        assertFalse(failureManager.articles.contains { $0.id == failed.id }, "Failed ingestion cannot replace the library with parsed data")
+        // Drain the startup cache read before forcing a read failure.
+        _ = try await store.fetchArticles()
+        let snapshot = failureManager.articles
+        await db.close()
+        await failureManager.fetchFeedsAsync()
+        assertEqual(failureManager.articles, snapshot, "Refresh read errors retain the visible library")
+        failureManager.stopBackgroundWork()
+    }
+
+    static func testUndatedArticleOrdering() async throws {
+        let db = DatabaseEngine(path: ":memory:")
+        try await db.open()
+        let dated = (0..<501).map { index in
+            FeedArticle(title: "Dated \(index)", link: "", guid: "dated-\(index)", description: "",
+                        pubDate: Date(timeIntervalSince1970: Double(index)), source: "Publisher")
+        }
+        let undated = (0..<3).map { index in
+            FeedArticle(title: "Undated \(index)", link: "", guid: "undated-\(index)", description: "",
+                        pubDate: DateParser.unknownDate, source: "Publisher")
+        }
+        try await db.upsertArticles(dated + undated)
+        let snapshot = try await db.fetchArticles()
+        assertEqual(Set(snapshot.prefix(3).map(\.id)), Set(undated.map(\.id)), "Undated stories remain visible beyond 500 dated stories")
+        assertEqual(snapshot.first?.pubDate, DateParser.unknownDate, "Ordering never fabricates a publication date")
+        let firstPage = try await db.fetchArticles(limit: 2)
+        let remainder = try await db.fetchArticles(limit: nil, after: ArticleQueryCursor(firstPage.last!))
+        assertEqual((firstPage + remainder).count, 504, "Date cursor includes every row")
+        assertEqual(Set((firstPage + remainder).map(\.id)).count, 504, "Tied ingestion dates do not duplicate rows")
+        let searchPage = try await db.searchArticles(query: "is:unread", limit: 2)
+        let searchRemainder = try await db.searchArticles(query: "is:unread", limit: 600, after: ArticleQueryCursor(searchPage.last!))
+        assertEqual((searchPage + searchRemainder).map(\.id), (firstPage + remainder).map(\.id), "Filter-only search uses the same order and cursor")
+        try await db.upsertArticles(undated)
+        assertEqual(try await db.fetchArticles(limit: 3).map(\.queryOrderValue), snapshot.prefix(3).map(\.queryOrderValue), "Refresh preserves original ingestion time")
+        try await db.markRead(articleId: undated[0].id, isRead: true)
+        assertEqual(try await db.pruneOldArticles(), 0, "New undated read stories are not pruned as ancient")
+        await db.close()
+    }
+
     static func testDateParsing() async {
         print("  - Testing Date parsing...")
         
         let date1Str = "Tue, 19 May 2026 20:30:00 GMT"
         let date1 = DateParser.parse(date1Str)
-        assertTrue(date1.timeIntervalSince1970 > 0, "Should successfully parse RFC 822 date")
+        assertTrue((date1?.timeIntervalSince1970 ?? 0) > 0, "Should successfully parse RFC 822 date")
         
         let date2Str = "2026-05-19T20:30:00Z"
         let date2 = DateParser.parse(date2Str)
-        assertTrue(date2.timeIntervalSince1970 > 0, "Should successfully parse ISO 8601 date")
+        assertTrue((date2?.timeIntervalSince1970 ?? 0) > 0, "Should successfully parse ISO 8601 date")
     }
     
     static func testXMLParsing() async {

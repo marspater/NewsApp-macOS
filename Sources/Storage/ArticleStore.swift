@@ -68,17 +68,20 @@ final class ArticleStore: ObservableObject {
     
     // MARK: - Article Ingestion & Upsert
     
-    func batchUpsert(articles newArticles: [FeedArticle], feedUrl: String? = nil) async {
-        guard !newArticles.isEmpty else { return }
+    @discardableResult
+    func batchUpsert(articles newArticles: [FeedArticle], feedUrl: String? = nil) async -> Set<String> {
+        guard !newArticles.isEmpty else { return [] }
         do {
-            try await database.upsertArticles(newArticles, feedUrl: feedUrl)
+            let insertedIDs = try await database.upsertArticles(newArticles, feedUrl: feedUrl)
             await refreshState()
+            return insertedIDs
         } catch is CancellationError {
             // Superseded refreshes must not publish stale snapshots.
         } catch {
             operationError = "Could not store fetched articles. Please try again."
             logger.error("Failed to batch upsert articles: \(error.localizedDescription)")
         }
+        return []
     }
     
     // MARK: - Article Queries & Search
@@ -88,15 +91,28 @@ final class ArticleStore: ObservableObject {
         isRead: Bool? = nil,
         isSaved: Bool? = nil,
         limit: Int? = 500
-    ) async -> [FeedArticle] {
-        do {
-            return try await database.fetchArticles(section: section, isRead: isRead, isSaved: isSaved, limit: limit)
-        } catch {
-            logger.error("Failed to fetch articles: \(error.localizedDescription)")
-            return []
-        }
+    ) async throws -> [FeedArticle] {
+        try await database.fetchArticles(section: section, isRead: isRead, isSaved: isSaved, limit: limit)
     }
-    
+
+    struct NavigationRequest: Equatable, Sendable {
+        let token = UUID()
+        let articleID: String?
+        let link: String
+    }
+
+    @Published var pendingNavigation: NavigationRequest?
+
+    func articleForNavigation(_ request: NavigationRequest) async throws -> FeedArticle? {
+        if let id = request.articleID,
+           let article = try await database.fetchArticles(limit: 1, id: id).first {
+            return article
+        }
+        let link = ArticleIdentity.canonicalizeURL(request.link)
+        guard !link.isEmpty else { return nil }
+        return try await database.fetchArticles(limit: 1, canonicalURL: link).first
+    }
+
     func search(query: String, limit: Int = 100) async -> [FeedArticle] {
         guard !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return articles

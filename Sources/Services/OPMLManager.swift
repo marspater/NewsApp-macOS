@@ -24,6 +24,9 @@ public final class OPMLParser: NSObject, XMLParserDelegate, @unchecked Sendable 
     }
 
     public static func parseValidated(data: Data) throws -> [OPMLItem] {
+        guard data.count <= OPMLFileReader.maximumBytes else {
+            throw NSError(domain: "OPML", code: 2, userInfo: [NSLocalizedDescriptionKey: "OPML files must be no larger than 5 MB."])
+        }
         let parser = OPMLParser()
         let xmlParser = XMLParser(data: data)
         xmlParser.shouldResolveExternalEntities = false
@@ -110,6 +113,25 @@ public enum OPMLExporter: Sendable {
     }
 }
 
+/// Reads off the UI actor, with a bound even if the file grows after selection.
+enum OPMLFileReader {
+    static let maximumBytes = 5 * 1024 * 1024
+
+    static func read(_ url: URL) async throws -> Data {
+        try await Task.detached(priority: .userInitiated) {
+            let scoped = url.startAccessingSecurityScopedResource()
+            defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+            let handle = try FileHandle(forReadingFrom: url)
+            defer { try? handle.close() }
+            let data = try handle.read(upToCount: maximumBytes + 1) ?? Data()
+            guard data.count <= maximumBytes else {
+                throw NSError(domain: "OPML", code: 2, userInfo: [NSLocalizedDescriptionKey: "OPML files must be no larger than 5 MB."])
+            }
+            return data
+        }.value
+    }
+}
+
 @MainActor
 public enum OPMLDialogs {
     public static func importOPML(onImport: @escaping (Data) -> Void) {
@@ -125,8 +147,10 @@ public enum OPMLDialogs {
             panel.allowedContentTypes = [.xml]
         }
         if panel.runModal() == .OK, let url = panel.url {
-            do { onImport(try Data(contentsOf: url)) }
-            catch { NSAlert(error: error).runModal() }
+            Task {
+                do { onImport(try await OPMLFileReader.read(url)) }
+                catch { NSAlert(error: error).runModal() }
+            }
         }
     }
 

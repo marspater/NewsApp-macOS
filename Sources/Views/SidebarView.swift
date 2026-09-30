@@ -303,13 +303,9 @@ struct SidebarView: View {
                     guard let url = item else { return }
                     
                     if url.isFileURL && (url.pathExtension.lowercased() == "opml" || url.pathExtension.lowercased() == "xml") {
-                        if let fileData = try? Data(contentsOf: url) {
-                            Task { @MainActor in
-                                let countBefore = self.feedManager.feedURLs.count
-                                self.feedManager.importFeeds(from: fileData)
-                                let added = self.feedManager.feedURLs.count - countBefore
-                                self.showConfirmation(added > 0 ? "Imported \(added) feed(s) from OPML" : "No new feeds imported")
-                            }
+                        Task { @MainActor in
+                            let added = await self.feedManager.importFeeds(fromFile: url)
+                            self.showConfirmation(added > 0 ? "Imported \(added) feed(s) from OPML" : "No new feeds imported")
                         }
                     } else if !url.isFileURL && (url.scheme == "http" || url.scheme == "https") {
                         let urlString = url.absoluteString

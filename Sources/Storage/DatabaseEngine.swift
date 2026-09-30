@@ -263,9 +263,10 @@ actor DatabaseEngine {
     
     // MARK: - Article Ingestion & Upsert
     
-    func upsertArticles(_ articles: [FeedArticle], feedUrl: String? = nil) throws {
+    @discardableResult
+    func upsertArticles(_ articles: [FeedArticle], feedUrl: String? = nil) throws -> Set<String> {
         guard let db = db else { throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Database not open"]) }
-        guard !articles.isEmpty else { return }
+        guard !articles.isEmpty else { return [] }
         
         let signpostState = NewsSignposts.begin(NewsSignposts.database, name: "DatabaseBatchUpsert", metadata: "count=\(articles.count)")
         defer { NewsSignposts.end(NewsSignposts.database, name: "DatabaseBatchUpsert", state: signpostState) }
@@ -282,6 +283,10 @@ actor DatabaseEngine {
             created_at, updated_at, reader_document
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
+            guid = coalesce(excluded.guid, articles.guid),
+            canonical_url = CASE WHEN ?
+                THEN excluded.canonical_url ELSE articles.canonical_url END,
+            published_at = CASE WHEN excluded.published_at = ? THEN articles.published_at ELSE excluded.published_at END,
             title = excluded.title,
             source = excluded.source,
             description = excluded.description,
@@ -335,13 +340,29 @@ actor DatabaseEngine {
             throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to prepare feed association"])
         }
         defer { sqlite3_finalize(feedStmt) }
+        var existenceStmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, "SELECT 1 FROM articles WHERE id = ?;", -1, &existenceStmt, nil) == SQLITE_OK else {
+            throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to prepare article existence query"])
+        }
+        defer { sqlite3_finalize(existenceStmt) }
+        var insertedIDs = Set<String>()
         let now = Date().timeIntervalSince1970
 
         for article in articles {
             try Task.checkCancellation()
             let id = article.id
+            let url = URL(string: article.normalizedLink)
+            let validLink = url?.host?.isEmpty == false && ["http", "https"].contains(url?.scheme?.lowercased() ?? "")
             let canonical = article.normalizedLink
             let pubDate = article.pubDate.timeIntervalSince1970
+
+            sqlite3_reset(existenceStmt)
+            sqlite3_bind_text(existenceStmt, 1, id, -1, Self.sqliteTransient)
+            let existenceStatus = sqlite3_step(existenceStmt)
+            guard existenceStatus == SQLITE_ROW || existenceStatus == SQLITE_DONE else {
+                throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to check stored article identity"])
+            }
+            if existenceStatus == SQLITE_DONE { insertedIDs.insert(id) }
 
             // 1. Insert/Update Article
             sqlite3_reset(artStmt)
@@ -362,6 +383,9 @@ actor DatabaseEngine {
                 let encoded = String(decoding: try JSONEncoder().encode(document), as: UTF8.self)
                 sqlite3_bind_text(artStmt, 14, encoded, -1, Self.sqliteTransient)
             } else { sqlite3_bind_null(artStmt, 14) }
+
+            sqlite3_bind_int(artStmt, 15, validLink ? 1 : 0)
+            sqlite3_bind_double(artStmt, 16, DateParser.unknownDate.timeIntervalSince1970)
 
             if sqlite3_step(artStmt) != SQLITE_DONE {
                 try rollbackTransaction()
@@ -403,8 +427,12 @@ actor DatabaseEngine {
         
         try Task.checkCancellation()
         try commitTransaction()
+        return insertedIDs
     }
     
+    // Unknown publisher dates retain their identity sentinel; ingestion time orders them.
+    private static let articleDateOrder = "CASE WHEN a.published_at = \(DateParser.unknownDate.timeIntervalSince1970) THEN a.created_at ELSE a.published_at END"
+
     // MARK: - Article Queries
     
     func fetchArticles(
@@ -412,7 +440,9 @@ actor DatabaseEngine {
         isRead: Bool? = nil,
         isSaved: Bool? = nil,
         limit: Int? = 500,
-        after: ArticleQueryCursor? = nil
+        after: ArticleQueryCursor? = nil,
+        id: String? = nil,
+        canonicalURL: String? = nil
     ) throws -> [FeedArticle] {
         guard let db = db else { throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Database not open"]) }
         
@@ -421,7 +451,7 @@ actor DatabaseEngine {
                a.published_at, a.source, a.image_url, a.category,
                ae.summary, ae.content_fetched,
                s.is_read, s.is_saved,
-               ae.key_points, ae.entities, ae.sentiment, a.reader_document
+               ae.key_points, ae.entities, ae.sentiment, a.reader_document, \(Self.articleDateOrder)
         FROM articles a
         JOIN article_state s ON s.article_id = a.id
         LEFT JOIN article_enrichment ae ON ae.article_id = a.id
@@ -431,6 +461,14 @@ actor DatabaseEngine {
         
         var params: [(type: String, val: Any)] = []
         
+        if let id {
+            query += " AND a.id = ?"
+            params.append(("text", id))
+        }
+        if let canonicalURL {
+            query += " AND a.canonical_url = ?"
+            params.append(("text", canonicalURL))
+        }
         if let read = isRead {
             query += " AND s.is_read = ?"
             params.append(("int", read ? 1 : 0))
@@ -447,11 +485,11 @@ actor DatabaseEngine {
             params += terms.map { ("text", $0) }
         }
         if let after {
-            query += " AND (a.published_at < ? OR (a.published_at = ? AND a.id > ?))"
+            query += " AND (\(Self.articleDateOrder) < ? OR (\(Self.articleDateOrder) = ? AND a.id > ?))"
             params += [("double", after.value), ("double", after.value), ("text", after.id)]
         }
 
-        query += " ORDER BY a.published_at DESC, a.id"
+        query += " ORDER BY \(Self.articleDateOrder) DESC, a.id"
         
         if let lim = limit {
             query += " LIMIT ?"
@@ -480,7 +518,10 @@ actor DatabaseEngine {
         var status = sqlite3_step(stmt)
         while status == SQLITE_ROW {
             try Task.checkCancellation()
-            if let article = parseArticleRow(stmt) { results.append(article) }
+            if var article = parseArticleRow(stmt) {
+                article.queryOrderValue = sqlite3_column_double(stmt, 18)
+                results.append(article)
+            }
             status = sqlite3_step(stmt)
         }
         guard status == SQLITE_DONE else {
@@ -520,7 +561,7 @@ actor DatabaseEngine {
         """
 
         
-        sql = sql.replacingOccurrences(of: "a.reader_document\n", with: "a.reader_document, " + (cleanTerms.isEmpty ? "a.published_at" : "fts.rank") + "\n")
+        sql = sql.replacingOccurrences(of: "a.reader_document\n", with: "a.reader_document, " + (cleanTerms.isEmpty ? Self.articleDateOrder : "fts.rank") + "\n")
         var params: [(type: String, val: Any)] = []
         
         let hasFTS = !cleanTerms.isEmpty
@@ -557,14 +598,14 @@ actor DatabaseEngine {
             if hasFTS {
                 sql += " AND (fts.rank > ? OR (fts.rank = ? AND a.id > ?))"
             } else {
-                sql += " AND (a.published_at < ? OR (a.published_at = ? AND a.id > ?))"
+                sql += " AND (\(Self.articleDateOrder) < ? OR (\(Self.articleDateOrder) = ? AND a.id > ?))"
             }
             params += [("double", after.value), ("double", after.value), ("text", after.id)]
         }
         if hasFTS {
             sql += " ORDER BY fts.rank, a.id LIMIT ?"
         } else {
-            sql += " ORDER BY a.published_at DESC, a.id LIMIT ?"
+            sql += " ORDER BY \(Self.articleDateOrder) DESC, a.id LIMIT ?"
         }
         params.append(("int", limit))
         
@@ -1095,7 +1136,7 @@ actor DatabaseEngine {
             JOIN article_state s ON s.article_id = a.id
             WHERE s.is_read = 1
               AND s.is_saved = 0
-              AND a.published_at < ?
+              AND \(Self.articleDateOrder) < ?
         );
         """
         var stmt: OpaquePointer?
