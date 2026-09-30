@@ -20,7 +20,7 @@ final class SavedStoriesManager: ObservableObject {
         self.articleStore = store
         self.savedArticles = store.savedArticles
         self.savedArticleIDs = Set(store.savedArticles.map { $0.id })
-        self.savedArticleLinks = Set(store.savedArticles.map { $0.normalizedLink })
+        self.savedArticleLinks = Set(store.savedArticles.map { $0.normalizedLink }.filter { !$0.isEmpty })
         
         // Keep savedArticles in sync with ArticleStore changes
         store.$savedArticles
@@ -29,7 +29,7 @@ final class SavedStoriesManager: ObservableObject {
                 guard let self, self.pendingMutations == 0 else { return }
                 self.savedArticles = updated
                 self.savedArticleIDs = Set(updated.map { $0.id })
-                self.savedArticleLinks = Set(updated.map { $0.normalizedLink })
+                self.savedArticleLinks = Set(updated.map { $0.normalizedLink }.filter { !$0.isEmpty })
             }
             .store(in: &cancellables)
     }
@@ -38,32 +38,39 @@ final class SavedStoriesManager: ObservableObject {
         guard !isSaved(article) else { return }
         savedArticles.insert(article, at: 0)
         savedArticleIDs.insert(article.id)
-        savedArticleLinks.insert(article.normalizedLink)
-        persistSaved(article, isSaved: true)
+        if !article.normalizedLink.isEmpty { savedArticleLinks.insert(article.normalizedLink) }
+        persistSaved([article], isSaved: true)
     }
 
     func remove(_ article: FeedArticle) {
         guard isSaved(article) else { return }
-        savedArticles.removeAll { $0.id == article.id || $0.link == article.link }
-        savedArticleIDs.remove(article.id)
-        savedArticleLinks.remove(article.normalizedLink)
-        persistSaved(article, isSaved: false)
+        // URL equivalence is a UI convenience; persist against the actual saved IDs.
+        let matching = savedArticles.filter {
+            $0.id == article.id || (!article.normalizedLink.isEmpty && $0.normalizedLink == article.normalizedLink)
+        }
+        let matchingIDs = Set(matching.map { $0.id })
+        savedArticles.removeAll { matchingIDs.contains($0.id) }
+        savedArticleIDs = Set(savedArticles.map { $0.id })
+        savedArticleLinks = Set(savedArticles.map { $0.normalizedLink }.filter { !$0.isEmpty })
+        persistSaved(matching, isSaved: false)
     }
 
     func isSaved(_ article: FeedArticle) -> Bool {
-        savedArticleIDs.contains(article.id) || savedArticleLinks.contains(article.normalizedLink)
+        savedArticleIDs.contains(article.id) || (!article.normalizedLink.isEmpty && savedArticleLinks.contains(article.normalizedLink))
     }
-    private func persistSaved(_ article: FeedArticle, isSaved: Bool) {
+    private func persistSaved(_ articles: [FeedArticle], isSaved: Bool) {
         let previous = mutationTask
         pendingMutations += 1
         mutationTask = Task {
             await previous?.value
-            await articleStore.setSaved(article: article, isSaved: isSaved)
+            for article in articles {
+                await articleStore.setSaved(article: article, isSaved: isSaved)
+            }
             pendingMutations -= 1
             if pendingMutations == 0 {
                 savedArticles = articleStore.savedArticles
                 savedArticleIDs = Set(savedArticles.map { $0.id })
-                savedArticleLinks = Set(savedArticles.map { $0.normalizedLink })
+                savedArticleLinks = Set(savedArticles.map { $0.normalizedLink }.filter { !$0.isEmpty })
                 mutationTask = nil
             }
         }

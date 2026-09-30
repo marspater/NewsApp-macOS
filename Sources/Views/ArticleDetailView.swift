@@ -135,7 +135,7 @@ struct ArticleDetailView: View {
                         Text("·")
                             .foregroundColor(AppColor.tertiaryText)
 
-                        Text(currentArticle.pubDate.formatted(date: .abbreviated, time: .omitted))
+                        Text(currentArticle.publicationDateText)
                             .font(.system(size: 12, weight: .medium))
                             .foregroundColor(AppColor.secondaryText)
 

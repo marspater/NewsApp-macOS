@@ -23,6 +23,7 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
     private var itemDescription = ""
     private var itemLink = ""
     private var itemGuid = ""
+    private var itemGuidIsPermalink = true
     private var itemPubDate = ""
     private var itemImageUrl = ""
     private var itemCategory = ""
@@ -120,6 +121,7 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
             itemDescription = ""
             itemLink = ""
             itemGuid = ""
+            itemGuidIsPermalink = true
             itemPubDate = ""
             itemUpdated = ""
             contentDepth = nil
@@ -137,6 +139,10 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
             itemContentIsPlainText = elementName == "content" && (attributeDict["type"] ?? "text") == "text"
         } else if isCollectingContentEncoded && ["p", "div", "br", "li", "h1", "h2", "blockquote"].contains(elementName) {
             itemContentEncoded += "\n\n"
+        }
+
+        if insideItem && elementName == "guid" {
+            itemGuidIsPermalink = attributeDict["isPermaLink"]?.lowercased() != "false"
         }
 
         if insideItem && elementName == "category", let term = attributeDict["term"], itemCategory.isEmpty {
@@ -208,7 +214,7 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
 
             guard articles.count < maxArticlesPerFeed else { return }
 
-            let date = DateParser.parse(itemPubDate.isEmpty ? itemUpdated : itemPubDate)
+            let date = DateParser.parse(itemPubDate.isEmpty ? itemUpdated : itemPubDate) ?? DateParser.unknownDate
             let cleanDesc = stripHTMLSimple(itemDescription).trimmingCharacters(in: .whitespacesAndNewlines)
 
             var fullContent: String? = nil
@@ -244,6 +250,12 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
             }
 
             let guidVal = itemGuid.trimmingCharacters(in: .whitespacesAndNewlines)
+            var articleLink = itemLink.trimmingCharacters(in: .whitespacesAndNewlines)
+            if articleLink.isEmpty, itemGuidIsPermalink,
+               let url = URL(string: guidVal),
+               ["http", "https"].contains(url.scheme?.lowercased() ?? ""), url.host != nil {
+                articleLink = guidVal
+            }
             let cleanCategory: String? = {
                 let first = itemCategory.components(separatedBy: .newlines)
                     .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -253,7 +265,7 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
             }()
             let article = FeedArticle(
                 title: itemTitle.trimmingCharacters(in: .whitespacesAndNewlines),
-                link: resolvedURL(itemLink),
+                link: resolvedURL(articleLink),
                 guid: guidVal.isEmpty ? nil : guidVal,
                 description: cleanDesc,
                 pubDate: date,

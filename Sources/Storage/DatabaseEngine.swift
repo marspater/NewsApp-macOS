@@ -263,9 +263,10 @@ actor DatabaseEngine {
     
     // MARK: - Article Ingestion & Upsert
     
-    func upsertArticles(_ articles: [FeedArticle], feedUrl: String? = nil) throws {
+    @discardableResult
+    func upsertArticles(_ articles: [FeedArticle], feedUrl: String? = nil) throws -> Set<String> {
         guard let db = db else { throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Database not open"]) }
-        guard !articles.isEmpty else { return }
+        guard !articles.isEmpty else { return [] }
         
         let signpostState = NewsSignposts.begin(NewsSignposts.database, name: "DatabaseBatchUpsert", metadata: "count=\(articles.count)")
         defer { NewsSignposts.end(NewsSignposts.database, name: "DatabaseBatchUpsert", state: signpostState) }
@@ -282,6 +283,10 @@ actor DatabaseEngine {
             created_at, updated_at, reader_document
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
+            guid = coalesce(excluded.guid, articles.guid),
+            canonical_url = CASE WHEN ?
+                THEN excluded.canonical_url ELSE articles.canonical_url END,
+            published_at = CASE WHEN excluded.published_at = ? THEN articles.published_at ELSE excluded.published_at END,
             title = excluded.title,
             source = excluded.source,
             description = excluded.description,
@@ -335,13 +340,29 @@ actor DatabaseEngine {
             throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to prepare feed association"])
         }
         defer { sqlite3_finalize(feedStmt) }
+        var existenceStmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, "SELECT 1 FROM articles WHERE id = ?;", -1, &existenceStmt, nil) == SQLITE_OK else {
+            throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to prepare article existence query"])
+        }
+        defer { sqlite3_finalize(existenceStmt) }
+        var insertedIDs = Set<String>()
         let now = Date().timeIntervalSince1970
 
         for article in articles {
             try Task.checkCancellation()
             let id = article.id
+            let url = URL(string: article.normalizedLink)
+            let validLink = url?.host?.isEmpty == false && ["http", "https"].contains(url?.scheme?.lowercased() ?? "")
             let canonical = article.normalizedLink
             let pubDate = article.pubDate.timeIntervalSince1970
+
+            sqlite3_reset(existenceStmt)
+            sqlite3_bind_text(existenceStmt, 1, id, -1, Self.sqliteTransient)
+            let existenceStatus = sqlite3_step(existenceStmt)
+            guard existenceStatus == SQLITE_ROW || existenceStatus == SQLITE_DONE else {
+                throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to check stored article identity"])
+            }
+            if existenceStatus == SQLITE_DONE { insertedIDs.insert(id) }
 
             // 1. Insert/Update Article
             sqlite3_reset(artStmt)
@@ -362,6 +383,9 @@ actor DatabaseEngine {
                 let encoded = String(decoding: try JSONEncoder().encode(document), as: UTF8.self)
                 sqlite3_bind_text(artStmt, 14, encoded, -1, Self.sqliteTransient)
             } else { sqlite3_bind_null(artStmt, 14) }
+
+            sqlite3_bind_int(artStmt, 15, validLink ? 1 : 0)
+            sqlite3_bind_double(artStmt, 16, DateParser.unknownDate.timeIntervalSince1970)
 
             if sqlite3_step(artStmt) != SQLITE_DONE {
                 try rollbackTransaction()
@@ -403,6 +427,7 @@ actor DatabaseEngine {
         
         try Task.checkCancellation()
         try commitTransaction()
+        return insertedIDs
     }
     
     // MARK: - Article Queries
@@ -412,7 +437,9 @@ actor DatabaseEngine {
         isRead: Bool? = nil,
         isSaved: Bool? = nil,
         limit: Int? = 500,
-        after: ArticleQueryCursor? = nil
+        after: ArticleQueryCursor? = nil,
+        id: String? = nil,
+        canonicalURL: String? = nil
     ) throws -> [FeedArticle] {
         guard let db = db else { throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Database not open"]) }
         
@@ -431,6 +458,14 @@ actor DatabaseEngine {
         
         var params: [(type: String, val: Any)] = []
         
+        if let id {
+            query += " AND a.id = ?"
+            params.append(("text", id))
+        }
+        if let canonicalURL {
+            query += " AND a.canonical_url = ?"
+            params.append(("text", canonicalURL))
+        }
         if let read = isRead {
             query += " AND s.is_read = ?"
             params.append(("int", read ? 1 : 0))

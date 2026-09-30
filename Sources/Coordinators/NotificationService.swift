@@ -163,7 +163,7 @@ final class NotificationService: Sendable {
         content.subtitle = article.title
         content.body = article.description.isEmpty ? "" : String(article.description.prefix(200))
         content.sound = .default
-        content.userInfo = ["articleLink": article.link]
+        content.userInfo = ["articleLink": article.link, "articleID": article.id]
 
         if let imageUrlString = article.imageUrl, let imageUrl = URL(string: imageUrlString),
            let attachment = await downloadNotificationAttachment(from: imageUrl) {

@@ -163,7 +163,7 @@ final class AppSettings: ObservableObject {
             return nil
         }
 
-        guard !feedURLs.contains(normalized) else { return normalized }
+        guard !feedURLs.contains(normalized) else { return nil }
         feedURLs.append(normalized)
         saveFeeds()
         return normalized
@@ -223,6 +223,7 @@ final class AppSettings: ObservableObject {
     func importFeeds(from opmlData: Data) -> Int {
         let items = OPMLParser.parse(data: opmlData)
         var addedCount = 0
+        var sectionsChanged = false
         for item in items {
             guard let normalized = Self.normalizeFeedURL(item.url, allowInsecureHTTP: allowInsecureHTTP) else {
                 continue
@@ -234,12 +235,13 @@ final class AppSettings: ObservableObject {
             }
             if let folder = item.folder, !folder.isEmpty, !userSections.contains(folder) {
                 userSections.append(folder)
+                sectionsChanged = true
             }
         }
         if addedCount > 0 {
             saveFeeds()
-            saveSections()
         }
+        if sectionsChanged { saveSections() }
         return addedCount
     }
 

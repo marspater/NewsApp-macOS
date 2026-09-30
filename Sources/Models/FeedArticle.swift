@@ -23,6 +23,10 @@ struct FeedArticle: Identifiable, Codable, Hashable, Sendable {
     var sentimentLabel: String?
     var readerDocument: ReaderDocument?
 
+    var publicationDateText: String {
+        pubDate == DateParser.unknownDate ? "Date unavailable" : pubDate.formatted(date: .abbreviated, time: .omitted)
+    }
+
     var normalizedLink: String {
         ArticleIdentity.canonicalizeURL(link)
     }

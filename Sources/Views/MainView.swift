@@ -111,17 +111,22 @@ struct MainView: View {
         .onReceive(NotificationCenter.default.publisher(for: .jumpToHistoryCommand)) { _ in
             selectedTopic = "History"
         }
-        .onReceive(NotificationCenter.default.publisher(for: .openArticleFromNotification)) { notification in
-            guard let userInfo = notification.userInfo,
-                  let articleLink = userInfo["articleLink"] as? String else { return }
-            
-            if let article = feedManager.articles.first(where: { $0.link == articleLink }) {
-                selectedTopic = "Today"
-                articlePath = NavigationPath()
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+        .task(id: articleStore.isReady ? articleStore.pendingNavigation?.token : nil) {
+            guard articleStore.isReady, let request = articleStore.pendingNavigation else { return }
+            do {
+                let article = try await articleStore.articleForNavigation(request)
+                guard !Task.isCancelled, articleStore.pendingNavigation == request else { return }
+                if let article {
+                    articlePath = NavigationPath()
                     readManager.markAsRead(article.id)
                     articlePath.append(FeedArticleWrap(article: article))
+                } else {
+                    articleStore.operationError = "This story is no longer available in your archive."
                 }
+                articleStore.pendingNavigation = nil
+            } catch {
+                guard !Task.isCancelled else { return }
+                articleStore.operationError = "The notification story could not be loaded. Please try again."
             }
         }
     }
@@ -134,10 +139,9 @@ struct MainView: View {
                 _ = provider.loadObject(ofClass: URL.self) { item, _ in
                     guard let url = item else { return }
                     
-                    if url.isFileURL && (url.pathExtension.lowercased() == "opml" || url.pathExtension.lowercased() == "xml"),
-                       let fileData = try? Data(contentsOf: url) {
+                    if url.isFileURL && (url.pathExtension.lowercased() == "opml" || url.pathExtension.lowercased() == "xml") {
                         Task { @MainActor in
-                            self.feedManager.importFeeds(from: fileData)
+                            await self.feedManager.importFeeds(fromFile: url)
                         }
                     }
                 }

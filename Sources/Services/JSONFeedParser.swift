@@ -55,7 +55,7 @@ class JSONFeedParser {
                 let title = item.title ?? "Untitled"
                 
                 let rawDate = item.datePublished ?? item.pubDate ?? ""
-                let pubDate = DateParser.parse(rawDate)
+                let pubDate = DateParser.parse(rawDate) ?? DateParser.unknownDate
                 
                 let imageUrl = item.image ?? item.thumbnail
                 

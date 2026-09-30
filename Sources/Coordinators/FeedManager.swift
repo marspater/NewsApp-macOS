@@ -32,6 +32,7 @@ class FeedManager: NSObject, ObservableObject {
 
     typealias FeedBatch = [(urlString: String, articles: [FeedArticle]?, error: FeedError?)]
     private let fetchBatch: @Sendable ([String], Bool) async -> FeedBatch
+    private let notifyBatch: @MainActor ([FeedArticle], AppSettings.NotificationMode) async -> Void
     private let enrichmentQueue: EnrichmentQueue
     private var isStopped = false
     private var storeUpdates: AnyCancellable?
@@ -52,10 +53,14 @@ class FeedManager: NSObject, ObservableObject {
     init(settings: AppSettings? = nil, store: ArticleStore? = nil, schedulesRefresh: Bool = true,
          fetchBatch: @escaping @Sendable ([String], Bool) async -> FeedBatch = { urls, allowHTTP in
              await FeedFetcher.shared.fetchAllFeeds(urls: urls, allowHTTP: allowHTTP)
+         },
+         notifyBatch: @escaping @MainActor ([FeedArticle], AppSettings.NotificationMode) async -> Void = { articles, mode in
+             await NotificationService.shared.triageAndNotify(newArticles: articles, mode: mode)
          }) {
         self.appSettings = settings ?? AppSettings.shared
         self.articleStore = store ?? ArticleStore.shared
         self.fetchBatch = fetchBatch
+        self.notifyBatch = notifyBatch
         self.enrichmentQueue = EnrichmentQueue(store: self.articleStore)
         super.init()
         storeUpdates = articleStore.$articles.sink { [weak self] articles in
@@ -101,6 +106,16 @@ class FeedManager: NSObject, ObservableObject {
             fetchFeeds()
         }
         return count
+    }
+
+    @discardableResult
+    func importFeeds(fromFile url: URL) async -> Int {
+        do {
+            return importFeeds(from: try await OPMLFileReader.read(url))
+        } catch {
+            articleStore.operationError = "The OPML file could not be read. Please choose a readable file no larger than 5 MB."
+            return 0
+        }
     }
 
     func exportOPML() -> String {
@@ -157,9 +172,11 @@ class FeedManager: NSObject, ObservableObject {
     func loadCachedArticles() {
         Task { @MainActor [weak self] in
             guard let self = self else { return }
-            let loaded = await self.articleStore.fetchArticles()
-            if !loaded.isEmpty {
+            do {
+                let loaded = try await self.articleStore.fetchArticles()
                 self.articles = loaded
+            } catch {
+                self.logger.error("Failed to load cached articles: \(error.localizedDescription)")
             }
         }
     }
@@ -268,7 +285,7 @@ class FeedManager: NSObject, ObservableObject {
 
         let results = await fetchBatch(appSettings.feedURLs, appSettings.allowInsecureHTTP)
 
-        let existingIds = Set(articles.map { $0.id })
+        var insertedIDs = Set<String>()
         var allParsed = [FeedArticle]()
         for res in results {
             guard !Task.isCancelled else { return }
@@ -279,7 +296,7 @@ class FeedManager: NSObject, ObservableObject {
                 feedStatuses[res.urlString] = .idle
                 if let arts = res.articles {
                     allParsed.append(contentsOf: arts)
-                    await articleStore.batchUpsert(articles: arts, feedUrl: res.urlString)
+                    insertedIDs.formUnion(await articleStore.batchUpsert(articles: arts, feedUrl: res.urlString))
                 }
             }
         }
@@ -287,17 +304,21 @@ class FeedManager: NSObject, ObservableObject {
         guard !Task.isCancelled else { return }
         allParsed.sort { $0.pubDate > $1.pubDate }
 
-        let newArticles = allParsed.filter { !existingIds.contains($0.id) }
+        var notifiedIDs = Set<String>()
+        let newArticles = allParsed.filter { insertedIDs.contains($0.id) && notifiedIDs.insert($0.id).inserted }
 
-        let stored = await articleStore.fetchArticles()
-        guard !Task.isCancelled else { return }
-        self.articles = stored.isEmpty ? allParsed : stored
+        do {
+            let stored = try await articleStore.fetchArticles()
+            guard !Task.isCancelled else { return }
+            self.articles = stored
+        } catch {
+            guard !Task.isCancelled else { return }
+            articleStore.operationError = "Stored articles could not be loaded. Your current library has been retained."
+            logger.error("Failed to reload articles after refresh: \(error.localizedDescription)")
+        }
 
         if appSettings.notificationsEnabled && !newArticles.isEmpty {
-            await NotificationService.shared.triageAndNotify(
-                newArticles: newArticles,
-                mode: appSettings.notificationMode
-            )
+            await notifyBatch(newArticles, appSettings.notificationMode)
         }
 
         guard !Task.isCancelled else { return }

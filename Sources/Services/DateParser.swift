@@ -1,7 +1,10 @@
 import Foundation
 
 struct DateParser {
-    static func parse(_ dateString: String) -> Date {
+    /// Unknown publication dates sort behind dated stories and remain stable across refreshes.
+    static let unknownDate = Date.distantPast
+
+    static func parse(_ dateString: String) -> Date? {
         let trimmed = dateString.trimmingCharacters(in: .whitespacesAndNewlines)
         
         let isoFormatter = ISO8601DateFormatter()
@@ -13,6 +16,8 @@ struct DateParser {
 
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.isLenient = false
         
         let formats = [
             "E, d MMM yyyy HH:mm:ss Z",
@@ -29,6 +34,6 @@ struct DateParser {
             }
         }
         
-        return Date()
+        return nil
     }
 }

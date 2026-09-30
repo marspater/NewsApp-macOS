@@ -4,6 +4,12 @@
 
 ### Fixed
 
+- Preserve the visible library on database read failures and notify only for committed new article IDs across the full archive.
+- Apply valid publisher URL/date corrections without replacing known metadata with missing or malformed values; keep undated stories stable across refreshes.
+- Reconcile bookmark removal against saved URL-equivalent IDs and exclude empty links from bookmark equivalence.
+- Retain notification navigation until storage is ready and resolve archived stories by stable ID or canonical link, without timing delays.
+- Respect RSS GUID permalink fallback, persist folder-only OPML imports, avoid duplicate-feed refresh restarts, and read OPML files off the UI actor with a 5 MB bound.
+
 - Resolve SonarCloud maintainability findings: propagate test errors, preserve JSON keys and stored preferences during naming cleanup, simplify branching and network callbacks, and compile the reader exclusion regex at build time.
 
 - Compile boilerplate-cleaning regexes once and use the semantic control radius for shortcut badges (reviewed proposals #83/#84).

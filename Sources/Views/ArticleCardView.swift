@@ -95,7 +95,7 @@ struct ArticleCardView: View {
                     
                     // Footer Row: Timestamp & Optional AI Badge
                     HStack(spacing: 8) {
-                        Text(article.pubDate.formatted(date: .abbreviated, time: .omitted))
+                        Text(article.publicationDateText)
                             .font(AppTypography.caption)
                             .foregroundColor(AppColor.tertiaryText)
                         
@@ -241,7 +241,7 @@ struct ArticleCardView: View {
     private var accessibilityDescription: String {
         let readState = isRead ? "Read" : "Unread"
         let savedState = isSaved ? ", saved in your library" : ""
-        let dateFormatted = article.pubDate.formatted(date: .abbreviated, time: .omitted)
+        let dateFormatted = article.publicationDateText
         return "\(article.title), from \(displaySource), published \(dateFormatted). \(readState)\(savedState)."
     }
 }
