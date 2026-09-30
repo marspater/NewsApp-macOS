@@ -17,7 +17,7 @@ permissions:
 jobs:
   test-arm64:
     name: Test (Apple Silicon)
-    runs-on: macos-15
+    runs-on: xcode-27
     timeout-minutes: 15
     steps:
       - name: Checkout Code
@@ -31,7 +31,7 @@ jobs:
           echo "Xcode: $(xcodebuild -version | tr '\n' ' ')"
 
       - name: Ensure Executable Permissions
-        run: chmod +x test.sh build.sh build_release.sh package_dmg.sh notarize.sh
+        run: chmod +x test.sh build.sh build_release.sh
 
       - name: Run Unit Tests
         run: ./test.sh
@@ -39,9 +39,9 @@ jobs:
       - name: Verify Swift Package Manager Build
         run: swift build --target News
 
-  release-universal:
-    name: Build & Package (Universal 2)
-    runs-on: macos-15
+  build-arm64:
+    name: Build Verification (Apple Silicon)
+    runs-on: xcode-27
     timeout-minutes: 20
     needs: test-arm64
     steps:
@@ -49,9 +49,9 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Ensure Executable Permissions
-        run: chmod +x build_release.sh package_dmg.sh notarize.sh
+        run: chmod +x build_release.sh
 
-      - name: Build Universal 2 Release Bundle
+      - name: Build Ad-hoc arm64 Verification Bundle
         run: ./build_release.sh
 
       - name: Verify Bundle Integrity & Hardened Runtime
@@ -63,8 +63,7 @@ jobs:
 
           ARCHS=$(lipo -archs "News.app/Contents/MacOS/News")
           echo "Found architectures: $ARCHS"
-          [[ "$ARCHS" =~ x86_64 ]]
-          [[ "$ARCHS" =~ arm64 ]]
+          [[ "$ARCHS" == arm64 ]]
 
           codesign --verify --deep --strict --verbose=2 "News.app"
           codesign -dvvv --entitlements :- "News.app"
@@ -72,34 +71,12 @@ jobs:
           echo "Gatekeeper assessment (informational for ad-hoc signing):"
           spctl -a -vvv "News.app" || true
 
-      - name: Package DMG and Release Archives
-        run: |
-          ./package_dmg.sh
-          test -f "News-Universal2.dmg"
-          test -f "News-Universal2.zip"
-          shasum -c "News-Universal2.dmg.sha256"
-          shasum -c "News-Universal2.zip.sha256"
-          hdiutil verify "News-Universal2.dmg"
+      - name: Archive Verification Bundle
+        run: ditto -c -k --sequesterRsrc --keepParent News.app News-arm64-verification.zip
 
-      - name: Archive Release Artifacts
+      - name: Upload Verification Artifact
         uses: actions/upload-artifact@v7
         with:
-          name: News-Universal2-Release
-          path: |
-            News-Universal2.dmg
-            News-Universal2.dmg.sha256
-            News-Universal2.zip
-            News-Universal2.zip.sha256
+          name: News-arm64-verification
+          path: News-arm64-verification.zip
           if-no-files-found: error
-
-  test-intel:
-    name: Test (Intel)
-    runs-on: macos-15-intel
-    timeout-minutes: 15
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v7
-      - name: Ensure Executable Permissions
-        run: chmod +x test.sh
-      - name: Run Unit Tests
-        run: TARGET_MACOS=15.0 ./test.sh

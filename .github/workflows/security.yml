@@ -20,7 +20,7 @@ concurrency:
 jobs:
   codeql:
     name: CodeQL (Swift)
-    runs-on: macos-15
+    runs-on: xcode-27
     timeout-minutes: 20
 
     steps:
@@ -76,7 +76,7 @@ jobs:
 
   swift-security-tests:
     name: Swift Security Tests
-    runs-on: macos-15
+    runs-on: xcode-27
     timeout-minutes: 20
     steps:
       - name: Checkout

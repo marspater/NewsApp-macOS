@@ -18,14 +18,14 @@ NewsApp is engineered with a **local-first, zero-telemetry architecture**. Readi
 ## 2. Zero Telemetry & Network Egress Boundary
 
 * **No Analytics or Tracking**: NewsApp contains zero telemetry SDKs, zero user tracking scripts, and zero third-party diagnostic reporters (e.g., no Google Analytics, no Firebase, no Sentry, no Mixpanel).
-* **Direct Network Access**: Outgoing HTTP/HTTPS network requests are made directly from your Mac to the specific RSS, Atom, or JSON feed hosts that you choose to subscribe to, and to the original web pages you view. No intermediate proxy, relay server, or cloud scraper is utilized.
+* **Direct Network Access**: Outgoing HTTP/HTTPS network requests are made directly from your Mac to the specific RSS, Atom, or JSON feed hosts that you choose to subscribe to, and to the original web pages you view. An on-device loopback gateway validates destinations and pins upstream connections to public IP addresses. No remote proxy, relay server or cloud scraper is utilized. TLS remains end-to-end between the native client and publisher.
 * **Server-Side Request Forgery (SSRF) Protection**:
-  Feed, extraction and article-image requests pass through `SecureHTTPClient` and `IPAddressValidator` before connection initiation. WebKit renders publisher pages separately and validates top-level navigation hosts; publisher pages may load their own third-party resources:
+  Feed, extraction, article-image and update requests use `SecureHTTPClient` and the native socket gateway. The gateway validates every resolved address before connecting to a numeric public endpoint, preventing a second DNS lookup from rebinding the connection. Protected Web previews use the same gateway and native content rules; permitted public third-party resources can still load:
   * **Loopback Prevention**: `127.0.0.0/8`, `::1`
   * **Private Network (RFC 1918) Prevention**: `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `fc00::/7`
   * **Link-Local / Cloud Metadata Prevention**: `169.254.0.0/16`, `fe80::/10`, AWS/GCP metadata (`169.254.169.254`)
   * **Port Restrictions**: Non-standard intranet ports are rejected; only standard HTTP/HTTPS ports (80, 443, 8080, 8443) are permitted for feed retrieval.
-* **WebView Navigation Security**: In-app article previews enforce strict HTTPS/HTTP schemes and prevent navigation to private or local network hosts.
+* **WebView Navigation Security**: In-app article previews enforce strict HTTPS/HTTP schemes. Scripts are disabled to prevent independent WebRTC sockets. Native WebKit content rules block numeric literals, single-label, localhost and mDNS resources, including local redirects, because WebKit implicitly bypasses proxies for local addresses. These restrictions can affect publisher interactivity; the external browser option remains available.
 
 ---
 
@@ -53,6 +53,7 @@ NewsApp is signed with macOS **Hardened Runtime** and declares only the absolute
 | Entitlement | Purpose |
 |:---|:---|
 | `com.apple.security.network.client` | Outgoing HTTP/HTTPS network connections to fetch feeds and article web pages. |
+| `com.apple.security.network.server` | An ephemeral listener bound strictly to `127.0.0.1` for the on-device destination-validation gateway; no LAN listener. |
 
 | `com.apple.security.files.user-selected.read-write` | User-initiated file dialogs to import and export OPML subscription lists. |
 
@@ -61,7 +62,6 @@ No access is requested or granted for:
 * Location Services
 * Contacts, Calendars, or Reminders
 * Arbitrary disk read/write permissions
-* Server network listener sockets (`network.server`)
 
 ---
 

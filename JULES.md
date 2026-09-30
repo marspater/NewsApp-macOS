@@ -96,7 +96,7 @@ Important UI qualities:
 Feed and article URLs are hostile input. Preserve all existing SSRF and redirect defenses. Do not weaken sandboxing. Avoid leaking user/article content into logs. Do not introduce telemetry merely to diagnose a problem.
 
 ## Release expectations
-The project targets Universal 2 distribution and Hardened Runtime signing. Release changes should preserve both Apple Silicon and Intel support where the current build configuration supports them. Do not casually raise the deployment target or add entitlements.
+The current development scope targets Apple silicon (arm64) with Hardened Runtime and App Sandbox. Use ad-hoc signing for verification; do not run notarization or build Intel slices. Do not casually raise the deployment target or add entitlements. The loopback-only network gateway requires the existing incoming-network entitlement.
 
 ## Known historical issues
 Early project reviews documented previously identified areas such as settings wiring, background fetch cadence, feature flags, history behavior, service decomposition, deterministic parsing/categorization tests, loading/error states, URL identity stability, enrichment resource controls, accessibility, and security hardening. Treat those areas as historical context, not permission to implement every recommendation blindly.

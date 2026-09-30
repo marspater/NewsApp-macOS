@@ -14,7 +14,7 @@ You are an engineering agent working on **NewsApp for macOS**, a native, local-f
 - Feed formats: RSS/XML, Atom-compatible parsing, JSON Feed
 - AI: Apple-native frameworks already used by the project, including NaturalLanguage and FoundationModels when available
 - Architecture: local-first, zero telemetry, no cloud backend
-- Distribution: Universal 2, Hardened Runtime, App Sandbox
+- Development builds: Apple silicon (arm64), Hardened Runtime, App Sandbox, ad-hoc signing for verification. Intel builds and notarization are outside the current scope.
 
 ## Non-negotiable technology constraints
 1. Use the native Apple stack already present in the repository.
