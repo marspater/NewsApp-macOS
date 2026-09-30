@@ -1917,22 +1917,24 @@ struct NewsTests {
         // 5. Caller Cancellation Resilience: cancelling one waiter does not abort execution for others
         let cancelCoordinator = RefreshCoordinator()
         let completionCounter = TestCounter()
+        let cancellationGate = FeedDeliveryGate()
         let waiterTask1 = Task {
             try await cancelCoordinator.executeRefresh {
-                try await Task.sleep(nanoseconds: 80_000_000) // 80ms
+                await cancellationGate.wait()
                 await completionCounter.increment()
             }
         }
-        // Yield to allow waiterTask1 to start and become the in-flight refresh task
-        try? await Task.sleep(nanoseconds: 10_000_000) // 10ms
+        while !(await cancellationGate.started) { await Task.yield() }
 
         let waiterTask2 = Task {
             try await cancelCoordinator.executeRefresh {
                 await completionCounter.increment()
             }
         }
-        // Cancel waiterTask1 early (as waiter caller)
+        // Keep work suspended until both callers have actually joined.
+        while await cancelCoordinator.waiterCount < 2 { await Task.yield() }
         waiterTask1.cancel()
+        await cancellationGate.deliver()
         _ = try? await waiterTask1.value
         _ = try? await waiterTask2.value
 

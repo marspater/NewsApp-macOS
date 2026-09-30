@@ -11,11 +11,14 @@ actor RefreshCoordinator {
 
     private var activeTask: Task<Void, Error>?
     private var currentRunID: UUID?
+    private(set) var waiterCount = 0
     private let logger = Logger(subsystem: "com.marspater.news", category: "RefreshCoordinator")
 
     /// Executes the provided refresh work, or joins the active in-flight refresh task
     /// if one is already running. Subsequent callers coalesce onto the in-flight task.
     func executeRefresh(_ work: @Sendable @escaping () async throws -> Void) async throws {
+        waiterCount += 1
+        defer { waiterCount -= 1 }
         if let current = activeTask {
             logger.debug("Refresh already in flight; coalescing caller onto active task.")
             try await current.value
