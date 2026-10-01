@@ -124,6 +124,7 @@ struct NewsTests {
         await testArticleIdentityDeep()
         await testDatabaseEnginePersistence()
         try await testCanonicalArticleIngestion(fixtureRoot: fixtureRoot)
+        try await testPersistentArticleAliases(fixtureRoot: fixtureRoot)
         await testFTS5SearchAndOperators()
         await testMigrationCoordinatorAtomicity()
         await testArticleRetentionPolicy()
@@ -418,7 +419,7 @@ struct NewsTests {
             await database.close()
             var handle: OpaquePointer?
             assertEqual(sqlite3_open(path, &handle), SQLITE_OK, "Open migration fixture")
-            assertEqual(sqlite3_exec(handle, "DROP TABLE article_feeds; ALTER TABLE articles DROP COLUMN reader_document; ALTER TABLE article_enrichment DROP COLUMN key_points; ALTER TABLE article_enrichment DROP COLUMN category; ALTER TABLE article_enrichment DROP COLUMN confidence; ALTER TABLE article_enrichment DROP COLUMN model_identifier; ALTER TABLE article_enrichment DROP COLUMN analysis_version; PRAGMA user_version = 1;", nil, nil, nil), SQLITE_OK, "Prepare v1 fixture")
+            assertEqual(sqlite3_exec(handle, "DROP TABLE article_aliases; DROP TABLE article_feeds; ALTER TABLE articles DROP COLUMN reader_document; ALTER TABLE article_enrichment DROP COLUMN key_points; ALTER TABLE article_enrichment DROP COLUMN category; ALTER TABLE article_enrichment DROP COLUMN confidence; ALTER TABLE article_enrichment DROP COLUMN model_identifier; ALTER TABLE article_enrichment DROP COLUMN analysis_version; PRAGMA user_version = 1;", nil, nil, nil), SQLITE_OK, "Prepare v1 fixture")
             sqlite3_close(handle)
             try await database.open()
             let migrated = try await database.fetchArticles()
@@ -879,7 +880,7 @@ struct NewsTests {
         saves.save(alias)
         await saves.waitForPendingChanges()
         assertTrue(try await db.isSaved(articleId: original.id), "Latest alias save applies to the existing document")
-        assertTrue(try await db.fetchArticles(id: alias.id).isEmpty, "Alias save does not create another document")
+        assertEqual(try await db.fetchArticles(id: alias.id).first?.id, original.id, "Alias save resolves the original document without a new primary key")
         assertEqual(try await db.fetchArticles(canonicalURL: corrected.link).count, 1, "Rapid save changes preserve one URL-equivalent document")
         let emptyLink = FeedArticle(title: "No link", link: "", guid: "empty-one", description: "", pubDate: .distantPast, source: "Publisher")
         let otherEmptyLink = FeedArticle(title: "Different story", link: "", guid: "empty-two", description: "", pubDate: .distantPast, source: "Publisher")
@@ -1256,6 +1257,159 @@ struct NewsTests {
         legacy.removeValue(forKey: "storedID")
         let legacyData = try JSONSerialization.data(withJSONObject: legacy)
         assertEqual(try JSONDecoder().decode(FeedArticle.self, from: legacyData).id, update.id, "Legacy JSON remains decodable without a stored ID")
+        await db.close()
+    }
+
+    @MainActor
+    static func testPersistentArticleAliases(fixtureRoot: URL) async throws {
+        print("  - Testing durable aliases, copied v4 migration, ambiguity and rollback...")
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("news-alias-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let originalPath = directory.appendingPathComponent("original.sqlite3").path
+        let copyPath = directory.appendingPathComponent("copy.sqlite3").path
+        func execute(_ path: String, _ sql: String) {
+            var handle: OpaquePointer?
+            assertEqual(sqlite3_open(path, &handle), SQLITE_OK, "Open isolated alias fixture")
+            defer { sqlite3_close(handle) }
+            assertEqual(sqlite3_exec(handle, sql, nil, nil, nil), SQLITE_OK, "Modify isolated alias fixture")
+        }
+        func value(_ path: String, _ sql: String) -> String? {
+            var handle: OpaquePointer?
+            assertEqual(sqlite3_open(path, &handle), SQLITE_OK, "Open isolated alias verification")
+            defer { sqlite3_close(handle) }
+            var statement: OpaquePointer?
+            assertEqual(sqlite3_prepare_v2(handle, sql, -1, &statement, nil), SQLITE_OK, "Prepare alias verification")
+            defer { sqlite3_finalize(statement) }
+            guard sqlite3_step(statement) == SQLITE_ROW else { return nil }
+            return sqlite3_column_text(statement, 0).map { String(cString: $0) }
+        }
+        let original = DatabaseEngine(path: originalPath)
+        try await original.open()
+        let first = FeedArticle(title: "Original report", link: fixtureRoot.appendingPathComponent("aliases/original").absoluteString,
+                                guid: "alias-first", description: "Report", pubDate: Date(timeIntervalSince1970: 100), source: "Publisher")
+        let duplicateA = FeedArticle(title: "Historical A", link: fixtureRoot.appendingPathComponent("aliases/ambiguous").absoluteString,
+                                     guid: "historical-a", description: "Report", pubDate: Date(), source: "Publisher")
+        let duplicateB = FeedArticle(title: "Historical B", link: fixtureRoot.appendingPathComponent("aliases/other").absoluteString,
+                                     guid: "historical-b", description: "Report", pubDate: Date(), source: "Publisher")
+        try await original.upsertArticles([first, duplicateA, duplicateB], feedUrl: "test-feed")
+        try await original.markRead(articleId: first.id, isRead: true)
+        try await original.setSaved(articleId: first.id, isSaved: true)
+        await original.close()
+        // Reconstruct a genuine v4 library, including duplicates that predate URL resolution.
+        execute(originalPath, """
+        UPDATE articles SET canonical_url = (SELECT canonical_url FROM articles WHERE id = 'historical-a') WHERE id = 'historical-b';
+        DROP TABLE article_aliases;
+        PRAGMA user_version = 4;
+        """)
+        let originalReadAt = value(originalPath, "SELECT read_at FROM article_state WHERE article_id = 'alias-first';")
+        let originalSavedAt = value(originalPath, "SELECT saved_at FROM article_state WHERE article_id = 'alias-first';")
+        try FileManager.default.copyItem(atPath: originalPath, toPath: copyPath)
+        let cancelledPath = directory.appendingPathComponent("cancelled.sqlite3").path
+        try FileManager.default.copyItem(atPath: originalPath, toPath: cancelledPath)
+        let cancelledDB = DatabaseEngine(path: cancelledPath)
+        let migration = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            try await cancelledDB.open()
+        }
+        do {
+            try await migration.value
+            assertTrue(false, "Cancelled migration must be reported")
+        } catch is CancellationError {
+            assertEqual(value(cancelledPath, "PRAGMA user_version;"), "4", "Cancelled migration leaves the old version")
+            assertEqual(value(cancelledPath, "SELECT count(*) FROM sqlite_master WHERE name = 'article_aliases';"), "0", "Cancelled migration rolls back the alias schema")
+            assertEqual(value(cancelledPath, "SELECT read_at FROM article_state WHERE article_id = 'alias-first';"), originalReadAt, "Cancelled migration preserves history")
+        }
+        try await cancelledDB.open()
+        await cancelledDB.close()
+        let db = DatabaseEngine(path: copyPath)
+        try await db.open()
+        assertEqual(value(copyPath, "PRAGMA user_version;"), "5", "Copied v4 library upgrades to v5")
+        assertEqual(value(originalPath, "PRAGMA user_version;"), "4", "Original fixture stays untouched")
+        assertEqual(try await db.fetchArticles(limit: nil).count, 3, "Migration keeps historical rows")
+        assertEqual(value(copyPath, "SELECT read_at FROM article_state WHERE article_id = 'alias-first';"), originalReadAt, "Migration preserves read history timestamp")
+        assertEqual(value(copyPath, "SELECT saved_at FROM article_state WHERE article_id = 'alias-first';"), originalSavedAt, "Migration preserves bookmark timestamp")
+        assertTrue(try await db.isRead(articleId: first.id), "Migration preserves read state")
+        assertTrue(try await db.isSaved(articleId: first.id), "Migration preserves saved state")
+        assertEqual(try await db.searchArticles(query: "Original").first?.id, first.id, "Migration preserves FTS")
+        assertEqual(value(copyPath, "SELECT count(*) FROM article_aliases WHERE kind = 'url' AND article_id IS NULL;"), "1", "Conflicting historical URL is marked ambiguous")
+        let unknown = FeedArticle(title: "Unknown identity", link: duplicateA.link, guid: "unknown-guid", description: "Report", pubDate: Date(), source: "Publisher")
+        assertEqual(try await db.resolvedArticleID(for: unknown), unknown.id, "Ambiguous URL never selects a historical row")
+        assertTrue(try await db.fetchArticles(limit: 1, canonicalURL: duplicateA.normalizedLink).isEmpty, "Ambiguous notification URL must not choose a document")
+        execute(copyPath, "PRAGMA foreign_keys = ON; DELETE FROM articles WHERE id = 'historical-a';")
+        assertTrue(try await db.fetchArticles(limit: 1, canonicalURL: duplicateA.normalizedLink).isEmpty, "Removing a conflicting row must not revive an ambiguous URL")
+        assertEqual(try await db.resolvedArticleID(for: unknown), unknown.id, "Ambiguous URL remains unusable after deletion")
+
+        func variant(_ guid: String, _ link: String, _ title: String) -> FeedArticle {
+            FeedArticle(title: title, link: link, guid: guid, description: first.description, pubDate: first.pubDate, source: first.source)
+        }
+        let second = variant("alias-second", first.link, first.title)
+        assertTrue(try await db.upsertArticles([second], feedUrl: "test-feed").isEmpty, "Same URL registers a new observed ID")
+        let moved = variant("alias-second", fixtureRoot.appendingPathComponent("aliases/moved").absoluteString, "Migrated report")
+        assertTrue(try await db.upsertArticles([moved], feedUrl: "test-feed").isEmpty, "Observed replacement GUID carries a URL change")
+        await db.close()
+        try await db.open()
+        assertEqual(try await db.fetchArticles(limit: 1, id: second.id).first?.id, first.id, "ID alias survives reopen")
+        assertEqual(try await db.fetchArticles(limit: 1, canonicalURL: first.normalizedLink).first?.id, first.id, "Previous URL survives replacement and reopen")
+        let store = ArticleStore(database: db)
+        await store.initialize()
+        let navigation = ArticleStore.NavigationRequest(articleID: second.id, link: "")
+        assertEqual(try await store.articleForNavigation(navigation)?.id, first.id, "Old notification ID resolves to stored article")
+        await store.markAsRead(id: second.id, isRead: false)
+        assertFalse(store.readArticleIDs.contains(first.id), "Read cache changes the stored ID")
+        await store.toggleRead(id: second.id)
+        assertTrue(store.readArticleIDs.contains(first.id), "Read toggle resolves alias before consulting cached state")
+        await store.toggleRead(id: second.id)
+        assertFalse(try await db.isRead(articleId: first.id), "Second alias toggle marks the original unread")
+        assertFalse(await store.toggleSave(article: moved), "Saved toggle through an alias unsaves the original")
+        assertTrue(await store.toggleSave(article: moved), "Second saved toggle restores the original bookmark")
+        try await db.markReadBatch(articleIds: [second.id], isRead: true)
+        try await db.setSaved(articleId: second.id, isSaved: false)
+        try await db.batchMarkSaved([second.id])
+        assertTrue(try await db.isRead(articleId: second.id), "Batch read and lookup resolve aliases")
+        assertTrue(try await db.isSaved(articleId: second.id), "Batch saved and lookup resolve aliases")
+        assertEqual(try await db.searchArticles(query: "Migrated").first?.id, first.id, "Updated FTS uses the original primary key")
+        await store.refreshState()
+        await store.updateEnrichment(id: second.id, content: "Verified evidence")
+        assertEqual(store.articles.first(where: { $0.id == first.id })?.fullContent, "Verified evidence", "Alias enrichment updates the visible stored article")
+        assertEqual(try await db.fetchArticles(id: first.id).first?.fullContent, "Verified evidence", "Enrichment through an alias updates the original")
+        let analysis = ArticleAnalysis(summary: "Cited summary", keyPoints: ["Finding"], entities: [], category: "Science", sentiment: nil, modelIdentifier: "test", analysisVersion: 1)
+        await store.saveArticleAnalysis(analysis, for: second.id)
+        assertEqual(store.savedArticles.first(where: { $0.id == first.id })?.aiSummary, analysis.summary, "Alias analysis updates the saved article cache")
+        assertEqual(await db.fetchArticleAnalysis(for: second.id)?.summary, analysis.summary, "Analysis persistence and lookup resolve aliases")
+        let returned = variant("alias-third", first.link, "Returned report")
+        assertTrue(try await db.upsertArticles([returned]).isEmpty, "Old URL recognizes a further GUID change")
+        let simultaneous = variant("alias-second", fixtureRoot.appendingPathComponent("aliases/third-location").absoluteString, first.title)
+        assertTrue(try await db.upsertArticles([simultaneous]).isEmpty, "Known ID and changed URL resolve together")
+        let unrelated = variant("never-observed", fixtureRoot.appendingPathComponent("aliases/unrelated").absoluteString, first.title)
+        assertEqual(try await db.resolvedArticleID(for: unrelated), unrelated.id, "No known signal means no guessed merge")
+
+        // Use another known, unambiguous document rather than the historical conflict.
+        let separate = variant("separate-guid", fixtureRoot.appendingPathComponent("aliases/separate").absoluteString, "Separate report")
+        try await db.upsertArticles([separate])
+        let contradictory = variant(first.id, separate.link, "Contradictory report")
+        do {
+            try await db.upsertArticles([contradictory])
+            assertTrue(false, "Contradictory known ID and URL must be reported")
+        } catch {
+            assertEqual(try await db.fetchArticles(id: first.id).first?.title, "Original report", "Conflicting signals must not overwrite the original")
+            assertEqual(try await db.fetchArticles(id: separate.id).first?.title, separate.title, "Conflicting signals must not overwrite the other document")
+        }
+
+        // An alias write failure must roll back the article update and its FTS trigger too.
+        execute(copyPath, "CREATE TRIGGER fail_alias BEFORE INSERT ON article_aliases BEGIN SELECT RAISE(ABORT, 'fixture failure'); END;")
+        let failed = variant("failed-alias", returned.link, "Must rollback")
+        do {
+            try await db.upsertArticles([failed])
+            assertTrue(false, "Alias failure must be reported")
+        } catch {
+            assertEqual(try await db.fetchArticles(limit: 1, id: first.id).first?.title, "Original report", "Failed alias update restores the previous article")
+            assertTrue(try await db.searchArticles(query: "rollback").isEmpty, "Failed alias write rolls back FTS")
+            assertEqual(try await db.resolvedArticleID(failed.id), failed.id, "Failed alias is never committed")
+        }
+        execute(copyPath, "DROP TRIGGER fail_alias;")
+        assertEqual(value(copyPath, "PRAGMA quick_check;"), "ok", "Migrated alias library passes quick_check")
+        assertTrue(value(copyPath, "PRAGMA foreign_key_check;") == nil, "Migrated aliases have no dangling targets")
         await db.close()
     }
 
