@@ -108,6 +108,7 @@ struct NewsTests {
             try await testOverviewDocumentModelBoundToInputsAndVersions(fixtureHost: fixtureHost)
             try await testOverviewPassageSelectionAndTokenBudget(fixtureHost: fixtureHost)
             try await testPromptInjectionDefenses(fixtureHost: fixtureHost)
+            try await testHistoricalReconciliation(fixtureRoot: fixtureRoot)
             try await testAuditPersistenceAndRoutingRegressions(fixtureRoot: fixtureRoot)
             try await testUndatedArticleOrdering()
             await testDatabaseEnginePersistence()
@@ -157,6 +158,7 @@ struct NewsTests {
         try await testOverviewDocumentModelBoundToInputsAndVersions(fixtureHost: fixtureHost)
         try await testOverviewPassageSelectionAndTokenBudget(fixtureHost: fixtureHost)
         try await testPromptInjectionDefenses(fixtureHost: fixtureHost)
+        try await testHistoricalReconciliation(fixtureRoot: fixtureRoot)
         await testFTS5SearchAndOperators()
         await testMigrationCoordinatorAtomicity()
         await testArticleRetentionPolicy()
@@ -451,7 +453,7 @@ struct NewsTests {
             await database.close()
             var handle: OpaquePointer?
             assertEqual(sqlite3_open(path, &handle), SQLITE_OK, "Open migration fixture")
-            assertEqual(sqlite3_exec(handle, "DROP TABLE article_aliases; DROP TABLE article_feeds; ALTER TABLE articles DROP COLUMN reader_document; ALTER TABLE article_enrichment DROP COLUMN key_points; ALTER TABLE article_enrichment DROP COLUMN category; ALTER TABLE article_enrichment DROP COLUMN confidence; ALTER TABLE article_enrichment DROP COLUMN model_identifier; ALTER TABLE article_enrichment DROP COLUMN analysis_version; PRAGMA user_version = 1;", nil, nil, nil), SQLITE_OK, "Prepare v1 fixture")
+            assertEqual(sqlite3_exec(handle, "DROP TABLE article_reconciliation_history; DROP TABLE article_reconciliations; DROP TABLE article_aliases; DROP TABLE article_feeds; ALTER TABLE articles DROP COLUMN reader_document; ALTER TABLE article_enrichment DROP COLUMN key_points; ALTER TABLE article_enrichment DROP COLUMN category; ALTER TABLE article_enrichment DROP COLUMN confidence; ALTER TABLE article_enrichment DROP COLUMN model_identifier; ALTER TABLE article_enrichment DROP COLUMN analysis_version; PRAGMA user_version = 1;", nil, nil, nil), SQLITE_OK, "Prepare v1 fixture")
             sqlite3_close(handle)
             try await database.open()
             let migrated = try await database.fetchArticles()
@@ -1392,7 +1394,7 @@ struct NewsTests {
         execute(originalPath, """
         UPDATE articles SET canonical_url = (SELECT canonical_url FROM articles WHERE id = 'historical-a') WHERE id = 'historical-b';
         DROP TABLE article_aliases;
-        PRAGMA user_version = 4;
+        DROP TABLE article_reconciliation_history; DROP TABLE article_reconciliations; PRAGMA user_version = 4;
         """)
         let originalReadAt = value(originalPath, "SELECT read_at FROM article_state WHERE article_id = 'alias-first';")
         let originalSavedAt = value(originalPath, "SELECT saved_at FROM article_state WHERE article_id = 'alias-first';")
@@ -1416,7 +1418,7 @@ struct NewsTests {
         await cancelledDB.close()
         let db = DatabaseEngine(path: copyPath)
         try await db.open()
-        assertEqual(value(copyPath, "PRAGMA user_version;"), "8", "Copied v4 library upgrades to the current schema")
+        assertEqual(value(copyPath, "PRAGMA user_version;"), "9", "Copied v4 library upgrades to the current schema")
         assertEqual(value(originalPath, "PRAGMA user_version;"), "4", "Original fixture stays untouched")
         assertEqual(try await db.fetchArticles(limit: nil).count, 3, "Migration keeps historical rows")
         assertEqual(value(copyPath, "SELECT read_at FROM article_state WHERE article_id = 'alias-first';"), originalReadAt, "Migration preserves read history timestamp")
@@ -1505,6 +1507,129 @@ struct NewsTests {
         assertEqual(value(copyPath, "PRAGMA quick_check;"), "ok", "Migrated alias library passes quick_check")
         assertTrue(value(copyPath, "PRAGMA foreign_key_check;") == nil, "Migrated aliases have no dangling targets")
         await db.close()
+    }
+
+    static func testHistoricalReconciliation(fixtureRoot: URL) async throws {
+        print("  - Testing copied-library historical reconciliation and preserved originals...")
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("news-history-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let path = directory.appendingPathComponent("original.sqlite3").path
+        let copy = directory.appendingPathComponent("copy.sqlite3").path
+        let failure = directory.appendingPathComponent("failure.sqlite3").path
+        let creator = DatabaseEngine(path: path)
+        try await creator.open()
+        await creator.close()
+        var handle: OpaquePointer?
+        assertEqual(sqlite3_open(path, &handle), SQLITE_OK, "Open isolated historical fixture")
+        func execute(_ sql: String) {
+            assertEqual(sqlite3_exec(handle, sql, nil, nil, nil), SQLITE_OK, "Execute historical fixture SQL")
+        }
+        let body = (1...65).map { "Historical evidence \($0) preserves the publisher's distinctive reporting." }.joined(separator: " ")
+        let url = fixtureRoot.appendingPathComponent("historical/story").absoluteString
+        execute("DROP TABLE article_reconciliation_history; DROP TABLE article_reconciliations; PRAGMA user_version = 8;")
+        let rows = [("historical-a", url, body), ("historical-b", url, body), ("historical-c", url, body),
+                    ("uncertain", url, body + " Different reporting."), ("short-body", url, "Short body"),
+                    ("reprint", fixtureRoot.appendingPathComponent("another/story").absoluteString, body),
+                    ("homepage-a", fixtureRoot.absoluteString, body), ("homepage-b", fixtureRoot.absoluteString, body)]
+        let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+        for (index, row) in rows.enumerated() {
+            var statement: OpaquePointer?
+            let sql = "INSERT INTO articles(id,guid,canonical_url,title,description,content,published_at,source,created_at,updated_at) VALUES(?,?,?,'Historical report',?,?,100,'Publisher',?,50);"
+            assertEqual(sqlite3_prepare_v2(handle, sql, -1, &statement, nil), SQLITE_OK, "Prepare original article")
+            for (column, value) in [row.0, row.0, row.1, body, row.2].enumerated() {
+                sqlite3_bind_text(statement, Int32(column + 1), value, -1, transient)
+            }
+            sqlite3_bind_double(statement, 6, Double(index + 10))
+            assertEqual(sqlite3_step(statement), SQLITE_DONE, "Insert historical article without modern deduplication")
+            sqlite3_finalize(statement)
+            execute("INSERT INTO article_state VALUES ('\(row.0)',0,0,NULL,NULL); INSERT INTO article_aliases VALUES ('id','\(row.0)','\(row.0)');")
+        }
+        execute("UPDATE article_state SET is_read=1,read_at=11 WHERE article_id='historical-a'; UPDATE article_state SET is_saved=1,saved_at=22 WHERE article_id='historical-b'; UPDATE article_state SET is_read=1,is_saved=1,read_at=33,saved_at=44 WHERE article_id='historical-c';")
+        execute("INSERT INTO article_feeds VALUES ('historical-a','feed-a'),('historical-b','feed-b'); INSERT INTO article_enrichment(article_id,summary) VALUES ('historical-b','Original generated summary'); INSERT INTO article_aliases VALUES ('id','observed-variant-b','historical-b');")
+        var alias: OpaquePointer?
+        assertEqual(sqlite3_prepare_v2(handle, "INSERT INTO article_aliases VALUES ('url',?,NULL);", -1, &alias, nil), SQLITE_OK, "Prepare ambiguous URL")
+        sqlite3_bind_text(alias, 1, url, -1, transient)
+        assertEqual(sqlite3_step(alias), SQLITE_DONE, "Retain uncertain shared URL")
+        sqlite3_finalize(alias)
+        let historical = FeedArticle(title: "Historical report", link: url, guid: nil,
+            description: body, pubDate: Date(timeIntervalSince1970: 100), source: "Publisher", fullContent: body)
+        for fingerprint in ArticleIdentity.publisherTextFingerprints(historical) {
+            assertEqual(sqlite3_prepare_v2(handle, "INSERT INTO article_aliases VALUES ('content',?,NULL);", -1, &alias, nil), SQLITE_OK, "Prepare ambiguous historical content")
+            sqlite3_bind_text(alias, 1, fingerprint, -1, transient)
+            assertEqual(sqlite3_step(alias), SQLITE_DONE, "Retain content ambiguity")
+            sqlite3_finalize(alias)
+        }
+        sqlite3_close(handle)
+        try FileManager.default.copyItem(atPath: path, toPath: copy)
+        try FileManager.default.copyItem(atPath: path, toPath: failure)
+        let migrated = DatabaseEngine(path: copy)
+        let cancelled = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            try await migrated.open()
+        }
+        do { try await cancelled.value; assertTrue(false, "Cancelled reconciliation must throw") } catch is CancellationError { }
+        func value(_ file: String, _ sql: String) -> String? {
+            var connection: OpaquePointer?, statement: OpaquePointer?
+            assertEqual(sqlite3_open(file, &connection), SQLITE_OK, "Inspect copied fixture")
+            defer { sqlite3_close(connection) }
+            assertEqual(sqlite3_prepare_v2(connection, sql, -1, &statement, nil), SQLITE_OK, "Prepare inspection")
+            defer { sqlite3_finalize(statement) }
+            guard sqlite3_step(statement) == SQLITE_ROW else { return nil }
+            return sqlite3_column_text(statement, 0).map { String(cString: $0) }
+        }
+        assertEqual(value(copy, "PRAGMA user_version;"), "8", "Cancellation rolls back the schema version")
+        assertEqual(value(copy, "SELECT count(*) FROM sqlite_master WHERE name='article_reconciliations';"), "0", "Cancellation rolls back newly created reconciliation tables")
+        assertEqual(sqlite3_open(failure, &handle), SQLITE_OK, "Inject copied-library failure")
+        execute("CREATE TRIGGER fail_reconciliation BEFORE UPDATE ON article_aliases WHEN old.article_id='historical-b' BEGIN SELECT RAISE(ABORT,'fixture'); END;")
+        sqlite3_close(handle)
+        let failed = DatabaseEngine(path: failure)
+        do { try await failed.open(); assertTrue(false, "Failed alias retargeting must abort migration") } catch { }
+        assertEqual(value(failure, "PRAGMA user_version;"), "8", "Injected failure rolls back migration version")
+        assertEqual(value(failure, "SELECT is_saved FROM article_state WHERE article_id='historical-a';"), "0", "Injected failure rolls back survivor state union")
+        assertEqual(value(failure, "SELECT article_id FROM article_aliases WHERE value='observed-variant-b';"), "historical-b", "Injected failure preserves old aliases")
+        try await migrated.open()
+        assertEqual(value(copy, "PRAGMA user_version;"), "9", "Copied library upgrades to v9")
+        assertEqual(value(path, "PRAGMA user_version;"), "8", "Original fixture remains untouched")
+        assertEqual(try await migrated.fetchArticles(limit: nil).count, 6, "Only confident same-URL text copies are hidden")
+        assertEqual(try await migrated.fetchArticles(limit: nil, includingOriginals: true).count, 8, "Every stored original remains reachable")
+        assertEqual(try await migrated.fetchArticles(id: "historical-b").first?.id, "historical-a", "Old IDs navigate to the survivor")
+        assertEqual(try await migrated.fetchArticles(id: "observed-variant-b").first?.id, "historical-a", "Observed old ID aliases follow the survivor")
+        assertEqual(try await migrated.fetchArticles(id: "historical-b", includingOriginals: true).first?.aiSummary, "Original generated summary", "Original enrichment is retained")
+        assertTrue(try await migrated.isRead(articleId: "historical-b"), "Read flags are unioned")
+        assertTrue(try await migrated.isSaved(articleId: "historical-a"), "Saved flags are unioned")
+        assertEqual(value(copy, "SELECT read_at || ':' || saved_at FROM article_state WHERE article_id='historical-a';"), "33.0:44.0", "Survivor carries latest known history timestamps")
+        assertEqual(value(copy, "SELECT read_at FROM article_reconciliation_history WHERE article_id='historical-a';"), "11.0", "Survivor's original read timestamp remains intact")
+        assertEqual(value(copy, "SELECT saved_at FROM article_reconciliation_history WHERE article_id='historical-b';"), "22.0", "Duplicate's original bookmark timestamp remains intact")
+        assertEqual(value(copy, "SELECT count(*) FROM article_feeds WHERE article_id='historical-a';"), "2", "Feed associations are unioned without multiplying articles")
+        assertEqual(try await migrated.counts().total, 6, "Counts hide reconciled copies")
+        assertEqual(try await migrated.counts().saved, 1, "Bookmarks count surviving documents")
+        assertEqual(try await migrated.getReadArticleIDs(), Set(["historical-a"]), "Read cache uses surviving IDs")
+        assertEqual(try await migrated.searchArticles(query: "Historical").count, 6, "FTS hides reconciled copies")
+        assertEqual(value(copy, "SELECT count(*) FROM article_feeds WHERE article_id='historical-a' AND feed_url='feed-b';"), "1", "Other original feed remains associated with the survivor")
+        let incoming = FeedArticle(title: "Historical report", link: url, guid: "fresh-guid", description: body, pubDate: Date(timeIntervalSince1970: 100), source: "Publisher", fullContent: body)
+        assertTrue(try await migrated.upsertArticles([incoming]).isEmpty, "Proven family evidence prevents refreshed variants from reappearing")
+        assertTrue(try await migrated.fetchArticles(canonicalURL: url).isEmpty, "Uncertain URL tombstone is never revived")
+        assertEqual(value(copy, "SELECT count(*) FROM article_aliases WHERE kind='content' AND article_id IS NULL;"), "2", "Historical evidence never revives ambiguous content aliases")
+        try await migrated.clearArticleCache()
+        assertEqual(try await migrated.fetchArticles(id: "historical-b", includingOriginals: true).first?.fullContent, body, "Saved family originals survive content cache purging")
+        await migrated.close()
+        try await migrated.open()
+        assertEqual(try await migrated.fetchArticles(id: "historical-c").first?.id, "historical-a", "Reconciled identities survive reopening")
+        try await migrated.setSaved(articleId: "historical-b", isSaved: false)
+        assertFalse(try await migrated.isSaved(articleId: "historical-a"), "Old-ID actions update the surviving bookmark")
+        assertEqual(sqlite3_open(copy, &handle), SQLITE_OK, "Add an overview citing a retained original")
+        execute("PRAGMA foreign_keys = ON; INSERT INTO event_overviews VALUES ('history-overview','history-event',1,'hash',1,1,'Title','Summary','[]',NULL,'[]','synthesized',1,1); INSERT INTO event_overview_citations(id,overview_id,article_id,passage_id,passage_fingerprint,quote) VALUES ('history-citation','history-overview','historical-b','passage','fingerprint','Quoted original');")
+        sqlite3_close(handle)
+        assertEqual(try await migrated.pruneOldArticles(keepReadDays: 30), 0, "A citation to any original protects the entire reconciled family")
+        assertEqual(try await migrated.fetchArticles(limit: nil, includingOriginals: true).count, 8, "Citation retention preserves all family originals")
+        try await migrated.deleteEventOverview(eventID: "history-event")
+        assertEqual(try await migrated.pruneOldArticles(keepReadDays: 30), 3, "Retention removes an expired original family together")
+        assertEqual(try await migrated.fetchArticles(limit: nil).count, 5, "Pruning never resurrects hidden originals")
+        assertTrue(try await migrated.fetchArticles(id: "historical-b").isEmpty, "Pruned old IDs cannot point at resurrected copies")
+        assertEqual(value(copy, "PRAGMA quick_check;"), "ok", "Migrated library passes quick_check")
+        assertTrue(value(copy, "PRAGMA foreign_key_check;") == nil, "Reconciled families have no dangling foreign keys")
+        await migrated.close()
     }
 
     @MainActor
@@ -1730,7 +1855,7 @@ struct NewsTests {
         INSERT INTO article_aliases SELECT kind,value,article_id FROM aliases_v7 WHERE kind != 'content';
         DROP TABLE aliases_v7;
         CREATE INDEX idx_article_aliases_article ON article_aliases(article_id);
-        PRAGMA user_version = 6;
+        DROP TABLE article_reconciliation_history; DROP TABLE article_reconciliations; PRAGMA user_version = 6;
         COMMIT;
         """
         assertEqual(sqlite3_exec(handle, downgrade, nil, nil, nil), SQLITE_OK, "Reconstruct v6 aliases")
@@ -1841,7 +1966,7 @@ struct NewsTests {
         await legacyDB.close()
         var handle: OpaquePointer?
         assertEqual(sqlite3_open(path, &handle), SQLITE_OK, "Open isolated v5 fixture")
-        assertEqual(sqlite3_exec(handle, "DELETE FROM article_aliases WHERE value LIKE 'feed-guid:%'; PRAGMA user_version = 5;", nil, nil, nil), SQLITE_OK, "Reconstruct a legacy v5 library")
+        assertEqual(sqlite3_exec(handle, "DROP TABLE article_reconciliation_history; DROP TABLE article_reconciliations; DELETE FROM article_aliases WHERE value LIKE 'feed-guid:%'; PRAGMA user_version = 5;", nil, nil, nil), SQLITE_OK, "Reconstruct a legacy v5 library")
         sqlite3_close(handle)
         try FileManager.default.copyItem(atPath: path, toPath: copy)
         let migrated = DatabaseEngine(path: copy)
