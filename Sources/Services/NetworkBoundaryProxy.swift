@@ -284,7 +284,21 @@ private final class SOCKSTunnel: @unchecked Sendable {
 
     private func reject() {
         guard !finished else { return }
-        client.send(content: Data([5, 2, 0, 1, 0, 0, 0, 0, 0, 0]), completion: .contentProcessed { [weak self] _ in self?.finish() })
+        // Half-close after the reply and drain until the client closes. Cancelling while request
+        // bytes are still unread makes TCP send RST, which can discard the reply before it is read.
+        // The handshake timeout still bounds a client that never closes.
+        client.send(content: Data([5, 2, 0, 1, 0, 0, 0, 0, 0, 0]), contentContext: .finalMessage, isComplete: true, completion: .contentProcessed { [weak self] error in
+            guard let self, error == nil else { self?.finish(); return }
+            self.drain()
+        })
+    }
+
+    private func drain() {
+        guard !finished else { return }
+        client.receive(minimumIncompleteLength: 1, maximumLength: 4096) { [weak self] _, _, eof, error in
+            guard let self, !eof, error == nil else { self?.finish(); return }
+            self.drain()
+        }
     }
 
     func finish() {
