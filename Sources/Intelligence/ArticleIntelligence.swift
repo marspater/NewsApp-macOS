@@ -650,12 +650,14 @@ public final class ArticleClassifier: Sendable {
         if #available(macOS 26.0, *), allowFoundationModels, isFoundationModelsAvailable {
             do {
                 let session = LanguageModelSession()
+                let safeData = GenerationPromptDefense.frameArticleData(title: title, description: description)
                 let prompt = """
+                \(GenerationPromptDefense.untrustedDataSystemGuard)
+
                 Classify this news article into exactly one category from the allowed list:
                 Allowed categories: Technology, Science, Business, Politics, World, Sports, Entertainment, Health, Travel, Food, Fashion, Lifestyle.
 
-                Title: \(title)
-                Description: \(description)
+                \(safeData)
                 """
 
                 let response = try await session.respond(to: prompt, generating: GenerableClassificationOutput.self)
@@ -743,17 +745,17 @@ public final class ArticleAnalyzer: Sendable {
         if #available(macOS 26.0, *), allowFoundationModels, ArticleClassifier.shared.isFoundationModelsAvailable {
             do {
                 let session = LanguageModelSession()
+                let safeData = GenerationPromptDefense.frameArticleData(title: title, content: budgetedContent)
                 let prompt = """
+                \(GenerationPromptDefense.untrustedDataSystemGuard)
+
                 Analyze the following news article and produce:
                 1. A single concise paragraph summary.
                 2. Between 3 and 5 bullet key points summarizing the primary takeaways.
                 3. Key named entities mentioned.
                 4. Overall sentiment (Positive, Neutral, or Critical).
 
-                Title: \(title)
-
-                Article Content:
-                \(budgetedContent)
+                \(safeData)
                 """
 
                 try Task.checkCancellation()
