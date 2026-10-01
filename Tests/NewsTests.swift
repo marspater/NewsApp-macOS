@@ -104,6 +104,7 @@ struct NewsTests {
             try await testPersistentArticleAliases(fixtureRoot: fixtureRoot)
             try await testFeedScopedGUIDs(fixtureRoot: fixtureRoot)
             try await testValidatedDocumentIdentity(fixtureRoot: fixtureRoot)
+        try await testPublisherTextFingerprints()
             try await testAuditPersistenceAndRoutingRegressions(fixtureRoot: fixtureRoot)
             try await testUndatedArticleOrdering()
             await testDatabaseEnginePersistence()
@@ -149,6 +150,7 @@ struct NewsTests {
         try await testPersistentArticleAliases(fixtureRoot: fixtureRoot)
         try await testFeedScopedGUIDs(fixtureRoot: fixtureRoot)
         try await testValidatedDocumentIdentity(fixtureRoot: fixtureRoot)
+        try await testPublisherTextFingerprints()
         await testFTS5SearchAndOperators()
         await testMigrationCoordinatorAtomicity()
         await testArticleRetentionPolicy()
@@ -1408,7 +1410,7 @@ struct NewsTests {
         await cancelledDB.close()
         let db = DatabaseEngine(path: copyPath)
         try await db.open()
-        assertEqual(value(copyPath, "PRAGMA user_version;"), "6", "Copied v4 library upgrades to the current schema")
+        assertEqual(value(copyPath, "PRAGMA user_version;"), "7", "Copied v4 library upgrades to the current schema")
         assertEqual(value(originalPath, "PRAGMA user_version;"), "4", "Original fixture stays untouched")
         assertEqual(try await db.fetchArticles(limit: nil).count, 3, "Migration keeps historical rows")
         assertEqual(value(copyPath, "SELECT read_at FROM article_state WHERE article_id = 'alias-first';"), originalReadAt, "Migration preserves read history timestamp")
@@ -1621,6 +1623,157 @@ struct NewsTests {
             return await pipeline.extractArticleWithIdentity(from: requested.absoluteString)
         }
         assertTrue(await cancelled.value.evidence == nil, "Cancelled extraction returns no identity evidence")
+    }
+
+    @MainActor
+    static func testPublisherTextFingerprints() async throws {
+        print("  - Testing conservative publisher text fingerprints...")
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("news-text-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let path = directory.appendingPathComponent("library.sqlite3").path
+        let text = (1...65).map { "Publisher evidence number \($0) confirms a distinct detail." }.joined(separator: " ")
+        func incoming(_ guid: String, host: String = "publisher.example", title: String = "Report",
+                      body: String? = nil, description: String? = nil,
+                      date: Date = Date(timeIntervalSince1970: 100)) -> FeedArticle {
+            var article = FeedArticle(title: title, link: "https://\(host)/\(guid)", guid: guid,
+                description: description ?? text, pubDate: date, source: "Shared label")
+            article.identityFeedURL = "https://\(host)/feed"
+            article.fullContent = body
+            return article
+        }
+        let db = DatabaseEngine(path: path)
+        try await db.open()
+        let first = incoming("first")
+        try await db.upsertArticles([first])
+        try await db.markRead(articleId: first.id, isRead: true)
+        try await db.setSaved(articleId: first.id, isSaved: true)
+        let duplicate = incoming("other-url-and-guid", description: text.replacingOccurrences(of: " ", with: "\n  "))
+        assertTrue(try await db.upsertArticles([duplicate]).isEmpty, "Exact normalized publisher text reuses the document")
+        assertEqual(try await db.resolvedArticleID(for: duplicate), first.id, "Text matching preserves the original ID")
+        assertTrue(try await db.isRead(articleId: duplicate.id), "Variant retains read state through its ID alias")
+        assertTrue(try await db.isSaved(articleId: duplicate.id), "Variant retains bookmark state")
+        for article in [incoming("reprint", host: "other-publisher.example"),
+                        incoming("changed", description: text + " New information."),
+                        incoming("later", date: Date(timeIntervalSince1970: 200)),
+                        incoming("other-title", title: "Another report")] {
+            assertEqual(try await db.upsertArticles([article]), Set([article.id]), "Different publisher, text or metadata stays separate")
+        }
+        let shortA = incoming("short-a", description: "Read more on our website.")
+        let shortB = incoming("short-b", description: shortA.description)
+        try await db.upsertArticles([shortA])
+        assertEqual(try await db.upsertArticles([shortB]), Set([shortB.id]), "Shared short teasers do not merge")
+        let unknown = incoming("undated", date: DateParser.unknownDate)
+        assertTrue(ArticleIdentity.publisherTextFingerprints(unknown).isEmpty, "Undated documents require stronger evidence")
+        assertTrue(ArticleIdentity.publisherTextFingerprints(incoming("large", description: String(repeating: text, count: 100))).isEmpty, "Oversized text is skipped rather than truncated")
+        var generated = incoming("generated", description: "Short teaser")
+        generated.aiSummary = text
+        assertTrue(ArticleIdentity.publisherTextFingerprints(generated).isEmpty, "Generated summaries never identify publisher documents")
+        let bodyA = incoming("body-a", body: text, description: "First teaser")
+        let bodyB = incoming("body-b", body: text, description: "Second teaser")
+        try await db.upsertArticles([bodyA])
+        assertTrue(try await db.upsertArticles([bodyB]).isEmpty, "Exact full body can match different descriptions")
+
+        let extracted = incoming("extracted", description: "No full body in RSS")
+        try await db.upsertArticles([extracted])
+        try await db.updateEnrichment(articleId: extracted.id,
+            update: DatabaseEngine.EnrichmentUpdate(content: text + " Extracted details."))
+        let extractedVariant = incoming("extracted-variant", body: text + " Extracted details.", description: "Different teaser")
+        assertTrue(try await db.upsertArticles([extractedVariant]).isEmpty, "On-demand publisher extraction contributes body evidence")
+
+        // A known GUID owns a separate row before it acquires identical publisher text.
+        let distinct = incoming("distinct", description: text + " Original distinction.")
+        try await db.upsertArticles([distinct])
+        let corrected = incoming("distinct")
+        assertTrue(try await db.upsertArticles([corrected]).isEmpty, "Known GUID takes precedence over text")
+        assertEqual(try await db.resolvedArticleID(for: corrected), distinct.id, "Authoritative identity is not overwritten by text")
+        let uncertain = incoming("uncertain")
+        assertEqual(try await db.upsertArticles([uncertain]), Set([uncertain.id]), "Ambiguous text never selects one of its owners")
+        await db.close()
+        try await db.open()
+        assertEqual(try await db.resolvedArticleID(for: duplicate), first.id, "Observed variant survives reopening")
+        let stillUncertain = incoming("still-uncertain")
+        assertEqual(try await db.upsertArticles([stillUncertain]), Set([stillUncertain.id]), "Ambiguity remains after reopening")
+        let mixed = incoming("mixed-evidence", body: text)
+        assertEqual(try await db.upsertArticles([mixed]), Set([mixed.id]), "Ambiguous description blocks automatic matching even with a unique body candidate")
+        assertTrue(try await db.isSaved(articleId: first.id), "Migration and reopening retain bookmark state")
+        // Fingerprint failure must roll back extracted text and enrichment together.
+        var failureHandle: OpaquePointer?
+        assertEqual(sqlite3_open(path, &failureHandle), SQLITE_OK, "Open isolated failure injector")
+        assertEqual(sqlite3_exec(failureHandle, "CREATE TRIGGER reject_text BEFORE INSERT ON article_aliases WHEN new.kind = 'content' BEGIN SELECT RAISE(ABORT, 'fixture'); END;", nil, nil, nil), SQLITE_OK, "Inject content alias failure")
+        do {
+            try await db.updateEnrichment(articleId: extracted.id,
+                update: DatabaseEngine.EnrichmentUpdate(summary: "Should roll back", content: text + " Failed update."))
+            assertTrue(false, "Alias failure must propagate")
+        } catch { }
+        let rolledBack = try await db.fetchArticles(id: extracted.id).first
+        assertEqual(rolledBack?.fullContent, text + " Extracted details.", "Failed alias preserves prior publisher text")
+        assertTrue(rolledBack?.aiSummary == nil, "Failed alias preserves prior enrichment")
+        assertEqual(sqlite3_exec(failureHandle, "DROP TRIGGER reject_text;", nil, nil, nil), SQLITE_OK, "Remove failure injector")
+        sqlite3_close(failureHandle)
+        await db.close()
+
+        // Exercise v6 -> v7 with existing aliases and a cancellation rollback.
+        var handle: OpaquePointer?
+        assertEqual(sqlite3_open(path, &handle), SQLITE_OK, "Open isolated migration fixture")
+        let downgrade = """
+        BEGIN;
+        ALTER TABLE article_aliases RENAME TO aliases_v7;
+        CREATE TABLE article_aliases(kind TEXT NOT NULL CHECK(kind IN ('id','url')), value TEXT NOT NULL,
+            article_id TEXT REFERENCES articles(id) ON DELETE CASCADE, PRIMARY KEY(kind,value));
+        INSERT INTO article_aliases SELECT kind,value,article_id FROM aliases_v7 WHERE kind != 'content';
+        DROP TABLE aliases_v7;
+        CREATE INDEX idx_article_aliases_article ON article_aliases(article_id);
+        PRAGMA user_version = 6;
+        COMMIT;
+        """
+        assertEqual(sqlite3_exec(handle, downgrade, nil, nil, nil), SQLITE_OK, "Reconstruct v6 aliases")
+        sqlite3_close(handle)
+        let cancelled = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            try await db.open()
+        }
+        do {
+            try await cancelled.value
+            assertTrue(false, "Cancelled fingerprint schema migration throws")
+        } catch is CancellationError { }
+        assertEqual(sqlite3_open(path, &handle), SQLITE_OK, "Read cancelled migration")
+        var statement: OpaquePointer?
+        assertEqual(sqlite3_prepare_v2(handle, "PRAGMA user_version;", -1, &statement, nil), SQLITE_OK, "Read schema version")
+        assertEqual(sqlite3_step(statement), SQLITE_ROW, "Schema version exists")
+        assertEqual(sqlite3_column_int(statement, 0), 6, "Cancelled migration retains v6")
+        sqlite3_finalize(statement)
+        sqlite3_close(handle)
+        try await db.open()
+        assertEqual(try await db.resolvedArticleID(for: duplicate), first.id, "v7 retains existing aliases")
+        assertTrue(try await db.isRead(articleId: first.id), "v7 retains reading state")
+        let historicalVariant = incoming("historical-new-guid", body: text + " Extracted details.", description: "Fresh teaser")
+        assertTrue(try await db.upsertArticles([historicalVariant]).isEmpty, "Migration indexes existing publisher body evidence")
+        assertEqual(try await db.resolvedArticleID(for: historicalVariant), extracted.id, "Historical body resolves without rewriting the primary key")
+        let historicalAmbiguity = incoming("historical-ambiguous")
+        assertEqual(try await db.upsertArticles([historicalAmbiguity]), Set([historicalAmbiguity.id]), "Migration preserves conflicting historical text as ambiguous")
+        await db.close()
+
+        let suite = "test.text.refresh.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = AppSettings(defaults: defaults)
+        settings.feedURLs = ["https://publisher.example/feed"]
+        settings.aiEnabled = false
+        settings.notificationsEnabled = true
+        let store = ArticleStore(database: DatabaseEngine(path: ":memory:"))
+        await store.initialize()
+        var notifications = [String]()
+        let manager = FeedManager(settings: settings, store: store, schedulesRefresh: false,
+            fetchBatch: { urls, _ in urls.map { ($0, [first, duplicate], nil) } },
+            notifyBatch: { articles, _ in notifications.append(contentsOf: articles.map { $0.id }) })
+        await manager.fetchFeedsAsync()
+        assertEqual(manager.articles.count, 1, "Refresh displays exact content variants once")
+        assertEqual(notifications, [first.id], "Refresh notifies only the committed document")
+        await manager.fetchFeedsAsync()
+        assertEqual(notifications, [first.id], "Repeated content variants never notify again")
+        manager.stopBackgroundWork()
+        await store.database.close()
     }
 
     @MainActor
