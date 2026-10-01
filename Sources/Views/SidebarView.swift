@@ -173,7 +173,7 @@ struct SidebarView: View {
         }
         .padding(AppSpacing.xs)
         .background(AppColor.success.opacity(0.12))
-        .cornerRadius(AppRadius.control)
+        .clipShape(RoundedRectangle(cornerRadius: AppRadius.control))
         .listRowBackground(Color.clear)
         .listRowSeparator(.hidden)
     }
