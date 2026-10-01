@@ -198,6 +198,7 @@ struct NewsTests {
             try await testPromptInjectionDefenses(fixtureHost: fixtureHost)
             try await testModelAvailabilityAndLanguageFallbacks(fixtureRoot: fixtureRoot)
             try await testPassageAnchoredFactExtraction()
+            try await testOverviewCompositionFromVerifiedFacts(fixtureHost: fixtureHost)
             try await testHistoricalReconciliation(fixtureRoot: fixtureRoot)
             try await testAuditPersistenceAndRoutingRegressions(fixtureRoot: fixtureRoot)
             try await testUndatedArticleOrdering()
@@ -256,6 +257,7 @@ struct NewsTests {
         try await testPromptInjectionDefenses(fixtureHost: fixtureHost)
         try await testModelAvailabilityAndLanguageFallbacks(fixtureRoot: fixtureRoot)
         try await testPassageAnchoredFactExtraction()
+        try await testOverviewCompositionFromVerifiedFacts(fixtureHost: fixtureHost)
         try await testHistoricalReconciliation(fixtureRoot: fixtureRoot)
         await testFTS5SearchAndOperators()
         await testMigrationCoordinatorAtomicity()
@@ -5320,6 +5322,168 @@ struct NewsTests {
         assertTrue(prompt.contains("<source_data>"), "Fact extraction prompt wraps passages in source data boundary container")
         assertTrue(prompt.contains("<evidence_passage id=\"p1\""), "Fact extraction prompt contains p1 evidence passage tag")
         assertTrue(prompt.contains("Do not synthesize or summarize into an overview yet"), "Prompt enforces separation of fact extraction before summarizing")
+    }
+
+    static func testOverviewCompositionFromVerifiedFacts(fixtureHost: String = "example.com") async throws {
+        print("  - Testing Overview composition from verified facts, intro paragraphs and quote invariants...")
+
+        let passage1 = EvidencePassage(
+            id: "pass-1",
+            articleID: "art-1",
+            text: "The European Space Agency launched the EnVision orbital mission from Kourou on Tuesday morning.",
+            ordinal: 1
+        )
+        let passage2 = EvidencePassage(
+            id: "pass-2",
+            articleID: "art-2",
+            text: "Mission flight controllers confirmed successful signal acquisition twenty-two minutes after launch separation.",
+            ordinal: 2
+        )
+        let passage3 = EvidencePassage(
+            id: "pass-3",
+            articleID: "art-1",
+            text: "The spacecraft payload includes synthetic aperture radar designed to map Venusian subterranean activity.",
+            ordinal: 3
+        )
+        let passage4 = EvidencePassage(
+            id: "pass-4",
+            articleID: "art-3",
+            text: "Atmospheric instruments will measure trace gas concentrations throughout the three-year primary science phase.",
+            ordinal: 4
+        )
+        let passages = [passage1, passage2, passage3, passage4]
+
+        let article1 = FeedArticle(
+            storedID: "art-1",
+            title: "ESA EnVision Mission Lifts Off",
+            link: "https://\(fixtureHost)/esa/envision-liftoff",
+            guid: "g-esa-1",
+            description: "Original publisher description 1",
+            pubDate: Date(timeIntervalSince1970: 1700000000),
+            source: "ESA Press",
+            fullContent: "Original complete publisher article content 1"
+        )
+        let article2 = FeedArticle(
+            storedID: "art-2",
+            title: "Signal Confirmed For EnVision Venus Orbiter",
+            link: "https://\(fixtureHost)/science/signal-confirmed",
+            guid: "g-sci-2",
+            description: "Original publisher description 2",
+            pubDate: Date(timeIntervalSince1970: 1700001000),
+            source: "Science Today",
+            fullContent: "Original complete publisher article content 2"
+        )
+        let article3 = FeedArticle(
+            storedID: "art-3",
+            title: "Atmospheric Survey of Venus Begins",
+            link: "https://\(fixtureHost)/space/venus-survey",
+            guid: "g-space-3",
+            description: "Original publisher description 3",
+            pubDate: Date(timeIntervalSince1970: 1700002000),
+            source: "Space Exploration",
+            fullContent: "Original complete publisher article content 3"
+        )
+        let articles = [article1, article2, article3]
+
+        // Verified facts extracted from passages
+        let fact1 = PassageAnchoredFact(
+            id: "f1",
+            statement: "The EnVision orbiter launched from Kourou on Tuesday morning.",
+            passageID: "pass-1",
+            quote: "launched the EnVision orbital mission from Kourou on Tuesday morning",
+            articleID: "art-1"
+        )
+        let fact2 = PassageAnchoredFact(
+            id: "f2",
+            statement: "Signal acquisition succeeded 22 minutes after stage separation.",
+            passageID: "pass-2",
+            quote: "successful signal acquisition twenty-two minutes after launch separation",
+            articleID: "art-2"
+        )
+        let fact3 = PassageAnchoredFact(
+            id: "f3",
+            statement: "The orbiter payload carries synthetic aperture radar to map Venusian subterranean activity.",
+            passageID: "pass-3",
+            quote: "payload includes synthetic aperture radar designed to map Venusian subterranean activity",
+            articleID: "art-1"
+        )
+        let fact4 = PassageAnchoredFact(
+            id: "f4",
+            statement: "Instruments will record trace atmospheric gases over a three-year primary phase.",
+            passageID: "pass-4",
+            quote: "measure trace gas concentrations throughout the three-year primary science phase",
+            articleID: "art-3"
+        )
+        let verifiedFacts = [fact1, fact2, fact3, fact4]
+
+        // 1. Compose synthesized overview
+        let doc = OverviewComposer.composeOverview(
+            eventID: "event-venus-1",
+            eventTitle: "ESA EnVision Venus Mission Launch",
+            verifiedFacts: verifiedFacts,
+            passages: passages,
+            articles: articles
+        )
+
+        // Acceptance criteria:
+        // A. One or two paragraph introduction
+        let paragraphs = doc.summary.components(separatedBy: "\n\n").filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        assertTrue(paragraphs.count >= 1 && paragraphs.count <= 2, "Introduction is strictly 1 or 2 paragraphs (actual: \(paragraphs.count))")
+
+        // B. Three to five key facts with citations
+        assertTrue(doc.facts.count >= 3 && doc.facts.count <= 5, "Overview has 3 to 5 key facts (actual: \(doc.facts.count))")
+        for fact in doc.facts {
+            assertTrue(!fact.id.isEmpty, "Fact ID is non-empty")
+            assertTrue(!fact.text.isEmpty, "Fact text is non-empty")
+            assertFalse(fact.citationIDs.isEmpty, "Fact has at least one citation ID")
+            for citationID in fact.citationIDs {
+                guard let citation = doc.citations[citationID] else {
+                    assertTrue(false, "Citation \(citationID) exists in overview citations map")
+                    continue
+                }
+                assertEqual(citation.id, citationID, "Citation ID matches key")
+                assertTrue(!citation.passageID.isEmpty, "Citation references non-empty passage ID")
+                assertTrue(passages.contains(where: { $0.id == citation.passageID }), "Cited passage ID exists in source passages")
+                // C. Quotes are reproduced from the source, never generated in a person's name
+                let matchingPassage = passages.first(where: { $0.id == citation.passageID })!
+                assertTrue(matchingPassage.text.contains(citation.quote), "Citation quote is strictly reproduced verbatim from source passage")
+            }
+        }
+
+        // D. Publisher text is never replaced by the overview
+        assertEqual(article1.title, "ESA EnVision Mission Lifts Off", "Article 1 title unchanged")
+        assertEqual(article1.description, "Original publisher description 1", "Article 1 description unchanged")
+        assertEqual(article1.fullContent, "Original complete publisher article content 1", "Article 1 full content unchanged")
+        assertEqual(article2.fullContent, "Original complete publisher article content 2", "Article 2 full content unchanged")
+        assertEqual(article3.fullContent, "Original complete publisher article content 3", "Article 3 full content unchanged")
+
+        // E. Provenance and membership binding
+        assertEqual(doc.kind, OverviewKind.synthesized, "Overview kind is synthesized when >= 3 facts present")
+        assertEqual(doc.eventID, "event-venus-1", "Event ID matches")
+        assertTrue(doc.memberArticleIDs.contains("art-1"), "Member article IDs contain art-1")
+        assertTrue(doc.memberArticleIDs.contains("art-2"), "Member article IDs contain art-2")
+
+        // F. Quote verification / rejection of hallucinated quotes
+        let hallucinatedFact = PassageAnchoredFact(
+            id: "f-fake",
+            statement: "The mission director claimed Venus holds active biological ecosystems.",
+            passageID: "pass-1",
+            quote: "Director announced Venus holds biological ecosystems",
+            articleID: "art-1"
+        )
+        let rejectedValidation = OverviewComposer.validateFactForOverview(hallucinatedFact, against: passages)
+        assertFalse(rejectedValidation.isValid, "Fabricated or hallucinated quote rejected by composer validation")
+
+        // G. Fallback behavior when verified facts < 3
+        let fallbackDoc = OverviewComposer.composeOverview(
+            eventID: "event-venus-fallback",
+            eventTitle: "EnVision Pre-Launch",
+            verifiedFacts: [fact1],
+            passages: [passage1],
+            articles: [article1]
+        )
+        assertEqual(fallbackDoc.kind, OverviewKind.fallbackExcerpts, "Composer falls back to fallbackExcerpts when verified facts < 3")
+        assertTrue(fallbackDoc.facts.count == 1, "Fallback contains available verified facts without fabricating ungrounded ones")
     }
 }
 

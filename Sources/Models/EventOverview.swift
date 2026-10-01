@@ -133,7 +133,7 @@ public struct OverviewLeadImage: Codable, Hashable, Sendable {
 }
 
 /// Generation mode for an event overview.
-public enum OverviewKind: String, Codable, Sendable {
+public enum OverviewKind: String, Codable, Sendable, Equatable, Hashable {
     case synthesized
     case fallbackExcerpts
 }
