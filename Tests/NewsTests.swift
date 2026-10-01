@@ -140,6 +140,23 @@ final class GatedURLProtocol: URLProtocol, @unchecked Sendable {
     }
 }
 
+/// Suspends every waiter until opened, so tests can hold follow-up work in flight.
+actor OpenGate {
+    private var isOpen = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+    private(set) var arrivals = 0
+    func wait() async {
+        arrivals += 1
+        if isOpen { return }
+        await withCheckedContinuation { waiters.append($0) }
+    }
+    func open() {
+        isOpen = true
+        for waiter in waiters { waiter.resume() }
+        waiters = []
+    }
+}
+
 @main
 struct NewsTests {
     static func main() async {
@@ -197,6 +214,7 @@ struct NewsTests {
         try await testAuditRefreshRegressions(fixtureRoot: fixtureRoot)
         try await testConditionalFeedRequests(fixtureRoot: fixtureRoot)
         try await testFeedBackoffAndHostLimits()
+        try await testRefreshEndsAtCollection()
         try await testUndatedArticleOrdering()
         try await testReaderFigures(fixtureRoot: fixtureRoot)
         await testReaderParsingRegressions()
@@ -1349,6 +1367,75 @@ struct NewsTests {
         assertEqual(requests.count, 1, "Manual refresh does not bypass the server's wait")
         assertEqual(manager.feedStatuses[shown], .failed(.retryScheduled(until: refreshStart.addingTimeInterval(1800))), "The paused feed reports when it resumes")
         manager.stopBackgroundWork()
+    }
+
+    /// Polls observable state with a deadline so a regression fails instead of hanging.
+    static func eventually(_ message: String, timeout: Duration = .seconds(10), _ condition: @escaping () async -> Bool) async {
+        let deadline = ContinuousClock.now + timeout
+        while !(await condition()) {
+            if ContinuousClock.now > deadline { assertTrue(false, message); return }
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+    }
+
+    @MainActor
+    static func testRefreshEndsAtCollection() async throws {
+        print("  - Testing that refresh ends at collection and background work follows energy state...")
+        let suite = "test.refresh-collection.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = AppSettings(defaults: defaults)
+        let feed = "https://8.8.8.8/news.xml"
+        settings.feedURLs = [feed]
+        settings.aiEnabled = false
+        settings.notificationsEnabled = true
+        let db = DatabaseEngine(path: ":memory:")
+        let store = ArticleStore(database: db)
+        await store.initialize()
+
+        // Notification triage is follow-up work: it must not hold the spinner, the published articles or the next refresh.
+        let gate = OpenGate()
+        let counter = TestCounter()
+        let manager = FeedManager(settings: settings, store: store, schedulesRefresh: false,
+            fetchBatch: { urls, _ in
+                await counter.increment()
+                let n = await counter.value
+                let article = FeedArticle(title: "Report \(n)", link: "https://example.com/report-\(n)", guid: "report-\(n)", description: "Publisher report", pubDate: Date(), source: "Test")
+                return urls.map { ($0, [article], nil, nil) }
+            },
+            notifyBatch: { _, _ in await gate.wait() })
+        let first = Task { await manager.fetchFeedsAsync() }
+        await eventually("Triage starts after collection") { await gate.arrivals == 1 }
+        assertFalse(manager.isAnyFeedLoading, "The spinner ends when collection ends, not when triage ends")
+        assertEqual(manager.articles.count, 1, "Collected articles are published while triage is still running")
+        assertEqual(manager.feedStatuses[feed], .idle, "The feed reports a finished refresh")
+        let second = Task { await manager.fetchFeedsAsync() } // Cmd-R during triage
+        await eventually("A refresh requested during triage collects again") { await gate.arrivals == 2 }
+        assertEqual(await counter.value, 2, "Cmd-R is not coalesced onto follow-up work")
+        assertEqual(manager.articles.count, 2, "Cmd-R publishes new articles immediately")
+        await gate.open()
+        await first.value
+        await second.value
+        manager.stopBackgroundWork()
+
+        // Background classification stops under Low Power Mode or thermal pressure, and otherwise runs through the shared queue.
+        settings.aiEnabled = true
+        settings.notificationsEnabled = false
+        let queue = EnrichmentQueue(store: store)
+        var energySaving = true
+        let article = FeedArticle(title: "Superconductor Breakthrough Confirmed", link: "https://example.com/classify", guid: "classify", description: "Independent labs replicate zero resistance", pubDate: Date(), source: "Physics Journal")
+        let background = FeedManager(settings: settings, store: store, schedulesRefresh: false,
+            fetchBatch: { urls, _ in urls.map { ($0, [article], nil, nil) } },
+            notifyBatch: { _, _ in },
+            enrichmentQueue: queue,
+            allowsBackgroundWork: { !energySaving })
+        await background.fetchFeedsAsync()
+        guard let storedID = background.articles.first?.id else { return assertTrue(false, "The refreshed article is stored") }
+        assertEqual(await queue.state(for: storedID), nil, "Energy saving schedules no classification")
+        energySaving = false
+        await background.fetchFeedsAsync()
+        await eventually("Classification runs once energy saving ends") { await queue.state(for: storedID) == .completed }
+        background.stopBackgroundWork()
     }
 
     static func testUndatedArticleOrdering() async throws {
@@ -2781,13 +2868,23 @@ struct NewsTests {
         // 5. Cancel all
         await queue.cancelAll(reason: .superseded)
         let stateA = await queue.state(for: articleA.id)
-        assertEqual(stateA, .cancelled(.superseded), "Article A should be cancelled with superseded reason")
+        assertTrue(stateA == .cancelled(.superseded) || stateA == .completed, "Article A is superseded unless it already finished")
         for _ in 0..<10 {
             await queue.enqueue(article: articleA, priority: .background)
             await queue.cancelAll(reason: .superseded)
             let active = await queue.activeJobCount()
             assertTrue(active <= 3, "Rapid replacement cannot exceed the concurrency bound")
         }
+
+        // Finished work is not superseded or repeated by the next refresh.
+        let articleC = FeedArticle(title: "Quarterly Earnings Beat Expectations", link: "https://example.com/earnings", guid: "eq-3",
+                                   description: "Revenue and profit exceed analyst forecasts", pubDate: Date(), source: "Markets")
+        await queue.enqueue(article: articleC, priority: .interactive)
+        await eventually("Article C finishes classification") { await queue.state(for: articleC.id) == .completed }
+        await queue.cancelAll(reason: .superseded)
+        assertEqual(await queue.state(for: articleC.id), .completed, "Superseding the backlog keeps finished work")
+        await queue.enqueue(article: articleC, priority: .background)
+        assertEqual(await queue.state(for: articleC.id), .completed, "A finished article is not classified again")
     }
     
     static func testDesignSystemAndArticleFilter() async {

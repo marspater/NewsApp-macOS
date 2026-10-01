@@ -154,6 +154,8 @@ actor EnrichmentQueue {
     /// Cancels all pending and in-flight jobs (e.g. on feed refresh or settings change).
     func cancelAll(reason: EnrichmentCancellationReason = .superseded) {
         for (id, var job) in jobs {
+            // Finished work stays finished, so a refresh does not classify the same articles again.
+            if case .completed = job.state { continue }
             job.task?.cancel()
             job.state = .cancelled(reason)
             jobs[id] = job
