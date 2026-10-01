@@ -4,6 +4,8 @@
 
 ### Fixed
 
+- Reuse fresh publisher image responses through native HTTP caching while preserving protected networking, byte bounds and publisher no-store rules.
+
 - Keep undated stories visible using stable ingestion-time ordering, with matching archive/search cursors and retention.
 
 - Preserve the visible library on database read failures and notify only for committed new article IDs across the full archive.

@@ -1974,7 +1974,7 @@ struct NewsTests {
             let body: String
             if request.contains("/page ") {
                 body = "<html><head><link rel='stylesheet' href='http://assets.invalid/style.css'><link rel='stylesheet' href='http://assets.invalid/redirect.css'></head><body>Publisher prose<img src='http://assets.invalid/image.svg'><img src='http://127.0.0.1:\(port)/forbidden'><img src='http://localhost:\(port)/forbidden-localhost'><img src='http://2130706433:\(port)/forbidden-decimal'><img src='http://0x7f000001:\(port)/forbidden-hex'><img src='http://127.1:\(port)/forbidden-short'><img src='http://0x7f.0.0.1:\(port)/forbidden-mixed-hex'><img src='http://0177.0.0.1:\(port)/forbidden-octal'><img src='http://%31%32%37.0.0.1:\(port)/forbidden-encoded'><img src='http://user@127.0.0.1:\(port)/forbidden-userinfo'><img src='http://127.0.0.1.:\(port)/forbidden-trailing-dot'>\(live ? "<img src='http://localtest.me:\(port)/forbidden-dns'>" : "")</body></html>"
-            } else if request.contains("/image.svg ") {
+            } else if request.contains(".svg ") {
                 body = "<svg xmlns='http://www.w3.org/2000/svg' width='1' height='1'></svg>"
             } else if request.contains("/style.css ") { body = "body { color: black; }" }
             else { body = "OK" }
@@ -1982,7 +1982,8 @@ struct NewsTests {
         if request.contains(".svg ") { mime = "image/svg+xml" }
         else if request.contains(".css ") { mime = "text/css" }
         else { mime = "text/html" }
-            response = Data("HTTP/1.1 200 OK\r\nContent-Type: \(mime)\r\nContent-Length: \(body.utf8.count)\r\nConnection: close\r\n\r\n\(body)".utf8)
+            let cacheHeader = request.contains("/cached-image.svg ") ? "Cache-Control: public, max-age=600\r\n" : "Cache-Control: no-store\r\n"
+            response = Data("HTTP/1.1 200 OK\r\n\(cacheHeader)Content-Type: \(mime)\r\nContent-Length: \(body.utf8.count)\r\nConnection: close\r\n\r\n\(body)".utf8)
         } else { response = data ?? Data() }
         connection.send(content: response, isComplete: true, completion: .contentProcessed { _ in connection.cancel() })
     }
@@ -2053,6 +2054,30 @@ struct NewsTests {
         let session = URLSession(configuration: configuration)
         let (body, _) = try await session.data(from: URL(string: "http://93.184.216.34/")!)
         assertEqual(String(decoding: body, as: UTF8.self), "OK", "Native URLSession uses the protected SOCKS tunnel")
+        // Native image caching must reuse bytes without bypassing destination policy.
+        let imageConfiguration = URLSessionConfiguration.ephemeral
+        imageConfiguration.proxyConfigurations = [proxy]
+        imageConfiguration.timeoutIntervalForRequest = 2
+        imageConfiguration.urlCache = URLCache(memoryCapacity: 1024 * 1024, diskCapacity: 0)
+        let imageClient = SecureHTTPClient(configuration: imageConfiguration)
+        let imageURL = URL(string: "http://93.184.216.34/cached-image.svg")!
+        let initialRequests = receivedRequests.count
+        let (firstImage, _) = try await imageClient.fetchImage(from: imageURL, allowHTTP: true)
+        let (cachedImage, _) = try await imageClient.fetchImage(from: imageURL, allowHTTP: true)
+        assertEqual(cachedImage, firstImage, "Cached image preserves publisher bytes")
+        assertEqual(receivedRequests.count, initialRequests + 1, "Fresh images use one protected upstream request")
+        do {
+            _ = try await imageClient.fetchImage(from: imageURL)
+            assertTrue(false, "Cached HTTP images cannot bypass disabled HTTP policy")
+        } catch let error as FeedError {
+            guard case .insecureScheme = error else { throw error }
+        }
+        _ = try await imageClient.fetchArticleHTML(from: imageURL, allowHTTP: true)
+        assertEqual(receivedRequests.count, initialRequests + 2, "Article fetching still reloads cached URLs")
+        let uncachedURL = URL(string: "http://93.184.216.34/uncached-image.svg")!
+        _ = try await imageClient.fetchImage(from: uncachedURL, allowHTTP: true)
+        _ = try await imageClient.fetchImage(from: uncachedURL, allowHTTP: true)
+        assertEqual(receivedRequests.count, initialRequests + 4, "No-store images are fetched again")
         try await verifyWebKitBoundary(proxy: proxy)
         let paths = receivedRequests.hosts
         assertTrue(paths.contains { $0.contains("/style.css ") }, "WebKit stylesheet traverses the protected proxy")
