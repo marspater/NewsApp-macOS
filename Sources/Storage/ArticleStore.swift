@@ -186,13 +186,15 @@ final class ArticleStore: ObservableObject {
     func setSaved(article: FeedArticle, isSaved nextState: Bool) async -> Bool {
         do {
             try await database.upsertArticles([article], feedUrl: nil)
-            try await database.setSaved(articleId: article.id, isSaved: nextState)
+            var storedArticle = article
+            storedArticle.storedID = try await database.resolvedArticleID(for: article)
+            try await database.setSaved(articleId: storedArticle.id, isSaved: nextState)
             if nextState {
-                if !savedArticles.contains(where: { $0.id == article.id }) {
-                    savedArticles.insert(article, at: 0)
+                if !savedArticles.contains(where: { $0.id == storedArticle.id }) {
+                    savedArticles.insert(storedArticle, at: 0)
                 }
             } else {
-                savedArticles.removeAll { $0.id == article.id }
+                savedArticles.removeAll { $0.id == storedArticle.id }
             }
             let counts = try await database.counts()
             self.savedCount = counts.saved

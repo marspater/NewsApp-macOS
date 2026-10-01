@@ -123,6 +123,7 @@ struct NewsTests {
         await testOfflineCacheAndResilience()
         await testArticleIdentityDeep()
         await testDatabaseEnginePersistence()
+        try await testCanonicalArticleIngestion(fixtureRoot: fixtureRoot)
         await testFTS5SearchAndOperators()
         await testMigrationCoordinatorAtomicity()
         await testArticleRetentionPolicy()
@@ -877,8 +878,9 @@ struct NewsTests {
         saves.remove(alias)
         saves.save(alias)
         await saves.waitForPendingChanges()
-        assertFalse(try await db.isSaved(articleId: original.id), "Rapid alias mutations retain the original unsave intent")
-        assertTrue(try await db.isSaved(articleId: alias.id), "Rapid alias mutations retain the latest save intent")
+        assertTrue(try await db.isSaved(articleId: original.id), "Latest alias save applies to the existing document")
+        assertTrue(try await db.fetchArticles(id: alias.id).isEmpty, "Alias save does not create another document")
+        assertEqual(try await db.fetchArticles(canonicalURL: corrected.link).count, 1, "Rapid save changes preserve one URL-equivalent document")
         let emptyLink = FeedArticle(title: "No link", link: "", guid: "empty-one", description: "", pubDate: .distantPast, source: "Publisher")
         let otherEmptyLink = FeedArticle(title: "Different story", link: "", guid: "empty-two", description: "", pubDate: .distantPast, source: "Publisher")
         saves.save(emptyLink)
@@ -1202,6 +1204,61 @@ struct NewsTests {
         assertEqual(reconciled, "https://test.com/path", "Should reconcile legacy URL")
     }
     
+    @MainActor
+    static func testCanonicalArticleIngestion(fixtureRoot: URL) async throws {
+        print("  - Testing canonical URL ingestion across changing GUIDs...")
+        let db = DatabaseEngine(path: ":memory:")
+        let store = ArticleStore(database: db)
+        await store.initialize()
+        let first = FeedArticle(title: "Original report", link: fixtureRoot.appendingPathComponent("identity/story").absoluteString,
+                                guid: "first-guid", description: "Publisher report", pubDate: Date(timeIntervalSince1970: 100), source: "Publisher")
+        let update = FeedArticle(title: "Updated report", link: first.link + "?utm_source=another-feed",
+                                 guid: "replacement-guid", description: "Updated publisher report", pubDate: Date(timeIntervalSince1970: 200), source: first.source)
+        try await db.upsertArticles([first], feedUrl: "primary-feed")
+        try await db.markRead(articleId: first.id, isRead: true)
+        try await db.setSaved(articleId: first.id, isSaved: true)
+        let inserted = try await db.upsertArticles([update, update], feedUrl: "secondary-feed")
+        assertTrue(inserted.isEmpty, "A changed GUID for the same canonical document is not a new article")
+        let rows = try await db.fetchArticles(limit: nil)
+        assertEqual(rows.count, 1, "Canonical aliases produce one stored article")
+        assertEqual(rows.first?.id, first.id, "Stored primary key remains the UI identity after GUID changes")
+        assertEqual(rows.first?.title, update.title, "Alias refresh updates publisher metadata")
+        assertTrue(try await db.isRead(articleId: first.id), "Alias refresh preserves read history")
+        assertTrue(try await db.isSaved(articleId: first.id), "Alias refresh preserves saved state")
+        assertEqual(try await db.searchArticles(query: "Updated").first?.id, first.id, "FTS returns the durable ID")
+        try await db.markRead(articleId: first.id, isRead: false)
+        try await db.markAllRead(feedUrl: "secondary-feed")
+        assertTrue(try await db.isRead(articleId: first.id), "Both feeds remain associated with the document")
+        await store.setSaved(article: update, isSaved: false)
+        assertFalse(try await db.isSaved(articleId: first.id), "Saving an incoming alias resolves the durable ID")
+        assertTrue(store.operationError == nil, "Alias save must not fail a foreign-key check")
+        let homepageEntries = (0..<2).map { index in
+            FeedArticle(title: "Homepage-linked item \(index)", link: fixtureRoot.absoluteString,
+                        guid: "homepage-\(index)", description: "Different reports", pubDate: Date(), source: first.source)
+        }
+        assertEqual(try await db.upsertArticles(homepageEntries).count, 2, "Generic homepage links do not merge distinct entries")
+        let missingLinks = (0..<2).map { index in
+            FeedArticle(title: "Missing-link item \(index)", link: "", guid: "missing-link-\(index)",
+                        description: "Different reports", pubDate: Date(), source: first.source)
+        }
+        assertEqual(try await db.upsertArticles(missingLinks).count, 2, "Missing links do not identify a document")
+        let referenceURL = first.link + "?reference=edition-two"
+        assertEqual(ArticleIdentity.canonicalizeURL(referenceURL), referenceURL, "Meaningful query keys must not be stripped by a broad ref prefix")
+        let otherEdition = FeedArticle(title: update.title, link: referenceURL, guid: "different-edition",
+                                       description: update.description, pubDate: update.pubDate, source: first.source)
+        assertEqual(try await db.upsertArticles([otherEdition]), Set([otherEdition.id]), "Meaningful query differences retain distinct documents")
+        let sameHeadline = FeedArticle(title: update.title, link: first.link + "-different", guid: "different-event",
+                                       description: update.description, pubDate: update.pubDate, source: first.source)
+        assertEqual(try await db.upsertArticles([sameHeadline]), Set([sameHeadline.id]), "Matching text alone cannot merge different documents")
+        let encoded = try JSONEncoder().encode(rows[0])
+        assertEqual(try JSONDecoder().decode(FeedArticle.self, from: encoded).id, first.id, "Cached articles retain the stored identity")
+        var legacy = try JSONSerialization.jsonObject(with: encoded) as! [String: Any]
+        legacy.removeValue(forKey: "storedID")
+        let legacyData = try JSONSerialization.data(withJSONObject: legacy)
+        assertEqual(try JSONDecoder().decode(FeedArticle.self, from: legacyData).id, update.id, "Legacy JSON remains decodable without a stored ID")
+        await db.close()
+    }
+
     static func testDatabaseEnginePersistence() async {
         print("  - Testing DatabaseEngine Persistence & Conflict Resolution...")
         
