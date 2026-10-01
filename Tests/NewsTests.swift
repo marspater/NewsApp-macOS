@@ -109,7 +109,7 @@ struct NewsTests {
             try await testOverviewDocumentModelBoundToInputsAndVersions(fixtureHost: fixtureHost)
             try await testOverviewPassageSelectionAndTokenBudget(fixtureHost: fixtureHost)
             try await testPromptInjectionDefenses(fixtureHost: fixtureHost)
-            try await testModelAvailabilityAndLanguageFallbacks(fixtureHost: fixtureHost)
+            try await testModelAvailabilityAndLanguageFallbacks(fixtureRoot: fixtureRoot)
             try await testAuditPersistenceAndRoutingRegressions(fixtureRoot: fixtureRoot)
             try await testUndatedArticleOrdering()
             await testDatabaseEnginePersistence()
@@ -159,7 +159,7 @@ struct NewsTests {
         try await testOverviewDocumentModelBoundToInputsAndVersions(fixtureHost: fixtureHost)
         try await testOverviewPassageSelectionAndTokenBudget(fixtureHost: fixtureHost)
         try await testPromptInjectionDefenses(fixtureHost: fixtureHost)
-        try await testModelAvailabilityAndLanguageFallbacks(fixtureHost: fixtureHost)
+        try await testModelAvailabilityAndLanguageFallbacks(fixtureRoot: fixtureRoot)
         await testFTS5SearchAndOperators()
         await testMigrationCoordinatorAtomicity()
         await testArticleRetentionPolicy()
@@ -4152,7 +4152,7 @@ struct NewsTests {
         assertTrue(GenerationPromptDefense.verifyHermeticGenerationPreconditions(), "Generation preconditions enforce tool-less, non-executable environment")
     }
 
-    static func testModelAvailabilityAndLanguageFallbacks(fixtureHost: String = "example.com") async throws {
+    static func testModelAvailabilityAndLanguageFallbacks(fixtureRoot: URL) async throws {
         print("  - Testing Model availability runtime probe and deterministic language fallbacks...")
 
         // 1. Language detection and support policies
@@ -4216,8 +4216,8 @@ struct NewsTests {
         let db = DatabaseEngine(path: ":memory:")
         try await db.open()
 
-        let art1 = FeedArticle(storedID: "art-1", title: "Quake Notice", link: "https://" + fixtureHost + "/art-1", guid: "g1", description: passage1.text, pubDate: Date(), source: "Source 1")
-        let art2 = FeedArticle(storedID: "art-2", title: "Damage Assessment", link: "https://" + fixtureHost + "/art-2", guid: "g2", description: passage2.text, pubDate: Date(), source: "Source 2")
+        let art1 = FeedArticle(storedID: "art-1", title: "Quake Notice", link: fixtureRoot.appendingPathComponent("art-1").absoluteString, guid: "g1", description: passage1.text, pubDate: Date(), source: "Source 1")
+        let art2 = FeedArticle(storedID: "art-2", title: "Damage Assessment", link: fixtureRoot.appendingPathComponent("art-2").absoluteString, guid: "g2", description: passage2.text, pubDate: Date(), source: "Source 2")
         _ = try await db.upsertArticles([art1, art2])
 
         let saved = try await db.recordEventOverview(fallbackDoc)

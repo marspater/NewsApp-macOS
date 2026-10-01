@@ -83,13 +83,12 @@ public struct ModelRuntimeProbe: Sendable {
         #if canImport(FoundationModels)
         if #available(macOS 26.0, *) {
             let availability = SystemLanguageModel.default.availability
-            switch availability {
-            case .available:
+            if case .available = availability {
                 if let lang = language, !supportedLanguages.contains(lang) {
                     return .languageUnsupported("Language \(lang.rawValue) is not supported for on-device generation.")
                 }
                 return .available
-            default:
+            } else {
                 return .modelNotReady("SystemLanguageModel is not ready: \(availability).")
             }
         } else {
