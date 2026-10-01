@@ -433,6 +433,22 @@ actor DatabaseEngine {
                 throw error
             }
         }
+        if version < 11 {
+            try beginTransaction()
+            do {
+                try Task.checkCancellation()
+                let columns = try columnNames(of: "feeds")
+                for (name, definition) in [("latest_item_at", "REAL"), ("item_count", "INTEGER NOT NULL DEFAULT 0"), ("full_text_items", "INTEGER NOT NULL DEFAULT 0")]
+                where !columns.contains(name) {
+                    try executeSimple("ALTER TABLE feeds ADD COLUMN \(name) \(definition);")
+                }
+                try setUserVersion(11)
+                try commitTransaction()
+            } catch {
+                try? rollbackTransaction()
+                throw error
+            }
+        }
     }
     
     private func executeBound(_ sql: String, _ values: [String]) throws {
@@ -716,8 +732,8 @@ actor DatabaseEngine {
         return targets.count == 1 ? targets.first : nil
     }
 
-    /// `validators` are written in the same transaction as the articles, so a feed is only ever
-    /// answered "not modified" for content that was durably ingested.
+    /// `validators` accompany a fresh 200 response. They and the response's content stats are written in the same
+    /// transaction as the articles, so a feed is only ever answered "not modified" for content that was durably ingested.
     @discardableResult
     func upsertArticles(_ articles: [FeedArticle], feedUrl: String? = nil, validators: FeedValidators? = nil) throws -> Set<String> {
         guard let db = db else { throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Database not open"]) }
@@ -896,7 +912,7 @@ actor DatabaseEngine {
         }
         
         if let feedUrl, let validators {
-            try recordFeedValidators(validators, for: feedUrl, at: now)
+            try recordFeedFetch(validators, stats: FeedContentStats(articles: articles), for: feedUrl, at: now)
         }
         try Task.checkCancellation()
         try commitTransaction()
@@ -905,16 +921,19 @@ actor DatabaseEngine {
 
     // MARK: - Feed Fetch State
 
-    /// Stored validators and retry schedule keyed by subscription URL.
+    /// Stored validators, retry schedule and content stats keyed by subscription URL.
     func feedFetchStates() throws -> [String: FeedFetchState] {
         guard let db = db else { throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Database not open"]) }
-        let sql = "SELECT url, etag, last_modified, consecutive_failures, next_attempt_at FROM feeds WHERE etag IS NOT NULL OR last_modified IS NOT NULL OR consecutive_failures > 0 OR next_attempt_at IS NOT NULL;"
+        let sql = "SELECT url, etag, last_modified, consecutive_failures, next_attempt_at, last_fetched_at, latest_item_at, item_count, full_text_items FROM feeds;"
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
             throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to prepare feed state query"])
         }
         defer { sqlite3_finalize(statement) }
         func text(_ column: Int32) -> String? { sqlite3_column_text(statement, column).map { String(cString: $0) } }
+        func date(_ column: Int32) -> Date? {
+            sqlite3_column_type(statement, column) == SQLITE_NULL ? nil : Date(timeIntervalSince1970: sqlite3_column_double(statement, column))
+        }
         var result: [String: FeedFetchState] = [:]
         while sqlite3_step(statement) == SQLITE_ROW {
             guard let url = text(0) else { continue }
@@ -922,7 +941,8 @@ actor DatabaseEngine {
             result[url] = FeedFetchState(
                 validators: validators.isEmpty ? nil : validators,
                 failures: Int(sqlite3_column_int(statement, 3)),
-                retryAt: sqlite3_column_type(statement, 4) == SQLITE_NULL ? nil : Date(timeIntervalSince1970: sqlite3_column_double(statement, 4)))
+                retryAt: date(4), lastFetchedAt: date(5), latestItemAt: date(6),
+                itemCount: Int(sqlite3_column_int(statement, 7)), fullTextItems: Int(sqlite3_column_int(statement, 8)))
         }
         return result
     }
@@ -967,16 +987,19 @@ actor DatabaseEngine {
         }
     }
 
-    /// Writes (or clears, when empty) a feed's validators; the caller owns the transaction.
-    private func recordFeedValidators(_ validators: FeedValidators, for feedURL: String, at now: Double) throws {
+    /// Writes a fresh response's validators (cleared when empty) and content stats; the caller owns the transaction.
+    private func recordFeedFetch(_ validators: FeedValidators, stats: FeedContentStats, for feedURL: String, at now: Double) throws {
         guard let db = db else { throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Database not open"]) }
         let sql = """
-        INSERT INTO feeds (id, url, created_at, last_fetched_at, etag, last_modified) VALUES (?, ?, ?, ?, ?, ?)
-        ON CONFLICT(url) DO UPDATE SET last_fetched_at = excluded.last_fetched_at, etag = excluded.etag, last_modified = excluded.last_modified;
+        INSERT INTO feeds (id, url, created_at, last_fetched_at, etag, last_modified, latest_item_at, item_count, full_text_items)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(url) DO UPDATE SET last_fetched_at = excluded.last_fetched_at, etag = excluded.etag,
+            last_modified = excluded.last_modified, latest_item_at = excluded.latest_item_at,
+            item_count = excluded.item_count, full_text_items = excluded.full_text_items;
         """
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
-            throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to prepare feed validator write"])
+            throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to prepare feed fetch write"])
         }
         defer { sqlite3_finalize(statement) }
         sqlite3_bind_text(statement, 1, UUID().uuidString, -1, Self.sqliteTransient)
@@ -986,8 +1009,11 @@ actor DatabaseEngine {
         for (index, value) in [(5, validators.etag), (6, validators.lastModified)] {
             if let value { sqlite3_bind_text(statement, Int32(index), value, -1, Self.sqliteTransient) } else { sqlite3_bind_null(statement, Int32(index)) }
         }
+        if let latest = stats.latestItem { sqlite3_bind_double(statement, 7, latest.timeIntervalSince1970) } else { sqlite3_bind_null(statement, 7) }
+        sqlite3_bind_int(statement, 8, Int32(stats.itemCount))
+        sqlite3_bind_int(statement, 9, Int32(stats.fullTextItems))
         guard sqlite3_step(statement) == SQLITE_DONE else {
-            throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to persist feed validators"])
+            throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to persist feed fetch state"])
         }
     }
     

@@ -46,6 +46,7 @@ struct FeedCatalogView: View {
             .padding(AppSpacing.md)
         }
         .frame(minWidth: 620, idealWidth: 680, minHeight: 560)
+        .task { await feedManager.reloadFeedHealth() }
     }
 
     private func header(for set: CatalogSet) -> some View {
@@ -89,6 +90,9 @@ struct FeedCatalogView: View {
                 Text(details(feed))
                     .font(AppTypography.caption)
                     .foregroundColor(AppColor.secondaryText)
+                if subscribed {
+                    FeedHealthLine(health: feedManager.feedHealth[feed.url])
+                }
                 if feed.availability == .previewOnly {
                     Text("Article pages may refuse the in-app reader; the feed preview still works.")
                         .font(AppTypography.caption)

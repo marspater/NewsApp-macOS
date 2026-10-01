@@ -72,6 +72,7 @@ swiftc -swift-version 6 -O -parse-as-library -target arm64-apple-macos${TARGET_M
     Sources/Views/MainView.swift \
     Sources/Views/SettingsView.swift \
     Sources/Views/FeedCatalogView.swift \
+    Sources/Views/FeedHealthLine.swift \
     Sources/Storage/SavedStoriesManager.swift \
     Sources/Services/OPMLManager.swift \
     Sources/Views/ArticleWebView.swift \

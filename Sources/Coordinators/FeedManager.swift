@@ -26,6 +26,8 @@ class FeedManager: NSObject, ObservableObject {
     @Published var articles: [FeedArticle] = []
     @Published var feedStatuses: [String: FeedStatus] = [:]
     @Published var isAnyFeedLoading: Bool = false
+    /// Operational health per subscription, refreshed after every refresh and when a view asks.
+    @Published private(set) var feedHealth: [String: FeedHealth] = [:]
 
     let appSettings: AppSettings
     let articleStore: ArticleStore
@@ -184,6 +186,14 @@ class FeedManager: NSObject, ObservableObject {
         }
     }
 
+    // MARK: - Feed Health
+
+    func reloadFeedHealth() async {
+        guard let states = try? await articleStore.database.feedFetchStates() else { return }
+        let now = Date()
+        feedHealth = Dictionary(appSettings.feedURLs.map { ($0, FeedHealth(states[$0], now: now)) }, uniquingKeysWith: { first, _ in first })
+    }
+
     // MARK: - Caching & Persistence
 
     func loadCachedArticles() {
@@ -192,6 +202,7 @@ class FeedManager: NSObject, ObservableObject {
             do {
                 let loaded = try await self.articleStore.fetchArticles()
                 self.articles = loaded
+                await self.reloadFeedHealth()
             } catch {
                 self.logger.error("Failed to load cached articles: \(error.localizedDescription)")
             }
@@ -345,6 +356,7 @@ class FeedManager: NSObject, ObservableObject {
             let stored = try await articleStore.fetchArticles()
             guard !Task.isCancelled else { return [] }
             self.articles = stored
+            await reloadFeedHealth()
         } catch {
             guard !Task.isCancelled else { return [] }
             articleStore.operationError = "Stored articles could not be loaded. Your current library has been retained."

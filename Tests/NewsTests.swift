@@ -222,6 +222,7 @@ struct NewsTests {
         try await testFeedBackoffAndHostLimits()
         try await testRefreshEndsAtCollection()
         try await testFeedCatalog()
+        try await testFeedHealth()
         try await testUndatedArticleOrdering()
         try await testReaderFigures(fixtureRoot: fixtureRoot)
         await testReaderParsingRegressions()
@@ -1524,6 +1525,123 @@ struct NewsTests {
         assertTrue(failures.isEmpty, "Every catalog feed fetches and parses (\(failures.count) of \(FeedCatalog.feeds.count) failed)")
     }
 
+    @MainActor
+    static func testFeedHealth() async throws {
+        print("  - Testing feed health: availability, freshness, text quality and persistence...")
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        func health(_ configure: (inout FeedFetchState) -> Void) -> FeedHealth {
+            var state = FeedFetchState(lastFetchedAt: now)
+            configure(&state)
+            return FeedHealth(state, now: now)
+        }
+        let unknown = FeedHealth(nil, now: now)
+        assertEqual([unknown.availability, health { $0.lastFetchedAt = nil }.availability], [.unknown, .unknown], "A feed never fetched is not rated")
+        assertEqual(unknown.freshness, .unknown, "No items, no freshness")
+        assertEqual(unknown.textQuality, .unknown, "No items, no text quality")
+        assertEqual(health { _ in }.availability, .responding, "A fetched feed responds")
+        let retry = now.addingTimeInterval(600)
+        assertEqual(health { $0.failures = 3; $0.retryAt = retry }.availability, .failing(failures: 3, retryAt: retry), "Failures are reported with the next attempt")
+        let day: TimeInterval = 86_400
+        func freshness(_ age: TimeInterval) -> FeedHealth.Freshness { health { $0.latestItemAt = now.addingTimeInterval(-age) }.freshness }
+        assertEqual([freshness(0), freshness(-3_600), freshness(3 * day), freshness(3 * day + 1), freshness(30 * day), freshness(30 * day + 1)],
+                    [.recent, .recent, .recent, .quiet, .quiet, .stale], "Freshness windows (future-dated items count as recent)")
+        func quality(_ full: Int, of count: Int) -> FeedHealth.TextQuality { health { $0.itemCount = count; $0.fullTextItems = full }.textQuality }
+        assertEqual([quality(0, of: 0), quality(8, of: 10), quality(79, of: 100), quality(3, of: 10), quality(29, of: 100), quality(0, of: 10)],
+                    [.unknown, .full, .partial, .partial, .summaries, .summaries], "Text quality thresholds")
+        assertTrue(health { $0.failures = 1 }.needsAttention && health { $0.latestItemAt = now.addingTimeInterval(-31 * day) }.needsAttention, "Failing and long-inactive feeds ask for attention")
+        assertFalse(health { $0.latestItemAt = now.addingTimeInterval(-day) }.needsAttention, "A healthy feed does not")
+        var good = FeedFetchState(lastFetchedAt: now)
+        (good.latestItemAt, good.itemCount, good.fullTextItems) = (now.addingTimeInterval(-7_200), 10, 9)
+        let summary = FeedHealth(good, now: now).summary(now: now)
+        assertTrue(summary.hasPrefix("Responding · Newest item ") && summary.hasSuffix(" · Full text"), "Summary reads availability, freshness, text: \(summary)")
+        assertTrue(health { $0.failures = 1 }.summary(now: now).hasPrefix("Not responding (1 failed attempt)"), "A failing feed says so plainly")
+        assertEqual(FeedHealth(nil, now: now).summary(now: now), "Not checked yet", "An unchecked feed says so")
+        assertTrue(FeedHealth.disclaimer.contains("not a rating of accuracy or trustworthiness"), "The disclaimer rules out a truthfulness reading")
+        let wordings = [summary, health { $0.failures = 4 }.summary(now: now), unknown.summary(now: now)].map { $0.lowercased() }
+        assertFalse(wordings.contains { text in ["credib", "bias", "fake", "reliab", "trust", "score", "accura"].contains { text.contains($0) } }, "Health wording never rates the reporting")
+
+        // Content stats come from the response, not from the archive.
+        func item(_ guid: String, date: Date, text: Int?) -> FeedArticle {
+            FeedArticle(title: "Report \(guid)", link: "https://example.com/\(guid)", guid: guid, description: "", pubDate: date, source: "Test",
+                        fullContent: text.map { String(repeating: "x", count: $0) })
+        }
+        let stats = FeedContentStats(articles: [item("a", date: now, text: 1200), item("b", date: now.addingTimeInterval(-day), text: 1199),
+                                                item("c", date: DateParser.unknownDate, text: nil)])
+        assertEqual(stats, FeedContentStats(articles: [item("a", date: now, text: 1200), item("b", date: now.addingTimeInterval(-day), text: 1199), item("c", date: DateParser.unknownDate, text: nil)]), "Stats are a pure function of the articles")
+        assertEqual([stats.itemCount, stats.fullTextItems], [3, 1], "Full text starts at 1200 characters")
+        assertEqual(stats.latestItem, now, "Undated items do not set the newest date")
+        assertEqual(FeedContentStats(articles: [item("c", date: DateParser.unknownDate, text: nil)]).latestItem, nil, "Only undated items: no newest date")
+
+        // Persistence with the ingest, untouched by 304 and failures.
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let db = DatabaseEngine(path: directory.appendingPathComponent("health.sqlite").path)
+        let store = ArticleStore(database: db)
+        await store.initialize()
+        let feed = "https://8.8.8.8/health.xml"
+        let before = Date()
+        await store.batchUpsert(articles: [item("a", date: now, text: 1500), item("b", date: now.addingTimeInterval(-day), text: nil)], feedUrl: feed,
+                                validators: FeedValidators(etag: "\"h1\"", lastModified: nil))
+        var stored = try await db.feedFetchStates()[feed]
+        assertEqual([stored?.itemCount, stored?.fullTextItems], [2, 1], "Ingest records what the response carried")
+        assertEqual(stored?.latestItemAt, now, "Ingest records the newest item")
+        assertTrue((stored?.lastFetchedAt ?? .distantPast) >= before.addingTimeInterval(-1), "Ingest records when the feed answered")
+        try await db.recordFeedSuccess(feed, at: now)
+        try await db.recordFeedFailure(feed, retryAfter: nil, at: now)
+        stored = try await db.feedFetchStates()[feed]
+        assertEqual([stored?.itemCount, stored?.fullTextItems], [2, 1], "304 and failures keep the last content stats")
+        assertEqual(stored?.validators, FeedValidators(etag: "\"h1\"", lastModified: nil), "Health writes never touch validators")
+        await store.batchUpsert(articles: [item("c", date: now.addingTimeInterval(day), text: 2000)], feedUrl: feed, validators: FeedValidators(etag: nil, lastModified: nil))
+        stored = try await db.feedFetchStates()[feed]
+        assertEqual([stored?.itemCount, stored?.fullTextItems], [1, 1], "A newer response replaces the stats")
+        assertEqual(stored?.failures, 1, "Ingest writes only its own columns, so an earlier failure count stays until a success clears it")
+
+        // End to end: a refresh publishes health to the UI model.
+        let mockConfig = URLSessionConfiguration.default
+        mockConfig.protocolClasses = [MockURLProtocol.self]
+        defer { MockURLProtocol.requestHandler = nil }
+        let suite = "test.health.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = AppSettings(defaults: defaults)
+        let live = "https://8.8.4.4/live.xml"
+        settings.feedURLs = [live]
+        settings.aiEnabled = false
+        settings.notificationsEnabled = false
+        let fetcher = FeedFetcher(client: SecureHTTPClient(configuration: mockConfig))
+        let manager = FeedManager(settings: settings, store: store, schedulesRefresh: false,
+            fetchBatch: { urls, allowHTTP in await fetcher.fetchAllFeeds(urls: urls, allowHTTP: allowHTTP, state: db) },
+            notifyBatch: { _, _ in })
+        let body = String(repeating: "Publisher report text. ", count: 80)
+        let rfc822 = { () -> String in
+            let formatter = DateFormatter()
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            formatter.dateFormat = "EEE, dd MMM yyyy HH:mm:ss Z"
+            return formatter.string(from: Date())
+        }()
+        let xml = Data("<rss version='2.0' xmlns:content='http://purl.org/rss/1.0/modules/content/'><channel><title>Live</title><item><title>One</title><link>https://example.com/live-one</link><guid>live-one</guid><pubDate>\(rfc822)</pubDate><content:encoded>\(body)</content:encoded></item></channel></rss>".utf8)
+        var status = 200
+        MockURLProtocol.requestHandler = { request in
+            (HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: status == 429 ? ["Retry-After": "900"] : nil)!, status == 200 ? xml : Data())
+        }
+        await manager.fetchFeedsAsync()
+        let responding = manager.feedHealth[live]
+        assertEqual(responding?.availability, .responding, "A refreshed feed reports as responding")
+        assertEqual(responding?.freshness, .recent, "Its items are recent")
+        assertEqual(responding?.textQuality, .full, "Its text is full")
+        status = 429
+        await manager.fetchFeedsAsync()
+        if case .failing(let failures, let retryAt)? = manager.feedHealth[live]?.availability {
+            assertEqual(failures, 1, "A refusal is counted")
+            assertTrue((retryAt ?? .distantPast) > Date(), "The next attempt is in the future")
+        } else {
+            assertTrue(false, "A refused feed reports as failing")
+        }
+        assertEqual(manager.feedHealth[live]?.textQuality, .full, "Content stats survive a failure")
+        manager.stopBackgroundWork()
+    }
+
     static func testUndatedArticleOrdering() async throws {
         let db = DatabaseEngine(path: ":memory:")
         try await db.open()
@@ -1957,7 +2075,7 @@ struct NewsTests {
         await cancelledDB.close()
         let db = DatabaseEngine(path: copyPath)
         try await db.open()
-        assertEqual(value(copyPath, "PRAGMA user_version;"), "10", "Copied v4 library upgrades to the current schema")
+        assertEqual(value(copyPath, "PRAGMA user_version;"), "11", "Copied v4 library upgrades to the current schema")
         assertEqual(value(originalPath, "PRAGMA user_version;"), "4", "Original fixture stays untouched")
         assertEqual(try await db.fetchArticles(limit: nil).count, 3, "Migration keeps historical rows")
         assertEqual(value(copyPath, "SELECT read_at FROM article_state WHERE article_id = 'alias-first';"), originalReadAt, "Migration preserves read history timestamp")
@@ -2128,7 +2246,7 @@ struct NewsTests {
         assertEqual(value(failure, "SELECT is_saved FROM article_state WHERE article_id='historical-a';"), "0", "Injected failure rolls back survivor state union")
         assertEqual(value(failure, "SELECT article_id FROM article_aliases WHERE value='observed-variant-b';"), "historical-b", "Injected failure preserves old aliases")
         try await migrated.open()
-        assertEqual(value(copy, "PRAGMA user_version;"), "10", "Copied library upgrades to the current schema")
+        assertEqual(value(copy, "PRAGMA user_version;"), "11", "Copied library upgrades to the current schema")
         assertEqual(value(path, "PRAGMA user_version;"), "8", "Original fixture remains untouched")
         assertEqual(try await migrated.fetchArticles(limit: nil).count, 6, "Only confident same-URL text copies are hidden")
         assertEqual(try await migrated.fetchArticles(limit: nil, includingOriginals: true).count, 8, "Every stored original remains reachable")
