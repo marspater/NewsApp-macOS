@@ -2030,6 +2030,13 @@ struct NewsTests {
         }
         let (udpClient, udpReply) = try await socksConnect(production, host: "93.184.216.34", command: 3)
         assertEqual(udpReply[1], 2, "UDP ASSOCIATE is denied")
+        try await socketSend(udpClient, Data("trailing".utf8))
+        do {
+            _ = try await socketRead(udpClient, count: 1)
+            assertTrue(false, "Rejected tunnel never relays trailing client bytes")
+        } catch let error as FeedError {
+            assertEqual(error, .network("EOF"), "Rejected tunnel drains unread bytes and closes without a reset")
+        }
         udpClient.cancel()
         let (portClient, portReply) = try await socksConnect(production, host: "93.184.216.34", port: 22)
         assertEqual(portReply[1], 2, "Unapproved ports denied")

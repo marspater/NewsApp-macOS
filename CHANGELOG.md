@@ -4,6 +4,8 @@
 
 ### Fixed
 
+- Deliver SOCKS rejection replies reliably: the network gateway half-closes and drains unread request bytes instead of resetting the connection.
+
 - Keep undated stories visible using stable ingestion-time ordering, with matching archive/search cursors and retention.
 
 - Preserve the visible library on database read failures and notify only for committed new article IDs across the full archive.
