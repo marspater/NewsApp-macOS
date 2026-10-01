@@ -390,8 +390,143 @@ actor DatabaseEngine {
                 throw error
             }
         }
+        if version < 9 {
+            try beginTransaction()
+            do {
+                try executeSimple("""
+                CREATE TABLE article_reconciliations (
+                    duplicate_id TEXT PRIMARY KEY REFERENCES articles(id) ON DELETE CASCADE,
+                    survivor_id TEXT NOT NULL REFERENCES articles(id) ON DELETE CASCADE,
+                    canonical_url TEXT NOT NULL, fingerprint TEXT NOT NULL
+                );
+                CREATE INDEX idx_article_reconciliation_survivor ON article_reconciliations(survivor_id);
+                CREATE INDEX idx_article_reconciliation_evidence ON article_reconciliations(canonical_url, fingerprint);
+                CREATE TABLE article_reconciliation_history (
+                    article_id TEXT PRIMARY KEY REFERENCES articles(id) ON DELETE CASCADE,
+                    is_read INTEGER NOT NULL, is_saved INTEGER NOT NULL,
+                    read_at REAL, saved_at REAL
+                );
+                """)
+                try reconcileHistoricalArticles()
+                try Task.checkCancellation()
+                try setUserVersion(9)
+                try commitTransaction()
+            } catch {
+                try? rollbackTransaction()
+                throw error
+            }
+        }
     }
     
+    private func executeBound(_ sql: String, _ values: [String]) throws {
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+            throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Cannot prepare reconciliation statement"])
+        }
+        defer { sqlite3_finalize(statement) }
+        for (index, value) in values.enumerated() {
+            sqlite3_bind_text(statement, Int32(index + 1), value, -1, Self.sqliteTransient)
+        }
+        guard sqlite3_step(statement) == SQLITE_DONE else {
+            throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Cannot execute reconciliation statement"])
+        }
+    }
+
+    private func reconcileHistoricalArticles() throws {
+        var statement: OpaquePointer?
+        let sql = """
+        SELECT id, canonical_url, title, description, content, published_at, source
+        FROM articles JOIN article_state ON article_state.article_id = articles.id
+        ORDER BY canonical_url, reader_document IS NOT NULL DESC,
+            length(content) DESC, created_at, id;
+        """
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+            throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Cannot prepare historical reconciliation"])
+        }
+        defer { sqlite3_finalize(statement) }
+        var currentURL = ""
+        var survivors = [String: String]()
+        var status = sqlite3_step(statement)
+        while status == SQLITE_ROW {
+            try Task.checkCancellation()
+            func text(_ column: Int32) -> String {
+                sqlite3_column_text(statement, column).map { String(cString: $0) } ?? ""
+            }
+            let id = text(0), url = text(1)
+            if url != currentURL { survivors.removeAll(keepingCapacity: true); currentURL = url }
+            if Self.isDocumentURL(url) {
+                let body = text(4)
+                let article = FeedArticle(title: text(2), link: url, guid: nil,
+                    description: text(3),
+                    pubDate: Date(timeIntervalSince1970: sqlite3_column_double(statement, 5)),
+                    source: text(6), fullContent: body.isEmpty ? nil : body)
+                if let fingerprint = Self.historicalFingerprint(article) {
+                    if let survivor = survivors[fingerprint] {
+                        try reconcileHistoricalArticle(id, into: survivor, url: url, fingerprint: fingerprint)
+                    } else if survivors.count < 1000 {
+                        // ponytail: bounded candidates per exact URL; oversized ambiguous
+                        // groups remain separate until corpus evidence justifies more work.
+                        survivors[fingerprint] = id
+                    }
+                }
+            }
+            status = sqlite3_step(statement)
+        }
+        guard status == SQLITE_DONE else {
+            throw NSError(domain: "DatabaseEngine", code: Int(status), userInfo: [NSLocalizedDescriptionKey: "Cannot read historical articles"])
+        }
+    }
+
+    private func reconcileHistoricalArticle(_ duplicate: String, into survivor: String, url: String, fingerprint: String) throws {
+        try executeBound("INSERT OR IGNORE INTO article_reconciliation_history SELECT * FROM article_state WHERE article_id IN (?, ?);", [duplicate, survivor])
+        try executeBound("""
+        UPDATE article_state SET (is_read, is_saved, read_at, saved_at) =
+            (SELECT max(is_read), max(is_saved), max(read_at), max(saved_at)
+             FROM article_state WHERE article_id IN (?, ?)) WHERE article_id = ?;
+        """, [duplicate, survivor, survivor])
+        try executeBound("INSERT OR IGNORE INTO article_feeds SELECT ?, feed_url FROM article_feeds WHERE article_id = ?;", [survivor, duplicate])
+        try executeBound("INSERT INTO article_reconciliations VALUES (?, ?, ?, ?);", [duplicate, survivor, url, fingerprint])
+        try executeBound("UPDATE article_aliases SET article_id = ? WHERE article_id = ?;", [survivor, duplicate])
+        try executeBound("""
+        INSERT INTO article_aliases(kind, value, article_id) VALUES ('id', ?, ?)
+        ON CONFLICT(kind, value) DO UPDATE SET article_id = excluded.article_id;
+        """, [duplicate, survivor])
+        // Keep URL/content ambiguity tombstones: reconciliation does not infer
+        // ownership of conflicting or previously removed alias targets.
+    }
+
+    private static func historicalFingerprint(_ article: FeedArticle) -> String? {
+        // A present body must qualify itself; its teaser cannot override different prose.
+        let body = article.fullContent ?? ""
+        let evidence = FeedArticle(title: article.title, link: article.link, guid: nil,
+            description: body.isEmpty ? article.description : "", pubDate: article.pubDate,
+            source: article.source, fullContent: body.isEmpty ? nil : body)
+        return ArticleIdentity.publisherTextFingerprints(evidence).first
+    }
+
+    private func historicalTarget(_ article: FeedArticle) throws -> String? {
+        guard let fingerprint = Self.historicalFingerprint(article) else { return nil }
+        var statement: OpaquePointer?
+        let sql = "SELECT DISTINCT survivor_id FROM article_reconciliations WHERE canonical_url = ? AND fingerprint = ?;"
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+            throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Cannot prepare historical identity lookup"])
+        }
+        defer { sqlite3_finalize(statement) }
+        sqlite3_bind_text(statement, 1, article.normalizedLink, -1, Self.sqliteTransient)
+        sqlite3_bind_text(statement, 2, fingerprint, -1, Self.sqliteTransient)
+        let status = sqlite3_step(statement)
+        if status == SQLITE_DONE { return nil }
+        guard status == SQLITE_ROW else {
+            throw NSError(domain: "DatabaseEngine", code: Int(status), userInfo: [NSLocalizedDescriptionKey: "Cannot read historical identity"])
+        }
+        let target = String(cString: sqlite3_column_text(statement, 0))
+        let next = sqlite3_step(statement)
+        guard next == SQLITE_ROW || next == SQLITE_DONE else {
+            throw NSError(domain: "DatabaseEngine", code: Int(next), userInfo: [NSLocalizedDescriptionKey: "Cannot finish historical identity lookup"])
+        }
+        return next == SQLITE_DONE ? target : nil
+    }
+
     private func getUserVersion() throws -> Int {
         guard let db = db else { throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Database not open"]) }
         var stmt: OpaquePointer?
@@ -499,6 +634,7 @@ actor DatabaseEngine {
         }
         if let target = idTarget ?? urlTarget { return target }
         if let target = try publisherTextTarget(article) { return target }
+        if let target = try historicalTarget(article) { return target }
         // Direct legacy callers may still supply an unscoped model. Keep that key
         // only if unused; a GUID already owned by another feed needs its scoped key.
         if let scoped, article.storedID == nil,
@@ -734,6 +870,9 @@ actor DatabaseEngine {
     // Unknown publisher dates retain their identity sentinel; ingestion time orders them.
     private static let articleDateOrder = "CASE WHEN a.published_at = \(DateParser.unknownDate.timeIntervalSince1970) THEN a.created_at ELSE a.published_at END"
 
+    private static let savedDocumentIDs = "SELECT article_id FROM article_state WHERE is_saved = 1 UNION SELECT r.duplicate_id FROM article_reconciliations r JOIN article_state s ON s.article_id = r.survivor_id WHERE s.is_saved = 1"
+    private static let visibleArticle = "NOT EXISTS (SELECT 1 FROM article_reconciliations r WHERE r.duplicate_id = a.id)"
+
     // MARK: - Article Queries
     
     func fetchArticles(
@@ -743,7 +882,8 @@ actor DatabaseEngine {
         limit: Int? = 500,
         after: ArticleQueryCursor? = nil,
         id: String? = nil,
-        canonicalURL: String? = nil
+        canonicalURL: String? = nil,
+        includingOriginals: Bool = false
     ) throws -> [FeedArticle] {
         guard let db = db else { throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Database not open"]) }
         
@@ -760,11 +900,12 @@ actor DatabaseEngine {
         """
 
         
+        if !includingOriginals { query += " AND " + Self.visibleArticle }
         var params: [(type: String, val: Any)] = []
         
         if let id {
             query += " AND a.id = ?"
-            params.append(("text", try resolvedArticleID(id)))
+            params.append(("text", includingOriginals ? id : try resolvedArticleID(id)))
         }
         if let canonicalURL {
             if let target = try aliasTarget(kind: "url", value: canonicalURL) {
@@ -889,6 +1030,8 @@ actor DatabaseEngine {
             sql += " WHERE 1=1"
         }
         
+        sql += " AND " + Self.visibleArticle
+
         if let sf = sourceFilter {
             sql += " AND a.source LIKE ?"
             params.append(("text", "%\(sf)%"))
@@ -1153,7 +1296,7 @@ actor DatabaseEngine {
     
     func getReadArticleIDs() throws -> Set<String> {
         guard let db = db else { throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Database not open"]) }
-        let sql = "SELECT article_id FROM article_state WHERE is_read = 1;"
+        let sql = "SELECT article_id FROM article_state s WHERE is_read = 1 AND NOT EXISTS (SELECT 1 FROM article_reconciliations r WHERE r.duplicate_id = s.article_id);"
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
         defer { sqlite3_finalize(stmt) }
@@ -1436,8 +1579,8 @@ actor DatabaseEngine {
     func clearArticleCache() throws {
         try beginTransaction()
         do {
-            try executeSimple("UPDATE articles SET content = NULL, reader_document = NULL WHERE id NOT IN (SELECT article_id FROM article_state WHERE is_saved = 1);")
-            try executeSimple("DELETE FROM article_enrichment WHERE article_id NOT IN (SELECT article_id FROM article_state WHERE is_saved = 1);")
+            try executeSimple("UPDATE articles SET content = NULL, reader_document = NULL WHERE id NOT IN (\(Self.savedDocumentIDs));")
+            try executeSimple("DELETE FROM article_enrichment WHERE article_id NOT IN (\(Self.savedDocumentIDs));")
             try commitTransaction()
         } catch {
             try? rollbackTransaction()
@@ -1450,7 +1593,7 @@ actor DatabaseEngine {
         try beginTransaction()
         do {
             try executeSimple("DELETE FROM article_enrichment;")
-            try executeSimple("UPDATE articles SET content = NULL, reader_document = NULL WHERE id NOT IN (SELECT article_id FROM article_state WHERE is_saved = 1);")
+            try executeSimple("UPDATE articles SET content = NULL, reader_document = NULL WHERE id NOT IN (\(Self.savedDocumentIDs));")
             try commitTransaction()
         } catch {
             try? rollbackTransaction()
@@ -1468,15 +1611,19 @@ actor DatabaseEngine {
         guard let db = db else { throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Database not open"]) }
         let cutoff = Date().timeIntervalSince1970 - Double(keepReadDays * 86400)
         
+        let expired = """
+        SELECT a.id FROM articles a JOIN article_state s ON s.article_id = a.id
+        WHERE s.is_read = 1 AND s.is_saved = 0 AND \(Self.articleDateOrder) < ?
+            AND \(Self.visibleArticle)
+            AND NOT EXISTS (SELECT 1 FROM event_overview_citations c
+                WHERE c.article_id = a.id OR c.article_id IN (
+                    SELECT duplicate_id FROM article_reconciliations WHERE survivor_id = a.id))
+        """
         let sql = """
-        DELETE FROM articles
-        WHERE id IN (
-            SELECT a.id FROM articles a
-            JOIN article_state s ON s.article_id = a.id
-            WHERE s.is_read = 1
-              AND s.is_saved = 0
-              AND \(Self.articleDateOrder) < ?
-              AND a.id NOT IN (SELECT article_id FROM event_overview_citations)
+        DELETE FROM articles WHERE id IN (
+            \(expired)
+            UNION SELECT r.duplicate_id FROM article_reconciliations r
+                WHERE r.survivor_id IN (\(expired))
         );
         """
         var stmt: OpaquePointer?
@@ -1484,6 +1631,7 @@ actor DatabaseEngine {
         defer { sqlite3_finalize(stmt) }
         
         sqlite3_bind_double(stmt, 1, cutoff)
+        sqlite3_bind_double(stmt, 2, cutoff)
         if sqlite3_step(stmt) == SQLITE_DONE {
             let changes = Int(sqlite3_changes(db))
             if changes > 0 {
@@ -1510,7 +1658,8 @@ actor DatabaseEngine {
             coalesce(sum(case when s.is_read = 0 then 1 else 0 end), 0) as unread_count,
             coalesce(sum(case when s.is_saved = 1 then 1 else 0 end), 0) as saved_count
         FROM articles a
-        JOIN article_state s ON s.article_id = a.id;
+        JOIN article_state s ON s.article_id = a.id
+        WHERE \(Self.visibleArticle);
         """
         if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
             defer { sqlite3_finalize(stmt) }
