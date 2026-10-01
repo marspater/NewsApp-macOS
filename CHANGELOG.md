@@ -16,6 +16,7 @@
 ### Changed
 
 - Request feeds conditionally: stored ETag and Last-Modified validators let publishers answer 304 Not Modified, which leaves stored articles untouched. Validators are saved atomically with the ingested articles, cleared by cache purges and dropped when a server stops sending them.
+- Honor `Retry-After` on 429/503 and back failing feeds off exponentially (10 minutes doubling to 6 hours), persisted per feed. Scheduled and manual refreshes both respect the wait, a host that pushed back is left alone, at most two requests run per host, and an offline device is not mistaken for failing feeds.
 - Preserve inline publisher figures, captions and alt text in the native reader, with bounded image decoding and graceful unavailable-image states.
 - Reuse the existing article for incoming GUID variants of the same document URL while retaining its durable identity, bookmarks and reading history.
 - Preserve meaningful URL query parameters instead of stripping every parameter beginning with a tracking-key prefix.

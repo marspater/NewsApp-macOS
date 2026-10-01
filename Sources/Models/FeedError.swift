@@ -11,6 +11,10 @@ enum FeedError: LocalizedError, Equatable, Sendable {
     case dnsRebindingDetected(host: String, ip: String)
     case responseTooLarge(bytes: Int64, maxAllowed: Int64)
     case httpStatus(Int)
+    /// 429 or 503, with the server's `Retry-After` when it sent one.
+    case serverBusy(status: Int, retryAfter: TimeInterval?)
+    /// Not requested: a server limit or repeated failures keep this feed paused until then.
+    case retryScheduled(until: Date)
     case unsupportedFormat(String)
     case parseFailed(String)
     case network(String)
@@ -38,6 +42,10 @@ enum FeedError: LocalizedError, Equatable, Sendable {
             return String(format: "Payload too large (%.1f MB exceeds %.1f MB limit).", mb, limitMb)
         case .httpStatus(let code):
             return "Server returned HTTP error status code \(code)."
+        case .serverBusy(let status, _):
+            return "The server asked News to slow down (HTTP \(status))."
+        case .retryScheduled(let until):
+            return "Paused until \(until.formatted(date: .abbreviated, time: .shortened)) after the server asked News to wait or the feed kept failing."
         case .unsupportedFormat(let format):
             return "Unsupported feed format: \(format)."
         case .parseFailed(let reason):

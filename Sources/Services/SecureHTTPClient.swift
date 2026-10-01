@@ -48,7 +48,7 @@ actor SecureHTTPClient {
 
     /// With validators the request is conditional and a 304 returns an empty body instead of throwing.
     func fetchFeed(from url: URL, allowHTTP: Bool = false, validators: FeedValidators? = nil) async throws -> (Data, HTTPURLResponse) {
-        try await fetchData(from: url, maxBytes: Self.defaultFeedLimit, timeout: Self.defaultTimeout, allowHTTP: allowHTTP, validators: validators)
+        try await fetchData(from: url, maxBytes: Self.defaultFeedLimit, timeout: Self.defaultTimeout, allowHTTP: allowHTTP, validators: validators, reportsBackpressure: true)
     }
 
     func fetchArticleHTML(from url: URL, allowHTTP: Bool = false) async throws -> (Data, HTTPURLResponse) {
@@ -123,7 +123,8 @@ actor SecureHTTPClient {
         timeout: TimeInterval = defaultTimeout,
         allowHTTP: Bool = false,
         cachePolicy: URLRequest.CachePolicy = .reloadIgnoringLocalCacheData,
-        validators: FeedValidators? = nil
+        validators: FeedValidators? = nil,
+        reportsBackpressure: Bool = false
     ) async throws -> (Data, HTTPURLResponse) {
         try validateDestination(url, allowHTTP: allowHTTP)
 
@@ -167,6 +168,10 @@ actor SecureHTTPClient {
         }
 
         // 7. Verify HTTP Status Code
+        if reportsBackpressure, httpResponse.statusCode == 429 || httpResponse.statusCode == 503 {
+            throw FeedError.serverBusy(status: httpResponse.statusCode,
+                                       retryAfter: FeedRetryPolicy.retryAfter(header: httpResponse.value(forHTTPHeaderField: "Retry-After"), now: Date()))
+        }
         guard (200...299).contains(httpResponse.statusCode) || (isConditional && httpResponse.statusCode == 304) else {
             throw FeedError.httpStatus(httpResponse.statusCode)
         }
