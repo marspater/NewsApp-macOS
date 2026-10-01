@@ -138,6 +138,7 @@ struct NewsTests {
         try await testAuditParsingAndSettingsRegressions(fixtureRoot: fixtureRoot)
         try await testAuditPersistenceAndRoutingRegressions(fixtureRoot: fixtureRoot)
         try await testAuditRefreshRegressions(fixtureRoot: fixtureRoot)
+        try await testConditionalFeedRequests(fixtureRoot: fixtureRoot)
         try await testUndatedArticleOrdering()
         try await testReaderFigures(fixtureRoot: fixtureRoot)
         await testReaderParsingRegressions()
@@ -959,7 +960,7 @@ struct NewsTests {
         settings.notificationsEnabled = true
         var notified: [String] = []
         let manager = FeedManager(settings: settings, store: store, schedulesRefresh: false,
-            fetchBatch: { urls, _ in urls.map { ($0, [archived, fresh, fresh], nil) } },
+            fetchBatch: { urls, _ in urls.map { ($0, [archived, fresh, fresh], nil, nil) } },
             notifyBatch: { articles, _ in notified.append(contentsOf: articles.map { $0.id }) })
         await manager.fetchFeedsAsync()
         let freshID = ArticleIdentity.scopedGUID(fresh.guid, feedURL: settings.feedURLs[0])!
@@ -974,7 +975,7 @@ struct NewsTests {
         assertEqual(sqlite3_exec(connection, "CREATE TRIGGER fail_ingest BEFORE INSERT ON articles BEGIN SELECT RAISE(ABORT, 'simulated ingestion failure'); END;", nil, nil, nil), SQLITE_OK, "Install failed-ingestion trigger")
         let failed = FeedArticle(title: "Failed", link: fixtureRoot.appendingPathComponent("failed").absoluteString, guid: "failed", description: "", pubDate: Date(), source: "Publisher")
         let failureManager = FeedManager(settings: settings, store: store, schedulesRefresh: false,
-            fetchBatch: { urls, _ in urls.map { ($0, [failed], nil) } },
+            fetchBatch: { urls, _ in urls.map { ($0, [failed], nil, nil) } },
             notifyBatch: { articles, _ in notified.append(contentsOf: articles.map { $0.id }) })
         await failureManager.fetchFeedsAsync()
         assertEqual(notified, [freshID], "Failed ingestion cannot send new-story notifications")
@@ -986,6 +987,121 @@ struct NewsTests {
         await failureManager.fetchFeedsAsync()
         assertEqual(failureManager.articles, snapshot, "Refresh read errors retain the visible library")
         failureManager.stopBackgroundWork()
+    }
+
+    @MainActor
+    static func testConditionalFeedRequests(fixtureRoot: URL) async throws {
+        print("  - Testing conditional feed requests, 304 handling and atomic validator persistence...")
+        let config = URLSessionConfiguration.default
+        config.protocolClasses = [MockURLProtocol.self]
+        let client = SecureHTTPClient(configuration: config)
+        defer { MockURLProtocol.requestHandler = nil }
+        let feedURL = fixtureRoot.appendingPathComponent("conditional.xml")
+        let modified = "Wed, 21 Oct 2026 07:28:00 GMT"
+
+        // Header plumbing: validators are replayed, and only a conditional request may accept 304.
+        var seen: [URLRequest] = []
+        MockURLProtocol.requestHandler = { request in
+            seen.append(request)
+            return (HTTPURLResponse(url: request.url!, statusCode: 304, httpVersion: nil, headerFields: nil)!, Data())
+        }
+        let (body, notModified) = try await client.fetchFeed(from: feedURL, validators: FeedValidators(etag: "W/\"v1\"", lastModified: modified))
+        assertEqual(notModified.statusCode, 304, "Conditional request surfaces 304")
+        assertTrue(body.isEmpty, "304 carries no body")
+        assertEqual(seen.last?.value(forHTTPHeaderField: "If-None-Match"), "W/\"v1\"", "Weak ETag replayed verbatim")
+        assertEqual(seen.last?.value(forHTTPHeaderField: "If-Modified-Since"), modified, "Last-Modified replayed")
+        do {
+            _ = try await client.fetchFeed(from: feedURL)
+            assertTrue(false, "An unconditional request cannot accept 304")
+        } catch {
+            assertEqual(error as? FeedError, .httpStatus(304), "Unsolicited 304 stays an HTTP error")
+        }
+        assertTrue(FeedValidators(etag: "x\r\nInjected: 1", lastModified: String(repeating: "a", count: 600)).isEmpty,
+                   "Header injection and oversized validators are dropped")
+        assertTrue(FeedValidators(etag: "\"caf\u{E9}\"", lastModified: nil).isEmpty, "Non-ASCII validators are dropped")
+
+        // End to end through refresh, with a real database.
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let path = directory.appendingPathComponent("conditional.sqlite").path
+        let db = DatabaseEngine(path: path)
+        let store = ArticleStore(database: db)
+        await store.initialize()
+        let suite = "test.conditional.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = AppSettings(defaults: defaults)
+        let feed = feedURL.absoluteString
+        settings.feedURLs = [feed]
+        settings.aiEnabled = false
+        let fetcher = FeedFetcher(client: client)
+        var notified = 0
+        let manager = FeedManager(settings: settings, store: store, schedulesRefresh: false,
+            fetchBatch: { urls, allowHTTP in await fetcher.fetchAllFeeds(urls: urls, allowHTTP: allowHTTP, state: db) },
+            notifyBatch: { articles, _ in notified += articles.count })
+        func rss(_ names: [String]) -> Data {
+            let items = names.map { "<item><title>Report \($0)</title><link>\(fixtureRoot.appendingPathComponent($0).absoluteString)</link><guid>\($0)</guid><description>Publisher report</description><pubDate>Wed, 21 Oct 2026 07:28:00 +0000</pubDate></item>" }
+            return Data("<rss version='2.0'><channel><title>Conditional</title>\(items.joined())</channel></rss>".utf8)
+        }
+        func serve(_ names: [String], headers: [String: String]) {
+            MockURLProtocol.requestHandler = { request in
+                seen.append(request)
+                return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: headers)!, rss(names))
+            }
+        }
+        func stored() async throws -> FeedValidators? { try await db.feedValidators()[feed] }
+
+        seen = []
+        serve(["a", "b"], headers: ["ETag": "\"v1\"", "Last-Modified": modified])
+        await manager.fetchFeedsAsync()
+        assertEqual(seen.count, 1, "First refresh requests the feed once")
+        assertEqual(seen.first?.value(forHTTPHeaderField: "If-None-Match"), nil, "First refresh is unconditional")
+        assertEqual(manager.articles.count, 2, "First refresh ingests the feed")
+        assertEqual(try await stored(), FeedValidators(etag: "\"v1\"", lastModified: modified), "Validators persist with the ingested articles")
+
+        seen = []
+        MockURLProtocol.requestHandler = { request in
+            seen.append(request)
+            return (HTTPURLResponse(url: request.url!, statusCode: 304, httpVersion: nil, headerFields: nil)!, Data())
+        }
+        let before = manager.articles
+        await manager.fetchFeedsAsync()
+        assertEqual(seen.last?.value(forHTTPHeaderField: "If-None-Match"), "\"v1\"", "Stored ETag is sent on the next refresh")
+        assertEqual(seen.last?.value(forHTTPHeaderField: "If-Modified-Since"), modified, "Stored Last-Modified is sent on the next refresh")
+        assertEqual(manager.articles, before, "304 leaves stored articles untouched")
+        assertEqual(manager.feedStatuses[feed], .idle, "304 is a healthy refresh")
+        assertEqual(notified, 2, "304 notifies nothing")
+        assertEqual(try await stored(), FeedValidators(etag: "\"v1\"", lastModified: modified), "304 keeps validators")
+
+        // An ingest that fails must not advance the validators, or the new items would hide behind a later 304.
+        var connection: OpaquePointer?
+        assertEqual(sqlite3_open(path, &connection), SQLITE_OK, "Open isolated conditional fixture")
+        defer { sqlite3_close(connection) }
+        assertEqual(sqlite3_exec(connection, "CREATE TRIGGER fail_ingest BEFORE INSERT ON articles BEGIN SELECT RAISE(ABORT, 'simulated ingestion failure'); END;", nil, nil, nil), SQLITE_OK, "Install failed-ingestion trigger")
+        serve(["a", "b", "c"], headers: ["ETag": "\"v2\""])
+        await manager.fetchFeedsAsync()
+        assertEqual(manager.articles.count, 2, "Failed ingestion stores nothing")
+        assertEqual(try await stored(), FeedValidators(etag: "\"v1\"", lastModified: modified), "Failed ingestion keeps the previous validators")
+
+        assertEqual(sqlite3_exec(connection, "DROP TRIGGER fail_ingest;", nil, nil, nil), SQLITE_OK, "Remove failed-ingestion trigger")
+        seen = []
+        serve(["a", "b", "c"], headers: ["ETag": "\"v2\""])
+        await manager.fetchFeedsAsync()
+        assertEqual(seen.last?.value(forHTTPHeaderField: "If-None-Match"), "\"v1\"", "Retry still asks relative to the last ingested state")
+        assertEqual(manager.articles.count, 3, "A server that answers 200 to a conditional request is ingested normally")
+        assertEqual(try await stored(), FeedValidators(etag: "\"v2\"", lastModified: nil), "Validators advance with the new items and drop stale Last-Modified")
+
+        serve(["a", "b", "c"], headers: [:])
+        await manager.fetchFeedsAsync()
+        assertEqual(try await stored(), nil, "A response without validators clears stale ones")
+
+        serve(["a", "b", "c"], headers: ["ETag": "\"v3\""])
+        await manager.fetchFeedsAsync()
+        assertEqual(try await stored(), FeedValidators(etag: "\"v3\"", lastModified: nil), "Validators are recorded again")
+        try await db.clearAllDatabaseCache()
+        assertEqual(try await stored(), nil, "Purging replaceable caches forces the next refresh to be unconditional")
+        manager.stopBackgroundWork()
     }
 
     static func testUndatedArticleOrdering() async throws {
@@ -1899,7 +2015,7 @@ struct NewsTests {
         await store.initialize()
         var notifications = [String]()
         let manager = FeedManager(settings: settings, store: store, schedulesRefresh: false,
-            fetchBatch: { urls, _ in urls.map { ($0, [first, duplicate], nil) } },
+            fetchBatch: { urls, _ in urls.map { ($0, [first, duplicate], nil, nil) } },
             notifyBatch: { articles, _ in notifications.append(contentsOf: articles.map { $0.id }) })
         await manager.fetchFeedsAsync()
         assertEqual(manager.articles.count, 1, "Refresh displays exact content variants once")
@@ -2026,7 +2142,7 @@ struct NewsTests {
                     "<item><title>Report</title><link>\(article.link)</link><guid isPermaLink='false'>\(article.guid!)</guid><description>Publisher report</description></item>"
                 }.joined()
                 let xml = "<rss version='2.0'><channel><title>Shared feed title</title>\(items)</channel></rss>"
-                return (feed, FeedXMLParser(data: Data(xml.utf8)).parse(), nil)
+                return (feed, FeedXMLParser(data: Data(xml.utf8)).parse(), nil, nil)
             } }, notifyBatch: { articles, _ in notified.append(contentsOf: articles.map { $0.id }) })
         await manager.fetchFeedsAsync()
         assertEqual(Set(notified), Set([first.id, second.id]), "Both colliding publishers notify with committed, distinct IDs")
@@ -2670,7 +2786,7 @@ struct NewsTests {
                 fetchBatch: { urls, _ in
                     guard let url = urls.first else { return [] }
                     await gate.wait()
-                    return [(url, [article], nil)]
+                    return [(url, [article], nil, nil)]
                 })
             let refresh = Task { await manager.fetchFeedsAsync() }
             while !(await gate.started) { await Task.yield() }

@@ -30,6 +30,7 @@ xcrun actool "$(pwd)/Assets/AppIcon.icon" --compile "$(pwd)/${RESOURCES_DIR}" \
 SWIFT_SOURCES=(
     Sources/Services/DateParser.swift
     Sources/Models/FeedError.swift
+    Sources/Models/FeedFetchState.swift
     Sources/Services/IPAddressValidator.swift
     Sources/Models/ArticleIdentity.swift
     Sources/Models/EventOverview.swift

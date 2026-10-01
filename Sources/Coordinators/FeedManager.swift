@@ -30,7 +30,7 @@ class FeedManager: NSObject, ObservableObject {
     let appSettings: AppSettings
     let articleStore: ArticleStore
 
-    typealias FeedBatch = [(urlString: String, articles: [FeedArticle]?, error: FeedError?)]
+    typealias FeedBatch = [FeedFetchResult]
     private let fetchBatch: @Sendable ([String], Bool) async -> FeedBatch
     private let notifyBatch: @MainActor ([FeedArticle], AppSettings.NotificationMode) async -> Void
     private let enrichmentQueue: EnrichmentQueue
@@ -51,15 +51,17 @@ class FeedManager: NSObject, ObservableObject {
     var aiEnabled: Bool { appSettings.aiEnabled }
 
     init(settings: AppSettings? = nil, store: ArticleStore? = nil, schedulesRefresh: Bool = true,
-         fetchBatch: @escaping @Sendable ([String], Bool) async -> FeedBatch = { urls, allowHTTP in
-             await FeedFetcher.shared.fetchAllFeeds(urls: urls, allowHTTP: allowHTTP)
-         },
+         fetchBatch: (@Sendable ([String], Bool) async -> FeedBatch)? = nil,
          notifyBatch: @escaping @MainActor ([FeedArticle], AppSettings.NotificationMode) async -> Void = { articles, mode in
              await NotificationService.shared.triageAndNotify(newArticles: articles, mode: mode)
          }) {
+        let store = store ?? ArticleStore.shared
+        let state = store.database
         self.appSettings = settings ?? AppSettings.shared
-        self.articleStore = store ?? ArticleStore.shared
-        self.fetchBatch = fetchBatch
+        self.articleStore = store
+        self.fetchBatch = fetchBatch ?? { urls, allowHTTP in
+            await FeedFetcher.shared.fetchAllFeeds(urls: urls, allowHTTP: allowHTTP, state: state)
+        }
         self.notifyBatch = notifyBatch
         self.enrichmentQueue = EnrichmentQueue(store: self.articleStore)
         super.init()
@@ -301,7 +303,7 @@ class FeedManager: NSObject, ObservableObject {
                         return article
                     }
                     allParsed.append(contentsOf: arts)
-                    insertedIDs.formUnion(await articleStore.batchUpsert(articles: arts, feedUrl: res.urlString))
+                    insertedIDs.formUnion(await articleStore.batchUpsert(articles: arts, feedUrl: res.urlString, validators: res.validators))
                 }
             }
         }

@@ -46,8 +46,9 @@ actor SecureHTTPClient {
 
     // MARK: - Public Fetch Ingestion APIs
 
-    func fetchFeed(from url: URL, allowHTTP: Bool = false) async throws -> (Data, HTTPURLResponse) {
-        try await fetchData(from: url, maxBytes: Self.defaultFeedLimit, timeout: Self.defaultTimeout, allowHTTP: allowHTTP)
+    /// With validators the request is conditional and a 304 returns an empty body instead of throwing.
+    func fetchFeed(from url: URL, allowHTTP: Bool = false, validators: FeedValidators? = nil) async throws -> (Data, HTTPURLResponse) {
+        try await fetchData(from: url, maxBytes: Self.defaultFeedLimit, timeout: Self.defaultTimeout, allowHTTP: allowHTTP, validators: validators)
     }
 
     func fetchArticleHTML(from url: URL, allowHTTP: Bool = false) async throws -> (Data, HTTPURLResponse) {
@@ -121,7 +122,8 @@ actor SecureHTTPClient {
         maxBytes: Int64,
         timeout: TimeInterval = defaultTimeout,
         allowHTTP: Bool = false,
-        cachePolicy: URLRequest.CachePolicy = .reloadIgnoringLocalCacheData
+        cachePolicy: URLRequest.CachePolicy = .reloadIgnoringLocalCacheData,
+        validators: FeedValidators? = nil
     ) async throws -> (Data, HTTPURLResponse) {
         try validateDestination(url, allowHTTP: allowHTTP)
 
@@ -134,6 +136,10 @@ actor SecureHTTPClient {
         request.setValue("navigate", forHTTPHeaderField: "Sec-Fetch-Mode")
         request.setValue("document", forHTTPHeaderField: "Sec-Fetch-Dest")
         request.setValue("?1", forHTTPHeaderField: "Sec-Fetch-User")
+        // Explicit validators with a reload policy: URLSession passes the 304 to us instead of replaying its cache.
+        if let etag = validators?.etag { request.setValue(etag, forHTTPHeaderField: "If-None-Match") }
+        if let modified = validators?.lastModified { request.setValue(modified, forHTTPHeaderField: "If-Modified-Since") }
+        let isConditional = !(validators?.isEmpty ?? true)
 
         // 4. Progressive Byte Streaming Download with Size Enforcement
         let session = try await protectedSession()
@@ -161,7 +167,7 @@ actor SecureHTTPClient {
         }
 
         // 7. Verify HTTP Status Code
-        guard (200...299).contains(httpResponse.statusCode) else {
+        guard (200...299).contains(httpResponse.statusCode) || (isConditional && httpResponse.statusCode == 304) else {
             throw FeedError.httpStatus(httpResponse.statusCode)
         }
 

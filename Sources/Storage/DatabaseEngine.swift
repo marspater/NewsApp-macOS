@@ -685,8 +685,10 @@ actor DatabaseEngine {
         return targets.count == 1 ? targets.first : nil
     }
 
+    /// `validators` are written in the same transaction as the articles, so a feed is only ever
+    /// answered "not modified" for content that was durably ingested.
     @discardableResult
-    func upsertArticles(_ articles: [FeedArticle], feedUrl: String? = nil) throws -> Set<String> {
+    func upsertArticles(_ articles: [FeedArticle], feedUrl: String? = nil, validators: FeedValidators? = nil) throws -> Set<String> {
         guard let db = db else { throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Database not open"]) }
         guard !articles.isEmpty else { return [] }
         
@@ -862,9 +864,54 @@ actor DatabaseEngine {
             }
         }
         
+        if let feedUrl, let validators {
+            try recordFeedValidators(validators, for: feedUrl, at: now)
+        }
         try Task.checkCancellation()
         try commitTransaction()
         return insertedIDs
+    }
+
+    // MARK: - Feed Fetch State
+
+    /// Stored conditional-request validators keyed by subscription URL.
+    func feedValidators() throws -> [String: FeedValidators] {
+        guard let db = db else { throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Database not open"]) }
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, "SELECT url, etag, last_modified FROM feeds WHERE etag IS NOT NULL OR last_modified IS NOT NULL;", -1, &statement, nil) == SQLITE_OK else {
+            throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to prepare feed validator query"])
+        }
+        defer { sqlite3_finalize(statement) }
+        func text(_ column: Int32) -> String? { sqlite3_column_text(statement, column).map { String(cString: $0) } }
+        var result: [String: FeedValidators] = [:]
+        while sqlite3_step(statement) == SQLITE_ROW {
+            if let url = text(0) { result[url] = FeedValidators(etag: text(1), lastModified: text(2)) }
+        }
+        return result
+    }
+
+    /// Writes (or clears, when empty) a feed's validators; the caller owns the transaction.
+    private func recordFeedValidators(_ validators: FeedValidators, for feedURL: String, at now: Double) throws {
+        guard let db = db else { throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Database not open"]) }
+        let sql = """
+        INSERT INTO feeds (id, url, created_at, last_fetched_at, etag, last_modified) VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(url) DO UPDATE SET last_fetched_at = excluded.last_fetched_at, etag = excluded.etag, last_modified = excluded.last_modified;
+        """
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+            throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to prepare feed validator write"])
+        }
+        defer { sqlite3_finalize(statement) }
+        sqlite3_bind_text(statement, 1, UUID().uuidString, -1, Self.sqliteTransient)
+        sqlite3_bind_text(statement, 2, feedURL, -1, Self.sqliteTransient)
+        sqlite3_bind_double(statement, 3, now)
+        sqlite3_bind_double(statement, 4, now)
+        for (index, value) in [(5, validators.etag), (6, validators.lastModified)] {
+            if let value { sqlite3_bind_text(statement, Int32(index), value, -1, Self.sqliteTransient) } else { sqlite3_bind_null(statement, Int32(index)) }
+        }
+        guard sqlite3_step(statement) == SQLITE_DONE else {
+            throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to persist feed validators"])
+        }
     }
     
     // Unknown publisher dates retain their identity sentinel; ingestion time orders them.
@@ -1581,6 +1628,8 @@ actor DatabaseEngine {
         do {
             try executeSimple("UPDATE articles SET content = NULL, reader_document = NULL WHERE id NOT IN (\(Self.savedDocumentIDs));")
             try executeSimple("DELETE FROM article_enrichment WHERE article_id NOT IN (\(Self.savedDocumentIDs));")
+            // Feed-provided bodies return only from an unconditional refresh.
+            try executeSimple("UPDATE feeds SET etag = NULL, last_modified = NULL;")
             try commitTransaction()
         } catch {
             try? rollbackTransaction()
@@ -1594,6 +1643,7 @@ actor DatabaseEngine {
         do {
             try executeSimple("DELETE FROM article_enrichment;")
             try executeSimple("UPDATE articles SET content = NULL, reader_document = NULL WHERE id NOT IN (\(Self.savedDocumentIDs));")
+            try executeSimple("UPDATE feeds SET etag = NULL, last_modified = NULL;")
             try commitTransaction()
         } catch {
             try? rollbackTransaction()
