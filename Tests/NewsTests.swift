@@ -199,6 +199,7 @@ struct NewsTests {
             try await testModelAvailabilityAndLanguageFallbacks(fixtureRoot: fixtureRoot)
             try await testPassageAnchoredFactExtraction()
             try await testHistoricalReconciliation(fixtureRoot: fixtureRoot)
+            try await testEventDataModel(fixtureRoot: fixtureRoot)
             try await testAuditPersistenceAndRoutingRegressions(fixtureRoot: fixtureRoot)
             try await testUndatedArticleOrdering()
             await testDatabaseEnginePersistence()
@@ -257,6 +258,7 @@ struct NewsTests {
         try await testModelAvailabilityAndLanguageFallbacks(fixtureRoot: fixtureRoot)
         try await testPassageAnchoredFactExtraction()
         try await testHistoricalReconciliation(fixtureRoot: fixtureRoot)
+        try await testEventDataModel(fixtureRoot: fixtureRoot)
         await testFTS5SearchAndOperators()
         await testMigrationCoordinatorAtomicity()
         await testArticleRetentionPolicy()
@@ -2088,7 +2090,7 @@ struct NewsTests {
         await cancelledDB.close()
         let db = DatabaseEngine(path: copyPath)
         try await db.open()
-        assertEqual(value(copyPath, "PRAGMA user_version;"), "11", "Copied v4 library upgrades to the current schema")
+        assertEqual(value(copyPath, "PRAGMA user_version;"), "13", "Copied v4 library upgrades to the current schema")
         assertEqual(value(originalPath, "PRAGMA user_version;"), "4", "Original fixture stays untouched")
         assertEqual(try await db.fetchArticles(limit: nil).count, 3, "Migration keeps historical rows")
         assertEqual(value(copyPath, "SELECT read_at FROM article_state WHERE article_id = 'alias-first';"), originalReadAt, "Migration preserves read history timestamp")
@@ -2259,7 +2261,7 @@ struct NewsTests {
         assertEqual(value(failure, "SELECT is_saved FROM article_state WHERE article_id='historical-a';"), "0", "Injected failure rolls back survivor state union")
         assertEqual(value(failure, "SELECT article_id FROM article_aliases WHERE value='observed-variant-b';"), "historical-b", "Injected failure preserves old aliases")
         try await migrated.open()
-        assertEqual(value(copy, "PRAGMA user_version;"), "11", "Copied library upgrades to the current schema")
+        assertEqual(value(copy, "PRAGMA user_version;"), "13", "Copied library upgrades to the current schema")
         assertEqual(value(path, "PRAGMA user_version;"), "8", "Original fixture remains untouched")
         assertEqual(try await migrated.fetchArticles(limit: nil).count, 6, "Only confident same-URL text copies are hidden")
         assertEqual(try await migrated.fetchArticles(limit: nil, includingOriginals: true).count, 8, "Every stored original remains reachable")
@@ -2940,6 +2942,126 @@ struct NewsTests {
         assertEqual(version, MigrationCoordinator.currentMigrationVersion, "Migration version must be set to 1")
     }
     
+    @MainActor
+    static func testEventDataModel(fixtureRoot: URL) async throws {
+        print("  - Testing event IDs, membership versions, merges, splits, retention and copied v11 migration...")
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("news-events-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let path = directory.appendingPathComponent("original.sqlite3").path
+        let copy = directory.appendingPathComponent("copy.sqlite3").path
+        let cancelledPath = directory.appendingPathComponent("cancelled.sqlite3").path
+        func value(_ file: String, _ sql: String) -> String? {
+            var connection: OpaquePointer?, statement: OpaquePointer?
+            assertEqual(sqlite3_open(file, &connection), SQLITE_OK, "Inspect event fixture")
+            defer { sqlite3_close(connection) }
+            assertEqual(sqlite3_prepare_v2(connection, sql, -1, &statement, nil), SQLITE_OK, "Prepare event inspection")
+            defer { sqlite3_finalize(statement) }
+            guard sqlite3_step(statement) == SQLITE_ROW else { return nil }
+            return sqlite3_column_text(statement, 0).map { String(cString: $0) }
+        }
+        let old = Date().addingTimeInterval(-40 * 86400)
+        let articles = ["a", "b", "c", "d", "e"].map { name in
+            FeedArticle(storedID: "event-\(name)", title: "Event report \(name)", link: fixtureRoot.appendingPathComponent("events/\(name)").absoluteString,
+                        guid: "event-guid-\(name)", description: "Distinct reporting \(name)", pubDate: old, source: "Publisher \(name)")
+        }
+        let creator = DatabaseEngine(path: path)
+        try await creator.open()
+        try await creator.upsertArticles(articles)
+        try await creator.markRead(articleId: "event-a", isRead: true)
+        try await creator.markRead(articleId: "event-b", isRead: true)
+        try await creator.setSaved(articleId: "event-b", isSaved: true)
+        await creator.close()
+        var handle: OpaquePointer?
+        assertEqual(sqlite3_open(path, &handle), SQLITE_OK, "Open v11 event fixture")
+        assertEqual(sqlite3_exec(handle, "DROP TABLE event_members; DROP TABLE events; PRAGMA user_version = 11;", nil, nil, nil), SQLITE_OK, "Reconstruct a v11 library")
+        sqlite3_close(handle)
+        try FileManager.default.copyItem(atPath: path, toPath: copy)
+        try FileManager.default.copyItem(atPath: path, toPath: cancelledPath)
+
+        let cancelledDB = DatabaseEngine(path: cancelledPath)
+        let cancelled = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            try await cancelledDB.open()
+        }
+        do { try await cancelled.value; assertTrue(false, "Cancelled event migration must throw") } catch is CancellationError { }
+        assertEqual(value(cancelledPath, "PRAGMA user_version;"), "11", "Cancelled event migration keeps the old version")
+        assertEqual(value(cancelledPath, "SELECT count(*) FROM sqlite_master WHERE name IN ('events','event_members');"), "0", "Cancelled event migration rolls back its tables")
+
+        let db = DatabaseEngine(path: copy)
+        try await db.open()
+        assertEqual(value(copy, "PRAGMA user_version;"), "13", "Copied v11 library upgrades to the event schema")
+        assertEqual(value(path, "PRAGMA user_version;"), "11", "Original v11 fixture stays untouched")
+        assertEqual(try await db.fetchArticles(limit: nil).count, 5, "Event migration keeps every article")
+        assertTrue(try await db.isRead(articleId: "event-a"), "Event migration keeps read state")
+        assertTrue(try await db.isSaved(articleId: "event-b"), "Event migration keeps saved state")
+        assertEqual(value(copy, "SELECT group_concat(name) FROM (SELECT name FROM pragma_table_info('event_members') ORDER BY name);"),
+                    "article_id,event_id,joined_version", "Membership stores article references, not source text")
+        assertEqual(value(copy, "SELECT count(*) FROM pragma_table_info('events') WHERE name IN ('title','description','content');"), "0", "Events do not copy source text")
+
+        let first = try await db.createEvent(memberArticleIDs: ["event-a", "event-b", "event-c", "event-a"])
+        assertEqual(first.membershipVersion, 1, "A new event starts at membership version 1")
+        assertEqual(first.memberArticleIDs, ["event-a", "event-b", "event-c"], "Repeated articles join once")
+        let grown = try await db.addArticles(["event-d"], toEvent: first.id)
+        assertEqual(grown.id, first.id, "Adding members keeps the event ID")
+        assertEqual(grown.membershipVersion, 2, "Adding a member bumps the membership version")
+        assertEqual(value(copy, "SELECT joined_version FROM event_members WHERE article_id='event-d';"), "2", "Members record the version they joined")
+        assertEqual(try await db.addArticles(["event-d"], toEvent: first.id).membershipVersion, 2, "Re-adding a member does not bump the version")
+
+        let second = try await db.createEvent(memberArticleIDs: ["event-c"])
+        assertEqual(try await db.fetchEvent(id: first.id)?.membershipVersion, 3, "Losing a member to another event bumps the version")
+        assertEqual(try await db.eventID(forArticle: "event-c"), second.id, "An article belongs to one event at a time")
+
+        let merged = try await db.mergeEvents(second.id, into: first.id)
+        assertEqual(merged.id, first.id, "The survivor keeps its ID")
+        assertEqual(merged.membershipVersion, 4, "A merge that moves members bumps the survivor's version")
+        assertEqual(merged.memberArticleIDs, ["event-a", "event-b", "event-c", "event-d"], "A merge unions members")
+        assertEqual(try await db.resolvedEventID(second.id), first.id, "The absorbed ID forwards to the survivor")
+        assertEqual(try await db.fetchEvent(id: second.id)?.id, first.id, "Links to the absorbed ID open the survivor")
+        assertEqual(try await db.mergeEvents(first.id, into: second.id).membershipVersion, 4, "Merging an event into its own forward is a no-op")
+
+        let split = try await db.splitEvent(second.id, movingArticles: ["event-c", "event-d"])
+        assertTrue(split.id != first.id && split.id != second.id, "A split gets a new stable ID")
+        assertEqual(split.membershipVersion, 1, "A split starts its own version history")
+        assertEqual(split.memberArticleIDs, ["event-c", "event-d"], "A split takes only the moved members")
+        let remaining = try await db.fetchEvent(id: first.id)
+        assertEqual(remaining?.memberArticleIDs, ["event-a", "event-b"], "The original keeps the remaining members")
+        assertEqual(remaining?.membershipVersion, 5, "A split bumps the original's version")
+        assertEqual(try await db.resolvedEventID(second.id), first.id, "Old forwards still resolve after a split")
+        do { _ = try await db.splitEvent(first.id, movingArticles: ["event-a", "event-b"]); assertTrue(false, "Moving every member is not a split") } catch { }
+        do { _ = try await db.splitEvent(first.id, movingArticles: ["event-c"]); assertTrue(false, "A split moves only current members") } catch { }
+        do { _ = try await db.createEvent(memberArticleIDs: ["missing-article"]); assertTrue(false, "Unknown articles cannot join an event") } catch { }
+        assertEqual(try await db.fetchEvent(id: first.id)?.membershipVersion, 5, "Rejected changes leave the version untouched")
+
+        assertTrue(try await db.isRead(articleId: "event-a"), "Merges and splits keep read state")
+        assertTrue(try await db.isSaved(articleId: "event-b"), "Merges and splits keep saved state")
+        assertEqual(try await db.fetchArticles(id: "event-c").first?.id, "event-c", "Merges and splits keep article IDs")
+
+        try await db.markRead(articleId: "event-c", isRead: true)
+        try await db.markRead(articleId: "event-d", isRead: true)
+        try await db.markRead(articleId: "event-e", isRead: true)
+        let cited = try await db.createEvent(memberArticleIDs: ["event-e"])
+        let citation = OverviewCitation(id: "event-citation", articleID: "event-e", passageID: "p", passageFingerprint: "f", quote: "Distinct reporting e")
+        try await db.recordEventOverview(EventOverviewDocument(
+            eventID: cited.id,
+            version: OverviewVersionContext(membershipVersion: cited.membershipVersion, inputTextHash: "hash"),
+            content: OverviewContent(title: "Event", summary: "Summary", citations: [citation])))
+        assertEqual(try await db.pruneOldArticles(keepReadDays: 30), 3, "Retention removes old read, unsaved, uncited members")
+        assertEqual(try await db.fetchEvent(id: first.id)?.memberArticleIDs, ["event-b"], "Saved members survive retention")
+        assertTrue(try await db.fetchEvent(id: split.id) == nil, "Events emptied by retention are dropped")
+        assertEqual(try await db.fetchEvent(id: cited.id)?.memberArticleIDs, ["event-e"], "Cited evidence stays reachable through its event")
+        try await db.removeArticles(["event-e"], fromEvent: cited.id)
+        try await db.removeArticles(["event-b"], fromEvent: first.id)
+        assertEqual(try await db.pruneOldArticles(keepReadDays: 30), 0, "Saved and cited articles are never pruned")
+        assertTrue(try await db.fetchEvent(id: cited.id) != nil, "An event with a stored overview keeps its ID")
+        assertTrue(try await db.resolvedEventID(first.id) == nil, "An empty event is dropped by retention")
+        assertTrue(try await db.resolvedEventID(second.id) == nil, "Its forwards are dropped with it")
+        assertTrue(try await db.isSaved(articleId: "event-b"), "Dropping an event keeps the saved article")
+        assertEqual(value(copy, "PRAGMA quick_check;"), "ok", "Event library passes quick_check")
+        assertTrue(value(copy, "PRAGMA foreign_key_check;") == nil, "Event membership has no dangling references")
+        await db.close()
+    }
+
     static func testArticleRetentionPolicy() async {
         print("  - Testing Article Retention Policy...")
         
