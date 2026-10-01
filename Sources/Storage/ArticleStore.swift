@@ -146,6 +146,7 @@ final class ArticleStore: ObservableObject {
     
     func markAsRead(id: String, isRead: Bool = true) async {
         do {
+            let id = try await database.resolvedArticleID(id)
             try await database.markRead(articleId: id, isRead: isRead)
             if isRead {
                 readArticleIDs.insert(id)
@@ -163,8 +164,13 @@ final class ArticleStore: ObservableObject {
     }
     
     func toggleRead(id: String) async {
-        let current = isRead(id)
-        await markAsRead(id: id, isRead: !current)
+        do {
+            let id = try await database.resolvedArticleID(id)
+            await markAsRead(id: id, isRead: !isRead(id))
+        } catch {
+            operationError = "Could not save reading history. Please try again."
+            logger.error("Failed to resolve article read state: \(error.localizedDescription)")
+        }
     }
     
     func markAllAsRead(feedUrl: String? = nil) async {
@@ -179,20 +185,30 @@ final class ArticleStore: ObservableObject {
     
     @discardableResult
     func toggleSave(article: FeedArticle) async -> Bool {
-        await setSaved(article: article, isSaved: !isSaved(article))
+        do {
+            let id = try await database.resolvedArticleID(for: article)
+            let nextState = try await !database.isSaved(articleId: id)
+            return await setSaved(article: article, isSaved: nextState)
+        } catch {
+            operationError = "Could not update Saved Stories. Please try again."
+            logger.error("Failed to resolve article saved state: \(error.localizedDescription)")
+            return false
+        }
     }
 
     @discardableResult
     func setSaved(article: FeedArticle, isSaved nextState: Bool) async -> Bool {
         do {
             try await database.upsertArticles([article], feedUrl: nil)
-            try await database.setSaved(articleId: article.id, isSaved: nextState)
+            var storedArticle = article
+            storedArticle.storedID = try await database.resolvedArticleID(for: article)
+            try await database.setSaved(articleId: storedArticle.id, isSaved: nextState)
             if nextState {
-                if !savedArticles.contains(where: { $0.id == article.id }) {
-                    savedArticles.insert(article, at: 0)
+                if !savedArticles.contains(where: { $0.id == storedArticle.id }) {
+                    savedArticles.insert(storedArticle, at: 0)
                 }
             } else {
-                savedArticles.removeAll { $0.id == article.id }
+                savedArticles.removeAll { $0.id == storedArticle.id }
             }
             let counts = try await database.counts()
             self.savedCount = counts.saved
@@ -220,6 +236,7 @@ final class ArticleStore: ObservableObject {
         readerDocument: ReaderDocument? = nil
     ) async {
         do {
+            let id = try await database.resolvedArticleID(id)
             try await database.updateEnrichment(
                 articleId: id,
                 update: .init(summary: summary, category: category, sentiment: sentiment,
@@ -261,6 +278,7 @@ final class ArticleStore: ObservableObject {
     
     func saveArticleAnalysis(_ analysis: ArticleAnalysis, for articleId: String) async {
         do {
+            let articleId = try await database.resolvedArticleID(articleId)
             try await database.saveArticleAnalysis(analysis, for: articleId)
             func applyingAnalysis(to article: FeedArticle) -> FeedArticle {
                 var updated = article

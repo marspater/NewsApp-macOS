@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased — 1 October 2026
+
+### Fixed
+
+- Preserve observed article IDs and document URLs through a transactional alias migration; resolve old notifications, read/save actions and enrichment to the existing article, rejecting contradictory signals and retaining URL ambiguity.
+
+### Changed
+
+- Reuse the existing article for incoming GUID variants of the same document URL while retaining its durable identity, bookmarks and reading history.
+- Preserve meaningful URL query parameters instead of stripping every parameter beginning with a tracking-key prefix.
+
 ## Unreleased — 30 September 2026
 
 ### Fixed

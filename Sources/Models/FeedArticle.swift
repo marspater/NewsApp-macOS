@@ -2,9 +2,11 @@ import Foundation
 
 struct FeedArticle: Identifiable, Codable, Hashable, Sendable {
     var queryOrderValue: Double? = nil
+    // Database identity survives corrected publisher GUIDs and URLs. Absent in legacy JSON.
+    var storedID: String? = nil
 
     var id: String {
-        ArticleIdentity.computeId(guid: guid, link: link, title: title, source: source, pubDate: pubDate)
+        storedID ?? ArticleIdentity.computeId(guid: guid, link: link, title: title, source: source, pubDate: pubDate)
     }
     let title: String
     let link: String

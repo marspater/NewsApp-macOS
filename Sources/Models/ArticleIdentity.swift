@@ -23,13 +23,13 @@ struct ArticleIdentity: Sendable {
         }
         
         if let queryItems = components.queryItems {
-            let trackingPrefixes = [
-                "utm_", "ref", "rss_source", "feedburner", "fbclid",
+            let trackingNames: Set<String> = [
+                "ref", "rss_source", "feedburner", "fbclid",
                 "gclid", "mc_cid", "mc_eid", "yclid", "igshid"
             ]
             let filtered = queryItems.filter { item in
                 let lowerName = item.name.lowercased()
-                return !trackingPrefixes.contains { lowerName.hasPrefix($0) }
+                return !lowerName.hasPrefix("utm_") && !trackingNames.contains(lowerName)
             }
             components.queryItems = filtered.isEmpty ? nil : filtered
         }
