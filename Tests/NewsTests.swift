@@ -1617,6 +1617,8 @@ struct NewsTests {
         let ukraine = FeedCatalog.feeds(in: .ukraine)
         manager.addCatalogFeeds(ukraine)
         await eventually("The new batch is fetched together") { await requested.batches.contains { Set($0) == Set(ukraine.map(\.url)) } }
+        // A refresh still in flight would absorb the next one; count only after it has finished.
+        await eventually("The catalog refresh finishes") { await MainActor.run { !manager.isAnyFeedLoading } }
         let batches = await requested.batches.count
         manager.addCatalogFeeds(ukraine)
         await manager.fetchFeedsAsync()
