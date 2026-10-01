@@ -6,6 +6,7 @@ import WebKit
 import SQLite3
 import ImageIO
 import UniformTypeIdentifiers
+import NaturalLanguage
 
 // MARK: - MockURLProtocol for Testing
 class MockURLProtocol: URLProtocol, @unchecked Sendable {
@@ -108,6 +109,7 @@ struct NewsTests {
             try await testOverviewDocumentModelBoundToInputsAndVersions(fixtureHost: fixtureHost)
             try await testOverviewPassageSelectionAndTokenBudget(fixtureHost: fixtureHost)
             try await testPromptInjectionDefenses(fixtureHost: fixtureHost)
+            try await testModelAvailabilityAndLanguageFallbacks(fixtureHost: fixtureHost)
             try await testAuditPersistenceAndRoutingRegressions(fixtureRoot: fixtureRoot)
             try await testUndatedArticleOrdering()
             await testDatabaseEnginePersistence()
@@ -157,6 +159,7 @@ struct NewsTests {
         try await testOverviewDocumentModelBoundToInputsAndVersions(fixtureHost: fixtureHost)
         try await testOverviewPassageSelectionAndTokenBudget(fixtureHost: fixtureHost)
         try await testPromptInjectionDefenses(fixtureHost: fixtureHost)
+        try await testModelAvailabilityAndLanguageFallbacks(fixtureHost: fixtureHost)
         await testFTS5SearchAndOperators()
         await testMigrationCoordinatorAtomicity()
         await testArticleRetentionPolicy()
@@ -4147,6 +4150,81 @@ struct NewsTests {
 
         // 6. Tool-less generation preconditions
         assertTrue(GenerationPromptDefense.verifyHermeticGenerationPreconditions(), "Generation preconditions enforce tool-less, non-executable environment")
+    }
+
+    static func testModelAvailabilityAndLanguageFallbacks(fixtureHost: String = "example.com") async throws {
+        print("  - Testing Model availability runtime probe and deterministic language fallbacks...")
+
+        // 1. Language detection and support policies
+        let englishSample = "NASA scientists confirmed the detection of organic molecules in the equatorial regolith samples."
+        let detectedEnglish = ModelLanguageSupport.detectDominantLanguage(for: englishSample)
+        assertEqual(detectedEnglish?.rawValue, NLLanguage.english.rawValue, "Dominant language of English sample correctly identified")
+        assertTrue(ModelLanguageSupport.isLanguageSupportedForGeneration(detectedEnglish), "English is supported for generative synthesis")
+
+        let ukrainianSample = "Українські астрономи зафіксували новий навколоземний астероїд за допомогою телескопа."
+        let detectedUkrainian = ModelLanguageSupport.detectDominantLanguage(for: ukrainianSample)
+        assertEqual(detectedUkrainian?.rawValue, NLLanguage.ukrainian.rawValue, "Dominant language of Ukrainian sample correctly identified")
+        assertFalse(ModelLanguageSupport.isLanguageSupportedForGeneration(detectedUkrainian), "Ukrainian generation is verified separately and not promised in base plan")
+
+        // 2. Runtime probe on macOS 15 fallback (simulated via probe override)
+        let macOS15Probe = ModelRuntimeProbe(overrideAvailable: false)
+        let status15 = macOS15Probe.checkAvailability(for: .english)
+        assertFalse(status15.isAvailable, "Model is not available on macOS 15 fallback path")
+        assertTrue(status15.reason != nil, "Reason provided for macOS 15 fallback")
+
+        // 3. Runtime probe with unsupported language
+        let activeProbe = ModelRuntimeProbe(overrideAvailable: true)
+        let statusUkrainian = activeProbe.checkAvailability(for: .ukrainian)
+        assertFalse(statusUkrainian.isAvailable, "Unsupported language rejected from generative path")
+        if case .languageUnsupported(let msg) = statusUkrainian {
+            assertTrue(msg.contains("uk"), "Reason identifies unsupported language")
+        } else {
+            assertTrue(false, "Expected languageUnsupported status")
+        }
+
+        // 4. Deterministic non-AI fallback generation without cloud AI
+        let passage1 = EvidencePassage(
+            id: "p1",
+            articleID: "art-1",
+            text: "Seismic monitors recorded a magnitude 4.8 tremor along the central fault.",
+            ordinal: 1
+        )
+        let passage2 = EvidencePassage(
+            id: "p2",
+            articleID: "art-2",
+            text: "Emergency response teams reported minor structural damage and zero casualties.",
+            ordinal: 2
+        )
+        let hash = EventOverviewDocument.computeInputTextHash(passages: [passage1, passage2])
+        let context = OverviewVersionContext(membershipVersion: 1, inputTextHash: hash)
+
+        let fallbackDoc = macOS15Probe.buildFallbackOverview(
+            eventID: "event-quake-1",
+            passages: [passage1, passage2],
+            context: context,
+            title: "Magnitude 4.8 Earthquake"
+        )
+
+        assertEqual(fallbackDoc.kind.rawValue, OverviewKind.fallbackExcerpts.rawValue, "Fallback overview uses fallbackExcerpts kind")
+        assertEqual(fallbackDoc.facts.count, 2, "Verified facts created directly from evidence passages")
+        assertEqual(fallbackDoc.citations.count, 2, "Citations created directly for supporting passages")
+        assertEqual(fallbackDoc.citations["c_fb_1"]?.passageID, "p1", "Citation 1 maps to passage 1")
+        assertEqual(fallbackDoc.citations["c_fb_2"]?.passageID, "p2", "Citation 2 maps to passage 2")
+        assertEqual(fallbackDoc.memberArticleIDs.sorted(), ["art-1", "art-2"], "Member article IDs populated correctly")
+
+        // Verify fallback document is directly persistable in DatabaseEngine
+        let db = DatabaseEngine(path: ":memory:")
+        try await db.open()
+
+        let art1 = FeedArticle(storedID: "art-1", title: "Quake Notice", link: "https://" + fixtureHost + "/art-1", guid: "g1", description: passage1.text, pubDate: Date(), source: "Source 1")
+        let art2 = FeedArticle(storedID: "art-2", title: "Damage Assessment", link: "https://" + fixtureHost + "/art-2", guid: "g2", description: passage2.text, pubDate: Date(), source: "Source 2")
+        _ = try await db.upsertArticles([art1, art2])
+
+        let saved = try await db.recordEventOverview(fallbackDoc)
+        assertTrue(saved, "Fallback overview successfully recorded in SQLite")
+        let fetched = try await db.fetchEventOverview(eventID: "event-quake-1")
+        assertEqual(fetched?.kind.rawValue, OverviewKind.fallbackExcerpts.rawValue, "Fallback overview successfully persisted and retrieved from SQLite")
+        assertEqual(fetched?.facts.count, 2, "Persisted fallback facts retrieved intact")
     }
 }
 

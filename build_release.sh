@@ -39,6 +39,7 @@ SWIFT_SOURCES=(
     Sources/Intelligence/ArticleIntelligence.swift
     Sources/Intelligence/OverviewPassageSelector.swift
     Sources/Intelligence/PromptDefense.swift
+    Sources/Intelligence/ModelAvailability.swift
     Sources/Intelligence/ContentExtractionPipeline.swift
     Sources/Intelligence/EnrichmentQueue.swift
     Sources/Services/NetworkBoundaryProxy.swift
