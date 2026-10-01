@@ -4,6 +4,8 @@
 
 ### Fixed
 
+- Preserve inline publisher formatting and feed HTML structure, retain image credits and candidates, curate responsive media, stabilize image layout and add native reader text sizes (phase C).
+
 - Retain protected redirect destinations and verified same-origin canonical URLs as document aliases; resolve relative reader images from the final response URL.
 - Reconcile confident historical same-document copies while preserving original rows, read/save histories and old-ID navigation; keep uncertain matches separate.
 

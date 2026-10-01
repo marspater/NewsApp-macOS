@@ -70,6 +70,7 @@ class JSONFeedParser {
                 let cleanContent = item.contentHTML.map(stripSimpleHTML) ?? item.contentText
                 let readableContent = cleanContent.flatMap { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0 }
 
+                let extracted = item.contentHTML.map { ContentExtractionPipeline.shared.extractFromHTML($0, baseUrl: link) }
                 let article = FeedArticle(
                     title: title.trimmingCharacters(in: .whitespacesAndNewlines),
                     link: link,
@@ -79,9 +80,10 @@ class JSONFeedParser {
                     source: sourceName,
                     imageUrl: imageUrl,
                     aiSummary: nil,
-                    fullContent: readableContent,
+                    fullContent: extracted?.content ?? readableContent,
                     category: category,
-                    contentFetched: readableContent != nil
+                    contentFetched: readableContent != nil,
+                    readerDocument: { if case .success(_, _, let document) = extracted { return document?.curated(feedImage: imageUrl, title: title) }; return nil }()
                 )
                 articles.append(article)
             }

@@ -179,7 +179,13 @@ struct NewsTests {
         fixtureURL.scheme = "https"
         fixtureURL.host = fixtureHost
         let fixtureRoot = fixtureURL.url!
+        if CommandLine.arguments.contains("--reader-live-pages") {
+            await testLiveReader(pagesOnly: true)
+            print("✅ Live reader pages passed")
+            return
+        }
         if CommandLine.arguments.contains("--story-regressions") {
+            try await testReaderPhaseC(fixtureRoot: fixtureRoot)
             try await testReaderFigures(fixtureRoot: fixtureRoot)
             try await testCanonicalArticleIngestion(fixtureRoot: fixtureRoot)
             try await testPersistentArticleAliases(fixtureRoot: fixtureRoot)
@@ -274,6 +280,7 @@ struct NewsTests {
         await testFeedArticleWrapContextNavigation()
         await testArticleContentRedactionAndTypography()
         await testArticleDetailReadingExperienceOverhaul()
+        try await testReaderPhaseC(fixtureRoot: fixtureRoot)
         await testBBCExtractionFixture()
         await testMultiPublisherExtractionFixtures()
         await testContentQualityValidation()
@@ -420,7 +427,7 @@ struct NewsTests {
         assertEqual(checker.statusMessage, "No published release is available to compare.", "Missing releases are not reported as up to date")
     }
 
-    static func testLiveReader() async {
+    static func testLiveReader(pagesOnly: Bool = false) async {
         for link in ["https://www.bbc.co.uk/news/articles/c6jdvmy1287yo", "https://www.bbc.co.uk/news/articles/cm750pyz5r0eo"] {
             let outcome = await ContentExtractionPipeline.shared.extractArticleDetailed(from: link)
             guard case .success(let content, _, let document) = outcome else {
@@ -428,10 +435,12 @@ struct NewsTests {
                 continue
             }
             assertTrue(document != nil, "Live publisher retains reader structure")
+            print("Live page: \(link), \(content.count) prose characters, \(document?.blocks.count ?? 0) blocks, \(document?.images?.count ?? 0) image candidates")
             assertFalse(content.contains("Get in touch"), "BBC contact furniture excluded")
             assertFalse(content.contains("17:45 weekdays"), "BBC listening promotion excluded")
         }
 
+        if pagesOnly { return }
         for url in ["https://www.theguardian.com/world/rss", "https://feeds.arstechnica.com/arstechnica/index", "https://www.nasa.gov/feed/"] {
             let result = await FeedFetcher.shared.fetchSingleFeed(urlString: url)
             assertTrue(result.error == nil, "Live feed fetch must succeed for \(url)")
@@ -4280,6 +4289,97 @@ struct NewsTests {
         let extractedParagraphs = ContentExtractionPipeline.shared.extractParagraphs(from: sampleHTML)
         assertEqual(extractedParagraphs.count, 3, "Should cleanly extract 3 substantive paragraphs from HTML")
         assertTrue(extractedParagraphs[0].contains("exoplanet"), "Paragraph text should match content")
+    }
+
+    static func testReaderPhaseC(fixtureRoot: URL) async throws {
+        print("  - Testing reader v4 formatting, media curation and feed-only structure...")
+        let first = "Publisher reporting preserves meaningful structure for readers and supplies enough context to understand this specific event."
+        let second = "A second paragraph provides independent details and explains the evidence without substituting any generated prose for the publisher's words."
+        let base = fixtureRoot.appendingPathComponent("news/story").absoluteString
+        let shapes = [
+            "<article><p>\(first)</p><p>\(second)</p></article>",
+            "<main><h2>Background</h2><div><p>\(first)</p></div><p>\(second)</p></main>",
+            "<article><div>\(first)<br>\(second)</div></article>",
+            "<article>\(first)<p>\(second)</p></article>",
+            "<article><p>\(first)<strong> Strong finding</strong> and <em>emphasized context</em>.</p><p>\(second)</p></article>",
+            "<article><p>\(first) <a href='../evidence'>Source evidence</a> and <code>metric_value</code>.</p><p>\(second)</p></article>",
+            "<article><p>\(first)</p><blockquote><p>\(second)</p></blockquote></article>",
+            "<article><p>\(first)</p><ol start=4><li>\(second)</li></ol></article>",
+            "<article><p>\(first)<p>\(second)</article>",
+            "<article><p style='display:none'>HIDDEN PROSE</p><p>\(first)</p><p>\(second)</p></article>",
+            "<article><p>\(first)</p><figure><img data-src='/photo.jpg' width=1200 height=800 alt='Publisher reporting'><figcaption>Actual scene <span class='photo-credit'>Agency / Photographer</span></figcaption></figure><p>\(second)</p></article>",
+            "<article><p>\(first)</p><picture><source srcset='/small.jpg 400w, /large.jpg 1200w'><img src='/fallback.jpg' width=1200 height=800></picture><noscript><img src='/backup.jpg'></noscript><p>\(second)</p></article>"
+        ]
+        var documents = [ReaderDocument]()
+        for (index, html) in shapes.enumerated() {
+            guard case .success(let content, _, let document) = ContentExtractionPipeline.shared.extractFromHTML(html, baseUrl: base), let document else {
+                assertTrue(false, "Reader shape \(index) extracts"); continue
+            }
+            assertTrue(content.contains(first) && content.contains(second), "Shape \(index) retains publisher text")
+            assertFalse(content.contains("HIDDEN PROSE"), "Hidden text never reaches analysis")
+            assertEqual(document.version, 4, "Structured publisher data uses v4")
+            assertEqual(try JSONDecoder().decode(ReaderDocument.self, from: JSONEncoder().encode(document)), document, "Shape \(index) round trips without loss")
+            documents.append(document)
+        }
+        assertEqual(documents[2].blocks.filter { $0.kind == .paragraph }.count, 2, "Explicit br prose is not flattened into one wall")
+        assertTrue(documents[4].blocks[0].inlineRuns?.contains { $0.strong } == true, "Strong text survives")
+        assertTrue(documents[4].blocks[0].inlineRuns?.contains { $0.emphasis } == true, "Emphasis survives")
+        assertTrue(documents[5].blocks[0].inlineRuns?.contains { $0.code } == true, "Inline code survives")
+        assertEqual(documents[5].blocks[0].inlineRuns?.first(where: { $0.link != nil })?.link, fixtureRoot.appendingPathComponent("evidence").absoluteString, "Inline links resolve relative to the protected response")
+        let figure = documents[10].blocks.first { $0.kind == .figure }!
+        assertEqual(figure.text, "Actual scene", "Credit stays out of caption")
+        assertEqual(figure.imageCredit, "Agency / Photographer", "Credit retained separately")
+        assertEqual(figure.imageWidth, 1200, "Unquoted dimensions retained")
+        assertTrue(documents[11].images?.contains { $0.url.hasSuffix("/large.jpg") } == true, "Suitable responsive source chosen")
+        assertTrue(documents[11].images?.contains { $0.url.hasSuffix("/backup.jpg") } == true, "Noscript image fallback retained")
+        assertFalse(ReaderImageCandidate.usable(url: base + "/logo.png"), "Publisher logos excluded")
+        assertFalse(ReaderImageCandidate.usable(url: base + "/advertisement/banner.jpg"), "Ad image paths excluded")
+        assertFalse(ReaderImageCandidate.usable(url: base + "/pixel.gif", width: 1, height: 1), "Tracking pixel excluded")
+        assertFalse(ReaderImageCandidate.usable(url: "javascript:alert(1)"), "Executable media URL excluded")
+        let invalid = ContentExtractionPipeline.shared.extractFromHTML("<article><p>\(first) <a href='javascript:alert(1)'>unsafe link</a></p><p>\(second)</p><figure><img src='/logo.png'></figure></article>", baseUrl: base)
+        guard case .success(_, _, let safe) = invalid else { fatalError("Invalid URL fixture must remain readable") }
+        assertFalse(safe?.blocks.contains { $0.kind == .figure } == true, "Logo figure filtered")
+        assertFalse(safe?.blocks.flatMap { $0.inlineRuns ?? [] }.contains { $0.link?.hasPrefix("javascript:") == true } == true, "Unsafe inline link remains plain text")
+        let old = Data(#"{"version":3,"blocks":[{"kind":"paragraph","text":"Legacy publisher prose"}]}"#.utf8)
+        assertEqual(try JSONDecoder().decode(ReaderDocument.self, from: old).blocks.first?.text, "Legacy publisher prose", "Old reader documents remain decodable")
+        assertFalse(ContentExtractionPipeline.shared.extractFromHTML("<article><p>Subscribe to continue</p></article>").isSuccess, "Paywall fragments remain an explicit fallback")
+        let media = [ReaderImageCandidate(url: base + "/unrelated.jpg", origin: .openGraph, width: 8000, height: 4000), ReaderImageCandidate(url: base + "/scene.jpg", origin: .body, alt: "Publisher reporting")]
+        assertEqual(ReaderImageCandidate.select(from: media, title: "Publisher reporting")?.origin, .body, "Publisher association beats raw size")
+        let noImage = ReaderDocument(blocks: [], images: [], leadImageURL: nil)
+        assertTrue(noImage.selectedImage(fallback: base + "/old.jpg") == nil, "A curated text-only document never revives the old feed image")
+
+        let html = shapes[10]
+        let rss = "<rss version='2.0'><channel><title>Fixture publisher</title><item><title>Report</title><link>\(base)</link><description>Preview</description><content:encoded xmlns:content='http://purl.org/rss/1.0/modules/content/'><![CDATA[\(html)]]></content:encoded></item></channel></rss>"
+        let rssArticle = FeedXMLParser(data: Data(rss.utf8), feedURL: base).parse().first!
+        assertEqual(rssArticle.readerDocument?.blocks.first(where: { $0.kind == .figure })?.imageCredit, figure.imageCredit, "RSS-only structure and credit survive parsing")
+        let json = try JSONSerialization.data(withJSONObject: ["version":"https://jsonfeed.org/version/1.1", "items":[["id":"json-v4", "url":base, "title":"Report", "content_html":html]]])
+        let jsonArticle = JSONFeedParser.parse(data: json, feedURL: base)!.first!
+        assertTrue(jsonArticle.readerDocument?.blocks.contains { $0.kind == .figure } == true, "JSON Feed HTML stays structured")
+        let atom = "<feed xmlns='http://www.w3.org/2005/Atom'><title>Publisher</title><entry><id>atom-v4</id><title>Report</title><link href='\(base)'/><content type='xhtml'><div xmlns='http://www.w3.org/1999/xhtml'><p>\(first) <strong>Actual finding</strong></p><p>\(second)</p></div></content></entry></feed>"
+        let atomArticle = FeedXMLParser(data: Data(atom.utf8), feedURL: base).parse().first!
+        assertTrue(atomArticle.readerDocument?.blocks.first?.inlineRuns?.contains { $0.strong } == true, "Atom XHTML inline markup survives XML parsing")
+        let mediaRSS = "<rss xmlns:media='http://search.yahoo.com/mrss/'><channel><title>Publisher</title><item><title>Media report</title><link>\(base)</link><enclosure url='\(base)/audio.mp3' type='audio/mpeg'/><media:content url='\(base)/scene.jpg' type='image/jpeg' width='1200' height='800'/><media:credit>Publisher photographer</media:credit></item></channel></rss>"
+        let mediaArticle = FeedXMLParser(data: Data(mediaRSS.utf8), feedURL: base).parse().first!
+        assertEqual(mediaArticle.imageUrl, base + "/scene.jpg", "Audio enclosures are not image candidates")
+        assertEqual(mediaArticle.readerDocument?.images?.first?.width, 1200, "Feed dimensions retained")
+        assertEqual(mediaArticle.readerDocument?.images?.first?.credit, "Publisher photographer", "Feed image credit retained")
+        let db = DatabaseEngine(path: ":memory:")
+        try await db.open()
+        try await db.upsertArticles([rssArticle])
+        assertEqual(try await db.fetchArticles().first?.readerDocument, rssArticle.readerDocument, "Feed reader v4 persists")
+        try await db.updateEnrichment(articleId: rssArticle.id, update: .init(content: first, readerDocument: noImage))
+        assertTrue(try await db.fetchArticles().first?.imageUrl == nil, "Curation can clear a wrong image in storage")
+        var repeats = [FeedArticle]()
+        for index in 0..<3 { repeats.append(FeedArticle(title: "Document \(index)", link: base + "/\(index)", guid: "repeat-\(index)", description: first, pubDate: Date(), source: "Recurring publisher", imageUrl: base + "/shared.jpg")) }
+        try await db.upsertArticles(repeats)
+        let repeated = try await db.repeatedImageURLs(source: "Recurring publisher")
+        assertEqual(repeated, Set([base + "/shared.jpg"]), "Recurrence counts distinct publisher documents")
+        assertTrue(try await db.fetchArticles().filter { $0.source == "Recurring publisher" }.allSatisfy { $0.imageUrl == nil }, "Feed cards omit repeated publisher furniture on hydration")
+        assertTrue(try await db.fetchArticles(includingOriginals: true).filter { $0.source == "Recurring publisher" }.allSatisfy { $0.imageUrl != nil }, "Explicit original retrieval preserves stored image metadata")
+        assertTrue(try await db.searchArticles(query: "Document").allSatisfy { $0.imageUrl == nil }, "Search uses the same media curation")
+        assertTrue(try await db.repeatedImageURLs(source: "Other publisher").isEmpty, "Recurrence never leaks between publishers")
+        assertTrue(documents[10].curated(feedImage: nil, title: "Report", excluding: Set([figure.imageURL!])).blocks.allSatisfy { $0.kind != .figure }, "Repeated publisher furniture is removed during curation")
+        await db.close()
     }
 
     static func testBBCExtractionFixture() async {

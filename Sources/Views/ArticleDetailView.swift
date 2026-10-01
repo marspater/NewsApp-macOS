@@ -40,6 +40,7 @@ struct ArticleDetailView: View {
     @State private var analysisError: String? = nil
     @State private var summaryExpanded = false
     @State private var reloadGeneration = 0
+    @State private var readerTextScale: CGFloat = 1
     @State private var contentState: ArticleContentState = .loading
 
     @FocusState private var isViewFocused: Bool
@@ -149,7 +150,7 @@ struct ArticleDetailView: View {
 
                     // Headline
                     Text(currentArticle.title)
-                        .font(AppTypography.titleFont(for: themeManager.articleTheme))
+                        .font(AppTypography.titleFont(for: themeManager.articleTheme, scale: readerTextScale))
                         .foregroundColor(AppColor.primaryText)
                         .lineSpacing(3)
 
@@ -185,7 +186,7 @@ struct ArticleDetailView: View {
                 }
                 .padding(.horizontal, AppLayout.pageInset)
                 .padding(.vertical, AppSpacing.xl)
-                .frame(maxWidth: 700, alignment: .leading)
+                .frame(maxWidth: 700 * min(readerTextScale, 1.3), alignment: .leading)
                 .frame(maxWidth: .infinity, alignment: .center)
             }
         }
@@ -195,21 +196,12 @@ struct ArticleDetailView: View {
 
     @ViewBuilder
     private var heroImageHeader: some View {
-        if let imageUrl = currentArticle.imageUrl, let url = URL(string: imageUrl),
+        if let imageUrl = currentArticle.readerDocument?.selectedImage(fallback: currentArticle.imageUrl) ?? (currentArticle.readerDocument == nil ? currentArticle.imageUrl : nil), let url = URL(string: imageUrl),
            currentArticle.readerDocument?.blocks.contains(where: { $0.kind == .figure && $0.imageURL == imageUrl }) != true {
-            ArticleRemoteImage(url: url) { phase in
-                switch phase {
-                case .success(let image):
-                    image.resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .frame(maxHeight: 280)
-                        .frame(maxWidth: .infinity)
-                        .clipShape(RoundedRectangle(cornerRadius: AppRadius.card))
-                        .accessibilityHidden(true)
-                default:
-                    EmptyView()
-                }
-            }
+            let candidate = currentArticle.readerDocument?.images?.first { $0.url == imageUrl }
+            ReaderFigureView(block: ReaderBlock(kind: .figure, text: candidate?.caption ?? "",
+                imageURL: imageUrl, imageAlt: candidate?.alt, imageCredit: candidate?.credit,
+                imageWidth: candidate?.width, imageHeight: candidate?.height), url: url, textScale: readerTextScale)
         }
     }
 
@@ -298,7 +290,7 @@ struct ArticleDetailView: View {
         VStack(alignment: .leading, spacing: 14) {
             ForEach(Array(paragraphs.enumerated()), id: \.offset) { _, paragraph in
                 Text(paragraph)
-                    .font(AppTypography.bodyFont(for: themeManager.articleTheme))
+                    .font(AppTypography.bodyFont(for: themeManager.articleTheme, scale: readerTextScale))
                     .foregroundColor(AppColor.primaryText.opacity(0.9))
                     .lineSpacing(AppTypography.bodyLineSpacing(for: themeManager.articleTheme))
                     .textSelection(.enabled)
@@ -307,10 +299,11 @@ struct ArticleDetailView: View {
     }
 
     private var articleContentParagraphs: some View {
-        let blocks = currentArticle.readerDocument?.blocks ?? displayParagraphs.map {
+        let storedBlocks = currentArticle.readerDocument?.blocks ?? []
+        let blocks = storedBlocks.isEmpty ? displayParagraphs.map {
             ReaderBlock(kind: .paragraph, text: $0)
-        }
-        return VStack(alignment: .leading, spacing: AppSpacing.lg) {
+        } : storedBlocks
+        return VStack(alignment: .leading, spacing: AppSpacing.lg * readerTextScale) {
             // Positions are stable within the immutable, article-keyed reader document.
             ForEach(Array(blocks.enumerated()), id: \.offset) { index, block in
                 readerBlock(block, isLead: index == 0)
@@ -324,35 +317,11 @@ struct ArticleDetailView: View {
         switch block.kind {
         case .figure:
             if let imageURL = block.imageURL, let url = URL(string: imageURL) {
-                VStack(alignment: .leading, spacing: AppSpacing.sm) {
-                    ArticleRemoteImage(url: url) { phase in
-                        switch phase {
-                        case .success(let image):
-                            image.resizable()
-                                .aspectRatio(contentMode: .fit)
-                                .frame(maxWidth: .infinity, maxHeight: 560)
-                                .clipShape(RoundedRectangle(cornerRadius: AppRadius.card))
-                                .accessibilityLabel(block.imageAlt ?? "Article image")
-                        case .failure:
-                            Label("Image unavailable", systemImage: "photo")
-                                .foregroundStyle(AppColor.secondaryText)
-                        case .empty:
-                            ProgressView().frame(maxWidth: .infinity, minHeight: 80)
-                        @unknown default:
-                            EmptyView()
-                        }
-                    }
-                    if !block.text.isEmpty {
-                        Text(block.text)
-                            .font(AppTypography.caption)
-                            .foregroundStyle(AppColor.secondaryText)
-                            .textSelection(.enabled)
-                    }
-                }
+                ReaderFigureView(block: block, url: url, textScale: readerTextScale)
             }
         case .heading, .subheading:
-            Text(block.text)
-                .font(block.kind == .heading ? AppTypography.title : AppTypography.headline)
+            Text(readerText(block))
+                .font(.system(size: (block.kind == .heading ? 22 : 15) * readerTextScale, weight: block.kind == .heading ? .bold : .semibold))
                 .foregroundStyle(AppColor.primaryText)
                 .padding(.top, AppSpacing.md)
                 .accessibilityAddTraits(.isHeader)
@@ -360,9 +329,9 @@ struct ArticleDetailView: View {
         case .quote:
             HStack(alignment: .top, spacing: AppSpacing.md) {
                 Rectangle().fill(AppColor.accent.opacity(0.5)).frame(width: 3)
-                Text(block.text)
-                    .font(AppTypography.bodyFont(for: themeManager.articleTheme).italic())
-                    .lineSpacing(5)
+                Text(readerText(block))
+                    .font(AppTypography.bodyFont(for: themeManager.articleTheme, scale: readerTextScale).italic())
+                    .lineSpacing(AppTypography.bodyLineSpacing(for: themeManager.articleTheme) * readerTextScale)
                     .textSelection(.enabled)
             }
             .fixedSize(horizontal: false, vertical: true)
@@ -371,22 +340,22 @@ struct ArticleDetailView: View {
             HStack(alignment: .firstTextBaseline, spacing: AppSpacing.sm) {
                 Text(block.ordinal.map { "\($0)." } ?? "•")
                     .foregroundStyle(AppColor.secondaryText)
-                Text(block.text).textSelection(.enabled)
+                Text(readerText(block)).textSelection(.enabled)
             }
-            .font(AppTypography.bodyFont(for: themeManager.articleTheme))
-            .lineSpacing(5)
+            .font(AppTypography.bodyFont(for: themeManager.articleTheme, scale: readerTextScale))
+            .lineSpacing(AppTypography.bodyLineSpacing(for: themeManager.articleTheme) * readerTextScale)
         case .code:
-            Text(block.text)
+            Text(readerText(block))
                 .font(.system(.body, design: .monospaced))
                 .textSelection(.enabled)
                 .padding(AppSpacing.md)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(AppColor.surface, in: RoundedRectangle(cornerRadius: AppRadius.control))
         case .paragraph:
-            Text(block.text)
-                .font(isLead ? AppTypography.leadFont(for: themeManager.articleTheme) : AppTypography.bodyFont(for: themeManager.articleTheme))
+            Text(readerText(block))
+                .font(isLead ? AppTypography.leadFont(for: themeManager.articleTheme, scale: readerTextScale) : AppTypography.bodyFont(for: themeManager.articleTheme, scale: readerTextScale))
                 .foregroundStyle(AppColor.primaryText)
-                .lineSpacing(5)
+                .lineSpacing(AppTypography.bodyLineSpacing(for: themeManager.articleTheme) * readerTextScale)
                 .fixedSize(horizontal: false, vertical: true)
                 .textSelection(.enabled)
         }
@@ -580,6 +549,11 @@ struct ArticleDetailView: View {
                 }
             }
             Menu {
+                Picker("Text size", selection: $readerTextScale) {
+                    Text("Standard").tag(CGFloat(1))
+                    Text("Large").tag(CGFloat(1.25))
+                    Text("Extra large").tag(CGFloat(1.5))
+                }
                 Picker("Reading style", selection: $themeManager.articleTheme) {
                     ForEach(ArticleThemeType.allCases) { theme in
                         Text(theme.rawValue).tag(theme)
@@ -803,7 +777,7 @@ struct ArticleDetailView: View {
     // MARK: - Independent Extraction & Analysis
 
     private func ensureContentExtracted(forceRefresh: Bool = false) async {
-        if !forceRefresh, currentArticle.readerDocument?.version == ReaderDocument.currentVersion,
+        if !forceRefresh, currentArticle.readerDocument.map({ (1...ReaderDocument.currentVersion).contains($0.version) }) == true,
            let existing = currentArticle.fullContent, !ArticleContentRedactor.redactAndSplit(existing).isEmpty {
             contentState = .ready
             return
@@ -828,7 +802,18 @@ struct ArticleDetailView: View {
             guard !Task.isCancelled, activeArticle.id == targetId else { return }
 
             switch extraction.outcome {
-            case .success(let content, let imageUrl, let document):
+            case .success(let content, let imageUrl, let extractedDocument):
+                var document = extractedDocument
+                if let extractedDocument {
+                    document = extractedDocument.curated(feedImage: currentArticle.imageUrl, title: currentArticle.title)
+                    do {
+                        let repeated = try await articleStore.database.repeatedImageURLs(source: currentArticle.source)
+                        try Task.checkCancellation()
+                        guard activeArticle.id == targetId else { return }
+                        document = document?.curated(feedImage: nil, title: currentArticle.title, excluding: repeated)
+                    } catch is CancellationError { return }
+                    catch { /* Recurrence is optional; protected images still use local filters. */ }
+                }
                 await articleStore.updateEnrichment(
                     id: targetId,
                     content: content,
@@ -841,9 +826,7 @@ struct ArticleDetailView: View {
                 updated.fullContent = content
                 updated.readerDocument = document
                 updated.contentFetched = true
-                if let img = imageUrl, updated.imageUrl == nil {
-                    updated.imageUrl = img
-                }
+                updated.imageUrl = document?.selectedImage(fallback: imageUrl) ?? (document == nil ? imageUrl : nil)
                 self.activeArticle = updated
                 self.contentState = .ready
             case .qualityValidationFailed(let reason):
@@ -962,4 +945,63 @@ private struct ReaderTagLayout: Layout {
         }
         return (CGSize(width: width, height: y + rowHeight), items)
     }
+}
+
+
+/// Whole-image fit plus a fixed ratio keeps known media stable before loading.
+struct ReaderFigureView: View {
+    let block: ReaderBlock
+    let url: URL
+    var textScale: CGFloat = 1
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: AppSpacing.sm) {
+            ArticleRemoteImage(url: url) { phase in
+                ZStack {
+                    AppColor.surface
+                    switch phase {
+                    case .success(let image):
+                        image.resizable().aspectRatio(contentMode: .fit)
+                            .accessibilityLabel(block.imageAlt ?? "Article image")
+                    case .failure:
+                        Label("Image unavailable", systemImage: "photo").foregroundStyle(AppColor.secondaryText)
+                    case .empty:
+                        ProgressView().accessibilityLabel("Loading article image")
+                    @unknown default: EmptyView()
+                    }
+                }
+                .aspectRatio(aspectRatio, contentMode: .fit)
+                .frame(maxWidth: .infinity)
+                .clipShape(RoundedRectangle(cornerRadius: AppRadius.card))
+            }
+            if !block.text.isEmpty {
+                Text(block.text).font(.system(size: 11 * textScale)).foregroundStyle(AppColor.secondaryText).textSelection(.enabled)
+            }
+            if let credit = block.imageCredit, !credit.isEmpty {
+                Text(credit).font(.system(size: 11 * textScale)).foregroundStyle(AppColor.secondaryText).textSelection(.enabled)
+                    .accessibilityLabel("Image credit: " + credit)
+            }
+            Text("Image source: " + (url.host ?? "Publisher"))
+                .font(.system(size: 11 * textScale)).foregroundStyle(AppColor.secondaryText).textSelection(.enabled)
+        }
+    }
+
+    private var aspectRatio: CGFloat {
+        guard let width = block.imageWidth, let height = block.imageHeight, width > 0, height > 0 else { return 1.5 }
+        return min(3, max(0.4, CGFloat(width) / CGFloat(height)))
+    }
+}
+
+func readerText(_ block: ReaderBlock) -> AttributedString {
+    guard let runs = block.inlineRuns, runs.map(\.text).joined() == block.text else { return AttributedString(block.text) }
+    var text = AttributedString()
+    for run in runs {
+        var part = AttributedString(run.text)
+        if run.strong { part.inlinePresentationIntent = .stronglyEmphasized }
+        if run.emphasis { part.inlinePresentationIntent = (part.inlinePresentationIntent ?? []).union(.emphasized) }
+        if run.code { part.inlinePresentationIntent = (part.inlinePresentationIntent ?? []).union(.code) }
+        if let link = ContentExtractionPipeline.readerImageURL(run.link, baseURL: nil) { part.link = URL(string: link) }
+        text.append(part)
+    }
+    return text
 }

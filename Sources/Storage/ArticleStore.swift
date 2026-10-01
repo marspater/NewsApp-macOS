@@ -265,9 +265,9 @@ final class ArticleStore: ObservableObject {
                     updated.contentFetched = true
                     updated.readerDocument = readerDocument
                 }
-                if let img = image, updated.imageUrl == nil {
-                    updated.imageUrl = img
-                }
+                if let document = readerDocument, document.version >= 4 {
+                    updated.imageUrl = document.leadImageURL
+                } else if let img = image, updated.imageUrl == nil { updated.imageUrl = img }
                 articles[idx] = updated
             }
             if let idx = savedArticles.firstIndex(where: { $0.id == id }) {
@@ -275,6 +275,9 @@ final class ArticleStore: ObservableObject {
                     savedArticles[idx].fullContent = content
                     savedArticles[idx].readerDocument = readerDocument
                     savedArticles[idx].contentFetched = true
+                }
+                if let document = readerDocument, document.version >= 4 {
+                    savedArticles[idx].imageUrl = document.leadImageURL
                 }
                 if let category { savedArticles[idx].category = category }
                 if let summary { savedArticles[idx].aiSummary = summary }
