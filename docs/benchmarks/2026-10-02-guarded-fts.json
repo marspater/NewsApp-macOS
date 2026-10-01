@@ -1,0 +1,87 @@
+{
+  "cpu_count": 10,
+  "feed_count": 5,
+  "fresh_rows_per_feed": 50,
+  "html_characters": 4175,
+  "library_rows": 10250,
+  "measurements_ms": {
+    "fts_first_100_ms": [
+      63.83425000240095,
+      65.90233332826756,
+      62.94645834714174,
+      63.05400002747774,
+      62.903041689423844,
+      62.31937499251217,
+      63.80462500965223,
+      67.63470833539031,
+      64.08195834956132,
+      63.82641664822586
+    ],
+    "html_extraction_ms": [
+      158.36087500792928,
+      156.3426249776967,
+      157.14016667334363,
+      156.87233334756456,
+      155.69654165301472,
+      157.4256666644942,
+      155.72766665718518,
+      155.9785833233036,
+      155.01058334484696,
+      156.11558334785514
+    ],
+    "natural_language_analysis_ms": [
+      22.428666678024456,
+      6.805249984608963,
+      6.6300000180490315,
+      6.354583310894668,
+      6.532458326546475,
+      7.126458338461816,
+      6.357208330882713,
+      6.317416671663523,
+      6.383250001817942,
+      6.692166673019528
+    ],
+    "refresh_5_mocked_feeds_ms": [
+      700.6690833368339,
+      521.303416666342,
+      519.2730000126176,
+      521.5027083468158,
+      525.1400416891556,
+      526.5170833445154,
+      537.5379166798666,
+      534.7367916547228,
+      549.335791671183,
+      528.6327916837763
+    ],
+    "refresh_cancel_mock_wait_ms": [
+      0.034708325983956456,
+      0.028875016141682863,
+      0.020625011529773474,
+      0.02500001573935151,
+      0.022249994799494743,
+      0.02154166577383876,
+      0.025374989490956068,
+      0.02320832572877407,
+      0.029624992748722434,
+      0.018749997252598405
+    ],
+    "snapshot_first_500_ms": [
+      74.97483334736899
+    ]
+  },
+  "optimization": "-O (test.sh performance mode)",
+  "os": "Version 27.0.1 (Build 26A434)",
+  "peak_process_rss_bytes": 112656384,
+  "physical_memory_bytes": 25769803776,
+  "prose_characters": 2030,
+  "publishers": 20,
+  "snapshot_rows": 500,
+  "hardware": "Apple M5, 24 GiB RAM",
+  "source_revision": "e65b527 plus guarded FTS schema-v12 change",
+  "toolchain": "Xcode 27.0 (27A266a), Swift 6.4, macOS 15 deployment target",
+  "limitations": [
+    "Same isolated mocked feed workload as core baseline; not UI or live transport",
+    "First refresh inserts rows; remaining nine update identical rows",
+    "FoundationModels disabled"
+  ]
+}

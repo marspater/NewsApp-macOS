@@ -180,6 +180,10 @@ struct NewsTests {
         fixtureURL.scheme = "https"
         fixtureURL.host = fixtureHost
         let fixtureRoot = fixtureURL.url!
+        if CommandLine.arguments.contains("--fts-refresh-regression") {
+            try await testUnchangedFTSRefresh()
+            return
+        }
         if CommandLine.arguments.contains("--performance-baseline") {
             try await runPerformanceBaseline()
             return
@@ -209,6 +213,7 @@ struct NewsTests {
             try await testUndatedArticleOrdering()
             await testDatabaseEnginePersistence()
             await testFTS5SearchAndOperators()
+        try await testUnchangedFTSRefresh()
             await testReaderParsingRegressions()
             await testStructuredReaderAndTags()
             await testReaderStoreUpdates()
@@ -265,6 +270,7 @@ struct NewsTests {
         try await testOverviewCompositionFromVerifiedFacts(fixtureHost: fixtureHost)
         try await testHistoricalReconciliation(fixtureRoot: fixtureRoot)
         await testFTS5SearchAndOperators()
+        try await testUnchangedFTSRefresh()
         await testMigrationCoordinatorAtomicity()
         await testArticleRetentionPolicy()
         await testArticleIntelligenceCapabilities()
@@ -319,6 +325,51 @@ struct NewsTests {
     }
 
     
+    static func testUnchangedFTSRefresh() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let path = directory.appendingPathComponent("fts.sqlite3").path
+        let db = DatabaseEngine(path: path)
+        try await db.open()
+        let first = FeedArticle(title: "Original research", link: "https://example.com/fts", guid: "fts", description: "Initial description", pubDate: Date(), source: "Publisher", fullContent: "Originalbodytoken")
+        try await db.upsertArticles([first])
+        var handle: OpaquePointer?
+        assertEqual(sqlite3_open(path, &handle), SQLITE_OK, "Open isolated FTS observation")
+        defer { sqlite3_close(handle) }
+        func rowID() -> Int64 {
+            var statement: OpaquePointer?
+            assertEqual(sqlite3_prepare_v2(handle, "SELECT rowid FROM articles_fts WHERE article_id='fts';", -1, &statement, nil), SQLITE_OK, "Observe FTS row")
+            defer { sqlite3_finalize(statement) }
+            assertEqual(sqlite3_step(statement), SQLITE_ROW, "FTS retains its row")
+            return sqlite3_column_int64(statement, 0)
+        }
+        // A second row ensures delete/reinsert would allocate a different rowid.
+        let other = FeedArticle(title: "Other story", link: "https://example.com/other", guid: "other", description: "", pubDate: Date(), source: "Publisher")
+        try await db.upsertArticles([other])
+        let initialID = rowID()
+        try await db.upsertArticles([first])
+        assertEqual(rowID(), initialID, "Identical refresh does not delete/reinsert FTS")
+        var metadata = first
+        metadata.imageUrl = "https://example.com/new-photo.jpg"
+        try await db.upsertArticles([metadata])
+        assertEqual(rowID(), initialID, "Image-only metadata does not rebuild searchable text")
+        assertEqual(sqlite3_exec(handle, "UPDATE articles SET title='Updated research', content=NULL, category='Science' WHERE id='fts';", nil, nil, nil), SQLITE_OK, "Change searchable fields including NULL")
+        assertTrue(rowID() != initialID, "Changed searchable fields rebuild FTS")
+        assertEqual(try await db.searchArticles(query: "Updated").count, 1, "Updated title is searchable")
+        assertTrue(try await db.searchArticles(query: "Originalbodytoken").isEmpty, "Cleared NULL content removes old terms")
+        assertEqual(try await db.searchArticles(query: "Science").count, 1, "Updated category is indexed")
+        try await db.upsertArticles([FeedArticle(title: "Migration anchor", link: "https://example.com/anchor", guid: "anchor", description: "", pubDate: Date(), source: "Publisher")])
+        await db.close()
+        assertEqual(sqlite3_exec(handle, "DROP TRIGGER trg_articles_au; CREATE TRIGGER trg_articles_au AFTER UPDATE ON articles BEGIN DELETE FROM articles_fts WHERE article_id=old.id; INSERT INTO articles_fts(article_id,title,description,content,source,category) VALUES(new.id,new.title,coalesce(new.description,''),coalesce(new.content,''),new.source,coalesce(new.category,'')); END; PRAGMA user_version=11;", nil, nil, nil), SQLITE_OK, "Reconstruct v11 trigger fixture")
+        try await db.open()
+        let migratedID = rowID()
+        assertEqual(sqlite3_exec(handle, "UPDATE articles SET updated_at=updated_at+1 WHERE id='fts';", nil, nil, nil), SQLITE_OK, "Exercise migrated metadata update")
+        assertEqual(rowID(), migratedID, "Existing v11 database receives the guarded trigger")
+        assertEqual(try await db.searchArticles(query: "Updated").count, 1, "Migration preserves searchable rows")
+        await db.close()
+    }
+
     /// Opt-in controlled service timings; not a rendered UI or network benchmark.
     @MainActor
     static func runPerformanceBaseline() async throws {
@@ -2190,7 +2241,7 @@ struct NewsTests {
         await cancelledDB.close()
         let db = DatabaseEngine(path: copyPath)
         try await db.open()
-        assertEqual(value(copyPath, "PRAGMA user_version;"), "11", "Copied v4 library upgrades to the current schema")
+        assertEqual(value(copyPath, "PRAGMA user_version;"), "12", "Copied v4 library upgrades to the current schema")
         assertEqual(value(originalPath, "PRAGMA user_version;"), "4", "Original fixture stays untouched")
         assertEqual(try await db.fetchArticles(limit: nil).count, 3, "Migration keeps historical rows")
         assertEqual(value(copyPath, "SELECT read_at FROM article_state WHERE article_id = 'alias-first';"), originalReadAt, "Migration preserves read history timestamp")
@@ -2361,7 +2412,7 @@ struct NewsTests {
         assertEqual(value(failure, "SELECT is_saved FROM article_state WHERE article_id='historical-a';"), "0", "Injected failure rolls back survivor state union")
         assertEqual(value(failure, "SELECT article_id FROM article_aliases WHERE value='observed-variant-b';"), "historical-b", "Injected failure preserves old aliases")
         try await migrated.open()
-        assertEqual(value(copy, "PRAGMA user_version;"), "11", "Copied library upgrades to the current schema")
+        assertEqual(value(copy, "PRAGMA user_version;"), "12", "Copied library upgrades to the current schema")
         assertEqual(value(path, "PRAGMA user_version;"), "8", "Original fixture remains untouched")
         assertEqual(try await migrated.fetchArticles(limit: nil).count, 6, "Only confident same-URL text copies are hidden")
         assertEqual(try await migrated.fetchArticles(limit: nil, includingOriginals: true).count, 8, "Every stored original remains reachable")

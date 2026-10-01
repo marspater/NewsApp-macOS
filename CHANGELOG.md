@@ -4,6 +4,8 @@
 
 ### Fixed
 
+- Skip FTS deletion/reindexing for unchanged searchable article fields during repeated refreshes; migrate existing libraries transactionally.
+
 - Preserve inline publisher formatting and feed HTML structure, retain image credits and candidates, curate responsive media, stabilize image layout and add native reader text sizes (phase C).
 
 - Retain protected redirect destinations and verified same-origin canonical URLs as document aliases; resolve relative reader images from the final response URL.

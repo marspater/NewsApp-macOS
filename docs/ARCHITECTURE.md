@@ -12,6 +12,8 @@ Native macOS, local-first RSS reader. This document defines the supported techno
 
 ## Implementation invariants
 
+- Schema v12 guards FTS update triggers with null-safe comparisons of indexed text fields; metadata-only and identical refreshes preserve existing FTS rows. Changed titles/descriptions/content/source/category still reindex atomically.
+
 - Keep UI concerns out of database, networking and domain layers. Preserve actor isolation, avoid main-actor database work, bound batch concurrency/memory, and avoid lifecycle retain cycles.
 - Propagate cancellation through feed, extraction and enrichment work. Shared refresh work survives an individual waiter cancelling; explicit reset cancels that shared work. Unstructured tasks require explicit lifecycle ownership.
 - Undated articles retain the unknown publication-date sentinel for identity/display; archive and filter-only search order and paginate by their original ingestion time. Retention uses the same date fallback.
