@@ -11,6 +11,7 @@ swiftc -target $(uname -m)-apple-macos${TARGET_MACOS} \
     Sources/Services/DateParser.swift \
     Sources/Models/FeedError.swift \
     Sources/Models/FeedFetchState.swift \
+    Sources/Models/FeedCatalog.swift \
     Sources/Services/IPAddressValidator.swift \
     Sources/Models/ArticleIdentity.swift \
     Sources/Models/EventOverview.swift \

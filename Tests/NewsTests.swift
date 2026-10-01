@@ -157,6 +157,12 @@ actor OpenGate {
     }
 }
 
+/// Records the feed batches a refresh requested.
+actor TestRecorder {
+    private(set) var batches: [[String]] = []
+    func record(_ urls: [String]) { batches.append(urls) }
+}
+
 @main
 struct NewsTests {
     static func main() async {
@@ -215,6 +221,7 @@ struct NewsTests {
         try await testConditionalFeedRequests(fixtureRoot: fixtureRoot)
         try await testFeedBackoffAndHostLimits()
         try await testRefreshEndsAtCollection()
+        try await testFeedCatalog()
         try await testUndatedArticleOrdering()
         try await testReaderFigures(fixtureRoot: fixtureRoot)
         await testReaderParsingRegressions()
@@ -276,6 +283,9 @@ struct NewsTests {
         
         if ProcessInfo.processInfo.environment["NEWS_LIVE_READER_CHECK"] == "1" {
             await testLiveReader()
+        }
+        if ProcessInfo.processInfo.environment["NEWS_LIVE_CATALOG_CHECK"] == "1" {
+            await testLiveCatalog()
         }
         if let snapshot = ProcessInfo.processInfo.environment["NEWS_SNAPSHOT_DB"] {
             let database = DatabaseEngine(path: snapshot)
@@ -1436,6 +1446,82 @@ struct NewsTests {
         await background.fetchFeedsAsync()
         await eventually("Classification runs once energy saving ends") { await queue.state(for: storedID) == .completed }
         background.stopBackgroundWork()
+    }
+
+    @MainActor
+    static func testFeedCatalog() async throws {
+        print("  - Testing the curated feed catalog, opt-in subscription and custom feeds...")
+        let feeds = FeedCatalog.feeds
+        assertTrue((30...60).contains(feeds.count), "The starter catalog stays in the planned 30-60 range (\(feeds.count))")
+        assertEqual(Set(feeds.map(\.id)).count, feeds.count, "Catalog ids are unique")
+        assertEqual(Set(feeds.map(\.url)).count, feeds.count, "Catalog URLs are unique")
+        for feed in feeds {
+            assertEqual(AppSettings.normalizeFeedURL(feed.url), feed.url, "\(feed.id) is stored in subscription form, so it is fetched exactly as verified")
+            let url = URL(string: feed.url)
+            assertEqual(url?.scheme, "https", "\(feed.id) uses HTTPS")
+            assertTrue(url?.host?.contains(".") == true && url?.user == nil && url?.password == nil, "\(feed.id) has a plain public host")
+            assertTrue(feed.language.range(of: "^[a-z]{2,3}$", options: .regularExpression) != nil, "\(feed.id) has a language code")
+            assertTrue(feed.region == "global" || feed.region.range(of: "^[A-Z]{2}$", options: .regularExpression) != nil, "\(feed.id) has a region")
+            assertFalse(feed.title.isEmpty || feed.publisher.isEmpty, "\(feed.id) is labeled")
+        }
+        assertTrue(ISO8601DateFormatter().date(from: FeedCatalog.verifiedOn + "T00:00:00Z") != nil, "Verification date is a calendar date")
+        for set in CatalogSet.allCases {
+            assertTrue(FeedCatalog.feeds(in: set).count >= 3, "\(set.title) is a real set")
+            assertFalse(set.summary.isEmpty, "\(set.title) is described")
+        }
+        assertTrue(Set(feeds.map(\.language)).isSuperset(of: ["en", "uk", "de", "fr", "it", "nl", "pl"]), "The catalog spans the planned languages")
+
+        // Opt-in: a fresh install subscribes to nothing from the catalog beyond its own defaults.
+        let suite = "test.catalog.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = AppSettings(defaults: defaults)
+        assertEqual(feeds.filter(settings.isSubscribed).map(\.id), ["ars-technica"], "Only a default feed is subscribed before the user chooses")
+
+        let world = FeedCatalog.feeds(in: .world)
+        settings.feedURLs = ["https://example.com/custom.xml"]
+        assertEqual(settings.addCatalogFeeds(world), world.count, "A set subscribes to each of its feeds")
+        assertEqual(settings.addCatalogFeeds(world), 0, "Choosing a set twice adds nothing")
+        assertEqual(settings.feedURLs.first, "https://example.com/custom.xml", "Existing subscriptions stay first and untouched")
+        assertEqual(settings.feedURLs.count, world.count + 1, "Only the chosen set was added")
+        assertEqual(settings.addFeed(url: "https://example.org/own.xml"), "https://example.org/own.xml", "Custom RSS still subscribes next to catalog feeds")
+        settings.removeFeed(url: world[0].url)
+        assertFalse(settings.isSubscribed(world[0]), "Any catalog source can be unsubscribed")
+        assertTrue(settings.isSubscribed(world[1]), "Unsubscribing one source keeps the others")
+        assertEqual(defaults.stringArray(forKey: AppSettings.feedURLsKey), settings.feedURLs, "Catalog choices persist like any subscription")
+
+        // One refresh covers a whole batch, and an already-subscribed feed does not refresh anything.
+        let db = DatabaseEngine(path: ":memory:")
+        let store = ArticleStore(database: db)
+        await store.initialize()
+        settings.feedURLs = []
+        settings.aiEnabled = false
+        let requested = TestRecorder()
+        let manager = FeedManager(settings: settings, store: store, schedulesRefresh: false,
+            fetchBatch: { urls, _ in await requested.record(urls); return urls.map { ($0, [], nil, nil) } },
+            notifyBatch: { _, _ in })
+        let ukraine = FeedCatalog.feeds(in: .ukraine)
+        manager.addCatalogFeeds(ukraine)
+        await eventually("The new batch is fetched together") { await requested.batches.contains { Set($0) == Set(ukraine.map(\.url)) } }
+        let batches = await requested.batches.count
+        manager.addCatalogFeeds(ukraine)
+        await manager.fetchFeedsAsync()
+        assertEqual(await requested.batches.count, batches + 1, "Re-adding subscribed feeds triggers no extra refresh")
+        manager.stopBackgroundWork()
+    }
+
+    /// Fetches every catalog feed through the app's own protected networking and parsers. Needs the network.
+    static func testLiveCatalog() async {
+        print("  - Live catalog check: fetching \(FeedCatalog.feeds.count) feeds...")
+        let results = await FeedFetcher().fetchAllFeeds(urls: FeedCatalog.feeds.map(\.url))
+        var failures: [String] = []
+        for feed in FeedCatalog.feeds {
+            guard let result = results.first(where: { $0.urlString == feed.url }) else { failures.append("\(feed.id): no result"); continue }
+            if let error = result.error { failures.append("\(feed.id): \(error.localizedDescription)") }
+            else if (result.articles ?? []).isEmpty { failures.append("\(feed.id): no articles") }
+        }
+        failures.forEach { print("    ✗ \($0)") }
+        assertTrue(failures.isEmpty, "Every catalog feed fetches and parses (\(failures.count) of \(FeedCatalog.feeds.count) failed)")
     }
 
     static func testUndatedArticleOrdering() async throws {

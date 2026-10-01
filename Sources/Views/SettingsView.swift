@@ -15,6 +15,7 @@ struct SettingsView: View {
     @State private var totalStorageSize: String = "Calculating..."
     @State private var cacheActionMessage: String? = nil
     @State private var opmlStatusMessage: String? = nil
+    @State private var showsCatalog = false
     @ObservedObject private var updateChecker = UpdateChecker.shared
 
     var body: some View {
@@ -117,6 +118,14 @@ struct SettingsView: View {
             // OPML actions bar
             HStack(spacing: 10) {
                 Button {
+                    showsCatalog = true
+                } label: {
+                    Label("Browse Catalog...", systemImage: "books.vertical")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+
+                Button {
                     OPMLDialogs.importOPML { data in
                         let count = feedManager.importFeeds(from: data)
                         opmlStatusMessage = count > 0 ? "Imported \(count) feed(s)" : "No new feeds imported."
@@ -201,6 +210,9 @@ struct SettingsView: View {
                 }
             }
             .listStyle(.plain)
+        }
+        .sheet(isPresented: $showsCatalog) {
+            FeedCatalogView()
         }
     }
 

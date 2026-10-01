@@ -94,6 +94,13 @@ class FeedManager: NSObject, ObservableObject {
         }
     }
 
+    /// Subscribes to catalog feeds the user chose; one refresh covers the whole batch.
+    func addCatalogFeeds(_ feeds: [CatalogFeed]) {
+        guard appSettings.addCatalogFeeds(feeds) > 0 else { return }
+        cancelRefresh()
+        fetchFeeds()
+    }
+
     func removeFeed(url: String) {
         cancelRefresh()
         appSettings.removeFeed(url: url)

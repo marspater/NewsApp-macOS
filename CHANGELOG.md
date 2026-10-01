@@ -13,6 +13,10 @@
 
 - Preserve observed article IDs and document URLs through a transactional alias migration; resolve old notifications, read/save actions and enrichment to the existing article, rejecting contradictory signals and retaining URL ambiguity.
 
+### Added
+
+- Add an opt-in starter catalog of 49 verified feeds in nine sets (world, politics, business, technology, science and health, culture and food, Ukraine, Europe, Asia/Middle East/Africa) with language, region, topic, publisher and availability metadata, reachable from Settings → Subscriptions → Browse Catalog. Nothing is subscribed automatically; custom RSS and removing any source work as before.
+
 ### Changed
 
 - Request feeds conditionally: stored ETag and Last-Modified validators let publishers answer 304 Not Modified, which leaves stored articles untouched. Validators are saved atomically with the ingested articles, cleared by cache purges and dropped when a server stops sending them.

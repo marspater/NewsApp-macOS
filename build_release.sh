@@ -31,6 +31,7 @@ SWIFT_SOURCES=(
     Sources/Services/DateParser.swift
     Sources/Models/FeedError.swift
     Sources/Models/FeedFetchState.swift
+    Sources/Models/FeedCatalog.swift
     Sources/Services/IPAddressValidator.swift
     Sources/Models/ArticleIdentity.swift
     Sources/Models/EventOverview.swift
@@ -66,6 +67,7 @@ SWIFT_SOURCES=(
     Sources/Views/ArticleDetailView.swift
     Sources/Views/MainView.swift
     Sources/Views/SettingsView.swift
+    Sources/Views/FeedCatalogView.swift
     Sources/Storage/SavedStoriesManager.swift
     Sources/Services/OPMLManager.swift
     Sources/Views/ArticleWebView.swift

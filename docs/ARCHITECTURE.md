@@ -31,6 +31,7 @@ Native macOS, local-first RSS reader. This document defines the supported techno
 - Image requests honor native HTTP freshness and no-store rules after destination validation; feed, article and update requests retain explicit reload behavior.
 - Feed requests are conditional. ETag/Last-Modified validators live in the existing `feeds` table, keyed by subscription URL, and are replayed through the shared protected client; a 304 leaves stored articles untouched. Validators are written in the ingestion transaction (never before it), cleared by replaceable-cache purges and replaced or dropped by each 200. They are untrusted headers: only short printable ASCII is stored.
 - Schema v8 adds a per-feed failure count and next-attempt time to `feeds`. `FeedFetcher` is the single refresh path for scheduled and manual refreshes: it skips feeds and hosts whose wait has not ended, runs at most six requests overall and two per host, records success (200/304) and failure, and honors `Retry-After` on 429/503 as a lower bound (capped at 24 hours; backoff is 10 minutes doubling to 6 hours). Local rejections, cancellation and a batch where every request fails to connect (offline) are never counted as feed failures. A host that answered 429/503 is cooled in memory only; after relaunch each of its other feeds probes once.
+- The starter catalog is opt-in data, not behavior: nothing is subscribed automatically, entries are stored in `AppSettings.normalizeFeedURL` form so they are fetched exactly as verified, and a catalog subscription is an ordinary subscription (custom RSS, removal, OPML and refresh treat it identically). Entries record how a feed looked on `FeedCatalog.verifiedOn`; they are not a quality or truthfulness rating, and live state comes from the feed's own health. Re-verify with `NEWS_LIVE_CATALOG_CHECK=1 ./test.sh` before changing entries.
 - Treat URLs, feed bodies, publisher HTML, redirects and OPML as untrusted. Route remote fetching through the shared protected networking path; preserve destination validation, numeric-IP pinning, response bounds and cancellation.
 - Keep app entitlements intact. Render sanitized reader HTML; protected WebKit previews disable publisher scripts and block local resources. Do not log secrets, article contents, credentials or full sensitive URLs.
 
@@ -57,6 +58,8 @@ Native macOS, local-first RSS reader. This document defines the supported techno
 - `Sources/Storage/CacheManager.swift`: HTTP cache, intentionally separate from durable user state.
 - `Sources/Models/FeedArticle.swift`, `ArticleIdentity.swift`: article/domain identity models.
 - `Sources/Models/FeedError.swift`: feed error types.
+- `Sources/Models/FeedFetchState.swift`: conditional-request validators, per-feed retry schedule and policy.
+- `Sources/Models/FeedCatalog.swift`: the curated starter catalog (data and set definitions); `Sources/Views/FeedCatalogView.swift` is its opt-in browser.
 
 ### Feed / networking (`Sources/Services/`, `Sources/Coordinators/`)
 - `Sources/Coordinators/FeedManager.swift`: feed orchestration and synchronization.

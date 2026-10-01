@@ -174,6 +174,22 @@ final class AppSettings: ObservableObject {
         saveFeeds()
     }
 
+    // MARK: - Catalog
+
+    func isSubscribed(_ feed: CatalogFeed) -> Bool {
+        feedURLs.contains(feed.url)
+    }
+
+    /// Subscribes to feeds the user chose from the catalog, skipping any already subscribed. Returns how many were added.
+    @discardableResult
+    func addCatalogFeeds(_ feeds: [CatalogFeed]) -> Int {
+        let added = feeds.map(\.url).filter { !feedURLs.contains($0) }
+        guard !added.isEmpty else { return 0 }
+        feedURLs.append(contentsOf: added)
+        saveFeeds()
+        return added.count
+    }
+
     func addSection(_ name: String) {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, !userSections.contains(trimmed) else { return }
