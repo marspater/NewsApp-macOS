@@ -777,7 +777,7 @@ struct ArticleDetailView: View {
     // MARK: - Independent Extraction & Analysis
 
     private func ensureContentExtracted(forceRefresh: Bool = false) async {
-        if !forceRefresh, currentArticle.readerDocument.map { (1...ReaderDocument.currentVersion).contains($0.version) } == true,
+        if !forceRefresh, currentArticle.readerDocument.map({ (1...ReaderDocument.currentVersion).contains($0.version) }) == true,
            let existing = currentArticle.fullContent, !ArticleContentRedactor.redactAndSplit(existing).isEmpty {
             contentState = .ready
             return

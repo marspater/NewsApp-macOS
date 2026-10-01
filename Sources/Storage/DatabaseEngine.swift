@@ -981,7 +981,7 @@ actor DatabaseEngine {
             throw NSError(domain: "DatabaseEngine", code: Int(status), userInfo: [NSLocalizedDescriptionKey: String(cString: sqlite3_errmsg(db))])
         }
         
-        return try curateImages(in: results)
+        return includingOriginals ? results : try curateImages(in: results)
     }
     
     // MARK: - Full Text Search (FTS5)
