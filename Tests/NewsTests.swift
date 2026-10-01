@@ -196,6 +196,7 @@ struct NewsTests {
             try await testOverviewPassageSelectionAndTokenBudget(fixtureHost: fixtureHost)
             try await testPromptInjectionDefenses(fixtureHost: fixtureHost)
             try await testModelAvailabilityAndLanguageFallbacks(fixtureRoot: fixtureRoot)
+            try await testPassageAnchoredFactExtraction()
             try await testHistoricalReconciliation(fixtureRoot: fixtureRoot)
             try await testAuditPersistenceAndRoutingRegressions(fixtureRoot: fixtureRoot)
             try await testUndatedArticleOrdering()
@@ -252,6 +253,7 @@ struct NewsTests {
         try await testOverviewPassageSelectionAndTokenBudget(fixtureHost: fixtureHost)
         try await testPromptInjectionDefenses(fixtureHost: fixtureHost)
         try await testModelAvailabilityAndLanguageFallbacks(fixtureRoot: fixtureRoot)
+        try await testPassageAnchoredFactExtraction()
         try await testHistoricalReconciliation(fixtureRoot: fixtureRoot)
         await testFTS5SearchAndOperators()
         await testMigrationCoordinatorAtomicity()
@@ -5115,5 +5117,117 @@ struct NewsTests {
         assertEqual(fetched?.kind.rawValue, OverviewKind.fallbackExcerpts.rawValue, "Fallback overview successfully persisted and retrieved from SQLite")
         assertEqual(fetched?.facts.count, 2, "Persisted fallback facts retrieved intact")
     }
+
+    static func testPassageAnchoredFactExtraction() async throws {
+        print("  - Testing Passage-anchored fact extraction and guided generation validation...")
+
+        let passage1 = EvidencePassage(
+            id: "p1",
+            articleID: "art-1",
+            text: "Seismic monitors recorded a magnitude 4.8 tremor along the central fault at 06:14 UTC.",
+            ordinal: 1
+        )
+        let passage2 = EvidencePassage(
+            id: "p2",
+            articleID: "art-2",
+            text: "Civil defense reported minor infrastructure cracking and confirmed zero casualties.",
+            ordinal: 2
+        )
+        let passages = [passage1, passage2]
+
+        // 1. Validation of well-formed candidate facts
+        let validCandidate = RawFactCandidate(
+            statement: "A magnitude 4.8 earthquake occurred along the central fault.",
+            passageID: "p1",
+            quote: "magnitude 4.8 tremor along the central fault"
+        )
+        let validCandidate2 = RawFactCandidate(
+            statement: "No casualties were reported following the event.",
+            passageID: "p2",
+            quote: "confirmed zero casualties"
+        )
+
+        let diagnostic1 = PassageFactValidator.validateCandidates([validCandidate, validCandidate2], against: passages)
+        assertEqual(diagnostic1.acceptedFacts.count, 2, "Both valid candidates accepted")
+        assertEqual(diagnostic1.rejectedFacts.count, 0, "No candidates rejected")
+        assertTrue(diagnostic1.isAllAnchored, "All facts properly passage-anchored")
+
+        let fact1 = diagnostic1.acceptedFacts[0]
+        assertEqual(fact1.passageID, "p1", "Fact 1 maps to passage p1")
+        assertEqual(fact1.articleID, "art-1", "Fact 1 article ID derived correctly from passage 1")
+        assertEqual(fact1.statement, "A magnitude 4.8 earthquake occurred along the central fault.", "Statement preserved")
+        assertEqual(fact1.quote, "magnitude 4.8 tremor along the central fault", "Quote preserved")
+
+        let fact2 = diagnostic1.acceptedFacts[1]
+        assertEqual(fact2.passageID, "p2", "Fact 2 maps to passage p2")
+        assertEqual(fact2.articleID, "art-2", "Fact 2 article ID derived correctly from passage 2")
+
+        // 2. Rejection of facts referencing non-existent passage IDs
+        let phantomCandidate = RawFactCandidate(
+            statement: "Tsunami warnings were issued across coastal sectors.",
+            passageID: "p_nonexistent_99",
+            quote: "Tsunami warnings"
+        )
+        let diagnostic2 = PassageFactValidator.validateCandidates([phantomCandidate], against: passages)
+        assertEqual(diagnostic2.acceptedFacts.count, 0, "Fact with phantom passage ID rejected")
+        assertEqual(diagnostic2.rejectedFacts.count, 1, "One rejection recorded")
+        assertFalse(diagnostic2.isAllAnchored, "Not all anchored")
+        if case .missingPassageID(let id) = diagnostic2.rejectedFacts[0].reason {
+            assertEqual(id, "p_nonexistent_99", "Rejection specifies invalid passage ID")
+        } else {
+            assertTrue(false, "Expected missingPassageID rejection")
+        }
+
+        // 3. Rejection of facts with unanchored quotes (hallucinated source link)
+        let unanchoredCandidate = RawFactCandidate(
+            statement: "The tremor caused estimated damages of $500 million.",
+            passageID: "p1",
+            quote: "damages of $500 million" // Not in passage1 text!
+        )
+        let diagnostic3 = PassageFactValidator.validateCandidates([unanchoredCandidate], against: passages)
+        assertEqual(diagnostic3.acceptedFacts.count, 0, "Fact with unanchored quote rejected")
+        assertEqual(diagnostic3.rejectedFacts.count, 1, "One rejection recorded")
+        if case .unanchoredQuote(let quote, let pid) = diagnostic3.rejectedFacts[0].reason {
+            assertEqual(quote, "damages of $500 million", "Rejection specifies unanchored quote")
+            assertEqual(pid, "p1", "Rejection specifies referenced passage ID")
+        } else {
+            assertTrue(false, "Expected unanchoredQuote rejection")
+        }
+
+        // 4. Rejection of empty statements and empty quotes
+        let emptyStatementCandidate = RawFactCandidate(
+            statement: "   \n\t  ",
+            passageID: "p1",
+            quote: "magnitude 4.8"
+        )
+        let emptyQuoteCandidate = RawFactCandidate(
+            statement: "Earthquake measured 4.8.",
+            passageID: "p1",
+            quote: ""
+        )
+        let diagnostic4 = PassageFactValidator.validateCandidates([emptyStatementCandidate, emptyQuoteCandidate], against: passages)
+        assertEqual(diagnostic4.acceptedFacts.count, 0, "Empty statement and empty quote candidates rejected")
+        assertEqual(diagnostic4.rejectedFacts.count, 2, "Two rejections recorded")
+
+        // 5. Deterministic fallback extraction (non-AI / macOS 15)
+        let deterministicFacts = PassageFactExtractor.deterministicExtract(passages: passages)
+        assertTrue(deterministicFacts.count >= 2, "Deterministic extraction yields atomic facts from evidence passages")
+        for df in deterministicFacts {
+            assertTrue(!df.statement.isEmpty, "Deterministic fact statement is non-empty")
+            assertTrue(!df.quote.isEmpty, "Deterministic fact quote is non-empty")
+            assertTrue(passages.contains(where: { $0.id == df.passageID }), "Deterministic fact references valid passage ID")
+            let matchingPassage = passages.first(where: { $0.id == df.passageID })!
+            assertEqual(df.articleID, matchingPassage.articleID, "Article ID matches passage")
+            assertTrue(matchingPassage.text.contains(df.quote), "Deterministic fact quote strictly grounded in passage text")
+        }
+
+        // 6. Extraction prompt generation with security boundaries
+        let prompt = PassageFactExtractor.buildFactExtractionPrompt(passages: passages)
+        assertTrue(prompt.contains(GenerationPromptDefense.untrustedDataSystemGuard), "Fact extraction prompt includes untrusted data system guard")
+        assertTrue(prompt.contains("<source_data>"), "Fact extraction prompt wraps passages in source data boundary container")
+        assertTrue(prompt.contains("<evidence_passage id=\"p1\""), "Fact extraction prompt contains p1 evidence passage tag")
+        assertTrue(prompt.contains("Do not synthesize or summarize into an overview yet"), "Prompt enforces separation of fact extraction before summarizing")
+    }
 }
+
 

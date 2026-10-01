@@ -22,6 +22,7 @@ swiftc -target $(uname -m)-apple-macos${TARGET_MACOS} \
     Sources/Intelligence/OverviewPassageSelector.swift \
     Sources/Intelligence/PromptDefense.swift \
     Sources/Intelligence/ModelAvailability.swift \
+    Sources/Intelligence/PassageFactExtractor.swift \
     Sources/Intelligence/ContentExtractionPipeline.swift \
     Sources/Intelligence/EnrichmentQueue.swift \
     Sources/Services/NetworkBoundaryProxy.swift \
