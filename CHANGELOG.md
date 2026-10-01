@@ -21,6 +21,7 @@
 
 ### Changed
 
+- Find event-matching candidates from shared names and title words within a 48-hour window, the same detected language and events still active in the last 72 hours, capped per article. Nothing groups articles yet.
 - Store events with stable IDs, article membership and membership versions (schema v13). Merges keep old event IDs working, splits get new ones, and neither changes article IDs or read/save state; no source text is copied into events. Nothing groups articles into events yet.
 - Show operational health per subscription (Settings → Subscriptions and the catalog): whether the feed responds, how recent its newest item is and how much text it carries. Health is persisted with ingestion and described as plumbing only, never as a rating of accuracy or trustworthiness.
 - Request feeds conditionally: stored ETag and Last-Modified validators let publishers answer 304 Not Modified, which leaves stored articles untouched. Validators are saved atomically with the ingested articles, cleared by cache purges and dropped when a server stops sending them.

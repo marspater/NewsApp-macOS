@@ -2487,6 +2487,34 @@ actor DatabaseEngine {
                       [.real(now), .text(eventID)])
     }
 
+    /// Event-matching candidates: FTS hits within `window` of `date`, best ranked first and capped at
+    /// `limit`. Hidden reconciled copies, `articleID` itself and members of events unchanged since
+    /// `activeSince` are excluded, so closed events never grow.
+    func eventCandidateRows(
+        matching query: String, around date: Date, window: TimeInterval,
+        activeSince: Date, excluding articleID: String, limit: Int
+    ) throws -> [(id: String, title: String, description: String, eventID: String?)] {
+        let sql = """
+        SELECT a.id, a.title, coalesce(a.description, ''), m.event_id
+        FROM articles_fts fts
+        JOIN articles a ON a.id = fts.article_id
+        LEFT JOIN event_members m ON m.article_id = a.id
+        LEFT JOIN events e ON e.id = m.event_id
+        WHERE articles_fts MATCH ? AND a.id != ?
+            AND \(Self.articleDateOrder) BETWEEN ? AND ?
+            AND \(Self.visibleArticle)
+            AND (m.event_id IS NULL OR e.updated_at >= ?)
+        ORDER BY fts.rank, a.id
+        LIMIT ?;
+        """
+        let center = date.timeIntervalSince1970
+        return try eventRows(sql, [.text(query), .text(articleID), .real(center - window), .real(center + window),
+                                   .real(activeSince.timeIntervalSince1970), .integer(limit)]).compactMap { row in
+            guard let id = row[0], let title = row[1] else { return nil }
+            return (id: id, title: title, description: row[2] ?? "", eventID: row[3])
+        }
+    }
+
     /// Drops events left without members unless an overview still refers to them. A forward dies with
     /// its survivor; merges keep forwards one hop deep, so two passes clear them.
     private func pruneEmptyEvents() throws {

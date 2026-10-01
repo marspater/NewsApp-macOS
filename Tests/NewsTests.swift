@@ -201,6 +201,7 @@ struct NewsTests {
             try await testOverviewCompositionFromVerifiedFacts(fixtureHost: fixtureHost)
             try await testHistoricalReconciliation(fixtureRoot: fixtureRoot)
             try await testEventDataModel(fixtureRoot: fixtureRoot)
+            try await testEventCandidateGeneration(fixtureRoot: fixtureRoot)
             try await testAuditPersistenceAndRoutingRegressions(fixtureRoot: fixtureRoot)
             try await testUndatedArticleOrdering()
             await testDatabaseEnginePersistence()
@@ -261,6 +262,7 @@ struct NewsTests {
         try await testOverviewCompositionFromVerifiedFacts(fixtureHost: fixtureHost)
         try await testHistoricalReconciliation(fixtureRoot: fixtureRoot)
         try await testEventDataModel(fixtureRoot: fixtureRoot)
+        try await testEventCandidateGeneration(fixtureRoot: fixtureRoot)
         await testFTS5SearchAndOperators()
         await testMigrationCoordinatorAtomicity()
         await testArticleRetentionPolicy()
@@ -3061,6 +3063,59 @@ struct NewsTests {
         assertTrue(try await db.isSaved(articleId: "event-b"), "Dropping an event keeps the saved article")
         assertEqual(value(copy, "PRAGMA quick_check;"), "ok", "Event library passes quick_check")
         assertTrue(value(copy, "PRAGMA foreign_key_check;") == nil, "Event membership has no dangling references")
+        await db.close()
+    }
+
+    static func testEventCandidateGeneration(fixtureRoot: URL) async throws {
+        print("  - Testing bounded event candidates by time window, language, terms and active events...")
+        let key = EventMatchKey(title: "Earthquake strikes Lviv region overnight", description: "A strong earthquake struck the Lviv region overnight, officials said.")
+        assertTrue(key.terms.count <= EventMatchKey.maximumTerms, "Match keys are bounded")
+        assertTrue(key.terms.contains { $0.lowercased() == "earthquake" }, "Distinctive title words become terms")
+        assertEqual(key.terms.filter { $0.lowercased() == "lviv" }.count, 1, "Names and title words are deduplicated")
+        assertFalse(key.terms.contains("the"), "Short words are not terms")
+        let hostile = EventMatchKey(title: "Ceasefire\" OR content:* NEAR(talks) {source} collapse", description: "")
+        assertTrue(hostile.ftsQuery?.contains("\"\"") == false, "Quotes in publisher text cannot break out of a phrase")
+        assertTrue(EventMatchKey(title: "A to B", description: "").ftsQuery == nil, "Articles without terms have no candidates")
+
+        let now = Date()
+        let db = DatabaseEngine(path: ":memory:")
+        try await db.open()
+        func article(_ id: String, _ title: String, _ description: String, hoursAgo: Double) -> FeedArticle {
+            FeedArticle(storedID: id, title: title, link: fixtureRoot.appendingPathComponent("candidates/\(id)").absoluteString,
+                        guid: id, description: description, pubDate: now.addingTimeInterval(-hoursAgo * 3600), source: "Publisher \(id)")
+        }
+        let english = "A strong earthquake struck the Lviv region overnight, officials said on Tuesday morning."
+        let target = article("target", "Earthquake strikes Lviv region overnight", english, hoursAgo: 0)
+        try await db.upsertArticles([
+            target,
+            article("recent", "Lviv earthquake damages homes", english, hoursAgo: 20),
+            article("old", "Lviv earthquake damages homes", english, hoursAgo: 120),
+            article("unrelated", "Central bank holds interest rates", "The central bank left its benchmark rate unchanged.", hoursAgo: 2),
+            article("german", "Erdbeben erschüttert Lviv", "Ein starkes Erdbeben hat in der Nacht die Region Lviv erschüttert, berichten die Behörden am Dienstag.", hoursAgo: 3),
+            article("active", "Earthquake in Lviv: rescuers search buildings", english, hoursAgo: 5),
+            article("closed", "Earthquake in Lviv: aftershocks expected", english, hoursAgo: 6)
+        ])
+        let active = try await db.createEvent(memberArticleIDs: ["active"], at: now)
+        _ = try await db.createEvent(memberArticleIDs: ["closed"], at: now.addingTimeInterval(-96 * 3600))
+
+        let candidates = try await EventCandidateFinder.candidates(for: target, in: db, now: now)
+        let ids = Set(candidates.map(\.articleID))
+        assertTrue(ids.contains("recent"), "Matching articles inside the window are candidates")
+        assertFalse(ids.contains("target"), "An article is never its own candidate")
+        assertFalse(ids.contains("old"), "Articles outside the time window are not candidates")
+        assertFalse(ids.contains("unrelated"), "Articles without shared terms are not candidates")
+        assertFalse(ids.contains("german"), "Articles in another detected language are not compared")
+        assertFalse(ids.contains("closed"), "Members of events past their active lifetime are not candidates")
+        assertEqual(candidates.first { $0.articleID == "active" }?.eventID, active.id, "Candidates carry their active event")
+        assertEqual(candidates.first { $0.articleID == "recent" }?.eventID, nil, "Unclustered candidates have no event")
+
+        try await db.upsertArticles((0..<30).map { article("bulk-\($0)", "Lviv earthquake update \($0)", english, hoursAgo: 1) })
+        var narrow = EventCandidatePolicy.standard
+        narrow.limit = 5
+        assertEqual(try await EventCandidateFinder.candidates(for: target, in: db, policy: narrow, now: now).count, 5, "Candidate count is capped")
+        narrow.limit = 0
+        assertTrue(try await EventCandidateFinder.candidates(for: target, in: db, policy: narrow, now: now).isEmpty, "A zero limit reads nothing")
+        _ = try await EventCandidateFinder.candidates(for: article("hostile", hostile.terms.joined(separator: " "), "", hoursAgo: 0), in: db, now: now)
         await db.close()
     }
 
