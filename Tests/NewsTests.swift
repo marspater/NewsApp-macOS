@@ -213,6 +213,8 @@ struct NewsTests {
     }
 
     static func runTests(fixtureHost: String = "example.com") async throws {
+        try StoryCorpus.run(evaluate: CommandLine.arguments.contains("--corpus-fingerprints"))
+        if CommandLine.arguments.contains("--corpus-fingerprints") { return }
         var fixtureURL = URLComponents()
         fixtureURL.scheme = "https"
         fixtureURL.host = fixtureHost
