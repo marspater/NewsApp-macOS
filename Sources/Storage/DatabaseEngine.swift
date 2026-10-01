@@ -296,6 +296,54 @@ actor DatabaseEngine {
                 throw error
             }
         }
+        if version < 7 {
+            try beginTransaction()
+            do {
+                try Task.checkCancellation()
+                try executeSimple("""
+                ALTER TABLE article_aliases RENAME TO article_aliases_v6;
+                CREATE TABLE article_aliases (
+                    kind TEXT NOT NULL CHECK(kind IN ('id', 'url', 'content')),
+                    value TEXT NOT NULL,
+                    article_id TEXT REFERENCES articles(id) ON DELETE CASCADE,
+                    PRIMARY KEY(kind, value)
+                );
+                INSERT INTO article_aliases SELECT kind, value, article_id FROM article_aliases_v6;
+                DROP TABLE article_aliases_v6;
+                CREATE INDEX idx_article_aliases_article ON article_aliases(article_id);
+                """)
+                // Index historical evidence without merging or rewriting any row.
+                var statement: OpaquePointer?
+                let sql = "SELECT id, canonical_url, title, description, content, published_at, source FROM articles;"
+                guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+                    throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Cannot prepare publisher text migration"])
+                }
+                defer { sqlite3_finalize(statement) }
+                var status = sqlite3_step(statement)
+                while status == SQLITE_ROW {
+                    try Task.checkCancellation()
+                    func text(_ column: Int32) -> String {
+                        sqlite3_column_text(statement, column).map { String(cString: $0) } ?? ""
+                    }
+                    let article = FeedArticle(title: text(2), link: text(1), guid: nil,
+                        description: text(3), pubDate: Date(timeIntervalSince1970: sqlite3_column_double(statement, 5)),
+                        source: text(6), fullContent: text(4))
+                    for fingerprint in ArticleIdentity.publisherTextFingerprints(article) {
+                        try recordAlias(kind: "content", value: fingerprint, articleID: text(0))
+                    }
+                    status = sqlite3_step(statement)
+                }
+                guard status == SQLITE_DONE else {
+                    throw NSError(domain: "DatabaseEngine", code: Int(status), userInfo: [NSLocalizedDescriptionKey: "Cannot read publisher text migration"])
+                }
+                try Task.checkCancellation()
+                try setUserVersion(7)
+                try commitTransaction()
+            } catch {
+                try? rollbackTransaction()
+                throw error
+            }
+        }
     }
     
     private func getUserVersion() throws -> Int {
@@ -404,11 +452,38 @@ actor DatabaseEngine {
             throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Conflicting article identity signals"])
         }
         if let target = idTarget ?? urlTarget { return target }
+        if let target = try publisherTextTarget(article) { return target }
         // Direct legacy callers may still supply an unscoped model. Keep that key
         // only if unused; a GUID already owned by another feed needs its scoped key.
         if let scoped, article.storedID == nil,
            try aliasTarget(kind: "id", value: article.id) != nil { return scoped }
         return article.id
+    }
+
+    private func publisherTextTarget(_ article: FeedArticle) throws -> String? {
+        let fingerprints = ArticleIdentity.publisherTextFingerprints(article)
+        guard !fingerprints.isEmpty else { return nil }
+        let placeholders = fingerprints.map { _ in "?" }.joined(separator: ",")
+        var statement: OpaquePointer?
+        let sql = "SELECT article_id FROM article_aliases WHERE kind = 'content' AND value IN (\(placeholders));"
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+            throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Cannot prepare publisher text lookup"])
+        }
+        defer { sqlite3_finalize(statement) }
+        for (index, fingerprint) in fingerprints.enumerated() {
+            sqlite3_bind_text(statement, Int32(index + 1), fingerprint, -1, Self.sqliteTransient)
+        }
+        var targets = Set<String>()
+        var status = sqlite3_step(statement)
+        while status == SQLITE_ROW {
+            guard let value = sqlite3_column_text(statement, 0) else { return nil }
+            targets.insert(String(cString: value))
+            status = sqlite3_step(statement)
+        }
+        guard status == SQLITE_DONE else {
+            throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Cannot read publisher text lookup"])
+        }
+        return targets.count == 1 ? targets.first : nil
     }
 
     @discardableResult
@@ -549,6 +624,10 @@ actor DatabaseEngine {
             }
             if Self.isDocumentURL(canonical) {
                 try recordAlias(kind: "url", value: canonical, articleID: id)
+            }
+
+            for fingerprint in ArticleIdentity.publisherTextFingerprints(article) {
+                try recordAlias(kind: "content", value: fingerprint, articleID: id)
             }
 
             if let feedUrl = identityFeedURL {
@@ -1060,6 +1139,11 @@ actor DatabaseEngine {
         let readerDocument = update.readerDocument
         guard let db = db else { throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Database not open"]) }
         
+        try beginTransaction()
+        defer {
+            if sqlite3_get_autocommit(db) == 0 { try? rollbackTransaction() }
+        }
+
         // 1. Update article table content, category & image if provided
         if content != nil || image != nil || category != nil {
             var updates: [String] = []
@@ -1098,7 +1182,11 @@ actor DatabaseEngine {
                     }
                 }
                 sqlite3_bind_text(artStmt, Int32(params.count + 1), articleId, -1, Self.sqliteTransient)
-                sqlite3_step(artStmt)
+                guard sqlite3_step(artStmt) == SQLITE_DONE else {
+                    throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Cannot update publisher content"])
+                }
+            } else {
+                throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Cannot prepare publisher content update"])
             }
         }
         
@@ -1116,7 +1204,9 @@ actor DatabaseEngine {
             enriched_at = excluded.enriched_at;
         """
         var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, enrichSql, -1, &stmt, nil) == SQLITE_OK else { return }
+        guard sqlite3_prepare_v2(db, enrichSql, -1, &stmt, nil) == SQLITE_OK else {
+            throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Cannot prepare enrichment update"])
+        }
         defer { sqlite3_finalize(stmt) }
         
         let now = Date().timeIntervalSince1970
@@ -1132,7 +1222,15 @@ actor DatabaseEngine {
         sqlite3_bind_int(stmt, 6, content != nil ? 1 : 0)
         sqlite3_bind_double(stmt, 7, now)
         
-        sqlite3_step(stmt)
+        guard sqlite3_step(stmt) == SQLITE_DONE else {
+            throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Cannot update enrichment"])
+        }
+        if content != nil, let article = try fetchArticles(id: articleId).first {
+            for fingerprint in ArticleIdentity.publisherTextFingerprints(article) {
+                try recordAlias(kind: "content", value: fingerprint, articleID: articleId)
+            }
+        }
+        try commitTransaction()
     }
 
     /// Persists structured ArticleAnalysis into article_enrichment.
