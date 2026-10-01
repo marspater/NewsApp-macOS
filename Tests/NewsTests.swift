@@ -468,7 +468,11 @@ struct NewsTests {
         assertTrue(FeedManager.isBlockedLocalAddress("::1"), "Should block IPv6 loopback")
         assertTrue(FeedManager.isBlockedLocalAddress("fe80::1"), "Should block IPv6 link-local")
         
-        assertFalse(FeedManager.isBlockedLocalAddress("google.com"), "Should allow public hostnames")
+        assertTrue(FeedManager.isBlockedLocalAddress("192.0.0.88"), "Should block IETF special-use 192.0.0.0/24")
+        // Hostname allowance depends on the local resolver, so it runs only with controlled network checks.
+        if ProcessInfo.processInfo.environment["NEWS_LIVE_READER_CHECK"] == "1" {
+            assertFalse(FeedManager.isBlockedLocalAddress("google.com"), "Should allow public hostnames")
+        }
         assertFalse(FeedManager.isBlockedLocalAddress("8.8.8.8"), "Should allow public IPs")
         assertFalse(FeedManager.isBlockedLocalAddress("172.15.2.2"), "Should allow public range outside 172.16-31")
     }
