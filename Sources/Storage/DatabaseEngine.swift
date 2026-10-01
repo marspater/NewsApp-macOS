@@ -219,6 +219,44 @@ actor DatabaseEngine {
                 throw error
             }
         }
+        if version < 5 {
+            try beginTransaction()
+            do {
+                try executeSimple("""
+                CREATE TABLE article_aliases (
+                    kind TEXT NOT NULL CHECK(kind IN ('id', 'url')),
+                    value TEXT NOT NULL,
+                    article_id TEXT REFERENCES articles(id) ON DELETE CASCADE,
+                    PRIMARY KEY(kind, value)
+                );
+                CREATE INDEX idx_article_aliases_article ON article_aliases(article_id);
+                """)
+                var statement: OpaquePointer?
+                guard sqlite3_prepare_v2(db, "SELECT id, canonical_url FROM articles;", -1, &statement, nil) == SQLITE_OK else {
+                    throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Cannot prepare alias migration"])
+                }
+                defer { sqlite3_finalize(statement) }
+                var status = sqlite3_step(statement)
+                while status == SQLITE_ROW {
+                    try Task.checkCancellation()
+                    let id = String(cString: sqlite3_column_text(statement, 0))
+                    let url = String(cString: sqlite3_column_text(statement, 1))
+                    try recordAlias(kind: "id", value: id, articleID: id)
+                    if Self.isDocumentURL(url) {
+                        try recordAlias(kind: "url", value: url, articleID: id)
+                    }
+                    status = sqlite3_step(statement)
+                }
+                guard status == SQLITE_DONE else {
+                    throw NSError(domain: "DatabaseEngine", code: Int(status), userInfo: [NSLocalizedDescriptionKey: "Cannot read alias migration rows"])
+                }
+                try setUserVersion(5)
+                try commitTransaction()
+            } catch {
+                try? rollbackTransaction()
+                throw error
+            }
+        }
     }
     
     private func getUserVersion() throws -> Int {
@@ -263,39 +301,68 @@ actor DatabaseEngine {
     
     // MARK: - Article Ingestion & Upsert
     
-    /// Reuse a persisted document before treating a publisher's new GUID as a new story.
-    /// Root URLs are not document identifiers: some feeds link every entry to their homepage.
-    func resolvedArticleID(for article: FeedArticle) throws -> String {
-        guard let db else { throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Database not open"]) }
-        let components = URLComponents(string: article.normalizedLink)
-        let isDocumentURL = components?.host?.isEmpty == false
+    // Root URLs are not document identifiers: feeds can link every item to a homepage.
+    private static func isDocumentURL(_ value: String) -> Bool {
+        let components = URLComponents(string: value)
+        return components?.host?.isEmpty == false
+            && components?.user == nil && components?.password == nil
             && ["http", "https"].contains(components?.scheme?.lowercased() ?? "")
             && (!(components?.path ?? "").trimmingCharacters(in: CharacterSet(charactersIn: "/")).isEmpty
                 || !(components?.query ?? "").isEmpty)
+    }
+
+    /// A NULL target permanently records ambiguity instead of choosing a document.
+    private func recordAlias(kind: String, value: String, articleID: String) throws {
         let sql = """
-        SELECT id FROM articles
-        WHERE id = ? OR canonical_url = ?
-        ORDER BY CASE WHEN id = ? THEN 0 ELSE 1 END, created_at, id
-        LIMIT 1;
+        INSERT INTO article_aliases(kind, value, article_id) VALUES (?, ?, ?)
+        ON CONFLICT(kind, value) DO UPDATE SET article_id =
+            CASE WHEN article_aliases.article_id = excluded.article_id
+                 THEN article_aliases.article_id ELSE NULL END;
         """
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
-            throw NSError(domain: "DatabaseEngine", code: Int(sqlite3_errcode(db)), userInfo: [NSLocalizedDescriptionKey: "Cannot resolve article identity"])
+            throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Cannot prepare article alias"])
         }
         defer { sqlite3_finalize(statement) }
-        sqlite3_bind_text(statement, 1, article.id, -1, Self.sqliteTransient)
-        if isDocumentURL {
-            sqlite3_bind_text(statement, 2, article.normalizedLink, -1, Self.sqliteTransient)
-        } else { sqlite3_bind_null(statement, 2) }
-        sqlite3_bind_text(statement, 3, article.id, -1, Self.sqliteTransient)
+        sqlite3_bind_text(statement, 1, kind, -1, Self.sqliteTransient)
+        sqlite3_bind_text(statement, 2, value, -1, Self.sqliteTransient)
+        sqlite3_bind_text(statement, 3, articleID, -1, Self.sqliteTransient)
+        guard sqlite3_step(statement) == SQLITE_DONE else {
+            throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Cannot persist article alias"])
+        }
+    }
+
+    private func aliasTarget(kind: String, value: String) throws -> String? {
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, "SELECT article_id FROM article_aliases WHERE kind = ? AND value = ?;", -1, &statement, nil) == SQLITE_OK else {
+            throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Cannot prepare alias lookup"])
+        }
+        defer { sqlite3_finalize(statement) }
+        sqlite3_bind_text(statement, 1, kind, -1, Self.sqliteTransient)
+        sqlite3_bind_text(statement, 2, value, -1, Self.sqliteTransient)
         switch sqlite3_step(statement) {
         case SQLITE_ROW:
-            return String(cString: sqlite3_column_text(statement, 0))
+            return sqlite3_column_text(statement, 0).map { String(cString: $0) }
         case SQLITE_DONE:
-            return article.id
+            return nil
         default:
-            throw NSError(domain: "DatabaseEngine", code: Int(sqlite3_errcode(db)), userInfo: [NSLocalizedDescriptionKey: "Cannot read article identity"])
+            throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Cannot read article alias"])
         }
+    }
+
+    func resolvedArticleID(_ id: String) throws -> String {
+        try aliasTarget(kind: "id", value: id) ?? id
+    }
+
+    /// Keep observed identities across serial URL/GUID changes without rewriting keys.
+    func resolvedArticleID(for article: FeedArticle) throws -> String {
+        let idTarget = try aliasTarget(kind: "id", value: article.id)
+        let urlTarget = Self.isDocumentURL(article.normalizedLink)
+            ? try aliasTarget(kind: "url", value: article.normalizedLink) : nil
+        if let idTarget, let urlTarget, idTarget != urlTarget {
+            throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Conflicting article identity signals"])
+        }
+        return idTarget ?? urlTarget ?? article.id
     }
 
     @discardableResult
@@ -427,6 +494,12 @@ actor DatabaseEngine {
                 throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to step article insert"])
             }
 
+            try recordAlias(kind: "id", value: id, articleID: id)
+            try recordAlias(kind: "id", value: article.id, articleID: id)
+            if Self.isDocumentURL(canonical) {
+                try recordAlias(kind: "url", value: canonical, articleID: id)
+            }
+
             if let feedUrl {
                 sqlite3_reset(feedStmt)
                 sqlite3_bind_text(feedStmt, 1, id, -1, Self.sqliteTransient)
@@ -498,11 +571,22 @@ actor DatabaseEngine {
         
         if let id {
             query += " AND a.id = ?"
-            params.append(("text", id))
+            params.append(("text", try resolvedArticleID(id)))
         }
         if let canonicalURL {
-            query += " AND a.canonical_url = ?"
-            params.append(("text", canonicalURL))
+            if let target = try aliasTarget(kind: "url", value: canonicalURL) {
+                query += " AND a.id = ?"
+                params.append(("text", target))
+            } else {
+                query += """
+                 AND a.canonical_url = ?
+                 AND (SELECT count(*) FROM articles WHERE canonical_url = ?) = 1
+                 AND NOT EXISTS (SELECT 1 FROM article_aliases WHERE kind = 'url' AND value = ? AND article_id IS NULL)
+                """
+                params.append(("text", canonicalURL))
+                params.append(("text", canonicalURL))
+                params.append(("text", canonicalURL))
+            }
         }
         if let read = isRead {
             query += " AND s.is_read = ?"
@@ -681,6 +765,7 @@ actor DatabaseEngine {
     // MARK: - State Mutations
     
     func markRead(articleId: String, isRead: Bool) throws {
+        let articleId = try resolvedArticleID(articleId)
         guard let db = db else { throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Database not open"]) }
         let sql = """
         INSERT INTO article_state (article_id, is_read, is_saved, read_at, saved_at)
@@ -732,6 +817,7 @@ actor DatabaseEngine {
         try beginTransaction()
         do {
             for articleId in articleIds {
+                let articleId = try resolvedArticleID(articleId)
                 sqlite3_reset(stmt)
                 sqlite3_bind_text(stmt, 1, articleId, -1, Self.sqliteTransient)
                 sqlite3_bind_int(stmt, 2, readInt)
@@ -774,6 +860,7 @@ actor DatabaseEngine {
         try beginTransaction()
         do {
             for articleId in articleIds {
+                let articleId = try resolvedArticleID(articleId)
                 sqlite3_reset(stmt)
                 sqlite3_bind_text(stmt, 1, articleId, -1, Self.sqliteTransient)
                 sqlite3_bind_double(stmt, 2, now)
@@ -812,6 +899,7 @@ actor DatabaseEngine {
     }
 
     func setSaved(articleId: String, isSaved: Bool) throws {
+        let articleId = try resolvedArticleID(articleId)
         guard let db = db else { throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Database not open"]) }
         let sql = """
         INSERT INTO article_state (article_id, is_read, is_saved, read_at, saved_at)
@@ -841,6 +929,7 @@ actor DatabaseEngine {
     }
     
     func isRead(articleId: String) throws -> Bool {
+        let articleId = try resolvedArticleID(articleId)
         guard let db = db else { throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Database not open"]) }
         let sql = "SELECT is_read FROM article_state WHERE article_id = ? LIMIT 1;"
         var stmt: OpaquePointer?
@@ -855,6 +944,7 @@ actor DatabaseEngine {
     }
     
     func isSaved(articleId: String) throws -> Bool {
+        let articleId = try resolvedArticleID(articleId)
         guard let db = db else { throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Database not open"]) }
         let sql = "SELECT is_saved FROM article_state WHERE article_id = ? LIMIT 1;"
         var stmt: OpaquePointer?
@@ -908,6 +998,7 @@ actor DatabaseEngine {
     }
 
     func updateEnrichment(articleId: String, update: EnrichmentUpdate) throws {
+        let articleId = try resolvedArticleID(articleId)
         let summary = update.summary
         let category = update.category
         let sentiment = update.sentiment
@@ -995,6 +1086,7 @@ actor DatabaseEngine {
 
     /// Persists structured ArticleAnalysis into article_enrichment.
     func saveArticleAnalysis(_ analysis: ArticleAnalysis, for articleId: String) throws {
+        let articleId = try resolvedArticleID(articleId)
         guard let db = db else { throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Database not open"]) }
 
         let sql = """
@@ -1063,7 +1155,7 @@ actor DatabaseEngine {
 
     /// Fetches persisted ArticleAnalysis for an article (if previously analyzed).
     func fetchArticleAnalysis(for articleId: String) -> ArticleAnalysis? {
-        guard let db = db else { return nil }
+        guard let db = db, let articleId = try? resolvedArticleID(articleId) else { return nil }
         let sql = """
         SELECT summary, key_points, category, sentiment, entities, model_identifier, analysis_version
         FROM article_enrichment

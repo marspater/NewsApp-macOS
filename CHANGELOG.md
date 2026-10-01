@@ -2,6 +2,10 @@
 
 ## Unreleased — 1 October 2026
 
+### Fixed
+
+- Preserve observed article IDs and document URLs through a transactional alias migration; resolve old notifications, read/save actions and enrichment to the existing article, rejecting contradictory signals and retaining URL ambiguity.
+
 ### Changed
 
 - Preserve inline publisher figures, captions and alt text in the native reader, with bounded image decoding and graceful unavailable-image states.
