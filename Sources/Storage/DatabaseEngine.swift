@@ -981,7 +981,7 @@ actor DatabaseEngine {
             throw NSError(domain: "DatabaseEngine", code: Int(status), userInfo: [NSLocalizedDescriptionKey: String(cString: sqlite3_errmsg(db))])
         }
         
-        return results
+        return try curateImages(in: results)
     }
     
     // MARK: - Full Text Search (FTS5)
@@ -1095,7 +1095,7 @@ actor DatabaseEngine {
         guard status == SQLITE_DONE else {
             throw NSError(domain: "DatabaseEngine", code: Int(status), userInfo: [NSLocalizedDescriptionKey: String(cString: sqlite3_errmsg(db))])
         }
-        return results
+        return try curateImages(in: results)
     }
     
     // MARK: - State Mutations
@@ -1320,6 +1320,61 @@ actor DatabaseEngine {
         return "Neutral"
     }
 
+    private func curateImages(in articles: [FeedArticle]) throws -> [FeedArticle] {
+        var repeatedBySource = [String: Set<String>]()
+        return try articles.map { original in
+            try Task.checkCancellation()
+            var article = original
+            guard article.imageUrl != nil || article.readerDocument?.images?.isEmpty == false else { return article }
+            let repeated: Set<String>
+            if let known = repeatedBySource[article.source] { repeated = known }
+            else {
+                repeated = try repeatedImageURLs(source: article.source)
+                repeatedBySource[article.source] = repeated
+            }
+            if let document = article.readerDocument, document.version >= 4 {
+                article.readerDocument = document.curated(feedImage: nil, title: article.title, excluding: repeated)
+                article.imageUrl = article.readerDocument?.leadImageURL
+            } else if let url = article.imageUrl, repeated.contains(url) || !ReaderImageCandidate.usable(url: url) {
+                article.imageUrl = nil
+            }
+            return article
+        }
+    }
+
+    // ponytail: flag three distinct documents, return at most 64 recurring URLs per publisher.
+    // This rejects repeated furniture heuristically; a publisher-specific allowlist needs corpus evidence.
+    /// Recurrence is publisher-local and counts distinct documents, not GUID copies.
+    func repeatedImageURLs(source: String) throws -> Set<String> {
+        let sql = """
+        SELECT url FROM (
+            SELECT image_url AS url, canonical_url FROM articles WHERE source = ?
+            UNION
+            SELECT json_extract(j.value, '$.url'), a.canonical_url FROM articles a,
+                json_each(CASE WHEN json_valid(a.reader_document) THEN a.reader_document ELSE '{}' END, '$.images') j
+                WHERE a.source = ?
+        ) WHERE url IS NOT NULL AND canonical_url IS NOT NULL
+        GROUP BY url HAVING count(DISTINCT canonical_url) >= 3 ORDER BY count(DISTINCT canonical_url) DESC, url LIMIT 64;
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Cannot prepare publisher image recurrence"])
+        }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_text(stmt, 1, source, -1, Self.sqliteTransient)
+        sqlite3_bind_text(stmt, 2, source, -1, Self.sqliteTransient)
+        var urls = Set<String>()
+        var status = sqlite3_step(stmt)
+        while status == SQLITE_ROW {
+            if let text = sqlite3_column_text(stmt, 0) { urls.insert(String(cString: text)) }
+            status = sqlite3_step(stmt)
+        }
+        guard status == SQLITE_DONE else {
+            throw NSError(domain: "DatabaseEngine", code: Int(status), userInfo: [NSLocalizedDescriptionKey: "Cannot read publisher image recurrence"])
+        }
+        return urls
+    }
+
     // MARK: - Enrichment Update
     
     struct EnrichmentUpdate: Sendable {
@@ -1368,7 +1423,12 @@ actor DatabaseEngine {
                     updates.append("reader_document = NULL")
                 }
             }
-            if let img = image {
+            if let document = readerDocument, document.version >= 4 {
+                if let selected = document.leadImageURL {
+                    updates.append("image_url = ?")
+                    params.append(("text", selected))
+                } else { updates.append("image_url = NULL") }
+            } else if let img = image {
                 updates.append("image_url = coalesce(image_url, ?)")
                 params.append(("text", img))
             }

@@ -86,11 +86,11 @@ enum AppTypography {
     static let metadata = Font.system(size: 10, weight: .semibold)
 
     // Reader Article Typography Themes
-    static func titleFont(for theme: ArticleThemeType) -> Font {
+    static func titleFont(for theme: ArticleThemeType, scale: CGFloat = 1) -> Font {
         switch theme {
-        case .casper: return .system(size: 34, weight: .bold, design: .serif)
-        case .edition: return .system(size: 32, weight: .heavy, design: .default)
-        case .alto: return .system(size: 28, weight: .medium, design: .monospaced)
+        case .casper: return .system(size: 34 * scale, weight: .bold, design: .serif)
+        case .edition: return .system(size: 32 * scale, weight: .heavy, design: .default)
+        case .alto: return .system(size: 28 * scale, weight: .medium, design: .monospaced)
         }
     }
 
@@ -102,19 +102,19 @@ enum AppTypography {
         }
     }
 
-    static func leadFont(for theme: ArticleThemeType) -> Font {
+    static func leadFont(for theme: ArticleThemeType, scale: CGFloat = 1) -> Font {
         switch theme {
-        case .casper: return .system(size: 20, weight: .regular, design: .serif)
-        case .edition: return .system(size: 18, weight: .regular, design: .default)
-        case .alto: return .system(size: 16, weight: .medium, design: .monospaced)
+        case .casper: return .system(size: 20 * scale, weight: .regular, design: .serif)
+        case .edition: return .system(size: 18 * scale, weight: .regular, design: .default)
+        case .alto: return .system(size: 16 * scale, weight: .medium, design: .monospaced)
         }
     }
 
-    static func bodyFont(for theme: ArticleThemeType) -> Font {
+    static func bodyFont(for theme: ArticleThemeType, scale: CGFloat = 1) -> Font {
         switch theme {
-        case .casper: return .system(size: 18, weight: .regular, design: .serif)
-        case .edition: return .system(size: 16, weight: .regular, design: .default)
-        case .alto: return .system(size: 15, weight: .regular, design: .default)
+        case .casper: return .system(size: 18 * scale, weight: .regular, design: .serif)
+        case .edition: return .system(size: 16 * scale, weight: .regular, design: .default)
+        case .alto: return .system(size: 15 * scale, weight: .regular, design: .default)
         }
     }
 

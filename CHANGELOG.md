@@ -1,4 +1,5 @@
 # Changelog
+- Preserve inline publisher formatting and feed HTML structure, retain image credits and candidates, curate responsive media, stabilize image layout and add native reader text sizes (phase C).
 
 ## Unreleased — 1 October 2026
 

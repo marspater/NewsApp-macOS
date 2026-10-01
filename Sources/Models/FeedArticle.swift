@@ -64,12 +64,37 @@ public struct ReaderBlock: Codable, Hashable, Sendable {
     public var ordinal: Int? = nil
     public var imageURL: String? = nil
     public var imageAlt: String? = nil
+    public var inlineRuns: [ReaderInlineRun]? = nil
+    public var imageCredit: String? = nil
+    public var imageWidth: Int? = nil
+    public var imageHeight: Int? = nil
 }
 
 public struct ReaderDocument: Codable, Hashable, Sendable {
-    public static let currentVersion = 3
+    public static let currentVersion = 4
     public var version = currentVersion
     public let blocks: [ReaderBlock]
+    public var images: [ReaderImageCandidate]? = nil
+    public var leadImageURL: String? = nil
+
+    func curated(feedImage: String?, title: String, excluding repeated: Set<String> = []) -> Self {
+        var result = self
+        var candidates = images ?? []
+        if let feedImage, ReaderImageCandidate.usable(url: feedImage), !candidates.contains(where: { $0.url == feedImage }) {
+            candidates.append(ReaderImageCandidate(url: feedImage, origin: .feed))
+        }
+        candidates.removeAll { repeated.contains($0.url) }
+        result.images = candidates
+        result.leadImageURL = ReaderImageCandidate.select(from: candidates, title: title)?.url
+        result = Self(version: result.version, blocks: blocks.filter { $0.imageURL.map { !repeated.contains($0) } ?? true },
+                      images: candidates, leadImageURL: result.leadImageURL)
+        return result
+    }
+
+    /// Curation is authoritative in v4, including the deliberate absence of a lead.
+    func selectedImage(fallback: String?) -> String? {
+        version >= 4 ? leadImageURL : fallback
+    }
 }
 
 struct ArticleFilterQuery: Equatable, Sendable {
@@ -179,4 +204,52 @@ enum ArticleSection {
         "World": ["world", "international", "global", "europe", "asia", "africa", "foreign", "nation", "united nations", "war", "conflict", "diplomat", "treaty"]
     ]
 
+}
+
+/// Runs retain publisher typography without storing or executing HTML.
+public struct ReaderInlineRun: Codable, Hashable, Sendable {
+    public var text: String
+    public var strong = false
+    public var emphasis = false
+    public var code = false
+    public var link: String? = nil
+}
+
+public struct ReaderImageCandidate: Codable, Hashable, Sendable {
+    public enum Origin: String, Codable, Sendable { case feed, openGraph, body }
+    public var url: String
+    public var origin: Origin
+    public var width: Int? = nil
+    public var height: Int? = nil
+    public var caption: String? = nil
+    public var credit: String? = nil
+    public var alt: String? = nil
+
+    var aspectRatio: Double? {
+        guard let width, let height, width > 0, height > 0 else { return nil }
+        return Double(width) / Double(height)
+    }
+
+    /// Publisher association, never a guarantee of semantic relevance.
+    static func select(from candidates: [Self], title: String) -> Self? {
+        let words = Set(title.lowercased().split(whereSeparator: { !$0.isLetter && !$0.isNumber }).filter { $0.count > 3 })
+        return candidates.filter { usable(url: $0.url, width: $0.width, height: $0.height) }
+            .enumerated().max { lhs, rhs in
+                func score(_ image: Self) -> Int {
+                    let text = (image.alt ?? "") + " " + (image.caption ?? "")
+                    let overlap = words.intersection(text.lowercased().split(whereSeparator: { !$0.isLetter && !$0.isNumber })).count
+                    return overlap * 10 + (image.origin == .body ? 3 : image.origin == .openGraph ? 2 : 1)
+                }
+                let a = score(lhs.element), b = score(rhs.element)
+                return a == b ? lhs.offset > rhs.offset : a < b
+            }?.element
+    }
+
+    static func usable(url: String, width: Int? = nil, height: Int? = nil) -> Bool {
+        guard ContentExtractionPipeline.readerImageURL(url, baseURL: nil) != nil,
+              width.map({ $0 >= 80 && $0 <= 16_384 }) ?? true,
+              height.map({ $0 >= 80 && $0 <= 16_384 }) ?? true else { return false }
+        let path = URL(string: url)?.path.lowercased() ?? ""
+        return path.range(of: #"(?:^|[./_-])(?:logo|favicon|tracking|pixel|spacer|advertisement|avatar)(?:[./_-]|$)"#, options: .regularExpression) == nil
+    }
 }

@@ -197,7 +197,8 @@ struct ArticleCardView: View {
     
     @ViewBuilder
     private var cardImageHeader: some View {
-        if let imageUrl = article.imageUrl, let url = URL(string: imageUrl) {
+        if let imageUrl = article.readerDocument?.selectedImage(fallback: article.imageUrl) ?? (article.readerDocument == nil ? article.imageUrl : nil),
+           ReaderImageCandidate.usable(url: imageUrl), let url = URL(string: imageUrl) {
             ArticleRemoteImage(url: url) { phase in
                 switch phase {
                 case .success(let image):
@@ -209,9 +210,10 @@ struct ArticleCardView: View {
                         .saturation(isRead ? 0.92 : 1.0)
                         .accessibilityHidden(true)
                 default:
-                    editorialFallbackHeader
+                    editorialFallbackHeader.frame(height: compact ? 170 : 140)
                 }
             }
+            .frame(height: compact ? 170 : 140)
         } else {
             editorialFallbackHeader
         }

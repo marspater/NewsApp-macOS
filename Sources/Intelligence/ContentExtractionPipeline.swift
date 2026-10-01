@@ -149,7 +149,7 @@ final class DOMElementNode: Sendable {
     }
 
     private var isHidden: Bool {
-        attributes["hidden"] != nil || attributes["aria-hidden"]?.lowercased() == "true"
+        attributes["style"]?.range(of: #"(?:display\s*:\s*none|visibility\s*:\s*hidden)"#, options: [.regularExpression, .caseInsensitive]) != nil || attributes["hidden"] != nil || attributes["aria-hidden"]?.lowercased() == "true"
             || className.split(whereSeparator: { $0.isWhitespace }).contains("visually-hidden")
     }
 
@@ -157,6 +157,7 @@ final class DOMElementNode: Sendable {
     func combinedText() -> String {
         guard !isReaderExcluded else { return "" }
         if tag == "br" { return "\n" }
+        if tag == "noscript" { return "" }
         var result = text
         for child in children {
             let childText = child.combinedText()
@@ -201,7 +202,16 @@ final class DOMElementNode: Sendable {
 
     func readingBlocks(allowDivFallback: Bool = true) -> [DOMElementNode] {
         guard !isReaderExcluded else { return [] }
-        if tag == "figure" { return [self] }
+        if tag == "noscript" { return children.flatMap { $0.readingBlocks(allowDivFallback: false) } }
+        if tag == "figure" || tag == "img" || tag == "picture" { return [self] }
+        if ["div", "p"].contains(tag), children.contains(where: { $0.tag == "br" }) {
+            var groups = [[DOMElementNode]]([[]])
+            for child in children {
+                if child.tag == "br" { groups.append([]) } else { groups[groups.count - 1].append(child) }
+            }
+            let paragraphs = groups.filter { !$0.isEmpty }.map { DOMElementNode(tag: "p", children: $0) }
+            if paragraphs.count > 1, paragraphs.allSatisfy({ $0.combinedText().count >= 25 }) { return paragraphs }
+        }
         if tag == "figcaption" { return [] }
         if tag == "ol" {
             var ordinal = Int(attributes["start"] ?? "") ?? 1
@@ -215,7 +225,20 @@ final class DOMElementNode: Sendable {
             }
         }
         if ["p", "h2", "h3", "h4", "h5", "h6", "li", "blockquote", "pre"].contains(tag) { return [self] }
-        let blocks = children.flatMap { $0.readingBlocks(allowDivFallback: false) }
+        var blocks = [DOMElementNode]()
+        var inline = [DOMElementNode]()
+        func flushInline() {
+            let paragraph = DOMElementNode(tag: "p", children: inline)
+            if paragraph.combinedText().trimmingCharacters(in: .whitespacesAndNewlines).count >= 25 { blocks.append(paragraph) }
+            inline.removeAll()
+        }
+        for child in children {
+            let nested = child.readingBlocks(allowDivFallback: false)
+            if !nested.isEmpty { flushInline(); blocks += nested }
+            else if child.tag == "br" { flushInline() }
+            else if !child.isReaderExcluded { inline.append(child) }
+        }
+        flushInline()
         if blocks.contains(where: { $0.tag != "figure" }) || !allowDivFallback { return blocks }
         let divs = children.flatMap { $0.readingBlocks() }
         if !divs.isEmpty { return divs }
@@ -226,16 +249,36 @@ final class DOMElementNode: Sendable {
         return []
     }
 
+    func inlineContent(strong: Bool = false, emphasis: Bool = false, code: Bool = false, link: String? = nil) -> [ReaderInlineRun] {
+        guard !isReaderExcluded else { return [] }
+        let strong = strong || ["strong", "b"].contains(tag)
+        let emphasis = emphasis || ["em", "i"].contains(tag)
+        let code = code || tag == "code"
+        let link = tag == "a" ? attributes["href"] : link
+        var runs = text.isEmpty ? [] : [ReaderInlineRun(text: text, strong: strong, emphasis: emphasis, code: code, link: link)]
+        for child in children {
+            if ["p", "div", "li"].contains(child.tag), !runs.isEmpty { runs.append(ReaderInlineRun(text: " ")) }
+            runs += child.inlineContent(strong: strong, emphasis: emphasis, code: code, link: link)
+        }
+        return runs
+    }
+
     var readerBlock: ReaderBlock? {
         guard !isReaderExcluded else { return nil }
-        if tag == "figure" {
+        if ["figure", "img", "picture"].contains(tag) {
             guard let image = visibleReaderImage(),
-                  let source = image.attributes["src"] ?? image.attributes["data-src"] else { return nil }
-            let caption = findNodes(tag: "figcaption").map { $0.combinedText() }.joined(separator: " ")
+                  let source = image.readerImageSource,
+                  image.attributes["alt"]?.range(of: #"\blogo\b"#, options: [.regularExpression, .caseInsensitive]) == nil else { return nil }
+            let caption = findNodes(tag: "figcaption").map { node in
+                node.children.filter { !$0.className.contains("credit") && !$0.className.contains("attribution") }.map { $0.combinedText() }.joined()
+            }.joined(separator: " ")
                 .replacingOccurrences(of: "[ \t\r\n]+", with: " ", options: .regularExpression)
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             return ReaderBlock(kind: .figure, text: String(caption.prefix(2000)), imageURL: source,
-                               imageAlt: image.attributes["alt"].map { String($0.prefix(500)) })
+                               imageAlt: (image.attributes["alt"] ?? findNodes(tag: "img").first?.attributes["alt"]).map { String($0.prefix(500)) },
+                               imageCredit: image.attributes["data-credit"] ?? attributes["data-credit"] ?? findNodes(tag: "figcaption").flatMap { $0.children }.first(where: { $0.className.contains("credit") || $0.className.contains("attribution") })?.combinedText(),
+                               imageWidth: (image.attributes["width"] ?? findNodes(tag: "img").first?.attributes["width"]).flatMap(Int.init),
+                               imageHeight: (image.attributes["height"] ?? findNodes(tag: "img").first?.attributes["height"]).flatMap(Int.init))
         }
         let plain = combinedText().replacingOccurrences(of: "[ \t\r\n]+", with: " ", options: .regularExpression).trimmingCharacters(in: .whitespacesAndNewlines)
         guard !plain.isEmpty, !ArticleContentRedactor.isBoilerplateLine(plain) else { return nil }
@@ -252,16 +295,35 @@ final class DOMElementNode: Sendable {
         guard computeLinkDensity() < 0.8 else { return nil }
         guard kind != .paragraph || plain.count >= 25 else { return nil }
         return ReaderBlock(kind: kind, text: kind == .code ? combinedText().trimmingCharacters(in: .whitespacesAndNewlines) : plain,
-                           ordinal: attributes["reader-ordinal"].flatMap(Int.init))
+                           ordinal: attributes["reader-ordinal"].flatMap(Int.init), inlineRuns: kind == .code ? nil : inlineContent())
+    }
+
+    var readerImageSource: String? {
+        // ponytail: bounded responsive candidates for a 1200 px reader; no media-query engine.
+        for key in ["data-srcset", "srcset"] {
+            let candidates = (attributes[key] ?? "").split(separator: ",").prefix(32).compactMap { item -> (String, Double)? in
+                let parts = item.split(whereSeparator: { $0.isWhitespace })
+                guard let url = parts.first else { return nil }
+                let descriptor = parts.count > 1 ? String(parts[1]) : "1x"
+                guard let size = Double(descriptor.dropLast()), size > 0, size.isFinite,
+                      descriptor.hasSuffix("w") || descriptor.hasSuffix("x") else { return nil }
+                return (String(url), descriptor.hasSuffix("x") ? size * 600 : size)
+            }.sorted { $0.1 < $1.1 }
+            if let chosen = candidates.first(where: { $0.1 >= 1200 }) ?? candidates.last { return chosen.0 }
+        }
+        for key in ["data-src", "data-original", "data-lazy-src", "src"] {
+            if let url = attributes[key], !url.isEmpty, !url.hasPrefix("data:") { return url }
+        }
+        return nil
     }
 
     private func visibleReaderImage() -> DOMElementNode? {
         guard !isReaderExcluded else { return nil }
-        if tag == "img" {
+        if tag == "img" || tag == "source" {
             for dimension in ["width", "height"] {
                 if let value = attributes[dimension].flatMap(Int.init), value < 80 { return nil }
             }
-            return self
+            return readerImageSource == nil ? nil : self
         }
         for child in children {
             if let image = child.visibleReaderImage() { return image }
@@ -293,7 +355,7 @@ enum HTMLDOMBuilder {
     ]
 
     private static let ignoredTags: Set<String> = [
-        "script", "style", "noscript", "iframe", "svg", "nav", "footer",
+        "script", "style", "iframe", "svg", "nav", "footer",
         "header", "form", "aside", "dialog", "time", "button"
     ]
 
@@ -411,14 +473,14 @@ enum HTMLDOMBuilder {
             if attrString.range(of: "(?:^|\\s)hidden(?:\\s|=|$)", options: [.regularExpression, .caseInsensitive]) != nil {
                 attributes["hidden"] = ""
             }
-            let attrPattern = "([a-zA-Z0-9_-]+)\\s*=\\s*[\"']([^\"']*)[\"']"
+            let attrPattern = #"([a-zA-Z0-9_-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))"#
             if let regex = try? NSRegularExpression(pattern: attrPattern) {
                 let matches = regex.matches(in: attrString, range: NSRange(attrString.startIndex..., in: attrString))
                 for match in matches {
                     if let keyRange = Range(match.range(at: 1), in: attrString),
-                       let valRange = Range(match.range(at: 2), in: attrString) {
+                       let valRange = (2...4).compactMap({ Range(match.range(at: $0), in: attrString) }).first {
                         let key = String(attrString[keyRange]).lowercased()
-                        let val = String(attrString[valRange])
+                        let val = ContentExtractionPipeline.shared.decodeHTMLEntities(String(attrString[valRange]))
                         attributes[key] = val
                     }
                 }
@@ -628,13 +690,38 @@ final class ContentExtractionPipeline: Sendable {
         }
 
         // Keep media in publisher order, without allowing images to qualify an empty article.
+        candidateParagraphs = candidateParagraphs.map { block in
+            var block = block
+            if let runs = block.inlineRuns {
+                var normalized = [ReaderInlineRun]()
+                var precedingWhitespace = true
+                for var run in runs {
+                    var text = ""
+                    for character in run.text {
+                        if character.isWhitespace {
+                            if !precedingWhitespace { text += " "; precedingWhitespace = true }
+                        } else { text.append(character); precedingWhitespace = false }
+                    }
+                    run.text = text
+                    run.link = Self.readerImageURL(run.link, baseURL: baseUrl)
+                    if !text.isEmpty { normalized.append(run) }
+                }
+                if !normalized.isEmpty { normalized[normalized.count - 1].text = normalized.last!.text.trimmingCharacters(in: .whitespaces) }
+                // Invalid/legacy structure falls back to plain text, never changes its words.
+                block.inlineRuns = normalized.map(\.text).joined() == block.text ? normalized : nil
+            }
+            return block
+        }
         var seenImages = Set<String>()
         candidateParagraphs = candidateParagraphs.compactMap { block in
             guard block.kind == .figure else { return block }
             guard seenImages.count < 8,
                   let url = Self.readerImageURL(block.imageURL, baseURL: baseUrl),
+                  ReaderImageCandidate.usable(url: url, width: block.imageWidth, height: block.imageHeight),
                   seenImages.insert(url).inserted else { return nil }
-            return ReaderBlock(kind: .figure, text: block.text, imageURL: url, imageAlt: block.imageAlt)
+            var resolved = block
+            resolved.imageURL = url
+            return resolved
         }
 
         // 4. Validate Content Quality
@@ -642,7 +729,21 @@ final class ContentExtractionPipeline: Sendable {
         switch validation {
         case .valid:
             let joined = candidateParagraphs.filter { $0.kind != .figure }.map(\.text).joined(separator: "\n\n")
-            return .success(content: joined, imageUrl: effectiveImage ?? candidateParagraphs.first(where: { $0.kind == .figure })?.imageURL, document: ReaderDocument(blocks: candidateParagraphs))
+            var images = candidateParagraphs.filter { $0.kind == .figure }.compactMap { block -> ReaderImageCandidate? in
+                guard let url = block.imageURL else { return nil }
+                return ReaderImageCandidate(url: url, origin: .body, width: block.imageWidth, height: block.imageHeight, caption: block.text, credit: block.imageCredit, alt: block.imageAlt)
+            }
+            if let effectiveImage, ReaderImageCandidate.usable(url: effectiveImage), !images.contains(where: { $0.url == effectiveImage }) {
+                let metadata = dom.findNodes(tag: "head").flatMap { $0.findNodes(tag: "meta") }
+                func dimension(_ property: String) -> Int? {
+                    metadata.first { $0.attributes["property"]?.lowercased() == property }?.attributes["content"].flatMap(Int.init)
+                }
+                images.append(ReaderImageCandidate(url: effectiveImage, origin: .openGraph,
+                    width: dimension("og:image:width"), height: dimension("og:image:height")))
+            }
+            let title = dom.findNodes(tag: "title").map { $0.combinedText() }.joined()
+            let lead = ReaderImageCandidate.select(from: images, title: title)?.url
+            return .success(content: joined, imageUrl: lead, document: ReaderDocument(blocks: candidateParagraphs, images: images, leadImageURL: lead))
         case .rejected(let reason):
             return .qualityValidationFailed(reason: reason)
         }
@@ -858,7 +959,7 @@ final class ContentExtractionPipeline: Sendable {
                let match = regex.firstMatch(in: html, range: NSRange(html.startIndex..., in: html)),
                let range = Range(match.range(at: 1), in: html) {
                 let candidate = String(html[range]).trimmingCharacters(in: .whitespacesAndNewlines)
-                if candidate.hasPrefix("http") {
+                if !candidate.isEmpty {
                     return candidate
                 }
             }
