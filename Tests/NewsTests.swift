@@ -12135,13 +12135,32 @@ struct NewsTests {
         let upperHost = "HTTPS://FEEDS.BBCO.CO.UK/NEWS/RSS.XML/"
         let normalizedUpper = AppSettings.normalizeFeedURL(upperHost)
         assertEqual(
-            normalizedUpper, "https://feeds.bbco.co.uk/NEWS/RSS.XML",
-            "Host must be lowercased and trailing slash stripped")
+            normalizedUpper, "https://feeds.bbco.co.uk/NEWS/RSS.XML/",
+            "Host must be lowercased; a meaningful trailing slash is kept")
+
+        for slashed in [
+            "https://www.japantimes.co.jp/feed/", "https://www.eurointegration.com.ua/rss/",
+            "https://phys.org/rss-feed/",
+            "https://www.theatlantic.com/feed/channel/culture/", "https://www.scmp.com/rss/91/feed/",
+        ] {
+            assertEqual(
+                AppSettings.normalizeFeedURL(slashed), slashed,
+                "Feeds served only with a trailing slash keep it: \(slashed)")
+        }
+        assertEqual(
+            AppSettings.normalizeFeedURL("http://phys.org/rss-feed/"), "https://phys.org/rss-feed/",
+            "HTTPS upgrade still applies to slashed paths")
+        assertEqual(
+            AppSettings.normalizeFeedURL("https://example.com/feed/?a=1"), "https://example.com/feed/?a=1",
+            "Query follows the kept slash")
+        assertEqual(
+            AppSettings.normalizeFeedURL("https://example.com/a%2Fb/"), "https://example.com/a%2Fb/",
+            "Encoded path is not rewritten")
 
         let bareDomain = "example.com/"
         let normalizedBare = AppSettings.normalizeFeedURL(bareDomain)
         assertEqual(
-            normalizedBare, "https://example.com", "Bare domain should gain https scheme and strip trailing slash")
+            normalizedBare, "https://example.com", "Bare domain should gain https scheme and drop the root slash")
 
         let invalidURL = AppSettings.normalizeFeedURL("")
         assertEqual(invalidURL, nil, "Empty string should return nil")
@@ -12163,6 +12182,54 @@ struct NewsTests {
 
         let storedSections = tempDefaults.stringArray(forKey: AppSettings.userSectionsKey) ?? []
         assertTrue(storedSections.contains("IsolatedSection"), "Injected defaults must receive userSections mutations")
+
+        // 3. Slash variants are one subscription; the URL is stored as given and stored subscriptions are never rewritten
+        let slashSuite = testDefaultsSuite("test.settings.slash")
+        let slashDefaults = UserDefaults(suiteName: slashSuite)!
+        defer { removeTestDefaults(slashSuite) }
+        slashDefaults.set(["https://legacy.example.com/feed"], forKey: AppSettings.feedURLsKey)
+        let slashSettings = AppSettings(defaults: slashDefaults)
+        assertEqual(
+            slashSettings.feedURLs, ["https://legacy.example.com/feed"], "Stored subscriptions are not migrated")
+        assertEqual(
+            slashSettings.addFeed(url: "https://legacy.example.com/feed/"), nil,
+            "Slash variant of a stored subscription is a duplicate")
+        assertEqual(
+            slashSettings.addFeed(url: "https://Slash.example.com/feed/"), "https://slash.example.com/feed/",
+            "Slashed feed is stored as given")
+        assertEqual(
+            slashSettings.addFeed(url: "https://slash.example.com/feed"), nil,
+            "Slashless variant of a slashed subscription is a duplicate")
+        assertEqual(
+            slashSettings.addFeed(url: "https://slash.example.com/feed//"), "https://slash.example.com/feed//",
+            "Only one trailing slash is insignificant")
+        let opml = Data(
+            "<opml><body><outline xmlUrl=\"https://opml.example.com/rss/\"/><outline xmlUrl=\"https://opml.example.com/rss\"/><outline xmlUrl=\"https://legacy.example.com/feed/\"/></body></opml>"
+                .utf8)
+        assertEqual(
+            slashSettings.importFeeds(from: opml), 1,
+            "OPML import adds one of two slash variants and skips subscribed ones")
+        assertEqual(
+            slashSettings.feedURLs.suffix(1), ["https://opml.example.com/rss/"],
+            "OPML import keeps the first form as given")
+        slashSettings.removeFeed(url: "https://legacy.example.com/feed")
+        assertEqual(
+            slashSettings.addFeed(url: "https://legacy.example.com/feed/"), "https://legacy.example.com/feed/",
+            "Removing the stored form frees the slash variant")
+        assertEqual(
+            slashDefaults.stringArray(forKey: AppSettings.feedURLsKey), slashSettings.feedURLs,
+            "Slash-preserving subscriptions persist as given")
+        if let catalogFeed = FeedCatalog.feeds.first(where: { !$0.url.contains("?") && !$0.url.hasSuffix("/") }) {
+            _ = slashSettings.addFeed(url: catalogFeed.url + "/")
+            assertTrue(
+                slashSettings.isSubscribed(catalogFeed), "A slash variant of a catalog feed counts as subscribed")
+            assertEqual(
+                slashSettings.addCatalogFeeds([catalogFeed, catalogFeed]), 0, "Catalog subscribe skips slash variants")
+            assertTrue(
+                !CatalogReviewEngine.detectTopicGaps(subscribedURLs: [catalogFeed.url + "/"]).contains {
+                    $0.catalogSet == catalogFeed.set
+                }, "A slash variant covers its catalog set")
+        }
     }
 
     static func testFixedTaxonomyAndCaseInsensitivity() async {

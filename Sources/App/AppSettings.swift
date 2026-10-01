@@ -180,7 +180,9 @@ final class AppSettings: ObservableObject {
     // MARK: - URL Normalization
 
     /// Normalizes and validates a feed subscription URL using URLComponents.
-    /// Handles scheme upgrades, host lowercasing, and trailing slash cleanup without brittle string replacement.
+    /// Handles scheme upgrades, host lowercasing and the bare root slash. A trailing slash on a non-root path is part of
+    /// the address: some publishers serve the feed only with it, and answer the slashless form with 403, 404 or a
+    /// redirect that downgrades to HTTP.
     nonisolated static func normalizeFeedURL(_ raw: String, allowInsecureHTTP: Bool = false) -> String? {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
@@ -202,16 +204,21 @@ final class AppSettings: ObservableObject {
             components.scheme = "https"
         }
 
-        var path = components.path
-        if path == "/" {
-            path = ""
-            components.path = path
-        } else if path.hasSuffix("/") && path.count > 1 {
-            path.removeLast()
-            components.path = path
-        }
+        if components.path == "/" { components.path = "" }
 
         return components.url?.absoluteString
+    }
+
+    /// Slash-insensitive subscription key: `/feed` and `/feed/` are one subscription even though only one form may work.
+    nonisolated static func feedKey(_ url: String) -> String {
+        guard var components = URLComponents(string: url) else { return url }
+        if components.percentEncodedPath.hasSuffix("/") { components.percentEncodedPath.removeLast() }
+        return components.url?.absoluteString ?? url
+    }
+
+    func hasFeed(_ normalizedURL: String) -> Bool {
+        let key = Self.feedKey(normalizedURL)
+        return feedURLs.contains { Self.feedKey($0) == key }
     }
 
     // MARK: - Mutation APIs
@@ -221,7 +228,7 @@ final class AppSettings: ObservableObject {
             return nil
         }
 
-        guard !feedURLs.contains(normalized) else { return nil }
+        guard !hasFeed(normalized) else { return nil }
         feedURLs.append(normalized)
         saveFeeds()
         return normalized
@@ -235,13 +242,14 @@ final class AppSettings: ObservableObject {
     // MARK: - Catalog
 
     func isSubscribed(_ feed: CatalogFeed) -> Bool {
-        feedURLs.contains(feed.url)
+        hasFeed(feed.url)
     }
 
     /// Subscribes to feeds the user chose from the catalog, skipping any already subscribed. Returns how many were added.
     @discardableResult
     func addCatalogFeeds(_ feeds: [CatalogFeed]) -> Int {
-        let added = feeds.map(\.url).filter { !feedURLs.contains($0) }
+        var knownFeedKeys = Set(feedURLs.map(Self.feedKey))
+        let added = feeds.map(\.url).filter { knownFeedKeys.insert(Self.feedKey($0)).inserted }
         guard !added.isEmpty else { return 0 }
         feedURLs.append(contentsOf: added)
         saveFeeds()
@@ -254,7 +262,8 @@ final class AppSettings: ObservableObject {
     func dismissAdvisory(for url: String, date: String) {
         guard let normalized = Self.normalizeFeedURL(url, allowInsecureHTTP: allowInsecureHTTP) else { return }
         var updated = dismissedAdvisories
-        updated[normalized] = date
+        // Slash-insensitive, matching keys stored before trailing slashes were kept.
+        updated[Self.feedKey(normalized)] = date
         dismissedAdvisories = updated
         defaults.set(updated, forKey: Self.dismissedAdvisoriesKey)
     }
@@ -262,7 +271,7 @@ final class AppSettings: ObservableObject {
     /// Whether an advisory dated on or before `date` has already been acknowledged by the reader.
     func isAdvisoryDismissed(for url: String, date: String) -> Bool {
         guard let normalized = Self.normalizeFeedURL(url, allowInsecureHTTP: allowInsecureHTTP) else { return false }
-        guard let dismissedDate = dismissedAdvisories[normalized] else { return false }
+        guard let dismissedDate = dismissedAdvisories[Self.feedKey(normalized)] else { return false }
         return dismissedDate >= date
     }
 
@@ -394,7 +403,7 @@ final class AppSettings: ObservableObject {
         var addedCount = 0
         var sectionsChanged = false
 
-        var knownFeeds = Set(feedURLs)
+        var knownFeedKeys = Set(feedURLs.map(Self.feedKey))
         var knownSections = Set(userSections)
 
         for item in items {
@@ -402,8 +411,7 @@ final class AppSettings: ObservableObject {
                 continue
             }
 
-            if !knownFeeds.contains(normalized) {
-                knownFeeds.insert(normalized)
+            if knownFeedKeys.insert(Self.feedKey(normalized)).inserted {
                 feedURLs.append(normalized)
                 addedCount += 1
             }
