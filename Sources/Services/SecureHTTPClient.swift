@@ -54,7 +54,7 @@ actor SecureHTTPClient {
     }
 
     func fetchImage(from url: URL, allowHTTP: Bool = false) async throws -> (Data, HTTPURLResponse) {
-        try await fetchData(from: url, maxBytes: Self.defaultImageLimit, timeout: Self.defaultTimeout, allowHTTP: allowHTTP)
+        try await fetchData(from: url, maxBytes: Self.defaultImageLimit, timeout: Self.defaultTimeout, allowHTTP: allowHTTP, cachePolicy: .useProtocolCachePolicy)
     }
 
     /// Shared navigation/ingestion preflight. DNS work stays on this actor, off the UI actor.
@@ -95,12 +95,13 @@ actor SecureHTTPClient {
         from url: URL,
         maxBytes: Int64,
         timeout: TimeInterval = defaultTimeout,
-        allowHTTP: Bool = false
+        allowHTTP: Bool = false,
+        cachePolicy: URLRequest.CachePolicy = .reloadIgnoringLocalCacheData
     ) async throws -> (Data, HTTPURLResponse) {
         try validateDestination(url, allowHTTP: allowHTTP)
 
         // 3. Register Task Security Policy in Delegate Coordinator
-        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: timeout)
+        var request = URLRequest(url: url, cachePolicy: cachePolicy, timeoutInterval: timeout)
         request.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.3 Safari/605.1.15", forHTTPHeaderField: "User-Agent")
         request.setValue("text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8", forHTTPHeaderField: "Accept")
         request.setValue("en-US,en;q=0.9", forHTTPHeaderField: "Accept-Language")

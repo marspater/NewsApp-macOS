@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- Reuse fresh publisher image responses through native HTTP caching while preserving protected networking, byte bounds and publisher no-store rules.
 - Deliver SOCKS rejection replies reliably: the network gateway half-closes and drains unread request bytes instead of resetting the connection.
 
 - Keep undated stories visible using stable ingestion-time ordering, with matching archive/search cursors and retention.
