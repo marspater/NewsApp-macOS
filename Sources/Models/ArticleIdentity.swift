@@ -55,6 +55,36 @@ struct ArticleIdentity: Sendable {
         return "fp_" + String(hex.prefix(16))
     }
 
+    /// Exact publisher text is supporting evidence, never a global document key.
+    static func publisherTextFingerprints(_ article: FeedArticle) -> [String] {
+        guard article.pubDate != DateParser.unknownDate,
+              article.pubDate.timeIntervalSince1970.isFinite,
+              let url = URLComponents(string: article.normalizedLink),
+              let host = url.host?.lowercased(), !host.isEmpty,
+              url.user == nil, url.password == nil,
+              ["http", "https"].contains(url.scheme ?? ""),
+              !url.path.trimmingCharacters(in: CharacterSet(charactersIn: "/")).isEmpty
+                || !(url.query ?? "").isEmpty else { return [] }
+        func normalized(_ text: String) -> String {
+            text.precomposedStringWithCanonicalMapping
+                .split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
+        }
+        let title = normalized(article.title)
+        guard !title.isEmpty else { return [] }
+        let publisher = host + (url.port.map { ":\($0)" } ?? "")
+        return [("description", article.description), ("body", article.fullContent ?? "")].compactMap { kind, text in
+            // ponytail: conservative exact text only; tune recall against the holdout,
+            // rather than merging short teasers or truncated large documents.
+            guard text.utf8.count <= 262_144 else { return nil }
+            let content = normalized(text)
+            guard content.count >= 400, content.split(separator: " ").count >= 40 else { return nil }
+            let fields = ["publisher-text-v1", publisher, normalized(article.source), kind, title,
+                          String(article.pubDate.timeIntervalSince1970), content]
+            let framed = fields.map { "\($0.utf8.count):\($0)" }.joined()
+            return SHA256.hash(data: Data(framed.utf8)).map { String(format: "%02x", $0) }.joined()
+        }
+    }
+
     /// GUIDs identify documents only within the configured subscription URL.
     static func scopedGUID(_ guid: String?, feedURL: String?) -> String? {
         guard let guid = guid?.trimmingCharacters(in: .whitespacesAndNewlines), !guid.isEmpty,
