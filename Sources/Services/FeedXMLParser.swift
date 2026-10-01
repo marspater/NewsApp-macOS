@@ -333,9 +333,13 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
         return ArticleContentRedactor.cleanText(text.trimmingCharacters(in: .whitespacesAndNewlines))
     }
 
+    private static let imageRegex: NSRegularExpression? = {
+        try? NSRegularExpression(pattern: "<img[^>]+src\\s*=\\s*['\"]([^'\"]+)['\"]", options: .caseInsensitive)
+    }()
+
     private func extractImageFromHTML(_ html: String) -> String? {
-        let pattern = "<img[^>]+src\\s*=\\s*['\"]([^'\"]+)['\"]"
-        guard let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive) else { return nil }
+        // Avoid repeated compilation of regex per parsed item
+        guard let regex = Self.imageRegex else { return nil }
         let range = NSRange(html.startIndex..., in: html)
         guard let match = regex.firstMatch(in: html, range: range),
               let captureRange = Range(match.range(at: 1), in: html) else { return nil }
