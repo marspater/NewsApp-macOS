@@ -11,7 +11,8 @@ Build on Apple silicon with Xcode 27 selected. The deployment target remains mac
 ## Validation
 
 ```sh
-./test.sh                         # Deterministic regressions; also run by the commit hook
+./test.sh                         # Full regressions; also run by the commit hook
+./test.sh --story-regressions     # Focused offline identity, reader and persistence checks
 ./build.sh                        # arm64 app with ad-hoc verification signing
 NEWS_LIVE_READER_CHECK=1 ./test.sh # Optional controlled-network and publisher checks
 ./build_release.sh                # Optimized arm64 verification bundle

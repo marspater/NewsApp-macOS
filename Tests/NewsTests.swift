@@ -98,6 +98,22 @@ struct NewsTests {
         fixtureURL.scheme = "https"
         fixtureURL.host = fixtureHost
         let fixtureRoot = fixtureURL.url!
+        if CommandLine.arguments.contains("--story-regressions") {
+            try await testReaderFigures(fixtureRoot: fixtureRoot)
+            try await testCanonicalArticleIngestion(fixtureRoot: fixtureRoot)
+            try await testAuditPersistenceAndRoutingRegressions(fixtureRoot: fixtureRoot)
+            try await testUndatedArticleOrdering()
+            await testDatabaseEnginePersistence()
+            await testFTS5SearchAndOperators()
+            await testReaderParsingRegressions()
+            await testStructuredReaderAndTags()
+            await testReaderStoreUpdates()
+            await testArticleRetentionPolicy()
+            try await testGranularCacheClearingAndRetention()
+            await testMultiPublisherExtractionFixtures()
+            print("✅ Story regressions passed")
+            return
+        }
         print("🏃 Running NewsApp Unit Tests...")
         
         await testURLNormalization()
