@@ -15,6 +15,7 @@ Build on Apple silicon with Xcode 27 selected. The deployment target remains mac
 ./test.sh --story-regressions     # Focused offline identity, reader and persistence checks
 ./build.sh                        # arm64 app with ad-hoc verification signing
 NEWS_LIVE_READER_CHECK=1 ./test.sh # Optional controlled-network and publisher checks
+NEWS_LIVE_CATALOG_CHECK=1 ./test.sh # Optional: fetch every catalog feed through the app's own networking and parsers
 ./build_release.sh                # Optimized arm64 verification bundle
 ```
 

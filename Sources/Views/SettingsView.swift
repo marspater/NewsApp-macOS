@@ -15,6 +15,7 @@ struct SettingsView: View {
     @State private var totalStorageSize: String = "Calculating..."
     @State private var cacheActionMessage: String? = nil
     @State private var opmlStatusMessage: String? = nil
+    @State private var showsCatalog = false
     @ObservedObject private var updateChecker = UpdateChecker.shared
 
     var body: some View {
@@ -117,6 +118,14 @@ struct SettingsView: View {
             // OPML actions bar
             HStack(spacing: 10) {
                 Button {
+                    showsCatalog = true
+                } label: {
+                    Label("Browse Catalog...", systemImage: "books.vertical")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+
+                Button {
                     OPMLDialogs.importOPML { data in
                         let count = feedManager.importFeeds(from: data)
                         opmlStatusMessage = count > 0 ? "Imported \(count) feed(s)" : "No new feeds imported."
@@ -159,32 +168,41 @@ struct SettingsView: View {
             List {
                 ForEach(feedManager.feedURLs, id: \.self) { urlString in
                     HStack(spacing: 12) {
-                        let status = feedManager.feedStatuses[urlString] ?? .idle
+                        let status = feedManager.feedStatuses[urlString]
                         switch status {
-                        case .idle:
+                        case nil:
+                            // No refresh this session yet: the health line below carries the stored state.
+                            Image(systemName: "circle.dashed")
+                                .foregroundColor(AppColor.secondaryText)
+                                .font(.system(size: 13))
+                                .accessibilityHidden(true)
+                        case .idle?:
                             Image(systemName: "checkmark.circle.fill")
                                 .foregroundColor(AppColor.success)
                                 .font(.system(size: 13))
                                 .help("Feed is active and up to date")
                                 .accessibilityLabel("Feed is active and up to date")
-                        case .loading:
+                        case .loading?:
                             ProgressView()
                                 .controlSize(.small)
                                 .scaleEffect(0.7)
                                 .frame(width: 14, height: 14)
                                 .help("Fetching updates...")
                                 .accessibilityLabel("Fetching updates...")
-                        case .failed(let err):
+                        case .failed(let err)?:
                             Image(systemName: "exclamationmark.triangle.fill")
                                 .foregroundColor(AppColor.warning)
                                 .font(.system(size: 13))
                                 .help(err.localizedDescription)
                                 .accessibilityLabel(err.localizedDescription)
                         }
-                        Text(urlString)
-                            .font(.system(size: 12, weight: .medium, design: .monospaced))
-                            .lineLimit(1)
-                            .foregroundColor(AppColor.primaryText)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(urlString)
+                                .font(.system(size: 12, weight: .medium, design: .monospaced))
+                                .lineLimit(1)
+                                .foregroundColor(AppColor.primaryText)
+                            FeedHealthLine(health: feedManager.feedHealth[urlString])
+                        }
                         Spacer()
                         Button(role: .destructive) {
                             feedManager.removeFeed(url: urlString)
@@ -201,6 +219,17 @@ struct SettingsView: View {
                 }
             }
             .listStyle(.plain)
+
+            Text(FeedHealth.disclaimer)
+                .font(AppTypography.caption)
+                .foregroundColor(AppColor.tertiaryText)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, AppLayout.pageInset)
+                .padding(.vertical, 8)
+        }
+        .task { await feedManager.reloadFeedHealth() }
+        .sheet(isPresented: $showsCatalog) {
+            FeedCatalogView()
         }
     }
 

@@ -83,6 +83,86 @@ func assertFalse(_ condition: Bool, _ message: String, file: String = #file, lin
     }
 }
 
+// MARK: - Controllable doubles for refresh scheduling tests
+
+/// Deterministic clock for retry schedules.
+final class TestClock: @unchecked Sendable {
+    private let lock = NSLock()
+    private var current: Date
+    init(_ start: Date) { current = start }
+    var now: Date { lock.lock(); defer { lock.unlock() }; return current }
+    func advance(by interval: TimeInterval) { lock.lock(); current = current.addingTimeInterval(interval); lock.unlock() }
+}
+
+/// Holds every request open until the test answers it, so concurrency and ordering are observable.
+final class GatedURLProtocol: URLProtocol, @unchecked Sendable {
+    private static let lock = NSLock()
+    private static var held: [GatedURLProtocol] = []
+    private static var startedURLs: [URL] = []
+    private static var peakTotal = 0
+    private static var peakByHost: [String: Int] = [:]
+
+    static func reset() {
+        lock.lock(); defer { lock.unlock() }
+        held = []; startedURLs = []; peakTotal = 0; peakByHost = [:]
+    }
+    static var heldURLs: [URL] { lock.lock(); defer { lock.unlock() }; return held.compactMap { $0.request.url } }
+    static var started: [URL] { lock.lock(); defer { lock.unlock() }; return startedURLs }
+    static var peak: (total: Int, byHost: [String: Int]) { lock.lock(); defer { lock.unlock() }; return (peakTotal, peakByHost) }
+
+    @discardableResult
+    static func respond(to url: URL, status: Int = 200, headers: [String: String] = [:], body: Data = Data()) -> Bool {
+        lock.lock()
+        guard let index = held.firstIndex(where: { $0.request.url == url }) else { lock.unlock(); return false }
+        let request = held.remove(at: index)
+        lock.unlock()
+        request.client?.urlProtocol(request, didReceive: HTTPURLResponse(url: url, statusCode: status, httpVersion: nil, headerFields: headers)!, cacheStoragePolicy: .notAllowed)
+        request.client?.urlProtocol(request, didLoad: body)
+        request.client?.urlProtocolDidFinishLoading(request)
+        return true
+    }
+
+    override class func canInit(with _: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        Self.lock.lock(); defer { Self.lock.unlock() }
+        Self.held.append(self)
+        Self.startedURLs.append(request.url!)
+        Self.peakTotal = max(Self.peakTotal, Self.held.count)
+        let host = request.url?.host ?? ""
+        Self.peakByHost[host] = max(Self.peakByHost[host] ?? 0, Self.held.filter { $0.request.url?.host == host }.count)
+    }
+
+    override func stopLoading() {
+        Self.lock.lock(); defer { Self.lock.unlock() }
+        Self.held.removeAll { $0 === self }
+    }
+}
+
+/// Suspends every waiter until opened, so tests can hold follow-up work in flight.
+actor OpenGate {
+    private var isOpen = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+    private(set) var arrivals = 0
+    func wait() async {
+        arrivals += 1
+        if isOpen { return }
+        await withCheckedContinuation { waiters.append($0) }
+    }
+    func open() {
+        isOpen = true
+        for waiter in waiters { waiter.resume() }
+        waiters = []
+    }
+}
+
+/// Records the feed batches a refresh requested.
+actor TestRecorder {
+    private(set) var batches: [[String]] = []
+    func record(_ urls: [String]) { batches.append(urls) }
+}
+
 @main
 struct NewsTests {
     static func main() async {
@@ -138,6 +218,11 @@ struct NewsTests {
         try await testAuditParsingAndSettingsRegressions(fixtureRoot: fixtureRoot)
         try await testAuditPersistenceAndRoutingRegressions(fixtureRoot: fixtureRoot)
         try await testAuditRefreshRegressions(fixtureRoot: fixtureRoot)
+        try await testConditionalFeedRequests(fixtureRoot: fixtureRoot)
+        try await testFeedBackoffAndHostLimits()
+        try await testRefreshEndsAtCollection()
+        try await testFeedCatalog()
+        try await testFeedHealth()
         try await testUndatedArticleOrdering()
         try await testReaderFigures(fixtureRoot: fixtureRoot)
         await testReaderParsingRegressions()
@@ -199,6 +284,9 @@ struct NewsTests {
         
         if ProcessInfo.processInfo.environment["NEWS_LIVE_READER_CHECK"] == "1" {
             await testLiveReader()
+        }
+        if ProcessInfo.processInfo.environment["NEWS_LIVE_CATALOG_CHECK"] == "1" {
+            await testLiveCatalog()
         }
         if let snapshot = ProcessInfo.processInfo.environment["NEWS_SNAPSHOT_DB"] {
             let database = DatabaseEngine(path: snapshot)
@@ -959,7 +1047,7 @@ struct NewsTests {
         settings.notificationsEnabled = true
         var notified: [String] = []
         let manager = FeedManager(settings: settings, store: store, schedulesRefresh: false,
-            fetchBatch: { urls, _ in urls.map { ($0, [archived, fresh, fresh], nil) } },
+            fetchBatch: { urls, _ in urls.map { ($0, [archived, fresh, fresh], nil, nil) } },
             notifyBatch: { articles, _ in notified.append(contentsOf: articles.map { $0.id }) })
         await manager.fetchFeedsAsync()
         let freshID = ArticleIdentity.scopedGUID(fresh.guid, feedURL: settings.feedURLs[0])!
@@ -974,7 +1062,7 @@ struct NewsTests {
         assertEqual(sqlite3_exec(connection, "CREATE TRIGGER fail_ingest BEFORE INSERT ON articles BEGIN SELECT RAISE(ABORT, 'simulated ingestion failure'); END;", nil, nil, nil), SQLITE_OK, "Install failed-ingestion trigger")
         let failed = FeedArticle(title: "Failed", link: fixtureRoot.appendingPathComponent("failed").absoluteString, guid: "failed", description: "", pubDate: Date(), source: "Publisher")
         let failureManager = FeedManager(settings: settings, store: store, schedulesRefresh: false,
-            fetchBatch: { urls, _ in urls.map { ($0, [failed], nil) } },
+            fetchBatch: { urls, _ in urls.map { ($0, [failed], nil, nil) } },
             notifyBatch: { articles, _ in notified.append(contentsOf: articles.map { $0.id }) })
         await failureManager.fetchFeedsAsync()
         assertEqual(notified, [freshID], "Failed ingestion cannot send new-story notifications")
@@ -986,6 +1074,572 @@ struct NewsTests {
         await failureManager.fetchFeedsAsync()
         assertEqual(failureManager.articles, snapshot, "Refresh read errors retain the visible library")
         failureManager.stopBackgroundWork()
+    }
+
+    @MainActor
+    static func testConditionalFeedRequests(fixtureRoot: URL) async throws {
+        print("  - Testing conditional feed requests, 304 handling and atomic validator persistence...")
+        let config = URLSessionConfiguration.default
+        config.protocolClasses = [MockURLProtocol.self]
+        let client = SecureHTTPClient(configuration: config)
+        defer { MockURLProtocol.requestHandler = nil }
+        let feedURL = fixtureRoot.appendingPathComponent("conditional.xml")
+        let modified = "Wed, 21 Oct 2026 07:28:00 GMT"
+
+        // Header plumbing: validators are replayed, and only a conditional request may accept 304.
+        var seen: [URLRequest] = []
+        MockURLProtocol.requestHandler = { request in
+            seen.append(request)
+            return (HTTPURLResponse(url: request.url!, statusCode: 304, httpVersion: nil, headerFields: nil)!, Data())
+        }
+        let (body, notModified) = try await client.fetchFeed(from: feedURL, validators: FeedValidators(etag: "W/\"v1\"", lastModified: modified))
+        assertEqual(notModified.statusCode, 304, "Conditional request surfaces 304")
+        assertTrue(body.isEmpty, "304 carries no body")
+        assertEqual(seen.last?.value(forHTTPHeaderField: "If-None-Match"), "W/\"v1\"", "Weak ETag replayed verbatim")
+        assertEqual(seen.last?.value(forHTTPHeaderField: "If-Modified-Since"), modified, "Last-Modified replayed")
+        do {
+            _ = try await client.fetchFeed(from: feedURL)
+            assertTrue(false, "An unconditional request cannot accept 304")
+        } catch {
+            assertEqual(error as? FeedError, .httpStatus(304), "Unsolicited 304 stays an HTTP error")
+        }
+        assertTrue(FeedValidators(etag: "x\r\nInjected: 1", lastModified: String(repeating: "a", count: 600)).isEmpty,
+                   "Header injection and oversized validators are dropped")
+        assertTrue(FeedValidators(etag: "\"caf\u{E9}\"", lastModified: nil).isEmpty, "Non-ASCII validators are dropped")
+
+        // End to end through refresh, with a real database.
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let path = directory.appendingPathComponent("conditional.sqlite").path
+        let db = DatabaseEngine(path: path)
+        let store = ArticleStore(database: db)
+        await store.initialize()
+        let suite = "test.conditional.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = AppSettings(defaults: defaults)
+        let feed = feedURL.absoluteString
+        settings.feedURLs = [feed]
+        settings.aiEnabled = false
+        let fetcher = FeedFetcher(client: client)
+        var notified = 0
+        let manager = FeedManager(settings: settings, store: store, schedulesRefresh: false,
+            fetchBatch: { urls, allowHTTP in await fetcher.fetchAllFeeds(urls: urls, allowHTTP: allowHTTP, state: db) },
+            notifyBatch: { articles, _ in notified += articles.count })
+        func rss(_ names: [String]) -> Data {
+            let items = names.map { "<item><title>Report \($0)</title><link>\(fixtureRoot.appendingPathComponent($0).absoluteString)</link><guid>\($0)</guid><description>Publisher report</description><pubDate>Wed, 21 Oct 2026 07:28:00 +0000</pubDate></item>" }
+            return Data("<rss version='2.0'><channel><title>Conditional</title>\(items.joined())</channel></rss>".utf8)
+        }
+        func serve(_ names: [String], headers: [String: String]) {
+            MockURLProtocol.requestHandler = { request in
+                seen.append(request)
+                return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: headers)!, rss(names))
+            }
+        }
+        func stored() async throws -> FeedValidators? { try await db.feedFetchStates()[feed]?.validators }
+
+        seen = []
+        serve(["a", "b"], headers: ["ETag": "\"v1\"", "Last-Modified": modified])
+        await manager.fetchFeedsAsync()
+        assertEqual(seen.count, 1, "First refresh requests the feed once")
+        assertEqual(seen.first?.value(forHTTPHeaderField: "If-None-Match"), nil, "First refresh is unconditional")
+        assertEqual(manager.articles.count, 2, "First refresh ingests the feed")
+        assertEqual(try await stored(), FeedValidators(etag: "\"v1\"", lastModified: modified), "Validators persist with the ingested articles")
+
+        seen = []
+        MockURLProtocol.requestHandler = { request in
+            seen.append(request)
+            return (HTTPURLResponse(url: request.url!, statusCode: 304, httpVersion: nil, headerFields: nil)!, Data())
+        }
+        let before = manager.articles
+        await manager.fetchFeedsAsync()
+        assertEqual(seen.last?.value(forHTTPHeaderField: "If-None-Match"), "\"v1\"", "Stored ETag is sent on the next refresh")
+        assertEqual(seen.last?.value(forHTTPHeaderField: "If-Modified-Since"), modified, "Stored Last-Modified is sent on the next refresh")
+        assertEqual(manager.articles, before, "304 leaves stored articles untouched")
+        assertEqual(manager.feedStatuses[feed], .idle, "304 is a healthy refresh")
+        assertEqual(notified, 2, "304 notifies nothing")
+        assertEqual(try await stored(), FeedValidators(etag: "\"v1\"", lastModified: modified), "304 keeps validators")
+
+        // An ingest that fails must not advance the validators, or the new items would hide behind a later 304.
+        var connection: OpaquePointer?
+        assertEqual(sqlite3_open(path, &connection), SQLITE_OK, "Open isolated conditional fixture")
+        defer { sqlite3_close(connection) }
+        assertEqual(sqlite3_exec(connection, "CREATE TRIGGER fail_ingest BEFORE INSERT ON articles BEGIN SELECT RAISE(ABORT, 'simulated ingestion failure'); END;", nil, nil, nil), SQLITE_OK, "Install failed-ingestion trigger")
+        serve(["a", "b", "c"], headers: ["ETag": "\"v2\""])
+        await manager.fetchFeedsAsync()
+        assertEqual(manager.articles.count, 2, "Failed ingestion stores nothing")
+        assertEqual(try await stored(), FeedValidators(etag: "\"v1\"", lastModified: modified), "Failed ingestion keeps the previous validators")
+
+        assertEqual(sqlite3_exec(connection, "DROP TRIGGER fail_ingest;", nil, nil, nil), SQLITE_OK, "Remove failed-ingestion trigger")
+        seen = []
+        serve(["a", "b", "c"], headers: ["ETag": "\"v2\""])
+        await manager.fetchFeedsAsync()
+        assertEqual(seen.last?.value(forHTTPHeaderField: "If-None-Match"), "\"v1\"", "Retry still asks relative to the last ingested state")
+        assertEqual(manager.articles.count, 3, "A server that answers 200 to a conditional request is ingested normally")
+        assertEqual(try await stored(), FeedValidators(etag: "\"v2\"", lastModified: nil), "Validators advance with the new items and drop stale Last-Modified")
+
+        serve(["a", "b", "c"], headers: [:])
+        await manager.fetchFeedsAsync()
+        assertEqual(try await stored(), nil, "A response without validators clears stale ones")
+
+        serve(["a", "b", "c"], headers: ["ETag": "\"v3\""])
+        await manager.fetchFeedsAsync()
+        assertEqual(try await stored(), FeedValidators(etag: "\"v3\"", lastModified: nil), "Validators are recorded again")
+        try await db.clearAllDatabaseCache()
+        assertEqual(try await stored(), nil, "Purging replaceable caches forces the next refresh to be unconditional")
+        manager.stopBackgroundWork()
+    }
+
+    @MainActor
+    static func testFeedBackoffAndHostLimits() async throws {
+        print("  - Testing Retry-After, exponential backoff, per-host limits and manual-refresh limits...")
+
+        // Policy: pure schedule and header parsing.
+        assertEqual(FeedRetryPolicy.backoff(afterFailures: 0), 0, "No failures, no wait")
+        assertEqual([1, 2, 3, 4].map(FeedRetryPolicy.backoff(afterFailures:)), [600, 1200, 2400, 4800], "Backoff doubles from ten minutes")
+        assertEqual(FeedRetryPolicy.backoff(afterFailures: 7), FeedRetryPolicy.maximumDelay, "Backoff is capped")
+        assertEqual(FeedRetryPolicy.backoff(afterFailures: Int.max), FeedRetryPolicy.maximumDelay, "Huge failure counts cannot overflow")
+        assertEqual(FeedRetryPolicy.delay(afterFailures: 1, retryAfter: 3600), 3600, "A longer Retry-After wins")
+        assertEqual(FeedRetryPolicy.delay(afterFailures: 1, retryAfter: 30), 600, "Retry-After never shortens the backoff")
+        assertEqual(FeedRetryPolicy.delay(afterFailures: 1, retryAfter: 1e12), FeedRetryPolicy.maximumRetryAfter, "Retry-After is capped at a day")
+        assertEqual(FeedRetryPolicy.delay(afterFailures: 1, retryAfter: -5), 600, "Negative Retry-After is ignored")
+        let reference = Date(timeIntervalSince1970: 1_792_567_620) // Wed, 21 Oct 2026 07:27:00 GMT
+        assertEqual(FeedRetryPolicy.retryAfter(header: "120", now: reference), 120, "Delay-seconds")
+        assertEqual(FeedRetryPolicy.retryAfter(header: " 7 ", now: reference), 7, "Surrounding whitespace")
+        assertEqual(FeedRetryPolicy.retryAfter(header: "Wed, 21 Oct 2026 07:28:00 GMT", now: reference), 60, "HTTP date in the future")
+        assertEqual(FeedRetryPolicy.retryAfter(header: "Wed, 21 Oct 2026 07:00:00 GMT", now: reference), 0, "HTTP date in the past waits nothing")
+        assertEqual(FeedRetryPolicy.retryAfter(header: "soon", now: reference), nil, "Garbage is ignored")
+        assertEqual(FeedRetryPolicy.retryAfter(header: "-5", now: reference), nil, "Negative values are ignored")
+        assertEqual(FeedRetryPolicy.retryAfter(header: nil, now: reference), nil, "Missing header")
+        assertTrue(FeedRetryPolicy.retryAfter(header: String(repeating: "9", count: 400), now: reference).map { $0.isFinite } == true, "Absurd values stay finite")
+
+        // Persistence: schedule survives reopening, success resets it, long quiet forgives it, validators are independent.
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let path = directory.appendingPathComponent("backoff.sqlite").path
+        let db = DatabaseEngine(path: path)
+        let store = ArticleStore(database: db)
+        await store.initialize()
+        let t0 = Date(timeIntervalSince1970: 1_800_000_000)
+        let feed = "https://8.8.8.8/persist.xml"
+        await store.batchUpsert(articles: [FeedArticle(title: "Kept", link: "https://example.com/kept", guid: "kept", description: "", pubDate: t0, source: "Test")],
+                                feedUrl: feed, validators: FeedValidators(etag: "\"keep\"", lastModified: nil))
+        assertEqual(try await db.recordFeedFailure(feed, retryAfter: nil, at: t0), t0.addingTimeInterval(600), "First failure waits ten minutes")
+        assertEqual(try await db.recordFeedFailure(feed, retryAfter: nil, at: t0.addingTimeInterval(601)), t0.addingTimeInterval(601 + 1200), "Second failure doubles the wait")
+        await db.close()
+        try await db.open()
+        var stateAfterReopen = try await db.feedFetchStates()[feed]
+        assertEqual(stateAfterReopen?.failures, 2, "Failure count survives reopening")
+        assertEqual(stateAfterReopen?.retryAt, t0.addingTimeInterval(601 + 1200), "Retry time survives reopening")
+        assertEqual(stateAfterReopen?.validators, FeedValidators(etag: "\"keep\"", lastModified: nil), "Failures do not touch validators")
+        try await db.recordFeedSuccess(feed, at: t0.addingTimeInterval(4000))
+        stateAfterReopen = try await db.feedFetchStates()[feed]
+        assertEqual(stateAfterReopen?.failures, 0, "Success resets the failure count")
+        assertEqual(stateAfterReopen?.retryAt, nil, "Success ends the wait")
+        assertEqual(stateAfterReopen?.validators, FeedValidators(etag: "\"keep\"", lastModified: nil), "Success does not touch validators")
+        try await db.recordFeedFailure(feed, retryAfter: nil, at: t0)
+        try await db.recordFeedFailure(feed, retryAfter: nil, at: t0.addingTimeInterval(700))
+        let forgiven = t0.addingTimeInterval(700 + 1200 + FeedRetryPolicy.maximumDelay + 1)
+        assertEqual(try await db.recordFeedFailure(feed, retryAfter: nil, at: forgiven), forgiven.addingTimeInterval(600), "A long quiet period forgives old failures")
+
+        // Fetcher: Retry-After, manual refresh inside the wait, and recovery.
+        let mockConfig = URLSessionConfiguration.default
+        mockConfig.protocolClasses = [MockURLProtocol.self]
+        let mockClient = SecureHTTPClient(configuration: mockConfig)
+        defer { MockURLProtocol.requestHandler = nil }
+        let clock = TestClock(t0)
+        let fetcher = FeedFetcher(client: mockClient, now: { clock.now })
+        let busy = "https://8.8.8.8/busy.xml"
+        var requests: [String] = []
+        var status = 429
+        var headers = ["Retry-After": "3600"]
+        let body = Data("<rss version='2.0'><channel><title>T</title><item><title>One</title><link>https://example.com/one</link><guid>one</guid><description>Report</description></item></channel></rss>".utf8)
+        MockURLProtocol.requestHandler = { request in
+            requests.append(request.url!.absoluteString)
+            return (HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: headers)!, status == 200 ? body : Data())
+        }
+        var results = await fetcher.fetchAllFeeds(urls: [busy], state: db)
+        assertEqual(results.first?.error, .serverBusy(status: 429, retryAfter: 3600), "429 reports the server's Retry-After")
+        assertEqual(try await db.feedFetchStates()[busy]?.retryAt, t0.addingTimeInterval(3600), "Retry-After becomes the persisted wait")
+        clock.advance(by: 60)
+        results = await fetcher.fetchAllFeeds(urls: [busy], state: db) // a manual refresh takes the same path
+        assertEqual(requests.count, 1, "A refresh inside the server's wait sends no request")
+        assertEqual(results.first?.error, .retryScheduled(until: t0.addingTimeInterval(3600)), "The skipped feed reports when it resumes")
+        clock.advance(by: 3600)
+        status = 200; headers = [:]
+        results = await fetcher.fetchAllFeeds(urls: [busy], state: db)
+        assertEqual(requests.count, 2, "Requests resume when the wait ends")
+        assertEqual(results.first?.articles?.count, 1, "The recovered feed delivers its articles")
+        assertEqual(try await db.feedFetchStates()[busy]?.failures ?? 0, 0, "Recovery clears the failure count")
+
+        // Exponential backoff for 5xx; 503 without Retry-After; local rejections never back off.
+        let flaky = "https://8.8.8.8/flaky.xml"
+        status = 500
+        var expected: [TimeInterval] = []
+        for failures in 1...3 {
+            let start = clock.now
+            _ = await fetcher.fetchAllFeeds(urls: [flaky], state: db)
+            let state = try await db.feedFetchStates()[flaky]
+            assertEqual(state?.failures, failures, "Failure \(failures) is counted")
+            expected.append(state!.retryAt!.timeIntervalSince(start))
+            clock.advance(by: expected.last! + 1)
+        }
+        assertEqual(expected, [600, 1200, 2400], "Failing feeds back off exponentially")
+        status = 503
+        results = await fetcher.fetchAllFeeds(urls: [flaky], state: db)
+        assertEqual(results.first?.error, .serverBusy(status: 503, retryAfter: nil), "503 without Retry-After is still a back-pressure signal")
+        let insecure = "http://8.8.8.8/insecure.xml"
+        _ = await fetcher.fetchAllFeeds(urls: [insecure], state: db)
+        assertEqual(try await db.feedFetchStates()[insecure], nil, "A locally rejected URL is never scheduled")
+
+        // Offline: when every request fails to connect nothing is blamed on the feeds; a mixed batch blames only the failing one.
+        clock.advance(by: 3600) // the 503 above cooled its whole host
+        let down = "https://8.8.8.8/down.xml", up = "https://8.8.4.4/up.xml"
+        MockURLProtocol.requestHandler = { request in
+            if request.url?.host == "8.8.8.8" { throw URLError(.notConnectedToInternet) }
+            return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, body)
+        }
+        _ = await fetcher.fetchAllFeeds(urls: [down, "https://8.8.8.8/down2.xml"], state: db)
+        assertEqual(try await db.feedFetchStates()[down], nil, "An offline batch records no failures")
+        _ = await fetcher.fetchAllFeeds(urls: [down, up], state: db)
+        assertEqual(try await db.feedFetchStates()[down]?.failures, 1, "A feed failing while others succeed is backed off")
+
+        // Host limits with held requests: two per host, many hosts in parallel.
+        let gatedConfig = URLSessionConfiguration.default
+        gatedConfig.protocolClasses = [GatedURLProtocol.self]
+        let gatedClient = SecureHTTPClient(configuration: gatedConfig)
+        func answerAll(_ expectedCount: Int) async {
+            var answered = 0
+            while answered < expectedCount {
+                if let url = GatedURLProtocol.heldURLs.first, GatedURLProtocol.respond(to: url, body: body) { answered += 1 } else { await Task.yield() }
+            }
+        }
+        GatedURLProtocol.reset()
+        let slow = (1...5).map { "https://8.8.8.8/slow\($0).xml" } + (1...2).map { "https://8.8.4.4/slow\($0).xml" }
+        let limited = FeedFetcher(client: gatedClient, now: { clock.now })
+        let batch = Task { await limited.fetchAllFeeds(urls: slow, state: nil) }
+        while GatedURLProtocol.started.count < 4 { await Task.yield() }
+        await answerAll(slow.count)
+        let finished = await batch.value
+        assertEqual(finished.count, slow.count, "Every feed is fetched")
+        assertEqual(GatedURLProtocol.peak.byHost["8.8.8.8"], FeedFetcher.maximumConcurrentFeedsPerHost, "A host never sees more than two concurrent requests")
+        assertEqual(GatedURLProtocol.peak.total, 4, "Different hosts still run in parallel")
+
+        // A host that pushes back is left alone, including feeds queued behind the refused one.
+        GatedURLProtocol.reset()
+        let siblings = (1...3).map { "https://8.8.8.8/sibling\($0).xml" }
+        let cooling = FeedFetcher(client: gatedClient, now: { clock.now })
+        let refused = Task { await cooling.fetchAllFeeds(urls: siblings, state: nil) }
+        while GatedURLProtocol.started.count < 2 { await Task.yield() }
+        GatedURLProtocol.respond(to: URL(string: siblings[0])!, status: 429, headers: ["Retry-After": "900"])
+        // The refusal is handled in one actor turn, so once the cooldown is visible the queued sibling has been decided.
+        while await cooling.cooldown(forHost: "8.8.8.8") == nil { await Task.yield() }
+        GatedURLProtocol.respond(to: URL(string: siblings[1])!, body: body)
+        let sibling = await refused.value
+        assertEqual(Set(GatedURLProtocol.started.map(\.absoluteString)), Set([siblings[0], siblings[1]]), "The queued sibling is never requested")
+        assertEqual(sibling.first { $0.urlString == siblings[2] }?.error, .retryScheduled(until: clock.now.addingTimeInterval(900)), "The sibling waits out the host's Retry-After")
+        let again = await cooling.fetchAllFeeds(urls: [siblings[1]], state: nil)
+        assertEqual(again.first?.error, .retryScheduled(until: clock.now.addingTimeInterval(900)), "The host cooldown outlives one refresh")
+        assertEqual(GatedURLProtocol.started.count, 2, "No request is sent during the cooldown")
+
+        // Cancelling a refresh is not a feed failure.
+        GatedURLProtocol.reset()
+        let cancelled = "https://8.8.4.4/cancelled.xml"
+        let victim = Task { await FeedFetcher(client: gatedClient, now: { clock.now }).fetchAllFeeds(urls: [cancelled], state: db) }
+        while GatedURLProtocol.started.isEmpty { await Task.yield() }
+        victim.cancel()
+        _ = await victim.value
+        assertEqual(try await db.feedFetchStates()[cancelled], nil, "Cancellation records no failure")
+
+        // End to end: Cmd-R inside the wait shows when the feed resumes and sends nothing.
+        let suite = "test.backoff.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = AppSettings(defaults: defaults)
+        let shown = "https://8.8.4.4/manager.xml"
+        settings.feedURLs = [shown]
+        settings.aiEnabled = false
+        let managed = FeedFetcher(client: mockClient, now: { clock.now })
+        let manager = FeedManager(settings: settings, store: store, schedulesRefresh: false,
+            fetchBatch: { urls, allowHTTP in await managed.fetchAllFeeds(urls: urls, allowHTTP: allowHTTP, state: db) },
+            notifyBatch: { _, _ in })
+        requests = []
+        status = 429; headers = ["Retry-After": "1800"]
+        MockURLProtocol.requestHandler = { request in
+            requests.append(request.url!.absoluteString)
+            return (HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: headers)!, Data())
+        }
+        let refreshStart = clock.now
+        await manager.fetchFeedsAsync()
+        assertEqual(manager.feedStatuses[shown], .failed(.serverBusy(status: 429, retryAfter: 1800)), "The refused refresh is reported")
+        await manager.fetchFeedsAsync()
+        assertEqual(requests.count, 1, "Manual refresh does not bypass the server's wait")
+        assertEqual(manager.feedStatuses[shown], .failed(.retryScheduled(until: refreshStart.addingTimeInterval(1800))), "The paused feed reports when it resumes")
+        manager.stopBackgroundWork()
+    }
+
+    /// Polls observable state with a deadline so a regression fails instead of hanging.
+    static func eventually(_ message: String, timeout: Duration = .seconds(10), _ condition: @escaping () async -> Bool) async {
+        let deadline = ContinuousClock.now + timeout
+        while !(await condition()) {
+            if ContinuousClock.now > deadline { assertTrue(false, message); return }
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+    }
+
+    @MainActor
+    static func testRefreshEndsAtCollection() async throws {
+        print("  - Testing that refresh ends at collection and background work follows energy state...")
+        let suite = "test.refresh-collection.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = AppSettings(defaults: defaults)
+        let feed = "https://8.8.8.8/news.xml"
+        settings.feedURLs = [feed]
+        settings.aiEnabled = false
+        settings.notificationsEnabled = true
+        let db = DatabaseEngine(path: ":memory:")
+        let store = ArticleStore(database: db)
+        await store.initialize()
+
+        // Notification triage is follow-up work: it must not hold the spinner, the published articles or the next refresh.
+        let gate = OpenGate()
+        let counter = TestCounter()
+        let manager = FeedManager(settings: settings, store: store, schedulesRefresh: false,
+            fetchBatch: { urls, _ in
+                await counter.increment()
+                let n = await counter.value
+                let article = FeedArticle(title: "Report \(n)", link: "https://example.com/report-\(n)", guid: "report-\(n)", description: "Publisher report", pubDate: Date(), source: "Test")
+                return urls.map { ($0, [article], nil, nil) }
+            },
+            notifyBatch: { _, _ in await gate.wait() })
+        let first = Task { await manager.fetchFeedsAsync() }
+        await eventually("Triage starts after collection") { await gate.arrivals == 1 }
+        assertFalse(manager.isAnyFeedLoading, "The spinner ends when collection ends, not when triage ends")
+        assertEqual(manager.articles.count, 1, "Collected articles are published while triage is still running")
+        assertEqual(manager.feedStatuses[feed], .idle, "The feed reports a finished refresh")
+        let second = Task { await manager.fetchFeedsAsync() } // Cmd-R during triage
+        await eventually("A refresh requested during triage collects again") { await gate.arrivals == 2 }
+        assertEqual(await counter.value, 2, "Cmd-R is not coalesced onto follow-up work")
+        assertEqual(manager.articles.count, 2, "Cmd-R publishes new articles immediately")
+        await gate.open()
+        await first.value
+        await second.value
+        manager.stopBackgroundWork()
+
+        // Background classification stops under Low Power Mode or thermal pressure, and otherwise runs through the shared queue.
+        settings.aiEnabled = true
+        settings.notificationsEnabled = false
+        let queue = EnrichmentQueue(store: store)
+        var energySaving = true
+        let article = FeedArticle(title: "Superconductor Breakthrough Confirmed", link: "https://example.com/classify", guid: "classify", description: "Independent labs replicate zero resistance", pubDate: Date(), source: "Physics Journal")
+        let background = FeedManager(settings: settings, store: store, schedulesRefresh: false,
+            fetchBatch: { urls, _ in urls.map { ($0, [article], nil, nil) } },
+            notifyBatch: { _, _ in },
+            enrichmentQueue: queue,
+            allowsBackgroundWork: { !energySaving })
+        await background.fetchFeedsAsync()
+        guard let storedID = background.articles.first?.id else { return assertTrue(false, "The refreshed article is stored") }
+        assertEqual(await queue.state(for: storedID), nil, "Energy saving schedules no classification")
+        energySaving = false
+        await background.fetchFeedsAsync()
+        await eventually("Classification runs once energy saving ends") { await queue.state(for: storedID) == .completed }
+        background.stopBackgroundWork()
+    }
+
+    @MainActor
+    static func testFeedCatalog() async throws {
+        print("  - Testing the curated feed catalog, opt-in subscription and custom feeds...")
+        let feeds = FeedCatalog.feeds
+        assertTrue((30...60).contains(feeds.count), "The starter catalog stays in the planned 30-60 range (\(feeds.count))")
+        assertEqual(Set(feeds.map(\.id)).count, feeds.count, "Catalog ids are unique")
+        assertEqual(Set(feeds.map(\.url)).count, feeds.count, "Catalog URLs are unique")
+        for feed in feeds {
+            assertEqual(AppSettings.normalizeFeedURL(feed.url), feed.url, "\(feed.id) is stored in subscription form, so it is fetched exactly as verified")
+            let url = URL(string: feed.url)
+            assertEqual(url?.scheme, "https", "\(feed.id) uses HTTPS")
+            assertTrue(url?.host?.contains(".") == true && url?.user == nil && url?.password == nil, "\(feed.id) has a plain public host")
+            assertTrue(feed.language.range(of: "^[a-z]{2,3}$", options: .regularExpression) != nil, "\(feed.id) has a language code")
+            assertTrue(feed.region == "global" || feed.region.range(of: "^[A-Z]{2}$", options: .regularExpression) != nil, "\(feed.id) has a region")
+            assertFalse(feed.title.isEmpty || feed.publisher.isEmpty, "\(feed.id) is labeled")
+        }
+        assertTrue(ISO8601DateFormatter().date(from: FeedCatalog.verifiedOn + "T00:00:00Z") != nil, "Verification date is a calendar date")
+        for set in CatalogSet.allCases {
+            assertTrue(FeedCatalog.feeds(in: set).count >= 3, "\(set.title) is a real set")
+            assertFalse(set.summary.isEmpty, "\(set.title) is described")
+        }
+        assertTrue(Set(feeds.map(\.language)).isSuperset(of: ["en", "uk", "de", "fr", "it", "nl", "pl"]), "The catalog spans the planned languages")
+
+        // Opt-in: a fresh install subscribes to nothing from the catalog beyond its own defaults.
+        let suite = "test.catalog.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = AppSettings(defaults: defaults)
+        assertEqual(feeds.filter(settings.isSubscribed).map(\.id), ["ars-technica"], "Only a default feed is subscribed before the user chooses")
+
+        let world = FeedCatalog.feeds(in: .world)
+        settings.feedURLs = ["https://example.com/custom.xml"]
+        assertEqual(settings.addCatalogFeeds(world), world.count, "A set subscribes to each of its feeds")
+        assertEqual(settings.addCatalogFeeds(world), 0, "Choosing a set twice adds nothing")
+        assertEqual(settings.feedURLs.first, "https://example.com/custom.xml", "Existing subscriptions stay first and untouched")
+        assertEqual(settings.feedURLs.count, world.count + 1, "Only the chosen set was added")
+        assertEqual(settings.addFeed(url: "https://example.org/own.xml"), "https://example.org/own.xml", "Custom RSS still subscribes next to catalog feeds")
+        settings.removeFeed(url: world[0].url)
+        assertFalse(settings.isSubscribed(world[0]), "Any catalog source can be unsubscribed")
+        assertTrue(settings.isSubscribed(world[1]), "Unsubscribing one source keeps the others")
+        assertEqual(defaults.stringArray(forKey: AppSettings.feedURLsKey), settings.feedURLs, "Catalog choices persist like any subscription")
+
+        // One refresh covers a whole batch, and an already-subscribed feed does not refresh anything.
+        let db = DatabaseEngine(path: ":memory:")
+        let store = ArticleStore(database: db)
+        await store.initialize()
+        settings.feedURLs = []
+        settings.aiEnabled = false
+        let requested = TestRecorder()
+        let manager = FeedManager(settings: settings, store: store, schedulesRefresh: false,
+            fetchBatch: { urls, _ in await requested.record(urls); return urls.map { ($0, [], nil, nil) } },
+            notifyBatch: { _, _ in })
+        let ukraine = FeedCatalog.feeds(in: .ukraine)
+        manager.addCatalogFeeds(ukraine)
+        await eventually("The new batch is fetched together") { await requested.batches.contains { Set($0) == Set(ukraine.map(\.url)) } }
+        let batches = await requested.batches.count
+        manager.addCatalogFeeds(ukraine)
+        await manager.fetchFeedsAsync()
+        assertEqual(await requested.batches.count, batches + 1, "Re-adding subscribed feeds triggers no extra refresh")
+        manager.stopBackgroundWork()
+    }
+
+    /// Fetches every catalog feed through the app's own protected networking and parsers. Needs the network.
+    static func testLiveCatalog() async {
+        print("  - Live catalog check: fetching \(FeedCatalog.feeds.count) feeds...")
+        let results = await FeedFetcher().fetchAllFeeds(urls: FeedCatalog.feeds.map(\.url))
+        var failures: [String] = []
+        for feed in FeedCatalog.feeds {
+            guard let result = results.first(where: { $0.urlString == feed.url }) else { failures.append("\(feed.id): no result"); continue }
+            if let error = result.error { failures.append("\(feed.id): \(error.localizedDescription)") }
+            else if (result.articles ?? []).isEmpty { failures.append("\(feed.id): no articles") }
+        }
+        failures.forEach { print("    ✗ \($0)") }
+        assertTrue(failures.isEmpty, "Every catalog feed fetches and parses (\(failures.count) of \(FeedCatalog.feeds.count) failed)")
+    }
+
+    @MainActor
+    static func testFeedHealth() async throws {
+        print("  - Testing feed health: availability, freshness, text quality and persistence...")
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        func health(_ configure: (inout FeedFetchState) -> Void) -> FeedHealth {
+            var state = FeedFetchState(lastFetchedAt: now)
+            configure(&state)
+            return FeedHealth(state, now: now)
+        }
+        let unknown = FeedHealth(nil, now: now)
+        assertEqual([unknown.availability, health { $0.lastFetchedAt = nil }.availability], [.unknown, .unknown], "A feed never fetched is not rated")
+        assertEqual(unknown.freshness, .unknown, "No items, no freshness")
+        assertEqual(unknown.textQuality, .unknown, "No items, no text quality")
+        assertEqual(health { _ in }.availability, .responding, "A fetched feed responds")
+        let retry = now.addingTimeInterval(600)
+        assertEqual(health { $0.failures = 3; $0.retryAt = retry }.availability, .failing(failures: 3, retryAt: retry), "Failures are reported with the next attempt")
+        let day: TimeInterval = 86_400
+        func freshness(_ age: TimeInterval) -> FeedHealth.Freshness { health { $0.latestItemAt = now.addingTimeInterval(-age) }.freshness }
+        assertEqual([freshness(0), freshness(-3_600), freshness(3 * day), freshness(3 * day + 1), freshness(30 * day), freshness(30 * day + 1)],
+                    [.recent, .recent, .recent, .quiet, .quiet, .stale], "Freshness windows (future-dated items count as recent)")
+        func quality(_ full: Int, of count: Int) -> FeedHealth.TextQuality { health { $0.itemCount = count; $0.fullTextItems = full }.textQuality }
+        assertEqual([quality(0, of: 0), quality(8, of: 10), quality(79, of: 100), quality(3, of: 10), quality(29, of: 100), quality(0, of: 10)],
+                    [.unknown, .full, .partial, .partial, .summaries, .summaries], "Text quality thresholds")
+        assertTrue(health { $0.failures = 1 }.needsAttention && health { $0.latestItemAt = now.addingTimeInterval(-31 * day) }.needsAttention, "Failing and long-inactive feeds ask for attention")
+        assertFalse(health { $0.latestItemAt = now.addingTimeInterval(-day) }.needsAttention, "A healthy feed does not")
+        var good = FeedFetchState(lastFetchedAt: now)
+        (good.latestItemAt, good.itemCount, good.fullTextItems) = (now.addingTimeInterval(-7_200), 10, 9)
+        let summary = FeedHealth(good, now: now).summary(now: now)
+        assertTrue(summary.hasPrefix("Responding · Newest item ") && summary.hasSuffix(" · Full text"), "Summary reads availability, freshness, text: \(summary)")
+        assertTrue(health { $0.failures = 1 }.summary(now: now).hasPrefix("Not responding (1 failed attempt)"), "A failing feed says so plainly")
+        assertEqual(FeedHealth(nil, now: now).summary(now: now), "Not checked yet", "An unchecked feed says so")
+        assertTrue(FeedHealth.disclaimer.contains("not a rating of accuracy or trustworthiness"), "The disclaimer rules out a truthfulness reading")
+        let wordings = [summary, health { $0.failures = 4 }.summary(now: now), unknown.summary(now: now)].map { $0.lowercased() }
+        assertFalse(wordings.contains { text in ["credib", "bias", "fake", "reliab", "trust", "score", "accura"].contains { text.contains($0) } }, "Health wording never rates the reporting")
+
+        // Content stats come from the response, not from the archive.
+        func item(_ guid: String, date: Date, text: Int?) -> FeedArticle {
+            FeedArticle(title: "Report \(guid)", link: "https://example.com/\(guid)", guid: guid, description: "", pubDate: date, source: "Test",
+                        fullContent: text.map { String(repeating: "x", count: $0) })
+        }
+        let stats = FeedContentStats(articles: [item("a", date: now, text: 1200), item("b", date: now.addingTimeInterval(-day), text: 1199),
+                                                item("c", date: DateParser.unknownDate, text: nil)])
+        assertEqual(stats, FeedContentStats(articles: [item("a", date: now, text: 1200), item("b", date: now.addingTimeInterval(-day), text: 1199), item("c", date: DateParser.unknownDate, text: nil)]), "Stats are a pure function of the articles")
+        assertEqual([stats.itemCount, stats.fullTextItems], [3, 1], "Full text starts at 1200 characters")
+        assertEqual(stats.latestItem, now, "Undated items do not set the newest date")
+        assertEqual(FeedContentStats(articles: [item("c", date: DateParser.unknownDate, text: nil)]).latestItem, nil, "Only undated items: no newest date")
+
+        // Persistence with the ingest, untouched by 304 and failures.
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let db = DatabaseEngine(path: directory.appendingPathComponent("health.sqlite").path)
+        let store = ArticleStore(database: db)
+        await store.initialize()
+        let feed = "https://8.8.8.8/health.xml"
+        let before = Date()
+        await store.batchUpsert(articles: [item("a", date: now, text: 1500), item("b", date: now.addingTimeInterval(-day), text: nil)], feedUrl: feed,
+                                validators: FeedValidators(etag: "\"h1\"", lastModified: nil))
+        var stored = try await db.feedFetchStates()[feed]
+        assertEqual([stored?.itemCount, stored?.fullTextItems], [2, 1], "Ingest records what the response carried")
+        assertEqual(stored?.latestItemAt, now, "Ingest records the newest item")
+        assertTrue((stored?.lastFetchedAt ?? .distantPast) >= before.addingTimeInterval(-1), "Ingest records when the feed answered")
+        try await db.recordFeedSuccess(feed, at: now)
+        try await db.recordFeedFailure(feed, retryAfter: nil, at: now)
+        stored = try await db.feedFetchStates()[feed]
+        assertEqual([stored?.itemCount, stored?.fullTextItems], [2, 1], "304 and failures keep the last content stats")
+        assertEqual(stored?.validators, FeedValidators(etag: "\"h1\"", lastModified: nil), "Health writes never touch validators")
+        await store.batchUpsert(articles: [item("c", date: now.addingTimeInterval(day), text: 2000)], feedUrl: feed, validators: FeedValidators(etag: nil, lastModified: nil))
+        stored = try await db.feedFetchStates()[feed]
+        assertEqual([stored?.itemCount, stored?.fullTextItems], [1, 1], "A newer response replaces the stats")
+        assertEqual(stored?.failures, 1, "Ingest writes only its own columns, so an earlier failure count stays until a success clears it")
+
+        // End to end: a refresh publishes health to the UI model.
+        let mockConfig = URLSessionConfiguration.default
+        mockConfig.protocolClasses = [MockURLProtocol.self]
+        defer { MockURLProtocol.requestHandler = nil }
+        let suite = "test.health.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = AppSettings(defaults: defaults)
+        let live = "https://8.8.4.4/live.xml"
+        settings.feedURLs = [live]
+        settings.aiEnabled = false
+        settings.notificationsEnabled = false
+        let fetcher = FeedFetcher(client: SecureHTTPClient(configuration: mockConfig))
+        let manager = FeedManager(settings: settings, store: store, schedulesRefresh: false,
+            fetchBatch: { urls, allowHTTP in await fetcher.fetchAllFeeds(urls: urls, allowHTTP: allowHTTP, state: db) },
+            notifyBatch: { _, _ in })
+        let body = String(repeating: "Publisher report text. ", count: 80)
+        let rfc822 = { () -> String in
+            let formatter = DateFormatter()
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            formatter.dateFormat = "EEE, dd MMM yyyy HH:mm:ss Z"
+            return formatter.string(from: Date())
+        }()
+        let xml = Data("<rss version='2.0' xmlns:content='http://purl.org/rss/1.0/modules/content/'><channel><title>Live</title><item><title>One</title><link>https://example.com/live-one</link><guid>live-one</guid><pubDate>\(rfc822)</pubDate><content:encoded>\(body)</content:encoded></item></channel></rss>".utf8)
+        var status = 200
+        MockURLProtocol.requestHandler = { request in
+            (HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: status == 429 ? ["Retry-After": "900"] : nil)!, status == 200 ? xml : Data())
+        }
+        await manager.fetchFeedsAsync()
+        let responding = manager.feedHealth[live]
+        assertEqual(responding?.availability, .responding, "A refreshed feed reports as responding")
+        assertEqual(responding?.freshness, .recent, "Its items are recent")
+        assertEqual(responding?.textQuality, .full, "Its text is full")
+        status = 429
+        await manager.fetchFeedsAsync()
+        if case .failing(let failures, let retryAt)? = manager.feedHealth[live]?.availability {
+            assertEqual(failures, 1, "A refusal is counted")
+            assertTrue((retryAt ?? .distantPast) > Date(), "The next attempt is in the future")
+        } else {
+            assertTrue(false, "A refused feed reports as failing")
+        }
+        assertEqual(manager.feedHealth[live]?.textQuality, .full, "Content stats survive a failure")
+        manager.stopBackgroundWork()
     }
 
     static func testUndatedArticleOrdering() async throws {
@@ -1421,7 +2075,7 @@ struct NewsTests {
         await cancelledDB.close()
         let db = DatabaseEngine(path: copyPath)
         try await db.open()
-        assertEqual(value(copyPath, "PRAGMA user_version;"), "9", "Copied v4 library upgrades to the current schema")
+        assertEqual(value(copyPath, "PRAGMA user_version;"), "11", "Copied v4 library upgrades to the current schema")
         assertEqual(value(originalPath, "PRAGMA user_version;"), "4", "Original fixture stays untouched")
         assertEqual(try await db.fetchArticles(limit: nil).count, 3, "Migration keeps historical rows")
         assertEqual(value(copyPath, "SELECT read_at FROM article_state WHERE article_id = 'alias-first';"), originalReadAt, "Migration preserves read history timestamp")
@@ -1592,7 +2246,7 @@ struct NewsTests {
         assertEqual(value(failure, "SELECT is_saved FROM article_state WHERE article_id='historical-a';"), "0", "Injected failure rolls back survivor state union")
         assertEqual(value(failure, "SELECT article_id FROM article_aliases WHERE value='observed-variant-b';"), "historical-b", "Injected failure preserves old aliases")
         try await migrated.open()
-        assertEqual(value(copy, "PRAGMA user_version;"), "9", "Copied library upgrades to v9")
+        assertEqual(value(copy, "PRAGMA user_version;"), "11", "Copied library upgrades to the current schema")
         assertEqual(value(path, "PRAGMA user_version;"), "8", "Original fixture remains untouched")
         assertEqual(try await migrated.fetchArticles(limit: nil).count, 6, "Only confident same-URL text copies are hidden")
         assertEqual(try await migrated.fetchArticles(limit: nil, includingOriginals: true).count, 8, "Every stored original remains reachable")
@@ -1899,7 +2553,7 @@ struct NewsTests {
         await store.initialize()
         var notifications = [String]()
         let manager = FeedManager(settings: settings, store: store, schedulesRefresh: false,
-            fetchBatch: { urls, _ in urls.map { ($0, [first, duplicate], nil) } },
+            fetchBatch: { urls, _ in urls.map { ($0, [first, duplicate], nil, nil) } },
             notifyBatch: { articles, _ in notifications.append(contentsOf: articles.map { $0.id }) })
         await manager.fetchFeedsAsync()
         assertEqual(manager.articles.count, 1, "Refresh displays exact content variants once")
@@ -2026,7 +2680,7 @@ struct NewsTests {
                     "<item><title>Report</title><link>\(article.link)</link><guid isPermaLink='false'>\(article.guid!)</guid><description>Publisher report</description></item>"
                 }.joined()
                 let xml = "<rss version='2.0'><channel><title>Shared feed title</title>\(items)</channel></rss>"
-                return (feed, FeedXMLParser(data: Data(xml.utf8)).parse(), nil)
+                return (feed, FeedXMLParser(data: Data(xml.utf8)).parse(), nil, nil)
             } }, notifyBatch: { articles, _ in notified.append(contentsOf: articles.map { $0.id }) })
         await manager.fetchFeedsAsync()
         assertEqual(Set(notified), Set([first.id, second.id]), "Both colliding publishers notify with committed, distinct IDs")
@@ -2418,13 +3072,23 @@ struct NewsTests {
         // 5. Cancel all
         await queue.cancelAll(reason: .superseded)
         let stateA = await queue.state(for: articleA.id)
-        assertEqual(stateA, .cancelled(.superseded), "Article A should be cancelled with superseded reason")
+        assertTrue(stateA == .cancelled(.superseded) || stateA == .completed, "Article A is superseded unless it already finished")
         for _ in 0..<10 {
             await queue.enqueue(article: articleA, priority: .background)
             await queue.cancelAll(reason: .superseded)
             let active = await queue.activeJobCount()
             assertTrue(active <= 3, "Rapid replacement cannot exceed the concurrency bound")
         }
+
+        // Finished work is not superseded or repeated by the next refresh.
+        let articleC = FeedArticle(title: "Quarterly Earnings Beat Expectations", link: "https://example.com/earnings", guid: "eq-3",
+                                   description: "Revenue and profit exceed analyst forecasts", pubDate: Date(), source: "Markets")
+        await queue.enqueue(article: articleC, priority: .interactive)
+        await eventually("Article C finishes classification") { await queue.state(for: articleC.id) == .completed }
+        await queue.cancelAll(reason: .superseded)
+        assertEqual(await queue.state(for: articleC.id), .completed, "Superseding the backlog keeps finished work")
+        await queue.enqueue(article: articleC, priority: .background)
+        assertEqual(await queue.state(for: articleC.id), .completed, "A finished article is not classified again")
     }
     
     static func testDesignSystemAndArticleFilter() async {
@@ -2670,7 +3334,7 @@ struct NewsTests {
                 fetchBatch: { urls, _ in
                     guard let url = urls.first else { return [] }
                     await gate.wait()
-                    return [(url, [article], nil)]
+                    return [(url, [article], nil, nil)]
                 })
             let refresh = Task { await manager.fetchFeedsAsync() }
             while !(await gate.started) { await Task.yield() }

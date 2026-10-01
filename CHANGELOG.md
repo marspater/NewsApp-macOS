@@ -13,8 +13,16 @@
 
 - Preserve observed article IDs and document URLs through a transactional alias migration; resolve old notifications, read/save actions and enrichment to the existing article, rejecting contradictory signals and retaining URL ambiguity.
 
+### Added
+
+- Add an opt-in starter catalog of 49 verified feeds in nine sets (world, politics, business, technology, science and health, culture and food, Ukraine, Europe, Asia/Middle East/Africa) with language, region, topic, publisher and availability metadata, reachable from Settings → Subscriptions → Browse Catalog. Nothing is subscribed automatically; custom RSS and removing any source work as before.
+
 ### Changed
 
+- Show operational health per subscription (Settings → Subscriptions and the catalog): whether the feed responds, how recent its newest item is and how much text it carries. Health is persisted with ingestion and described as plumbing only, never as a rating of accuracy or trustworthiness.
+- Request feeds conditionally: stored ETag and Last-Modified validators let publishers answer 304 Not Modified, which leaves stored articles untouched. Validators are saved atomically with the ingested articles, cleared by cache purges and dropped when a server stops sending them.
+- Honor `Retry-After` on 429/503 and back failing feeds off exponentially (10 minutes doubling to 6 hours), persisted per feed. Scheduled and manual refreshes both respect the wait, a host that pushed back is left alone, at most two requests run per host, and an offline device is not mistaken for failing feeds.
+- End a refresh when new articles are collected and published: notification triage and background classification no longer hold the spinner or the next Cmd-R. Finished classification is not repeated by every refresh, background classification pauses under Low Power Mode and thermal pressure, and scheduled refreshes defer when the system asks.
 - Preserve inline publisher figures, captions and alt text in the native reader, with bounded image decoding and graceful unavailable-image states.
 - Reuse the existing article for incoming GUID variants of the same document URL while retaining its durable identity, bookmarks and reading history.
 - Preserve meaningful URL query parameters instead of stripping every parameter beginning with a tracking-key prefix.

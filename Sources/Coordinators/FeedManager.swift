@@ -26,18 +26,22 @@ class FeedManager: NSObject, ObservableObject {
     @Published var articles: [FeedArticle] = []
     @Published var feedStatuses: [String: FeedStatus] = [:]
     @Published var isAnyFeedLoading: Bool = false
+    /// Operational health per subscription, refreshed after every refresh and when a view asks.
+    @Published private(set) var feedHealth: [String: FeedHealth] = [:]
 
     let appSettings: AppSettings
     let articleStore: ArticleStore
 
-    typealias FeedBatch = [(urlString: String, articles: [FeedArticle]?, error: FeedError?)]
+    typealias FeedBatch = [FeedFetchResult]
     private let fetchBatch: @Sendable ([String], Bool) async -> FeedBatch
     private let notifyBatch: @MainActor ([FeedArticle], AppSettings.NotificationMode) async -> Void
     private let enrichmentQueue: EnrichmentQueue
+    private let allowsBackgroundWork: @MainActor () -> Bool
     private var isStopped = false
     private var storeUpdates: AnyCancellable?
     private var terminationObserver: AnyCancellable?
-    private var refreshTask: Task<Void, Never>?
+    /// Collection only: fetch, ingest and publish. Resolves to the newly stored articles.
+    private var refreshTask: Task<[FeedArticle], Never>?
     private var refreshRunID: UUID?
     private var enrichmentTask: Task<Void, Never>?
     private var backgroundTimer: Timer?
@@ -51,17 +55,25 @@ class FeedManager: NSObject, ObservableObject {
     var aiEnabled: Bool { appSettings.aiEnabled }
 
     init(settings: AppSettings? = nil, store: ArticleStore? = nil, schedulesRefresh: Bool = true,
-         fetchBatch: @escaping @Sendable ([String], Bool) async -> FeedBatch = { urls, allowHTTP in
-             await FeedFetcher.shared.fetchAllFeeds(urls: urls, allowHTTP: allowHTTP)
-         },
+         fetchBatch: (@Sendable ([String], Bool) async -> FeedBatch)? = nil,
          notifyBatch: @escaping @MainActor ([FeedArticle], AppSettings.NotificationMode) async -> Void = { articles, mode in
              await NotificationService.shared.triageAndNotify(newArticles: articles, mode: mode)
+         },
+         enrichmentQueue: EnrichmentQueue? = nil,
+         allowsBackgroundWork: @escaping @MainActor () -> Bool = {
+             let info = ProcessInfo.processInfo
+             return !info.isLowPowerModeEnabled && info.thermalState.rawValue < ProcessInfo.ThermalState.serious.rawValue
          }) {
+        let store = store ?? ArticleStore.shared
+        let state = store.database
         self.appSettings = settings ?? AppSettings.shared
-        self.articleStore = store ?? ArticleStore.shared
-        self.fetchBatch = fetchBatch
+        self.articleStore = store
+        self.fetchBatch = fetchBatch ?? { urls, allowHTTP in
+            await FeedFetcher.shared.fetchAllFeeds(urls: urls, allowHTTP: allowHTTP, state: state)
+        }
         self.notifyBatch = notifyBatch
-        self.enrichmentQueue = EnrichmentQueue(store: self.articleStore)
+        self.enrichmentQueue = enrichmentQueue ?? EnrichmentQueue(store: store)
+        self.allowsBackgroundWork = allowsBackgroundWork
         super.init()
         storeUpdates = articleStore.$articles.sink { [weak self] articles in
             self?.articles = articles
@@ -82,6 +94,13 @@ class FeedManager: NSObject, ObservableObject {
             feedStatuses[added] = .idle
             fetchFeeds()
         }
+    }
+
+    /// Subscribes to catalog feeds the user chose; one refresh covers the whole batch.
+    func addCatalogFeeds(_ feeds: [CatalogFeed]) {
+        guard appSettings.addCatalogFeeds(feeds) > 0 else { return }
+        cancelRefresh()
+        fetchFeeds()
     }
 
     func removeFeed(url: String) {
@@ -167,6 +186,14 @@ class FeedManager: NSObject, ObservableObject {
         }
     }
 
+    // MARK: - Feed Health
+
+    func reloadFeedHealth() async {
+        guard let states = try? await articleStore.database.feedFetchStates() else { return }
+        let now = Date()
+        feedHealth = Dictionary(appSettings.feedURLs.map { ($0, FeedHealth(states[$0], now: now)) }, uniquingKeysWith: { first, _ in first })
+    }
+
     // MARK: - Caching & Persistence
 
     func loadCachedArticles() {
@@ -175,6 +202,7 @@ class FeedManager: NSObject, ObservableObject {
             do {
                 let loaded = try await self.articleStore.fetchArticles()
                 self.articles = loaded
+                await self.reloadFeedHealth()
             } catch {
                 self.logger.error("Failed to load cached articles: \(error.localizedDescription)")
             }
@@ -210,6 +238,11 @@ class FeedManager: NSObject, ObservableObject {
             Task { @MainActor in
                 guard let self = self else {
                     completion(.finished)
+                    return
+                }
+                // The system asks to defer when it is busy or saving energy; run at the next opportunity instead.
+                if self.backgroundActivity?.shouldDefer == true {
+                    completion(.deferred)
                     return
                 }
 
@@ -248,29 +281,36 @@ class FeedManager: NSObject, ObservableObject {
         Task { await queue.cancelAll(reason: .user) }
     }
 
+    /// Returns once new articles are collected and published. Notification triage and background classification
+    /// follow for the caller that started the run, but never hold the refresh, its spinner or the next Cmd-R.
     func fetchFeedsAsync() async {
         guard !isStopped else { return }
         if let refreshTask {
-            await refreshTask.value
+            _ = await refreshTask.value
             return
         }
         let runID = UUID()
         refreshRunID = runID
-        let task = Task<Void, Never> { [weak self] in
-            guard let self else { return }
-            await self.performRefreshPipeline()
+        let task = Task<[FeedArticle], Never> { [weak self] in
+            await self?.performRefreshPipeline() ?? []
         }
         // Retain the work itself so subscription changes cancel ingestion as well as fetching.
         refreshTask = task
-        await task.value
-        if refreshRunID == runID {
-            refreshTask = nil
-            refreshRunID = nil
-            isAnyFeedLoading = false
+        let newArticles = await task.value
+        guard refreshRunID == runID else { return }
+        refreshTask = nil
+        refreshRunID = nil
+        isAnyFeedLoading = false
+
+        guard !isStopped else { return }
+        if appSettings.notificationsEnabled && !newArticles.isEmpty {
+            await notifyBatch(newArticles, appSettings.notificationMode)
         }
+        guard !Task.isCancelled, !isStopped else { return }
+        enrichArticlesInBackground()
     }
 
-    private func performRefreshPipeline() async {
+    private func performRefreshPipeline() async -> [FeedArticle] {
         let signpostState = NewsSignposts.begin(NewsSignposts.feeds, name: "RefreshFeeds", metadata: "feeds=\(appSettings.feedURLs.count)")
         defer { NewsSignposts.end(NewsSignposts.feeds, name: "RefreshFeeds", state: signpostState) }
 
@@ -288,7 +328,7 @@ class FeedManager: NSObject, ObservableObject {
         var insertedIDs = Set<String>()
         var allParsed = [FeedArticle]()
         for res in results {
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled else { return [] }
             guard appSettings.feedURLs.contains(res.urlString) else { continue }
             if let err = res.error {
                 feedStatuses[res.urlString] = .failed(err)
@@ -301,12 +341,12 @@ class FeedManager: NSObject, ObservableObject {
                         return article
                     }
                     allParsed.append(contentsOf: arts)
-                    insertedIDs.formUnion(await articleStore.batchUpsert(articles: arts, feedUrl: res.urlString))
+                    insertedIDs.formUnion(await articleStore.batchUpsert(articles: arts, feedUrl: res.urlString, validators: res.validators))
                 }
             }
         }
 
-        guard !Task.isCancelled else { return }
+        guard !Task.isCancelled else { return [] }
         allParsed.sort { $0.pubDate > $1.pubDate }
 
         var notifiedIDs = Set<String>()
@@ -314,27 +354,24 @@ class FeedManager: NSObject, ObservableObject {
 
         do {
             let stored = try await articleStore.fetchArticles()
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled else { return [] }
             self.articles = stored
+            await reloadFeedHealth()
         } catch {
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled else { return [] }
             articleStore.operationError = "Stored articles could not be loaded. Your current library has been retained."
             logger.error("Failed to reload articles after refresh: \(error.localizedDescription)")
         }
 
-        if appSettings.notificationsEnabled && !newArticles.isEmpty {
-            await notifyBatch(newArticles, appSettings.notificationMode)
-        }
-
-        guard !Task.isCancelled else { return }
-        enrichArticlesInBackground()
+        return newArticles
     }
 
     // MARK: - Background Enrichment
 
     private func enrichArticlesInBackground() {
         enrichmentTask?.cancel()
-        guard appSettings.aiEnabled else { return }
+        // Low Power Mode and thermal pressure defer classification; the next refresh picks the backlog up again.
+        guard appSettings.aiEnabled, allowsBackgroundWork() else { return }
 
         let snapshot = articles
         let allowHTTP = appSettings.allowInsecureHTTP
