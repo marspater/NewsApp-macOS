@@ -257,6 +257,45 @@ actor DatabaseEngine {
                 throw error
             }
         }
+        if version < 6 {
+            try beginTransaction()
+            do {
+                // Multiple-feed histories do not record which feed supplied each GUID.
+                // Seed only a current GUID that still matches its original key and
+                // has one feed; URL aliases preserve less certain histories.
+                var statement: OpaquePointer?
+                let sql = """
+                SELECT a.id, a.guid, min(af.feed_url)
+                FROM articles a JOIN article_feeds af ON af.article_id = a.id
+                WHERE a.guid IS NOT NULL
+                GROUP BY a.id HAVING count(*) = 1;
+                """
+                guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+                    throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Cannot prepare scoped GUID migration"])
+                }
+                defer { sqlite3_finalize(statement) }
+                var status = sqlite3_step(statement)
+                while status == SQLITE_ROW {
+                    try Task.checkCancellation()
+                    let id = String(cString: sqlite3_column_text(statement, 0))
+                    let guid = String(cString: sqlite3_column_text(statement, 1))
+                    let feed = String(cString: sqlite3_column_text(statement, 2))
+                    if id == ArticleIdentity.computeId(guid: guid, link: ""),
+                       let scoped = ArticleIdentity.scopedGUID(guid, feedURL: feed) {
+                        try recordAlias(kind: "id", value: scoped, articleID: id)
+                    }
+                    status = sqlite3_step(statement)
+                }
+                guard status == SQLITE_DONE else {
+                    throw NSError(domain: "DatabaseEngine", code: Int(status), userInfo: [NSLocalizedDescriptionKey: "Cannot read scoped GUID migration rows"])
+                }
+                try setUserVersion(6)
+                try commitTransaction()
+            } catch {
+                try? rollbackTransaction()
+                throw error
+            }
+        }
     }
     
     private func getUserVersion() throws -> Int {
@@ -355,14 +394,21 @@ actor DatabaseEngine {
     }
 
     /// Keep observed identities across serial URL/GUID changes without rewriting keys.
-    func resolvedArticleID(for article: FeedArticle) throws -> String {
-        let idTarget = try aliasTarget(kind: "id", value: article.id)
+    func resolvedArticleID(for article: FeedArticle, feedURL: String? = nil) throws -> String {
+        let scoped = ArticleIdentity.scopedGUID(article.guid, feedURL: feedURL ?? article.identityFeedURL)
+        let lookupID = article.storedID ?? scoped ?? article.id
+        let idTarget = try aliasTarget(kind: "id", value: lookupID)
         let urlTarget = Self.isDocumentURL(article.normalizedLink)
             ? try aliasTarget(kind: "url", value: article.normalizedLink) : nil
         if let idTarget, let urlTarget, idTarget != urlTarget {
             throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Conflicting article identity signals"])
         }
-        return idTarget ?? urlTarget ?? article.id
+        if let target = idTarget ?? urlTarget { return target }
+        // Direct legacy callers may still supply an unscoped model. Keep that key
+        // only if unused; a GUID already owned by another feed needs its scoped key.
+        if let scoped, article.storedID == nil,
+           try aliasTarget(kind: "id", value: article.id) != nil { return scoped }
+        return article.id
     }
 
     @discardableResult
@@ -452,7 +498,8 @@ actor DatabaseEngine {
 
         for article in articles {
             try Task.checkCancellation()
-            let id = try resolvedArticleID(for: article)
+            let identityFeedURL = feedUrl ?? article.identityFeedURL
+            let id = try resolvedArticleID(for: article, feedURL: identityFeedURL)
             let url = URL(string: article.normalizedLink)
             let validLink = url?.host?.isEmpty == false && ["http", "https"].contains(url?.scheme?.lowercased() ?? "")
             let canonical = article.normalizedLink
@@ -478,7 +525,7 @@ actor DatabaseEngine {
             sqlite3_bind_text(artStmt, 8, article.source, -1, Self.sqliteTransient)
             if let img = article.imageUrl { sqlite3_bind_text(artStmt, 9, img, -1, Self.sqliteTransient) } else { sqlite3_bind_null(artStmt, 9) }
             if let cat = article.category { sqlite3_bind_text(artStmt, 10, cat, -1, Self.sqliteTransient) } else { sqlite3_bind_null(artStmt, 10) }
-            if let f = feedUrl { sqlite3_bind_text(artStmt, 11, f, -1, Self.sqliteTransient) } else { sqlite3_bind_null(artStmt, 11) }
+            if let f = identityFeedURL { sqlite3_bind_text(artStmt, 11, f, -1, Self.sqliteTransient) } else { sqlite3_bind_null(artStmt, 11) }
             sqlite3_bind_double(artStmt, 12, now)
             sqlite3_bind_double(artStmt, 13, now)
             if let document = article.readerDocument {
@@ -495,12 +542,16 @@ actor DatabaseEngine {
             }
 
             try recordAlias(kind: "id", value: id, articleID: id)
-            try recordAlias(kind: "id", value: article.id, articleID: id)
+            if let scoped = ArticleIdentity.scopedGUID(article.guid, feedURL: identityFeedURL) {
+                try recordAlias(kind: "id", value: scoped, articleID: id)
+            } else {
+                try recordAlias(kind: "id", value: article.id, articleID: id)
+            }
             if Self.isDocumentURL(canonical) {
                 try recordAlias(kind: "url", value: canonical, articleID: id)
             }
 
-            if let feedUrl {
+            if let feedUrl = identityFeedURL {
                 sqlite3_reset(feedStmt)
                 sqlite3_bind_text(feedStmt, 1, id, -1, Self.sqliteTransient)
                 sqlite3_bind_text(feedStmt, 2, feedUrl, -1, Self.sqliteTransient)

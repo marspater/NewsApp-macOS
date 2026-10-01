@@ -294,7 +294,12 @@ class FeedManager: NSObject, ObservableObject {
                 feedStatuses[res.urlString] = .failed(err)
             } else {
                 feedStatuses[res.urlString] = .idle
-                if let arts = res.articles {
+                if let incoming = res.articles {
+                    let arts = incoming.map { article in
+                        var article = article
+                        article.identityFeedURL = res.urlString
+                        return article
+                    }
                     allParsed.append(contentsOf: arts)
                     insertedIDs.formUnion(await articleStore.batchUpsert(articles: arts, feedUrl: res.urlString))
                 }

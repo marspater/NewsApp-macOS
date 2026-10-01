@@ -55,6 +55,19 @@ struct ArticleIdentity: Sendable {
         return "fp_" + String(hex.prefix(16))
     }
 
+    /// GUIDs identify documents only within the configured subscription URL.
+    static func scopedGUID(_ guid: String?, feedURL: String?) -> String? {
+        guard let guid = guid?.trimmingCharacters(in: .whitespacesAndNewlines), !guid.isEmpty,
+              let feedURL, !feedURL.isEmpty else { return nil }
+        // AppSettings normalizes subscriptions. Keep their scheme and every query
+        // parameter: document URL tracking rules must not collapse distinct feeds.
+        let feed = feedURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !feed.isEmpty else { return nil }
+        let normalizedGUID = computeId(guid: guid, link: "")
+        let digest = SHA256.hash(data: Data("\(feed.utf8.count):\(feed)\(normalizedGUID)".utf8))
+        return "feed-guid:" + digest.map { String(format: "%02x", $0) }.joined()
+    }
+
     /// Computes deterministic article identity using the three-tier resolution:
     /// 1. Stable feed GUID (if non-empty; if URL-shaped, canonicalized)
     /// 2. Canonicalized article URL
@@ -64,8 +77,10 @@ struct ArticleIdentity: Sendable {
         link: String,
         title: String = "",
         source: String = "",
-        pubDate: Date = Date()
+        pubDate: Date = Date(),
+        feedURL: String? = nil
     ) -> String {
+        if let scoped = scopedGUID(guid, feedURL: feedURL) { return scoped }
         if let g = guid?.trimmingCharacters(in: .whitespacesAndNewlines), !g.isEmpty {
             if g.hasPrefix("http://") || g.hasPrefix("https://") {
                 return canonicalizeURL(g)

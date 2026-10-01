@@ -102,6 +102,7 @@ struct NewsTests {
             try await testReaderFigures(fixtureRoot: fixtureRoot)
             try await testCanonicalArticleIngestion(fixtureRoot: fixtureRoot)
             try await testPersistentArticleAliases(fixtureRoot: fixtureRoot)
+            try await testFeedScopedGUIDs(fixtureRoot: fixtureRoot)
             try await testAuditPersistenceAndRoutingRegressions(fixtureRoot: fixtureRoot)
             try await testUndatedArticleOrdering()
             await testDatabaseEnginePersistence()
@@ -145,6 +146,7 @@ struct NewsTests {
         await testDatabaseEnginePersistence()
         try await testCanonicalArticleIngestion(fixtureRoot: fixtureRoot)
         try await testPersistentArticleAliases(fixtureRoot: fixtureRoot)
+        try await testFeedScopedGUIDs(fixtureRoot: fixtureRoot)
         await testFTS5SearchAndOperators()
         await testMigrationCoordinatorAtomicity()
         await testArticleRetentionPolicy()
@@ -945,10 +947,11 @@ struct NewsTests {
             fetchBatch: { urls, _ in urls.map { ($0, [archived, fresh, fresh], nil) } },
             notifyBatch: { articles, _ in notified.append(contentsOf: articles.map { $0.id }) })
         await manager.fetchFeedsAsync()
-        assertTrue(manager.articles.contains { $0.id == fresh.id }, "Notified undated story remains in the visible snapshot")
-        assertEqual(notified, [fresh.id], "Only committed new IDs notify once, across duplicate rows and feeds")
+        let freshID = ArticleIdentity.scopedGUID(fresh.guid, feedURL: settings.feedURLs[0])!
+        assertTrue(manager.articles.contains { $0.id == freshID }, "Notified undated story remains in the visible snapshot")
+        assertEqual(notified, [freshID], "Only committed new IDs notify once, across duplicate rows and feeds")
         await manager.fetchFeedsAsync()
-        assertEqual(notified, [fresh.id], "Repeat refresh does not re-notify stored stories")
+        assertEqual(notified, [freshID], "Repeat refresh does not re-notify stored stories")
         manager.stopBackgroundWork()
         var connection: OpaquePointer?
         assertEqual(sqlite3_open(path, &connection), SQLITE_OK, "Open isolated refresh failure fixture")
@@ -959,7 +962,7 @@ struct NewsTests {
             fetchBatch: { urls, _ in urls.map { ($0, [failed], nil) } },
             notifyBatch: { articles, _ in notified.append(contentsOf: articles.map { $0.id }) })
         await failureManager.fetchFeedsAsync()
-        assertEqual(notified, [fresh.id], "Failed ingestion cannot send new-story notifications")
+        assertEqual(notified, [freshID], "Failed ingestion cannot send new-story notifications")
         assertFalse(failureManager.articles.contains { $0.id == failed.id }, "Failed ingestion cannot replace the library with parsed data")
         // Drain the startup cache read before forcing a read failure.
         _ = try await store.fetchArticles()
@@ -1403,7 +1406,7 @@ struct NewsTests {
         await cancelledDB.close()
         let db = DatabaseEngine(path: copyPath)
         try await db.open()
-        assertEqual(value(copyPath, "PRAGMA user_version;"), "5", "Copied v4 library upgrades to v5")
+        assertEqual(value(copyPath, "PRAGMA user_version;"), "6", "Copied v4 library upgrades to the current schema")
         assertEqual(value(originalPath, "PRAGMA user_version;"), "4", "Original fixture stays untouched")
         assertEqual(try await db.fetchArticles(limit: nil).count, 3, "Migration keeps historical rows")
         assertEqual(value(copyPath, "SELECT read_at FROM article_state WHERE article_id = 'alias-first';"), originalReadAt, "Migration preserves read history timestamp")
@@ -1420,7 +1423,9 @@ struct NewsTests {
         assertEqual(try await db.resolvedArticleID(for: unknown), unknown.id, "Ambiguous URL remains unusable after deletion")
 
         func variant(_ guid: String, _ link: String, _ title: String) -> FeedArticle {
-            FeedArticle(title: title, link: link, guid: guid, description: first.description, pubDate: first.pubDate, source: first.source)
+            var article = FeedArticle(title: title, link: link, guid: guid, description: first.description, pubDate: first.pubDate, source: first.source)
+            article.identityFeedURL = "test-feed"
+            return article
         }
         let second = variant("alias-second", first.link, first.title)
         assertTrue(try await db.upsertArticles([second], feedUrl: "test-feed").isEmpty, "Same URL registers a new observed ID")
@@ -1490,6 +1495,134 @@ struct NewsTests {
         assertEqual(value(copyPath, "PRAGMA quick_check;"), "ok", "Migrated alias library passes quick_check")
         assertTrue(value(copyPath, "PRAGMA foreign_key_check;") == nil, "Migrated aliases have no dangling targets")
         await db.close()
+    }
+
+    @MainActor
+    static func testFeedScopedGUIDs(fixtureRoot: URL) async throws {
+        print("  - Testing feed-scoped GUID collisions and notification identities...")
+        let feeds = [fixtureRoot.appendingPathComponent("guid-feed-a").absoluteString,
+                     fixtureRoot.appendingPathComponent("guid-feed-b").absoluteString]
+        func incoming(_ feed: String, _ link: String, guid: String = "shared-guid") -> FeedArticle {
+            var article = FeedArticle(title: "Report", link: link, guid: guid, description: "Publisher report", pubDate: Date(timeIntervalSince1970: 100), source: "Shared feed title")
+            article.identityFeedURL = feed
+            return article
+        }
+        let first = incoming(feeds[0], fixtureRoot.appendingPathComponent("publisher-a/report").absoluteString)
+        let second = incoming(feeds[1], fixtureRoot.appendingPathComponent("publisher-b/report").absoluteString)
+        assertTrue(first.id != second.id, "The same raw GUID from different feeds has different identity")
+        assertTrue(ArticleIdentity.scopedGUID("shared-guid", feedURL: feeds[0] + "?utm_source=rss") != first.id, "Article tracking rules must not collapse configured feed URLs")
+        assertTrue(ArticleIdentity.scopedGUID("shared-guid", feedURL: feeds[0].replacingOccurrences(of: "https://", with: "http://")) != first.id, "Explicit HTTP and HTTPS subscriptions retain separate namespaces")
+        assertTrue(ArticleIdentity.scopedGUID("shared-guid", feedURL: feeds[0] + "?edition=2") != first.id, "Document-selecting feed parameters retain separate namespaces")
+        let db = DatabaseEngine(path: ":memory:")
+        try await db.open()
+        assertEqual(try await db.upsertArticles([first], feedUrl: feeds[0]), Set([first.id]), "First feed inserts its scoped identity")
+        try await db.markRead(articleId: first.id, isRead: true)
+        try await db.setSaved(articleId: first.id, isSaved: true)
+        assertEqual(try await db.upsertArticles([second], feedUrl: feeds[1]), Set([second.id]), "Other publisher's reused GUID inserts a distinct document")
+        assertEqual(try await db.fetchArticles(limit: nil).count, 2, "GUID collision does not overwrite either publisher")
+        assertFalse(try await db.isRead(articleId: second.id), "The other publisher does not inherit reading state")
+        assertFalse(try await db.isSaved(articleId: second.id), "The other publisher does not inherit a bookmark")
+        let moved = incoming(feeds[1], fixtureRoot.appendingPathComponent("publisher-b/moved").absoluteString)
+        assertTrue(try await db.upsertArticles([moved], feedUrl: feeds[1]).isEmpty, "Same-feed GUID resolves a changed URL")
+        assertEqual(try await db.fetchArticles(id: second.id).first?.link, moved.link, "URL correction updates only its own publisher")
+        assertEqual(try await db.fetchArticles(id: first.id).first?.link, first.link, "The other publisher's URL stays intact")
+        let sharedDocument = incoming(feeds[1], first.link, guid: "same-document-other-feed")
+        assertTrue(try await db.upsertArticles([sharedDocument], feedUrl: feeds[1]).isEmpty, "Exact document URL can still connect different feeds")
+        assertEqual(try await db.resolvedArticleID(for: sharedDocument), first.id, "Scoped alias points to the original shared document")
+        let missingA = incoming(feeds[0], "", guid: "missing-link-guid")
+        let missingB = incoming(feeds[1], "", guid: "missing-link-guid")
+        assertEqual(try await db.upsertArticles([missingA], feedUrl: feeds[0]), Set([missingA.id]), "Missing URL remains identifiable within its feed")
+        assertEqual(try await db.upsertArticles([missingB], feedUrl: feeds[1]), Set([missingB.id]), "Missing URLs do not make GUIDs global")
+        await db.close()
+
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("news-guid-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let path = directory.appendingPathComponent("legacy.sqlite3").path
+        let copy = directory.appendingPathComponent("copy.sqlite3").path
+        let legacyDB = DatabaseEngine(path: path)
+        try await legacyDB.open()
+        let legacy = FeedArticle(title: "Legacy report", link: first.link, guid: "legacy-guid", description: "Existing article", pubDate: Date(), source: "Publisher")
+        try await legacyDB.upsertArticles([legacy], feedUrl: feeds[0])
+        try await legacyDB.markRead(articleId: legacy.id, isRead: true)
+        try await legacyDB.setSaved(articleId: legacy.id, isSaved: true)
+        let multi = FeedArticle(title: "Multi-feed legacy report", link: fixtureRoot.appendingPathComponent("legacy/multi").absoluteString, guid: "multi-guid", description: "Existing article", pubDate: Date(), source: "Publisher")
+        try await legacyDB.upsertArticles([multi], feedUrl: feeds[0])
+        try await legacyDB.upsertArticles([multi], feedUrl: feeds[1])
+        let uncertain = FeedArticle(title: "Unattributed variant", link: fixtureRoot.appendingPathComponent("legacy/uncertain").absoluteString, guid: "original-unattributed", description: "Existing article", pubDate: Date(), source: "Publisher")
+        try await legacyDB.upsertArticles([uncertain], feedUrl: feeds[0])
+        let unattributed = FeedArticle(title: uncertain.title, link: uncertain.link, guid: "unattributed-guid", description: uncertain.description, pubDate: uncertain.pubDate, source: "Other publisher")
+        try await legacyDB.upsertArticles([unattributed])
+        await legacyDB.close()
+        var handle: OpaquePointer?
+        assertEqual(sqlite3_open(path, &handle), SQLITE_OK, "Open isolated v5 fixture")
+        assertEqual(sqlite3_exec(handle, "DELETE FROM article_aliases WHERE value LIKE 'feed-guid:%'; PRAGMA user_version = 5;", nil, nil, nil), SQLITE_OK, "Reconstruct a legacy v5 library")
+        sqlite3_close(handle)
+        try FileManager.default.copyItem(atPath: path, toPath: copy)
+        let migrated = DatabaseEngine(path: copy)
+        let cancelledMigration = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            try await migrated.open()
+        }
+        do {
+            try await cancelledMigration.value
+            assertTrue(false, "Cancelled scoped GUID migration must be reported")
+        } catch is CancellationError {
+            assertEqual(sqlite3_open(copy, &handle), SQLITE_OK, "Inspect cancelled v6 migration")
+            var statement: OpaquePointer?
+            assertEqual(sqlite3_prepare_v2(handle, "PRAGMA user_version;", -1, &statement, nil), SQLITE_OK, "Read cancelled migration version")
+            assertEqual(sqlite3_step(statement), SQLITE_ROW, "Read old schema version")
+            assertEqual(sqlite3_column_int(statement, 0), 5, "Scoped GUID migration rolls back its version")
+            sqlite3_finalize(statement)
+            assertEqual(sqlite3_prepare_v2(handle, "SELECT count(*) FROM article_aliases WHERE value LIKE 'feed-guid:%';", -1, &statement, nil), SQLITE_OK, "Read cancelled migration aliases")
+            assertEqual(sqlite3_step(statement), SQLITE_ROW, "Read scoped alias count")
+            assertEqual(sqlite3_column_int(statement, 0), 0, "Cancelled migration commits no scoped aliases")
+            sqlite3_finalize(statement)
+            sqlite3_close(handle)
+        }
+        try await migrated.open()
+        let legacyMoved = incoming(feeds[0], fixtureRoot.appendingPathComponent("legacy/moved").absoluteString, guid: "legacy-guid")
+        assertTrue(try await migrated.upsertArticles([legacyMoved], feedUrl: feeds[0]).isEmpty, "Migration maps scoped GUID to the existing primary key even after URL correction")
+        assertEqual(try await migrated.fetchArticles(id: legacy.id).first?.id, legacy.id, "Legacy primary key is preserved")
+        let unknownMulti = incoming(feeds[1], fixtureRoot.appendingPathComponent("legacy/multi-moved").absoluteString, guid: "multi-guid")
+        assertEqual(try await migrated.resolvedArticleID(for: unknownMulti), unknownMulti.id, "Migration does not guess GUID ownership for multi-feed history")
+        assertEqual(try await migrated.fetchArticles(id: multi.id).first?.id, multi.id, "Uncertain multi-feed article retains its old ID")
+        let unknownOwner = incoming(feeds[0], fixtureRoot.appendingPathComponent("legacy/unattributed-moved").absoluteString, guid: "unattributed-guid")
+        assertEqual(try await migrated.resolvedArticleID(for: unknownOwner), unknownOwner.id, "Migration does not attribute a later unscoped GUID variant to the original feed")
+        assertTrue(try await migrated.isRead(articleId: legacyMoved.id), "Scoped lookup preserves legacy read state")
+        assertTrue(try await migrated.isSaved(articleId: legacyMoved.id), "Scoped lookup preserves legacy saved state")
+        let legacyCollision = incoming(feeds[1], second.link, guid: "legacy-guid")
+        assertEqual(try await migrated.upsertArticles([legacyCollision], feedUrl: feeds[1]), Set([legacyCollision.id]), "Legacy GUID ownership does not extend to another feed")
+        assertEqual(try await migrated.fetchArticles(limit: nil).count, 4, "Copied library retains originals and colliding document")
+        await migrated.close()
+
+        let suite = "test.guid.refresh.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = AppSettings(defaults: defaults)
+        settings.feedURLs = feeds
+        settings.aiEnabled = false
+        settings.notificationsEnabled = true
+        let store = ArticleStore(database: DatabaseEngine(path: ":memory:"))
+        await store.initialize()
+        var notified = [String]()
+        let manager = FeedManager(settings: settings, store: store, schedulesRefresh: false,
+            fetchBatch: { urls, _ in urls.map { feed in
+                let articles = feed == feeds[0] ? [first, first] : [second, second, sharedDocument]
+                let items = articles.map { article in
+                    "<item><title>Report</title><link>\(article.link)</link><guid isPermaLink='false'>\(article.guid!)</guid><description>Publisher report</description></item>"
+                }.joined()
+                let xml = "<rss version='2.0'><channel><title>Shared feed title</title>\(items)</channel></rss>"
+                return (feed, FeedXMLParser(data: Data(xml.utf8)).parse(), nil)
+            } }, notifyBatch: { articles, _ in notified.append(contentsOf: articles.map { $0.id }) })
+        await manager.fetchFeedsAsync()
+        assertEqual(Set(notified), Set([first.id, second.id]), "Both colliding publishers notify with committed, distinct IDs")
+        assertEqual(notified.count, 2, "Duplicate RSS rows and overlapping feeds notify once per stored document")
+        await manager.fetchFeedsAsync()
+        assertEqual(notified.count, 2, "Repeated refresh does not re-notify either publisher")
+        assertEqual(Set(manager.articles.map { $0.id }), Set([first.id, second.id]), "Visible identities agree with notification IDs")
+        manager.stopBackgroundWork()
+        await store.database.close()
     }
 
     static func testDatabaseEnginePersistence() async {
