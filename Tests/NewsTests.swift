@@ -1,6 +1,7 @@
 // NewsTests.swift
 
 import Foundation
+import Darwin
 import Network
 import WebKit
 import SQLite3
@@ -179,6 +180,10 @@ struct NewsTests {
         fixtureURL.scheme = "https"
         fixtureURL.host = fixtureHost
         let fixtureRoot = fixtureURL.url!
+        if CommandLine.arguments.contains("--performance-baseline") {
+            try await runPerformanceBaseline()
+            return
+        }
         if CommandLine.arguments.contains("--reader-live-pages") {
             await testLiveReader(pagesOnly: true)
             print("✅ Live reader pages passed")
@@ -314,6 +319,99 @@ struct NewsTests {
     }
 
     
+    /// Opt-in controlled service timings; not a rendered UI or network benchmark.
+    @MainActor
+    static func runPerformanceBaseline() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("news-baseline-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let suite = "test.performance.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer {
+            defaults.removePersistentDomain(forName: suite)
+            try? FileManager.default.removeItem(at: directory)
+        }
+        let settings = AppSettings(defaults: defaults)
+        settings.aiEnabled = false
+        settings.notificationsEnabled = false
+        settings.feedURLs = (0..<5).map { "https://baseline.example/feed-\($0)" }
+        let db = DatabaseEngine(path: directory.appendingPathComponent("library.sqlite3").path)
+        let store = ArticleStore(database: db)
+        await store.initialize()
+        let prose = (1...20).map { "Researchers in London compared observation \($0) with the published evidence and documented the results." }.joined(separator: " ")
+        func article(_ index: Int) -> FeedArticle {
+            let image = "https://baseline.example/media/publisher-\(index % 20).jpg"
+            let document = ReaderDocument(blocks: [ReaderBlock(kind: .paragraph, text: prose)],
+                images: [ReaderImageCandidate(url: image, origin: .body, width: 1200, height: 800)], leadImageURL: image)
+            return FeedArticle(title: "Research report \(index)", link: "https://baseline.example/article/\(index)",
+                guid: "baseline-\(index)", description: "Research evidence", pubDate: Date(timeIntervalSince1970: 1_800_000_000 + Double(index)),
+                source: "Publisher \(index % 20)", imageUrl: image, fullContent: prose, readerDocument: document)
+        }
+        let archive = (0..<10_000).map(article)
+        try await db.upsertArticles(archive)
+        var measurements = [String: [Double]]()
+        func record(_ name: String, from start: Double) {
+            measurements[name, default: []].append((ProcessInfo.processInfo.systemUptime - start) * 1000)
+        }
+        let coldStart = ProcessInfo.processInfo.systemUptime
+        assertTrue(await store.refreshState(), "Baseline snapshot hydrates")
+        record("snapshot_first_500_ms", from: coldStart)
+        assertEqual(store.articles.count, 500, "Baseline keeps the real snapshot limit")
+        let batches = (0..<5).map { offset in (0..<50).map { article(10_000 + offset * 50 + $0) } }
+        let manager = FeedManager(settings: settings, store: store, schedulesRefresh: false, fetchBatch: { urls, _ in
+            zip(urls, batches).map { ($0.0, $0.1, nil, nil) }
+        })
+        for _ in 0..<10 {
+            let start = ProcessInfo.processInfo.systemUptime
+            await manager.fetchFeedsAsync()
+            record("refresh_5_mocked_feeds_ms", from: start)
+            assertEqual(manager.articles.count, 500, "Refresh publishes the bounded snapshot")
+        }
+        assertEqual(try await db.counts().total, 10_250, "Repeated refreshes keep one row per document")
+        manager.stopBackgroundWork()
+        for _ in 0..<10 {
+            let start = ProcessInfo.processInfo.systemUptime
+            let rows = try await db.searchArticles(query: "Research", limit: 100)
+            record("fts_first_100_ms", from: start)
+            assertEqual(rows.count, 100, "FTS benchmark returns expected rows")
+        }
+        let html = "<article><h2>Evidence</h2><p>\(prose)</p><figure><img src='/photo.jpg' width='1200' height='800'></figure><p>\(prose)</p></article>"
+        for _ in 0..<10 {
+            let start = ProcessInfo.processInfo.systemUptime
+            assertTrue(ContentExtractionPipeline.shared.extractFromHTML(html, baseUrl: "https://baseline.example/story").isSuccess, "Benchmark extraction succeeds")
+            record("html_extraction_ms", from: start)
+            let analysisStart = ProcessInfo.processInfo.systemUptime
+            let analysis = try await ArticleAnalyzer.shared.analyze(title: "Research evidence", content: prose, allowFoundationModels: false)
+            record("natural_language_analysis_ms", from: analysisStart)
+            assertFalse(analysis.summary.isEmpty, "Deterministic analysis returns publisher-derived text")
+        }
+        for _ in 0..<10 {
+            let entered = TestCounter()
+            let cancelledManager = FeedManager(settings: settings, store: store, schedulesRefresh: false, fetchBatch: { _, _ in
+                await entered.increment()
+                do { try await Task.sleep(nanoseconds: 60_000_000_000) } catch { }
+                return []
+            })
+            let refresh = Task { await cancelledManager.fetchFeedsAsync() }
+            while await entered.value == 0 { await Task.yield() }
+            let start = ProcessInfo.processInfo.systemUptime
+            cancelledManager.stopBackgroundWork()
+            await refresh.value
+            record("refresh_cancel_mock_wait_ms", from: start)
+        }
+        var usage = rusage()
+        guard getrusage(RUSAGE_SELF, &usage) == 0 else { fatalError("Cannot obtain process memory high-water mark") }
+        let report: [String: Any] = ["library_rows": 10_250, "publishers": 20, "snapshot_rows": 500,
+            "feed_count": 5, "fresh_rows_per_feed": 50, "prose_characters": prose.count, "html_characters": html.count,
+            "peak_process_rss_bytes": usage.ru_maxrss, "measurements_ms": measurements,
+            "os": ProcessInfo.processInfo.operatingSystemVersionString, "cpu_count": ProcessInfo.processInfo.processorCount,
+            "physical_memory_bytes": ProcessInfo.processInfo.physicalMemory, "optimization": "-O (test.sh performance mode)"]
+        let data = try JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys])
+        print("PERFORMANCE_BASELINE_JSON_BEGIN")
+        print(String(decoding: data, as: UTF8.self))
+        print("PERFORMANCE_BASELINE_JSON_END")
+        await db.close()
+    }
+
     @MainActor
     static func testReaderStoreUpdates() async {
         let suiteName = "test.reader.\(UUID().uuidString)"
