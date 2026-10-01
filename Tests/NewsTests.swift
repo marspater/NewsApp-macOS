@@ -103,6 +103,7 @@ struct NewsTests {
             try await testCanonicalArticleIngestion(fixtureRoot: fixtureRoot)
             try await testPersistentArticleAliases(fixtureRoot: fixtureRoot)
             try await testFeedScopedGUIDs(fixtureRoot: fixtureRoot)
+            try await testValidatedDocumentIdentity(fixtureRoot: fixtureRoot)
         try await testPublisherTextFingerprints()
             try await testAuditPersistenceAndRoutingRegressions(fixtureRoot: fixtureRoot)
             try await testUndatedArticleOrdering()
@@ -148,6 +149,7 @@ struct NewsTests {
         try await testCanonicalArticleIngestion(fixtureRoot: fixtureRoot)
         try await testPersistentArticleAliases(fixtureRoot: fixtureRoot)
         try await testFeedScopedGUIDs(fixtureRoot: fixtureRoot)
+        try await testValidatedDocumentIdentity(fixtureRoot: fixtureRoot)
         try await testPublisherTextFingerprints()
         await testFTS5SearchAndOperators()
         await testMigrationCoordinatorAtomicity()
@@ -1497,6 +1499,130 @@ struct NewsTests {
         assertEqual(value(copyPath, "PRAGMA quick_check;"), "ok", "Migrated alias library passes quick_check")
         assertTrue(value(copyPath, "PRAGMA foreign_key_check;") == nil, "Migrated aliases have no dangling targets")
         await db.close()
+    }
+
+    @MainActor
+    static func testValidatedDocumentIdentity(fixtureRoot: URL) async throws {
+        print("  - Testing protected canonical and redirect identity evidence...")
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [MockURLProtocol.self]
+        let pipeline = ContentExtractionPipeline(client: SecureHTTPClient(configuration: configuration))
+        defer { MockURLProtocol.requestHandler = nil }
+        let requested = fixtureRoot.appendingPathComponent("short/story")
+        let final = fixtureRoot.appendingPathComponent("articles/story")
+        let canonical = fixtureRoot.appendingPathComponent("canonical/story")
+        let prose = (1...65).map { "Verified publisher fact \($0) adds distinctive editorial evidence." }.joined(separator: " ")
+        func html(_ href: String = "../canonical/story", title: String = "Publisher story", body: String? = nil) -> String {
+            "<html><head><title>\(title)</title><link rel='alternate canonical' href='\(href)'></head><body><article><p>\(body ?? prose)</p><figure><img src='../photo.jpg'><figcaption>Publisher photo</figcaption></figure><p>Additional reporting confirms the detailed evidence and provides context for this event.</p></article></body></html>"
+        }
+        var requests = [URL]()
+        MockURLProtocol.requestHandler = { request in
+            let url = request.url!
+            requests.append(url)
+            let resolved = url == requested ? final : url
+            return (HTTPURLResponse(url: resolved, statusCode: 200, httpVersion: nil, headerFields: nil)!, Data(html().utf8))
+        }
+        let extraction = await pipeline.extractArticleWithIdentity(from: requested.absoluteString)
+        assertTrue(extraction.outcome.isSuccess, "Validated redirect remains readable")
+        guard let evidence = extraction.evidence else { assertTrue(false, "Successful fetch produces identity evidence"); return }
+        assertEqual(Set(evidence.urls), Set([final.absoluteString, canonical.absoluteString]), "Fetched redirect and equivalent canonical are evidence")
+        assertEqual(requests, [requested, canonical], "Exactly one canonical verification probe is made")
+        guard case .success(let content, _, let document) = extraction.outcome else { return }
+        assertEqual(document?.blocks.first(where: { $0.kind == .figure })?.imageURL, fixtureRoot.appendingPathComponent("photo.jpg").absoluteString, "Relative images resolve from the final response URL")
+
+        let db = DatabaseEngine(path: ":memory:")
+        let store = ArticleStore(database: db)
+        await store.initialize()
+        var original = FeedArticle(title: "Publisher story", link: requested.absoluteString, guid: "original", description: "Teaser", pubDate: Date(), source: "Publisher")
+        original.identityFeedURL = fixtureRoot.appendingPathComponent("feed").absoluteString
+        try await db.upsertArticles([original])
+        try await db.markRead(articleId: original.id, isRead: true)
+        try await db.setSaved(articleId: original.id, isSaved: true)
+        await store.updateEnrichment(id: original.id, content: content, readerDocument: document, identityEvidence: evidence)
+        let variant = FeedArticle(title: original.title, link: canonical.absoluteString, guid: "new-guid", description: original.description, pubDate: original.pubDate, source: original.source)
+        assertTrue(try await db.upsertArticles([variant], feedUrl: original.identityFeedURL).isEmpty, "Verified canonical variant reuses stored identity")
+        assertEqual(try await db.fetchArticles(canonicalURL: final.absoluteString).first?.id, original.id, "Verified redirect resolves through aliases")
+        assertTrue(try await db.isRead(articleId: original.id), "Canonical evidence preserves read state")
+        assertTrue(try await db.isSaved(articleId: original.id), "Canonical evidence preserves saved state")
+        let unrelated = FeedArticle(title: "Unrelated", link: fixtureRoot.appendingPathComponent("unrelated").absoluteString, guid: "unrelated", description: "Different article", pubDate: Date(), source: "Publisher")
+        try await db.upsertArticles([unrelated])
+        do {
+            try await db.recordDocumentIdentity(evidence, articleID: unrelated.id)
+            assertTrue(false, "Evidence cannot be attached to another article")
+        } catch { }
+        await db.close()
+
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("news-validated-alias-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let path = directory.appendingPathComponent("library.sqlite3").path
+        let persistent = DatabaseEngine(path: path)
+        try await persistent.open()
+        try await persistent.upsertArticles([original, variant])
+        var handle: OpaquePointer?
+        assertEqual(sqlite3_open(path, &handle), SQLITE_OK, "Open isolated alias failure fixture")
+        assertEqual(sqlite3_exec(handle, "CREATE TRIGGER fail_document BEFORE INSERT ON article_aliases WHEN new.kind='url' AND new.value LIKE '%/articles/story' BEGIN SELECT RAISE(ABORT, 'fixture'); END;", nil, nil, nil), SQLITE_OK, "Inject second evidence alias failure")
+        do {
+            try await persistent.recordDocumentIdentity(evidence, articleID: original.id)
+            assertTrue(false, "Alias write failure must propagate")
+        } catch { }
+        assertEqual(try await persistent.fetchArticles(canonicalURL: canonical.absoluteString).first?.id, variant.id, "Failed evidence rolls back earlier alias conflict")
+        assertEqual(sqlite3_exec(handle, "DROP TRIGGER fail_document;", nil, nil, nil), SQLITE_OK, "Remove alias failure fixture")
+        sqlite3_close(handle)
+        try await persistent.recordDocumentIdentity(evidence, articleID: original.id)
+        assertEqual(try await persistent.fetchArticles(limit: nil).count, 2, "Evidence does not merge conflicting historical rows")
+        assertTrue(try await persistent.fetchArticles(canonicalURL: canonical.absoluteString).isEmpty, "Conflicting validated canonical becomes ambiguous")
+        await persistent.close()
+        try await persistent.open()
+        assertEqual(try await persistent.fetchArticles(canonicalURL: final.absoluteString).first?.id, original.id, "Validated redirect alias survives reopening")
+        assertTrue(try await persistent.fetchArticles(canonicalURL: canonical.absoluteString).isEmpty, "Validated canonical ambiguity survives reopening")
+        await persistent.close()
+
+        for href in ["https://127.0.0.1/private", "file:///etc/passwd", "https://other.example/article", "/", "https://user:secret@\(fixtureRoot.host!)/article"] {
+            requests = []
+            MockURLProtocol.requestHandler = { request in
+                requests.append(request.url!)
+                return (HTTPURLResponse(url: final, statusCode: 200, httpVersion: nil, headerFields: nil)!, Data(html(href).utf8))
+            }
+            let rejected = await pipeline.extractArticleWithIdentity(from: requested.absoluteString)
+            assertTrue(rejected.outcome.isSuccess, "Untrusted canonical does not discard readable content")
+            assertEqual(rejected.evidence?.urls, [final.absoluteString], "Arbitrary canonical is not identity evidence")
+            assertEqual(requests, [requested], "Unsafe or cross-origin canonical never triggers a fetch")
+        }
+        for mismatch in ["body", "title", "status", "multiple"] {
+            requests = []
+            MockURLProtocol.requestHandler = { request in
+                let url = request.url!
+                requests.append(url)
+                var page = url == requested ? html() : html(title: mismatch == "title" ? "Other story" : "Publisher story", body: mismatch == "body" ? prose + " Changed facts." : nil)
+                if mismatch == "multiple" { page = page.replacingOccurrences(of: "</head>", with: "<link rel='canonical' href='/another'></head>") }
+                let status = mismatch == "status" && url != requested ? 403 : 200
+                return (HTTPURLResponse(url: url == requested ? final : url, statusCode: status, httpVersion: nil, headerFields: nil)!, Data(page.utf8))
+            }
+            let rejected = await pipeline.extractArticleWithIdentity(from: requested.absoluteString)
+            assertTrue(rejected.outcome.isSuccess, "Optional failed canonical proof retains the source article")
+            assertEqual(rejected.evidence?.urls, [final.absoluteString], "Changed title/body, failed response or multiple canonicals do not alias")
+        }
+        MockURLProtocol.requestHandler = { request in
+            (HTTPURLResponse(url: URL(string: "https://127.0.0.1/article")!, statusCode: 200, httpVersion: nil, headerFields: nil)!, Data(html().utf8))
+        }
+        let blocked = await pipeline.extractArticleWithIdentity(from: requested.absoluteString)
+        assertFalse(blocked.outcome.isSuccess, "Final response destination still requires protected validation")
+        assertTrue(blocked.evidence == nil, "Blocked final destination yields no identity evidence")
+        MockURLProtocol.requestHandler = { request in
+            (HTTPURLResponse(url: URL(string: requested.absoluteString.replacingOccurrences(of: "https://", with: "http://"))!, statusCode: 200, httpVersion: nil, headerFields: nil)!, Data(html().utf8))
+        }
+        let downgrade = await pipeline.extractArticleWithIdentity(from: requested.absoluteString, allowHTTP: true)
+        assertFalse(downgrade.outcome.isSuccess, "HTTPS extraction rejects an HTTP final destination even when initial HTTP is allowed")
+        assertTrue(downgrade.evidence == nil, "Downgrade creates no aliases")
+        MockURLProtocol.requestHandler = { request in
+            (HTTPURLResponse(url: final, statusCode: 200, httpVersion: nil, headerFields: nil)!, Data(html().utf8))
+        }
+        let cancelled = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            return await pipeline.extractArticleWithIdentity(from: requested.absoluteString)
+        }
+        assertTrue(await cancelled.value.evidence == nil, "Cancelled extraction returns no identity evidence")
     }
 
     @MainActor

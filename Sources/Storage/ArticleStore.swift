@@ -233,7 +233,8 @@ final class ArticleStore: ObservableObject {
         topics: [String]? = nil,
         content: String? = nil,
         image: String? = nil,
-        readerDocument: ReaderDocument? = nil
+        readerDocument: ReaderDocument? = nil,
+        identityEvidence: DocumentIdentityEvidence? = nil
     ) async {
         do {
             let id = try await database.resolvedArticleID(id)
@@ -244,6 +245,16 @@ final class ArticleStore: ObservableObject {
                               image: image, readerDocument: readerDocument)
             )
             
+            if let identityEvidence {
+                do {
+                    try await database.recordDocumentIdentity(identityEvidence, articleID: id)
+                } catch {
+                    // Content has already persisted; an optional alias failure must
+                    // not prevent the reader/list caches from reflecting that content.
+                    logger.error("Failed to record document identity: \(error.localizedDescription)")
+                }
+            }
+
             // Update in-memory articles array
             if let idx = articles.firstIndex(where: { $0.id == id }) {
                 var updated = articles[idx]

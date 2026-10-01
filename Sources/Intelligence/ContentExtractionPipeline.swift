@@ -1,6 +1,17 @@
 import Foundation
 import os
 
+/// Constructed only after protected fetching and document-equivalence checks.
+struct DocumentIdentityEvidence: Equatable, Sendable {
+    let requestedURL: String
+    let urls: [String]
+
+    fileprivate init(requestedURL: String, urls: [String]) {
+        self.requestedURL = requestedURL
+        self.urls = urls
+    }
+}
+
 // MARK: - Extraction Outcome & Diagnostics
 
 public enum ExtractionOutcome: Equatable, Sendable {
@@ -449,33 +460,45 @@ final class ContentExtractionPipeline: Sendable {
     static let shared = ContentExtractionPipeline()
     private let logger = Logger(subsystem: "com.marspater.news", category: "extraction")
 
-    init() {}
+    private let client: SecureHTTPClient
+
+    init(client: SecureHTTPClient = .shared) { self.client = client }
 
     /// Detailed extraction entry point returning structured outcome for diagnostics.
     func extractArticleDetailed(from link: String, allowHTTP: Bool = false) async -> ExtractionOutcome {
+        await extractArticleWithIdentity(from: link, allowHTTP: allowHTTP).outcome
+    }
+
+    func extractArticleWithIdentity(from link: String, allowHTTP: Bool = false) async
+        -> (outcome: ExtractionOutcome, evidence: DocumentIdentityEvidence?) {
         guard let url = URL(string: link) else {
             logger.error("[Extraction] Malformed article URL")
-            return .contentParsingFailed(reason: "Malformed URL: \(link)")
+            return (.contentParsingFailed(reason: "Malformed URL: \(link)"), nil)
         }
 
         let host = url.host ?? "unknown"
 
         do {
-            let (data, response) = try await SecureHTTPClient.shared.fetchArticleHTML(from: url, allowHTTP: allowHTTP)
+            let (data, response) = try await client.fetchArticleHTML(from: url, allowHTTP: allowHTTP)
 
             if response.statusCode >= 400 {
                 logger.warning("[Extraction] Host: \(host, privacy: .public) | HTTP Error: \(response.statusCode)")
-                return .httpError(status: response.statusCode)
+                return (.httpError(status: response.statusCode), nil)
             }
 
             let html = decodeHTML(data: data, response: response)
             guard !html.isEmpty else {
                 logger.warning("[Extraction] Host: \(host, privacy: .public) | Empty response body")
-                return .emptyContent
+                return (.emptyContent, nil)
             }
 
             let leadImage = extractLeadImage(from: html)
-            let outcome = extractFromHTML(html, baseUrl: link, leadImage: leadImage)
+            let finalURL = response.url ?? url
+            if url.scheme?.lowercased() == "https", finalURL.scheme?.lowercased() == "http" {
+                throw FeedError.insecureScheme("http")
+            }
+            try await client.validateDestination(finalURL, allowHTTP: allowHTTP)
+            let outcome = extractFromHTML(html, baseUrl: finalURL.absoluteString, leadImage: leadImage)
 
             switch outcome {
             case .success(let content, _, _):
@@ -488,30 +511,90 @@ final class ContentExtractionPipeline: Sendable {
                 break
             }
 
-            return outcome
+            let evidence = try await identityEvidence(requestedURL: url, finalURL: finalURL,
+                html: html, outcome: outcome, allowHTTP: allowHTTP)
+            return (outcome, evidence)
         } catch let error as FeedError {
             switch error {
             case .httpStatus(let status):
-                return .httpError(status: status)
+                return (.httpError(status: status), nil)
             case .blockedHost(let h, let reason):
                 logger.warning("[Extraction] Host \(h, privacy: .public) blocked: \(reason, privacy: .public)")
-                return .securityBlocked(reason: "Blocked host: \(reason)")
+                return (.securityBlocked(reason: "Blocked host: \(reason)"), nil)
             case .insecureScheme(let s):
                 logger.warning("[Extraction] Insecure scheme rejected: \(s, privacy: .public)")
-                return .securityBlocked(reason: "Insecure scheme: \(s)")
+                return (.securityBlocked(reason: "Insecure scheme: \(s)"), nil)
             case .blockedPort(let p):
-                return .securityBlocked(reason: "Blocked port: \(p)")
+                return (.securityBlocked(reason: "Blocked port: \(p)"), nil)
             case .responseTooLarge(let bytes, let maxAllowed):
                 logger.warning("[Extraction] Response exceeded limit: \(bytes) > \(maxAllowed)")
-                return .networkError(reason: "Response too large (\(bytes) bytes)")
+                return (.networkError(reason: "Response too large (\(bytes) bytes)"), nil)
             default:
                 logger.warning("[Extraction] Feed error for \(host, privacy: .public): \(error.localizedDescription, privacy: .public)")
-                return .networkError(reason: error.localizedDescription)
+                return (.networkError(reason: error.localizedDescription), nil)
             }
         } catch {
             logger.error("[Extraction] Network failure for \(host, privacy: .public): \(error.localizedDescription, privacy: .public)")
-            return .networkError(reason: error.localizedDescription)
+            return (.networkError(reason: error.localizedDescription), nil)
         }
+    }
+
+    private func identityEvidence(requestedURL: URL, finalURL: URL, html: String,
+                                  outcome: ExtractionOutcome, allowHTTP: Bool) async throws -> DocumentIdentityEvidence? {
+        guard let content = outcome.content, Self.documentURL(finalURL) else { return nil }
+        var urls = [finalURL.absoluteString]
+        let dom = HTMLDOMBuilder.parse(html: html)
+        let title = Self.normalizedEvidenceText(dom.findNodes(tag: "title").map { $0.combinedText() }.joined())
+        let links = dom.findNodes(tag: "head")
+            .flatMap { $0.findNodes(tag: "link") }
+            .filter { ($0.attributes["rel"] ?? "").lowercased().split(whereSeparator: { $0.isWhitespace }).contains("canonical") }
+        // ponytail: one same-origin canonical probe on demand; no canonical chains.
+        if links.count == 1, let href = links.first?.attributes["href"], href.utf8.count <= 8192,
+           let candidate = URL(string: href, relativeTo: finalURL)?.absoluteURL,
+           Self.documentURL(candidate), Self.sameOrigin(candidate, finalURL),
+           ArticleIdentity.canonicalizeURL(candidate.absoluteString) != ArticleIdentity.canonicalizeURL(finalURL.absoluteString),
+           !title.isEmpty, content.count >= 400, content.utf8.count <= 262_144 {
+            do {
+                let (data, response) = try await client.fetchArticleHTML(from: candidate, allowHTTP: allowHTTP)
+                if let resolved = response.url, Self.documentURL(resolved), Self.sameOrigin(resolved, finalURL) {
+                    try await client.validateDestination(resolved, allowHTTP: allowHTTP)
+                    let candidateHTML = decodeHTML(data: data, response: response)
+                    let otherTitle = Self.normalizedEvidenceText(HTMLDOMBuilder.parse(html: candidateHTML)
+                        .findNodes(tag: "title").map { $0.combinedText() }.joined())
+                    if title == otherTitle,
+                       let other = extractFromHTML(candidateHTML, baseUrl: resolved.absoluteString).content,
+                       other.utf8.count <= 262_144, Self.normalizedEvidenceText(other) == Self.normalizedEvidenceText(content) {
+                        urls.append(candidate.absoluteString)
+                        urls.append(resolved.absoluteString)
+                    }
+                }
+            } catch {
+                // Failed optional canonical verification does not discard readable content.
+                // Cancellation still prevents returning or storing identity evidence below.
+            }
+        }
+        try Task.checkCancellation()
+        guard !urls.isEmpty else { return nil }
+        return DocumentIdentityEvidence(requestedURL: ArticleIdentity.canonicalizeURL(requestedURL.absoluteString),
+            urls: Array(Set(urls.map { ArticleIdentity.canonicalizeURL($0) })).sorted())
+    }
+
+    private static func normalizedEvidenceText(_ text: String) -> String {
+        text.precomposedStringWithCanonicalMapping.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
+    }
+
+    private static func documentURL(_ url: URL) -> Bool {
+        guard let components = URLComponents(url: url, resolvingAgainstBaseURL: true),
+              ["http", "https"].contains(components.scheme?.lowercased() ?? ""),
+              components.host?.isEmpty == false, components.user == nil, components.password == nil else { return false }
+        return !components.path.trimmingCharacters(in: CharacterSet(charactersIn: "/")).isEmpty
+            || !(components.query ?? "").isEmpty
+    }
+
+    private static func sameOrigin(_ lhs: URL, _ rhs: URL) -> Bool {
+        lhs.scheme?.lowercased() == rhs.scheme?.lowercased()
+            && lhs.host?.lowercased() == rhs.host?.lowercased()
+            && (lhs.port ?? (lhs.scheme == "https" ? 443 : 80)) == (rhs.port ?? (rhs.scheme == "https" ? 443 : 80))
     }
 
     /// Legacy backward-compatible facade returning (content, imageUrl).

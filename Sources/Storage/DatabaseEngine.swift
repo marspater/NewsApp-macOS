@@ -460,6 +460,23 @@ actor DatabaseEngine {
         return article.id
     }
 
+    /// Validated evidence extends one existing document; it never merges stored rows.
+    func recordDocumentIdentity(_ evidence: DocumentIdentityEvidence, articleID: String) throws {
+        let id = try resolvedArticleID(articleID)
+        try beginTransaction()
+        defer {
+            if sqlite3_get_autocommit(db) == 0 { try? rollbackTransaction() }
+        }
+        guard try aliasTarget(kind: "url", value: evidence.requestedURL) == id else {
+            throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Document evidence does not belong to the requested article"])
+        }
+        for url in evidence.urls {
+            try Task.checkCancellation()
+            if Self.isDocumentURL(url) { try recordAlias(kind: "url", value: url, articleID: id) }
+        }
+        try commitTransaction()
+    }
+
     private func publisherTextTarget(_ article: FeedArticle) throws -> String? {
         let fingerprints = ArticleIdentity.publisherTextFingerprints(article)
         guard !fingerprints.isEmpty else { return nil }

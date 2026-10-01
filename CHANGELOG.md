@@ -4,6 +4,8 @@
 
 ### Fixed
 
+- Retain protected redirect destinations and verified same-origin canonical URLs as document aliases; resolve relative reader images from the final response URL.
+
 - Match substantial exact publisher text across URL/GUID variants while preserving independent reprints and uncertain identities.
 
 - Scope incoming GUIDs to their configured subscription, preserving legacy article IDs while keeping colliding publishers and their read/save/notification state separate.
