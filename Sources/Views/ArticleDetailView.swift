@@ -195,7 +195,8 @@ struct ArticleDetailView: View {
 
     @ViewBuilder
     private var heroImageHeader: some View {
-        if let imageUrl = currentArticle.imageUrl, let url = URL(string: imageUrl) {
+        if let imageUrl = currentArticle.imageUrl, let url = URL(string: imageUrl),
+           currentArticle.readerDocument?.blocks.contains(where: { $0.kind == .figure && $0.imageURL == imageUrl }) != true {
             ArticleRemoteImage(url: url) { phase in
                 switch phase {
                 case .success(let image):
@@ -321,6 +322,34 @@ struct ArticleDetailView: View {
     @ViewBuilder
     private func readerBlock(_ block: ReaderBlock, isLead: Bool) -> some View {
         switch block.kind {
+        case .figure:
+            if let imageURL = block.imageURL, let url = URL(string: imageURL) {
+                VStack(alignment: .leading, spacing: AppSpacing.sm) {
+                    ArticleRemoteImage(url: url) { phase in
+                        switch phase {
+                        case .success(let image):
+                            image.resizable()
+                                .aspectRatio(contentMode: .fit)
+                                .frame(maxWidth: .infinity, maxHeight: 560)
+                                .clipShape(RoundedRectangle(cornerRadius: AppRadius.card))
+                                .accessibilityLabel(block.imageAlt ?? "Article image")
+                        case .failure:
+                            Label("Image unavailable", systemImage: "photo")
+                                .foregroundStyle(AppColor.secondaryText)
+                        case .empty:
+                            ProgressView().frame(maxWidth: .infinity, minHeight: 80)
+                        @unknown default:
+                            EmptyView()
+                        }
+                    }
+                    if !block.text.isEmpty {
+                        Text(block.text)
+                            .font(AppTypography.caption)
+                            .foregroundStyle(AppColor.secondaryText)
+                            .textSelection(.enabled)
+                    }
+                }
+            }
         case .heading, .subheading:
             Text(block.text)
                 .font(block.kind == .heading ? AppTypography.title : AppTypography.headline)

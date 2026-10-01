@@ -4,6 +4,7 @@
 
 ### Changed
 
+- Preserve inline publisher figures, captions and alt text in the native reader, with bounded image decoding and graceful unavailable-image states.
 - Reuse the existing article for incoming GUID variants of the same document URL while retaining its durable identity, bookmarks and reading history.
 - Preserve meaningful URL query parameters instead of stripping every parameter beginning with a tracking-key prefix.
 
