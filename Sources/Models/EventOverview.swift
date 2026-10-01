@@ -17,6 +17,26 @@ public struct EvidencePassage: Codable, Hashable, Sendable, Identifiable {
     }
 }
 
+/// Metadata describing the original source publication for an overview citation.
+public struct OverviewSourceMetadata: Codable, Hashable, Sendable {
+    public var title: String?
+    public var name: String?
+    public var url: String?
+    public var publishedAt: Date?
+
+    public init(
+        title: String? = nil,
+        name: String? = nil,
+        url: String? = nil,
+        publishedAt: Date? = nil
+    ) {
+        self.title = title
+        self.name = name
+        self.url = url
+        self.publishedAt = publishedAt
+    }
+}
+
 /// Claim-level citation linking an overview statement directly to a stored article and evidence passage.
 public struct OverviewCitation: Codable, Hashable, Sendable, Identifiable {
     public let id: String
@@ -24,10 +44,12 @@ public struct OverviewCitation: Codable, Hashable, Sendable, Identifiable {
     public let passageID: String
     public let passageFingerprint: String
     public let quote: String
-    public var sourceTitle: String?
-    public var sourceName: String?
-    public var sourceURL: String?
-    public var publishedAt: Date?
+    public var source: OverviewSourceMetadata?
+
+    public var sourceTitle: String? { source?.title }
+    public var sourceName: String? { source?.name }
+    public var sourceURL: String? { source?.url }
+    public var publishedAt: Date? { source?.publishedAt }
 
     public init(
         id: String,
@@ -35,20 +57,50 @@ public struct OverviewCitation: Codable, Hashable, Sendable, Identifiable {
         passageID: String,
         passageFingerprint: String,
         quote: String,
-        sourceTitle: String? = nil,
-        sourceName: String? = nil,
-        sourceURL: String? = nil,
-        publishedAt: Date? = nil
+        source: OverviewSourceMetadata? = nil
     ) {
         self.id = id
         self.articleID = articleID
         self.passageID = passageID
         self.passageFingerprint = passageFingerprint
         self.quote = quote
-        self.sourceTitle = sourceTitle
-        self.sourceName = sourceName
-        self.sourceURL = sourceURL
-        self.publishedAt = publishedAt
+        self.source = source
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id, articleID, passageID, passageFingerprint, quote
+        case sourceTitle, sourceName, sourceURL, publishedAt
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.id = try container.decode(String.self, forKey: .id)
+        self.articleID = try container.decode(String.self, forKey: .articleID)
+        self.passageID = try container.decode(String.self, forKey: .passageID)
+        self.passageFingerprint = try container.decode(String.self, forKey: .passageFingerprint)
+        self.quote = try container.decode(String.self, forKey: .quote)
+        let title = try container.decodeIfPresent(String.self, forKey: .sourceTitle)
+        let name = try container.decodeIfPresent(String.self, forKey: .sourceName)
+        let url = try container.decodeIfPresent(String.self, forKey: .sourceURL)
+        let publishedAt = try container.decodeIfPresent(Date.self, forKey: .publishedAt)
+        if title != nil || name != nil || url != nil || publishedAt != nil {
+            self.source = OverviewSourceMetadata(title: title, name: name, url: url, publishedAt: publishedAt)
+        } else {
+            self.source = nil
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(articleID, forKey: .articleID)
+        try container.encode(passageID, forKey: .passageID)
+        try container.encode(passageFingerprint, forKey: .passageFingerprint)
+        try container.encode(quote, forKey: .quote)
+        try container.encodeIfPresent(sourceTitle, forKey: .sourceTitle)
+        try container.encodeIfPresent(sourceName, forKey: .sourceName)
+        try container.encodeIfPresent(sourceURL, forKey: .sourceURL)
+        try container.encodeIfPresent(publishedAt, forKey: .publishedAt)
     }
 }
 
@@ -86,53 +138,41 @@ public enum OverviewKind: String, Codable, Sendable {
     case fallbackExcerpts
 }
 
-/// Derived overview document model bound to membership version, input text hashes, schema version, and analysis version.
-public struct EventOverviewDocument: Codable, Hashable, Sendable, Identifiable {
-    public static let currentSchemaVersion = 1
-    public static let currentAnalysisVersion = 1
-
-    public let id: String
-    public let eventID: String
+/// Versioning and input binding context for an event overview document.
+public struct OverviewVersionContext: Codable, Hashable, Sendable {
     public let membershipVersion: Int
     public let inputTextHash: String
     public let schemaVersion: Int
     public let analysisVersion: Int
-    public let createdAt: Date
-    public let updatedAt: Date
 
+    public init(
+        membershipVersion: Int,
+        inputTextHash: String,
+        schemaVersion: Int = EventOverviewDocument.currentSchemaVersion,
+        analysisVersion: Int = EventOverviewDocument.currentAnalysisVersion
+    ) {
+        self.membershipVersion = membershipVersion
+        self.inputTextHash = inputTextHash
+        self.schemaVersion = schemaVersion
+        self.analysisVersion = analysisVersion
+    }
+}
+
+/// Narrative content and verified facts comprising an event overview.
+public struct OverviewContent: Codable, Hashable, Sendable {
     public let title: String
     public let summary: String
     public let facts: [OverviewFact]
     public let citations: [String: OverviewCitation]
     public let leadImage: OverviewLeadImage?
-    public let memberArticleIDs: [String]
-    public let kind: OverviewKind
 
     public init(
-        id: String = UUID().uuidString,
-        eventID: String,
-        membershipVersion: Int,
-        inputTextHash: String,
-        schemaVersion: Int = currentSchemaVersion,
-        analysisVersion: Int = currentAnalysisVersion,
-        createdAt: Date = Date(),
-        updatedAt: Date = Date(),
         title: String,
         summary: String,
-        facts: [OverviewFact],
-        citations: [OverviewCitation],
-        leadImage: OverviewLeadImage? = nil,
-        memberArticleIDs: [String] = [],
-        kind: OverviewKind = .synthesized
+        facts: [OverviewFact] = [],
+        citations: [OverviewCitation] = [],
+        leadImage: OverviewLeadImage? = nil
     ) {
-        self.id = id
-        self.eventID = eventID
-        self.membershipVersion = membershipVersion
-        self.inputTextHash = inputTextHash
-        self.schemaVersion = schemaVersion
-        self.analysisVersion = analysisVersion
-        self.createdAt = createdAt
-        self.updatedAt = updatedAt
         self.title = title
         self.summary = summary
         self.facts = facts
@@ -140,8 +180,128 @@ public struct EventOverviewDocument: Codable, Hashable, Sendable, Identifiable {
         for c in citations { dict[c.id] = c }
         self.citations = dict
         self.leadImage = leadImage
+    }
+}
+
+/// Origin, membership scope, and lifecycle timestamps for an overview document.
+public struct OverviewProvenance: Codable, Hashable, Sendable {
+    public let memberArticleIDs: [String]
+    public let kind: OverviewKind
+    public let createdAt: Date
+    public let updatedAt: Date
+
+    public init(
+        memberArticleIDs: [String] = [],
+        kind: OverviewKind = .synthesized,
+        createdAt: Date = Date(),
+        updatedAt: Date = Date()
+    ) {
         self.memberArticleIDs = memberArticleIDs
         self.kind = kind
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+    }
+}
+
+/// Derived overview document model bound to membership version, input text hashes, schema version, and analysis version.
+public struct EventOverviewDocument: Codable, Hashable, Sendable, Identifiable {
+    public static let currentSchemaVersion = 1
+    public static let currentAnalysisVersion = 1
+
+    public let id: String
+    public let eventID: String
+    public let version: OverviewVersionContext
+    public let content: OverviewContent
+    public let provenance: OverviewProvenance
+
+    public var membershipVersion: Int { version.membershipVersion }
+    public var inputTextHash: String { version.inputTextHash }
+    public var schemaVersion: Int { version.schemaVersion }
+    public var analysisVersion: Int { version.analysisVersion }
+    public var title: String { content.title }
+    public var summary: String { content.summary }
+    public var facts: [OverviewFact] { content.facts }
+    public var citations: [String: OverviewCitation] { content.citations }
+    public var leadImage: OverviewLeadImage? { content.leadImage }
+    public var memberArticleIDs: [String] { provenance.memberArticleIDs }
+    public var kind: OverviewKind { provenance.kind }
+    public var createdAt: Date { provenance.createdAt }
+    public var updatedAt: Date { provenance.updatedAt }
+
+    public init(
+        id: String = UUID().uuidString,
+        eventID: String,
+        version: OverviewVersionContext,
+        content: OverviewContent,
+        provenance: OverviewProvenance = OverviewProvenance()
+    ) {
+        self.id = id
+        self.eventID = eventID
+        self.version = version
+        self.content = content
+        self.provenance = provenance
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id, eventID, membershipVersion, inputTextHash, schemaVersion, analysisVersion
+        case createdAt, updatedAt, title, summary, facts, citations, leadImage, memberArticleIDs, kind
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.id = try container.decode(String.self, forKey: .id)
+        self.eventID = try container.decode(String.self, forKey: .eventID)
+        let membershipVersion = try container.decode(Int.self, forKey: .membershipVersion)
+        let inputTextHash = try container.decode(String.self, forKey: .inputTextHash)
+        let schemaVersion = try container.decode(Int.self, forKey: .schemaVersion)
+        let analysisVersion = try container.decode(Int.self, forKey: .analysisVersion)
+        self.version = OverviewVersionContext(
+            membershipVersion: membershipVersion,
+            inputTextHash: inputTextHash,
+            schemaVersion: schemaVersion,
+            analysisVersion: analysisVersion
+        )
+        let title = try container.decode(String.self, forKey: .title)
+        let summary = try container.decode(String.self, forKey: .summary)
+        let facts = try container.decode([OverviewFact].self, forKey: .facts)
+        let citations = try container.decode([String: OverviewCitation].self, forKey: .citations)
+        let leadImage = try container.decodeIfPresent(OverviewLeadImage.self, forKey: .leadImage)
+        self.content = OverviewContent(
+            title: title,
+            summary: summary,
+            facts: facts,
+            citations: Array(citations.values),
+            leadImage: leadImage
+        )
+        let memberArticleIDs = try container.decode([String].self, forKey: .memberArticleIDs)
+        let kind = try container.decode(OverviewKind.self, forKey: .kind)
+        let createdAt = try container.decode(Date.self, forKey: .createdAt)
+        let updatedAt = try container.decode(Date.self, forKey: .updatedAt)
+        self.provenance = OverviewProvenance(
+            memberArticleIDs: memberArticleIDs,
+            kind: kind,
+            createdAt: createdAt,
+            updatedAt: updatedAt
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(eventID, forKey: .eventID)
+        try container.encode(membershipVersion, forKey: .membershipVersion)
+        try container.encode(inputTextHash, forKey: .inputTextHash)
+        try container.encode(schemaVersion, forKey: .schemaVersion)
+        try container.encode(analysisVersion, forKey: .analysisVersion)
+        try container.encode(createdAt, forKey: .createdAt)
+        try container.encode(updatedAt, forKey: .updatedAt)
+        try container.encode(title, forKey: .title)
+        try container.encode(summary, forKey: .summary)
+        try container.encode(facts, forKey: .facts)
+        try container.encode(citations, forKey: .citations)
+        try container.encodeIfPresent(leadImage, forKey: .leadImage)
+        try container.encode(memberArticleIDs, forKey: .memberArticleIDs)
+        try container.encode(kind, forKey: .kind)
     }
 
     /// Evaluates if an existing overview is stale relative to updated membership, inputs, or versions.
@@ -165,17 +325,6 @@ public struct EventOverviewDocument: Codable, Hashable, Sendable, Identifiable {
             return $0.id < $1.id
         }
         let combined = sorted.map { "\($0.articleID):\($0.fingerprint)" }.joined(separator: "|")
-        return ArticleIdentity.sha256Hex(combined)
-    }
-
-    /// Computes deterministic input text hash across candidate/representative articles.
-    static func computeInputTextHash(articles: [FeedArticle]) -> String {
-        let sorted = articles.sorted { $0.id < $1.id }
-        let combined = sorted.map { a in
-            let text = a.fullContent ?? a.description
-            let textHash = ArticleIdentity.sha256Hex(text.trimmingCharacters(in: .whitespacesAndNewlines))
-            return "\(a.id):\(textHash)"
-        }.joined(separator: "|")
         return ArticleIdentity.sha256Hex(combined)
     }
 }

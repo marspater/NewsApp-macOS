@@ -1799,29 +1799,37 @@ actor DatabaseEngine {
                 passageID: passageID,
                 passageFingerprint: passageFingerprint,
                 quote: quote,
-                sourceTitle: sourceTitle,
-                sourceName: sourceName,
-                sourceURL: sourceURL,
-                publishedAt: publishedAt
+                source: OverviewSourceMetadata(
+                    title: sourceTitle,
+                    name: sourceName,
+                    url: sourceURL,
+                    publishedAt: publishedAt
+                )
             ))
         }
 
         return EventOverviewDocument(
             id: id,
             eventID: fetchedEventID,
-            membershipVersion: membershipVersion,
-            inputTextHash: inputTextHash,
-            schemaVersion: schemaVersion,
-            analysisVersion: analysisVersion,
-            createdAt: createdAt,
-            updatedAt: updatedAt,
-            title: title,
-            summary: summary,
-            facts: facts,
-            citations: citations,
-            leadImage: leadImage,
-            memberArticleIDs: memberArticleIDs,
-            kind: kind
+            version: OverviewVersionContext(
+                membershipVersion: membershipVersion,
+                inputTextHash: inputTextHash,
+                schemaVersion: schemaVersion,
+                analysisVersion: analysisVersion
+            ),
+            content: OverviewContent(
+                title: title,
+                summary: summary,
+                facts: facts,
+                citations: citations,
+                leadImage: leadImage
+            ),
+            provenance: OverviewProvenance(
+                memberArticleIDs: memberArticleIDs,
+                kind: kind,
+                createdAt: createdAt,
+                updatedAt: updatedAt
+            )
         )
     }
 

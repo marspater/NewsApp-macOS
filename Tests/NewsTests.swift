@@ -104,8 +104,8 @@ struct NewsTests {
             try await testPersistentArticleAliases(fixtureRoot: fixtureRoot)
             try await testFeedScopedGUIDs(fixtureRoot: fixtureRoot)
             try await testValidatedDocumentIdentity(fixtureRoot: fixtureRoot)
-        try await testPublisherTextFingerprints()
-            try await testOverviewDocumentModelBoundToInputsAndVersions()
+            try await testPublisherTextFingerprints()
+            try await testOverviewDocumentModelBoundToInputsAndVersions(fixtureHost: fixtureHost)
             try await testAuditPersistenceAndRoutingRegressions(fixtureRoot: fixtureRoot)
             try await testUndatedArticleOrdering()
             await testDatabaseEnginePersistence()
@@ -152,6 +152,7 @@ struct NewsTests {
         try await testFeedScopedGUIDs(fixtureRoot: fixtureRoot)
         try await testValidatedDocumentIdentity(fixtureRoot: fixtureRoot)
         try await testPublisherTextFingerprints()
+        try await testOverviewDocumentModelBoundToInputsAndVersions(fixtureHost: fixtureHost)
         await testFTS5SearchAndOperators()
         await testMigrationCoordinatorAtomicity()
         await testArticleRetentionPolicy()
@@ -3786,7 +3787,7 @@ struct NewsTests {
         assertFalse(persistedSaved, "Explicit unsave is idempotent in SQLite")
     }
 
-    static func testOverviewDocumentModelBoundToInputsAndVersions() async throws {
+    static func testOverviewDocumentModelBoundToInputsAndVersions(fixtureHost: String = "example.com") async throws {
         print("  - Testing Overview document model bound to inputs, versions and retention safety...")
 
         // 1. Passage and Input Text Hash determinism
@@ -3805,8 +3806,7 @@ struct NewsTests {
             passageID: passage1.id,
             passageFingerprint: passage1.fingerprint,
             quote: passage1.text,
-            sourceTitle: "Rover Water Discovery",
-            sourceName: "AeroSpace Daily"
+            source: OverviewSourceMetadata(title: "Rover Water Discovery", name: "AeroSpace Daily")
         )
         let citation2 = OverviewCitation(
             id: "c2",
@@ -3814,8 +3814,7 @@ struct NewsTests {
             passageID: passage2.id,
             passageFingerprint: passage2.fingerprint,
             quote: passage2.text,
-            sourceTitle: "Orbital Spectrometry Results",
-            sourceName: "CosmoNews"
+            source: OverviewSourceMetadata(title: "Orbital Spectrometry Results", name: "CosmoNews")
         )
 
         let fact1 = OverviewFact(id: "f1", text: "Water flowed on ancient Mars.", citationIDs: ["c1"])
@@ -3825,16 +3824,14 @@ struct NewsTests {
         let doc = EventOverviewDocument(
             id: "doc-1",
             eventID: "event-42",
-            membershipVersion: 1,
-            inputTextHash: hash1,
-            schemaVersion: 1,
-            analysisVersion: 1,
-            title: "Mars Water and Ice Evidence",
-            summary: "Recent rover and orbital discoveries indicate past water and present ice at the landing site.",
-            facts: [fact1, fact2],
-            citations: [citation1, citation2],
-            memberArticleIDs: ["art-1", "art-2"],
-            kind: .synthesized
+            version: OverviewVersionContext(membershipVersion: 1, inputTextHash: hash1, schemaVersion: 1, analysisVersion: 1),
+            content: OverviewContent(
+                title: "Mars Water and Ice Evidence",
+                summary: "Recent rover and orbital discoveries indicate past water and present ice at the landing site.",
+                facts: [fact1, fact2],
+                citations: [citation1, citation2]
+            ),
+            provenance: OverviewProvenance(memberArticleIDs: ["art-1", "art-2"], kind: .synthesized)
         )
 
         // Verify JSON round-trip
@@ -3862,9 +3859,9 @@ struct NewsTests {
         try await db.open()
 
         let oldPubDate = Date().addingTimeInterval(-40 * 86400) // 40 days old (> 30 day cutoff)
-        let article1 = FeedArticle(storedID: "art-1", title: "Rover Water Discovery", link: "https://example.com/art-1", guid: "g1", description: passage1.text, pubDate: oldPubDate, source: "AeroSpace Daily")
-        let article2 = FeedArticle(storedID: "art-2", title: "Orbital Spectrometry Results", link: "https://example.com/art-2", guid: "g2", description: passage2.text, pubDate: oldPubDate, source: "CosmoNews")
-        let article3 = FeedArticle(storedID: "art-3", title: "Uncited Old Article", link: "https://example.com/art-3", guid: "g3", description: "Unrelated text", pubDate: oldPubDate, source: "OtherNews")
+        let article1 = FeedArticle(storedID: "art-1", title: "Rover Water Discovery", link: "https://\(fixtureHost)/art-1", guid: "g1", description: passage1.text, pubDate: oldPubDate, source: "AeroSpace Daily")
+        let article2 = FeedArticle(storedID: "art-2", title: "Orbital Spectrometry Results", link: "https://\(fixtureHost)/art-2", guid: "g2", description: passage2.text, pubDate: oldPubDate, source: "CosmoNews")
+        let article3 = FeedArticle(storedID: "art-3", title: "Uncited Old Article", link: "https://\(fixtureHost)/art-3", guid: "g3", description: "Unrelated text", pubDate: oldPubDate, source: "OtherNews")
 
         _ = try await db.upsertArticles([article1, article2, article3])
         for id in ["art-1", "art-2", "art-3"] {
@@ -3876,13 +3873,14 @@ struct NewsTests {
         let overviewV2 = EventOverviewDocument(
             id: "doc-v2",
             eventID: "event-42",
-            membershipVersion: 2,
-            inputTextHash: hash1,
-            title: "Mars Water and Ice Evidence v2",
-            summary: "Overview version 2.",
-            facts: [fact1, fact2],
-            citations: [citation1, citation2],
-            memberArticleIDs: ["art-1", "art-2"]
+            version: OverviewVersionContext(membershipVersion: 2, inputTextHash: hash1),
+            content: OverviewContent(
+                title: "Mars Water and Ice Evidence v2",
+                summary: "Overview version 2.",
+                facts: [fact1, fact2],
+                citations: [citation1, citation2]
+            ),
+            provenance: OverviewProvenance(memberArticleIDs: ["art-1", "art-2"])
         )
 
         let savedV2 = try await db.recordEventOverview(overviewV2)
@@ -3896,13 +3894,14 @@ struct NewsTests {
         let overviewV1 = EventOverviewDocument(
             id: "doc-v1",
             eventID: "event-42",
-            membershipVersion: 1, // older version!
-            inputTextHash: "old-hash",
-            title: "Mars Water and Ice Evidence v1",
-            summary: "Overview version 1 arriving late.",
-            facts: [fact1],
-            citations: [citation1],
-            memberArticleIDs: ["art-1"]
+            version: OverviewVersionContext(membershipVersion: 1, inputTextHash: "old-hash"),
+            content: OverviewContent(
+                title: "Mars Water and Ice Evidence v1",
+                summary: "Overview version 1 arriving late.",
+                facts: [fact1],
+                citations: [citation1]
+            ),
+            provenance: OverviewProvenance(memberArticleIDs: ["art-1"])
         )
 
         let savedV1 = try await db.recordEventOverview(overviewV1)
