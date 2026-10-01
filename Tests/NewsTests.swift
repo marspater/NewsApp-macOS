@@ -102,6 +102,7 @@ struct NewsTests {
             try await testReaderFigures(fixtureRoot: fixtureRoot)
             try await testCanonicalArticleIngestion(fixtureRoot: fixtureRoot)
             try await testPersistentArticleAliases(fixtureRoot: fixtureRoot)
+            try await testFeedScopedGUIDs(fixtureRoot: fixtureRoot)
             try await testAuditPersistenceAndRoutingRegressions(fixtureRoot: fixtureRoot)
             try await testUndatedArticleOrdering()
             await testDatabaseEnginePersistence()
@@ -1502,7 +1503,7 @@ struct NewsTests {
         let feeds = [fixtureRoot.appendingPathComponent("guid-feed-a").absoluteString,
                      fixtureRoot.appendingPathComponent("guid-feed-b").absoluteString]
         func incoming(_ feed: String, _ link: String, guid: String = "shared-guid") -> FeedArticle {
-            var article = FeedArticle(title: "Report", link: link, guid: guid, description: "Publisher report", pubDate: Date(), source: feed)
+            var article = FeedArticle(title: "Report", link: link, guid: guid, description: "Publisher report", pubDate: Date(timeIntervalSince1970: 100), source: "Shared feed title")
             article.identityFeedURL = feed
             return article
         }
@@ -1607,12 +1608,16 @@ struct NewsTests {
         var notified = [String]()
         let manager = FeedManager(settings: settings, store: store, schedulesRefresh: false,
             fetchBatch: { urls, _ in urls.map { feed in
-                let article = feed == feeds[0] ? first : second
-                return (feed, [article, article], nil)
+                let articles = feed == feeds[0] ? [first, first] : [second, second, sharedDocument]
+                let items = articles.map { article in
+                    "<item><title>Report</title><link>\(article.link)</link><guid isPermaLink='false'>\(article.guid!)</guid><description>Publisher report</description></item>"
+                }.joined()
+                let xml = "<rss version='2.0'><channel><title>Shared feed title</title>\(items)</channel></rss>"
+                return (feed, FeedXMLParser(data: Data(xml.utf8)).parse(), nil)
             } }, notifyBatch: { articles, _ in notified.append(contentsOf: articles.map { $0.id }) })
         await manager.fetchFeedsAsync()
         assertEqual(Set(notified), Set([first.id, second.id]), "Both colliding publishers notify with committed, distinct IDs")
-        assertEqual(notified.count, 2, "Duplicate rows notify once per stored document")
+        assertEqual(notified.count, 2, "Duplicate RSS rows and overlapping feeds notify once per stored document")
         await manager.fetchFeedsAsync()
         assertEqual(notified.count, 2, "Repeated refresh does not re-notify either publisher")
         assertEqual(Set(manager.articles.map { $0.id }), Set([first.id, second.id]), "Visible identities agree with notification IDs")
