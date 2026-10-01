@@ -449,7 +449,29 @@ actor DatabaseEngine {
                 throw error
             }
         }
-        // Version 12 is reserved for the guarded FTS update trigger.
+        if version < 12 {
+            try beginTransaction()
+            do {
+                try Task.checkCancellation()
+                try executeSimple("""
+                DROP TRIGGER IF EXISTS trg_articles_au;
+                CREATE TRIGGER trg_articles_au AFTER UPDATE ON articles
+                WHEN old.title IS NOT new.title OR old.description IS NOT new.description
+                    OR old.content IS NOT new.content OR old.source IS NOT new.source
+                    OR old.category IS NOT new.category
+                BEGIN
+                    DELETE FROM articles_fts WHERE article_id = old.id;
+                    INSERT INTO articles_fts(article_id, title, description, content, source, category)
+                    VALUES (new.id, new.title, coalesce(new.description, ''), coalesce(new.content, ''), new.source, coalesce(new.category, ''));
+                END;
+                """)
+                try setUserVersion(12)
+                try commitTransaction()
+            } catch {
+                try? rollbackTransaction()
+                throw error
+            }
+        }
         if version < 13 {
             try beginTransaction()
             do {

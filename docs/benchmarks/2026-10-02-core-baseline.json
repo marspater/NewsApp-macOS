@@ -1,0 +1,89 @@
+{
+  "cpu_count": 10,
+  "feed_count": 5,
+  "fresh_rows_per_feed": 50,
+  "html_characters": 4175,
+  "library_rows": 10250,
+  "measurements_ms": {
+    "fts_first_100_ms": [
+      68.53079167194664,
+      86.05170832015574,
+      87.90183335077018,
+      82.2667499887757,
+      76.28870834014378,
+      75.49499999731779,
+      76.07062498573214,
+      74.70425000065006,
+      75.53095833281986,
+      74.50420831446536
+    ],
+    "html_extraction_ms": [
+      179.2928749928251,
+      177.37933332682587,
+      175.1278333249502,
+      175.45445830910467,
+      181.2576666707173,
+      193.4458333416842,
+      193.41750000603497,
+      190.1475416671019,
+      179.26866665948182,
+      172.5215833284892
+    ],
+    "natural_language_analysis_ms": [
+      21.778916649054736,
+      6.748416664777324,
+      6.453958310885355,
+      6.53808334027417,
+      7.393291656626388,
+      7.849124987842515,
+      7.1048749960027635,
+      7.367666665231809,
+      6.779499992262572,
+      6.999916658969596
+    ],
+    "refresh_5_mocked_feeds_ms": [
+      709.7317916632164,
+      2845.5075416713953,
+      2968.6974583310075,
+      2966.052708332427,
+      3115.1416249922477,
+      2902.6466249779332,
+      2975.688916660147,
+      3955.6667916476727,
+      3212.950083310716,
+      4029.3896666553337
+    ],
+    "refresh_cancel_mock_wait_ms": [
+      0.03695834311656654,
+      0.025999994250014424,
+      0.02166666672565043,
+      0.019625003915280104,
+      0.02912498894147575,
+      0.022291671484708786,
+      0.03004167228937149,
+      0.01858331961557269,
+      0.01795834396034479,
+      0.017333339201286435
+    ],
+    "snapshot_first_500_ms": [
+      78.49537499714643
+    ]
+  },
+  "optimization": "-O (test.sh performance mode)",
+  "os": "Version 27.0.1 (Build 26A434)",
+  "peak_process_rss_bytes": 112787456,
+  "physical_memory_bytes": 25769803776,
+  "prose_characters": 2030,
+  "publishers": 20,
+  "snapshot_rows": 500,
+  "hardware": "Apple M5, 24 GiB RAM",
+  "source_revision": "da3c58e plus the performance-baseline test harness",
+  "toolchain": "Xcode 27.0 (27A266a), Swift 6.4, macOS 15 deployment target",
+  "limitations": [
+    "Mocked feed batches bypass transport and feed parsing",
+    "Snapshot publication is not first rendered card",
+    "Analysis disables FoundationModels",
+    "RSS is whole benchmark process high-water mark including fixture construction",
+    "Refresh sample 1 inserts 250 rows; samples 2-10 repeat the same batches"
+  ]
+}

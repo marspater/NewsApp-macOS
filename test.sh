@@ -6,8 +6,13 @@ export CLANG_MODULE_CACHE_PATH="${CLANG_MODULE_CACHE_PATH:-${TMPDIR:-/tmp}/news-
 export SWIFT_MODULECACHE_PATH="$CLANG_MODULE_CACHE_PATH"
 
 
+TEST_OPT_FLAGS=()
+for argument in "$@"; do
+    if [[ "$argument" == "--performance-baseline" ]]; then TEST_OPT_FLAGS=(-O); fi
+done
+
 echo "Compiling tests for macOS ${TARGET_MACOS} ($(uname -m))..."
-swiftc -target $(uname -m)-apple-macos${TARGET_MACOS} \
+swiftc "${TEST_OPT_FLAGS[@]}" -target $(uname -m)-apple-macos${TARGET_MACOS} \
     Sources/Services/DateParser.swift \
     Sources/Models/FeedError.swift \
     Sources/Models/FeedFetchState.swift \
