@@ -36,6 +36,7 @@ swiftc -swift-version 6 -O -parse-as-library -target arm64-apple-macos${TARGET_M
     Sources/Models/FeedError.swift \
     Sources/Services/IPAddressValidator.swift \
     Sources/Models/ArticleIdentity.swift \
+    Sources/Models/EventOverview.swift \
     Sources/Storage/DatabaseEngine.swift \
     Sources/Storage/MigrationCoordinator.swift \
     Sources/Storage/ArticleStore.swift \
