@@ -55,15 +55,17 @@ struct FeedArticleWrap: Identifiable, Hashable, Sendable {
 /// Publisher-authored structure. Plain text remains separate for search and analysis.
 public struct ReaderBlock: Codable, Hashable, Sendable {
     public enum Kind: String, Codable, Sendable {
-        case paragraph, heading, subheading, quote, listItem, code
+        case paragraph, heading, subheading, quote, listItem, code, figure
     }
     public let kind: Kind
     public let text: String
     public var ordinal: Int? = nil
+    public var imageURL: String? = nil
+    public var imageAlt: String? = nil
 }
 
 public struct ReaderDocument: Codable, Hashable, Sendable {
-    public static let currentVersion = 2
+    public static let currentVersion = 3
     public var version = currentVersion
     public let blocks: [ReaderBlock]
 }

@@ -1,4 +1,5 @@
 import Foundation
+import ImageIO
 import Network
 
 /// Centralized, hardened HTTP client for all remote network ingestion.
@@ -55,6 +56,30 @@ actor SecureHTTPClient {
 
     func fetchImage(from url: URL, allowHTTP: Bool = false) async throws -> (Data, HTTPURLResponse) {
         try await fetchData(from: url, maxBytes: Self.defaultImageLimit, timeout: Self.defaultTimeout, allowHTTP: allowHTTP, cachePolicy: .useProtocolCachePolicy)
+    }
+
+    /// Decode bounded thumbnails on the networking actor, away from SwiftUI's main actor.
+    func fetchReaderImage(from url: URL) async throws -> CGImage {
+        let (data, _) = try await fetchImage(from: url)
+        try Task.checkCancellation()
+        return try Self.decodeReaderImage(data)
+    }
+
+    nonisolated static func decodeReaderImage(_ data: Data) throws -> CGImage {
+        guard let source = CGImageSourceCreateWithData(data as CFData, [kCGImageSourceShouldCache: false] as CFDictionary),
+              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+              let width = (properties[kCGImagePropertyPixelWidth] as? NSNumber)?.doubleValue,
+              let height = (properties[kCGImagePropertyPixelHeight] as? NSNumber)?.doubleValue,
+              width > 0, height > 0, width <= 16384, height <= 16384, width * height <= 64_000_000,
+              let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [
+                kCGImageSourceCreateThumbnailFromImageAlways: true,
+                kCGImageSourceCreateThumbnailWithTransform: true,
+                kCGImageSourceThumbnailMaxPixelSize: 1600,
+                kCGImageSourceShouldCacheImmediately: true
+              ] as CFDictionary) else {
+            throw URLError(.cannotDecodeContentData)
+        }
+        return image
     }
 
     /// Shared navigation/ingestion preflight. DNS work stays on this actor, off the UI actor.

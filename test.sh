@@ -44,7 +44,7 @@ swiftc -target $(uname -m)-apple-macos${TARGET_MACOS} \
     -o test_runner
 
 echo "Running unit tests..."
-./test_runner
+./test_runner "$@"
 
 # Clean up
 rm -f test_runner

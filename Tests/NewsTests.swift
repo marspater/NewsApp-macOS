@@ -4,6 +4,8 @@ import Foundation
 import Network
 import WebKit
 import SQLite3
+import ImageIO
+import UniformTypeIdentifiers
 
 // MARK: - MockURLProtocol for Testing
 class MockURLProtocol: URLProtocol, @unchecked Sendable {
@@ -96,6 +98,23 @@ struct NewsTests {
         fixtureURL.scheme = "https"
         fixtureURL.host = fixtureHost
         let fixtureRoot = fixtureURL.url!
+        if CommandLine.arguments.contains("--story-regressions") {
+            try await testReaderFigures(fixtureRoot: fixtureRoot)
+            try await testCanonicalArticleIngestion(fixtureRoot: fixtureRoot)
+            try await testPersistentArticleAliases(fixtureRoot: fixtureRoot)
+            try await testAuditPersistenceAndRoutingRegressions(fixtureRoot: fixtureRoot)
+            try await testUndatedArticleOrdering()
+            await testDatabaseEnginePersistence()
+            await testFTS5SearchAndOperators()
+            await testReaderParsingRegressions()
+            await testStructuredReaderAndTags()
+            await testReaderStoreUpdates()
+            await testArticleRetentionPolicy()
+            try await testGranularCacheClearingAndRetention()
+            await testMultiPublisherExtractionFixtures()
+            print("✅ Story regressions passed")
+            return
+        }
         print("🏃 Running NewsApp Unit Tests...")
         
         await testURLNormalization()
@@ -111,6 +130,7 @@ struct NewsTests {
         try await testAuditPersistenceAndRoutingRegressions(fixtureRoot: fixtureRoot)
         try await testAuditRefreshRegressions(fixtureRoot: fixtureRoot)
         try await testUndatedArticleOrdering()
+        try await testReaderFigures(fixtureRoot: fixtureRoot)
         await testReaderParsingRegressions()
         await testStructuredReaderAndTags()
         await testReaderStoreUpdates()
@@ -1205,6 +1225,65 @@ struct NewsTests {
         assertEqual(reconciled, "https://test.com/path", "Should reconcile legacy URL")
     }
     
+    static func testReaderFigures(fixtureRoot: URL) async throws {
+        print("  - Testing inline reader figures, captions and bounded image decoding...")
+        let prose = "The researchers published their findings after reviewing the available evidence and comparing the results across several independent observations."
+        let html = """
+        <article><p>\(prose)</p>
+        <figure><img src="/media/report.png" alt="Researchers examining the sample" width="1200" height="800"><figcaption>Sample photograph. Credit: Research team.</figcaption></figure>
+        <h2>Results</h2><p>Additional observations support the initial findings. \(prose)</p>
+        <figure hidden><img src="/hidden.png"><figcaption>Hidden caption</figcaption></figure>
+        <figure><img src="file:///private/image.png"><figcaption>Local resource</figcaption></figure>
+        <figure><img src="/pixel.png" width="1" height="1"></figure>
+        <figure><img src="/media/report.png"><figcaption>Duplicate image</figcaption></figure>
+        <aside><figure><img src="/related.png"></figure></aside></article>
+        """
+        let pipeline = ContentExtractionPipeline()
+        guard case .success(let content, let lead, let document) = pipeline.extractFromHTML(html, baseUrl: fixtureRoot.absoluteString),
+              let document else {
+            assertTrue(false, "Structured publisher fixture must extract")
+            return
+        }
+        assertEqual(document.blocks.map(\.kind), [.paragraph, .figure, .heading, .paragraph], "Keep editorial order and remove hidden, duplicate and invalid images")
+        let figure = document.blocks[1]
+        assertEqual(figure.imageURL, fixtureRoot.appendingPathComponent("media/report.png").absoluteString, "Relative figure URL resolves against publisher page")
+        assertEqual(lead, figure.imageURL, "An editorial figure supplies the lead when metadata is absent")
+        assertEqual(figure.text, "Sample photograph. Credit: Research team.", "Caption and attribution survive extraction")
+        assertEqual(figure.imageAlt, "Researchers examining the sample", "Publisher alt text survives for accessibility")
+        assertFalse(content.contains("Credit:"), "Image captions do not enter the article prose used for analysis")
+        assertEqual(try JSONDecoder().decode(ReaderDocument.self, from: JSONEncoder().encode(document)), document, "Reader figures round-trip through persisted JSON")
+        let oldJSON = Data(#"{"version":2,"blocks":[{"kind":"paragraph","text":"Old text"}]}"#.utf8)
+        assertEqual(try JSONDecoder().decode(ReaderDocument.self, from: oldJSON).blocks[0].text, "Old text", "Existing reader documents remain readable")
+        assertTrue(ContentExtractionPipeline.readerImageURL("data:image/png;base64,AAAA", baseURL: nil) == nil, "Embedded resources are not remote reader images")
+        assertTrue(ContentExtractionPipeline.readerImageURL("https://user:secret@example.com/image.png", baseURL: nil) == nil, "Credential-bearing image URLs are rejected")
+        let manyFigures = (0..<20).map { "<figure><img src='/media/\($0).png'></figure>" }.joined()
+        guard case .success(_, _, let bounded) = pipeline.extractFromHTML("<article><p>\(prose)</p>\(manyFigures)<p>Second paragraph. \(prose)</p></article>", baseUrl: fixtureRoot.absoluteString) else {
+            assertTrue(false, "Bounded media fixture must retain prose")
+            return
+        }
+        assertEqual(bounded?.blocks.filter { $0.kind == .figure }.count, 8, "Reader document bounds remote image work")
+        let divHTML = "<article><div>\(prose)</div><figure><img src='/media/div.png'></figure><div>Another observation. \(prose)</div></article>"
+        guard case .success(let divText, _, let divDocument) = pipeline.extractFromHTML(divHTML, baseUrl: fixtureRoot.absoluteString) else {
+            assertTrue(false, "Adding figures must not suppress the div-only prose fallback")
+            return
+        }
+        assertTrue(divText.contains("Another observation"), "Div-only prose survives around figures")
+        assertEqual(divDocument?.blocks.map(\.kind), [.paragraph, .figure, .paragraph], "Div-only articles preserve image position")
+        let context = CGContext(data: nil, width: 2400, height: 1200, bitsPerComponent: 8, bytesPerRow: 0,
+                                space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        let data = NSMutableData()
+        let destination = CGImageDestinationCreateWithData(data, UTType.png.identifier as CFString, 1, nil)!
+        CGImageDestinationAddImage(destination, context.makeImage()!, nil)
+        assertTrue(CGImageDestinationFinalize(destination), "Encode isolated raster fixture")
+        let thumbnail = try SecureHTTPClient.decodeReaderImage(data as Data)
+        assertEqual(thumbnail.width, 1600, "Decode at a bounded display size")
+        assertEqual(thumbnail.height, 800, "Preserve image aspect ratio")
+        do {
+            _ = try SecureHTTPClient.decodeReaderImage(Data("invalid image".utf8))
+            assertTrue(false, "Invalid image input must fail decoding")
+        } catch { /* Expected invalid-image failure. */ }
+    }
+
     @MainActor
     static func testCanonicalArticleIngestion(fixtureRoot: URL) async throws {
         print("  - Testing canonical URL ingestion across changing GUIDs...")

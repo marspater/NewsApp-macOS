@@ -190,6 +190,8 @@ final class DOMElementNode: Sendable {
 
     func readingBlocks(allowDivFallback: Bool = true) -> [DOMElementNode] {
         guard !isReaderExcluded else { return [] }
+        if tag == "figure" { return [self] }
+        if tag == "figcaption" { return [] }
         if tag == "ol" {
             var ordinal = Int(attributes["start"] ?? "") ?? 1
             return children.flatMap { child -> [DOMElementNode] in
@@ -203,7 +205,7 @@ final class DOMElementNode: Sendable {
         }
         if ["p", "h2", "h3", "h4", "h5", "h6", "li", "blockquote", "pre"].contains(tag) { return [self] }
         let blocks = children.flatMap { $0.readingBlocks(allowDivFallback: false) }
-        if !blocks.isEmpty || !allowDivFallback { return blocks }
+        if blocks.contains(where: { $0.tag != "figure" }) || !allowDivFallback { return blocks }
         let divs = children.flatMap { $0.readingBlocks() }
         if !divs.isEmpty { return divs }
         if ["div", "article", "main", "section"].contains(tag),
@@ -215,6 +217,15 @@ final class DOMElementNode: Sendable {
 
     var readerBlock: ReaderBlock? {
         guard !isReaderExcluded else { return nil }
+        if tag == "figure" {
+            guard let image = visibleReaderImage(),
+                  let source = image.attributes["src"] ?? image.attributes["data-src"] else { return nil }
+            let caption = findNodes(tag: "figcaption").map { $0.combinedText() }.joined(separator: " ")
+                .replacingOccurrences(of: "[ \t\r\n]+", with: " ", options: .regularExpression)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            return ReaderBlock(kind: .figure, text: String(caption.prefix(2000)), imageURL: source,
+                               imageAlt: image.attributes["alt"].map { String($0.prefix(500)) })
+        }
         let plain = combinedText().replacingOccurrences(of: "[ \t\r\n]+", with: " ", options: .regularExpression).trimmingCharacters(in: .whitespacesAndNewlines)
         guard !plain.isEmpty, !ArticleContentRedactor.isBoilerplateLine(plain) else { return nil }
         let kind: ReaderBlock.Kind
@@ -231,6 +242,20 @@ final class DOMElementNode: Sendable {
         guard kind != .paragraph || plain.count >= 25 else { return nil }
         return ReaderBlock(kind: kind, text: kind == .code ? combinedText().trimmingCharacters(in: .whitespacesAndNewlines) : plain,
                            ordinal: attributes["reader-ordinal"].flatMap(Int.init))
+    }
+
+    private func visibleReaderImage() -> DOMElementNode? {
+        guard !isReaderExcluded else { return nil }
+        if tag == "img" {
+            for dimension in ["width", "height"] {
+                if let value = attributes[dimension].flatMap(Int.init), value < 80 { return nil }
+            }
+            return self
+        }
+        for child in children {
+            if let image = child.visibleReaderImage() { return image }
+        }
+        return nil
     }
 
     /// Computes link density: ratio of text inside <a> tags versus total combined text.
@@ -258,7 +283,7 @@ enum HTMLDOMBuilder {
 
     private static let ignoredTags: Set<String> = [
         "script", "style", "noscript", "iframe", "svg", "nav", "footer",
-        "header", "form", "aside", "dialog", "figure", "figcaption", "time", "button"
+        "header", "form", "aside", "dialog", "time", "button"
     ]
 
     /// Parses clean HTML into a DOM tree while filtering non-content containers.
@@ -501,8 +526,8 @@ final class ContentExtractionPipeline: Sendable {
     }
 
     /// Core DOM-aware extraction engine that processes HTML into structured article prose.
-    func extractFromHTML(_ html: String, baseUrl _: String? = nil, leadImage: String? = nil) -> ExtractionOutcome {
-        let effectiveImage = leadImage ?? extractLeadImage(from: html)
+    func extractFromHTML(_ html: String, baseUrl: String? = nil, leadImage: String? = nil) -> ExtractionOutcome {
+        let effectiveImage = Self.readerImageURL(leadImage ?? extractLeadImage(from: html), baseURL: baseUrl)
 
         // 1. Build DOM Tree
         let dom = HTMLDOMBuilder.parse(html: html)
@@ -512,22 +537,41 @@ final class ContentExtractionPipeline: Sendable {
 
         // 3. Fallback to document-level paragraphs if top container yielded insufficient prose
         var candidateParagraphs = scoredParagraphs
-        if candidateParagraphs.count < 2 {
+        if candidateParagraphs.filter({ $0.kind != .figure }).count < 2 {
             let docParas = extractDocumentParagraphs(from: dom)
-            if docParas.count > candidateParagraphs.count {
+            if docParas.filter({ $0.kind != .figure }).count > candidateParagraphs.filter({ $0.kind != .figure }).count {
                 candidateParagraphs = docParas
             }
+        }
+
+        // Keep media in publisher order, without allowing images to qualify an empty article.
+        var seenImages = Set<String>()
+        candidateParagraphs = candidateParagraphs.compactMap { block in
+            guard block.kind == .figure else { return block }
+            guard seenImages.count < 8,
+                  let url = Self.readerImageURL(block.imageURL, baseURL: baseUrl),
+                  seenImages.insert(url).inserted else { return nil }
+            return ReaderBlock(kind: .figure, text: block.text, imageURL: url, imageAlt: block.imageAlt)
         }
 
         // 4. Validate Content Quality
         let validation = ContentQualityValidator.validate(paragraphs: candidateParagraphs.filter { $0.kind == .paragraph || $0.kind == .quote || $0.kind == .listItem }.map(\.text))
         switch validation {
         case .valid:
-            let joined = candidateParagraphs.map(\.text).joined(separator: "\n\n")
-            return .success(content: joined, imageUrl: effectiveImage, document: ReaderDocument(blocks: candidateParagraphs))
+            let joined = candidateParagraphs.filter { $0.kind != .figure }.map(\.text).joined(separator: "\n\n")
+            return .success(content: joined, imageUrl: effectiveImage ?? candidateParagraphs.first(where: { $0.kind == .figure })?.imageURL, document: ReaderDocument(blocks: candidateParagraphs))
         case .rejected(let reason):
             return .qualityValidationFailed(reason: reason)
         }
+    }
+
+    /// Structural URL validation only; actual loads still pass through SecureHTTPClient.
+    static func readerImageURL(_ raw: String?, baseURL: String?) -> String? {
+        guard let raw, raw.utf8.count <= 8192,
+              let url = URL(string: raw.trimmingCharacters(in: .whitespacesAndNewlines), relativeTo: baseURL.flatMap(URL.init(string:)))?.absoluteURL,
+              ["https", "http"].contains(url.scheme?.lowercased() ?? ""),
+              url.host?.isEmpty == false, url.user == nil, url.password == nil else { return nil }
+        return url.absoluteString
     }
 
     // MARK: - Container Scoring Engine
@@ -575,8 +619,9 @@ final class ContentExtractionPipeline: Sendable {
         var score: Double = 0.0
 
         // Paragraph count & text length contribution
-        score += Double(substantiveParagraphs.count) * 30.0
-        let totalChars = substantiveParagraphs.reduce(0) { $0 + $1.text.count }
+        let textBlocks = substantiveParagraphs.filter { $0.kind != .figure }
+        score += Double(textBlocks.count) * 30.0
+        let totalChars = textBlocks.reduce(0) { $0 + $1.text.count }
         score += Double(totalChars) / 35.0
 
         // Tag Priority Bonus
@@ -633,9 +678,9 @@ final class ContentExtractionPipeline: Sendable {
         let dom = HTMLDOMBuilder.parse(html: html)
         let scored = scoreAndExtractBestParagraphs(from: dom)
         if scored.count >= 2 {
-            return scored.map(\.text)
+            return scored.filter { $0.kind != .figure }.map(\.text)
         }
-        return extractDocumentParagraphs(from: dom).map(\.text)
+        return extractDocumentParagraphs(from: dom).filter { $0.kind != .figure }.map(\.text)
     }
 
     /// Computes link density: ratio of text inside <a> tags versus total plain text.

@@ -207,6 +207,7 @@ struct ArticleCardView: View {
                         .frame(maxWidth: .infinity)
                         .clipped()
                         .saturation(isRead ? 0.92 : 1.0)
+                        .accessibilityHidden(true)
                 default:
                     editorialFallbackHeader
                 }
@@ -257,13 +258,9 @@ struct ArticleRemoteImage<Content: View>: View {
             .task(id: url) {
                 phase = .empty
                 do {
-                    let (data, _) = try await SecureHTTPClient.shared.fetchImage(from: url)
+                    let image = try await SecureHTTPClient.shared.fetchReaderImage(from: url)
                     try Task.checkCancellation()
-                    if let image = NSImage(data: data) {
-                        phase = .success(Image(nsImage: image))
-                    } else {
-                        phase = .failure(URLError(.cannotDecodeContentData))
-                    }
+                    phase = .success(Image(image, scale: 1, label: Text("Article image")))
                 } catch {
                     guard !Task.isCancelled else { return }
                     phase = .failure(error)
