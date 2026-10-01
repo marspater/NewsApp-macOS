@@ -191,6 +191,7 @@ struct NewsTests {
             try await testPersistentArticleAliases(fixtureRoot: fixtureRoot)
             try await testFeedScopedGUIDs(fixtureRoot: fixtureRoot)
             try await testValidatedDocumentIdentity(fixtureRoot: fixtureRoot)
+            try await testIdentityBaselineScenarios(fixtureRoot: fixtureRoot)
             try await testPublisherTextFingerprints()
             try await testOverviewDocumentModelBoundToInputsAndVersions(fixtureHost: fixtureHost)
             try await testOverviewPassageSelectionAndTokenBudget(fixtureHost: fixtureHost)
@@ -247,6 +248,7 @@ struct NewsTests {
         try await testPersistentArticleAliases(fixtureRoot: fixtureRoot)
         try await testFeedScopedGUIDs(fixtureRoot: fixtureRoot)
         try await testValidatedDocumentIdentity(fixtureRoot: fixtureRoot)
+        try await testIdentityBaselineScenarios(fixtureRoot: fixtureRoot)
         try await testPublisherTextFingerprints()
         try await testOverviewDocumentModelBoundToInputsAndVersions(fixtureHost: fixtureHost)
         try await testOverviewPassageSelectionAndTokenBudget(fixtureHost: fixtureHost)
@@ -2299,6 +2301,86 @@ struct NewsTests {
     }
 
     @MainActor
+    static func testIdentityBaselineScenarios(fixtureRoot: URL) async throws {
+        print("  - Testing baseline query, mobile/AMP and publisher reprint scenarios...")
+        func feedArticle(_ link: String, guid: String, feed: String) -> FeedArticle {
+            let xml = "<rss><channel><title>Baseline publisher</title><item><title>Same headline</title><link><![CDATA[\(link)]]></link><guid>\(guid)</guid><description>Short publisher teaser.</description><pubDate>Thu, 01 Oct 2026 12:00:00 GMT</pubDate></item></channel></rss>"
+            var article = FeedXMLParser(data: Data(xml.utf8), feedURL: feed).parse().first!
+            article.identityFeedURL = feed
+            return article
+        }
+        let feed = fixtureRoot.appendingPathComponent("baseline/feed").absoluteString
+        for (index, key) in ["page", "article_id", "post", "lang", "reference"].enumerated() {
+            let db = DatabaseEngine(path: ":memory:")
+            try await db.open()
+            let base = fixtureRoot.appendingPathComponent("baseline/query-\(index)").absoluteString
+            let first = feedArticle(base + "?\(key)=1&utm_source=rss", guid: "query-first", feed: feed)
+            try await db.upsertArticles([first], feedUrl: feed)
+            try await db.markRead(articleId: first.id, isRead: true)
+            try await db.setSaved(articleId: first.id, isSaved: true)
+            let trackingVariant = feedArticle(base + "?\(key)=1&fbclid=changed", guid: "query-variant", feed: feed)
+            assertTrue(try await db.upsertArticles([trackingVariant], feedUrl: feed).isEmpty, "Tracking-only \(key) variant reuses one document")
+            let otherDocument = feedArticle(base + "?\(key)=2&utm_medium=feed", guid: "query-other", feed: feed)
+            try await db.upsertArticles([otherDocument], feedUrl: feed)
+            assertEqual(try await db.fetchArticles(limit: nil).count, 2, "Meaningful \(key) value distinguishes documents with identical titles")
+            assertTrue(try await db.isRead(articleId: trackingVariant.id), "Tracking variant resolves read history")
+            assertTrue(try await db.isSaved(articleId: trackingVariant.id), "Tracking variant resolves saved history")
+            assertFalse(try await db.isRead(articleId: otherDocument.id), "Different document has independent read state")
+            assertEqual(ArticleIdentity.canonicalizeURL(base + "?\(key)=&\(key)=2&utm_campaign=test"), base + "?\(key)=&\(key)=2", "Empty and repeated meaningful query values survive")
+            await db.close()
+        }
+
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [MockURLProtocol.self]
+        let pipeline = ContentExtractionPipeline(client: SecureHTTPClient(configuration: configuration))
+        defer { MockURLProtocol.requestHandler = nil }
+        let desktop = fixtureRoot.appendingPathComponent("baseline/desktop/story")
+        let prose = (1...65).map { "Baseline fact \($0) provides distinctive publisher evidence for the same document." }.joined(separator: " ")
+        for path in ["baseline/mobile/story", "baseline/amp/story"] {
+            let db = DatabaseEngine(path: ":memory:")
+            try await db.open()
+            let requested = fixtureRoot.appendingPathComponent(path)
+            let original = feedArticle(requested.absoluteString, guid: "format-original", feed: feed)
+            try await db.upsertArticles([original], feedUrl: feed)
+            try await db.markRead(articleId: original.id, isRead: true)
+            try await db.setSaved(articleId: original.id, isSaved: true)
+            let variant = feedArticle(desktop.absoluteString, guid: "format-variant", feed: feed)
+            assertTrue(original.normalizedLink != variant.normalizedLink, "Mobile/AMP paths are not guessed equivalent by normalization")
+            MockURLProtocol.requestHandler = { request in
+                let html = "<html><head><title>Same headline</title><link rel='canonical' href='\(desktop.absoluteString)'></head><body><article><p>\(prose)</p></article></body></html>"
+                return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, Data(html.utf8))
+            }
+            let result = await pipeline.extractArticleWithIdentity(from: requested.absoluteString)
+            guard let evidence = result.evidence else { fatalError("Matching protected format fixture must produce evidence") }
+            assertTrue(evidence.urls.contains(desktop.absoluteString), "Matching format canonical is verified")
+            try await db.recordDocumentIdentity(evidence, articleID: original.id)
+            assertTrue(try await db.upsertArticles([variant], feedUrl: feed).isEmpty, "Verified mobile/AMP variant retains one document")
+            assertEqual(try await db.fetchArticles(limit: nil).count, 1, "Format alias does not create a second card")
+            assertTrue(try await db.isRead(articleId: variant.id), "Format alias retains reading history")
+            assertTrue(try await db.isSaved(articleId: variant.id), "Format alias retains saved history")
+            await db.close()
+        }
+
+        let db = DatabaseEngine(path: ":memory:")
+        try await db.open()
+        var wire = feedArticle("https://wire.example/report", guid: "syndicated-guid", feed: "https://wire.example/rss")
+        var reprint = feedArticle("https://outlet.example/report", guid: "syndicated-guid", feed: "https://outlet.example/rss")
+        wire.fullContent = prose; reprint.fullContent = prose
+        // Use the same label too: host and subscription identity must still distinguish publishers.
+        try await db.upsertArticles([wire], feedUrl: wire.identityFeedURL)
+        try await db.upsertArticles([reprint], feedUrl: reprint.identityFeedURL)
+        let stored = try await db.fetchArticles(limit: nil)
+        assertEqual(stored.count, 2, "Identical wire text, headline, date and raw GUID across publishers remain two source documents")
+        let wireID = stored.first { $0.link == wire.link }!.id
+        let reprintID = stored.first { $0.link == reprint.link }!.id
+        try await db.markRead(articleId: wireID, isRead: true)
+        try await db.setSaved(articleId: wireID, isSaved: true)
+        assertFalse(try await db.isRead(articleId: reprintID), "Reprint reading state stays independent")
+        assertFalse(try await db.isSaved(articleId: reprintID), "Reprint saved state stays independent")
+        await db.close()
+    }
+
+    @MainActor
     static func testValidatedDocumentIdentity(fixtureRoot: URL) async throws {
         print("  - Testing protected canonical and redirect identity evidence...")
         let configuration = URLSessionConfiguration.ephemeral
@@ -4321,6 +4403,7 @@ struct NewsTests {
             assertEqual(try JSONDecoder().decode(ReaderDocument.self, from: JSONEncoder().encode(document)), document, "Shape \(index) round trips without loss")
             documents.append(document)
         }
+        assertTrue(documents[0].images?.isEmpty == true, "Missing image retains a structured text-only document")
         assertEqual(documents[2].blocks.filter { $0.kind == .paragraph }.count, 2, "Explicit br prose is not flattened into one wall")
         assertTrue(documents[4].blocks[0].inlineRuns?.contains { $0.strong } == true, "Strong text survives")
         assertTrue(documents[4].blocks[0].inlineRuns?.contains { $0.emphasis } == true, "Emphasis survives")
@@ -4347,6 +4430,16 @@ struct NewsTests {
         assertEqual(ReaderImageCandidate.select(from: media, title: "Publisher reporting")?.origin, .body, "Publisher association beats raw size")
         let noImage = ReaderDocument(blocks: [], images: [], leadImageURL: nil)
         assertTrue(noImage.selectedImage(fallback: base + "/old.jpg") == nil, "A curated text-only document never revives the old feed image")
+
+        let oversizedHTML = "<article><p>\(first)</p><figure><img src='/oversized.jpg' width='20000' height='20000'></figure><p>\(second)</p></article>"
+        guard case .success(let oversizedText, _, let oversizedDocument) = ContentExtractionPipeline.shared.extractFromHTML(oversizedHTML, baseUrl: base) else { fatalError("Oversized media must not discard prose") }
+        assertTrue(oversizedText.contains(first), "Oversized media keeps publisher prose")
+        assertFalse(oversizedDocument?.blocks.contains { $0.kind == .figure } == true, "Oversized declared dimensions are excluded before image requests")
+        let bodyOnlyRSS = "<rss xmlns:content='http://purl.org/rss/1.0/modules/content/'><channel><title>Publisher</title><item><guid>rss-no-page</guid><title>Offline report</title><content:encoded><![CDATA[\(shapes[0])]]></content:encoded></item></channel></rss>"
+        let bodyOnly = FeedXMLParser(data: Data(bodyOnlyRSS.utf8), feedURL: base).parse().first!
+        assertEqual(bodyOnly.link, "", "RSS-only fixture has no fetchable article page")
+        assertEqual(bodyOnly.readerDocument?.blocks.filter { $0.kind == .paragraph }.count, 2, "RSS-only publisher body retains paragraph structure without a page fetch")
+        assertTrue(bodyOnly.fullContent?.contains(first) == true && bodyOnly.contentFetched, "RSS-only publisher content is ready for native rendering")
 
         let html = shapes[10]
         let rss = "<rss version='2.0'><channel><title>Fixture publisher</title><item><title>Report</title><link>\(base)</link><description>Preview</description><content:encoded xmlns:content='http://purl.org/rss/1.0/modules/content/'><![CDATA[\(html)]]></content:encoded></item></channel></rss>"
