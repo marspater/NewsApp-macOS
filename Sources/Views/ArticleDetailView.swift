@@ -821,19 +821,20 @@ struct ArticleDetailView: View {
         contentState = .loading
 
         do {
-            let outcome = await ContentExtractionPipeline.shared.extractArticleDetailed(
+            let extraction = await ContentExtractionPipeline.shared.extractArticleWithIdentity(
                 from: link,
                 allowHTTP: allowInsecure
             )
             guard !Task.isCancelled, activeArticle.id == targetId else { return }
 
-            switch outcome {
+            switch extraction.outcome {
             case .success(let content, let imageUrl, let document):
                 await articleStore.updateEnrichment(
                     id: targetId,
                     content: content,
                     image: imageUrl,
-                    readerDocument: document
+                    readerDocument: document,
+                    identityEvidence: extraction.evidence
                 )
                 guard !Task.isCancelled, activeArticle.id == targetId else { return }
                 var updated = self.activeArticle

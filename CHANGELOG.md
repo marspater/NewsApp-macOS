@@ -4,6 +4,8 @@
 
 ### Fixed
 
+- Retain protected redirect destinations and verified same-origin canonical URLs as document aliases; resolve relative reader images from the final response URL.
+
 - Scope incoming GUIDs to their configured subscription, preserving legacy article IDs while keeping colliding publishers and their read/save/notification state separate.
 
 - Preserve observed article IDs and document URLs through a transactional alias migration; resolve old notifications, read/save actions and enrichment to the existing article, rejecting contradictory signals and retaining URL ambiguity.
