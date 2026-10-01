@@ -43,6 +43,12 @@ struct ArticleIdentity: Sendable {
         return components.url?.absoluteString ?? trimmed
     }
 
+    /// Computes a lowercase hex SHA-256 string for the given UTF-8 text.
+    static func sha256Hex(_ string: String) -> String {
+        let digest = SHA256.hash(data: Data(string.utf8))
+        return digest.map { String(format: "%02x", $0) }.joined()
+    }
+
     /// Computes a fallback content fingerprint using SHA-256.
     /// Used when both GUID and canonical link are missing or generic.
     static func computeContentFingerprint(title: String, source: String, pubDate: Date) -> String {
@@ -50,9 +56,7 @@ struct ArticleIdentity: Sendable {
         let normalizedSource = source.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let timestamp = Int(pubDate.timeIntervalSince1970)
         let raw = "\(normalizedTitle)|\(normalizedSource)|\(timestamp)"
-        let digest = SHA256.hash(data: Data(raw.utf8))
-        let hex = digest.map { String(format: "%02x", $0) }.joined()
-        return "fp_" + String(hex.prefix(16))
+        return "fp_" + String(sha256Hex(raw).prefix(16))
     }
 
     /// Exact publisher text is supporting evidence, never a global document key.

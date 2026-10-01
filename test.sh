@@ -12,6 +12,7 @@ swiftc -target $(uname -m)-apple-macos${TARGET_MACOS} \
     Sources/Models/FeedError.swift \
     Sources/Services/IPAddressValidator.swift \
     Sources/Models/ArticleIdentity.swift \
+    Sources/Models/EventOverview.swift \
     Sources/Storage/DatabaseEngine.swift \
     Sources/Storage/MigrationCoordinator.swift \
     Sources/Storage/ArticleStore.swift \

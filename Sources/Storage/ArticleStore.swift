@@ -352,4 +352,21 @@ final class ArticleStore: ObservableObject {
             return 0
         }
     }
+
+    // MARK: - Event Overviews
+
+    @discardableResult
+    func recordEventOverview(_ document: EventOverviewDocument) async throws -> Bool {
+        try await database.recordEventOverview(document)
+    }
+
+    func fetchEventOverview(eventID: String) async throws -> EventOverviewDocument? {
+        try await database.fetchEventOverview(eventID: eventID)
+    }
+
+    @discardableResult
+    func deleteEventOverview(eventID: String) async throws -> Bool {
+        try await database.deleteEventOverview(eventID: eventID)
+    }
 }
+

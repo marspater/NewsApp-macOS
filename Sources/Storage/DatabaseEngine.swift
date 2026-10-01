@@ -344,6 +344,52 @@ actor DatabaseEngine {
                 throw error
             }
         }
+        if version < 8 {
+            try beginTransaction()
+            do {
+                try Task.checkCancellation()
+                try executeSimple("""
+                CREATE TABLE IF NOT EXISTS event_overviews (
+                    id TEXT PRIMARY KEY,
+                    event_id TEXT NOT NULL UNIQUE,
+                    membership_version INTEGER NOT NULL,
+                    input_text_hash TEXT NOT NULL,
+                    schema_version INTEGER NOT NULL,
+                    analysis_version INTEGER NOT NULL,
+                    title TEXT NOT NULL,
+                    summary TEXT NOT NULL,
+                    facts_json TEXT NOT NULL,
+                    lead_image_json TEXT,
+                    member_article_ids_json TEXT NOT NULL,
+                    kind TEXT NOT NULL,
+                    created_at REAL NOT NULL,
+                    updated_at REAL NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_event_overviews_event_id ON event_overviews(event_id);
+
+                CREATE TABLE IF NOT EXISTS event_overview_citations (
+                    id TEXT PRIMARY KEY,
+                    overview_id TEXT NOT NULL REFERENCES event_overviews(id) ON DELETE CASCADE,
+                    article_id TEXT NOT NULL REFERENCES articles(id) ON DELETE RESTRICT,
+                    passage_id TEXT NOT NULL,
+                    passage_fingerprint TEXT NOT NULL,
+                    quote TEXT NOT NULL,
+                    source_title TEXT,
+                    source_name TEXT,
+                    source_url TEXT,
+                    published_at REAL
+                );
+                CREATE INDEX IF NOT EXISTS idx_event_overview_citations_overview_id ON event_overview_citations(overview_id);
+                CREATE INDEX IF NOT EXISTS idx_event_overview_citations_article_id ON event_overview_citations(article_id);
+                """)
+                try setUserVersion(8)
+                try commitTransaction()
+                logger.info("Database schema migrated to version 8 (event overviews and citations)")
+            } catch {
+                try? rollbackTransaction()
+                throw error
+            }
+        }
     }
     
     private func getUserVersion() throws -> Int {
@@ -1430,6 +1476,7 @@ actor DatabaseEngine {
             WHERE s.is_read = 1
               AND s.is_saved = 0
               AND \(Self.articleDateOrder) < ?
+              AND a.id NOT IN (SELECT article_id FROM event_overview_citations)
         );
         """
         var stmt: OpaquePointer?
@@ -1546,6 +1593,276 @@ actor DatabaseEngine {
                 try? JSONDecoder().decode(ReaderDocument.self, from: Data(String(cString: $0).utf8))
             }
         )
+    }
+
+    // MARK: - Event Overviews
+
+    @discardableResult
+    func recordEventOverview(_ overview: EventOverviewDocument) throws -> Bool {
+        guard let db = db else { throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Database not open"]) }
+
+        try beginTransaction()
+        defer {
+            if sqlite3_get_autocommit(db) == 0 { try? rollbackTransaction() }
+        }
+
+        // Check if an existing overview exists for this event
+        var checkStmt: OpaquePointer?
+        let checkSql = "SELECT id, membership_version FROM event_overviews WHERE event_id = ?;"
+        guard sqlite3_prepare_v2(db, checkSql, -1, &checkStmt, nil) == SQLITE_OK else {
+            throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to prepare check statement for event overview"])
+        }
+        defer { sqlite3_finalize(checkStmt) }
+
+        sqlite3_bind_text(checkStmt, 1, overview.eventID, -1, Self.sqliteTransient)
+        var existingOverviewID: String?
+        if sqlite3_step(checkStmt) == SQLITE_ROW {
+            let existingVersion = Int(sqlite3_column_int(checkStmt, 1))
+            // An older result never overwrites a newer version
+            if existingVersion > overview.membershipVersion {
+                return false
+            }
+            if let idText = sqlite3_column_text(checkStmt, 0) {
+                existingOverviewID = String(cString: idText)
+            }
+        }
+
+        // If an existing overview exists with older/same version, remove it first
+        if let oldID = existingOverviewID {
+            var delStmt: OpaquePointer?
+            if sqlite3_prepare_v2(db, "DELETE FROM event_overviews WHERE id = ?;", -1, &delStmt, nil) == SQLITE_OK {
+                sqlite3_bind_text(delStmt, 1, oldID, -1, Self.sqliteTransient)
+                _ = sqlite3_step(delStmt)
+                sqlite3_finalize(delStmt)
+            }
+        }
+
+        let encoder = JSONEncoder()
+        let factsJSON = String(decoding: try encoder.encode(overview.facts), as: UTF8.self)
+        let memberArticleIDsJSON = String(decoding: try encoder.encode(overview.memberArticleIDs), as: UTF8.self)
+        var leadImageJSON: String?
+        if let leadImage = overview.leadImage {
+            leadImageJSON = String(decoding: try encoder.encode(leadImage), as: UTF8.self)
+        }
+
+        let insertOverviewSql = """
+        INSERT INTO event_overviews (
+            id, event_id, membership_version, input_text_hash,
+            schema_version, analysis_version, title, summary,
+            facts_json, lead_image_json, member_article_ids_json,
+            kind, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+        """
+
+        var overviewStmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, insertOverviewSql, -1, &overviewStmt, nil) == SQLITE_OK else {
+            throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to prepare insert statement for event overview"])
+        }
+        defer { sqlite3_finalize(overviewStmt) }
+
+        sqlite3_bind_text(overviewStmt, 1, overview.id, -1, Self.sqliteTransient)
+        sqlite3_bind_text(overviewStmt, 2, overview.eventID, -1, Self.sqliteTransient)
+        sqlite3_bind_int(overviewStmt, 3, Int32(overview.membershipVersion))
+        sqlite3_bind_text(overviewStmt, 4, overview.inputTextHash, -1, Self.sqliteTransient)
+        sqlite3_bind_int(overviewStmt, 5, Int32(overview.schemaVersion))
+        sqlite3_bind_int(overviewStmt, 6, Int32(overview.analysisVersion))
+        sqlite3_bind_text(overviewStmt, 7, overview.title, -1, Self.sqliteTransient)
+        sqlite3_bind_text(overviewStmt, 8, overview.summary, -1, Self.sqliteTransient)
+        sqlite3_bind_text(overviewStmt, 9, factsJSON, -1, Self.sqliteTransient)
+        if let lij = leadImageJSON {
+            sqlite3_bind_text(overviewStmt, 10, lij, -1, Self.sqliteTransient)
+        } else {
+            sqlite3_bind_null(overviewStmt, 10)
+        }
+        sqlite3_bind_text(overviewStmt, 11, memberArticleIDsJSON, -1, Self.sqliteTransient)
+        sqlite3_bind_text(overviewStmt, 12, overview.kind.rawValue, -1, Self.sqliteTransient)
+        sqlite3_bind_double(overviewStmt, 13, overview.createdAt.timeIntervalSince1970)
+        sqlite3_bind_double(overviewStmt, 14, overview.updatedAt.timeIntervalSince1970)
+
+        guard sqlite3_step(overviewStmt) == SQLITE_DONE else {
+            let errMsg = String(cString: sqlite3_errmsg(db))
+            throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to insert event overview: \(errMsg)"])
+        }
+
+        let insertCitationSql = """
+        INSERT INTO event_overview_citations (
+            id, overview_id, article_id, passage_id, passage_fingerprint,
+            quote, source_title, source_name, source_url, published_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+        """
+        var citationStmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, insertCitationSql, -1, &citationStmt, nil) == SQLITE_OK else {
+            throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to prepare citation statement"])
+        }
+        defer { sqlite3_finalize(citationStmt) }
+
+        for citation in overview.citations.values {
+            sqlite3_reset(citationStmt)
+            sqlite3_bind_text(citationStmt, 1, citation.id, -1, Self.sqliteTransient)
+            sqlite3_bind_text(citationStmt, 2, overview.id, -1, Self.sqliteTransient)
+            sqlite3_bind_text(citationStmt, 3, citation.articleID, -1, Self.sqliteTransient)
+            sqlite3_bind_text(citationStmt, 4, citation.passageID, -1, Self.sqliteTransient)
+            sqlite3_bind_text(citationStmt, 5, citation.passageFingerprint, -1, Self.sqliteTransient)
+            sqlite3_bind_text(citationStmt, 6, citation.quote, -1, Self.sqliteTransient)
+            if let st = citation.sourceTitle { sqlite3_bind_text(citationStmt, 7, st, -1, Self.sqliteTransient) } else { sqlite3_bind_null(citationStmt, 7) }
+            if let sn = citation.sourceName { sqlite3_bind_text(citationStmt, 8, sn, -1, Self.sqliteTransient) } else { sqlite3_bind_null(citationStmt, 8) }
+            if let su = citation.sourceURL { sqlite3_bind_text(citationStmt, 9, su, -1, Self.sqliteTransient) } else { sqlite3_bind_null(citationStmt, 9) }
+            if let pa = citation.publishedAt { sqlite3_bind_double(citationStmt, 10, pa.timeIntervalSince1970) } else { sqlite3_bind_null(citationStmt, 10) }
+
+            guard sqlite3_step(citationStmt) == SQLITE_DONE else {
+                let errMsg = String(cString: sqlite3_errmsg(db))
+                throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to insert event overview citation: \(errMsg)"])
+            }
+        }
+
+        try commitTransaction()
+        return true
+    }
+
+    func fetchEventOverview(eventID: String) throws -> EventOverviewDocument? {
+        guard let db = db else { throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Database not open"]) }
+
+        let overviewSql = """
+        SELECT id, event_id, membership_version, input_text_hash,
+               schema_version, analysis_version, title, summary,
+               facts_json, lead_image_json, member_article_ids_json,
+               kind, created_at, updated_at
+        FROM event_overviews
+        WHERE event_id = ?;
+        """
+        var overviewStmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, overviewSql, -1, &overviewStmt, nil) == SQLITE_OK else {
+            throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to prepare fetch overview statement"])
+        }
+        defer { sqlite3_finalize(overviewStmt) }
+
+        sqlite3_bind_text(overviewStmt, 1, eventID, -1, Self.sqliteTransient)
+        guard sqlite3_step(overviewStmt) == SQLITE_ROW else {
+            return nil
+        }
+
+        let id = String(cString: sqlite3_column_text(overviewStmt, 0))
+        let fetchedEventID = String(cString: sqlite3_column_text(overviewStmt, 1))
+        let membershipVersion = Int(sqlite3_column_int(overviewStmt, 2))
+        let inputTextHash = String(cString: sqlite3_column_text(overviewStmt, 3))
+        let schemaVersion = Int(sqlite3_column_int(overviewStmt, 4))
+        let analysisVersion = Int(sqlite3_column_int(overviewStmt, 5))
+        let title = String(cString: sqlite3_column_text(overviewStmt, 6))
+        let summary = String(cString: sqlite3_column_text(overviewStmt, 7))
+        let factsJSON = String(cString: sqlite3_column_text(overviewStmt, 8))
+        let leadImageJSON = sqlite3_column_text(overviewStmt, 9).map { String(cString: $0) }
+        let memberArticleIDsJSON = String(cString: sqlite3_column_text(overviewStmt, 10))
+        let kindString = String(cString: sqlite3_column_text(overviewStmt, 11))
+        let createdAt = Date(timeIntervalSince1970: sqlite3_column_double(overviewStmt, 12))
+        let updatedAt = Date(timeIntervalSince1970: sqlite3_column_double(overviewStmt, 13))
+
+        let decoder = JSONDecoder()
+        let facts = (try? decoder.decode([OverviewFact].self, from: Data(factsJSON.utf8))) ?? []
+        let memberArticleIDs = (try? decoder.decode([String].self, from: Data(memberArticleIDsJSON.utf8))) ?? []
+        var leadImage: OverviewLeadImage?
+        if let lij = leadImageJSON, let data = lij.data(using: .utf8) {
+            leadImage = try? decoder.decode(OverviewLeadImage.self, from: data)
+        }
+        let kind = OverviewKind(rawValue: kindString) ?? .synthesized
+
+        // Fetch citations
+        let citationSql = """
+        SELECT id, article_id, passage_id, passage_fingerprint,
+               quote, source_title, source_name, source_url, published_at
+        FROM event_overview_citations
+        WHERE overview_id = ?;
+        """
+        var citationStmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, citationSql, -1, &citationStmt, nil) == SQLITE_OK else {
+            throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to prepare fetch citations statement"])
+        }
+        defer { sqlite3_finalize(citationStmt) }
+
+        sqlite3_bind_text(citationStmt, 1, id, -1, Self.sqliteTransient)
+        var citations: [OverviewCitation] = []
+        while sqlite3_step(citationStmt) == SQLITE_ROW {
+            let citID = String(cString: sqlite3_column_text(citationStmt, 0))
+            let articleID = String(cString: sqlite3_column_text(citationStmt, 1))
+            let passageID = String(cString: sqlite3_column_text(citationStmt, 2))
+            let passageFingerprint = String(cString: sqlite3_column_text(citationStmt, 3))
+            let quote = String(cString: sqlite3_column_text(citationStmt, 4))
+            let sourceTitle = sqlite3_column_text(citationStmt, 5).map { String(cString: $0) }
+            let sourceName = sqlite3_column_text(citationStmt, 6).map { String(cString: $0) }
+            let sourceURL = sqlite3_column_text(citationStmt, 7).map { String(cString: $0) }
+            var publishedAt: Date?
+            if sqlite3_column_type(citationStmt, 8) != SQLITE_NULL {
+                publishedAt = Date(timeIntervalSince1970: sqlite3_column_double(citationStmt, 8))
+            }
+            citations.append(OverviewCitation(
+                id: citID,
+                articleID: articleID,
+                passageID: passageID,
+                passageFingerprint: passageFingerprint,
+                quote: quote,
+                source: OverviewSourceMetadata(
+                    title: sourceTitle,
+                    name: sourceName,
+                    url: sourceURL,
+                    publishedAt: publishedAt
+                )
+            ))
+        }
+
+        return EventOverviewDocument(
+            id: id,
+            eventID: fetchedEventID,
+            version: OverviewVersionContext(
+                membershipVersion: membershipVersion,
+                inputTextHash: inputTextHash,
+                schemaVersion: schemaVersion,
+                analysisVersion: analysisVersion
+            ),
+            content: OverviewContent(
+                title: title,
+                summary: summary,
+                facts: facts,
+                citations: citations,
+                leadImage: leadImage
+            ),
+            provenance: OverviewProvenance(
+                memberArticleIDs: memberArticleIDs,
+                kind: kind,
+                createdAt: createdAt,
+                updatedAt: updatedAt
+            )
+        )
+    }
+
+    @discardableResult
+    func deleteEventOverview(eventID: String) throws -> Bool {
+        guard let db = db else { throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Database not open"]) }
+
+        try beginTransaction()
+        defer {
+            if sqlite3_get_autocommit(db) == 0 { try? rollbackTransaction() }
+        }
+
+        var stmt: OpaquePointer?
+        let sql = "DELETE FROM event_overviews WHERE event_id = ?;"
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to prepare delete event overview statement"])
+        }
+        defer { sqlite3_finalize(stmt) }
+
+        sqlite3_bind_text(stmt, 1, eventID, -1, Self.sqliteTransient)
+        guard sqlite3_step(stmt) == SQLITE_DONE else {
+            let errMsg = String(cString: sqlite3_errmsg(db))
+            throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to delete event overview: \(errMsg)"])
+        }
+        let changes = sqlite3_changes(db)
+        try commitTransaction()
+        return changes > 0
+    }
+
+    func clearEventOverviews() throws {
+        guard db != nil else { return }
+        try executeSimple("DELETE FROM event_overviews;")
+        logger.info("Cleared all event overviews and citations.")
     }
 
 }

@@ -104,7 +104,8 @@ struct NewsTests {
             try await testPersistentArticleAliases(fixtureRoot: fixtureRoot)
             try await testFeedScopedGUIDs(fixtureRoot: fixtureRoot)
             try await testValidatedDocumentIdentity(fixtureRoot: fixtureRoot)
-        try await testPublisherTextFingerprints()
+            try await testPublisherTextFingerprints()
+            try await testOverviewDocumentModelBoundToInputsAndVersions(fixtureHost: fixtureHost)
             try await testAuditPersistenceAndRoutingRegressions(fixtureRoot: fixtureRoot)
             try await testUndatedArticleOrdering()
             await testDatabaseEnginePersistence()
@@ -151,6 +152,7 @@ struct NewsTests {
         try await testFeedScopedGUIDs(fixtureRoot: fixtureRoot)
         try await testValidatedDocumentIdentity(fixtureRoot: fixtureRoot)
         try await testPublisherTextFingerprints()
+        try await testOverviewDocumentModelBoundToInputsAndVersions(fixtureHost: fixtureHost)
         await testFTS5SearchAndOperators()
         await testMigrationCoordinatorAtomicity()
         await testArticleRetentionPolicy()
@@ -1410,7 +1412,7 @@ struct NewsTests {
         await cancelledDB.close()
         let db = DatabaseEngine(path: copyPath)
         try await db.open()
-        assertEqual(value(copyPath, "PRAGMA user_version;"), "7", "Copied v4 library upgrades to the current schema")
+        assertEqual(value(copyPath, "PRAGMA user_version;"), "8", "Copied v4 library upgrades to the current schema")
         assertEqual(value(originalPath, "PRAGMA user_version;"), "4", "Original fixture stays untouched")
         assertEqual(try await db.fetchArticles(limit: nil).count, 3, "Migration keeps historical rows")
         assertEqual(value(copyPath, "SELECT read_at FROM article_state WHERE article_id = 'alias-first';"), originalReadAt, "Migration preserves read history timestamp")
@@ -3783,6 +3785,148 @@ struct NewsTests {
         _ = await store.setSaved(article: article, isSaved: false)
         let persistedSaved = try await store.database.isSaved(articleId: article.id)
         assertFalse(persistedSaved, "Explicit unsave is idempotent in SQLite")
+    }
+
+    static func testOverviewDocumentModelBoundToInputsAndVersions(fixtureHost: String = "example.com") async throws {
+        print("  - Testing Overview document model bound to inputs, versions and retention safety...")
+
+        // 1. Passage and Input Text Hash determinism
+        let passage1 = EvidencePassage(id: "p1", articleID: "art-1", text: "Mars rover discovered signs of ancient water flow.", ordinal: 0)
+        let passage2 = EvidencePassage(id: "p2", articleID: "art-2", text: "Subsurface ice detected at landing site by orbital spectrometry.", ordinal: 1)
+        let passage3 = EvidencePassage(id: "p3", articleID: "art-1", text: "Mission scientists confirm delta deposit features.", ordinal: 2)
+
+        let hash1 = EventOverviewDocument.computeInputTextHash(passages: [passage1, passage2, passage3])
+        let hash2 = EventOverviewDocument.computeInputTextHash(passages: [passage3, passage1, passage2])
+        assertEqual(hash1, hash2, "Input text hash is deterministic across passage insertion order")
+
+        // 2. Citations bound to article ID and evidence passage ID/fingerprint
+        let citation1 = OverviewCitation(
+            id: "c1",
+            articleID: "art-1",
+            passageID: passage1.id,
+            passageFingerprint: passage1.fingerprint,
+            quote: passage1.text,
+            source: OverviewSourceMetadata(title: "Rover Water Discovery", name: "AeroSpace Daily")
+        )
+        let citation2 = OverviewCitation(
+            id: "c2",
+            articleID: "art-2",
+            passageID: passage2.id,
+            passageFingerprint: passage2.fingerprint,
+            quote: passage2.text,
+            source: OverviewSourceMetadata(title: "Orbital Spectrometry Results", name: "CosmoNews")
+        )
+
+        let fact1 = OverviewFact(id: "f1", text: "Water flowed on ancient Mars.", citationIDs: ["c1"])
+        let fact2 = OverviewFact(id: "f2", text: "Subsurface ice remains at the landing site.", citationIDs: ["c2"])
+
+        // 3. Document tied to membership version, input text hashes, schema version and analysis version
+        let doc = EventOverviewDocument(
+            id: "doc-1",
+            eventID: "event-42",
+            version: OverviewVersionContext(membershipVersion: 1, inputTextHash: hash1, schemaVersion: 1, analysisVersion: 1),
+            content: OverviewContent(
+                title: "Mars Water and Ice Evidence",
+                summary: "Recent rover and orbital discoveries indicate past water and present ice at the landing site.",
+                facts: [fact1, fact2],
+                citations: [citation1, citation2]
+            ),
+            provenance: OverviewProvenance(memberArticleIDs: ["art-1", "art-2"], kind: .synthesized)
+        )
+
+        // Verify JSON round-trip
+        let encoder = JSONEncoder()
+        let decoder = JSONDecoder()
+        let data = try encoder.encode(doc)
+        let decoded = try decoder.decode(EventOverviewDocument.self, from: data)
+        assertEqual(decoded.id, doc.id, "Document ID matches")
+        assertEqual(decoded.eventID, "event-42", "Event ID matches")
+        assertEqual(decoded.membershipVersion, 1, "Membership version matches")
+        assertEqual(decoded.inputTextHash, hash1, "Input text hash matches")
+        assertEqual(decoded.facts.count, 2, "Fact count matches")
+        assertEqual(decoded.citations["c1"]?.articleID, "art-1", "Citation 1 article ID matches")
+        assertEqual(decoded.citations["c2"]?.passageFingerprint, passage2.fingerprint, "Citation 2 passage fingerprint matches")
+
+        // 4. Changed inputs mark the overview stale
+        assertFalse(doc.isStale(currentMembershipVersion: 1, currentInputTextHash: hash1), "Current inputs are not stale")
+        assertTrue(doc.isStale(currentMembershipVersion: 2, currentInputTextHash: hash1), "Changed membership version marks overview stale")
+        assertTrue(doc.isStale(currentMembershipVersion: 1, currentInputTextHash: "different-hash"), "Changed input text hash marks overview stale")
+        assertTrue(doc.isStale(currentMembershipVersion: 1, currentInputTextHash: hash1, targetSchemaVersion: 2), "Changed schema version marks overview stale")
+        assertTrue(doc.isStale(currentMembershipVersion: 1, currentInputTextHash: hash1, targetAnalysisVersion: 2), "Changed analysis version marks overview stale")
+
+        // 5. DatabaseEngine persistence, version supersession, and retention safety
+        let db = DatabaseEngine(path: ":memory:")
+        try await db.open()
+
+        let oldPubDate = Date().addingTimeInterval(-40 * 86400) // 40 days old (> 30 day cutoff)
+        let article1 = FeedArticle(storedID: "art-1", title: "Rover Water Discovery", link: "https://\(fixtureHost)/art-1", guid: "g1", description: passage1.text, pubDate: oldPubDate, source: "AeroSpace Daily")
+        let article2 = FeedArticle(storedID: "art-2", title: "Orbital Spectrometry Results", link: "https://\(fixtureHost)/art-2", guid: "g2", description: passage2.text, pubDate: oldPubDate, source: "CosmoNews")
+        let article3 = FeedArticle(storedID: "art-3", title: "Uncited Old Article", link: "https://\(fixtureHost)/art-3", guid: "g3", description: "Unrelated text", pubDate: oldPubDate, source: "OtherNews")
+
+        _ = try await db.upsertArticles([article1, article2, article3])
+        for id in ["art-1", "art-2", "art-3"] {
+            try await db.markRead(articleId: id, isRead: true)
+            try await db.setSaved(articleId: id, isSaved: false)
+        }
+
+        // Record event overview v2
+        let overviewV2 = EventOverviewDocument(
+            id: "doc-v2",
+            eventID: "event-42",
+            version: OverviewVersionContext(membershipVersion: 2, inputTextHash: hash1),
+            content: OverviewContent(
+                title: "Mars Water and Ice Evidence v2",
+                summary: "Overview version 2.",
+                facts: [fact1, fact2],
+                citations: [citation1, citation2]
+            ),
+            provenance: OverviewProvenance(memberArticleIDs: ["art-1", "art-2"])
+        )
+
+        let savedV2 = try await db.recordEventOverview(overviewV2)
+        assertTrue(savedV2, "Overview v2 successfully recorded")
+
+        let fetched = try await db.fetchEventOverview(eventID: "event-42")
+        assertEqual(fetched?.membershipVersion, 2, "Fetched overview has membership version 2")
+        assertEqual(fetched?.citations.count, 2, "Fetched overview carries 2 citations")
+
+        // 6. An older result never overwrites a newer version
+        let overviewV1 = EventOverviewDocument(
+            id: "doc-v1",
+            eventID: "event-42",
+            version: OverviewVersionContext(membershipVersion: 1, inputTextHash: "old-hash"),
+            content: OverviewContent(
+                title: "Mars Water and Ice Evidence v1",
+                summary: "Overview version 1 arriving late.",
+                facts: [fact1],
+                citations: [citation1]
+            ),
+            provenance: OverviewProvenance(memberArticleIDs: ["art-1"])
+        )
+
+        let savedV1 = try await db.recordEventOverview(overviewV1)
+        assertFalse(savedV1, "Older membership version (v1) cannot overwrite existing newer version (v2)")
+
+        let fetchedAfterStaleWrite = try await db.fetchEventOverview(eventID: "event-42")
+        assertEqual(fetchedAfterStaleWrite?.membershipVersion, 2, "Existing overview version 2 preserved against older version overwrite")
+
+        // 7. Retention never leaves citations pointing nowhere
+        // art-1 and art-2 are cited by event-42.
+        // art-3 is NOT cited anywhere. All 3 are read and > 30 days old.
+        let pruned = try await db.pruneOldArticles(keepReadDays: 30)
+        assertEqual(pruned, 1, "Only uncited old article (art-3) was pruned; cited articles are preserved")
+
+        let art1 = try await db.fetchArticles(id: "art-1").first
+        let art2 = try await db.fetchArticles(id: "art-2").first
+        let art3 = try await db.fetchArticles(id: "art-3").first
+        assertTrue(art1 != nil, "Cited article 1 preserved by retention policy")
+        assertTrue(art2 != nil, "Cited article 2 preserved by retention policy")
+        assertTrue(art3 == nil, "Uncited article 3 successfully pruned")
+
+        // Verify citations still intact and point to existing articles
+        let finalOverview = try await db.fetchEventOverview(eventID: "event-42")
+        assertEqual(finalOverview?.citations["c1"]?.articleID, "art-1", "Citation 1 still points to valid art-1")
+        assertEqual(finalOverview?.citations["c2"]?.articleID, "art-2", "Citation 2 still points to valid art-2")
     }
 }
 
