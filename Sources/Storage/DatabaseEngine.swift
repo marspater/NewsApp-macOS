@@ -263,6 +263,41 @@ actor DatabaseEngine {
     
     // MARK: - Article Ingestion & Upsert
     
+    /// Reuse a persisted document before treating a publisher's new GUID as a new story.
+    /// Root URLs are not document identifiers: some feeds link every entry to their homepage.
+    func resolvedArticleID(for article: FeedArticle) throws -> String {
+        guard let db else { throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Database not open"]) }
+        let components = URLComponents(string: article.normalizedLink)
+        let isDocumentURL = components?.host?.isEmpty == false
+            && ["http", "https"].contains(components?.scheme?.lowercased() ?? "")
+            && (!(components?.path ?? "").trimmingCharacters(in: CharacterSet(charactersIn: "/")).isEmpty
+                || !(components?.query ?? "").isEmpty)
+        let sql = """
+        SELECT id FROM articles
+        WHERE id = ? OR canonical_url = ?
+        ORDER BY CASE WHEN id = ? THEN 0 ELSE 1 END, created_at, id
+        LIMIT 1;
+        """
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+            throw NSError(domain: "DatabaseEngine", code: Int(sqlite3_errcode(db)), userInfo: [NSLocalizedDescriptionKey: "Cannot resolve article identity"])
+        }
+        defer { sqlite3_finalize(statement) }
+        sqlite3_bind_text(statement, 1, article.id, -1, Self.sqliteTransient)
+        if isDocumentURL {
+            sqlite3_bind_text(statement, 2, article.normalizedLink, -1, Self.sqliteTransient)
+        } else { sqlite3_bind_null(statement, 2) }
+        sqlite3_bind_text(statement, 3, article.id, -1, Self.sqliteTransient)
+        switch sqlite3_step(statement) {
+        case SQLITE_ROW:
+            return String(cString: sqlite3_column_text(statement, 0))
+        case SQLITE_DONE:
+            return article.id
+        default:
+            throw NSError(domain: "DatabaseEngine", code: Int(sqlite3_errcode(db)), userInfo: [NSLocalizedDescriptionKey: "Cannot read article identity"])
+        }
+    }
+
     @discardableResult
     func upsertArticles(_ articles: [FeedArticle], feedUrl: String? = nil) throws -> Set<String> {
         guard let db = db else { throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Database not open"]) }
@@ -350,7 +385,7 @@ actor DatabaseEngine {
 
         for article in articles {
             try Task.checkCancellation()
-            let id = article.id
+            let id = try resolvedArticleID(for: article)
             let url = URL(string: article.normalizedLink)
             let validLink = url?.host?.isEmpty == false && ["http", "https"].contains(url?.scheme?.lowercased() ?? "")
             let canonical = article.normalizedLink
@@ -1195,7 +1230,7 @@ actor DatabaseEngine {
             return nil
         }
         
-        let _ = String(cString: idStr)
+        let storedID = String(cString: idStr)
         let guid: String? = sqlite3_column_text(stmt, 1).flatMap { String(cString: $0) }
         let canonical = String(cString: canonicalStr)
         let title = String(cString: titleStr)
@@ -1233,6 +1268,7 @@ actor DatabaseEngine {
         }
         
         return FeedArticle(
+            storedID: storedID,
             title: title,
             link: canonical,
             guid: guid,

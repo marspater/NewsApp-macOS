@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased — 1 October 2026
+
+### Changed
+
+- Reuse the existing article for incoming GUID variants of the same document URL while retaining its durable identity, bookmarks and reading history.
+- Preserve meaningful URL query parameters instead of stripping every parameter beginning with a tracking-key prefix.
+
 ## Unreleased — 30 September 2026
 
 ### Fixed
