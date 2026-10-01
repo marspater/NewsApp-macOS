@@ -17,6 +17,7 @@ swiftc -target $(uname -m)-apple-macos${TARGET_MACOS} \
     Sources/Storage/MigrationCoordinator.swift \
     Sources/Storage/ArticleStore.swift \
     Sources/Intelligence/ArticleIntelligence.swift \
+    Sources/Intelligence/OverviewPassageSelector.swift \
     Sources/Intelligence/ContentExtractionPipeline.swift \
     Sources/Intelligence/EnrichmentQueue.swift \
     Sources/Services/NetworkBoundaryProxy.swift \
