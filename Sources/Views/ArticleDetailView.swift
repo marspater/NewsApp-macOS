@@ -150,6 +150,7 @@ struct ArticleDetailView: View {
                 EventOverviewReaderView(
                     overview: overview,
                     memberArticles: eventMemberArticles.isEmpty ? [currentArticle] : eventMemberArticles,
+                    textScale: readerTextScale,
                     onSelectArticle: { article in
                         activeArticle = article
                         highlightedPassage = nil
