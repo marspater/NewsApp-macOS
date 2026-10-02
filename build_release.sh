@@ -32,6 +32,7 @@ SWIFT_SOURCES=(
     Sources/Models/FeedError.swift
     Sources/Models/FeedFetchState.swift
     Sources/Models/FeedCatalog.swift
+    Sources/Models/MuteRules.swift
     Sources/Services/IPAddressValidator.swift
     Sources/Models/ArticleIdentity.swift
     Sources/Models/EventOverview.swift
@@ -44,6 +45,7 @@ SWIFT_SOURCES=(
     Sources/Intelligence/PromptDefense.swift
     Sources/Intelligence/ModelAvailability.swift
     Sources/Intelligence/PassageFactExtractor.swift
+    Sources/Intelligence/TensionMethodology.swift
     Sources/Intelligence/OverviewComposer.swift
     Sources/Intelligence/OverviewQualityAuditor.swift
     Sources/Intelligence/OverviewClaimVerifier.swift
@@ -52,6 +54,7 @@ SWIFT_SOURCES=(
     Sources/Intelligence/EventClustering.swift
     Sources/Intelligence/ContentExtractionPipeline.swift
     Sources/Intelligence/EnrichmentQueue.swift
+    Sources/Intelligence/OverviewGenerationCoordinator.swift
     Sources/Services/NetworkBoundaryProxy.swift
     Sources/Views/WebPreviewPolicy.swift
     Sources/Services/SecureHTTPClient.swift

@@ -276,6 +276,7 @@ struct NewsTests {
             try await testPassageAnchoredFactExtraction()
             try await testOverviewCompositionFromVerifiedFacts(fixtureHost: fixtureHost)
             try await testOverviewQualityAuditAndReleaseGate(fixtureHost: fixtureHost)
+            try await testOnDemandOverviewGenerationAndCaching(fixtureHost: fixtureHost)
             try await testDeterministicClaimVerification(fixtureHost: fixtureHost)
             try await testHistoricalReconciliation(fixtureRoot: fixtureRoot)
             try await testEventDataModel(fixtureRoot: fixtureRoot)
@@ -320,6 +321,8 @@ struct NewsTests {
         try await testRefreshEndsAtCollection()
         try await testFeedCatalog()
         try await testFeedHealth()
+        try await testUserMuting()
+        try await testTensionMethodology()
         try await testUndatedArticleOrdering()
         try await testReaderFigures(fixtureRoot: fixtureRoot)
         await testReaderParsingRegressions()
@@ -347,6 +350,7 @@ struct NewsTests {
         try await testPassageAnchoredFactExtraction()
         try await testOverviewCompositionFromVerifiedFacts(fixtureHost: fixtureHost)
         try await testOverviewQualityAuditAndReleaseGate(fixtureHost: fixtureHost)
+        try await testOnDemandOverviewGenerationAndCaching(fixtureHost: fixtureHost)
         try await testDeterministicClaimVerification(fixtureHost: fixtureHost)
         try await testHistoricalReconciliation(fixtureRoot: fixtureRoot)
         try await testEventDataModel(fixtureRoot: fixtureRoot)
@@ -1784,6 +1788,236 @@ struct NewsTests {
         }
         failures.forEach { print("    ✗ \($0)") }
         assertTrue(failures.isEmpty, "Every catalog feed fetches and parses (\(failures.count) of \(FeedCatalog.feeds.count) failed)")
+    }
+
+    @MainActor
+    static func testUserMuting() async throws {
+        print("  - Testing user-controlled source and topic muting...")
+        var rules = MuteRules()
+        assertEqual(rules.addSource("https://www.Example.com/world?id=1"), "example.com", "A URL mutes its publisher host")
+        assertEqual(rules.addSource("EXAMPLE.com"), nil, "A host is muted once")
+        assertEqual(MuteRules.host("not a host"), nil, "Text with spaces is not a host")
+        assertEqual(MuteRules.host("localhost"), nil, "A muted host needs a domain")
+        assertEqual(MuteRules.host("news..example.com"), nil, "Empty host labels are rejected")
+        assertTrue(rules.mutesSource(link: "https://news.example.com/a"), "A host covers its subdomains")
+        assertFalse(rules.mutesSource(link: "https://badexample.com/a"), "A host does not cover another name ending in it")
+        assertFalse(rules.mutesSource(link: "https://example.com.attacker.net/a"), "A host does not cover a name that only contains it")
+        assertFalse(rules.mutesSource(link: ""), "A story without a document URL is never source-muted")
+        assertFalse(rules.mutesTopic(title: "Example.com launches", description: ""), "Source rules never match words")
+
+        assertEqual(rules.addTopic("  Climate   change "), "Climate change", "Topics keep the reader's words with whitespace collapsed")
+        assertEqual(rules.addTopic("CLIMATE CHANGE"), nil, "A topic is muted once in any letter case")
+        assertEqual(rules.addTopic("?!"), nil, "A topic needs a word")
+        assertEqual(rules.addTopic(String(repeating: "a", count: MuteRules.topicLength + 1)), nil, "Overlong topics are rejected")
+        for topic in ["art", "Війна", "covid-19", "cafe"] { assertEqual(rules.addTopic(topic), topic, "Topic \(topic) is added") }
+        func mutesTopic(_ title: String, _ description: String = "") -> Bool {
+            rules.mutesTopic(title: title, description: description)
+        }
+        assertTrue(mutesTopic("Modern art fair opens"), "A topic matches a whole word in the headline")
+        assertTrue(mutesTopic("Gallery news", "The Art's new home"), "Topics match in the feed summary and before apostrophes")
+        assertFalse(mutesTopic("Artist wins prize"), "A topic never matches inside a longer word")
+        assertTrue(mutesTopic("Climate-change protests grow"), "Phrases match across punctuation")
+        assertFalse(mutesTopic("Climate policy change"), "Phrase words must be adjacent and in order")
+        assertTrue(mutesTopic("ВІЙНА триває"), "Matching ignores letter case beyond ASCII")
+        assertFalse(mutesTopic("Війни не буде"), "Other word forms are other words")
+        assertTrue(mutesTopic("COVID 19 cases fall"), "A hyphenated topic matches the same words")
+        assertFalse(mutesTopic("Best café in town"), "Diacritics are significant")
+        assertFalse(rules.mutesSource(link: "https://art.org/climate-change"), "Topic rules never match links")
+        assertEqual(rules.matchedTopics(title: "Art and climate change", description: ""), ["Climate change", "art"], "Each covering topic is reported")
+        assertEqual(MuteRules(sources: rules.sources, topics: rules.topics), rules, "Stored rules restore unchanged")
+
+        // SQLite applies muting before LIMIT and reports what it hid.
+        let db = DatabaseEngine(path: ":memory:")
+        try await db.open()
+        func story(_ index: Int, _ link: String, _ title: String, _ description: String = "") -> FeedArticle {
+            FeedArticle(title: title, link: link, guid: "mute-\(index)", description: description,
+                        pubDate: Date(timeIntervalSince1970: 1_700_000_000 - Double(index) * 60), source: "Publisher")
+        }
+        let stories = [
+            story(0, "https://www.example.com/0", "Example lead"),
+            story(1, "https://news.example.com/1", "Example subdomain"),
+            story(2, "https://other.org/2", "Climate change summit"),
+            story(3, "https://other.org/3", "Budget passes", "Markets react"),
+            story(4, "https://other.org/4", "Artist profile", "A gallery opening"),
+            story(5, "https://other.org/5", "Election results", "Art market shrugs"),
+            story(6, "https://other.org/6", "Weather")
+        ]
+        try await db.upsertArticles(stories)
+        let muting = MuteRules(sources: ["example.com"], topics: ["Climate change", "art"])
+        let firstPage = try await db.fetchArticles(limit: 1, muting: muting)
+        assertEqual(firstPage.map(\.id), [stories[3].id], "The first page is filled from unmuted stories, not trimmed after LIMIT")
+        let remainder = try await db.fetchArticles(limit: nil, after: ArticleQueryCursor(firstPage[0]), muting: muting)
+        assertEqual((firstPage + remainder).map(\.id), [stories[3].id, stories[4].id, stories[6].id], "Cursor pages continue over unmuted stories only")
+        assertEqual(try await db.mutedArticleCount(muting: muting), 4, "The list counts every muted story, beyond the first page")
+        assertEqual(try await db.fetchArticles(limit: nil).count, stories.count, "Nothing is hidden without rules")
+        assertEqual(try await db.mutedArticleCount(muting: MuteRules()), 0, "No rules hide no stories")
+        try await db.markRead(articleId: stories[0].id, isRead: true)
+        assertEqual(try await db.mutedArticleCount(isRead: false, muting: muting), 3, "Hidden counts use the list's own filters")
+        try await db.setSaved(articleId: stories[2].id, isSaved: true)
+        assertEqual(try await db.fetchArticles(isSaved: true).map(\.id), [stories[2].id], "Saved Stories, queried without rules, keep muted stories")
+        assertTrue(try await db.searchArticles(query: "example", muting: muting).isEmpty, "Search applies muting")
+        assertEqual(try await db.searchArticles(query: "example").count, 2, "Search without rules finds the muted stories")
+        assertEqual(try await db.mutedArticleCount(search: "example", muting: muting), 2, "Search reports how many stories muting hid")
+        let ruleCounts = try await db.mutedRuleCounts(muting)
+        assertEqual(ruleCounts.sources, ["example.com": 2], "Settings count the stories each source rule covers")
+        assertEqual(ruleCounts.topics, ["Climate change": 1, "art": 1], "Settings count the stories each topic rule covers")
+        await db.close()
+
+        // Rules persist with the reader's settings; Unmute All clears them.
+        let suite = "test.muting.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = AppSettings(defaults: defaults)
+        assertTrue(settings.muteRules.isEmpty, "Nothing is muted by default")
+        assertEqual(settings.muteSource("https://www.example.com/a"), "example.com", "Settings mute a host from a story link")
+        assertEqual(settings.muteSource("example.com"), nil, "A muted host is not added twice")
+        assertEqual(settings.muteTopic("Election"), "Election", "Settings mute a topic")
+        assertEqual(AppSettings(defaults: defaults).muteRules, settings.muteRules, "Muting persists across launches")
+        settings.unmuteTopic("Election")
+        assertEqual(AppSettings(defaults: defaults).muteRules.topics, [], "Unmuting a topic is stored")
+        settings.clearMuting()
+        assertTrue(AppSettings(defaults: defaults).muteRules.isEmpty, "Unmute All clears the stored rules")
+
+        // Muted stories never notify.
+        settings.feedURLs = ["https://other.org/feed.xml"]
+        settings.aiEnabled = false
+        settings.notificationsEnabled = true
+        settings.muteSource("example.com")
+        let store = ArticleStore(database: DatabaseEngine(path: ":memory:"))
+        await store.initialize()
+        var notified: [String] = []
+        let manager = FeedManager(settings: settings, store: store, schedulesRefresh: false,
+            fetchBatch: { urls, _ in urls.map { ($0, [stories[0], stories[3]], nil, nil) } },
+            notifyBatch: { articles, _ in notified.append(contentsOf: articles.map(\.title)) })
+        await manager.fetchFeedsAsync()
+        assertEqual(notified, [stories[3].title], "Only unmuted new stories notify")
+        assertEqual(manager.articles.count, 2, "Muted stories are still stored")
+        manager.stopBackgroundWork()
+    }
+
+    static func testTensionMethodology() async throws {
+        print("  - Testing the news tension methodology: panel, coverage, unique events and classification...")
+        let methodology = TensionMethodology.v1
+        let panel = methodology.panel
+        assertEqual(Set(panel.map(\.catalogID)).count, panel.count, "Panel feeds are unique")
+        for member in panel {
+            let entry = FeedCatalog.feeds.first { $0.id == member.catalogID }
+            assertEqual(entry?.url, member.url, "Panel feed \(member.catalogID) matches the catalog; a changed entry needs a new methodology version")
+            assertEqual(entry?.language, methodology.language, "Panel feed \(member.catalogID) publishes in the methodology language")
+        }
+        assertEqual(methodology.panelRegions.count, 6, "The v1 panel spans six regions")
+        assertFalse(methodology.panelRegions.contains(.latinAmerica) || methodology.panelRegions.contains(.oceania), "Latin America and Oceania are stated v1 gaps")
+        assertTrue(methodology.minimumReportingFeeds * 2 > panel.count, "A comparable day needs most panel feeds")
+        assertTrue(methodology.minimumReportingRegions * 2 > methodology.panelRegions.count, "A comparable day needs most panel regions")
+        assertTrue(TensionMethodology.disclaimer.contains("not how dangerous the world is"), "The indicator describes the corpus, not world danger")
+
+        // Coverage: a missing day is never zero, and a regional slice is never the world.
+        func url(_ id: String) -> String { panel.first { $0.catalogID == id }?.url ?? "" }
+        let european = panel.filter { $0.region == .europe }.map(\.url)
+        assertEqual(methodology.coverage(reportingFeedURLs: []).status, .noData, "A day without panel items has no data")
+        assertEqual(methodology.coverage(reportingFeedURLs: ["https://example.com/feed.xml"]).status, .noData, "Feeds outside the panel do not count")
+        assertEqual(methodology.coverage(reportingFeedURLs: Set(european + [url("cbc-world"), url("al-jazeera")])).status, .insufficient,
+                    "Seven feeds from three regions are not a comparable day")
+        assertEqual(methodology.coverage(reportingFeedURLs: Set(Array(european.prefix(4)) + [url("cbc-world"), url("al-jazeera"), url("cna")])).status, .sufficient,
+                    "Seven feeds from four regions are a comparable day")
+
+        let day = TensionMethodology.day(containing: Date(timeIntervalSince1970: 1_789_948_800 + 50_000))
+        assertEqual(day, DateInterval(start: Date(timeIntervalSince1970: 1_789_948_800), duration: 86_400), "Observation days are UTC calendar days")
+        assertTrue(methodology.isProvisional(day, now: day.end.addingTimeInterval(3_600)), "A day stays provisional just after it ends")
+        assertFalse(methodology.isProvisional(day, now: day.end.addingTimeInterval(86_400)), "A day is final a day after it ends")
+
+        // Classification reads anchored quotes only, deterministically.
+        func fact(_ id: String, _ quote: String) -> PassageAnchoredFact {
+            PassageAnchoredFact(id: id, statement: "A model restatement that mentions an airstrike", passageID: "p-\(id)", quote: quote, articleID: "article")
+        }
+        let strike = TensionEventClassifier.classify([
+            fact("f1", "Airstrikes hit the port overnight, and at least 12 people were killed."),
+            fact("f2", "The death toll rose to 45 on Tuesday as fighting intensified."),
+            fact("f3", "Officials said 3,400 residents were displaced.")
+        ])
+        assertEqual(strike.methodologyVersion, 1, "Classifications record the methodology version")
+        assertEqual(strike.type, .armedConflict, "Conflict cues set the type")
+        assertEqual(strike.typeEvidence, ["f1", "f2"], "Type evidence lists the supporting facts")
+        assertEqual(strike.deaths, .tens, "The largest reported death figure sets its order of magnitude")
+        assertEqual(strike.affected, .thousands, "Displacement is recorded apart from deaths")
+        assertEqual(strike.magnitudeEvidence, ["f1", "f2", "f3"], "Every fact with a figure is evidence")
+        assertEqual(strike.escalation, .escalating, "Explicit escalation is reported")
+        assertEqual(strike.escalationEvidence, ["f2"], "Escalation evidence lists its fact")
+        assertEqual(TensionEventClassifier.classify([fact("s1", "Officials met on Monday.")]).type, nil, "Model statements are never read")
+
+        let truce = TensionEventClassifier.classify([
+            fact("t1", "Both sides agreed to a ceasefire on Monday."),
+            fact("t2", "The government rejected a ceasefire last week.")
+        ])
+        assertEqual(truce.escalation, .deescalating, "A ceasefire de-escalates")
+        assertEqual(truce.escalationEvidence, ["t1"], "A negated cue does not count")
+        assertEqual(TensionEventClassifier.classify([fact("c1", "The ceasefire collapsed within hours.")]).escalation, .noSignal,
+                    "A collapsed ceasefire is not de-escalation")
+        let unrest = TensionEventClassifier.classify([
+            fact("u1", "Protests escalated in the capital."),
+            fact("u2", "Police lifted the curfew on Sunday.")
+        ])
+        assertEqual(unrest.type, .civilUnrest, "Unrest cues set the type")
+        assertEqual(unrest.escalation, .mixed, "Opposite signals are reported as mixed")
+        assertEqual(TensionEventClassifier.classify([fact("x1", "An earthquake struck as protesters gathered.")]).type, .civilUnrest,
+                    "Ties follow the declared type order")
+        assertEqual(TensionEventClassifier.classify([fact("w1", "The riotous party and floodlights drew crowds.")]).type, nil,
+                    "Cues never match inside longer words")
+        assertEqual(TensionEventClassifier.classify([fact("w2", "A trade war over tariffs deepened.")]).type, nil, "A bare \"war\" is not a conflict cue")
+        assertEqual(TensionFigures("The 2004 tsunami killed 230,000 people.").deaths, 230_000, "Years are not figures; the reported toll is")
+        let year = TensionFigures("In 2023 floods hit the region.")
+        assertEqual(year.deaths + year.affected, 0, "A year alone is not a figure")
+        assertEqual(TensionFigures("More than 1.5 million people have been displaced.").affected, 1_500_000, "Multipliers are applied")
+        assertEqual(TensionFigures("Hundreds of residents were displaced by the floods.").affected, 200, "Quantity words map into their magnitude")
+        assertEqual([0, 9, 10, 999, 1_000].map(TensionMagnitude.init(count:)), [.notReported, .units, .tens, .hundreds, .thousands],
+                    "Magnitudes are orders of magnitude")
+
+        // A day's corpus: panel feeds only, unique events counted once.
+        let db = DatabaseEngine(path: ":memory:")
+        try await db.open()
+        let noon = day.start.addingTimeInterval(43_200)
+        func story(_ index: Int, _ title: String, _ summary: String, date: Date? = nil) -> FeedArticle {
+            FeedArticle(title: title, link: "https://news.example/\(index)", guid: "tension-\(index)", description: summary,
+                        pubDate: date ?? noon.addingTimeInterval(Double(index) * 60), source: "Panel")
+        }
+        let reports: [(String, FeedArticle)] = [
+            ("bbc-world", story(1, "Earthquake strikes coastal city", "A strong earthquake struck the coastal city on Monday, and at least 120 people were killed.")),
+            ("al-jazeera", story(2, "Coastal earthquake toll climbs", "Rescuers searched collapsed buildings after the earthquake as the death toll rose to 150.")),
+            ("guardian-world", story(3, "Election results announced", "Officials announced the results of the national election on Monday afternoon.")),
+            ("cbc-world", story(4, "Protests over fuel prices", "Thousands of demonstrators marched as police used tear gas near parliament.")),
+            ("the-hindu", story(5, "Talks on river water", "Delegations from both countries met to discuss sharing water from the river.")),
+            ("cna", story(6, "Port reopens after typhoon", "The port reopened on Monday after the typhoon forced a two-day closure.")),
+            ("africanews", story(7, "Vaccination drive expands", "Health workers expanded a vaccination drive after a cholera outbreak in the region.")),
+            ("dawn", story(8, "Undated archive item", "An undated item that must never fall inside an observation day.", date: DateParser.unknownDate)),
+            ("france-24", story(9, "Next day report", "A report published after the observation day ended must not count.", date: day.end.addingTimeInterval(60)))
+        ]
+        for (catalogID, article) in reports { try await db.upsertArticles([article], feedUrl: url(catalogID)) }
+        try await db.upsertArticles([story(10, "Earthquake aftershock felt", "A subscribed feed outside the panel reported the earthquake aftershock in the city.")],
+                                    feedUrl: "https://example.com/feed.xml")
+        let stored = try await db.fetchArticles(limit: nil)
+        func storedID(_ title: String) -> String { stored.first { $0.title == title }?.id ?? "" }
+        let quake = try await db.createEvent(memberArticleIDs: [storedID("Earthquake strikes coastal city"), storedID("Coastal earthquake toll climbs"),
+                                                                storedID("Earthquake aftershock felt")])
+        let rows = try await db.tensionCorpus(day: day, feedURLs: panel.map(\.url))
+        assertEqual(Set(rows.map(\.article.title)).count, 7, "The corpus holds the day's dated panel items only")
+        assertFalse(rows.contains { $0.feedURL == "https://example.com/feed.xml" }, "Subscriptions outside the panel are not corpus")
+        let assessment = TensionDayAssessor.assess(day: day, rows: rows, now: day.end.addingTimeInterval(3_600))
+        assertEqual(assessment.coverage.status, .sufficient, "Seven panel feeds from six regions are a comparable day")
+        assertTrue(assessment.isProvisional, "The assessment says the day can still change")
+        assertEqual(assessment.events.count, 6, "Two reports of one earthquake count as one unique event")
+        let quakeDay = assessment.events.first { $0.key == quake.id }
+        assertEqual(quakeDay?.reporting.map(\.catalogID), ["bbc-world", "al-jazeera"], "An event records which panel feeds reported it")
+        assertEqual(quakeDay?.articleIDs.count, 2, "Event members outside the panel are not classified")
+        assertEqual(quakeDay?.classification.type, .disaster, "The earthquake is classified as a disaster")
+        assertEqual(quakeDay?.classification.deaths, .hundreds, "The larger anchored toll sets the magnitude")
+        let election = assessment.events.first { $0.key == storedID("Election results announced") }
+        assertEqual(election?.classification.type, nil, "A story without cues counts as an event but not as tension")
+        let thin = TensionDayAssessor.assess(day: day, rows: rows.filter { $0.feedURL == url("bbc-world") }, now: day.end.addingTimeInterval(3_600))
+        assertEqual(thin.coverage.status, .insufficient, "One feed is not a comparable day")
+        assertTrue(thin.events.isEmpty, "An insufficient day classifies nothing")
+        let nextDay = TensionMethodology.day(containing: day.end.addingTimeInterval(86_400 + 60))
+        assertEqual(TensionDayAssessor.assess(day: nextDay, rows: [], now: Date()).coverage.status, .noData, "A day without panel items is a gap")
+        await db.close()
     }
 
     @MainActor
@@ -6682,6 +6916,128 @@ struct NewsTests {
         assertTrue(p50 >= 0.25 && p50 <= 0.30, "p50 median timing in expected range (actual: \(p50))")
         assertTrue(p95 >= 0.45 && p95 <= 0.50, "p95 tail timing in expected range (actual: \(p95))")
         assertTrue(statsTracker.averageDuration != nil, "Average duration calculated")
+    }
+
+    /// Tests on-demand overview generation, caching, cooperative cancellation,
+    /// staleness detection, and version protection.
+    @MainActor
+    static func testOnDemandOverviewGenerationAndCaching(fixtureHost: String) async throws {
+        print("  - Testing On-demand overview generation, caching and cancellation...")
+
+        let passageText1 = "Astronomers detected high concentrations of atmospheric phosphine on Venus, hinting at potential chemical anomalies."
+        let passageText2 = "Independent spectrographic analysis confirmed distinct spectral absorption bands matching phosphine molecules."
+        let passageText3 = "The research team cautioned that abiotic geological or volcanic mechanisms could also explain the phosphine signatures."
+
+        let article1 = FeedArticle(
+            storedID: "art-venus-1",
+            title: "Phosphine Detected on Venus",
+            link: "https://\(fixtureHost)/venus/phosphine-1",
+            guid: "g-v1",
+            description: passageText1,
+            pubDate: Date(timeIntervalSince1970: 1700000000),
+            source: "Science Journal",
+            fullContent: passageText1
+        )
+        let article2 = FeedArticle(
+            storedID: "art-venus-2",
+            title: "Spectrographic Confirmation of Venus Phosphine",
+            link: "https://\(fixtureHost)/venus/phosphine-2",
+            guid: "g-v2",
+            description: passageText2,
+            pubDate: Date(timeIntervalSince1970: 1700001000),
+            source: "Astronomy Today",
+            fullContent: passageText2
+        )
+        let article3 = FeedArticle(
+            storedID: "art-venus-3",
+            title: "Abiotic Hypotheses for Venus Biomarker Claims",
+            link: "https://\(fixtureHost)/venus/phosphine-3",
+            guid: "g-v3",
+            description: passageText3,
+            pubDate: Date(timeIntervalSince1970: 1700002000),
+            source: "Planetary Science",
+            fullContent: passageText3
+        )
+        let articles = [article1, article2, article3]
+
+        let db = DatabaseEngine(path: ":memory:")
+        try await db.open()
+        _ = try await db.upsertArticles(articles)
+        let store = ArticleStore(database: db)
+        let queue = EnrichmentQueue(store: store)
+        let coordinator = OverviewGenerationCoordinator(store: store, queue: queue)
+
+        // 1. Generate on request for the visible event
+        let overviewV1 = await coordinator.requestOverview(
+            eventID: "event-phosphine",
+            eventTitle: "Phosphine Anomaly on Venus",
+            membershipVersion: 1,
+            articles: articles,
+            priority: .onDemand
+        )
+        assertTrue(overviewV1 != nil, "Overview generated on request")
+        assertEqual(overviewV1?.eventID, "event-phosphine", "Overview event ID matches")
+        assertEqual(overviewV1?.membershipVersion, 1, "Overview membership version matches")
+
+        // 2. Cache hit: repeat request returns identical cached overview without regenerating
+        let cachedOverview = await coordinator.requestOverview(
+            eventID: "event-phosphine",
+            eventTitle: "Phosphine Anomaly on Venus",
+            membershipVersion: 1,
+            articles: articles,
+            priority: .onDemand
+        )
+        assertTrue(cachedOverview != nil, "Cached overview retrieved successfully")
+        assertEqual(cachedOverview?.id, overviewV1?.id, "Cached overview has identical document ID (cache hit)")
+        assertEqual(cachedOverview?.createdAt, overviewV1?.createdAt, "Cached overview has identical creation timestamp")
+
+        // 3. Meaningful input change triggers regeneration (membershipVersion bumps from 1 to 2)
+        let article4 = FeedArticle(
+            storedID: "art-venus-4",
+            title: "Follow-up Observations from Mauna Kea",
+            link: "https://\(fixtureHost)/venus/phosphine-4",
+            guid: "g-v4",
+            description: "Submillimeter telescope data provides further resolution on upper atmosphere layers.",
+            pubDate: Date(timeIntervalSince1970: 1700003000),
+            source: "Keck Observatory",
+            fullContent: "Submillimeter telescope data provides further resolution on upper atmosphere layers."
+        )
+        _ = try await db.upsertArticles([article4])
+        let updatedArticles = [article1, article2, article3, article4]
+
+        let overviewV2 = await coordinator.requestOverview(
+            eventID: "event-phosphine",
+            eventTitle: "Phosphine Anomaly on Venus",
+            membershipVersion: 2,
+            articles: updatedArticles,
+            priority: .onDemand
+        )
+        assertTrue(overviewV2 != nil, "Regenerated overview exists for updated membership version")
+        assertEqual(overviewV2?.membershipVersion, 2, "Regenerated overview carries membership version 2")
+        assertFalse(overviewV2?.id == overviewV1?.id, "Regenerated overview has new document ID")
+
+        // 4. Visible event change & cancellation
+        // When setting visible event to A, then immediately switching to B, A's in-flight task is cancelled
+        await coordinator.setVisibleEvent(eventID: "event-A", eventTitle: "Event A", membershipVersion: 1, articles: [article1])
+        await coordinator.setVisibleEvent(eventID: "event-B", eventTitle: "Event B", membershipVersion: 1, articles: [article2])
+        // Explicit cancellation when reader closes
+        await coordinator.cancel(eventID: "event-B")
+
+        // 5. Stale result never overwrites a newer version
+        let staleV1 = EventOverviewDocument(
+            id: "doc-stale-v1",
+            eventID: "event-phosphine",
+            version: OverviewVersionContext(membershipVersion: 1, inputTextHash: "hash-stale"),
+            content: OverviewContent(title: "Stale V1", summary: "Old overview"),
+            provenance: OverviewProvenance(memberArticleIDs: ["art-venus-1"], kind: .synthesized)
+        )
+        // Attempting to record stale v1 when v2 is already stored returns false
+        let overwriteAttempt = try await db.recordEventOverview(staleV1)
+        assertFalse(overwriteAttempt, "DatabaseEngine rejects stale version 1 when version 2 already exists")
+
+        let storedDoc = try await db.fetchEventOverview(eventID: "event-phosphine")
+        assertEqual(storedDoc?.membershipVersion, 2, "Stored overview retains newer version 2")
+        assertFalse(storedDoc?.id == "doc-stale-v1", "Stale v1 document did not overwrite newer version")
     }
 
     /// Tests deterministic verification of overview claims, citations, numbers, units, currency,

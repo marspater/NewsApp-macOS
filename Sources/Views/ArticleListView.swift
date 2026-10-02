@@ -38,9 +38,23 @@ struct ArticleListView: View {
     @State private var isPointerInList = false
     /// Set by the reader's own regrouping actions, which apply at once.
     @State private var appliesNextUpdate = false
+    /// Stories the reader's muting removes from this list, across every page.
+    @State private var mutedCount = 0
+    @State private var showsMuted = false
+    @State private var confirmsUnmuteAll = false
+
+    private var isSearching: Bool {
+        !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    /// Muting applies to the feed lists and search; Saved Stories and History list everything the reader kept or opened.
+    private var listMuting: MuteRules {
+        isSearching || (selectedTopic != "Saved Stories" && selectedTopic != "History") ? appSettings.muteRules : MuteRules()
+    }
 
     private var queryIdentity: String {
-        "\(selectedTopic ?? "Today"):\(searchText):\(themeManager.autoHideRead)"
+        let muting = listMuting
+        return "\(selectedTopic ?? "Today"):\(searchText):\(themeManager.autoHideRead):\(muting.sourceParameter)|\(muting.topicParameter):\(showsMuted)"
     }
 
     var filteredArticles: [FeedArticle] { buffer.displayed.articles }
@@ -158,8 +172,15 @@ struct ArticleListView: View {
             defer { if queryRunID == runID { isLoadingPage = false } }
             do {
                 if !isPaging { try await Task.sleep(for: .milliseconds(180)) }
-                let fetched = try await fetchPage(after: isPaging ? cursor : nil)
+                let muting = listMuting
+                let fetched = try await fetchPage(after: isPaging ? cursor : nil, muting: showsMuted ? MuteRules() : muting)
                 try Task.checkCancellation()
+                if !isPaging {
+                    var hidden = 0
+                    if !muting.isEmpty { hidden = try await countMuted(muting) }
+                    try Task.checkCancellation()
+                    mutedCount = hidden
+                }
                 let page = Array(fetched.prefix(200))
                 let listed = isPaging ? buffer.displayed.articles + page : page
                 let events = try await articleStore.eventFeedSummaries(for: listed.map(\.id))
@@ -198,18 +219,58 @@ struct ArticleListView: View {
         }
     }
 
-    private func fetchPage(after pageCursor: ArticleQueryCursor?) async throws -> [FeedArticle] {
-        if !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return try await articleStore.database.searchArticles(query: searchText, limit: 201, after: pageCursor)
-        }
+    private var listFilters: (topic: String, read: Bool?, saved: Bool?) {
         let topic = selectedTopic ?? "Today"
         let read: Bool?
         if topic == "History" { read = true }
         else if topic == "Unread" || (themeManager.autoHideRead && topic != "Saved Stories") { read = false }
         else { read = nil }
+        return (topic, read, topic == "Saved Stories" ? true : nil)
+    }
+
+    private func fetchPage(after pageCursor: ArticleQueryCursor?, muting: MuteRules) async throws -> [FeedArticle] {
+        if isSearching {
+            return try await articleStore.database.searchArticles(query: searchText, limit: 201, after: pageCursor, muting: muting)
+        }
+        let filters = listFilters
         return try await articleStore.database.fetchArticles(
-            section: topic, isRead: read, isSaved: topic == "Saved Stories" ? true : nil,
-            limit: 201, after: pageCursor)
+            section: filters.topic, isRead: filters.read, isSaved: filters.saved,
+            limit: 201, after: pageCursor, muting: muting)
+    }
+
+    private func countMuted(_ muting: MuteRules) async throws -> Int {
+        if isSearching {
+            return try await articleStore.database.mutedArticleCount(search: searchText, muting: muting)
+        }
+        let filters = listFilters
+        return try await articleStore.database.mutedArticleCount(
+            section: filters.topic, isRead: filters.read, isSaved: filters.saved, muting: muting)
+    }
+
+    // MARK: - Muting
+
+    private var mutingMenu: some View {
+        Menu {
+            Button(showsMuted ? "Hide Muted Stories" : "Show Muted Stories") { showsMuted.toggle() }
+            SettingsLink { Text("Muting Settings…") }
+            Divider()
+            Button("Unmute All…", role: .destructive) { confirmsUnmuteAll = true }
+        } label: {
+            Label(showsMuted ? "Showing \(mutedCount) muted" : "\(mutedCount) hidden by muting",
+                  systemImage: showsMuted ? "eye" : "eye.slash")
+                .font(AppTypography.caption)
+                .foregroundStyle(AppColor.secondaryText)
+        }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .fixedSize()
+        .help(showsMuted ? "Muted stories are shown in this list" : "Stories hidden by your muted sources and topics")
+        .accessibilityLabel(showsMuted ? "Showing \(mutedCount) muted stories" : "\(mutedCount) stories hidden by muting")
+        .confirmationDialog("Unmute every source and topic?", isPresented: $confirmsUnmuteAll) {
+            Button("Unmute All", role: .destructive) { appSettings.clearMuting() }
+        } message: {
+            Text("Muted stories return to every list.")
+        }
     }
 
     // MARK: - Queued Updates
@@ -276,9 +337,18 @@ struct ArticleListView: View {
                 Text(searchText.isEmpty ? (selectedTopic ?? "Today") : "Search")
                     .font(AppTypography.display)
                     .foregroundStyle(AppColor.primaryText)
-                Text("\(entries.count) stories · Your personal edition")
-                    .font(AppTypography.caption)
-                    .foregroundStyle(AppColor.secondaryText)
+                HStack(spacing: AppSpacing.xs) {
+                    Text("\(entries.count) stories · Your personal edition")
+                        .font(AppTypography.caption)
+                        .foregroundStyle(AppColor.secondaryText)
+                    if mutedCount > 0 && !listMuting.isEmpty {
+                        Text("·")
+                            .font(AppTypography.caption)
+                            .foregroundStyle(AppColor.secondaryText)
+                            .accessibilityHidden(true)
+                        mutingMenu
+                    }
+                }
             }
             
             Spacer()
@@ -485,6 +555,12 @@ struct ArticleListView: View {
                     .foregroundColor(AppColor.secondaryText)
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: 340)
+
+                if mutedCount > 0 && !showsMuted && !listMuting.isEmpty {
+                    Button(mutedCount == 1 ? "Show 1 Muted Story" : "Show \(mutedCount) Muted Stories") { showsMuted = true }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                }
                 
                 if selectedTopic == "Today" || selectedTopic == "Unread" {
                     Button("Refresh Feeds") {
