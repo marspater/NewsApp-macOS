@@ -23,6 +23,7 @@
 
 ### Changed
 
+- Refresh after the Mac wakes: timers stop during sleep, so a feed older than the refresh interval, or a refresh interrupted by sleep, is fetched once about ten seconds after wake. A refresh cut off by sleep is cancelled rather than recorded as feed failures, so healthy feeds are not backed off.
 - Group coverage of the same event into one feed card ("5 sources · updated …") with every member publication one click or the E key away, and a toggle (G) back to individual publications. Matching is deterministic and conservative: a shared name or place, shared action terms, closeness in time and no contradicting quarter, year, weekday, headline figure, place or language; a newcomer must fit the whole event. Clustering runs after a refresh has published, off the main actor, only for new or changed articles.
 - Keep the feed still while it is being read: new, removed and regrouped stories wait behind an explicit "N new stories" button (U) instead of moving cards under the pointer; queued updates respect Reduce Motion.
 - Mark events as updated only for new reporting since the version the reader opened; opening an event marks no article read, and read/saved state stays per article.
