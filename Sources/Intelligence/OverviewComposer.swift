@@ -122,10 +122,12 @@ public struct OverviewComposer: Sendable {
         )
 
         let memberArticleIDs = articles.map { $0.id }
+        // Timeline items come from every valid fact, not only the key facts shown above them.
+        let timeline = OverviewTimelineBuilder.build(facts: validFacts, passages: passages, articles: articles)
 
         // If fewer than 3 verified facts, provide a safe fallback overview
         if validFacts.count < 3 {
-            return composeFallbackOverview(
+            return attaching(timeline, to: composeFallbackOverview(
                 eventID: eventID,
                 eventTitle: eventTitle,
                 validFacts: validFacts,
@@ -133,7 +135,7 @@ public struct OverviewComposer: Sendable {
                 articles: articles,
                 versionContext: versionContext,
                 leadImage: leadImage
-            )
+            ))
         }
 
         // Synthesize 3 to 5 key facts
@@ -196,11 +198,35 @@ public struct OverviewComposer: Sendable {
             updatedAt: Date()
         )
 
-        return EventOverviewDocument(
+        return attaching(timeline, to: EventOverviewDocument(
             eventID: eventID,
             version: versionContext,
             content: content,
             provenance: provenance
+        ))
+    }
+
+    /// Adds a timeline and its citations to a composed overview; an empty timeline leaves it unchanged.
+    private static func attaching(_ timeline: OverviewTimelineBuilder.Timeline, to document: EventOverviewDocument) -> EventOverviewDocument {
+        guard !timeline.items.isEmpty else { return document }
+        let content = OverviewContent(
+            title: document.title,
+            summary: document.summary,
+            facts: document.facts,
+            citations: Array(document.citations.values) + timeline.citations,
+            leadImage: document.leadImage,
+            evidenceSections: OverviewEvidenceSections(
+                timeline: timeline.items,
+                perspectives: document.perspectives,
+                thematicAngle: document.thematicAngle
+            )
+        )
+        return EventOverviewDocument(
+            id: document.id,
+            eventID: document.eventID,
+            version: document.version,
+            content: content,
+            provenance: document.provenance
         )
     }
 

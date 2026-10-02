@@ -279,6 +279,7 @@ struct NewsTests {
             try await testOnDemandOverviewGenerationAndCaching(fixtureHost: fixtureHost)
             try await testDeterministicClaimVerification(fixtureHost: fixtureHost)
             try await testEventOverviewReaderMode(fixtureHost: fixtureHost)
+            try await testOverviewTimeline(fixtureHost: fixtureHost)
             try await testHistoricalReconciliation(fixtureRoot: fixtureRoot)
             try await testEventDataModel(fixtureRoot: fixtureRoot)
             try await testEventCandidateGeneration(fixtureRoot: fixtureRoot)
@@ -354,6 +355,7 @@ struct NewsTests {
         try await testOnDemandOverviewGenerationAndCaching(fixtureHost: fixtureHost)
         try await testDeterministicClaimVerification(fixtureHost: fixtureHost)
         try await testEventOverviewReaderMode(fixtureHost: fixtureHost)
+        try await testOverviewTimeline(fixtureHost: fixtureHost)
         try await testHistoricalReconciliation(fixtureRoot: fixtureRoot)
         try await testEventDataModel(fixtureRoot: fixtureRoot)
         try await testEventCandidateGeneration(fixtureRoot: fixtureRoot)
@@ -6252,7 +6254,8 @@ struct NewsTests {
         let doc = EventOverviewDocument(
             id: "doc-1",
             eventID: "event-42",
-            version: OverviewVersionContext(membershipVersion: 1, inputTextHash: hash1, schemaVersion: 1, analysisVersion: 1),
+            version: OverviewVersionContext(membershipVersion: 1, inputTextHash: hash1, schemaVersion: 1,
+                                           analysisVersion: EventOverviewDocument.currentAnalysisVersion),
             content: OverviewContent(
                 title: "Mars Water and Ice Evidence",
                 summary: "Recent rover and orbital discoveries indicate past water and present ice at the landing site.",
@@ -6280,7 +6283,8 @@ struct NewsTests {
         assertTrue(doc.isStale(currentMembershipVersion: 2, currentInputTextHash: hash1), "Changed membership version marks overview stale")
         assertTrue(doc.isStale(currentMembershipVersion: 1, currentInputTextHash: "different-hash"), "Changed input text hash marks overview stale")
         assertTrue(doc.isStale(currentMembershipVersion: 1, currentInputTextHash: hash1, targetSchemaVersion: 2), "Changed schema version marks overview stale")
-        assertTrue(doc.isStale(currentMembershipVersion: 1, currentInputTextHash: hash1, targetAnalysisVersion: 2), "Changed analysis version marks overview stale")
+        assertTrue(doc.isStale(currentMembershipVersion: 1, currentInputTextHash: hash1,
+                               targetAnalysisVersion: EventOverviewDocument.currentAnalysisVersion + 1), "Changed analysis version marks overview stale")
 
         // 5. DatabaseEngine persistence, version supersession, and retention safety
         let db = DatabaseEngine(path: ":memory:")
@@ -7589,6 +7593,101 @@ struct NewsTests {
         let fetched = try await dbEngine.fetchEventOverview(eventID: "event-num")
         assertTrue(fetched != nil, "Fetched overview exists in database")
         assertEqual(fetched?.kind, OverviewKind.fallbackExcerpts, "Stored overview in database is fallbackExcerpts, not a failed retelling")
+    }
+
+    static func testOverviewTimeline(fixtureHost: String) async throws {
+        print("  - Testing sourced overview timelines: stated dates, unknown years, plans and citations (#143)...")
+        let utc = TimeZone(identifier: "UTC")!
+        func day(_ year: Int, _ month: Int, _ day: Int, hour: Int = 12) -> Date {
+            var calendar = Calendar(identifier: .gregorian)
+            calendar.timeZone = utc
+            return calendar.date(from: DateComponents(year: year, month: month, day: day, hour: hour))!
+        }
+        func article(_ id: String, _ source: String, published: Date) -> FeedArticle {
+            FeedArticle(storedID: id, title: "Report \(id)", link: "https://\(fixtureHost)/\(id)", guid: id,
+                        description: "", pubDate: published, source: source)
+        }
+        let wire = article("tl-wire", "Wire", published: day(2026, 10, 1))
+        let daily = article("tl-daily", "Daily", published: day(2026, 10, 1, hour: 18))
+        let undated = article("tl-undated", "Undated", published: DateParser.unknownDate)
+        let articles = [wire, daily, undated]
+        var passages: [EvidencePassage] = []
+        func fact(_ article: FeedArticle, _ text: String) -> PassageAnchoredFact {
+            let passage = EvidencePassage(id: "\(article.id)_p\(passages.count + 1)", articleID: article.id, text: text, ordinal: passages.count + 1)
+            passages.append(passage)
+            return PassageAnchoredFact(id: "f-\(passage.id)", statement: text, passageID: passage.id, quote: text, articleID: article.id)
+        }
+        let announced = "On 15 September 2026, the ministry announced the flood defence plan."
+        let facts = [
+            fact(wire, "Parliament is scheduled to vote on the plan on 20 October."),
+            fact(wire, announced),
+            fact(daily, announced),
+            fact(daily, "The storm hit the coast on Monday, flooding 300 homes."),
+            fact(daily, "The ruling on 3 March overturned a 12 June 2024 decision."),
+            fact(undated, "On 1 October 2026, officials met the regional council."),
+            fact(wire, "The defence programme began in March 2019 after earlier floods.")
+        ]
+        let english = Locale(identifier: "en_US")
+        let timeline = OverviewTimelineBuilder.build(facts: facts, passages: passages, articles: articles, locale: english)
+        assertEqual(timeline.items.map(\.summary), [facts[6].quote, announced, facts[0].quote],
+                    "Dated sentences appear once, in event order; weekdays, several dates and unknown publication dates stay out")
+        assertEqual(timeline.items.map(\.isFuturePlan), [false, false, true], "A date after publication is labeled as a plan")
+        assertTrue(timeline.items[0].dateText.contains("2019") && !timeline.items[0].dateText.contains("15"),
+                   "A month-precision date is shown at month precision: \(timeline.items[0].dateText)")
+        assertTrue(timeline.items[1].dateText.contains("2026"), "A stated year is shown: \(timeline.items[1].dateText)")
+        assertFalse(timeline.items[2].dateText.contains("2026"), "A missing year stays missing: \(timeline.items[2].dateText)")
+        assertEqual(timeline.items[1].citationIDs.count, 2, "Reprints of one sentence become one item with both sources")
+        let citations = Dictionary(uniqueKeysWithValues: timeline.citations.map { ($0.id, $0) })
+        for item in timeline.items {
+            assertFalse(item.citationIDs.isEmpty, "Every timeline item has a source")
+            for id in item.citationIDs {
+                guard let citation = citations[id] else { return assertTrue(false, "Timeline citation \(id) exists") }
+                assertEqual(citation.quote, item.summary, "The item reproduces its cited quote")
+                assertTrue(citation.publishedAt == wire.pubDate || citation.publishedAt == daily.pubDate,
+                           "The publication date stays on the citation, apart from the event date")
+            }
+        }
+        assertEqual(Set(timeline.citations.map(\.id)).count, timeline.citations.count, "Citation IDs are unique")
+
+        let single = OverviewTimelineBuilder.build(facts: [facts[1], facts[3]], passages: passages, articles: articles)
+        assertTrue(single.items.isEmpty && single.citations.isEmpty, "One dated sentence is not a timeline")
+        let sameDay = [fact(wire, "On 2 September 2026, the dam was inspected."), fact(daily, "Engineers reported cracks on 2 September 2026.")]
+        assertTrue(OverviewTimelineBuilder.build(facts: sameDay, passages: passages, articles: articles).items.isEmpty,
+                   "Two sentences on one date are not a timeline")
+
+        typealias Stated = OverviewTimelineBuilder.StatedDate
+        func stated(_ sentence: String) -> Stated? { OverviewTimelineBuilder.singleStatedDate(in: sentence) }
+        assertTrue(stated("Police said 3 may have died.") == nil, "The modal verb may is not a month")
+        assertTrue(stated("NASA sent 3 Mars landers.") == nil, "A capitalized planet is not the French month")
+        assertTrue(stated("On 31 April the agency said nothing.") == nil, "An impossible date is not placed")
+        assertEqual(stated("Sept. 5, 2025 was the deadline."), Stated(year: 2025, month: 9, day: 5), "Abbreviated English dates")
+        assertEqual(stated("Le 3 mars 2026, le gouvernement a annoncé un plan."), Stated(year: 2026, month: 3, day: 3), "French dates")
+        assertEqual(stated("Am 3. März 2026 trat das Gesetz in Kraft."), Stated(year: 2026, month: 3, day: 3), "German dates")
+        assertEqual(stated("3 березня 2026 року уряд ухвалив рішення."), Stated(year: 2026, month: 3, day: 3), "Ukrainian dates")
+        assertEqual(stated("Rząd przyjął ustawę 1 maja 2026 r."), Stated(year: 2026, month: 5, day: 1), "Polish dates")
+        assertEqual(stated("The programme began in March 2019."), Stated(year: 2019, month: 3, day: nil), "Month and year")
+
+        let newYear = day(2027, 1, 2)
+        let lateDecember = Stated(year: nil, month: 12, day: 30)
+        assertEqual(OverviewTimelineBuilder.resolve(lateDecember, publishedAt: newYear), day(2026, 12, 30, hour: 0),
+                    "A missing year is placed nearest to publication")
+        assertFalse(OverviewTimelineBuilder.isPlan(lateDecember, resolved: day(2026, 12, 30, hour: 0), publishedAt: newYear),
+                    "A date before publication is not a plan")
+        let october = Stated(year: 2026, month: 10, day: nil)
+        assertFalse(OverviewTimelineBuilder.isPlan(october, resolved: day(2026, 10, 1, hour: 0), publishedAt: wire.pubDate),
+                    "The month of publication is not a plan")
+        assertTrue(OverviewTimelineBuilder.isPlan(Stated(year: 2026, month: 11, day: nil), resolved: day(2026, 11, 1, hour: 0),
+                                                  publishedAt: wire.pubDate), "A later month is a plan")
+
+        let composed = OverviewComposer.composeOverview(eventID: "event-timeline", eventTitle: "Flood defence plan",
+                                                        verifiedFacts: facts, passages: passages, articles: articles)
+        assertEqual(composed.timeline.count, 3, "Composed overviews carry the timeline")
+        assertTrue(composed.timeline.allSatisfy { $0.citationIDs.allSatisfy { composed.citations[$0] != nil } },
+                   "Timeline citations are stored with the overview")
+        assertEqual(composed.analysisVersion, EventOverviewDocument.currentAnalysisVersion, "Timelines bump the analysis version")
+        let undatedOverview = OverviewComposer.composeOverview(eventID: "event-undated", eventTitle: "Storm",
+                                                               verifiedFacts: [facts[3], facts[4]], passages: passages, articles: articles)
+        assertTrue(undatedOverview.evidenceSections == nil, "Without dated sentences the section is absent")
     }
 
     static func testEventOverviewReaderMode(fixtureHost: String) async throws {
