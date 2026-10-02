@@ -1,0 +1,16 @@
+{
+  "cli_start_and_migration_ms": [
+    286.9606250023935,
+    317.18108398490585,
+    358.6135419900529,
+    319.874874985544,
+    309.1557089937851
+  ],
+  "migrated_database_bytes": 91488256,
+  "prose_characters": 2030,
+  "rows": 10250,
+  "source_database_bytes": 91025408,
+  "source_schema": 14,
+  "sqlite": "3.54.0",
+  "target_schema": 15
+}

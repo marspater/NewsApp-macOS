@@ -4,6 +4,8 @@
 
 ### Fixed
 
+- Avoid full-text content scans when joining search/event candidates or updating/deleting indexed articles. Schema v15 rebuilds the derived index with durable integer keys while preserving article IDs, saved/read history and event membership.
+
 - Opening an article that belongs to an event no longer switches the reader to the event overview when it finishes generating, including out of the web view; the overview is offered in the toolbar. Closing a reader and quickly opening another article of the same event no longer cancels that article's overview.
 - An event overview that cites the same passage as another event's stored overview, for example after "Not the Same Event" moves an article, is now stored instead of silently failing and being regenerated on every open.
 

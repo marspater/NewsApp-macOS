@@ -543,6 +543,62 @@ actor DatabaseEngine {
                 throw error
             }
         }
+        if version < 15 {
+            try beginTransaction()
+            do {
+                try Task.checkCancellation()
+                // A durable integer key avoids reading the FTS content blob just to join article IDs.
+                // Do not use articles.rowid: VACUUM may change a hidden rowid on a TEXT-keyed table.
+                try executeSimple("""
+                DROP TRIGGER IF EXISTS trg_articles_ai;
+                DROP TRIGGER IF EXISTS trg_articles_ad;
+                DROP TRIGGER IF EXISTS trg_articles_au;
+                DROP TABLE IF EXISTS articles_fts;
+                DROP TABLE IF EXISTS article_fts_rows;
+                CREATE TABLE article_fts_rows (
+                    fts_rowid INTEGER PRIMARY KEY,
+                    article_id TEXT NOT NULL UNIQUE REFERENCES articles(id) ON DELETE CASCADE
+                );
+                CREATE VIRTUAL TABLE articles_fts USING fts5(
+                    article_id UNINDEXED, title, description, content, source, category,
+                    tokenize = 'porter unicode61'
+                );
+                INSERT INTO article_fts_rows(article_id) SELECT id FROM articles ORDER BY id;
+                INSERT INTO articles_fts(rowid, article_id, title, description, content, source, category)
+                SELECT f.fts_rowid, a.id, a.title, coalesce(a.description, ''), coalesce(a.content, ''),
+                       a.source, coalesce(a.category, '')
+                FROM articles a JOIN article_fts_rows f ON f.article_id = a.id;
+                CREATE TRIGGER trg_articles_ai AFTER INSERT ON articles BEGIN
+                    INSERT INTO article_fts_rows(article_id) VALUES (new.id);
+                    INSERT INTO articles_fts(rowid, article_id, title, description, content, source, category)
+                    VALUES ((SELECT fts_rowid FROM article_fts_rows WHERE article_id = new.id), new.id,
+                            new.title, coalesce(new.description, ''), coalesce(new.content, ''),
+                            new.source, coalesce(new.category, ''));
+                END;
+                CREATE TRIGGER trg_articles_ad BEFORE DELETE ON articles BEGIN
+                    DELETE FROM articles_fts WHERE rowid = (SELECT fts_rowid FROM article_fts_rows WHERE article_id = old.id);
+                    DELETE FROM article_fts_rows WHERE article_id = old.id;
+                END;
+                CREATE TRIGGER trg_articles_au AFTER UPDATE ON articles
+                WHEN old.title IS NOT new.title OR old.description IS NOT new.description
+                  OR old.content IS NOT new.content OR old.source IS NOT new.source
+                  OR old.category IS NOT new.category
+                BEGIN
+                    DELETE FROM articles_fts WHERE rowid = (SELECT fts_rowid FROM article_fts_rows WHERE article_id = old.id);
+                    INSERT INTO articles_fts(rowid, article_id, title, description, content, source, category)
+                    VALUES ((SELECT fts_rowid FROM article_fts_rows WHERE article_id = new.id), new.id,
+                            new.title, coalesce(new.description, ''), coalesce(new.content, ''),
+                            new.source, coalesce(new.category, ''));
+                END;
+                """)
+                try Task.checkCancellation()
+                try setUserVersion(15)
+                try commitTransaction()
+            } catch {
+                try? rollbackTransaction()
+                throw error
+            }
+        }
     }
     
     /// Muting predicates for list queries (`MuteRules`); both are pure functions of their arguments.
@@ -1182,7 +1238,7 @@ actor DatabaseEngine {
         var sql = ""
         var params: [QueryParameter] = []
         if !parsed.terms.isEmpty {
-            join = " JOIN articles_fts fts ON fts.article_id = a.id WHERE articles_fts MATCH ?"
+            join = " JOIN article_fts_rows f ON f.article_id = a.id JOIN articles_fts fts ON fts.rowid = f.fts_rowid WHERE articles_fts MATCH ?"
             // Sanitize FTS search term: wrap terms with quotes or escape special FTS characters
             let sanitizedFtsTerm = parsed.terms.map { term in
                 let cleaned = term.replacingOccurrences(of: "\"", with: "")
@@ -2808,7 +2864,8 @@ actor DatabaseEngine {
         let sql = """
         SELECT a.id, a.title, coalesce(a.description, ''), m.event_id
         FROM articles_fts fts
-        JOIN articles a ON a.id = fts.article_id
+        JOIN article_fts_rows f ON f.fts_rowid = fts.rowid
+        JOIN articles a ON a.id = f.article_id
         LEFT JOIN event_members m ON m.article_id = a.id
         LEFT JOIN events e ON e.id = m.event_id
         WHERE articles_fts MATCH ? AND a.id != ?

@@ -15,6 +15,7 @@ Native macOS, local-first RSS reader. This document defines the supported techno
 - Briefing is an optional, window-local session of at most ten unread, unmuted publications from an explicit 24-hour publication window. Selection balances source and category counts over at most 500 recent candidates; membership and order stay frozen until an explicit New Briefing. Read state supplies progress without removing cards. Normal refresh, archive access and scheduling remain independent.
 
 - Schema v12 guards FTS update triggers with null-safe comparisons of indexed text fields; metadata-only and identical refreshes preserve existing FTS rows. Changed titles/descriptions/content/source/category still reindex atomically.
+- Schema v15 gives each indexed article a durable integer key in `article_fts_rows`, independent of `articles`' hidden rowid. FTS search/candidate joins and update/delete triggers use that key; the migration transactionally rebuilds only the derived index from stored articles. Rank/ID tie order, visibility filters and saved/read/event data are preserved, including across `VACUUM`.
 
 - Keep UI concerns out of database, networking and domain layers. Preserve actor isolation, avoid main-actor database work, bound batch concurrency/memory, and avoid lifecycle retain cycles.
 - Propagate cancellation through feed, extraction and enrichment work. Shared refresh work survives an individual waiter cancelling; explicit reset cancels that shared work. Unstructured tasks require explicit lifecycle ownership.
