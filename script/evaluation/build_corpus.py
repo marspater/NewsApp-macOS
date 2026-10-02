@@ -5,6 +5,7 @@ import datetime
 import hashlib
 import json
 import pathlib
+import tempfile
 import urllib.parse
 import zipfile
 
@@ -23,55 +24,58 @@ def canonical(url):
                                   urllib.parse.urlencode(query), parts.fragment))
 
 
-def build(args):
-    parents = {}
-    def root(key):
-        parents.setdefault(key, key)
-        if parents[key] != key:
-            parents[key] = root(parents[key])
-        return parents[key]
-    def join(a, b):
-        a, b = root(a), root(b)
-        parents[max(a, b)] = min(a, b)
-
+def read_groups(path, join):
     group = None
-    for line in args.groups.read_text().splitlines():
+    for line in path.read_text().splitlines():
         if line.startswith('GROUP-'):
             group = line.strip()
         elif line.startswith('TOPIC-'):
             join(group, line.split('\t')[0])
+
+
+def read_topics(path):
     topics = {}
     current = None
-    for line in args.events.read_text().splitlines():
+    for line in path.read_text().splitlines():
         if line.startswith('TOPIC-'):
             fields = line.split('\t')
             current = fields[0]
             topics[current] = {'category': fields[1], 'dates': []}
         elif len(line) > 10 and line[4] == '-' and line[7] == '-':
             topics[current]['dates'].append(line.split('\t')[0])
-    rows = {}
-    url_owner = {}
-    with zipfile.ZipFile(args.articles) as archive:
-        # Reading members, rather than extracting, avoids trusting archive paths.
+    return topics
+
+
+def article_rows(text):
+    for line in text.splitlines():
+        fields = line.split('\t')
+        if len(fields) != 2:
+            continue
+        date, url = fields
+        parts = urllib.parse.urlsplit(url)
+        if parts.scheme in ('http', 'https') and parts.hostname and not parts.username and not parts.password:
+            yield date, url, parts.hostname.lower()
+
+
+def read_articles(path, topics, join):
+    rows, url_owner = {}, {}
+    with zipfile.ZipFile(path) as archive:
+        # Read members without extracting archive paths to disk.
         for name in sorted(archive.namelist()):
             topic = pathlib.PurePosixPath(name).stem
             if topic not in topics:
                 continue
-            rows[topic] = []
-            for line in archive.read(name).decode('utf-8').splitlines():
-                fields = line.split('\t')
-                if len(fields) != 2:
-                    continue
-                date, url = fields
-                parts = urllib.parse.urlsplit(url)
-                if parts.scheme not in ('http', 'https') or not parts.hostname or parts.username or parts.password:
-                    continue
+            rows[topic] = list(article_rows(archive.read(name).decode('utf-8')))
+            for _, url, _ in rows[topic]:
                 key = canonical(url)
                 if key in url_owner:
                     join(topic, url_owner[key])
                 else:
                     url_owner[key] = topic
-                rows[topic].append((date, url, parts.hostname.lower()))
+    return rows
+
+
+def candidate_topics(topics, rows, root):
     candidates = []
     for topic, info in topics.items():
         if len(info['dates']) != 1:
@@ -83,6 +87,10 @@ def build(args):
                 docs.append((date, url, host))
         if len(docs) >= 3:
             candidates.append((topic, root(topic), info, docs[:3]))
+    return candidates
+
+
+def select_topics(candidates):
     selected = []
     groups = set()
     for item in sorted(candidates, key=lambda item: digest('news-corpus-v1:' + item[1])):
@@ -92,6 +100,10 @@ def build(args):
         if len(selected) == 100:
             break
     assert len(selected) == 100, 'Need 100 disjoint single-event groups'
+    return selected
+
+
+def imported_pairs(selected):
     documents, events, pairs = [], [], []
     for index, (topic, group, info, rows_) in enumerate(selected):
         split = 'tuning' if index < 70 else 'holdout'
@@ -104,6 +116,10 @@ def build(args):
         for ordinal in [1, 2]:
             pairs.append({'left': f'{event}-0', 'right': f'{event}-{ordinal}', 'label': 'same_event',
                           'split': split, 'provenance': 'w2e-single-event-topic'})
+    return documents, events, pairs
+
+
+def add_event_negatives(events, pairs):
     # Negatives stay inside a split; different merged topic/URL families are never split apart.
     for split in ['tuning', 'holdout']:
         subset = [e for e in events if e['split'] == split]
@@ -111,6 +127,9 @@ def build(args):
             other = subset[(index + 1) % len(subset)]
             pairs.append({'left': event['id'] + '-0', 'right': other['id'] + '-0', 'label': 'different',
                           'split': split, 'provenance': 'w2e-distinct-merged-groups'})
+
+
+def add_tracking_controls(documents, events, pairs):
     # Derived identity controls, explicitly not independent publisher observations.
     for index, event in enumerate(events[:]):
         original = next(d for d in documents if d['id'] == event['id'] + '-0')
@@ -120,6 +139,9 @@ def build(args):
         documents.append(variant)
         pairs.append({'left': original['id'], 'right': variant['id'], 'label': 'same_document',
                       'split': event['split'], 'provenance': 'derived-tracking-control'})
+
+
+def add_authored_controls(documents, events, pairs):
     # Authored controls are fiction, not additional publisher observations.
     details = {
         'en': [('Quarterly results announced', 'Aster company reported first-quarter revenue of 120 units.', 'Aster company reported second-quarter revenue of 85 units.'),
@@ -155,6 +177,41 @@ def build(args):
             documents.append(copy)
             pairs.append({'left': original['id'], 'right': copy['id'], 'label': 'same_document',
                           'split': split, 'provenance': 'authored-content-copy'})
+
+
+def write_corpus(result, destination):
+    # CLI arguments may come from copied/untrusted instructions. Never replace a
+    # file, follow an output symlink, or write outside the fixture/temp roots.
+    if destination.is_symlink():
+        raise ValueError('Output must not be a symlink')
+    output = destination.resolve()
+    fixture = pathlib.Path(__file__).resolve().parents[2] / 'Tests/Fixtures/story-corpus'
+    roots = (fixture.resolve(), pathlib.Path(tempfile.gettempdir()).resolve(), pathlib.Path('/tmp').resolve())
+    if output.suffix != '.json' or not any(output.is_relative_to(root) for root in roots):
+        raise ValueError('Output must be a new JSON file inside the fixture or temporary directory')
+    with output.open('x', encoding='utf-8') as handle:
+        handle.write(json.dumps(result, ensure_ascii=False, indent=2) + '\n')
+
+
+def build(args):
+    parents = {}
+    def root(key):
+        parents.setdefault(key, key)
+        if parents[key] != key:
+            parents[key] = root(parents[key])
+        return parents[key]
+    def join(a, b):
+        a, b = root(a), root(b)
+        parents[max(a, b)] = min(a, b)
+
+    read_groups(args.groups, join)
+    topics = read_topics(args.events)
+    rows = read_articles(args.articles, topics, join)
+    selected = select_topics(candidate_topics(topics, rows, root))
+    documents, events, pairs = imported_pairs(selected)
+    add_event_negatives(events, pairs)
+    add_tracking_controls(documents, events, pairs)
+    add_authored_controls(documents, events, pairs)
     for index, pair in enumerate(pairs):
         pair['id'] = f'pair-{index:03d}'
     result = {'version': 1, 'releaseEligible': False, 'documents': documents, 'events': events, 'pairs': pairs,
@@ -163,7 +220,7 @@ def build(args):
                              'inputSHA256': {name: hashlib.sha256(path.read_bytes()).hexdigest()
                                              for name, path in [('articles', args.articles), ('events', args.events), ('groups', args.groups)]},
                              'note': 'Original author topic relevance reused, not a new independent article review. No publisher text or WCEP summaries redistributed. Control bodies are authored fiction. Languages of URL-only records are unknown.'}}
-    args.output.write_text(json.dumps(result, ensure_ascii=False, indent=2) + '\n')
+    write_corpus(result, args.output)
 
 
 if __name__ == '__main__':

@@ -5,7 +5,11 @@ import collections
 import copy
 import hashlib
 import json
+import math
 import pathlib
+import tempfile
+
+from build_corpus import write_corpus
 
 LABELS = {'same_document', 'same_event', 'different'}
 DEFAULT = pathlib.Path(__file__).resolve().parents[2] / 'Tests/Fixtures/story-corpus/corpus-v1.json'
@@ -90,6 +94,24 @@ def report(corpus, prediction, split):
 
 def self_check(corpus):
     validate(corpus)
+    with tempfile.TemporaryDirectory(prefix='news-corpus-output-') as directory:
+        output = pathlib.Path(directory) / 'sample.json'
+        write_corpus({'test': True}, output)
+        try:
+            write_corpus({'test': False}, output)
+        except FileExistsError:
+            pass
+        else:
+            raise AssertionError('Existing output replaced')
+        require(json.loads(output.read_text()) == {'test': True}, 'Output changed after rejected overwrite')
+        link = pathlib.Path(directory) / 'link.json'
+        link.symlink_to(output)
+        for forbidden in [link, pathlib.Path(directory) / 'wrong.txt', pathlib.Path('/dev/news-corpus-not-created.json')]:
+            try:
+                write_corpus({}, forbidden)
+            except ValueError:
+                continue
+            raise AssertionError('Unsafe output accepted')
     mutations = [lambda c: c['events'][0].update(split='holdout'),
                  lambda c: c['pairs'][0].update(label='invalid'),
                  lambda c: c['pairs'].append(c['pairs'][0]),
@@ -104,17 +126,17 @@ def self_check(corpus):
         raise AssertionError('Invalid corpus accepted')
     pairs = [{'id': 'a', 'label': 'same_document'}, {'id': 'b', 'label': 'different'}, {'id': 'c', 'label': 'same_document'}]
     sample = metrics(pairs, {'a': 'same_document', 'b': 'same_document', 'c': None})
-    assert sample['labels']['same_document']['precision'] == 0.5
-    assert sample['labels']['same_document']['recallAll'] == 0.5
+    assert math.isclose(sample['labels']['same_document']['precision'], 0.5)
+    assert math.isclose(sample['labels']['same_document']['recallAll'], 0.5)
     assert sample['abstained'] == 1
     tuning = [p for p in corpus['pairs'] if p['split'] == 'tuning']
     prediction = {'algorithm': 'self-check', 'task': 'three_way',
                   'predictions': {p['id']: p['label'] for p in tuning}}
     result = report(corpus, prediction, 'tuning')
-    assert result['overall']['accuracyEvaluated'] == 1 and not result['releaseGatePassed']
+    assert math.isclose(result['overall']['accuracyEvaluated'], 1) and not result['releaseGatePassed']
     prediction['task'] = 'document_identity'
     prediction['predictions'] = {p['id']: 'different' if p['label'] == 'same_event' else p['label'] for p in tuning}
-    assert report(corpus, prediction, 'tuning')['overall']['accuracyEvaluated'] == 1
+    assert math.isclose(report(corpus, prediction, 'tuning')['overall']['accuracyEvaluated'], 1)
     prediction['predictions'].pop(tuning[0]['id'])
     try:
         report(corpus, prediction, 'tuning')

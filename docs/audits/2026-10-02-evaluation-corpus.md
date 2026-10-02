@@ -12,6 +12,7 @@ The corpus and runnable instructions live in [the fixture README](../../Tests/Fi
 - Corpus/metric self-checks passed, including invalid labels, split leakage, duplicate pairs, forbidden publisher bodies, binary vs three-way scoring, missing predictions, and explicit abstentions.
 - Native fingerprint **tuning only**: 42 authored pairs evaluated (21 copy positives, 21 hard negatives), all classified as expected; 280 metadata-only pairs abstained. These controls provide no real-publisher accuracy evidence.
 - `./test.sh` passed on arm64 with deployment target macOS 15. No app behavior or production storage changed; app build/install/live publisher checks were not performed.
+- Builder output safety checks passed: existing files, symlinks, non-JSON names and paths outside fixture/temp roots are rejected. Refactored builder regeneration retained the frozen corpus checksum.
 - `git diff --check` passed.
 
 ## Acceptance still open

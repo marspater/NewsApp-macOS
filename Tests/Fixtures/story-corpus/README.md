@@ -50,7 +50,7 @@ Holdout evaluation requires both `--corpus-holdout` in the native runner and `--
 
 ## Rebuild and remaining acceptance work
 
-The builder uses Python's standard library and makes no network requests. With the original input files (checksums in provenance):
+The builder uses Python's standard library and makes no network requests. Output must be a new `.json` file under the fixture directory or the system temporary directory; existing files and output symlinks are rejected. With the original input files (checksums in provenance):
 
 ```sh
 python3 script/evaluation/build_corpus.py \
