@@ -28,6 +28,7 @@ struct ArticleDetailView: View {
     @EnvironmentObject private var readManager: ReadManager
     @EnvironmentObject private var themeManager: ThemeManager
     @Environment(\.colorSchemeContrast) private var contrast
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @State private var viewMode: DetailViewMode = .reader
     @State private var isWebLoading: Bool = false
@@ -99,8 +100,52 @@ struct ArticleDetailView: View {
     }
 
     var body: some View {
+        contentLayer
+            .background(AppColor.background)
+            .softScrollEdge()
+            .toolbar { readerToolbar }
+            .toolbarBackground(.visible, for: .windowToolbar)
+            .focusable()
+            .focusEffectDisabled()
+            .focused($isViewFocused)
+            .onKeyPress { press in
+                handleKeyPress(press: press)
+            }
+            .transaction { transaction in
+                if reduceMotion {
+                    transaction.animation = nil
+                }
+            }
+            .modifier(ArticleNavigationCommands(
+                onNextArticle: nextArticle,
+                onPrevArticle: prevArticle,
+                onToggleRead: { readManager.toggleRead(currentArticle.id) },
+                onToggleSave: toggleSave,
+                onOpenInBrowser: openInBrowser,
+                onToggleViewMode: toggleViewMode
+            ))
+            .task(id: activeArticle.id) {
+                await loadEventOverviewForActiveArticle()
+            }
+            .task(id: activeArticleContentTaskID) {
+                await ensureContentExtracted(forceRefresh: reloadGeneration > 0)
+            }
+            .task(id: summaryExpanded ? activeArticle.id : nil) {
+                guard summaryExpanded else { return }
+                await startArticleAnalysis()
+            }
+            .onAppear { isViewFocused = true }
+            .onDisappear {
+                let owner = overviewOwner
+                Task {
+                    await OverviewGenerationCoordinator.shared.clearVisibleEvent(owner: owner)
+                }
+            }
+    }
+
+    private var contentLayer: some View {
         Group {
-            // Content Layer
+            // Content Layer: descendants enable focus effects for their own interactive controls
             if experienceMode == .eventOverview, let overview = currentOverview {
                 EventOverviewReaderView(
                     overview: overview,
@@ -119,56 +164,27 @@ struct ArticleDetailView: View {
                     }
                 )
                 .id(overview.id)
+                .focusEffectDisabled(false)
             } else if viewMode == .reader {
-                readerView.id(activeArticle.id)
+                readerView
+                    .id(activeArticle.id)
+                    .focusEffectDisabled(false)
             } else {
                 webViewContainer
+                    .focusEffectDisabled(false)
             }
         }
-        .background(AppColor.background)
-        .softScrollEdge()
-        .toolbar { readerToolbar }
-        .toolbarBackground(.visible, for: .windowToolbar)
-        .focusable()
-        .focusEffectDisabled()
-        .focused($isViewFocused)
-        .onKeyPress { press in
-            handleKeyPress(press: press)
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .nextArticleCommand)) { _ in nextArticle() }
-        .onReceive(NotificationCenter.default.publisher(for: .prevArticleCommand)) { _ in prevArticle() }
-        .onReceive(NotificationCenter.default.publisher(for: .toggleReadCommand)) { _ in
-            readManager.toggleRead(currentArticle.id)
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .toggleSaveCommand)) { _ in
-            toggleSave()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .openInBrowserCommand)) { _ in
-            openInBrowser()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .toggleViewModeCommand)) { _ in
-            if currentOverview != nil {
-                experienceMode = (experienceMode == .eventOverview ? .sourcePublication : .eventOverview)
-            } else {
-                viewMode = (viewMode == .reader) ? .web : .reader
-            }
-        }
-        .task(id: activeArticle.id) {
-            await loadEventOverviewForActiveArticle()
-        }
-        .task(id: "\(activeArticle.id):\(reloadGeneration)") {
-            await ensureContentExtracted(forceRefresh: reloadGeneration > 0)
-        }
-        .task(id: summaryExpanded ? activeArticle.id : nil) {
-            guard summaryExpanded else { return }
-            await startArticleAnalysis()
-        }
-        .onAppear { isViewFocused = true }
-        .onDisappear {
-            let owner = overviewOwner
-            Task {
-                await OverviewGenerationCoordinator.shared.clearVisibleEvent(owner: owner)
-            }
+    }
+
+    private var activeArticleContentTaskID: String {
+        "\(activeArticle.id):\(reloadGeneration)"
+    }
+
+    private func toggleViewMode() {
+        if currentOverview != nil {
+            experienceMode = (experienceMode == .eventOverview ? .sourcePublication : .eventOverview)
+        } else {
+            viewMode = (viewMode == .reader) ? .web : .reader
         }
     }
 
@@ -187,6 +203,7 @@ struct ArticleDetailView: View {
                                     .font(.system(size: 14))
                                     .foregroundColor(AppColor.accent)
                                     .padding(.top, 2)
+                                    .accessibilityHidden(true)
 
                                 VStack(alignment: .leading, spacing: 4) {
                                     Text("Cited in Event Overview")
@@ -197,6 +214,7 @@ struct ArticleDetailView: View {
                                         .font(.system(size: 13, weight: .medium, design: .serif))
                                         .foregroundColor(AppColor.primaryText)
                                         .lineSpacing(2)
+                                        .textSelection(.enabled)
                                 }
                             }
                             .accessibilityElement(children: .combine)
@@ -205,7 +223,13 @@ struct ArticleDetailView: View {
                             Spacer()
 
                             Button {
-                                highlightedPassage = nil
+                                if reduceMotion {
+                                    highlightedPassage = nil
+                                } else {
+                                    withAnimation(Self.readerAnimation(reduceMotion: reduceMotion)) {
+                                        highlightedPassage = nil
+                                    }
+                                }
                             } label: {
                                 Image(systemName: "xmark.circle.fill")
                                     .font(.system(size: 13))
@@ -246,7 +270,11 @@ struct ArticleDetailView: View {
                             .foregroundColor(AppColor.secondaryText)
                     }
                     .accessibilityElement(children: .ignore)
-                    .accessibilityLabel("\(displaySource), \(currentArticle.publicationDateText), \(readingTimeEstimate)")
+                    .accessibilityLabel(Self.sourceLineAccessibilityLabel(
+                        source: displaySource,
+                        publicationDateText: currentArticle.publicationDateText,
+                        readingTimeEstimate: readingTimeEstimate
+                    ))
 
                     // Headline
                     Text(currentArticle.title)
@@ -261,7 +289,7 @@ struct ArticleDetailView: View {
                     heroImageHeader
 
                     if appSettings.aiEnabled || currentArticle.aiSummary != nil {
-                        DisclosureGroup("On-device summary", isExpanded: $summaryExpanded) {
+                        DisclosureGroup("On-device summary", isExpanded: summaryExpandedBinding) {
                             aiAnalysisSection.padding(.top, AppSpacing.sm)
                         }
                         .font(AppTypography.bodySmall)
@@ -330,6 +358,8 @@ struct ArticleDetailView: View {
                 .font(.system(size: 13, weight: .medium))
                 .foregroundColor(AppColor.secondaryText)
         }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Loading full article")
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.vertical, AppSpacing.lg)
     }
@@ -340,6 +370,7 @@ struct ArticleDetailView: View {
                 Image(systemName: "doc.text.magnifyingglass")
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundColor(AppColor.secondaryText)
+                    .accessibilityHidden(true)
                 Text("Full article unavailable in reader")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundColor(AppColor.primaryText)
@@ -349,6 +380,7 @@ struct ArticleDetailView: View {
                 } label: {
                     HStack(spacing: 4) {
                         Image(systemName: "arrow.clockwise")
+                            .accessibilityHidden(true)
                         Text("Retry")
                     }
                     .font(.system(size: 11, weight: .medium))
@@ -361,6 +393,7 @@ struct ArticleDetailView: View {
                 } label: {
                     HStack(spacing: 4) {
                         Image(systemName: "safari")
+                            .accessibilityHidden(true)
                         Text("Open Web View (W)")
                     }
                     .font(.system(size: 11, weight: .semibold))
@@ -373,7 +406,7 @@ struct ArticleDetailView: View {
                 .font(.system(size: 12))
                 .foregroundColor(AppColor.secondaryText)
 
-            Divider().opacity(0.15)
+            Divider().opacity(Self.dividerOpacity(for: contrast))
 
             Text(currentArticle.fullContent == nil ? "FEED SUMMARY PREVIEW" : "PREVIOUSLY SAVED TEXT")
                 .font(.system(size: 10, weight: .bold))
@@ -432,7 +465,10 @@ struct ArticleDetailView: View {
                 .textSelection(.enabled)
         case .quote:
             HStack(alignment: .top, spacing: AppSpacing.md) {
-                Rectangle().fill(AppColor.accent.opacity(0.5)).frame(width: 3)
+                Rectangle()
+                    .fill(AppColor.accent.opacity(Self.quoteBarOpacity(for: contrast)))
+                    .frame(width: 3)
+                    .accessibilityHidden(true)
                 Text(readerText(block))
                     .font(AppTypography.bodyFont(for: themeManager.articleTheme, scale: readerTextScale).italic())
                     .lineSpacing(AppTypography.bodyLineSpacing(for: themeManager.articleTheme) * readerTextScale)
@@ -448,6 +484,7 @@ struct ArticleDetailView: View {
             }
             .font(AppTypography.bodyFont(for: themeManager.articleTheme, scale: readerTextScale))
             .lineSpacing(AppTypography.bodyLineSpacing(for: themeManager.articleTheme) * readerTextScale)
+            .accessibilityElement(children: .combine)
         case .code:
             Text(readerText(block))
                 .font(.system(.body, design: .monospaced))
@@ -479,7 +516,7 @@ struct ArticleDetailView: View {
     private var terminalAffordance: some View {
         VStack(spacing: AppSpacing.md) {
             Divider()
-                .opacity(0.15)
+                .opacity(Self.dividerOpacity(for: contrast))
                 .padding(.vertical, AppSpacing.sm)
 
             HStack(spacing: AppSpacing.md) {
@@ -501,6 +538,7 @@ struct ArticleDetailView: View {
                 } label: {
                     HStack(spacing: 6) {
                         Image(systemName: "safari")
+                            .accessibilityHidden(true)
                         Text("Open Web View (W)")
                     }
                     .font(.system(size: 12, weight: .medium))
@@ -509,9 +547,10 @@ struct ArticleDetailView: View {
                     .padding(.vertical, 8)
                     .background(AppColor.surface.opacity(0.85))
                     .clipShape(Capsule())
-                    .overlay(Capsule().stroke(borderColor(Color.primary.opacity(0.08)), lineWidth: 0.5))
+                    .overlay(Capsule().stroke(borderColor(Color.primary.opacity(Self.capsuleBorderOpacity(for: contrast))), lineWidth: 0.5))
                 }
                 .buttonStyle(.plain)
+                .buttonBorderShape(.capsule)
                 .help("Open Web View (W)")
 
                 if URL(string: currentArticle.link) != nil {
@@ -520,6 +559,7 @@ struct ArticleDetailView: View {
                     } label: {
                         HStack(spacing: 5) {
                             Image(systemName: "arrow.up.right")
+                                .accessibilityHidden(true)
                             Text("External")
                         }
                         .font(.system(size: 12, weight: .medium))
@@ -528,9 +568,10 @@ struct ArticleDetailView: View {
                         .padding(.vertical, 8)
                         .background(AppColor.surface.opacity(0.6))
                         .clipShape(Capsule())
-                        .overlay(Capsule().stroke(borderColor(Color.primary.opacity(0.06)), lineWidth: 0.5))
+                        .overlay(Capsule().stroke(borderColor(Color.primary.opacity(Self.capsuleBorderOpacity(for: contrast))), lineWidth: 0.5))
                     }
                     .buttonStyle(.plain)
+                    .buttonBorderShape(.capsule)
                     .help("Open in default web browser (O)")
                 }
             }
@@ -741,8 +782,12 @@ struct ArticleDetailView: View {
         }
     }
 
+    static func shouldPassThroughToSystem(modifiers: EventModifiers) -> Bool {
+        !modifiers.intersection([.command, .control, .option]).isEmpty
+    }
+
     private func handleKeyPress(press: KeyPress) -> KeyPress.Result {
-        guard press.modifiers.intersection([.command, .control, .option]).isEmpty else { return .ignored }
+        guard !Self.shouldPassThroughToSystem(modifiers: press.modifiers) else { return .ignored }
         if press.key == .escape {
             if !path.isEmpty { path.removeLast() }
             return .handled
@@ -778,6 +823,41 @@ struct ArticleDetailView: View {
             return .handled
         }
         return .ignored
+    }
+
+    private var summaryExpandedBinding: Binding<Bool> {
+        Binding(
+            get: { summaryExpanded },
+            set: { val in
+                if reduceMotion {
+                    summaryExpanded = val
+                } else {
+                    withAnimation(Self.readerAnimation(reduceMotion: reduceMotion)) {
+                        summaryExpanded = val
+                    }
+                }
+            }
+        )
+    }
+
+    static func readerAnimation(reduceMotion: Bool) -> Animation? {
+        reduceMotion ? nil : .easeInOut(duration: 0.2)
+    }
+
+    static func sourceLineAccessibilityLabel(source: String, publicationDateText: String, readingTimeEstimate: String) -> String {
+        "\(source), \(publicationDateText), \(readingTimeEstimate)"
+    }
+
+    static func dividerOpacity(for contrast: ColorSchemeContrast) -> Double {
+        contrast == .increased ? 0.60 : 0.15
+    }
+
+    static func quoteBarOpacity(for contrast: ColorSchemeContrast) -> Double {
+        contrast == .increased ? 1.0 : 0.5
+    }
+
+    static func capsuleBorderOpacity(for contrast: ColorSchemeContrast) -> Double {
+        contrast == .increased ? 0.35 : 0.08
     }
 
     private var tertiaryText: Color {
@@ -824,6 +904,8 @@ struct ArticleDetailView: View {
                     .font(.system(size: 13, weight: .medium))
                     .foregroundColor(AppColor.intelligence)
             }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("Analyzing article with on-device AI")
             .padding(12)
             .background(AppColor.surface, in: RoundedRectangle(cornerRadius: AppRadius.card))
         } else if let analysis = analysis {
@@ -833,6 +915,7 @@ struct ArticleDetailView: View {
                     Image(systemName: "sparkles")
                         .font(.system(size: 12))
                         .foregroundColor(AppColor.intelligence)
+                        .accessibilityHidden(true)
                     Text(analysis.modelIdentifier == "apple.natural-language.fallback" ? "Extractive summary" : "AI-generated summary")
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundColor(AppColor.primaryText)
@@ -842,6 +925,7 @@ struct ArticleDetailView: View {
                     .font(.system(size: 14, weight: .regular))
                     .foregroundColor(readableText(0.92))
                     .lineSpacing(AppTypography.bodyLineSpacing(for: themeManager.articleTheme))
+                    .textSelection(.enabled)
 
                 // Key Takeaways
                 if !analysis.keyPoints.isEmpty {
@@ -857,9 +941,11 @@ struct ArticleDetailView: View {
                                     .fill(AppColor.intelligence.opacity(0.8))
                                     .frame(width: 5, height: 5)
                                     .padding(.top, 6)
+                                    .accessibilityHidden(true)
                                 Text(point)
                                     .font(.system(size: 13))
                                     .foregroundColor(readableText(0.88))
+                                    .textSelection(.enabled)
                             }
                         }
                     }
@@ -890,7 +976,13 @@ struct ArticleDetailView: View {
                     .foregroundColor(AppColor.secondaryText)
                 Spacer()
                 Button("Close summary") {
-                    summaryExpanded = false
+                    if reduceMotion {
+                        summaryExpanded = false
+                    } else {
+                        withAnimation(Self.readerAnimation(reduceMotion: reduceMotion)) {
+                            summaryExpanded = false
+                        }
+                    }
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
@@ -903,6 +995,7 @@ struct ArticleDetailView: View {
                     Image(systemName: "sparkles")
                         .font(.system(size: 12))
                         .foregroundColor(AppColor.intelligence)
+                        .accessibilityHidden(true)
                     Text("AI-generated summary")
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundColor(AppColor.primaryText)
@@ -912,6 +1005,7 @@ struct ArticleDetailView: View {
                     .font(.system(size: 14, weight: .regular))
                     .foregroundColor(readableText(0.92))
                     .lineSpacing(AppTypography.bodyLineSpacing(for: themeManager.articleTheme))
+                    .textSelection(.enabled)
             }
             .padding(14)
             .background(AppColor.surface, in: RoundedRectangle(cornerRadius: AppRadius.card))
@@ -1157,15 +1251,23 @@ struct ReaderFigureView: View {
     let url: URL
     var textScale: CGFloat = 1
 
+    static func effectiveImageAlt(for block: ReaderBlock) -> String {
+        if let alt = block.imageAlt?.trimmingCharacters(in: .whitespacesAndNewlines), !alt.isEmpty {
+            return alt
+        }
+        return "Article image"
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: AppSpacing.sm) {
             ArticleRemoteImage(url: url) { phase in
                 ZStack {
                     AppColor.surface
+                        .accessibilityHidden(true)
                     switch phase {
                     case .success(let image):
                         image.resizable().aspectRatio(contentMode: .fit)
-                            .accessibilityLabel(block.imageAlt ?? "Article image")
+                            .accessibilityLabel(Self.effectiveImageAlt(for: block))
                     case .failure:
                         Label("Image unavailable", systemImage: "photo").foregroundStyle(AppColor.secondaryText)
                     case .empty:
@@ -1192,6 +1294,25 @@ struct ReaderFigureView: View {
     private var aspectRatio: CGFloat {
         guard let width = block.imageWidth, let height = block.imageHeight, width > 0, height > 0 else { return 1.5 }
         return min(3, max(0.4, CGFloat(width) / CGFloat(height)))
+    }
+}
+
+private struct ArticleNavigationCommands: ViewModifier {
+    let onNextArticle: () -> Void
+    let onPrevArticle: () -> Void
+    let onToggleRead: () -> Void
+    let onToggleSave: () -> Void
+    let onOpenInBrowser: () -> Void
+    let onToggleViewMode: () -> Void
+
+    func body(content: Content) -> some View {
+        content
+            .onReceive(NotificationCenter.default.publisher(for: .nextArticleCommand)) { _ in onNextArticle() }
+            .onReceive(NotificationCenter.default.publisher(for: .prevArticleCommand)) { _ in onPrevArticle() }
+            .onReceive(NotificationCenter.default.publisher(for: .toggleReadCommand)) { _ in onToggleRead() }
+            .onReceive(NotificationCenter.default.publisher(for: .toggleSaveCommand)) { _ in onToggleSave() }
+            .onReceive(NotificationCenter.default.publisher(for: .openInBrowserCommand)) { _ in onOpenInBrowser() }
+            .onReceive(NotificationCenter.default.publisher(for: .toggleViewModeCommand)) { _ in onToggleViewMode() }
     }
 }
 
