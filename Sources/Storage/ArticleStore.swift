@@ -399,6 +399,15 @@ final class ArticleStore: ObservableObject {
     // MARK: - Event Overviews
 
     @discardableResult
+    func recordVerifiedOverview(
+        _ document: EventOverviewDocument,
+        passages: [EvidencePassage],
+        articles: [FeedArticle]
+    ) async throws -> (saved: Bool, document: EventOverviewDocument) {
+        try await database.recordVerifiedOverview(document, passages: passages, articles: articles)
+    }
+
+    @discardableResult
     func recordEventOverview(_ document: EventOverviewDocument) async throws -> Bool {
         try await database.recordEventOverview(document)
     }
