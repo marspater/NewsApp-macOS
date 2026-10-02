@@ -11,6 +11,8 @@ for argument in "$@"; do
     if [[ "$argument" == "--performance-baseline" ]]; then TEST_OPT_FLAGS=(-O); fi
 done
 
+python3 script/evaluation/evaluate.py
+
 echo "Compiling tests for macOS ${TARGET_MACOS} ($(uname -m))..."
 swiftc "${TEST_OPT_FLAGS[@]}" -target $(uname -m)-apple-macos${TARGET_MACOS} \
     Sources/Services/DateParser.swift \
@@ -57,6 +59,7 @@ swiftc "${TEST_OPT_FLAGS[@]}" -target $(uname -m)-apple-macos${TARGET_MACOS} \
     Sources/Coordinators/RefreshCoordinator.swift \
     Sources/App/NewsSignposts.swift \
     Sources/App/UpdateChecker.swift \
+    Tests/StoryCorpus.swift \
     Tests/NewsTests.swift \
     -o test_runner
 
