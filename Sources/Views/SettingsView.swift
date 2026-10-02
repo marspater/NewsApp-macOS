@@ -7,6 +7,7 @@ struct SettingsView: View {
     @EnvironmentObject var feedManager: FeedManager
     @EnvironmentObject var themeManager: ThemeManager
     @EnvironmentObject var readManager: ReadManager
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     
     @State private var newFeedURL: String = ""
     @State private var selectedTab = 0
@@ -855,11 +856,11 @@ struct SettingsView: View {
     }
 
     private func showActionMessage(_ msg: String) {
-        withAnimation {
+        withAnimation(reduceMotion ? nil : AppMotion.responsive) {
             cacheActionMessage = msg
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
-            withAnimation {
+            withAnimation(reduceMotion ? nil : AppMotion.responsive) {
                 if cacheActionMessage == msg {
                     cacheActionMessage = nil
                 }
