@@ -231,6 +231,10 @@ struct NewsTests {
             print("CAPTURE_FINGERPRINT_REPORT " + String(decoding: data, as: UTF8.self))
             return
         }
+        if CommandLine.arguments.contains("--active-work-cancellation") {
+            try await testActiveWorkCancellation()
+            return
+        }
         let corpusMode = CommandLine.arguments.contains("--corpus-fingerprints") || CommandLine.arguments.contains("--corpus-events")
         try await StoryCorpus.run(evaluate: corpusMode)
         if corpusMode { return }
@@ -398,6 +402,7 @@ struct NewsTests {
         await testRefreshCoordinatorSingleFlightCoalescing()
         try await testFeedRemovalAndShutdown()
         try await testSleepAndWakeRefresh()
+        try await testActiveWorkCancellation()
         await testSignpostHelperExecution()
         await testAppSettingsIsolationAndURLNormalization()
         await testFixedTaxonomyAndCaseInsensitivity()
@@ -3754,6 +3759,149 @@ struct NewsTests {
         let toll = EventFeatures(title: "Drone strike kills three in Kharkiv", description: "", date: now)
         assertEqual(toll.titleNumbers, ["3"], "Spelled headline figures are compared as numbers")
         assertTrue(toll.anchors.contains("kharkiv"), "Places in a headline are anchors")
+    }
+
+    static func testActiveWorkCancellation() async throws {
+        print("  - Testing cancellation during real clustering and transactional ingestion...")
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("news-active-cancel-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let path = directory.appendingPathComponent("ingestion.sqlite3").path
+        let db = DatabaseEngine(path: path)
+        try await db.open()
+        let now = Date()
+        let feed = "https://cancel.example/feed"
+        let original = FeedArticle(storedID: "preserved", title: "Preserved report", link: "https://cancel.example/preserved",
+                                   guid: "preserved", description: "Original description", pubDate: now,
+                                   source: "Publisher", fullContent: "Originalbodytoken")
+        try await db.upsertArticles([original], feedUrl: feed, validators: FeedValidators(etag: "original", lastModified: nil))
+        try await db.markRead(articleId: original.id, isRead: true)
+        try await db.setSaved(articleId: original.id, isSaved: true)
+        var observer: OpaquePointer?
+        assertEqual(sqlite3_open_v2(path, &observer, SQLITE_OPEN_READWRITE, nil), SQLITE_OK, "Observe only the temporary ingestion database")
+        defer { sqlite3_close(observer) }
+        func snapshot() -> [String: [[String?]]] {
+            var result: [String: [[String?]]] = [:]
+            for table in ["articles", "article_state", "article_aliases", "article_enrichment", "article_feeds", "feeds", "articles_fts"] {
+                var statement: OpaquePointer?
+                assertEqual(sqlite3_prepare_v2(observer, "SELECT * FROM \(table) ORDER BY 1, 2;", -1, &statement, nil), SQLITE_OK, "Prepare fixture snapshot")
+                var rows: [[String?]] = []
+                var status = sqlite3_step(statement)
+                while status == SQLITE_ROW {
+                    rows.append((0..<sqlite3_column_count(statement)).map { column in
+                        sqlite3_column_text(statement, column).map { String(cString: $0) }
+                    })
+                    status = sqlite3_step(statement)
+                }
+                assertEqual(status, SQLITE_DONE, "Read complete fixture snapshot")
+                sqlite3_finalize(statement)
+                result[table] = rows
+            }
+            return result
+        }
+        let before = snapshot()
+        let changed = FeedArticle(storedID: original.id, title: "Rolledback report", link: original.link,
+                                  guid: original.guid, description: original.description, pubDate: now,
+                                  source: original.source, fullContent: "Rolledbackbodytoken")
+        let body = String(repeating: "Controlled publisher prose describes research and independent observations. ", count: 110)
+        // Exceed the native page-cache spill threshold so WAL growth occurs before COMMIT.
+        let batch = [changed] + (0..<20_000).map { index in
+            FeedArticle(storedID: "cancel-insert-\(index)", title: "New report \(index)", link: "https://cancel.example/insert/\(index)",
+                        guid: "cancel-insert-\(index)", description: "Controlled report \(index)", pubDate: now,
+                        source: "Publisher", fullContent: body)
+        }
+        let sampleCount = CommandLine.arguments.contains("--active-work-cancellation") ? 5 : 1
+        var samples: [String: [Double]] = [:]
+        for _ in 0..<sampleCount {
+            assertEqual(sqlite3_exec(observer, "PRAGMA wal_checkpoint(TRUNCATE);", nil, nil, nil), SQLITE_OK, "Reset only the temporary WAL between equal-work samples")
+            let done = SocketObservation()
+            let write = Task.detached { () -> (Bool, Double) in
+                let cancelled: Bool
+                do {
+                    _ = try await db.upsertArticles(batch, feedUrl: feed, validators: FeedValidators(etag: "new", lastModified: nil))
+                    cancelled = false
+                } catch is CancellationError { cancelled = true }
+                catch { assertTrue(false, "Unexpected ingestion error: \(error)"); cancelled = false }
+                let end = ProcessInfo.processInfo.systemUptime
+                done.recordText("finished")
+                return (cancelled, end)
+            }
+            await eventually("Actual transaction spills pages to the WAL before cancellation", timeout: .seconds(60)) {
+                let size = (try? FileManager.default.attributesOfItem(atPath: path + "-wal")[.size] as? NSNumber)?.intValue ?? 0
+                return size > 1_048_576
+            }
+            assertEqual(done.count, 0, "Ingestion is still active at the observed WAL spill")
+            let start = ProcessInfo.processInfo.systemUptime
+            write.cancel()
+            await eventually("Active ingestion cancels and rolls back within its deadline", timeout: .seconds(2)) { done.count == 1 }
+            let (cancelled, end) = await write.value
+            assertTrue(cancelled, "Active ingestion reports CancellationError")
+            samples["ingestion_rollback", default: []].append((end - start) * 1000)
+            assertEqual(snapshot(), before, "Rollback preserves articles, read/save timestamps, identities, enrichment, feed metadata and FTS")
+            assertEqual(try await db.counts().total, 1, "No cancelled batch row is committed")
+            assertEqual(try await db.searchArticles(query: "Originalbodytoken").map(\.id), [original.id], "Original searchable text survives cancellation")
+            assertTrue(try await db.searchArticles(query: "Rolledbackbodytoken").isEmpty, "Cancelled searchable text is absent")
+        }
+        assertEqual(sqlite3_exec(observer, "INSERT INTO articles_fts(articles_fts) VALUES('integrity-check');", nil, nil, nil), SQLITE_OK, "FTS remains valid after repeated rollbacks")
+        await db.close()
+
+        let clustering = DatabaseEngine(path: directory.appendingPathComponent("clustering.sqlite3").path)
+        try await clustering.open()
+        let articles = (0..<400).map { index in
+            FeedArticle(storedID: "cancel-cluster-\(index)", title: "Research observatory reports measurement \(index)",
+                        link: "https://cancel.example/cluster/\(index)", guid: "cancel-cluster-\(index)",
+                        description: "The research observatory published independent measurement results for project \(index).",
+                        pubDate: now, source: "Publisher \(index % 20)")
+        }
+        try await clustering.upsertArticles(articles)
+        try await clustering.markRead(articleId: articles[0].id, isRead: true)
+        try await clustering.setSaved(articleId: articles[0].id, isSaved: true)
+        var pendingAtCancel: [Int] = []
+        for _ in 0..<sampleCount {
+            try await clustering.markEventMatchProcessed(articles.map(\.id), matcherVersion: 0, at: now)
+            let done = SocketObservation()
+            let work = Task.detached { () -> (Bool, Double) in
+                let cancelled: Bool
+                do {
+                    _ = try await EventClusterer.run(in: clustering, now: now)
+                    cancelled = false
+                } catch is CancellationError { cancelled = true }
+                catch { assertTrue(false, "Unexpected clustering error: \(error)"); cancelled = false }
+                let end = ProcessInfo.processInfo.systemUptime
+                done.recordText("finished")
+                return (cancelled, end)
+            }
+            await eventually("Clustering commits real progress before cancellation") {
+                let count = try? await clustering.pendingEventMatchRows(activeSince: now.addingTimeInterval(-72 * 3600),
+                    matcherVersion: EventMatcher.version, limit: 400).count
+                return count.map { $0 < 400 } ?? false
+            }
+            let remaining = try await clustering.pendingEventMatchRows(activeSince: now.addingTimeInterval(-72 * 3600),
+                matcherVersion: EventMatcher.version, limit: 400).count
+            assertTrue(remaining > 0 && remaining < 400, "Clustering has completed some work and still has pending rows")
+            assertEqual(done.count, 0, "Clustering is active when cancelled")
+            pendingAtCancel.append(remaining)
+            let start = ProcessInfo.processInfo.systemUptime
+            work.cancel()
+            await eventually("Active clustering cancels within its deadline", timeout: .seconds(2)) { done.count == 1 }
+            let (cancelled, end) = await work.value
+            assertTrue(cancelled, "Active clustering reports CancellationError")
+            samples["clustering", default: []].append((end - start) * 1000)
+            assertEqual(try await clustering.counts().total, 400, "Cancellation never deletes source articles")
+            assertTrue(try await clustering.isRead(articleId: articles[0].id), "Clustering cancellation preserves read state")
+            assertTrue(try await clustering.isSaved(articleId: articles[0].id), "Clustering cancellation preserves saved state")
+        }
+        let resumed = try await EventClusterer.run(in: clustering, now: now)
+        assertTrue(resumed.processed > 0, "A later pass resumes cancelled work")
+        assertTrue(try await clustering.pendingEventMatchRows(activeSince: now.addingTimeInterval(-72 * 3600),
+            matcherVersion: EventMatcher.version, limit: 1).isEmpty, "Resumed clustering drains remaining rows")
+        assertEqual(try await EventClusterer.run(in: clustering, now: now).processed, 0, "The resumed archive is not recomputed")
+        await clustering.close()
+        let report: [String: Any] = ["samples_ms": samples, "samples_per_operation": sampleCount, "ingestion_batch_rows": batch.count,
+            "ingestion_body_characters": body.count, "wal_spill_threshold_bytes": 1_048_576,
+            "clustering_library_rows": articles.count, "clustering_pending_at_cancel": pendingAtCancel,
+            "sqlite_version": String(cString: sqlite3_libversion())]
+        print("ACTIVE_CANCELLATION_REPORT " + String(decoding: try JSONSerialization.data(withJSONObject: report, options: [.sortedKeys]), as: UTF8.self))
     }
 
     static func testEventClustering(fixtureRoot: URL) async throws {
