@@ -18,24 +18,44 @@ struct ArticleListView: View {
     @EnvironmentObject private var savedStories: SavedStoriesManager
     
     @AppStorage("articleGridLayout") private var gridLayout = false
+    @AppStorage("groupsEventCoverage") private var groupsEvents = true
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var focusedArticleID: String? = nil
     @State private var isShortcutsHelpPresented: Bool = false
     
-    @State private var databaseResults: [FeedArticle] = []
+    @State private var buffer = FeedUpdateBuffer()
     @State private var pageRequest = 0
+    @State private var loadedPageRequest = 0
     @State private var cursor: ArticleQueryCursor?
     @State private var loadedQuery: String?
-    @State private var loadedRevision: UInt64?
     @State private var queryRunID = UUID()
     @State private var isLoadingPage = false
     @State private var hasMoreResults = false
+    @State private var pendingHasMore = false
     @State private var queryError: String?
+    @State private var expandedEvents: Set<String> = []
+    @State private var isScrolledAway = false
+    @State private var isPointerInList = false
+    /// Set by the reader's own regrouping actions, which apply at once.
+    @State private var appliesNextUpdate = false
 
     private var queryIdentity: String {
         "\(selectedTopic ?? "Today"):\(searchText):\(themeManager.autoHideRead)"
     }
 
-    var filteredArticles: [FeedArticle] { databaseResults }
+    var filteredArticles: [FeedArticle] { buffer.displayed.articles }
+
+    /// Saved Stories and History list exactly what the reader kept or opened.
+    private var groupingMode: FeedGroupingMode {
+        groupsEvents && selectedTopic != "Saved Stories" && selectedTopic != "History" ? .events : .publications
+    }
+
+    private var entries: [FeedEntry] { buffer.displayed.entries(groupingMode) }
+
+    /// The reader is looking at the list or an article from it, so cards must not move underneath.
+    private var isHoldingList: Bool {
+        !appliesNextUpdate && (!articlePath.isEmpty || isScrolledAway || isPointerInList || focusedArticleID != nil)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -62,12 +82,29 @@ struct ArticleListView: View {
                         }.padding()
                     }
                 }
-                .safeAreaInset(edge: .top, spacing: 0) { headerBar }
+                .safeAreaInset(edge: .top, spacing: 0) {
+                    VStack(spacing: 0) {
+                        headerBar
+                        if buffer.pending != nil { updatesButton(proxy: proxy) }
+                    }
+                }
+                .onScrollGeometryChange(for: Bool.self) { geometry in
+                    geometry.contentOffset.y + geometry.contentInsets.top > 24
+                } action: { _, scrolled in
+                    isScrolledAway = scrolled
+                }
+                .onHover { isPointerInList = $0 }
+                .onChange(of: buffer.newEntryCount(groupingMode)) { previous, count in
+                    if count > previous { announceUpdates(count) }
+                }
                 .softScrollEdge()
                 .focusable()
                 .focusEffectDisabled()
                 .onKeyPress { press in
                     handleKeyPress(press: press, proxy: proxy)
+                }
+                .onReceive(NotificationCenter.default.publisher(for: .showFeedUpdatesCommand)) { _ in
+                    if articlePath.isEmpty { applyPendingUpdates(proxy: proxy) }
                 }
                 .onReceive(NotificationCenter.default.publisher(for: .nextArticleCommand)) { _ in
                     if articlePath.isEmpty { navigateList(offset: 1, proxy: proxy) }
@@ -102,48 +139,120 @@ struct ArticleListView: View {
                 }
             }
         }
-        .task(id: "\(queryIdentity):\(articleStore.revision):\(pageRequest)") {
+        .task(id: "\(queryIdentity):\(articleStore.revision):\(articleStore.eventRevision):\(pageRequest)") {
             let identity = queryIdentity
             let runID = UUID()
             queryRunID = runID
-            let replacesPage = cursor == nil || loadedQuery != identity || loadedRevision != articleStore.revision
-            if loadedQuery != identity { databaseResults = [] }
-            if replacesPage {
+            let isNewQuery = loadedQuery != identity
+            let isPaging = !isNewQuery && pageRequest != loadedPageRequest && cursor != nil
+            loadedPageRequest = pageRequest
+            if isNewQuery {
+                buffer = FeedUpdateBuffer()
                 cursor = nil
                 hasMoreResults = false
+                expandedEvents = []
                 loadedQuery = identity
-                loadedRevision = articleStore.revision
             }
             queryError = nil
             isLoadingPage = true
             defer { if queryRunID == runID { isLoadingPage = false } }
             do {
-                if cursor == nil { try await Task.sleep(for: .milliseconds(180)) }
-                let fetched: [FeedArticle]
-                if !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    fetched = try await articleStore.database.searchArticles(query: searchText, limit: 201, after: cursor)
-                } else {
-                    let topic = selectedTopic ?? "Today"
-                    let read: Bool?
-                    if topic == "History" { read = true }
-                    else if topic == "Unread" || (themeManager.autoHideRead && topic != "Saved Stories") { read = false }
-                    else { read = nil }
-                    fetched = try await articleStore.database.fetchArticles(
-                        section: topic, isRead: read, isSaved: topic == "Saved Stories" ? true : nil,
-                        limit: 201, after: cursor)
-                }
+                if !isPaging { try await Task.sleep(for: .milliseconds(180)) }
+                let fetched = try await fetchPage(after: isPaging ? cursor : nil)
                 try Task.checkCancellation()
                 let page = Array(fetched.prefix(200))
-                if replacesPage { databaseResults = page }
-                else { databaseResults.append(contentsOf: page) }
-                cursor = page.last.map(ArticleQueryCursor.init)
-                hasMoreResults = fetched.count > 200
+                let listed = isPaging ? buffer.displayed.articles + page : page
+                let events = try await articleStore.eventFeedSummaries(for: listed.map(\.id))
+                try Task.checkCancellation()
+                let morePages = fetched.count > 200
+                if isPaging {
+                    buffer.append(page, events: events)
+                    cursor = buffer.displayed.articles.last.map(ArticleQueryCursor.init)
+                    hasMoreResults = morePages
+                } else if isNewQuery {
+                    buffer.replace(with: FeedSnapshot(articles: page, events: events))
+                    cursor = page.last.map(ArticleQueryCursor.init)
+                    hasMoreResults = morePages
+                } else {
+                    let snapshot = FeedSnapshot(articles: page, events: events)
+                    let holding = isHoldingList
+                    appliesNextUpdate = false
+                    let result = withAnimation(reduceMotion ? nil : AppMotion.state) {
+                        buffer.receive(snapshot, holding: holding, mode: groupingMode, hasMore: morePages)
+                    }
+                    switch result {
+                    case .replaced:
+                        cursor = page.last.map(ArticleQueryCursor.init)
+                        hasMoreResults = morePages
+                    case .refreshedInPlace:
+                        break
+                    case .waiting:
+                        pendingHasMore = morePages
+                    }
+                }
             } catch is CancellationError {
                 // A newer query owns the results.
             } catch {
                 if queryRunID == runID { queryError = "Could not load articles. Please try again." }
             }
         }
+    }
+
+    private func fetchPage(after pageCursor: ArticleQueryCursor?) async throws -> [FeedArticle] {
+        if !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return try await articleStore.database.searchArticles(query: searchText, limit: 201, after: pageCursor)
+        }
+        let topic = selectedTopic ?? "Today"
+        let read: Bool?
+        if topic == "History" { read = true }
+        else if topic == "Unread" || (themeManager.autoHideRead && topic != "Saved Stories") { read = false }
+        else { read = nil }
+        return try await articleStore.database.fetchArticles(
+            section: topic, isRead: read, isSaved: topic == "Saved Stories" ? true : nil,
+            limit: 201, after: pageCursor)
+    }
+
+    // MARK: - Queued Updates
+
+    private func updatesButton(proxy: ScrollViewProxy) -> some View {
+        let count = buffer.newEntryCount(groupingMode)
+        return Button {
+            applyPendingUpdates(proxy: proxy)
+        } label: {
+            Label(count > 0 ? "\(count) new \(count == 1 ? "story" : "stories")" : "Show updates", systemImage: "arrow.up")
+                .font(AppTypography.label)
+                .foregroundStyle(AppColor.accent)
+                .padding(.horizontal, AppSpacing.sm)
+                .padding(.vertical, 6)
+                .background(Capsule().fill(AppColor.accent.opacity(0.14)))
+        }
+        .buttonStyle(.plain)
+        .padding(.bottom, AppSpacing.xs)
+        .help("Show the latest stories (U). The list keeps its place until you do.")
+        .accessibilityHint("Moves to the top of the updated list")
+    }
+
+    private func applyPendingUpdates(proxy: ScrollViewProxy) {
+        guard buffer.pending != nil else { return }
+        withAnimation(reduceMotion ? nil : AppMotion.state) {
+            buffer.applyPending()
+        }
+        cursor = buffer.displayed.articles.last.map(ArticleQueryCursor.init)
+        hasMoreResults = pendingHasMore
+        if let first = entries.first {
+            withAnimation(reduceMotion ? nil : AppMotion.quick) {
+                proxy.scrollTo(first.id, anchor: .top)
+            }
+        }
+    }
+
+    private func announceUpdates(_ count: Int) {
+        guard let application = NSApp else { return }
+        let message = count == 1 ? "1 new story available" : "\(count) new stories available"
+        NSAccessibility.post(element: application, notification: .announcementRequested, userInfo: [
+            .announcement: message,
+            .priority: NSAccessibilityPriorityLevel.medium.rawValue
+        ])
     }
 
     // MARK: - Header Bar
@@ -167,13 +276,24 @@ struct ArticleListView: View {
                 Text(searchText.isEmpty ? (selectedTopic ?? "Today") : "Search")
                     .font(AppTypography.display)
                     .foregroundStyle(AppColor.primaryText)
-                Text("\(filteredArticles.count) stories · Your personal edition")
+                Text("\(entries.count) stories · Your personal edition")
                     .font(AppTypography.caption)
                     .foregroundStyle(AppColor.secondaryText)
             }
             
             Spacer()
             
+            Toggle(isOn: $groupsEvents) {
+                Image(systemName: "square.stack.3d.up")
+                    .font(.system(size: 14, weight: .medium))
+            }
+            .toggleStyle(.button)
+            .buttonStyle(.plain)
+            .foregroundColor(groupsEvents ? AppColor.accent : AppColor.secondaryText)
+            .help(groupsEvents ? "Showing one card per event. Show individual publications (G)" : "Showing individual publications. Group coverage of the same event (G)")
+            .accessibilityLabel("Group Coverage by Event")
+            .accessibilityValue(groupsEvents ? "On" : "Off")
+
             Picker("Article layout", selection: $gridLayout) {
                 Image(systemName: "list.bullet").tag(false)
                     .accessibilityLabel("List")
@@ -245,12 +365,38 @@ struct ArticleListView: View {
     }
 
     private var articleCards: some View {
-        ForEach(filteredArticles) { article in
-            ArticleCardView(article: article, isSelected: article.id == focusedArticleID, compact: !gridLayout) {
-                openArticle(article)
+        ForEach(entries) { entry in
+            switch entry {
+            case .article(let article):
+                ArticleCardView(article: article, isSelected: article.id == focusedArticleID, compact: !gridLayout) {
+                    openArticle(article)
+                }
+                .id(entry.id)
+            case .event(let summary, let representative, _):
+                EventCardView(
+                    representative: representative,
+                    summary: summary,
+                    isSelected: representative.id == focusedArticleID,
+                    compact: !gridLayout,
+                    isExpanded: expansionBinding(summary.eventID),
+                    openRepresentative: { openEvent(summary.eventID, article: representative) },
+                    openMember: { member, members in
+                        openEvent(summary.eventID, article: member, context: members)
+                    },
+                    separate: { member in separate(member, from: summary.eventID) }
+                )
+                .id(entry.id)
             }
-            .id(article.id)
         }
+    }
+
+    private func expansionBinding(_ eventID: String) -> Binding<Bool> {
+        Binding(
+            get: { expandedEvents.contains(eventID) },
+            set: { isExpanded in
+                if isExpanded { expandedEvents.insert(eventID) } else { expandedEvents.remove(eventID) }
+            }
+        )
     }
 
     // MARK: - Empty States & Diagnostics
@@ -421,6 +567,15 @@ struct ArticleListView: View {
             } else if press.characters == "r" {
                 refreshFeeds()
                 return .handled
+            } else if press.characters == "e" {
+                toggleFocusedEventSources()
+                return .handled
+            } else if press.characters == "g" {
+                groupsEvents.toggle()
+                return .handled
+            } else if press.characters == "u" {
+                applyPendingUpdates(proxy: proxy)
+                return .handled
             } else if press.characters == "o" {
                 if let id = focusedArticleID, let art = filteredArticles.first(where: { $0.id == id }),
                    let url = URL(string: art.link) {
@@ -433,37 +588,65 @@ struct ArticleListView: View {
     }
     
     private func navigateList(offset: Int, proxy: ScrollViewProxy) {
-        guard !filteredArticles.isEmpty else { return }
+        let listed = entries
+        guard !listed.isEmpty else { return }
         let currentIndex: Int
-        if let currentID = focusedArticleID, let idx = filteredArticles.firstIndex(where: { $0.id == currentID }) {
+        if let currentID = focusedArticleID, let idx = listed.firstIndex(where: { $0.id == currentID }) {
             currentIndex = idx
         } else {
-            currentIndex = offset > 0 ? -1 : filteredArticles.count
+            currentIndex = offset > 0 ? -1 : listed.count
         }
-        let targetIndex = max(0, min(filteredArticles.count - 1, currentIndex + offset))
-        let targetArticle = filteredArticles[targetIndex]
-        focusedArticleID = targetArticle.id
-        withAnimation(AppMotion.quick) {
-            proxy.scrollTo(targetArticle.id, anchor: .center)
+        let targetIndex = max(0, min(listed.count - 1, currentIndex + offset))
+        let target = listed[targetIndex]
+        focusedArticleID = target.id
+        withAnimation(reduceMotion ? nil : AppMotion.quick) {
+            proxy.scrollTo(target.id, anchor: .center)
         }
     }
     
     private func openFocusedArticle() {
-        let articleToOpen: FeedArticle?
-        if let id = focusedArticleID, let art = filteredArticles.first(where: { $0.id == id }) {
-            articleToOpen = art
-        } else {
-            articleToOpen = filteredArticles.first
+        let listed = entries
+        guard let entry = listed.first(where: { $0.id == focusedArticleID }) ?? listed.first else { return }
+        switch entry {
+        case .article(let article): openArticle(article)
+        case .event(let summary, let representative, _): openEvent(summary.eventID, article: representative)
         }
-        guard let article = articleToOpen else { return }
-        openArticle(article)
     }
 
-    private func openArticle(_ article: FeedArticle) {
-        let context = filteredArticles
+    private func toggleFocusedEventSources() {
+        guard let entry = entries.first(where: { $0.id == focusedArticleID }),
+              case .event(let summary, _, _) = entry else { return }
+        let binding = expansionBinding(summary.eventID)
+        withAnimation(reduceMotion ? nil : AppMotion.state) { binding.wrappedValue.toggle() }
+        if binding.wrappedValue {
+            let eventID = summary.eventID
+            Task { await articleStore.markEventSeen(eventID) }
+        }
+    }
+
+    private func openArticle(_ article: FeedArticle, context: [FeedArticle]? = nil) {
+        let context = context ?? filteredArticles
         focusedArticleID = article.id
         readManager.markAsRead(article.id)
         articlePath.append(FeedArticleWrap(article: article, contextArticles: context))
+    }
+
+    /// Opening a publication from an event records the event version as seen; it marks only the
+    /// opened article read.
+    private func openEvent(_ eventID: String, article: FeedArticle, context: [FeedArticle]? = nil) {
+        Task { await articleStore.markEventSeen(eventID) }
+        openArticle(article, context: context)
+    }
+
+    private func separate(_ article: FeedArticle, from eventID: String) {
+        Task {
+            appliesNextUpdate = true
+            if await articleStore.separateArticle(article.id, fromEvent: eventID) {
+                feedManager.clusterEventsInBackground()
+            } else {
+                appliesNextUpdate = false
+            }
+        }
     }
     
     private func refreshFeeds() {
@@ -500,6 +683,9 @@ struct ArticleListView: View {
                 shortcutRow("M", "Toggle read / unread")
                 shortcutRow("S", "Bookmark story")
                 shortcutRow("O", "Open in browser")
+                shortcutRow("E", "Show or hide event sources")
+                shortcutRow("G", "Group by event / publications")
+                shortcutRow("U", "Show queued updates")
                 shortcutRow("W", "Toggle Reader / Web view")
             }
             

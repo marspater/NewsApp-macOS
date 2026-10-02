@@ -14,6 +14,7 @@ Build on Apple silicon with Xcode 27 selected. The deployment target remains mac
 ./test.sh                         # Full regressions; also run by the commit hook
 ./test.sh --story-regressions     # Focused offline identity, reader and persistence checks
 ./test.sh --performance-baseline  # Opt-in optimized synthetic core-service timings
+NEWS_EVENT_CORPUS=corpus.json ./test.sh --event-corpus # Event clustering precision/recall on a local labeled corpus (#102)
 ./build.sh                        # arm64 app with ad-hoc verification signing
 NEWS_LIVE_READER_CHECK=1 ./test.sh # Optional controlled-network and publisher checks
 NEWS_LIVE_CATALOG_CHECK=1 ./test.sh # Optional: fetch every catalog feed through the app's own networking and parsers

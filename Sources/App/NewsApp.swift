@@ -12,6 +12,7 @@ extension Notification.Name {
     static let toggleSaveCommand = Notification.Name("toggleSaveCommand")
     static let openInBrowserCommand = Notification.Name("openInBrowserCommand")
     static let toggleViewModeCommand = Notification.Name("toggleViewModeCommand")
+    static let showFeedUpdatesCommand = Notification.Name("showFeedUpdatesCommand")
 }
 
 @main
@@ -102,6 +103,10 @@ struct NewsApp: App {
                     NotificationCenter.default.post(name: .prevArticleCommand, object: nil)
                 }
                 .keyboardShortcut("k", modifiers: .command)
+
+                Button("Show Queued Updates") {
+                    NotificationCenter.default.post(name: .showFeedUpdatesCommand, object: nil)
+                }
 
                 Divider()
 

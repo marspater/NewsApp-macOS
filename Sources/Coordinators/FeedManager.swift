@@ -44,6 +44,10 @@ class FeedManager: NSObject, ObservableObject {
     private var refreshTask: Task<[FeedArticle], Never>?
     private var refreshRunID: UUID?
     private var enrichmentTask: Task<Void, Never>?
+    /// Event clustering after collection; one pass at a time, never part of the refresh itself.
+    private var clusteringTask: Task<Void, Never>?
+    private var clusteringRunID: UUID?
+    private var needsClusteringPass = false
     private var backgroundTimer: Timer?
     private var backgroundActivity: NSBackgroundActivityScheduler?
 
@@ -203,6 +207,8 @@ class FeedManager: NSObject, ObservableObject {
                 let loaded = try await self.articleStore.fetchArticles()
                 self.articles = loaded
                 await self.reloadFeedHealth()
+                // Catch up on articles a previous session collected but did not cluster.
+                self.clusterEventsInBackground()
             } catch {
                 self.logger.error("Failed to load cached articles: \(error.localizedDescription)")
             }
@@ -276,6 +282,9 @@ class FeedManager: NSObject, ObservableObject {
         cancelRefresh()
         enrichmentTask?.cancel()
         enrichmentTask = nil
+        clusteringTask?.cancel()
+        clusteringTask = nil
+        clusteringRunID = nil
         isAnyFeedLoading = false
         let queue = enrichmentQueue
         Task { await queue.cancelAll(reason: .user) }
@@ -303,6 +312,7 @@ class FeedManager: NSObject, ObservableObject {
         isAnyFeedLoading = false
 
         guard !isStopped else { return }
+        clusterEventsInBackground()
         if appSettings.notificationsEnabled && !newArticles.isEmpty {
             await notifyBatch(newArticles, appSettings.notificationMode)
         }
@@ -364,6 +374,54 @@ class FeedManager: NSObject, ObservableObject {
         }
 
         return newArticles
+    }
+
+    // MARK: - Event Clustering
+
+    /// Groups new and changed articles into events once a refresh has published them. The pass runs
+    /// off the main actor with cancellation; a request during a pass schedules exactly one more.
+    func clusterEventsInBackground() {
+        guard !isStopped else { return }
+        guard clusteringTask == nil else {
+            needsClusteringPass = true
+            return
+        }
+        let database = articleStore.database
+        let runID = UUID()
+        clusteringRunID = runID
+        clusteringTask = Task { [weak self] in
+            repeat {
+                self?.needsClusteringPass = false
+                let work = Task.detached(priority: .utility) {
+                    try await EventClusterer.run(in: database)
+                }
+                let result = await withTaskCancellationHandler {
+                    await work.result
+                } onCancel: {
+                    work.cancel()
+                }
+                guard let self, self.clusteringRunID == runID, !Task.isCancelled else { return }
+                switch result {
+                case .success(let report):
+                    if !report.changedEvents.isEmpty { self.articleStore.noteEventsChanged() }
+                case .failure(let error):
+                    if !(error is CancellationError) {
+                        self.logger.error("Event clustering failed: \(error.localizedDescription)")
+                    }
+                }
+            } while self?.needsClusteringPass == true && !Task.isCancelled
+            guard let self, self.clusteringRunID == runID else { return }
+            self.clusteringTask = nil
+            self.clusteringRunID = nil
+        }
+    }
+
+    /// Resolves once no clustering pass is running or scheduled.
+    func waitForEventClustering() async {
+        while let task = clusteringTask {
+            await task.value
+            if clusteringTask == task { return }
+        }
     }
 
     // MARK: - Background Enrichment

@@ -502,6 +502,46 @@ actor DatabaseEngine {
                 throw error
             }
         }
+        if version < 14 {
+            try beginTransaction()
+            do {
+                try Task.checkCancellation()
+                // Matching progress, the user's "different events" decisions and the event version a
+                // reader has seen. A changed title or description makes the article pending again.
+                try executeSimple("""
+                CREATE TABLE IF NOT EXISTS event_match_state (
+                    article_id TEXT PRIMARY KEY REFERENCES articles(id) ON DELETE CASCADE,
+                    matcher_version INTEGER NOT NULL,
+                    processed_at REAL NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS event_exclusions (
+                    article_id TEXT NOT NULL REFERENCES articles(id) ON DELETE CASCADE,
+                    other_article_id TEXT NOT NULL REFERENCES articles(id) ON DELETE CASCADE,
+                    created_at REAL NOT NULL,
+                    PRIMARY KEY (article_id, other_article_id),
+                    CHECK (article_id < other_article_id)
+                );
+                CREATE INDEX IF NOT EXISTS idx_event_exclusions_other ON event_exclusions(other_article_id);
+                CREATE TABLE IF NOT EXISTS event_state (
+                    event_id TEXT PRIMARY KEY REFERENCES events(id) ON DELETE CASCADE,
+                    seen_version INTEGER NOT NULL,
+                    seen_at REAL NOT NULL
+                );
+                DROP TRIGGER IF EXISTS trg_articles_event_rematch;
+                CREATE TRIGGER trg_articles_event_rematch AFTER UPDATE OF title, description ON articles
+                WHEN old.title IS NOT new.title OR old.description IS NOT new.description
+                BEGIN
+                    DELETE FROM event_match_state WHERE article_id = old.id;
+                END;
+                """)
+                try Task.checkCancellation()
+                try setUserVersion(14)
+                try commitTransaction()
+            } catch {
+                try? rollbackTransaction()
+                throw error
+            }
+        }
     }
     
     private func executeBound(_ sql: String, _ values: [String]) throws {
@@ -1086,6 +1126,7 @@ actor DatabaseEngine {
         after: ArticleQueryCursor? = nil,
         id: String? = nil,
         canonicalURL: String? = nil,
+        eventID: String? = nil,
         includingOriginals: Bool = false
     ) throws -> [FeedArticle] {
         guard let db = db else { throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Database not open"]) }
@@ -1124,6 +1165,10 @@ actor DatabaseEngine {
                 params.append(("text", canonicalURL))
                 params.append(("text", canonicalURL))
             }
+        }
+        if let eventID {
+            query += " AND a.id IN (SELECT article_id FROM event_members WHERE event_id = ?)"
+            params.append(("text", try resolvedEventID(eventID) ?? eventID))
         }
         if let read = isRead {
             query += " AND s.is_read = ?"
@@ -2535,6 +2580,212 @@ actor DatabaseEngine {
             guard let id = row[0], let title = row[1] else { return nil }
             return (id: id, title: title, description: row[2] ?? "", eventID: row[3])
         }
+    }
+
+    // MARK: - Event Matching
+
+    private static let eventMatchColumns = """
+    SELECT a.id, a.title, coalesce(a.description, ''), a.source, \(DatabaseEngine.articleDateOrder), m.event_id
+    FROM articles a
+    LEFT JOIN event_members m ON m.article_id = a.id
+    """
+
+    private func eventMatchRows(_ sql: String, _ values: [EventValue]) throws -> [EventMatchRow] {
+        try eventRows(sql, values).compactMap { row in
+            guard let id = row[0], let title = row[1] else { return nil }
+            return EventMatchRow(id: id, title: title, description: row[2] ?? "", source: row[3] ?? "",
+                                 date: Date(timeIntervalSince1970: row[4].flatMap { Double($0) } ?? 0), eventID: row[5])
+        }
+    }
+
+    /// Visible articles dated after `activeSince` that the current matcher has not processed, oldest
+    /// first. Older articles are never matched again, so the archive is not recomputed.
+    func pendingEventMatchRows(activeSince: Date, matcherVersion: Int, limit: Int) throws -> [EventMatchRow] {
+        try eventMatchRows("""
+        \(Self.eventMatchColumns)
+        LEFT JOIN event_match_state ms ON ms.article_id = a.id
+        WHERE (ms.article_id IS NULL OR ms.matcher_version < ?)
+            AND \(Self.articleDateOrder) >= ? AND \(Self.visibleArticle)
+        ORDER BY \(Self.articleDateOrder), a.id
+        LIMIT ?;
+        """, [.integer(matcherVersion), .real(activeSince.timeIntervalSince1970), .integer(limit)])
+    }
+
+    func eventMatchRows(articleIDs: [String]) throws -> [EventMatchRow] {
+        var rows: [EventMatchRow] = []
+        for start in stride(from: 0, to: articleIDs.count, by: 400) {
+            let slice = Array(articleIDs[start..<min(start + 400, articleIDs.count)])
+            let placeholders = Array(repeating: "?", count: slice.count).joined(separator: ", ")
+            rows += try eventMatchRows("\(Self.eventMatchColumns) WHERE a.id IN (\(placeholders));", slice.map { .text($0) })
+        }
+        return rows
+    }
+
+    /// The live event, its membership version and its members, for a whole-event check.
+    func eventMatchMembers(eventID: String) throws -> (id: String, version: Int, members: [EventMatchRow])? {
+        guard let live = try? liveEvent(eventID) else { return nil }
+        let members = try eventMatchRows("\(Self.eventMatchColumns) WHERE m.event_id = ?;", [.text(live.id)])
+        return (live.id, live.version, members)
+    }
+
+    /// Articles the user marked as a different event from `articleID`.
+    func eventExclusions(of articleID: String) throws -> Set<String> {
+        guard let member = try memberArticleID(articleID) else { return [] }
+        return Set(try eventRows("""
+        SELECT other_article_id FROM event_exclusions WHERE article_id = ?
+        UNION SELECT article_id FROM event_exclusions WHERE other_article_id = ?;
+        """, [.text(member), .text(member)]).compactMap { $0[0] })
+    }
+
+    func markEventMatchProcessed(_ articleIDs: [String], matcherVersion: Int, at date: Date = Date()) throws {
+        try inEventTransaction { () throws -> Void in
+            for articleID in articleIDs {
+                try markMatched(articleID, matcherVersion: matcherVersion, at: date.timeIntervalSince1970)
+            }
+        }
+    }
+
+    private func markMatched(_ articleID: String, matcherVersion: Int, at now: Double) throws {
+        // An article deleted in the meantime has nothing left to mark.
+        try eventRows("""
+        INSERT INTO event_match_state(article_id, matcher_version, processed_at)
+        SELECT ?, ?, ? WHERE EXISTS (SELECT 1 FROM articles WHERE id = ?)
+        ON CONFLICT(article_id) DO UPDATE SET matcher_version = excluded.matcher_version, processed_at = excluded.processed_at;
+        """, [.text(articleID), .integer(matcherVersion), .real(now), .text(articleID)])
+    }
+
+    private func excluded(_ articleID: String, from others: [String]) throws -> Bool {
+        for other in others where other != articleID {
+            let (low, high) = articleID < other ? (articleID, other) : (other, articleID)
+            if try !eventRows("SELECT 1 FROM event_exclusions WHERE article_id = ? AND other_article_id = ?;", [.text(low), .text(high)]).isEmpty {
+                return true
+            }
+        }
+        return false
+    }
+
+    /// Applies a matcher decision only if the state it was made against still holds: the target event
+    /// keeps the expected version, new-event partners are still unassigned and no pair is excluded.
+    /// Otherwise nothing changes and the article stays pending for the next pass.
+    func applyEventMatch(_ articleID: String, _ decision: EventMatchDecision, matcherVersion: Int, at date: Date = Date()) throws -> EventMatchOutcome {
+        try inEventTransaction { () throws -> EventMatchOutcome in
+            let now = date.timeIntervalSince1970
+            guard let member = try memberArticleID(articleID) else { return .conflict }
+            switch decision {
+            case .join(let eventID, let expectedVersion):
+                guard try resolvedEventID(eventID) == eventID, let live = try? liveEvent(eventID),
+                      live.version == expectedVersion else { return .conflict }
+                let members = try eventRows("SELECT article_id FROM event_members WHERE event_id = ?;", [.text(eventID)]).compactMap { $0[0] }
+                guard !(try excluded(member, from: members)) else { return .conflict }
+                if try assignMembers([member], to: eventID, joinedVersion: live.version + 1, at: now) {
+                    try bumpMembershipVersion(eventID, at: now)
+                }
+                try markMatched(member, matcherVersion: matcherVersion, at: now)
+                return .joined(eventID)
+            case .create(let partners):
+                var group = [member]
+                for partner in partners {
+                    guard let resolved = try memberArticleID(partner), !group.contains(resolved),
+                          try eventRows("SELECT 1 FROM event_members WHERE article_id = ?;", [.text(resolved)]).isEmpty,
+                          !(try excluded(resolved, from: group)) else { return .conflict }
+                    group.append(resolved)
+                }
+                guard group.count >= 2 else { return .conflict }
+                let id = try insertEvent(members: group, at: now)
+                for article in group { try markMatched(article, matcherVersion: matcherVersion, at: now) }
+                return .created(id)
+            }
+        }
+    }
+
+    /// "These are different events": takes the article out of the event and records an exclusion
+    /// against every remaining member. Later passes may match it elsewhere, never back with them.
+    @discardableResult
+    func separateArticle(_ articleID: String, fromEvent eventID: String, at date: Date = Date()) throws -> StoryEvent {
+        let id = try inEventTransaction { () throws -> String in
+            let target = try liveEvent(eventID)
+            guard let member = try memberArticleID(articleID) else { throw Self.eventError("Unknown event member article") }
+            let members = try eventRows("SELECT article_id FROM event_members WHERE event_id = ?;", [.text(target.id)]).compactMap { $0[0] }
+            guard members.contains(member) else { throw Self.eventError("The article is not part of this event") }
+            let now = date.timeIntervalSince1970
+            try eventRows("DELETE FROM event_members WHERE article_id = ? AND event_id = ?;", [.text(member), .text(target.id)])
+            try bumpMembershipVersion(target.id, at: now)
+            for other in members where other != member {
+                let (low, high) = member < other ? (member, other) : (other, member)
+                try eventRows("INSERT OR IGNORE INTO event_exclusions(article_id, other_article_id, created_at) VALUES (?, ?, ?);",
+                              [.text(low), .text(high), .real(now)])
+            }
+            try eventRows("DELETE FROM event_match_state WHERE article_id = ?;", [.text(member)])
+            return target.id
+        }
+        return try requireEvent(id)
+    }
+
+    // MARK: - Event Reading State
+
+    /// Records that the reader has seen the event up to `version` (the current version by default,
+    /// never beyond it). Seen versions only grow. Article read and saved state is not touched.
+    @discardableResult
+    func markEventSeen(_ eventID: String, version: Int? = nil, at date: Date = Date()) throws -> Int {
+        try inEventTransaction { () throws -> Int in
+            let live = try liveEvent(eventID)
+            let seen = max(1, min(version ?? live.version, live.version))
+            try eventRows("""
+            INSERT INTO event_state(event_id, seen_version, seen_at) VALUES (?, ?, ?)
+            ON CONFLICT(event_id) DO UPDATE SET seen_version = max(seen_version, excluded.seen_version), seen_at = excluded.seen_at;
+            """, [.text(live.id), .integer(seen), .real(date.timeIntervalSince1970)])
+            return try eventRows("SELECT seen_version FROM event_state WHERE event_id = ?;", [.text(live.id)]).first?[0].flatMap { Int($0) } ?? seen
+        }
+    }
+
+    func eventSeenVersion(_ eventID: String) throws -> Int? {
+        guard let live = try resolvedEventID(eventID) else { return nil }
+        return try eventRows("SELECT seen_version FROM event_state WHERE event_id = ?;", [.text(live)]).first?[0].flatMap { Int($0) }
+    }
+
+    /// Every visible member of the events that hold any of `articleIDs`, newest first, with the
+    /// state a feed card needs. No article text beyond the title is read.
+    func eventFeedSummaries(forArticles articleIDs: [String]) throws -> [EventFeedSummary] {
+        var eventIDs: [String] = []
+        var seen = Set<String>()
+        for start in stride(from: 0, to: articleIDs.count, by: 400) {
+            let slice = Array(articleIDs[start..<min(start + 400, articleIDs.count)])
+            let placeholders = Array(repeating: "?", count: slice.count).joined(separator: ", ")
+            for row in try eventRows("SELECT DISTINCT event_id FROM event_members WHERE article_id IN (\(placeholders));", slice.map { .text($0) }) {
+                if let id = row[0], seen.insert(id).inserted { eventIDs.append(id) }
+            }
+        }
+        var summaries: [EventFeedSummary] = []
+        for start in stride(from: 0, to: eventIDs.count, by: 400) {
+            let slice = Array(eventIDs[start..<min(start + 400, eventIDs.count)])
+            let placeholders = Array(repeating: "?", count: slice.count).joined(separator: ", ")
+            let rows = try eventRows("""
+            SELECT m.event_id, e.membership_version, st.seen_version, a.id, a.source, a.title,
+                   \(Self.articleDateOrder), m.joined_version, s.is_read, s.is_saved
+            FROM event_members m
+            JOIN events e ON e.id = m.event_id
+            JOIN articles a ON a.id = m.article_id
+            JOIN article_state s ON s.article_id = a.id
+            LEFT JOIN event_state st ON st.event_id = m.event_id
+            WHERE m.event_id IN (\(placeholders)) AND \(Self.visibleArticle)
+            ORDER BY m.event_id, \(Self.articleDateOrder) DESC, a.id;
+            """, slice.map { .text($0) })
+            var current: (id: String, version: Int, seen: Int?, members: [EventFeedMember])?
+            for row in rows {
+                guard let eventID = row[0], let articleID = row[3] else { continue }
+                if current?.id != eventID {
+                    if let current { summaries.append(EventFeedSummary(eventID: current.id, membershipVersion: current.version, seenVersion: current.seen, members: current.members)) }
+                    current = (eventID, row[1].flatMap { Int($0) } ?? 1, row[2].flatMap { Int($0) }, [])
+                }
+                current?.members.append(EventFeedMember(
+                    articleID: articleID, source: row[4] ?? "", title: row[5] ?? "",
+                    date: Date(timeIntervalSince1970: row[6].flatMap { Double($0) } ?? 0),
+                    joinedVersion: row[7].flatMap { Int($0) } ?? 1,
+                    isRead: row[8] == "1", isSaved: row[9] == "1"))
+            }
+            if let current { summaries.append(EventFeedSummary(eventID: current.id, membershipVersion: current.version, seenVersion: current.seen, members: current.members)) }
+        }
+        return summaries
     }
 
     /// Drops events left without members unless an overview still refers to them. A forward dies with

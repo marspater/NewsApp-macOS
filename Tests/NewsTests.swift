@@ -164,6 +164,43 @@ actor TestRecorder {
     func record(_ urls: [String]) { batches.append(urls) }
 }
 
+/// Synthetic event control set: one earthquake reported three ways, plus hard negatives (strikes on
+/// different days in one region, two quarterly reports of one company, identical generic headlines).
+/// Invented text, no publisher content.
+enum EventControlSet {
+    static func articles(now: Date, root: URL) -> [(article: FeedArticle, event: String?)] {
+        func item(_ id: String, _ title: String, _ description: String, hoursAgo: Double, source: String, event: String?) -> (article: FeedArticle, event: String?) {
+            (FeedArticle(storedID: id, title: title, link: root.appendingPathComponent("control/\(id)").absoluteString, guid: id,
+                         description: description, pubDate: now.addingTimeInterval(-hoursAgo * 3600), source: source), event)
+        }
+        return [
+            item("quake-1", "Earthquake of magnitude 7 strikes eastern Turkey near Malatya",
+                 "A powerful earthquake of magnitude 7 struck eastern Turkey near the city of Malatya on Monday, damaging buildings and forcing residents into the streets, the disaster agency AFAD said.",
+                 hoursAgo: 6, source: "Wire One", event: "quake"),
+            item("quake-2", "Magnitude 7 earthquake hits eastern Turkey, damaging buildings in Malatya",
+                 "A magnitude 7 earthquake struck eastern Turkey on Monday near Malatya, damaging buildings, the disaster agency AFAD said. Residents fled into the streets.",
+                 hoursAgo: 5, source: "Daily Two", event: "quake"),
+            item("quake-3", "Strong earthquake shakes Malatya in eastern Turkey",
+                 "Buildings were damaged in Malatya after a strong magnitude 7 earthquake struck eastern Turkey on Monday, according to the disaster agency AFAD.",
+                 hoursAgo: 4, source: "Herald Three", event: "quake"),
+            item("strike-monday", "Russian drone strike on Kharkiv kills 3",
+                 "A Russian drone struck an apartment building in Kharkiv late on Monday, killing three people, regional governor Oleh Syniehubov said.",
+                 hoursAgo: 20, source: "Wire One", event: "strike-monday"),
+            item("strike-tuesday", "Russian missile strike on Kharkiv injures 12",
+                 "A Russian missile hit a railway station in Kharkiv on Tuesday afternoon, injuring 12 people, regional governor Oleh Syniehubov said.",
+                 hoursAgo: 2, source: "Daily Two", event: "strike-tuesday"),
+            item("apple-q3", "Apple reports record third-quarter revenue",
+                 "Apple said on Thursday that revenue in its fiscal third quarter rose to a record, led by iPhone sales in China.",
+                 hoursAgo: 8, source: "Wire One", event: "apple-q3"),
+            item("apple-q4", "Apple reports record fourth-quarter revenue",
+                 "Apple said on Thursday that revenue in its fiscal fourth quarter rose to a record, led by iPhone sales in China.",
+                 hoursAgo: 7, source: "Daily Two", event: "apple-q4"),
+            item("live-1", "Live updates: the latest", "Follow our live coverage.", hoursAgo: 3, source: "Wire One", event: nil),
+            item("live-2", "Live updates: the latest", "Follow our live coverage.", hoursAgo: 3, source: "Daily Two", event: nil)
+        ]
+    }
+}
+
 @main
 struct NewsTests {
     static func main() async {
@@ -182,6 +219,15 @@ struct NewsTests {
         let fixtureRoot = fixtureURL.url!
         if CommandLine.arguments.contains("--fts-refresh-regression") {
             try await testUnchangedFTSRefresh()
+            return
+        }
+        if CommandLine.arguments.contains("--event-corpus") {
+            guard let path = ProcessInfo.processInfo.environment["NEWS_EVENT_CORPUS"] else {
+                print("❌ Set NEWS_EVENT_CORPUS to a labeled event corpus JSON file")
+                exit(1)
+            }
+            print("🏃 Evaluating event clustering on \(path)...")
+            try await evaluateEventCorpus(path: path)
             return
         }
         if CommandLine.arguments.contains("--performance-baseline") {
@@ -211,6 +257,12 @@ struct NewsTests {
             try await testHistoricalReconciliation(fixtureRoot: fixtureRoot)
             try await testEventDataModel(fixtureRoot: fixtureRoot)
             try await testEventCandidateGeneration(fixtureRoot: fixtureRoot)
+            try await testEventMatcherRules()
+            try await testEventClustering(fixtureRoot: fixtureRoot)
+            try await testEventReadingState(fixtureRoot: fixtureRoot)
+            await testEventFeedGroupingAndStability()
+            try await testRefreshClustersEvents(fixtureRoot: fixtureRoot)
+            try await testEventCorpusHarness(fixtureRoot: fixtureRoot)
             try await testAuditPersistenceAndRoutingRegressions(fixtureRoot: fixtureRoot)
             try await testUndatedArticleOrdering()
             await testDatabaseEnginePersistence()
@@ -273,6 +325,12 @@ struct NewsTests {
         try await testHistoricalReconciliation(fixtureRoot: fixtureRoot)
         try await testEventDataModel(fixtureRoot: fixtureRoot)
         try await testEventCandidateGeneration(fixtureRoot: fixtureRoot)
+        try await testEventMatcherRules()
+        try await testEventClustering(fixtureRoot: fixtureRoot)
+        try await testEventReadingState(fixtureRoot: fixtureRoot)
+        await testEventFeedGroupingAndStability()
+        try await testRefreshClustersEvents(fixtureRoot: fixtureRoot)
+        try await testEventCorpusHarness(fixtureRoot: fixtureRoot)
         await testFTS5SearchAndOperators()
         try await testUnchangedFTSRefresh()
         await testMigrationCoordinatorAtomicity()
@@ -2245,7 +2303,7 @@ struct NewsTests {
         await cancelledDB.close()
         let db = DatabaseEngine(path: copyPath)
         try await db.open()
-        assertEqual(value(copyPath, "PRAGMA user_version;"), "13", "Copied v4 library upgrades to the current schema")
+        assertEqual(value(copyPath, "PRAGMA user_version;"), "14", "Copied v4 library upgrades to the current schema")
         assertEqual(value(originalPath, "PRAGMA user_version;"), "4", "Original fixture stays untouched")
         assertEqual(try await db.fetchArticles(limit: nil).count, 3, "Migration keeps historical rows")
         assertEqual(value(copyPath, "SELECT read_at FROM article_state WHERE article_id = 'alias-first';"), originalReadAt, "Migration preserves read history timestamp")
@@ -2416,7 +2474,7 @@ struct NewsTests {
         assertEqual(value(failure, "SELECT is_saved FROM article_state WHERE article_id='historical-a';"), "0", "Injected failure rolls back survivor state union")
         assertEqual(value(failure, "SELECT article_id FROM article_aliases WHERE value='observed-variant-b';"), "historical-b", "Injected failure preserves old aliases")
         try await migrated.open()
-        assertEqual(value(copy, "PRAGMA user_version;"), "13", "Copied library upgrades to the current schema")
+        assertEqual(value(copy, "PRAGMA user_version;"), "14", "Copied library upgrades to the current schema")
         assertEqual(value(path, "PRAGMA user_version;"), "8", "Original fixture remains untouched")
         assertEqual(try await migrated.fetchArticles(limit: nil).count, 6, "Only confident same-URL text copies are hidden")
         assertEqual(try await migrated.fetchArticles(limit: nil, includingOriginals: true).count, 8, "Every stored original remains reachable")
@@ -3129,7 +3187,7 @@ struct NewsTests {
         await creator.close()
         var handle: OpaquePointer?
         assertEqual(sqlite3_open(path, &handle), SQLITE_OK, "Open v11 event fixture")
-        assertEqual(sqlite3_exec(handle, "DROP TABLE event_members; DROP TABLE events; PRAGMA user_version = 11;", nil, nil, nil), SQLITE_OK, "Reconstruct a v11 library")
+        assertEqual(sqlite3_exec(handle, "DROP TRIGGER trg_articles_event_rematch; DROP TABLE event_state; DROP TABLE event_exclusions; DROP TABLE event_match_state; DROP TABLE event_members; DROP TABLE events; PRAGMA user_version = 11;", nil, nil, nil), SQLITE_OK, "Reconstruct a v11 library")
         sqlite3_close(handle)
         try FileManager.default.copyItem(atPath: path, toPath: copy)
         try FileManager.default.copyItem(atPath: path, toPath: cancelledPath)
@@ -3145,7 +3203,7 @@ struct NewsTests {
 
         let db = DatabaseEngine(path: copy)
         try await db.open()
-        assertEqual(value(copy, "PRAGMA user_version;"), "13", "Copied v11 library upgrades to the event schema")
+        assertEqual(value(copy, "PRAGMA user_version;"), "14", "Copied v11 library upgrades to the event schema")
         assertEqual(value(path, "PRAGMA user_version;"), "11", "Original v11 fixture stays untouched")
         assertEqual(try await db.fetchArticles(limit: nil).count, 5, "Event migration keeps every article")
         assertTrue(try await db.isRead(articleId: "event-a"), "Event migration keeps read state")
@@ -3268,6 +3326,455 @@ struct NewsTests {
         assertTrue(try await EventCandidateFinder.candidates(for: target, in: db, policy: narrow, now: now).isEmpty, "A zero limit reads nothing")
         _ = try await EventCandidateFinder.candidates(for: article("hostile", hostile.terms.joined(separator: " "), "", hoursAgo: 0), in: db, now: now)
         await db.close()
+    }
+
+    static func testEventMatcherRules() async throws {
+        print("  - Testing conservative event matching: who/what/where/when, conflicts and whole-event compatibility...")
+        let now = Date()
+        func features(_ anchors: Set<String>, _ keywords: Set<String>, hours: Double = 0, places: Set<String> = [],
+                      periods: Set<String> = [], weekdays: Set<String> = [], numbers: Set<String> = [],
+                      language: String? = "en") -> EventFeatures {
+            EventFeatures(language: language, organizations: anchors, places: places, keywords: keywords,
+                          date: now.addingTimeInterval(hours * 3600), titleNumbers: numbers, periods: periods, weekdays: weekdays)
+        }
+        let quake = features(["afad"], ["earthquake", "magnitude", "damage", "building", "eastern"], places: ["malatya"])
+        let quakeLater = features(["afad"], ["earthquake", "magnitude", "damage", "resident", "eastern"], hours: 2, places: ["malatya", "turkey"])
+        let pair = EventMatcher.assess(quake, quakeLater)
+        assertTrue(pair.isMatch, "Shared names and places, shared action terms and close times match")
+        assertEqual(pair.conflict, nil, "A matching pair has no contradicting facts")
+        assertEqual(EventMatcher.assess(quakeLater, quake), pair, "Matching is symmetric")
+
+        let wordingOnly = features([], ["earthquake", "magnitude", "damage", "building", "eastern"], hours: 1)
+        assertFalse(EventMatcher.assess(quake, wordingOnly).isMatch, "Similar wording without a shared name or place is not enough")
+
+        let thirdQuarter = features(["apple"], ["revenue", "record", "iphone", "sale"], periods: ["q3"])
+        let fourthQuarter = features(["apple"], ["revenue", "record", "iphone", "sale"], hours: 1, periods: ["q4"])
+        assertEqual(EventMatcher.assess(thirdQuarter, fourthQuarter).conflict, .period, "Quarterly reports of one company are different events")
+        assertFalse(EventMatcher.assess(thirdQuarter, fourthQuarter).isMatch, "A period conflict never matches")
+
+        let mondayStrike = features(["syniehubov"], ["drone", "strike", "apartment", "kill"], places: ["kharkiv"], weekdays: ["monday"])
+        let tuesdayStrike = features(["syniehubov"], ["drone", "strike", "apartment", "kill"], hours: 10, places: ["kharkiv"], weekdays: ["tuesday"])
+        assertEqual(EventMatcher.assess(mondayStrike, tuesdayStrike).conflict, .weekday, "Strikes on different days in one region are different events")
+        let threeKilled = features(["syniehubov"], ["drone", "strike", "kill"], places: ["kharkiv"], numbers: ["3"])
+        let twelveHurt = features(["syniehubov"], ["drone", "strike", "kill"], hours: 1, places: ["kharkiv"], numbers: ["12"])
+        assertEqual(EventMatcher.assess(threeKilled, twelveHurt).conflict, .titleNumbers, "Different headline figures are kept apart")
+        let odesa = features(["navy"], ["storm", "flood", "coast"], places: ["odesa"])
+        let gdansk = features(["navy"], ["storm", "flood", "coast"], hours: 1, places: ["gdansk"])
+        assertEqual(EventMatcher.assess(odesa, gdansk).conflict, .places, "The same kind of event in different places is not one event")
+        let german = features(["afad"], quake.keywords, places: ["malatya"], language: "de")
+        assertEqual(EventMatcher.assess(quake, german).conflict, .language, "Languages are not compared directly")
+        let late = features(["afad"], quake.keywords, hours: 40, places: ["malatya"])
+        assertEqual(EventMatcher.assess(quake, late).conflict, .timeGap, "Reports far apart in time never match")
+
+        let followUpTerms: Set<String> = ["earthquake", "damage", "rescue", "tent", "camp", "aid", "shelter", "winter"]
+        assertTrue(EventMatcher.assess(quake, features(["afad"], followUpTerms, hours: 2, places: ["malatya"])).isMatch,
+                   "Moderate overlap matches when reports are close in time")
+        assertFalse(EventMatcher.assess(quake, features(["afad"], followUpTerms, hours: 20, places: ["malatya"])).isMatch,
+                    "Reports half a day apart need stronger agreement on what happened")
+
+        // A≈B and B≈C while A contradicts C: C cannot join an event that holds A and B.
+        let a = features(["afad"], ["earthquake", "magnitude", "damage", "building"], places: ["malatya"], weekdays: ["monday"])
+        let b = features(["afad"], ["earthquake", "magnitude", "damage", "building", "aid", "rescue", "tent"], hours: 1, places: ["malatya"])
+        let c = features(["afad"], ["aid", "rescue", "tent", "donation"], hours: 2, places: ["malatya"], weekdays: ["tuesday"])
+        assertTrue(EventMatcher.assess(a, b).isMatch && EventMatcher.assess(b, c).isMatch, "Chain fixture: neighbours match")
+        assertTrue(EventMatcher.eventScore(for: c, members: [b]) != nil, "C fits an event holding only B")
+        assertTrue(EventMatcher.eventScore(for: c, members: [a, b]) == nil, "Whole-event compatibility stops the chain A≈B≈C")
+        assertTrue(EventMatcher.eventScore(for: quakeLater, members: [quake], excluded: true) == nil, "A local exclusion always wins")
+        var capped = EventMatchPolicy.standard
+        capped.maximumEventSize = 1
+        assertTrue(EventMatcher.eventScore(for: quakeLater, members: [quake], policy: capped) == nil, "Events stop growing at their size bound")
+
+        let extracted = EventFeatures(
+            title: "Apple reports record third-quarter revenue in 2026",
+            description: "<p>Apple said on Thursday that revenue in its fiscal Q3 rose, officials in Cupertino said.</p>",
+            date: now)
+        assertTrue(extracted.periods.contains("q3"), "Quarter phrases and Q3 tokens become periods")
+        assertTrue(extracted.weekdays.contains("thursday"), "Weekdays are explicit when-signals")
+        assertTrue(extracted.years.contains("2026"), "Years are explicit when-signals")
+        assertTrue(extracted.titleNumbers.isEmpty, "Years are not headline figures")
+        assertFalse(extracted.keywords.contains("say") || extracted.keywords.contains("said"), "Reporting verbs are not evidence")
+        assertFalse(extracted.keywords.contains { $0.contains("<") || $0 == "p" }, "Markup is not evidence")
+        assertTrue(extracted.anchors.contains("cupertino"), "Mid-sentence names are anchors even when the tagger misses them")
+        let toll = EventFeatures(title: "Drone strike kills three in Kharkiv", description: "", date: now)
+        assertEqual(toll.titleNumbers, ["3"], "Spelled headline figures are compared as numbers")
+        assertTrue(toll.anchors.contains("kharkiv"), "Places in a headline are anchors")
+    }
+
+    static func testEventClustering(fixtureRoot: URL) async throws {
+        print("  - Testing incremental clustering, hard negatives, changed articles, exclusions and bounded passes...")
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("news-clusters-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let path = directory.appendingPathComponent("clusters.sqlite3").path
+        func execute(_ sql: String) {
+            var handle: OpaquePointer?
+            assertEqual(sqlite3_open(path, &handle), SQLITE_OK, "Open cluster fixture")
+            assertEqual(sqlite3_exec(handle, sql, nil, nil, nil), SQLITE_OK, "Edit cluster fixture")
+            sqlite3_close(handle)
+        }
+        let db = DatabaseEngine(path: path)
+        try await db.open()
+        let now = Date()
+        func article(_ id: String, _ title: String, _ description: String, hoursAgo: Double, source: String) -> FeedArticle {
+            FeedArticle(storedID: id, title: title, link: fixtureRoot.appendingPathComponent("clusters/\(id)").absoluteString,
+                        guid: id, description: description, pubDate: now.addingTimeInterval(-hoursAgo * 3600), source: source)
+        }
+        func together(_ first: String, _ second: String) async throws -> Bool {
+            guard let event = try await db.eventID(forArticle: first) else { return false }
+            return try await db.eventID(forArticle: second) == event
+        }
+        try await db.upsertArticles(EventControlSet.articles(now: now, root: fixtureRoot).map(\.article) + [
+            article("old", "Earthquake of magnitude 7 strikes eastern Turkey near Malatya", "An archived report.", hoursAgo: 200, source: "Archive")
+        ])
+
+        let report = try await EventClusterer.run(in: db, now: now)
+        assertEqual(report.processed, 9, "A pass handles every recent unmatched article exactly once")
+        guard let quakeEvent = try await db.eventID(forArticle: "quake-1") else {
+            return assertTrue(false, "Reports of one earthquake form an event")
+        }
+        let secondJoined = try await together("quake-1", "quake-2")
+        let thirdJoined = try await together("quake-1", "quake-3")
+        assertTrue(secondJoined && thirdJoined, "All reports of the earthquake join one event")
+        assertTrue(report.changedEvents.contains(quakeEvent), "The pass reports the events it changed")
+        assertFalse(try await together("strike-monday", "strike-tuesday"), "Different strikes in one region stay separate")
+        assertFalse(try await together("apple-q3", "apple-q4"), "Different quarterly reports of one company stay separate")
+        assertFalse(try await together("live-1", "live-2"), "Identical generic headlines are not one event")
+        assertTrue(try await db.eventID(forArticle: "old") == nil, "Articles outside the active lifetime are never matched")
+        assertEqual(try await EventClusterer.run(in: db, now: now).processed, 0, "A second pass recomputes nothing")
+
+        // A changed member is matched again and leaves an event it no longer fits.
+        let version = try await db.fetchEvent(id: quakeEvent)?.membershipVersion ?? 0
+        execute("UPDATE articles SET title='Central bank holds interest rates', description='The central bank left its benchmark rate unchanged.' WHERE id='quake-3';")
+        let changed = try await EventClusterer.run(in: db, now: now)
+        assertEqual(changed.processed, 1, "Only the changed article is matched again")
+        assertEqual(changed.detached, 1, "A member that no longer fits leaves its event")
+        assertTrue(try await db.eventID(forArticle: "quake-3") == nil, "The changed article is no longer a member")
+        assertEqual(try await db.fetchEvent(id: quakeEvent)?.membershipVersion, version + 1, "Leaving bumps the version once")
+
+        // A new report joins the active event it fits as a whole.
+        try await db.upsertArticles([article("quake-4", "Malatya earthquake: magnitude 7 quake damages buildings in eastern Turkey",
+            "Rescuers searched damaged buildings in Malatya in eastern Turkey after the magnitude 7 earthquake on Monday, the disaster agency AFAD said.",
+            hoursAgo: 1, source: "Gazette Four")])
+        let grown = try await EventClusterer.run(in: db, now: now)
+        assertEqual(grown.joined, 1, "A new report joins the event")
+        assertTrue(try await together("quake-1", "quake-4"), "The new report shares the event ID")
+
+        // "These are different events" is a local exclusion that survives refreshes and re-clustering.
+        try await db.setSaved(articleId: "quake-2", isSaved: true)
+        let separated = try await db.separateArticle("quake-2", fromEvent: quakeEvent)
+        assertFalse(separated.memberArticleIDs.contains("quake-2"), "Separation removes the article from the event")
+        assertEqual(try await db.eventExclusions(of: "quake-2"), Set(separated.memberArticleIDs), "The article is excluded from every remaining member")
+        do { _ = try await db.separateArticle("quake-2", fromEvent: quakeEvent); assertTrue(false, "Only members can be separated") } catch { }
+        assertEqual(try await EventClusterer.run(in: db, now: now).processed, 1, "Only the separated article is matched again")
+        assertFalse(try await together("quake-2", "quake-1"), "A separated article never rejoins its excluded partners")
+        try await db.upsertArticles([EventControlSet.articles(now: now, root: fixtureRoot).first { $0.article.id == "quake-2" }!.article])
+        _ = try await EventClusterer.run(in: db, now: now)
+        assertFalse(try await together("quake-2", "quake-1"), "Exclusions survive a refresh of the article")
+        execute("DELETE FROM event_members; DELETE FROM events; DELETE FROM event_match_state;")
+        _ = try await EventClusterer.run(in: db, now: now)
+        let rejoinedFirst = try await together("quake-2", "quake-1")
+        let rejoinedNew = try await together("quake-2", "quake-4")
+        assertFalse(rejoinedFirst || rejoinedNew, "Exclusions survive a complete re-clustering")
+        assertTrue(try await together("quake-1", "quake-4"), "Re-clustering rebuilds the event without the excluded article")
+        assertTrue(try await db.isSaved(articleId: "quake-2"), "Saving stays with the article through regrouping")
+
+        // Passes are bounded and cancellable; unfinished work stays pending.
+        try await db.upsertArticles((0..<5).map { article("bulk-\($0)", "Unrelated bulletin \($0)", "Standalone notice \($0).", hoursAgo: 1, source: "Bulletin") })
+        assertEqual(try await EventClusterer.run(in: db, now: now, limit: 2).processed, 2, "A pass stops at its bound")
+        let cancelled = Task { () async throws -> EventClusteringReport in
+            withUnsafeCurrentTask { $0?.cancel() }
+            return try await EventClusterer.run(in: db, now: now)
+        }
+        do { _ = try await cancelled.value; assertTrue(false, "A cancelled pass throws") } catch is CancellationError { }
+        assertEqual(try await EventClusterer.run(in: db, now: now).processed, 3, "Cancelled and bounded work waits for the next pass")
+        await db.close()
+        var handle: OpaquePointer?, statement: OpaquePointer?
+        assertEqual(sqlite3_open(path, &handle), SQLITE_OK, "Inspect cluster library")
+        assertEqual(sqlite3_prepare_v2(handle, "PRAGMA foreign_key_check;", -1, &statement, nil), SQLITE_OK, "Check cluster references")
+        assertTrue(sqlite3_step(statement) == SQLITE_DONE, "Clustering leaves no dangling references")
+        sqlite3_finalize(statement)
+        sqlite3_close(handle)
+    }
+
+    static func testEventReadingState(fixtureRoot: URL) async throws {
+        print("  - Testing event seen versions, substantive updates, independence from article state and the v14 migration...")
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("news-event-state-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let path = directory.appendingPathComponent("state.sqlite3").path
+        let now = Date()
+        func article(_ id: String, _ title: String, source: String, hoursAgo: Double) -> FeedArticle {
+            FeedArticle(storedID: id, title: title, link: fixtureRoot.appendingPathComponent("state/\(id)").absoluteString,
+                        guid: id, description: "Report \(id)", pubDate: now.addingTimeInterval(-hoursAgo * 3600), source: source)
+        }
+        let db = DatabaseEngine(path: path)
+        try await db.open()
+        try await db.upsertArticles([
+            article("first", "Ferry sinks off Crete", source: "Wire One", hoursAgo: 5),
+            article("second", "Ferry sinking near Crete: passengers rescued", source: "Daily Two", hoursAgo: 4),
+            article("reprint", "Ferry sinks off Crete", source: "Herald Three", hoursAgo: 3),
+            article("update", "Crete ferry: captain detained after sinking", source: "Wire One", hoursAgo: 1),
+            article("merged", "Crete ferry owner faces inquiry", source: "Gazette Four", hoursAgo: 0.5)
+        ])
+        let event = try await db.createEvent(memberArticleIDs: ["first", "second"], at: now)
+        func summary() async throws -> EventFeedSummary? { try await db.eventFeedSummaries(forArticles: ["first"]).first }
+        assertEqual(try await summary()?.seenVersion, nil, "An event starts unseen")
+        assertFalse(try await summary()?.hasSubstantiveUpdate ?? true, "An unseen event is new, not updated")
+        assertEqual(try await summary()?.members.map(\.articleID), ["second", "first"], "Members are listed newest first")
+        assertEqual(try await db.markEventSeen(event.id), 1, "Opening records the current version")
+        assertFalse(try await db.isRead(articleId: "first"), "Seeing an event marks no article read")
+        try await db.addArticles(["reprint"], toEvent: event.id)
+        assertFalse(try await summary()?.hasSubstantiveUpdate ?? true, "A reprint of a known headline is not new reporting")
+        assertEqual(try await summary()?.coverageText, "3 sources", "Coverage counts distinct publishers")
+        try await db.addArticles(["update"], toEvent: event.id)
+        assertEqual(try await db.markEventSeen(event.id, version: 2), 2, "Reading overview version 2 records version 2")
+        assertTrue(try await summary()?.hasSubstantiveUpdate ?? false, "Version 2 does not cover reporting that joined later")
+        try await db.markRead(articleId: "update", isRead: true)
+        assertFalse(try await summary()?.hasSubstantiveUpdate ?? true, "Reading the new article settles the update")
+        assertEqual(try await db.eventSeenVersion(event.id), 2, "Article state does not change event state")
+        assertEqual(try await db.markEventSeen(event.id), 3, "Opening again records the latest version")
+        assertEqual(try await db.markEventSeen(event.id, version: 1), 3, "Seen versions never go back")
+        let other = try await db.createEvent(memberArticleIDs: ["merged"], at: now)
+        try await db.mergeEvents(other.id, into: event.id)
+        assertTrue(try await summary()?.hasSubstantiveUpdate ?? false, "Reporting merged in later is an update of the event")
+        assertEqual(try await db.markEventSeen(other.id), 4, "The absorbed ID records state on the survivor")
+        try await db.setSaved(articleId: "second", isSaved: true)
+        assertEqual(try await summary()?.members.first { $0.articleID == "second" }?.isSaved, true, "Members carry their own saved state")
+        await db.close()
+
+        // v13 → v14 on a copy: cancellation rolls back; the upgrade keeps events.
+        var handle: OpaquePointer?
+        assertEqual(sqlite3_open(path, &handle), SQLITE_OK, "Open v14 fixture")
+        assertEqual(sqlite3_exec(handle, "DROP TRIGGER trg_articles_event_rematch; DROP TABLE event_state; DROP TABLE event_exclusions; DROP TABLE event_match_state; PRAGMA user_version = 13;", nil, nil, nil), SQLITE_OK, "Reconstruct a v13 library")
+        sqlite3_close(handle)
+        let copy = directory.appendingPathComponent("copy.sqlite3").path
+        try FileManager.default.copyItem(atPath: path, toPath: copy)
+        func value(_ file: String, _ sql: String) -> String? {
+            var connection: OpaquePointer?, statement: OpaquePointer?
+            assertEqual(sqlite3_open(file, &connection), SQLITE_OK, "Inspect v14 fixture")
+            defer { sqlite3_close(connection) }
+            assertEqual(sqlite3_prepare_v2(connection, sql, -1, &statement, nil), SQLITE_OK, "Prepare v14 inspection")
+            defer { sqlite3_finalize(statement) }
+            guard sqlite3_step(statement) == SQLITE_ROW else { return nil }
+            return sqlite3_column_text(statement, 0).map { String(cString: $0) }
+        }
+        let cancelledDB = DatabaseEngine(path: copy)
+        let cancelled = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            try await cancelledDB.open()
+        }
+        do { try await cancelled.value; assertTrue(false, "Cancelled v14 migration must throw") } catch is CancellationError { }
+        assertEqual(value(copy, "PRAGMA user_version;"), "13", "Cancelled v14 migration keeps version 13")
+        assertEqual(value(copy, "SELECT count(*) FROM sqlite_master WHERE name IN ('event_match_state','event_exclusions','event_state');"), "0", "Cancelled v14 migration rolls back its tables")
+        let migrated = DatabaseEngine(path: copy)
+        try await migrated.open()
+        assertEqual(value(copy, "PRAGMA user_version;"), "14", "Copied v13 library upgrades to v14")
+        assertEqual(value(path, "PRAGMA user_version;"), "13", "Original v13 fixture stays untouched")
+        assertEqual(try await migrated.fetchEvent(id: event.id)?.memberArticleIDs.count, 5, "Migration keeps events and members")
+        assertTrue(try await migrated.isSaved(articleId: "second"), "Migration keeps saved state")
+        assertEqual(value(copy, "SELECT count(*) FROM pragma_table_info('event_exclusions') WHERE name IN ('title','description','content');"), "0", "Exclusions store no source text")
+        assertEqual(value(copy, "PRAGMA quick_check;"), "ok", "Migrated library passes quick_check")
+        await migrated.close()
+    }
+
+    static func testEventFeedGroupingAndStability() async {
+        print("  - Testing event cards, publication mode, source filters and the stable feed buffer...")
+        let now = Date()
+        func article(_ id: String, source: String, minutesAgo: Double, title: String? = nil) -> FeedArticle {
+            FeedArticle(storedID: id, title: title ?? "Story \(id)", link: "https://example.com/\(id)", guid: id,
+                        description: "", pubDate: now.addingTimeInterval(-minutesAgo * 60), source: source)
+        }
+        func member(_ article: FeedArticle, joined: Int = 1) -> EventFeedMember {
+            EventFeedMember(articleID: article.id, source: article.source, title: article.title, date: article.pubDate,
+                            joinedVersion: joined, isRead: false, isSaved: false)
+        }
+        let a = article("a", source: "Wire One", minutesAgo: 1)
+        let b = article("b", source: "Daily Two", minutesAgo: 2)
+        let c = article("c", source: "Daily Two\nSection", minutesAgo: 3)
+        let d = article("d", source: "Solo", minutesAgo: 4)
+        let event = EventFeedSummary(eventID: "e1", membershipVersion: 1, seenVersion: nil, members: [member(a), member(c)])
+        let single = EventFeedSummary(eventID: "e2", membershipVersion: 2, seenVersion: nil, members: [member(d)])
+        let grouped = EventFeedGrouping.entries(for: [a, b, c, d], events: [event, single], mode: .events)
+        assertEqual(grouped.map(\.id), ["a", "b", "d"], "A confirmed event is one card at its first listed member")
+        if case .event(let summary, let representative, let visible) = grouped[0] {
+            assertEqual(summary.eventID, "e1", "The card carries its event")
+            assertEqual(representative.id, "a", "The first listed member represents the event")
+            assertEqual(visible.map(\.id), ["a", "c"], "Every listed member stays available inside the event")
+        } else {
+            assertTrue(false, "The first entry is an event card")
+        }
+        assertEqual(EventFeedGrouping.entries(for: [a, b, c, d], events: [event, single], mode: .publications).map(\.id),
+                    ["a", "b", "c", "d"], "Publication mode lists every article")
+        assertEqual(EventFeedGrouping.entries(for: [c, b], events: [event], mode: .events).first?.representative.id, "c",
+                    "A source filter keeps that source's own article on the card")
+        assertEqual(EventFeedGrouping.entries(for: [a, a, b], events: [], mode: .events).map(\.id), ["a", "b"], "No article is listed twice")
+        assertEqual(event.sources, ["Wire One", "Daily Two"], "Sources are distinct display names")
+        assertEqual(single.coverageText, "1 article from Solo", "Single-publisher coverage names the publisher")
+
+        var buffer = FeedUpdateBuffer()
+        assertEqual(buffer.receive(FeedSnapshot(articles: [a, b]), holding: true, mode: .events), .replaced, "The first page always shows")
+        let fresh = article("n", source: "Wire One", minutesAgo: 0)
+        assertEqual(buffer.receive(FeedSnapshot(articles: [fresh, a, b]), holding: true, mode: .events), .waiting, "New stories wait while the list is read")
+        assertEqual(buffer.displayed.articles.map(\.id), ["a", "b"], "Cards do not move under the reader")
+        assertEqual(buffer.newEntryCount(.events), 1, "The indicator counts new cards")
+        buffer.applyPending()
+        assertEqual(buffer.displayed.articles.map(\.id), ["n", "a", "b"], "Applying shows the update")
+        assertTrue(buffer.pending == nil, "Nothing waits after applying")
+        let renamed = article("b", source: "Daily Two", minutesAgo: 2, title: "Story b, updated")
+        assertEqual(buffer.receive(FeedSnapshot(articles: [fresh, renamed]), holding: true, mode: .events), .waiting, "Removals wait while the list is read")
+        assertEqual(buffer.displayed.articles.map(\.id), ["n", "a", "b"], "A card read away in Unread stays until the reader updates")
+        assertEqual(buffer.displayed.articles[2].title, "Story b, updated", "Listed content refreshes in place")
+        assertEqual(buffer.newEntryCount(.events), 0, "An update without new cards is not counted as new")
+        assertEqual(buffer.receive(FeedSnapshot(articles: [fresh, renamed]), holding: false, mode: .events), .replaced, "Updates apply when nobody is reading")
+
+        buffer.replace(with: FeedSnapshot(articles: [a, b, c]))
+        assertEqual(buffer.receive(FeedSnapshot(articles: [a, b, c], events: [event]), holding: true, mode: .events), .waiting, "Regrouping waits while the list is read")
+        assertEqual(buffer.displayed.entries(.events).map(\.id), ["a", "b", "c"], "Grouping does not change under the reader")
+        buffer.applyPending()
+        let seen = EventFeedSummary(eventID: "e1", membershipVersion: 1, seenVersion: 1, members: [member(a), member(c)])
+        assertEqual(buffer.receive(FeedSnapshot(articles: [a, b, c], events: [seen]), holding: true, mode: .events), .refreshedInPlace, "Event state that moves nothing applies at once")
+        assertEqual(buffer.displayed.events.first?.seenVersion, 1, "The card shows the new event state")
+        buffer.append([d], events: [seen, single])
+        assertEqual(buffer.displayed.articles.map(\.id), ["a", "b", "c", "d"], "Further pages append in order")
+        assertEqual(buffer.receive(FeedSnapshot(articles: [a, b], events: [seen]), holding: true, mode: .events, hasMore: true), .refreshedInPlace, "A same-order first page keeps further pages")
+        assertEqual(buffer.displayed.articles.count, 4, "Loaded pages stay")
+    }
+
+    @MainActor
+    static func testRefreshClustersEvents(fixtureRoot: URL) async throws {
+        print("  - Testing clustering after refresh, off the main actor and outside the refresh path...")
+        let suite = "test.refresh-events.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = AppSettings(defaults: defaults)
+        let feeds = ["https://8.8.8.8/one.xml", "https://8.8.4.4/two.xml"]
+        settings.feedURLs = feeds
+        settings.aiEnabled = false
+        settings.notificationsEnabled = false
+        let db = DatabaseEngine(path: ":memory:")
+        let store = ArticleStore(database: db)
+        await store.initialize()
+        let control = EventControlSet.articles(now: Date(), root: fixtureRoot).filter { $0.article.id.hasPrefix("quake") }.map(\.article)
+        let batches = Dictionary(uniqueKeysWithValues: zip(feeds, [Array(control.prefix(2)), Array(control.dropFirst(2))]))
+        let manager = FeedManager(settings: settings, store: store, schedulesRefresh: false,
+            fetchBatch: { urls, _ in urls.map { ($0, batches[$0], nil, nil) } },
+            notifyBatch: { _, _ in })
+        let revision = store.eventRevision
+        await manager.fetchFeedsAsync()
+        await manager.waitForEventClustering()
+        let ids = manager.articles.map(\.id)
+        assertEqual(ids.count, 3, "The refresh publishes every report")
+        var events = Set<String?>()
+        for id in ids { events.insert(try await db.eventID(forArticle: id)) }
+        assertEqual(events.count, 1, "Reports collected by one refresh are grouped afterwards")
+        assertTrue(events.first! != nil, "The grouped reports share an event")
+        assertTrue(store.eventRevision != revision, "The feed is told to regroup")
+        await manager.fetchFeedsAsync()
+        await manager.waitForEventClustering()
+        assertEqual(try await EventClusterer.run(in: db).processed, 0, "Refreshes leave nothing unmatched")
+        manager.stopBackgroundWork()
+    }
+
+    static func testEventCorpusHarness(fixtureRoot: URL) async throws {
+        print("  - Testing the labeled event corpus harness on the synthetic control set...")
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("news-corpus-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let formatter = ISO8601DateFormatter()
+        let items = EventControlSet.articles(now: Date(), root: fixtureRoot).map { item -> [String: String] in
+            var entry = ["id": item.article.id, "title": item.article.title, "description": item.article.description,
+                         "source": item.article.source, "published": formatter.string(from: item.article.pubDate), "split": "holdout"]
+            entry["event"] = item.event
+            return entry
+        }
+        let file = directory.appendingPathComponent("corpus.json")
+        try JSONSerialization.data(withJSONObject: ["articles": items]).write(to: file)
+        let metrics = try await evaluateEventCorpus(path: file.path)
+        guard let holdout = metrics["holdout"] else { return assertTrue(false, "The holdout split is evaluated") }
+        assertEqual(holdout.falsePositives, 0, "The synthetic control set has no false merges")
+        assertTrue(holdout.truePositives >= 3, "The synthetic earthquake reports are linked")
+    }
+
+    struct EventCorpusMetrics {
+        var truePositives = 0, falsePositives = 0, falseNegatives = 0, impureEvents = 0
+        var precision: Double { truePositives + falsePositives == 0 ? 1 : Double(truePositives) / Double(truePositives + falsePositives) }
+        var recall: Double { truePositives + falseNegatives == 0 ? 1 : Double(truePositives) / Double(truePositives + falseNegatives) }
+        mutating func add(predicted: Bool, gold: Bool) {
+            if predicted && gold { truePositives += 1 } else if predicted { falsePositives += 1 } else if gold { falseNegatives += 1 }
+        }
+        var line: String {
+            String(format: "precision %.3f (TP %ld, FP %ld), recall %.3f (FN %ld)", precision, truePositives, falsePositives, recall, falseNegatives)
+        }
+    }
+
+    /// Replays a labeled corpus through the real clusterer in six-hour steps, as refreshes would, and
+    /// reports pairwise precision, recall and false merges per split, language and source. Tuning
+    /// must use the "tune" split only; the "holdout" split is the acceptance measurement (#102).
+    /// Format: {"articles": [{"id", "title", "description", "source", "published" (ISO 8601),
+    /// "event" (label, or absent for singletons), "split" ("tune" or "holdout")}]}.
+    @discardableResult
+    static func evaluateEventCorpus(path: String) async throws -> [String: EventCorpusMetrics] {
+        struct Corpus: Decodable {
+            struct Item: Decodable {
+                let id: String, title: String, description: String?, source: String, published: Date, event: String?, split: String?
+            }
+            let articles: [Item]
+        }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let corpus = try decoder.decode(Corpus.self, from: Data(contentsOf: URL(fileURLWithPath: path)))
+        var results: [String: EventCorpusMetrics] = [:]
+        for split in Set(corpus.articles.map { $0.split ?? "holdout" }).sorted() {
+            let items = corpus.articles.filter { ($0.split ?? "holdout") == split }.sorted { $0.published < $1.published }
+            guard var clock = items.first?.published else { continue }
+            let db = DatabaseEngine(path: ":memory:")
+            try await db.open()
+            var index = 0
+            while index < items.count {
+                var batch: [FeedArticle] = []
+                while index < items.count, items[index].published <= clock {
+                    let item = items[index]
+                    batch.append(FeedArticle(storedID: item.id, title: item.title, link: "https://corpus.invalid/\(item.id)", guid: item.id,
+                                             description: item.description ?? "", pubDate: item.published, source: item.source))
+                    index += 1
+                }
+                if !batch.isEmpty {
+                    try await db.upsertArticles(batch)
+                    _ = try await EventClusterer.run(in: db, now: clock, limit: .max)
+                }
+                clock = clock.addingTimeInterval(6 * 3600)
+                if index < items.count, items[index].published > clock { clock = items[index].published }
+            }
+            var predicted: [String?] = []
+            for item in items { predicted.append(try await db.eventID(forArticle: item.id)) }
+            await db.close()
+            let languages = items.map { EventMatchKey.language(of: $0.title + "\n" + ($0.description ?? "")) ?? "unknown" }
+            var total = EventCorpusMetrics()
+            var byLanguage: [String: EventCorpusMetrics] = [:], bySource: [String: EventCorpusMetrics] = [:]
+            for i in items.indices {
+                for j in items.indices where j > i {
+                    let isPredicted = predicted[i] != nil && predicted[i] == predicted[j]
+                    let isGold = items[i].event != nil && items[i].event == items[j].event
+                    guard isPredicted || isGold else { continue }
+                    total.add(predicted: isPredicted, gold: isGold)
+                    byLanguage[languages[i] == languages[j] ? languages[i] : "mixed", default: EventCorpusMetrics()].add(predicted: isPredicted, gold: isGold)
+                    for source in Set([items[i].source, items[j].source]) {
+                        bySource[source, default: EventCorpusMetrics()].add(predicted: isPredicted, gold: isGold)
+                    }
+                }
+            }
+            var labelsByEvent: [String: Set<String>] = [:]
+            for (position, event) in predicted.enumerated() {
+                guard let event else { continue }
+                labelsByEvent[event, default: []].insert(items[position].event ?? "unlabeled-\(items[position].id)")
+            }
+            total.impureEvents = labelsByEvent.values.filter { $0.count > 1 }.count
+            print("    \(split): \(items.count) articles, \(total.line), \(total.falsePositives) falsely merged pairs in \(total.impureEvents) events")
+            for (language, metrics) in byLanguage.sorted(by: { $0.key < $1.key }) { print("      language \(language): \(metrics.line)") }
+            for (source, metrics) in bySource.sorted(by: { $0.key < $1.key }) { print("      source \(source): \(metrics.line)") }
+            results[split] = total
+        }
+        return results
     }
 
     static func testArticleRetentionPolicy() async {

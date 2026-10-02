@@ -39,6 +39,7 @@ swiftc -swift-version 6 -O -parse-as-library -target arm64-apple-macos${TARGET_M
     Sources/Services/IPAddressValidator.swift \
     Sources/Models/ArticleIdentity.swift \
     Sources/Models/EventOverview.swift \
+    Sources/Models/EventFeed.swift \
     Sources/Storage/DatabaseEngine.swift \
     Sources/Storage/MigrationCoordinator.swift \
     Sources/Storage/ArticleStore.swift \
@@ -49,6 +50,8 @@ swiftc -swift-version 6 -O -parse-as-library -target arm64-apple-macos${TARGET_M
     Sources/Intelligence/PassageFactExtractor.swift \
     Sources/Intelligence/OverviewComposer.swift \
     Sources/Intelligence/EventCandidates.swift \
+    Sources/Intelligence/EventMatcher.swift \
+    Sources/Intelligence/EventClustering.swift \
     Sources/Intelligence/ContentExtractionPipeline.swift \
     Sources/Intelligence/EnrichmentQueue.swift \
     Sources/Services/NetworkBoundaryProxy.swift \
@@ -70,6 +73,7 @@ swiftc -swift-version 6 -O -parse-as-library -target arm64-apple-macos${TARGET_M
     Sources/Views/GlassSystem.swift \
     Sources/Views/SidebarView.swift \
     Sources/Views/ArticleCardView.swift \
+    Sources/Views/EventCardView.swift \
     Sources/Views/ArticleListView.swift \
     Sources/Views/ArticleDetailView.swift \
     Sources/Views/MainView.swift \
