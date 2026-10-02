@@ -513,6 +513,9 @@ struct NewsTests {
         }
         let archive = (0..<10_000).map(article)
         try await db.upsertArticles(archive)
+        let clusterNow = Date(timeIntervalSince1970: 1_800_010_250)
+        // Steady-state archive, rather than a first-launch clustering backlog competing with refresh.
+        try await db.markEventMatchProcessed(archive.map(\.id), matcherVersion: EventMatcher.version, at: clusterNow)
         var measurements = [String: [Double]]()
         func record(_ name: String, from start: Double) {
             measurements[name, default: []].append((ProcessInfo.processInfo.systemUptime - start) * 1000)
@@ -530,6 +533,7 @@ struct NewsTests {
             await manager.fetchFeedsAsync()
             record("refresh_5_mocked_feeds_ms", from: start)
             assertEqual(manager.articles.count, 500, "Refresh publishes the bounded snapshot")
+            await manager.waitForEventClustering()
         }
         assertEqual(try await db.counts().total, 10_250, "Repeated refreshes keep one row per document")
         manager.stopBackgroundWork()
@@ -550,12 +554,26 @@ struct NewsTests {
             assertFalse(analysis.summary.isEmpty, "Deterministic analysis returns publisher-derived text")
         }
 
-        // Event clustering & feed grouping (#104, #153)
-        let clusterNow = Date(timeIntervalSince1970: 1_800_010_250)
-        for _ in 0..<5 {
+        // Event clustering & feed grouping (#104, #153). Unchanged archives must do no matching work.
+        try await db.markEventMatchProcessed(batches.flatMap { $0 }.map(\.id), matcherVersion: EventMatcher.version, at: clusterNow)
+        for _ in 0..<10 {
             let start = ProcessInfo.processInfo.systemUptime
-            _ = try await EventClusterer.run(in: db, now: clusterNow, limit: 200)
-            record("event_clustering_ms", from: start)
+            let report = try await EventClusterer.run(in: db, now: clusterNow)
+            record("event_clustering_unchanged_ms", from: start)
+            assertEqual(report.processed, 0, "Unchanged refresh does not recompute the archive")
+        }
+        // Reset the same 200 rows for each dense candidate pass: equal work, not successive backlog slices.
+        let denseIDs = archive.suffix(200).map(\.id)
+        var processedRows: [Int] = []
+        for _ in 0..<5 {
+            try await db.markEventMatchProcessed(denseIDs, matcherVersion: 0, at: clusterNow)
+            let start = ProcessInfo.processInfo.systemUptime
+            let report = try await EventClusterer.run(in: db, now: clusterNow, limit: 200)
+            record("event_clustering_dense_200_ms", from: start)
+            processedRows.append(report.processed)
+            assertEqual(report.processed, 200, "Each dense pass processes exactly the reset rows")
+            assertTrue(try await db.pendingEventMatchRows(activeSince: clusterNow.addingTimeInterval(-72 * 3600),
+                matcherVersion: EventMatcher.version, limit: 1).isEmpty, "Dense pass drains its bounded work")
         }
         let snapshotArticles = Array(store.articles.prefix(500))
         let snapshotIDs = snapshotArticles.map(\.id)
@@ -607,6 +625,7 @@ struct NewsTests {
         guard getrusage(RUSAGE_SELF, &usage) == 0 else { fatalError("Cannot obtain process memory high-water mark") }
         let report: [String: Any] = ["library_rows": 10_250, "publishers": 20, "snapshot_rows": 500,
             "feed_count": 5, "fresh_rows_per_feed": 50, "prose_characters": prose.count, "html_characters": html.count,
+            "dense_clustering_processed_rows": processedRows,
             "peak_process_rss_bytes": usage.ru_maxrss, "measurements_ms": measurements,
             "os": ProcessInfo.processInfo.operatingSystemVersionString, "cpu_count": ProcessInfo.processInfo.processorCount,
             "physical_memory_bytes": ProcessInfo.processInfo.physicalMemory, "optimization": "-O (test.sh performance mode)"]
@@ -3621,13 +3640,23 @@ struct NewsTests {
                         guid: id, description: description, pubDate: now.addingTimeInterval(-hoursAgo * 3600), source: "Publisher \(id)")
         }
         let english = "A strong earthquake struck the Lviv region overnight, officials said on Tuesday morning."
+        let german = "Ein starkes Erdbeben hat in der Nacht die Region Lviv erschüttert, berichten die Behörden am Dienstag."
+        let recognizer = NLLanguageRecognizer()
+        let languageTexts = [english, german, "", german, english, ""]
+        assertEqual(EventMatchKey.language(of: english), "en", "Language regression includes confident English")
+        assertEqual(EventMatchKey.language(of: german), "de", "Language regression includes confident German")
+        assertEqual(EventMatchKey.language(of: ""), nil, "Empty text has no detected language")
+        for text in languageTexts {
+            assertEqual(EventMatchKey.language(of: text, using: recognizer), EventMatchKey.language(of: text),
+                        "Reusing the recognizer preserves independent language results, including nil")
+        }
         let target = article("target", "Earthquake strikes Lviv region overnight", english, hoursAgo: 0)
         try await db.upsertArticles([
             target,
             article("recent", "Lviv earthquake damages homes", english, hoursAgo: 20),
             article("old", "Lviv earthquake damages homes", english, hoursAgo: 120),
             article("unrelated", "Central bank holds interest rates", "The central bank left its benchmark rate unchanged.", hoursAgo: 2),
-            article("german", "Erdbeben erschüttert Lviv", "Ein starkes Erdbeben hat in der Nacht die Region Lviv erschüttert, berichten die Behörden am Dienstag.", hoursAgo: 3),
+            article("german", "Erdbeben erschüttert Lviv", german, hoursAgo: 3),
             article("active", "Earthquake in Lviv: rescuers search buildings", english, hoursAgo: 5),
             article("closed", "Earthquake in Lviv: aftershocks expected", english, hoursAgo: 6)
         ])

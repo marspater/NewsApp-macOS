@@ -13,6 +13,7 @@ Build on Apple silicon with Xcode 27 selected. The deployment target remains mac
 ```sh
 ./test.sh                         # Full regressions; also run by the commit hook
 ./test.sh --story-regressions     # Focused offline identity, reader and persistence checks
+./script/native_performance_baseline.sh # Isolated MainView window, rendered-card samples and process memory
 ./test.sh --performance-baseline  # Opt-in optimized synthetic core-service timings
 NEWS_EVENT_CORPUS=corpus.json ./test.sh --event-corpus # Event clustering precision/recall on a local labeled corpus (#102)
 NEWS_EMBEDDING_THRESHOLD=0.4 NEWS_EVENT_CORPUS=corpus.json ./test.sh --event-corpus --corpus-holdout # Holdout, embeddings at the cutoff chosen on tune (#127)
@@ -29,6 +30,8 @@ NEWS_LIVE_CATALOG_CHECK=1 ./test.sh # Optional: fetch every catalog feed through
 Add deterministic regressions for changed parsing, classification, persistence, migrations, security boundaries and state transitions. Synchronize async tests on observable state rather than short sleeps; model-dependent tests must use deterministic fallbacks. Preserve tests rather than removing failing coverage. Keep tests isolated from real user settings, databases and logs.
 
 For app changes, build in an isolated staging directory: `build.sh` replaces `News.app` in its working directory. A successful build is not evidence of installation, launch or live network behavior; report those checks separately. Validate `build_release.sh` and affected packaging scripts for distribution changes, without invoking notarization in development. Documentation-only edits require link/path and consistency checks, not an unrelated app rebuild.
+
+The native performance script requires an active Mac desktop. It compiles the production views with a separate test entry point, uses temporary SQLite/defaults and mocked feeds, and writes JSON plus a first-card PNG to the printed directory (or the directory supplied as its first argument). Its sampled bitmap timing is an upper bound on rendering readiness, not cold app launch; process memory includes fixture setup and the on-device Vision probe. It neither installs a bundle nor runs the production app delegate.
 
 Before publication, fetch `origin/main`, review the diff and run checks affected by the change. Never report a check as passing unless it completed successfully. Record noteworthy behavior changes in [CHANGELOG.md](CHANGELOG.md); dated evidence belongs in `docs/audits/`.
 

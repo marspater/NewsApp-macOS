@@ -26,6 +26,8 @@
 
 ### Added
 
+- Add an opt-in isolated native rendered-card benchmark and integrated service budgets; distinguish unchanged refreshes from dense clustering work without modifying the real library.
+
 - Add an optional Briefing: up to ten unread stories from the last 24 hours, mixed across sources and categories, frozen until a new briefing is requested, with reading progress and completion.
 
 - Show a sourced timeline in event overviews when the selected reports state at least two different explicit calendar dates. Each item reproduces the source sentence with links to every publication that printed it; dates appear exactly as precise as stated (a missing year stays missing), items dated after their article was published are labeled Planned, and relative dates such as "on Monday" are left out.
