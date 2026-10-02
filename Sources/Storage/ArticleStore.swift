@@ -416,6 +416,10 @@ final class ArticleStore: ObservableObject {
         try await database.fetchEventOverview(eventID: eventID)
     }
 
+    func fetchEventOverview(forArticleID articleID: String) async throws -> EventOverviewDocument? {
+        try await database.fetchEventOverview(forArticleID: articleID)
+    }
+
     @discardableResult
     func deleteEventOverview(eventID: String) async throws -> Bool {
         try await database.deleteEventOverview(eventID: eventID)

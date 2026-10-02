@@ -2263,7 +2263,17 @@ actor DatabaseEngine {
         }
 
         let encoder = JSONEncoder()
-        let factsJSON = String(decoding: try encoder.encode(overview.facts), as: UTF8.self)
+        let factsJSON: String
+        if let evidence = overview.content.evidenceSections, !evidence.isEmpty {
+            struct OverviewFactsEnvelope: Codable {
+                let facts: [OverviewFact]
+                let evidenceSections: OverviewEvidenceSections?
+            }
+            let envelope = OverviewFactsEnvelope(facts: overview.facts, evidenceSections: evidence)
+            factsJSON = String(decoding: try encoder.encode(envelope), as: UTF8.self)
+        } else {
+            factsJSON = String(decoding: try encoder.encode(overview.facts), as: UTF8.self)
+        }
         let memberArticleIDsJSON = String(decoding: try encoder.encode(overview.memberArticleIDs), as: UTF8.self)
         var leadImageJSON: String?
         if let leadImage = overview.leadImage {
@@ -2382,7 +2392,21 @@ actor DatabaseEngine {
         let updatedAt = Date(timeIntervalSince1970: sqlite3_column_double(overviewStmt, 13))
 
         let decoder = JSONDecoder()
-        let facts = (try? decoder.decode([OverviewFact].self, from: Data(factsJSON.utf8))) ?? []
+        var facts: [OverviewFact] = []
+        var evidenceSections: OverviewEvidenceSections?
+        let trimmedFacts = factsJSON.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmedFacts.hasPrefix("{") {
+            struct OverviewFactsEnvelope: Codable {
+                let facts: [OverviewFact]
+                let evidenceSections: OverviewEvidenceSections?
+            }
+            if let envelope = try? decoder.decode(OverviewFactsEnvelope.self, from: Data(factsJSON.utf8)) {
+                facts = envelope.facts
+                evidenceSections = envelope.evidenceSections
+            }
+        } else {
+            facts = (try? decoder.decode([OverviewFact].self, from: Data(factsJSON.utf8))) ?? []
+        }
         let memberArticleIDs = (try? decoder.decode([String].self, from: Data(memberArticleIDsJSON.utf8))) ?? []
         var leadImage: OverviewLeadImage?
         if let lij = leadImageJSON, let data = lij.data(using: .utf8) {
@@ -2447,7 +2471,8 @@ actor DatabaseEngine {
                 summary: summary,
                 facts: facts,
                 citations: citations,
-                leadImage: leadImage
+                leadImage: leadImage,
+                evidenceSections: evidenceSections
             ),
             provenance: OverviewProvenance(
                 memberArticleIDs: memberArticleIDs,
@@ -2456,6 +2481,34 @@ actor DatabaseEngine {
                 updatedAt: updatedAt
             )
         )
+    }
+
+    /// Resolves the event overview associated with a given article ID (via event membership or citations).
+    func fetchEventOverview(forArticleID articleID: String) throws -> EventOverviewDocument? {
+        if let eventID = try eventID(forArticle: articleID),
+           let overview = try fetchEventOverview(eventID: eventID) {
+            return overview
+        }
+
+        // Fallback: check overview citations for direct article attribution
+        guard let db = db else { return nil }
+        var stmt: OpaquePointer?
+        let sql = """
+        SELECT o.event_id FROM event_overview_citations c
+        JOIN event_overviews o ON o.id = c.overview_id
+        WHERE c.article_id = ? LIMIT 1;
+        """
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            return nil
+        }
+        defer { sqlite3_finalize(stmt) }
+
+        sqlite3_bind_text(stmt, 1, articleID, -1, Self.sqliteTransient)
+        if sqlite3_step(stmt) == SQLITE_ROW, let eventIDText = sqlite3_column_text(stmt, 0) {
+            let eventID = String(cString: eventIDText)
+            return try fetchEventOverview(eventID: eventID)
+        }
+        return nil
     }
 
     @discardableResult
