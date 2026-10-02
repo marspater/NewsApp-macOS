@@ -281,6 +281,7 @@ struct NewsTests {
             try await testOverviewGenerationCancellationAndSupersession(fixtureHost: fixtureHost)
             try await testDeterministicClaimVerification(fixtureHost: fixtureHost)
             try await testEventOverviewReaderMode(fixtureHost: fixtureHost)
+            try await testOverviewResolutionWhenOpeningMemberArticle(fixtureHost: fixtureHost)
             try await testOverviewTimeline(fixtureHost: fixtureHost)
             try await testEventTimelineWithSourcedItems(fixtureHost: fixtureHost)
             try await testAttributedPerspectivesOfParticipantsAndPublishers(fixtureHost: fixtureHost)
@@ -364,6 +365,7 @@ struct NewsTests {
         try await testOverviewGenerationCancellationAndSupersession(fixtureHost: fixtureHost)
         try await testDeterministicClaimVerification(fixtureHost: fixtureHost)
         try await testEventOverviewReaderMode(fixtureHost: fixtureHost)
+        try await testOverviewResolutionWhenOpeningMemberArticle(fixtureHost: fixtureHost)
         try await testOverviewTimeline(fixtureHost: fixtureHost)
         try await testEventTimelineWithSourcedItems(fixtureHost: fixtureHost)
         try await testAttributedPerspectivesOfParticipantsAndPublishers(fixtureHost: fixtureHost)
@@ -8172,6 +8174,131 @@ struct NewsTests {
         let publicationMode = ReaderExperienceMode.sourcePublication
         assertEqual(overviewMode.rawValue, "Event overview", "Overview mode label is 'Event overview'")
         assertEqual(publicationMode.rawValue, "Source publication", "Publication mode label is 'Source publication'")
+    }
+
+    /// #218: Verifies that opening an article belonging to a multi-source event
+    /// generates an overview in the background, persists it, and resolves it when queried.
+    @MainActor
+    static func testOverviewResolutionWhenOpeningMemberArticle(fixtureHost: String = "example.com") async throws {
+        print("  - Testing overview resolution when opening member article (#218)...")
+        let db = DatabaseEngine(path: ":memory:")
+        try await db.open()
+
+        let art1 = FeedArticle(
+            storedID: "art-ev-1",
+            title: "Volcanic Eruption Prompts Island Evacuations",
+            link: "https://\(fixtureHost)/volcano/island-1",
+            guid: "g-volcano-1",
+            description: "Emergency teams began evacuating coastal communities after Mount Teide began erupting early Thursday morning.",
+            pubDate: Date(timeIntervalSince1970: 1792051200),
+            source: "Atlantic Wire",
+            fullContent: "Emergency teams began evacuating coastal communities after Mount Teide began erupting early Thursday morning. Scientists recorded twenty separate seismic tremors along the north caldera."
+        )
+
+        let art2 = FeedArticle(
+            storedID: "art-ev-2",
+            title: "Airports Halt Flights as Ash Cloud Spreads",
+            link: "https://\(fixtureHost)/volcano/airports-2",
+            guid: "g-volcano-2",
+            description: "Civil aviation authorities closed two international airports due to rising ash plumes from Mount Teide.",
+            pubDate: Date(timeIntervalSince1970: 1792054800),
+            source: "Island Gazette",
+            fullContent: "Civil aviation authorities closed two international airports due to rising ash plumes from Mount Teide. Aviation officials said thirty scheduled flights were redirected to regional hubs."
+        )
+
+        let articles = [art1, art2]
+        _ = try await db.upsertArticles(articles)
+
+        let store = ArticleStore(database: db)
+        let queue = EnrichmentQueue(store: store)
+        let coordinator = OverviewGenerationCoordinator(store: store, queue: queue)
+
+        // 1. Initially, no event exists and no overview exists for art1
+        let initialSummaries = try await store.eventFeedSummaries(for: [art1.id])
+        assertTrue(initialSummaries.isEmpty, "Articles not yet in an event have no event summary")
+        let initialOverview = try await store.fetchEventOverview(forArticleID: art1.id)
+        assertTrue(initialOverview == nil, "No overview exists before event creation")
+
+        // 2. Create multi-source event
+        let event = try await db.createEvent(memberArticleIDs: [art1.id, art2.id])
+        let summaries = try await store.eventFeedSummaries(for: [art1.id])
+        assertEqual(summaries.count, 1, "Article 1 belongs to 1 event")
+        let summary = summaries[0]
+        assertEqual(summary.eventID, event.id, "Summary matches created event ID")
+        assertTrue(summary.isConfirmed, "Event with 2 members is confirmed")
+        assertEqual(summary.sources.count, 2, "Event has 2 distinct sources")
+        assertEqual(summary.membershipVersion, 1, "Initial membership version is 1")
+
+        // Overview in store is still nil before reader resolution
+        let beforeGenOverview = try await store.fetchEventOverview(forArticleID: art1.id)
+        assertTrue(beforeGenOverview == nil, "Overview not yet generated")
+
+        // 3. Opening member article triggers coordinator setVisibleEvent at visibleEvent priority
+        let memberArticles = try await store.eventMemberArticles(eventID: summary.eventID)
+        assertEqual(memberArticles.count, 2, "Event members fetched correctly")
+        let title = memberArticles.first?.title ?? summary.members.first?.title ?? art1.title
+
+        let generated = await coordinator.setVisibleEvent(
+            eventID: summary.eventID,
+            eventTitle: title,
+            membershipVersion: summary.membershipVersion,
+            articles: memberArticles,
+            store: store
+        )
+        assertTrue(generated != nil, "Generated overview is returned by coordinator")
+        assertEqual(generated?.eventID, summary.eventID, "Generated overview matches event ID")
+        assertEqual(generated?.membershipVersion, 1, "Generated overview carries membership version 1")
+
+        // 4. Stored overview is now persisted in database and resolves by member article ID
+        let resolvedOverview1 = try await store.fetchEventOverview(forArticleID: art1.id)
+        assertTrue(resolvedOverview1 != nil, "fetchEventOverview resolves for member article 1")
+        assertEqual(resolvedOverview1?.id, generated?.id, "Resolved overview matches generated ID")
+
+        let resolvedOverview2 = try await store.fetchEventOverview(forArticleID: art2.id)
+        assertTrue(resolvedOverview2 != nil, "fetchEventOverview resolves for member article 2")
+        assertEqual(resolvedOverview2?.id, generated?.id, "Member article 2 resolves to the same overview")
+
+        // 5. Leaving the event / closing the reader cancels visible event
+        await coordinator.setVisibleEvent(eventID: nil)
+        assertTrue(await coordinator.inFlightInputHash(for: summary.eventID) == nil, "No in-flight generation remains")
+
+        // 6. Membership version bump triggers regeneration of stale overview
+        let art3 = FeedArticle(
+            storedID: "art-ev-3",
+            title: "Ferry Services Mobilized for Evacuations",
+            link: "https://\(fixtureHost)/volcano/ferry-3",
+            guid: "g-volcano-3",
+            description: "Maritime authorities deployed four passenger ferries to assist coastal evacuations.",
+            pubDate: Date(timeIntervalSince1970: 1792058400),
+            source: "Maritime Journal",
+            fullContent: "Maritime authorities deployed four passenger ferries to assist coastal evacuations. Harbor operations confirmed five hundred residents boarded the first vessel."
+        )
+        _ = try await db.upsertArticles([art3])
+        _ = try await db.addArticles([art3.id], toEvent: event.id)
+
+        let updatedSummaries = try await store.eventFeedSummaries(for: [art1.id])
+        let updatedSummary = updatedSummaries[0]
+        assertEqual(updatedSummary.membershipVersion, 2, "Membership version bumped to 2")
+        assertEqual(updatedSummary.sources.count, 3, "Event now has 3 sources")
+
+        // Stored overview is now stale because its version is 1 < current version 2
+        assertTrue(resolvedOverview1?.isStale(currentMembershipVersion: updatedSummary.membershipVersion) == true, "Old overview is identified as stale")
+
+        let updatedMemberArticles = try await store.eventMemberArticles(eventID: updatedSummary.eventID)
+        let regenerated = await coordinator.setVisibleEvent(
+            eventID: updatedSummary.eventID,
+            eventTitle: title,
+            membershipVersion: updatedSummary.membershipVersion,
+            articles: updatedMemberArticles,
+            store: store
+        )
+        assertTrue(regenerated != nil, "Regenerated overview exists for updated version")
+        assertEqual(regenerated?.membershipVersion, 2, "Regenerated overview carries version 2")
+
+        let resolvedUpdated = try await store.fetchEventOverview(forArticleID: art3.id)
+        assertEqual(resolvedUpdated?.membershipVersion, 2, "Newly added member article 3 resolves to version 2 overview")
+
+        await db.close()
     }
 
     static func testEventTimelineWithSourcedItems(fixtureHost: String = "example.com") async throws {

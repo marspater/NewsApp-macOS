@@ -446,12 +446,12 @@ public struct EventOverviewDocument: Codable, Hashable, Sendable, Identifiable {
     /// Evaluates if an existing overview is stale relative to updated membership, inputs, or versions.
     public func isStale(
         currentMembershipVersion: Int,
-        currentInputTextHash: String,
+        currentInputTextHash: String? = nil,
         targetSchemaVersion: Int = currentSchemaVersion,
         targetAnalysisVersion: Int = currentAnalysisVersion
     ) -> Bool {
         membershipVersion != currentMembershipVersion
-            || inputTextHash != currentInputTextHash
+            || (currentInputTextHash != nil && inputTextHash != currentInputTextHash)
             || schemaVersion != targetSchemaVersion
             || analysisVersion != targetAnalysisVersion
     }

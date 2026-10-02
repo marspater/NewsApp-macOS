@@ -48,6 +48,7 @@ struct ArticleDetailView: View {
     @State private var currentOverview: EventOverviewDocument? = nil
     @State private var highlightedPassage: String? = nil
     @State private var eventMemberArticles: [FeedArticle] = []
+    @State private var isOverviewLoading: Bool = false
 
     @FocusState private var isViewFocused: Bool
 
@@ -151,20 +152,7 @@ struct ArticleDetailView: View {
             }
         }
         .task(id: activeArticle.id) {
-            if currentOverview == nil || !(currentOverview?.memberArticleIDs.contains(activeArticle.id) ?? false) {
-                if let ov = try? await articleStore.fetchEventOverview(forArticleID: activeArticle.id) {
-                    currentOverview = ov
-                    let members = articleStore.articles.filter { ov.memberArticleIDs.contains($0.id) }
-                    eventMemberArticles = members
-                } else {
-                    currentOverview = nil
-                    eventMemberArticles = []
-                    experienceMode = .sourcePublication
-                }
-            } else if let ov = currentOverview {
-                let members = articleStore.articles.filter { ov.memberArticleIDs.contains($0.id) }
-                eventMemberArticles = members
-            }
+            await loadEventOverviewForActiveArticle()
         }
         .task(id: "\(activeArticle.id):\(reloadGeneration)") {
             await ensureContentExtracted(forceRefresh: reloadGeneration > 0)
@@ -174,6 +162,11 @@ struct ArticleDetailView: View {
             await startArticleAnalysis()
         }
         .onAppear { isViewFocused = true }
+        .onDisappear {
+            Task {
+                await OverviewGenerationCoordinator.shared.setVisibleEvent(eventID: nil)
+            }
+        }
     }
 
     // MARK: - Reader View
@@ -631,6 +624,17 @@ struct ArticleDetailView: View {
                 .pickerStyle(.segmented)
                 .labelsHidden()
                 .help("Switch between event overview and source publication")
+            } else if isOverviewLoading {
+                HStack(spacing: 6) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("Loading event overview…")
+                        .font(AppTypography.caption)
+                        .foregroundColor(AppColor.secondaryText)
+                }
+                .help("Generating evidence-backed event overview…")
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("Loading event overview")
             }
 
             if currentOverview == nil || experienceMode == .sourcePublication {
@@ -1031,6 +1035,53 @@ struct ArticleDetailView: View {
                 self.analysisError = error.localizedDescription
                 self.isAnalyzing = false
             }
+        }
+    }
+
+    private func loadEventOverviewForActiveArticle() async {
+        let summaries = (try? await articleStore.eventFeedSummaries(for: [activeArticle.id])) ?? []
+        guard let summary = summaries.first, summary.isConfirmed, summary.sources.count >= 2 else {
+            isOverviewLoading = false
+            currentOverview = nil
+            eventMemberArticles = []
+            experienceMode = .sourcePublication
+            await OverviewGenerationCoordinator.shared.setVisibleEvent(eventID: nil)
+            return
+        }
+
+        let eventID = summary.eventID
+        let membershipVersion = summary.membershipVersion
+
+        if let existing = currentOverview,
+           existing.eventID == eventID,
+           !existing.isStale(currentMembershipVersion: membershipVersion) {
+            isOverviewLoading = false
+            let members = (try? await articleStore.eventMemberArticles(eventID: eventID)) ?? []
+            eventMemberArticles = members.isEmpty ? [activeArticle] : members
+            return
+        }
+
+        let members = (try? await articleStore.eventMemberArticles(eventID: eventID)) ?? []
+        let resolvedMembers = members.isEmpty ? [activeArticle] : members
+        let eventTitle = resolvedMembers.first?.title ?? summary.members.first?.title ?? activeArticle.title
+
+        isOverviewLoading = true
+
+        let doc = await OverviewGenerationCoordinator.shared.setVisibleEvent(
+            eventID: eventID,
+            eventTitle: eventTitle,
+            membershipVersion: membershipVersion,
+            articles: resolvedMembers,
+            store: articleStore
+        )
+
+        guard !Task.isCancelled else { return }
+
+        isOverviewLoading = false
+        if let doc = doc {
+            currentOverview = doc
+            eventMemberArticles = resolvedMembers
+            experienceMode = .eventOverview
         }
     }
 
