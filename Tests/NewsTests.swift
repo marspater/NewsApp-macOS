@@ -7407,6 +7407,7 @@ struct NewsTests {
 
     /// #154: a reader closed during generation stores nothing, and an article edited during generation
     /// supersedes the running generation even though the event's membership version is unchanged.
+    @MainActor
     static func testOverviewGenerationCancellationAndSupersession(fixtureHost: String) async throws {
         print("  - Testing overview generation cancelled by the reader and superseded by an article edit...")
         func report(_ index: Int, _ text: String) -> FeedArticle {
