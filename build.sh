@@ -73,6 +73,7 @@ swiftc -swift-version 6 -O -parse-as-library -target arm64-apple-macos${TARGET_M
     Sources/Views/GlassSystem.swift \
     Sources/Views/SidebarView.swift \
     Sources/Views/ArticleCardView.swift \
+    Sources/Views/EventCardView.swift \
     Sources/Views/ArticleListView.swift \
     Sources/Views/ArticleDetailView.swift \
     Sources/Views/MainView.swift \

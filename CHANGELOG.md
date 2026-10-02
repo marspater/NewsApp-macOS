@@ -23,6 +23,10 @@
 
 ### Changed
 
+- Group coverage of the same event into one feed card ("5 sources · updated …") with every member publication one click or the E key away, and a toggle (G) back to individual publications. Matching is deterministic and conservative: a shared name or place, shared action terms, closeness in time and no contradicting quarter, year, weekday, headline figure, place or language; a newcomer must fit the whole event. Clustering runs after a refresh has published, off the main actor, only for new or changed articles.
+- Keep the feed still while it is being read: new, removed and regrouped stories wait behind an explicit "N new stories" button (U) instead of moving cards under the pointer; queued updates respect Reduce Motion.
+- Mark events as updated only for new reporting since the version the reader opened; opening an event marks no article read, and read/saved state stays per article.
+- Add "Not the Same Event" to a member's context menu: a local exclusion (schema v14) that later refreshes and re-clustering respect.
 - Find event-matching candidates from shared names and title words within a 48-hour window, the same detected language and events still active in the last 72 hours, capped per article. Nothing groups articles yet.
 - Store events with stable IDs, article membership and membership versions (schema v13). Merges keep old event IDs working, splits get new ones, and neither changes article IDs or read/save state; no source text is copied into events. Nothing groups articles into events yet.
 - Show operational health per subscription (Settings → Subscriptions and the catalog): whether the feed responds, how recent its newest item is and how much text it carries. Health is persisted with ingestion and described as plumbing only, never as a rating of accuracy or trustworthiness.
