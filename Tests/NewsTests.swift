@@ -292,6 +292,7 @@ struct NewsTests {
             try await testEventClustering(fixtureRoot: fixtureRoot)
             try await testEventReadingState(fixtureRoot: fixtureRoot)
             await testEventFeedGroupingAndStability()
+        try await testFiniteBriefing()
             try await testRefreshClustersEvents(fixtureRoot: fixtureRoot)
             try await testEventCorpusHarness(fixtureRoot: fixtureRoot)
             try testCapturedFingerprintReview()
@@ -373,6 +374,7 @@ struct NewsTests {
         try await testEventClustering(fixtureRoot: fixtureRoot)
         try await testEventReadingState(fixtureRoot: fixtureRoot)
         await testEventFeedGroupingAndStability()
+        try await testFiniteBriefing()
         try await testRefreshClustersEvents(fixtureRoot: fixtureRoot)
         try await testEventCorpusHarness(fixtureRoot: fixtureRoot)
         try testCapturedFingerprintReview()
@@ -3954,6 +3956,49 @@ struct NewsTests {
         await manager.waitForEventClustering()
         assertEqual(try await EventClusterer.run(in: db).processed, 0, "Refreshes leave nothing unmatched")
         manager.stopBackgroundWork()
+    }
+
+    static func testFiniteBriefing() async throws {
+        print("  - Testing bounded, balanced and frozen briefings (#162)...")
+        let now = Date(timeIntervalSince1970: 1_790_928_000)
+        func article(_ id: String, age: TimeInterval, source: String = "Dominant", category: String = "Tech") -> FeedArticle {
+            FeedArticle(storedID: id, title: "Briefing story \(id)", link: "https://example.com/briefing/\(id)",
+                        guid: id, description: "Publisher report \(id)", pubDate: now.addingTimeInterval(-age),
+                        source: source, category: category)
+        }
+        var candidates = (0..<40).map { article("dominant-\($0)", age: Double($0)) }
+        candidates += [article("world", age: 100, source: "World Desk", category: "World"),
+                       article("science", age: 200, source: "Science Desk", category: "Science"),
+                       article("read", age: 0), article("old", age: FiniteBriefing.duration + 1),
+                       article("future", age: -1), article("boundary", age: FiniteBriefing.duration)]
+        var undated = article("undated", age: 0)
+        undated = FeedArticle(storedID: undated.id, title: undated.title, link: undated.link,
+                             guid: undated.guid, description: undated.description, pubDate: DateParser.unknownDate, source: undated.source)
+        candidates.append(undated)
+        let session = FiniteBriefing(candidates: candidates + [candidates[0]], readIDs: ["read"], now: now)
+        assertEqual(session.articles.count, 10, "The briefing is bounded")
+        assertEqual(Set(session.articles.map(\.id)).count, 10, "Duplicate candidates cannot consume slots")
+        assertEqual(Array(session.articles.prefix(3).map(\.id)), ["dominant-0", "world", "science"], "Recency ties break a source/category mix deterministically")
+        assertFalse(session.articles.contains { ["read", "old", "future", "undated"].contains($0.id) }, "Read, old, future and undated stories stay out")
+        let frozen = session.articles
+        candidates.insert(article("arriving-later", age: 0), at: 0)
+        assertEqual(session.articles, frozen, "Incoming stories cannot change an existing selection")
+        let allRead = Set(session.articles.map(\.id))
+        assertTrue(session.isComplete(allRead), "Reading all selected stories completes the briefing")
+        assertEqual(session.readCount([session.articles[0].id]), 1, "Completion follows article read state")
+        assertFalse(session.isComplete([]), "An unread briefing is incomplete")
+        assertFalse(FiniteBriefing(candidates: [], readIDs: [], now: now).isComplete([]), "An empty window is not a completed briefing")
+
+        let db = DatabaseEngine(path: ":memory:")
+        try await db.open()
+        _ = try await db.upsertArticles(candidates)
+        try await db.markRead(articleId: "read", isRead: true)
+        let fetched = try await db.fetchArticles(isRead: false, limit: 500,
+            publicationWindow: now.addingTimeInterval(-FiniteBriefing.duration)...now)
+        let ids = Set(fetched.map(\.id))
+        assertTrue(ids.contains("boundary"), "The lower time boundary is included")
+        assertFalse(ids.contains("old") || ids.contains("future") || ids.contains("undated") || ids.contains("read"), "SQLite filters the exact window and read state before selection")
+        assertEqual(try await db.fetchArticles(limit: nil).count, candidates.count, "The briefing leaves archive access intact")
     }
 
     static func testEventCorpusHarness(fixtureRoot: URL) async throws {

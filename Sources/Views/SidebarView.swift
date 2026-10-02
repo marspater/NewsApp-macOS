@@ -213,6 +213,7 @@ struct SidebarView: View {
         Section("Inbox") {
             topicRow(title: "Today", icon: "newspaper.fill", isLoading: feedManager.isAnyFeedLoading, accessibility: "Today's Articles")
             topicRow(title: "Unread", icon: "circle.circle.fill", badge: unreadBadge, accessibility: "Unread Articles")
+            topicRow(title: "Briefing", icon: "text.book.closed", accessibility: "Finite Briefing")
         }
     }
 

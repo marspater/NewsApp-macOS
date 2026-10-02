@@ -12,6 +12,8 @@ Native macOS, local-first RSS reader. This document defines the supported techno
 
 ## Implementation invariants
 
+- Briefing is an optional, window-local session of at most ten unread, unmuted publications from an explicit 24-hour publication window. Selection balances source and category counts over at most 500 recent candidates; membership and order stay frozen until an explicit New Briefing. Read state supplies progress without removing cards. Normal refresh, archive access and scheduling remain independent.
+
 - Schema v12 guards FTS update triggers with null-safe comparisons of indexed text fields; metadata-only and identical refreshes preserve existing FTS rows. Changed titles/descriptions/content/source/category still reindex atomically.
 
 - Keep UI concerns out of database, networking and domain layers. Preserve actor isolation, avoid main-actor database work, bound batch concurrency/memory, and avoid lifecycle retain cycles.
