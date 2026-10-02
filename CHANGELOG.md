@@ -16,6 +16,7 @@
 - Reader accessibility: the headline and publisher headings are announced with heading levels, the source line is read as one phrase, the citation highlight's dismiss button is its own labelled control, the headline is selectable, and Increase Contrast restores full-strength text and visible control borders (#123).
 
 - Retain protected redirect destinations and verified same-origin canonical URLs as document aliases; resolve relative reader images from the final response URL.
+- Forward TCP EOF through the protected proxy, so cancelling a refresh closes the upstream request while half-closed responses can finish draining.
 - Reconcile confident historical same-document copies while preserving original rows, read/save histories and old-ID navigation; keep uncertain matches separate.
 
 - Match substantial exact publisher text across URL/GUID variants while preserving independent reprints and uncertain identities.
