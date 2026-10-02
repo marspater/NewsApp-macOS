@@ -549,6 +549,46 @@ struct NewsTests {
             record("natural_language_analysis_ms", from: analysisStart)
             assertFalse(analysis.summary.isEmpty, "Deterministic analysis returns publisher-derived text")
         }
+
+        // Event clustering & feed grouping (#104, #153)
+        let clusterNow = Date(timeIntervalSince1970: 1_800_010_250)
+        for _ in 0..<5 {
+            let start = ProcessInfo.processInfo.systemUptime
+            _ = try await EventClusterer.run(in: db, now: clusterNow, limit: 200)
+            record("event_clustering_ms", from: start)
+        }
+        let snapshotArticles = Array(store.articles.prefix(500))
+        let snapshotIDs = snapshotArticles.map(\.id)
+        for _ in 0..<10 {
+            let start = ProcessInfo.processInfo.systemUptime
+            let summaries = try await store.eventFeedSummaries(for: snapshotIDs)
+            let entries = EventFeedGrouping.entries(for: snapshotArticles, events: summaries, mode: .events)
+            record("event_feed_grouping_ms", from: start)
+            assertFalse(entries.isEmpty, "Grouped feed entries are not empty")
+        }
+
+        // Overview generation & cached lookup (#104, #153)
+        let eventArticles = Array(archive.prefix(3))
+        let queue = EnrichmentQueue(store: store)
+        let coordinator = OverviewGenerationCoordinator(store: store, queue: queue)
+        for i in 0..<10 {
+            let start = ProcessInfo.processInfo.systemUptime
+            let doc = await coordinator.requestOverview(
+                eventID: "bench-event-\(i)",
+                eventTitle: "Research report on observation",
+                membershipVersion: 1,
+                articles: eventArticles,
+                priority: .visibleEvent
+            )
+            record("overview_generation_ms", from: start)
+            assertTrue(doc != nil, "Benchmark overview generation succeeds")
+        }
+        for _ in 0..<10 {
+            let start = ProcessInfo.processInfo.systemUptime
+            let cached = try await store.fetchEventOverview(eventID: "bench-event-0")
+            record("overview_cached_ms", from: start)
+            assertTrue(cached != nil, "Cached overview lookup succeeds")
+        }
         for _ in 0..<10 {
             let entered = TestCounter()
             let cancelledManager = FeedManager(settings: settings, store: store, schedulesRefresh: false, fetchBatch: { _, _ in
