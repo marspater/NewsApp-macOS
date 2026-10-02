@@ -256,6 +256,7 @@ struct NewsTests {
             try await testModelAvailabilityAndLanguageFallbacks(fixtureRoot: fixtureRoot)
             try await testPassageAnchoredFactExtraction()
             try await testOverviewCompositionFromVerifiedFacts(fixtureHost: fixtureHost)
+            try await testDeterministicClaimVerification(fixtureHost: fixtureHost)
             try await testHistoricalReconciliation(fixtureRoot: fixtureRoot)
             try await testEventDataModel(fixtureRoot: fixtureRoot)
             try await testEventCandidateGeneration(fixtureRoot: fixtureRoot)
@@ -324,6 +325,7 @@ struct NewsTests {
         try await testModelAvailabilityAndLanguageFallbacks(fixtureRoot: fixtureRoot)
         try await testPassageAnchoredFactExtraction()
         try await testOverviewCompositionFromVerifiedFacts(fixtureHost: fixtureHost)
+        try await testDeterministicClaimVerification(fixtureHost: fixtureHost)
         try await testHistoricalReconciliation(fixtureRoot: fixtureRoot)
         try await testEventDataModel(fixtureRoot: fixtureRoot)
         try await testEventCandidateGeneration(fixtureRoot: fixtureRoot)
@@ -6322,6 +6324,379 @@ struct NewsTests {
         assertEqual(fallbackDoc.kind, OverviewKind.fallbackExcerpts, "Composer falls back to fallbackExcerpts when verified facts < 3")
         assertTrue(fallbackDoc.facts.count == 1, "Fallback contains available verified facts without fabricating ungrounded ones")
     }
+
+    /// Tests deterministic verification of overview claims, citations, numbers, units, currency,
+    /// dates, negation, attribution, and fallback behavior.
+    static func testDeterministicClaimVerification(fixtureHost: String) async throws {
+        print("  - Testing Deterministic verification of overview claims and fallbacks...")
+
+        let passage1 = EvidencePassage(
+            id: "pass-alpha",
+            articleID: "art-alpha",
+            text: "On 15 October 2026, European Space Agency launched 42 orbital communication satellites with a total budget of $50 million.",
+            ordinal: 1
+        )
+        let passage2 = EvidencePassage(
+            id: "pass-beta",
+            articleID: "art-beta",
+            text: "The telemetry team confirmed maximum orbital speed of 100 km/h and reported zero initial hardware failures.",
+            ordinal: 2
+        )
+        let passage3 = EvidencePassage(
+            id: "pass-gamma",
+            articleID: "art-gamma",
+            text: "Ministry of Infrastructure did not approve private orbital licensing for third-party commercial operators.",
+            ordinal: 3
+        )
+        let passage4 = EvidencePassage(
+            id: "pass-delta",
+            articleID: "art-delta",
+            text: "Міністерство транспорту повідомило про успішне завершення першого етапу випробувань у вересні 2026 року.",
+            ordinal: 4
+        )
+        let passages = [passage1, passage2, passage3, passage4]
+
+        let article1 = FeedArticle(
+            storedID: "art-alpha",
+            title: "Satellites Launched",
+            link: "https://\(fixtureHost)/satellites",
+            guid: "g-alpha",
+            description: "Launch report",
+            pubDate: Date(timeIntervalSince1970: 1700000000),
+            source: "Space News",
+            fullContent: passage1.text
+        )
+        let article2 = FeedArticle(
+            storedID: "art-beta",
+            title: "Telemetry Success",
+            link: "https://\(fixtureHost)/telemetry",
+            guid: "g-beta",
+            description: "Telemetry report",
+            pubDate: Date(timeIntervalSince1970: 1700001000),
+            source: "Space News",
+            fullContent: passage2.text
+        )
+        let article3 = FeedArticle(
+            storedID: "art-gamma",
+            title: "Licensing Status",
+            link: "https://\(fixtureHost)/licensing",
+            guid: "g-gamma",
+            description: "Licensing report",
+            pubDate: Date(timeIntervalSince1970: 1700002000),
+            source: "Gov News",
+            fullContent: passage3.text
+        )
+        let article4 = FeedArticle(
+            storedID: "art-delta",
+            title: "Випробування завершено",
+            link: "https://\(fixtureHost)/trials",
+            guid: "g-delta",
+            description: "Звіт про випробування",
+            pubDate: Date(timeIntervalSince1970: 1700003000),
+            source: "UA News",
+            fullContent: passage4.text
+        )
+        let articles = [article1, article2, article3, article4]
+
+        let validFact1 = PassageAnchoredFact(
+            id: "f-a",
+            statement: "ESA launched 42 orbital communication satellites on 15 October 2026 with a budget of $50 million.",
+            passageID: "pass-alpha",
+            quote: "launched 42 orbital communication satellites with a total budget of $50 million",
+            articleID: "art-alpha"
+        )
+        let validFact2 = PassageAnchoredFact(
+            id: "f-b",
+            statement: "The telemetry team confirmed speed of 100 km/h with zero initial failures.",
+            passageID: "pass-beta",
+            quote: "telemetry team confirmed maximum orbital speed of 100 km/h and reported zero initial hardware failures",
+            articleID: "art-beta"
+        )
+        let validFact3 = PassageAnchoredFact(
+            id: "f-c",
+            statement: "Ministry of Infrastructure did not approve private orbital licensing.",
+            passageID: "pass-gamma",
+            quote: "Ministry of Infrastructure did not approve private orbital licensing",
+            articleID: "art-gamma"
+        )
+
+        // 1. Baseline: valid overview passes deterministic verification
+        let baselineOverview = OverviewComposer.composeOverview(
+            eventID: "event-alpha-1",
+            eventTitle: "Orbital Satellite Deployment",
+            verifiedFacts: [validFact1, validFact2, validFact3],
+            passages: passages,
+            articles: articles
+        )
+        let baselineReport = OverviewClaimVerifier.verifyOverview(baselineOverview, passages: passages, articles: articles)
+        assertTrue(baselineReport.isFullyVerified, "Baseline overview with valid facts is fully verified")
+        assertEqual(baselineReport.verifiedFacts.count, 3, "All 3 facts verified")
+        assertTrue(baselineReport.unverifiedFacts.isEmpty, "No unverified facts in baseline")
+        assertTrue(baselineReport.allFailureReasons.isEmpty, "Zero failure reasons in baseline")
+
+        // 2. Check: Citation ID existence
+        let missingCiteCitation = OverviewCitation(
+            id: "cite_nonexistent",
+            articleID: "art-alpha",
+            passageID: "pass-alpha",
+            passageFingerprint: "fp1",
+            quote: "launched 42 orbital communication satellites"
+        )
+        let missingCiteFact = OverviewFact(id: "f-bad-cite", text: "ESA launched satellites", citationIDs: ["cite_ghost_id"])
+        let badCiteOverview = EventOverviewDocument(
+            id: "doc-bad-cite",
+            eventID: "event-alpha-1",
+            version: OverviewVersionContext(membershipVersion: 1, inputTextHash: "h1"),
+            content: OverviewContent(
+                title: "Bad Citation Overview",
+                summary: "Summary text",
+                facts: [missingCiteFact],
+                citations: [missingCiteCitation]
+            )
+        )
+        let badCiteReport = OverviewClaimVerifier.verifyOverview(badCiteOverview, passages: passages, articles: articles)
+        assertFalse(badCiteReport.isFullyVerified, "Overview with non-existent citation ID fails verification")
+        assertTrue(badCiteReport.allFailureReasons.contains(where: {
+            if case .missingCitation(let id) = $0 { return id == "cite_ghost_id" }
+            return false
+        }), "Report contains missingCitation reason for cite_ghost_id")
+
+        // Check: Missing passage ID
+        let ghostPassageCitation = OverviewCitation(
+            id: "cite-ghost-pass",
+            articleID: "art-alpha",
+            passageID: "pass-ghost",
+            passageFingerprint: "fp1",
+            quote: "some quote"
+        )
+        let ghostPassageFact = OverviewFact(id: "f-ghost-pass", text: "Ghost passage claim", citationIDs: ["cite-ghost-pass"])
+        let ghostPassOverview = EventOverviewDocument(
+            id: "doc-ghost-pass",
+            eventID: "event-alpha-1",
+            version: OverviewVersionContext(membershipVersion: 1, inputTextHash: "h1"),
+            content: OverviewContent(
+                title: "Ghost Passage",
+                summary: "Summary",
+                facts: [ghostPassageFact],
+                citations: [ghostPassageCitation]
+            )
+        )
+        let ghostPassReport = OverviewClaimVerifier.verifyOverview(ghostPassOverview, passages: passages, articles: articles)
+        assertFalse(ghostPassReport.isFullyVerified, "Overview referencing missing passage ID fails verification")
+        assertTrue(ghostPassReport.allFailureReasons.contains(where: {
+            if case .missingPassage(let id) = $0 { return id == "pass-ghost" }
+            return false
+        }), "Report contains missingPassage reason for pass-ghost")
+
+        // 3. Check: Supporting text in cited passage
+        let unanchoredCitation = OverviewCitation(
+            id: "cite-unanchored",
+            articleID: "art-alpha",
+            passageID: "pass-alpha",
+            passageFingerprint: "fp1",
+            quote: "aliens made contact with ground stations in Kourou"
+        )
+        let unanchoredFact = OverviewFact(id: "f-unanchored", text: "Aliens contacted Earth", citationIDs: ["cite-unanchored"])
+        let unanchoredOverview = EventOverviewDocument(
+            id: "doc-unanchored",
+            eventID: "event-alpha-1",
+            version: OverviewVersionContext(membershipVersion: 1, inputTextHash: "h1"),
+            content: OverviewContent(
+                title: "Unanchored",
+                summary: "Summary",
+                facts: [unanchoredFact],
+                citations: [unanchoredCitation]
+            )
+        )
+        let unanchoredReport = OverviewClaimVerifier.verifyOverview(unanchoredOverview, passages: passages, articles: articles)
+        assertFalse(unanchoredReport.isFullyVerified, "Overview with quote not in passage fails verification")
+        assertTrue(unanchoredReport.allFailureReasons.contains(where: {
+            if case .unanchoredQuote(let q, _) = $0 { return q.contains("aliens") }
+            return false
+        }), "Report contains unanchoredQuote failure reason")
+
+        // 4. Check: Numbers, units, currency and dates
+        // 4a. Number mismatch: claim mentions 84 satellites instead of 42
+        let numMismatchFact = PassageAnchoredFact(
+            id: "f-num",
+            statement: "ESA launched 84 orbital communication satellites.",
+            passageID: "pass-alpha",
+            quote: "launched 42 orbital communication satellites with a total budget of $50 million",
+            articleID: "art-alpha"
+        )
+        let numOverview = OverviewComposer.composeOverview(
+            eventID: "event-num",
+            eventTitle: "Num Test",
+            verifiedFacts: [numMismatchFact, validFact2, validFact3],
+            passages: passages,
+            articles: articles
+        )
+        let numReport = OverviewClaimVerifier.verifyOverview(numOverview, passages: passages, articles: articles)
+        assertFalse(numReport.isFullyVerified, "Numeric mismatch (84 vs 42) fails verification")
+        assertTrue(numReport.allFailureReasons.contains(where: {
+            if case .numericMismatch(let num, _) = $0 { return num == "84" }
+            return false
+        }), "Report flags numericMismatch for 84")
+
+        // 4b. Currency mismatch: claim has €50 million instead of $50 million
+        let currMismatchFact = PassageAnchoredFact(
+            id: "f-curr",
+            statement: "The program had a total budget of €50 million.",
+            passageID: "pass-alpha",
+            quote: "launched 42 orbital communication satellites with a total budget of $50 million",
+            articleID: "art-alpha"
+        )
+        let currOverview = OverviewComposer.composeOverview(
+            eventID: "event-curr",
+            eventTitle: "Curr Test",
+            verifiedFacts: [currMismatchFact, validFact2, validFact3],
+            passages: passages,
+            articles: articles
+        )
+        let currReport = OverviewClaimVerifier.verifyOverview(currOverview, passages: passages, articles: articles)
+        assertFalse(currReport.isFullyVerified, "Currency mismatch (€ vs $) fails verification")
+        assertTrue(currReport.allFailureReasons.contains(where: {
+            if case .currencyMismatch(let curr, _) = $0 { return curr == "€" || curr == "EUR" }
+            return false
+        }), "Report flags currencyMismatch")
+
+        // 4c. Date mismatch: claim has 2025 instead of 2026
+        let dateMismatchFact = PassageAnchoredFact(
+            id: "f-date",
+            statement: "The satellites were launched in October 2025.",
+            passageID: "pass-alpha",
+            quote: "On 15 October 2026, European Space Agency launched 42 orbital communication satellites",
+            articleID: "art-alpha"
+        )
+        let dateOverview = OverviewComposer.composeOverview(
+            eventID: "event-date",
+            eventTitle: "Date Test",
+            verifiedFacts: [dateMismatchFact, validFact2, validFact3],
+            passages: passages,
+            articles: articles
+        )
+        let dateReport = OverviewClaimVerifier.verifyOverview(dateOverview, passages: passages, articles: articles)
+        assertFalse(dateReport.isFullyVerified, "Date mismatch (2025 vs 2026) fails verification")
+        assertTrue(dateReport.allFailureReasons.contains(where: {
+            if case .dateMismatch(let d, _) = $0 { return d.contains("2025") }
+            return false
+        }), "Report flags dateMismatch")
+
+        // 4d. Unit mismatch: claim has 100 mph instead of 100 km/h
+        let unitMismatchFact = PassageAnchoredFact(
+            id: "f-unit",
+            statement: "The telemetry team confirmed speed of 100 mph.",
+            passageID: "pass-beta",
+            quote: "telemetry team confirmed maximum orbital speed of 100 km/h and reported zero initial hardware failures",
+            articleID: "art-beta"
+        )
+        let unitOverview = OverviewComposer.composeOverview(
+            eventID: "event-unit",
+            eventTitle: "Unit Test",
+            verifiedFacts: [unitMismatchFact, validFact1, validFact3],
+            passages: passages,
+            articles: articles
+        )
+        let unitReport = OverviewClaimVerifier.verifyOverview(unitOverview, passages: passages, articles: articles)
+        assertFalse(unitReport.isFullyVerified, "Unit mismatch (mph vs km/h) fails verification")
+        assertTrue(unitReport.allFailureReasons.contains(where: {
+            if case .unitMismatch(let u, _) = $0 { return u == "mph" }
+            return false
+        }), "Report flags unitMismatch")
+
+        // 5. Check: Negation and attribution preservation
+        // 5a. Negation flipped (passage has "did not approve", claim says "approved")
+        let flippedNegationFact = PassageAnchoredFact(
+            id: "f-neg-flip",
+            statement: "Ministry of Infrastructure approved private orbital licensing for commercial operators.",
+            passageID: "pass-gamma",
+            quote: "Ministry of Infrastructure did not approve private orbital licensing for third-party commercial operators",
+            articleID: "art-gamma"
+        )
+        let negOverview = OverviewComposer.composeOverview(
+            eventID: "event-neg",
+            eventTitle: "Negation Test",
+            verifiedFacts: [flippedNegationFact, validFact1, validFact2],
+            passages: passages,
+            articles: articles
+        )
+        let negReport = OverviewClaimVerifier.verifyOverview(negOverview, passages: passages, articles: articles)
+        assertFalse(negReport.isFullyVerified, "Flipped negation (dropped 'not') fails verification")
+        assertTrue(negReport.allFailureReasons.contains(where: {
+            if case .negationFlipped = $0 { return true }
+            return false
+        }), "Report flags negationFlipped")
+
+        // 5b. Ukrainian negation flipped
+        let uaFlippedFact = PassageAnchoredFact(
+            id: "f-ua-neg",
+            statement: "Міністерство транспорту не завершило перший етап випробувань.",
+            passageID: "pass-delta",
+            quote: "Міністерство транспорту повідомило про успішне завершення першого етапу випробувань у вересні 2026 року",
+            articleID: "art-delta"
+        )
+        let uaOverview = OverviewComposer.composeOverview(
+            eventID: "event-ua-neg",
+            eventTitle: "UA Negation Test",
+            verifiedFacts: [uaFlippedFact, validFact1, validFact2],
+            passages: passages,
+            articles: articles
+        )
+        let uaReport = OverviewClaimVerifier.verifyOverview(uaOverview, passages: passages, articles: articles)
+        assertFalse(uaReport.isFullyVerified, "Ukrainian fabricated negation fails verification")
+        assertTrue(uaReport.allFailureReasons.contains(where: {
+            if case .negationFlipped = $0 { return true }
+            return false
+        }), "Report flags negationFlipped for Ukrainian text")
+
+        // 5c. Attribution mismatch (fabricated attribution: "White House announced" when source says "Міністерство транспорту")
+        let attrMismatchFact = PassageAnchoredFact(
+            id: "f-attr-bad",
+            statement: "The White House announced the successful completion of the first stage of trials.",
+            passageID: "pass-delta",
+            quote: "Міністерство транспорту повідомило про успішне завершення першого етапу випробувань у вересні 2026 року",
+            articleID: "art-delta"
+        )
+        let attrOverview = OverviewComposer.composeOverview(
+            eventID: "event-attr",
+            eventTitle: "Attr Test",
+            verifiedFacts: [attrMismatchFact, validFact1, validFact2],
+            passages: passages,
+            articles: articles
+        )
+        let attrReport = OverviewClaimVerifier.verifyOverview(attrOverview, passages: passages, articles: articles)
+        assertFalse(attrReport.isFullyVerified, "Attribution mismatch fails verification")
+        assertTrue(attrReport.allFailureReasons.contains(where: {
+            if case .attributionMissing(let a, _) = $0 { return a.contains("White House") }
+            return false
+        }), "Report flags attributionMissing for White House")
+
+        // 6. Failure behavior: never store failed retelling as finished overview; show verified excerpts and source list
+        let fallbackDoc = OverviewClaimVerifier.createFallbackOverview(
+            from: numOverview,
+            passages: passages,
+            articles: articles,
+            report: numReport
+        )
+        assertEqual(fallbackDoc.kind, OverviewKind.fallbackExcerpts, "Fallback overview kind is fallbackExcerpts")
+        assertFalse(fallbackDoc.kind == OverviewKind.synthesized, "Failed retelling is never kept as synthesized")
+        assertEqual(fallbackDoc.facts.count, 2, "Fallback retains only the 2 verified facts, dropping the failed numeric claim")
+        assertTrue(fallbackDoc.summary.contains("Verified Excerpts"), "Fallback summary header indicates verified excerpts")
+        assertTrue(fallbackDoc.summary.contains("Sources"), "Fallback summary lists sources")
+
+        // 7. Safe persistence via DatabaseEngine: recordVerifiedOverview never stores failed synthesized overview
+        let dbEngine = DatabaseEngine(path: ":memory:")
+        try await dbEngine.open()
+        _ = try await dbEngine.upsertArticles(articles)
+        let savedOutcome = try await dbEngine.recordVerifiedOverview(numOverview, passages: passages, articles: articles)
+        assertTrue(savedOutcome.saved, "Overview saved safely")
+        assertEqual(savedOutcome.document.kind, OverviewKind.fallbackExcerpts, "DatabaseEngine stored fallbackExcerpts, not synthesized")
+
+        let fetched = try await dbEngine.fetchEventOverview(eventID: "event-num")
+        assertTrue(fetched != nil, "Fetched overview exists in database")
+        assertEqual(fetched?.kind, OverviewKind.fallbackExcerpts, "Stored overview in database is fallbackExcerpts, not a failed retelling")
+    }
 }
+
 
 

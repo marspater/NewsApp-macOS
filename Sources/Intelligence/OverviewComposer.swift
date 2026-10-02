@@ -129,10 +129,9 @@ public struct OverviewComposer: Sendable {
                 eventID: eventID,
                 eventTitle: eventTitle,
                 validFacts: validFacts,
-                passagesByID: passagesByID,
-                articlesByID: articlesByID,
+                passages: passages,
+                articles: articles,
                 versionContext: versionContext,
-                memberArticleIDs: memberArticleIDs,
                 leadImage: leadImage
             )
         }
@@ -228,12 +227,15 @@ public struct OverviewComposer: Sendable {
         eventID: String,
         eventTitle: String,
         validFacts: [PassageAnchoredFact],
-        passagesByID: [String: EvidencePassage],
-        articlesByID: [String: FeedArticle],
+        passages: [EvidencePassage],
+        articles: [FeedArticle],
         versionContext: OverviewVersionContext,
-        memberArticleIDs: [String],
         leadImage: OverviewLeadImage?
     ) -> EventOverviewDocument {
+        let passagesByID = Dictionary(uniqueKeysWithValues: passages.map { ($0.id, $0) })
+        let articlesByID = Dictionary(uniqueKeysWithValues: articles.map { ($0.id, $0) })
+        let memberArticleIDs = articles.map(\.id)
+
         var overviewFacts: [OverviewFact] = []
         var citations: [OverviewCitation] = []
 
