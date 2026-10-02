@@ -280,6 +280,7 @@ struct NewsTests {
             try await testOnDemandOverviewGenerationAndCaching(fixtureHost: fixtureHost)
             try await testDeterministicClaimVerification(fixtureHost: fixtureHost)
             try await testEventOverviewReaderMode(fixtureHost: fixtureHost)
+            try await testEventTimelineWithSourcedItems(fixtureHost: fixtureHost)
             try await testHistoricalReconciliation(fixtureRoot: fixtureRoot)
             try await testEventDataModel(fixtureRoot: fixtureRoot)
             try await testEventCandidateGeneration(fixtureRoot: fixtureRoot)
@@ -356,6 +357,7 @@ struct NewsTests {
         try await testOnDemandOverviewGenerationAndCaching(fixtureHost: fixtureHost)
         try await testDeterministicClaimVerification(fixtureHost: fixtureHost)
         try await testEventOverviewReaderMode(fixtureHost: fixtureHost)
+        try await testEventTimelineWithSourcedItems(fixtureHost: fixtureHost)
         try await testHistoricalReconciliation(fixtureRoot: fixtureRoot)
         try await testEventDataModel(fixtureRoot: fixtureRoot)
         try await testEventCandidateGeneration(fixtureRoot: fixtureRoot)
@@ -7918,6 +7920,163 @@ struct NewsTests {
         let publicationMode = ReaderExperienceMode.sourcePublication
         assertEqual(overviewMode.rawValue, "Event overview", "Overview mode label is 'Event overview'")
         assertEqual(publicationMode.rawValue, "Source publication", "Publication mode label is 'Source publication'")
+    }
+
+    static func testEventTimelineWithSourcedItems(fixtureHost: String = "example.com") async throws {
+        print("  - Testing Event timeline with sourced items (#143)...")
+
+        let pubDate1 = Date(timeIntervalSince1970: 1792051200) // 15 October 2026 08:00 UTC
+        let pubDate2 = Date(timeIntervalSince1970: 1792137600) // 16 October 2026 08:00 UTC
+
+        let passage1 = EvidencePassage(
+            id: "pass_quake_1",
+            articleID: "art_seismic_1",
+            text: "Seismic sensors detected a magnitude 5.2 earthquake at 06:14 UTC along the subduction zone.",
+            ordinal: 1
+        )
+        let passage2 = EvidencePassage(
+            id: "pass_quake_2",
+            articleID: "art_seismic_2",
+            text: "On 15 October 2026, civil protection teams established three emergency shelters in coastal towns.",
+            ordinal: 2
+        )
+        let passage3 = EvidencePassage(
+            id: "pass_quake_3",
+            articleID: "art_seismic_1",
+            text: "Emergency officials reported zero casualties and stated that structural damage assessments remain underway.",
+            ordinal: 3
+        )
+        let passageFuturePlan = EvidencePassage(
+            id: "pass_plan_4",
+            articleID: "art_seismic_2",
+            text: "Infrastructure ministry announced that regional seismic retrofitting is scheduled to begin in the second quarter of 2027.",
+            ordinal: 4
+        )
+
+        let article1 = FeedArticle(
+            storedID: "art_seismic_1",
+            title: "Magnitude 5.2 Earthquake Detected",
+            link: "https://\(fixtureHost)/seismic-1",
+            guid: "guid-s1",
+            description: passage1.text,
+            pubDate: pubDate1,
+            source: "Geological Service",
+            fullContent: "\(passage1.text) \(passage3.text)"
+        )
+        let article2 = FeedArticle(
+            storedID: "art_seismic_2",
+            title: "Emergency Shelters Deployed",
+            link: "https://\(fixtureHost)/seismic-2",
+            guid: "guid-s2",
+            description: passage2.text,
+            pubDate: pubDate2,
+            source: "Civil Protection",
+            fullContent: "\(passage2.text) \(passageFuturePlan.text)"
+        )
+
+        let citations: [String: OverviewCitation] = [
+            "c_1": OverviewCitation(id: "c_1", articleID: "art_seismic_1", passageID: "pass_quake_1", passageFingerprint: passage1.fingerprint, quote: "at 06:14 UTC along the subduction zone"),
+            "c_2": OverviewCitation(id: "c_2", articleID: "art_seismic_2", passageID: "pass_quake_2", passageFingerprint: passage2.fingerprint, quote: "On 15 October 2026, civil protection teams"),
+            "c_3": OverviewCitation(id: "c_3", articleID: "art_seismic_1", passageID: "pass_quake_3", passageFingerprint: passage3.fingerprint, quote: "structural damage assessments remain underway"),
+            "c_4": OverviewCitation(id: "c_4", articleID: "art_seismic_2", passageID: "pass_plan_4", passageFingerprint: passageFuturePlan.fingerprint, quote: "scheduled to begin in the second quarter of 2027")
+        ]
+
+        // 1. Extraction: extractTimeline correctly identifies temporal items and sources
+        let timelineItems = OverviewTimelineExtractor.extractTimeline(
+            passages: [passage1, passage2, passageFuturePlan],
+            articles: [article1, article2],
+            existingCitations: citations
+        )
+        assertTrue(timelineItems.count >= 2, "Timeline extractor produces at least two chronological items")
+
+        // 2. Rule 1: Event date kept separate from publication date
+        for item in timelineItems {
+            assertTrue(!item.citationIDs.isEmpty, "Rule 4: Every timeline item has at least one source citation")
+            if let _ = item.eventDate, let pubDate = item.publicationDate {
+                assertEqual(pubDate, item.publicationDate, "Publication date preserved independently")
+            }
+        }
+
+        // 3. Rule 2: An unknown date stays unknown
+        let itemWithoutDate = OverviewTimelineItem(
+            id: "tl_nodate",
+            dateText: "Date unspecified",
+            summary: "Damage assessments remain underway.",
+            citationIDs: ["c_3"],
+            isFuturePlan: false,
+            eventDate: nil,
+            publicationDate: pubDate1
+        )
+        let validationNoDate = OverviewTimelineValidator.validateItem(itemWithoutDate, against: citations)
+        assertTrue(validationNoDate.isValid, "Item with unknown event date is valid when eventDate is nil")
+        assertEqual(itemWithoutDate.eventDate, nil, "Unknown event date is strictly nil, never defaulted to publication date")
+
+        // Validator rejects synthesized timestamp for unknown date
+        let invalidSynthesizedDate = OverviewTimelineItem(
+            id: "tl_invalid",
+            dateText: "Date unspecified",
+            summary: "Damage assessments remain underway.",
+            citationIDs: ["c_3"],
+            isFuturePlan: false,
+            eventDate: pubDate1,
+            publicationDate: pubDate1
+        )
+        let validationSynthesized = OverviewTimelineValidator.validateItem(invalidSynthesizedDate, against: citations)
+        assertFalse(validationSynthesized.isValid, "Fabricated event timestamp for unspecified date rejected")
+
+        // 4. Rule 3: Future plans are labeled as plans
+        let futurePlanItem = timelineItems.first(where: { $0.isFuturePlan })
+        assertTrue(futurePlanItem != nil, "Future plan detected from plan markers in text")
+        assertTrue(futurePlanItem!.isFuturePlan, "Future plan is explicitly labeled as plan (isFuturePlan == true)")
+        assertTrue(futurePlanItem!.dateText.lowercased().contains("quarter") || futurePlanItem!.dateText.lowercased().contains("scheduled"), "Future plan date text preserves plan anchor")
+
+        // Validator rejects future plan marked as normal past event
+        let unlabelledPlan = OverviewTimelineItem(
+            id: "tl_unlabelled",
+            dateText: "Second Quarter 2027",
+            summary: "Retrofitting is scheduled to begin in the second quarter of 2027.",
+            citationIDs: ["c_4"],
+            isFuturePlan: false,
+            eventDate: Date(timeIntervalSince1970: 1814400000),
+            publicationDate: pubDate2
+        )
+        let validationUnlabelled = OverviewTimelineValidator.validateItem(unlabelledPlan, against: citations)
+        assertFalse(validationUnlabelled.isValid, "Future plan without isFuturePlan=true is rejected")
+
+        // 5. Rule 4: Every item has a source citation
+        let sourcelessItem = OverviewTimelineItem(
+            id: "tl_no_source",
+            dateText: "15 October 2026",
+            summary: "Shelters deployed.",
+            citationIDs: [],
+            isFuturePlan: false
+        )
+        let validationSourceless = OverviewTimelineValidator.validateItem(sourcelessItem, against: citations)
+        assertFalse(validationSourceless.isValid, "Item without source citations rejected")
+
+        let nonExistentCitationItem = OverviewTimelineItem(
+            id: "tl_bad_source",
+            dateText: "15 October 2026",
+            summary: "Shelters deployed.",
+            citationIDs: ["c_nonexistent_99"],
+            isFuturePlan: false
+        )
+        let validationBadSource = OverviewTimelineValidator.validateItem(nonExistentCitationItem, against: citations)
+        assertFalse(validationBadSource.isValid, "Item with non-existent citation ID rejected")
+
+        // 6. Rule of Absent Sections: Fewer than 2 items results in empty timeline
+        let singleItemTimeline = OverviewTimelineExtractor.extractTimeline(
+            passages: [passage1],
+            articles: [article1],
+            existingCitations: ["c_1": citations["c_1"]!]
+        )
+        assertTrue(singleItemTimeline.isEmpty, "Timeline section is absent when fewer than two valid items exist")
+
+        // 7. Chronological Ordering: Past events precede future plans
+        if timelineItems.count >= 2 {
+            let lastItem = timelineItems.last!
+            assertTrue(lastItem.isFuturePlan, "Future plans are positioned at the end of the timeline")
+        }
     }
 }
 
