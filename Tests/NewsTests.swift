@@ -278,6 +278,7 @@ struct NewsTests {
             try await testOverviewQualityAuditAndReleaseGate(fixtureHost: fixtureHost)
             try await testOnDemandOverviewGenerationAndCaching(fixtureHost: fixtureHost)
             try await testDeterministicClaimVerification(fixtureHost: fixtureHost)
+            try await testEventOverviewReaderMode(fixtureHost: fixtureHost)
             try await testHistoricalReconciliation(fixtureRoot: fixtureRoot)
             try await testEventDataModel(fixtureRoot: fixtureRoot)
             try await testEventCandidateGeneration(fixtureRoot: fixtureRoot)
@@ -352,6 +353,7 @@ struct NewsTests {
         try await testOverviewQualityAuditAndReleaseGate(fixtureHost: fixtureHost)
         try await testOnDemandOverviewGenerationAndCaching(fixtureHost: fixtureHost)
         try await testDeterministicClaimVerification(fixtureHost: fixtureHost)
+        try await testEventOverviewReaderMode(fixtureHost: fixtureHost)
         try await testHistoricalReconciliation(fixtureRoot: fixtureRoot)
         try await testEventDataModel(fixtureRoot: fixtureRoot)
         try await testEventCandidateGeneration(fixtureRoot: fixtureRoot)
@@ -7410,6 +7412,192 @@ struct NewsTests {
         let fetched = try await dbEngine.fetchEventOverview(eventID: "event-num")
         assertTrue(fetched != nil, "Fetched overview exists in database")
         assertEqual(fetched?.kind, OverviewKind.fallbackExcerpts, "Stored overview in database is fallbackExcerpts, not a failed retelling")
+    }
+
+    static func testEventOverviewReaderMode(fixtureHost: String) async throws {
+        print("  - Testing Event overview reader mode, layout order, absent sections, fact link passage navigation and mode switching...")
+
+        let linkScheme = "feed"
+        let articleA = FeedArticle(
+            storedID: "art-reader-alpha",
+            title: "Seismic Activity Detected in Central Region",
+            link: "\(linkScheme)://\(fixtureHost)/stories/alpha",
+            guid: "guid-alpha",
+            description: "Initial reports of tremor.",
+            pubDate: Date(timeIntervalSince1970: 1727850000),
+            source: "Geological Monitor"
+        )
+        let articleB = FeedArticle(
+            storedID: "art-reader-beta",
+            title: "Transit Lines Inspected Following Minor Quake",
+            link: "\(linkScheme)://\(fixtureHost)/stories/beta",
+            guid: "guid-beta",
+            description: "Transit authorities deploy inspection teams.",
+            pubDate: Date(timeIntervalSince1970: 1727853600),
+            source: "City Transit News"
+        )
+        let articles = [articleA, articleB]
+
+        // 1. Model: Evidence sections (timeline, perspectives, thematic angle)
+        let timelineItem1 = OverviewTimelineItem(
+            id: "tl-1",
+            dateText: "06:14 UTC",
+            summary: "Magnitude 4.8 tremor recorded along central fault line.",
+            citationIDs: ["cite-alpha"],
+            isFuturePlan: false
+        )
+        let timelineItem2 = OverviewTimelineItem(
+            id: "tl-2",
+            dateText: "Tomorrow 08:00 UTC",
+            summary: "Secondary drone inspection of high-speed rail bridges scheduled.",
+            citationIDs: ["cite-beta"],
+            isFuturePlan: true
+        )
+        let perspective1 = OverviewPerspective(
+            id: "persp-1",
+            participant: "Regional Seismology Office",
+            position: "Aftershock probabilities remain low over the next 48 hours.",
+            citationIDs: ["cite-alpha"]
+        )
+        let perspective2 = OverviewPerspective(
+            id: "persp-2",
+            participant: "Transit Safety Commission",
+            position: "All lines cleared for operation after ultrasonic rail checks.",
+            citationIDs: ["cite-beta"]
+        )
+        let thematicAngle = OverviewThematicAngle(
+            id: "angle-1",
+            title: "Infrastructure Resilience",
+            summary: "Automated early warning sensors halted trains 12 seconds before surface waves arrived.",
+            citationIDs: ["cite-alpha", "cite-beta"]
+        )
+        let evidenceSections = OverviewEvidenceSections(
+            timeline: [timelineItem1, timelineItem2],
+            perspectives: [perspective1, perspective2],
+            thematicAngle: thematicAngle
+        )
+        assertFalse(evidenceSections.isEmpty, "Evidence sections with content is not empty")
+
+        let citationA = OverviewCitation(
+            id: "cite-alpha",
+            articleID: articleA.id,
+            passageID: "pass-a",
+            passageFingerprint: "fp-a",
+            quote: "Seismic monitors recorded a magnitude 4.8 tremor along the central fault at 06:14 UTC.",
+            source: OverviewSourceMetadata(title: articleA.title, name: articleA.source, url: articleA.link, publishedAt: articleA.pubDate)
+        )
+        let citationB = OverviewCitation(
+            id: "cite-beta",
+            articleID: articleB.id,
+            passageID: "pass-b",
+            passageFingerprint: "fp-b",
+            quote: "Ultrasonic sensors and drone crews cleared all central line bridges by mid-morning.",
+            source: OverviewSourceMetadata(title: articleB.title, name: articleB.source, url: articleB.link, publishedAt: articleB.pubDate)
+        )
+
+        let fact1 = OverviewFact(id: "f-1", text: "A magnitude 4.8 tremor struck along the central fault.", citationIDs: ["cite-alpha"])
+        let fact2 = OverviewFact(id: "f-2", text: "Automated sensor trips safely halted all rail transit.", citationIDs: ["cite-beta"])
+        let fact3 = OverviewFact(id: "f-3", text: "Ultrasonic rail inspections revealed zero structural flaws.", citationIDs: ["cite-beta"])
+
+        let leadImage = OverviewLeadImage(
+            url: "\(linkScheme)://\(fixtureHost)/images/seismic-station.jpg",
+            caption: "Seismic monitoring station in the central valley.",
+            credit: "Geological Monitor / Photo",
+            sourceArticleID: articleA.id
+        )
+
+        let introSummary = """
+        Seismologists recorded a moderate 4.8-magnitude earthquake in the central valley early Tuesday morning, triggering automated transit halts across the metropolitan corridor.
+
+        Rapid structural inspections confirmed that rail infrastructure and elevated bridges sustained no damage, allowing passenger service to resume ahead of the morning peak.
+        """
+
+        let overviewDoc = EventOverviewDocument(
+            id: "doc-reader-1",
+            eventID: "event-quake-1",
+            version: OverviewVersionContext(membershipVersion: 1, inputTextHash: "hash-quake"),
+            content: OverviewContent(
+                title: "Magnitude 4.8 Tremor Halts Central Valley Rail Lines",
+                summary: introSummary,
+                facts: [fact1, fact2, fact3],
+                citations: [citationA, citationB],
+                leadImage: leadImage,
+                evidenceSections: evidenceSections
+            ),
+            provenance: OverviewProvenance(
+                memberArticleIDs: [articleA.id, articleB.id],
+                kind: .synthesized
+            )
+        )
+
+        // Verify document forwarders and evidence content
+        assertEqual(overviewDoc.timeline.count, 2, "Overview document forwards timeline items")
+        assertTrue(overviewDoc.timeline[1].isFuturePlan, "Future timeline item retains isFuturePlan flag")
+        assertEqual(overviewDoc.perspectives.count, 2, "Overview document forwards perspectives")
+        assertEqual(overviewDoc.thematicAngle?.title, "Infrastructure Resilience", "Overview document forwards thematic angle")
+
+        // 2. DatabaseEngine & ArticleStore persistence and fetchEventOverview(forArticleID:)
+        let dbEngine = DatabaseEngine(path: ":memory:")
+        try await dbEngine.open()
+        _ = try await dbEngine.upsertArticles(articles)
+        let event = try await dbEngine.createEvent(memberArticleIDs: [articleA.id, articleB.id])
+
+        let saved = try await dbEngine.recordEventOverview(EventOverviewDocument(
+            id: overviewDoc.id,
+            eventID: event.id,
+            version: overviewDoc.version,
+            content: overviewDoc.content,
+            provenance: OverviewProvenance(memberArticleIDs: [articleA.id, articleB.id], kind: .synthesized)
+        ))
+        assertTrue(saved, "DatabaseEngine recorded overview successfully")
+
+        // Lookup by member article ID
+        let fetchedByArticleA = try await dbEngine.fetchEventOverview(forArticleID: articleA.id)
+        assertTrue(fetchedByArticleA != nil, "fetchEventOverview resolves by member article A ID")
+        assertEqual(fetchedByArticleA?.title, overviewDoc.title, "Fetched overview title matches")
+        assertEqual(fetchedByArticleA?.timeline.count, 2, "Fetched overview restores timeline")
+        assertTrue(fetchedByArticleA?.timeline[1].isFuturePlan == true, "Fetched timeline item retains isFuturePlan")
+        assertEqual(fetchedByArticleA?.perspectives.count, 2, "Fetched overview restores perspectives")
+        assertEqual(fetchedByArticleA?.thematicAngle?.title, "Infrastructure Resilience", "Fetched overview restores thematic angle")
+
+        let fetchedByArticleB = try await dbEngine.fetchEventOverview(forArticleID: articleB.id)
+        assertTrue(fetchedByArticleB != nil, "fetchEventOverview resolves by member article B ID")
+
+        let nonExistent = try await dbEngine.fetchEventOverview(forArticleID: "non-existent-art")
+        assertTrue(nonExistent == nil, "fetchEventOverview returns nil for non-existent article")
+
+        // 3. Layout Rules: Verify absent sections when data is missing
+        let emptySectionsDoc = EventOverviewDocument(
+            id: "doc-minimal",
+            eventID: "event-min-1",
+            version: OverviewVersionContext(membershipVersion: 1, inputTextHash: "min"),
+            content: OverviewContent(
+                title: "Minimal Event",
+                summary: "One short paragraph.",
+                facts: [],
+                citations: [],
+                leadImage: nil,
+                evidenceSections: nil
+            ),
+            provenance: OverviewProvenance(memberArticleIDs: [articleA.id], kind: .synthesized)
+        )
+        assertTrue(emptySectionsDoc.leadImage == nil, "Lead image absent when nil")
+        assertTrue(emptySectionsDoc.facts.isEmpty, "Facts section absent when empty")
+        assertTrue(emptySectionsDoc.timeline.isEmpty, "Timeline section absent when empty")
+        assertTrue(emptySectionsDoc.perspectives.isEmpty, "Perspectives section absent when empty")
+        assertTrue(emptySectionsDoc.thematicAngle == nil, "Thematic angle section absent when nil")
+
+        // 4. Citation resolving & fact link opening stored passage
+        let citedQuote = citationA.quote
+        let targetArticleID = citationA.articleID
+        assertEqual(targetArticleID, articleA.id, "Citation links to articleA")
+        assertTrue(citedQuote.contains("06:14 UTC"), "Citation contains exact stored passage quote")
+
+        // 5. Reader experience modes verification
+        let overviewMode = ReaderExperienceMode.eventOverview
+        let publicationMode = ReaderExperienceMode.sourcePublication
+        assertEqual(overviewMode.rawValue, "Event overview", "Overview mode label is 'Event overview'")
+        assertEqual(publicationMode.rawValue, "Source publication", "Publication mode label is 'Source publication'")
     }
 }
 

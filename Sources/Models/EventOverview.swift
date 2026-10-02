@@ -132,6 +132,99 @@ public struct OverviewLeadImage: Codable, Hashable, Sendable {
     }
 }
 
+/// Clearly labeled modes for reading an event: either the synthesized event overview
+/// or the underlying original source publication.
+public enum ReaderExperienceMode: String, CaseIterable, Sendable, Identifiable {
+    case eventOverview = "Event overview"
+    case sourcePublication = "Source publication"
+
+    public var id: String { rawValue }
+}
+
+/// An entry in an event overview's chronological timeline.
+public struct OverviewTimelineItem: Codable, Hashable, Sendable, Identifiable {
+    public let id: String
+    public let dateText: String
+    public let summary: String
+    public let citationIDs: [String]
+    public let isFuturePlan: Bool
+
+    public init(
+        id: String = UUID().uuidString,
+        dateText: String,
+        summary: String,
+        citationIDs: [String] = [],
+        isFuturePlan: Bool = false
+    ) {
+        self.id = id
+        self.dateText = dateText
+        self.summary = summary
+        self.citationIDs = citationIDs
+        self.isFuturePlan = isFuturePlan
+    }
+}
+
+/// A participant or publisher perspective with clearly attributed stance or statement.
+public struct OverviewPerspective: Codable, Hashable, Sendable, Identifiable {
+    public let id: String
+    public let participant: String
+    public let position: String
+    public let citationIDs: [String]
+
+    public init(
+        id: String = UUID().uuidString,
+        participant: String,
+        position: String,
+        citationIDs: [String] = []
+    ) {
+        self.id = id
+        self.participant = participant
+        self.position = position
+        self.citationIDs = citationIDs
+    }
+}
+
+/// A thematic grouping of verified facts around a specific angle (e.g., economic or infrastructural impact).
+public struct OverviewThematicAngle: Codable, Hashable, Sendable, Identifiable {
+    public let id: String
+    public let title: String
+    public let summary: String
+    public let citationIDs: [String]
+
+    public init(
+        id: String = UUID().uuidString,
+        title: String,
+        summary: String,
+        citationIDs: [String] = []
+    ) {
+        self.id = id
+        self.title = title
+        self.summary = summary
+        self.citationIDs = citationIDs
+    }
+}
+
+/// Optional structured evidence sections: chronological timeline, participant perspectives, and thematic angle.
+public struct OverviewEvidenceSections: Codable, Hashable, Sendable {
+    public let timeline: [OverviewTimelineItem]
+    public let perspectives: [OverviewPerspective]
+    public let thematicAngle: OverviewThematicAngle?
+
+    public var isEmpty: Bool {
+        timeline.isEmpty && perspectives.isEmpty && thematicAngle == nil
+    }
+
+    public init(
+        timeline: [OverviewTimelineItem] = [],
+        perspectives: [OverviewPerspective] = [],
+        thematicAngle: OverviewThematicAngle? = nil
+    ) {
+        self.timeline = timeline
+        self.perspectives = perspectives
+        self.thematicAngle = thematicAngle
+    }
+}
+
 /// Generation mode for an event overview.
 public enum OverviewKind: String, Codable, Sendable, Equatable, Hashable {
     case synthesized
@@ -165,13 +258,15 @@ public struct OverviewContent: Codable, Hashable, Sendable {
     public let facts: [OverviewFact]
     public let citations: [String: OverviewCitation]
     public let leadImage: OverviewLeadImage?
+    public let evidenceSections: OverviewEvidenceSections?
 
     public init(
         title: String,
         summary: String,
         facts: [OverviewFact] = [],
         citations: [OverviewCitation] = [],
-        leadImage: OverviewLeadImage? = nil
+        leadImage: OverviewLeadImage? = nil,
+        evidenceSections: OverviewEvidenceSections? = nil
     ) {
         self.title = title
         self.summary = summary
@@ -180,6 +275,7 @@ public struct OverviewContent: Codable, Hashable, Sendable {
         for c in citations { dict[c.id] = c }
         self.citations = dict
         self.leadImage = leadImage
+        self.evidenceSections = evidenceSections
     }
 }
 
@@ -223,6 +319,10 @@ public struct EventOverviewDocument: Codable, Hashable, Sendable, Identifiable {
     public var facts: [OverviewFact] { content.facts }
     public var citations: [String: OverviewCitation] { content.citations }
     public var leadImage: OverviewLeadImage? { content.leadImage }
+    public var evidenceSections: OverviewEvidenceSections? { content.evidenceSections }
+    public var timeline: [OverviewTimelineItem] { evidenceSections?.timeline ?? [] }
+    public var perspectives: [OverviewPerspective] { evidenceSections?.perspectives ?? [] }
+    public var thematicAngle: OverviewThematicAngle? { evidenceSections?.thematicAngle }
     public var memberArticleIDs: [String] { provenance.memberArticleIDs }
     public var kind: OverviewKind { provenance.kind }
     public var createdAt: Date { provenance.createdAt }
@@ -245,6 +345,7 @@ public struct EventOverviewDocument: Codable, Hashable, Sendable, Identifiable {
     enum CodingKeys: String, CodingKey {
         case id, eventID, membershipVersion, inputTextHash, schemaVersion, analysisVersion
         case createdAt, updatedAt, title, summary, facts, citations, leadImage, memberArticleIDs, kind
+        case evidenceSections
     }
 
     public init(from decoder: Decoder) throws {
@@ -266,12 +367,14 @@ public struct EventOverviewDocument: Codable, Hashable, Sendable, Identifiable {
         let facts = try container.decode([OverviewFact].self, forKey: .facts)
         let citations = try container.decode([String: OverviewCitation].self, forKey: .citations)
         let leadImage = try container.decodeIfPresent(OverviewLeadImage.self, forKey: .leadImage)
+        let evidenceSections = try container.decodeIfPresent(OverviewEvidenceSections.self, forKey: .evidenceSections)
         self.content = OverviewContent(
             title: title,
             summary: summary,
             facts: facts,
             citations: Array(citations.values),
-            leadImage: leadImage
+            leadImage: leadImage,
+            evidenceSections: evidenceSections
         )
         let memberArticleIDs = try container.decode([String].self, forKey: .memberArticleIDs)
         let kind = try container.decode(OverviewKind.self, forKey: .kind)
@@ -300,6 +403,7 @@ public struct EventOverviewDocument: Codable, Hashable, Sendable, Identifiable {
         try container.encode(facts, forKey: .facts)
         try container.encode(citations, forKey: .citations)
         try container.encodeIfPresent(leadImage, forKey: .leadImage)
+        try container.encodeIfPresent(content.evidenceSections, forKey: .evidenceSections)
         try container.encode(memberArticleIDs, forKey: .memberArticleIDs)
         try container.encode(kind, forKey: .kind)
     }

@@ -43,12 +43,31 @@ struct ArticleDetailView: View {
     @State private var readerTextScale: CGFloat = 1
     @State private var contentState: ArticleContentState = .loading
 
+    @State private var experienceMode: ReaderExperienceMode = .sourcePublication
+    @State private var currentOverview: EventOverviewDocument? = nil
+    @State private var highlightedPassage: String? = nil
+    @State private var eventMemberArticles: [FeedArticle] = []
+
     @FocusState private var isViewFocused: Bool
 
-    init(article: FeedArticle, allArticles: [FeedArticle] = [], path: Binding<NavigationPath>) {
+    init(
+        article: FeedArticle,
+        allArticles: [FeedArticle] = [],
+        path: Binding<NavigationPath>,
+        overview: EventOverviewDocument? = nil,
+        initialExperienceMode: ReaderExperienceMode? = nil
+    ) {
         self._activeArticle = State(initialValue: article)
         self.allArticles = allArticles
         self._path = path
+        self._currentOverview = State(initialValue: overview)
+        if let mode = initialExperienceMode {
+            self._experienceMode = State(initialValue: mode)
+        } else if overview != nil {
+            self._experienceMode = State(initialValue: .eventOverview)
+        } else {
+            self._experienceMode = State(initialValue: .sourcePublication)
+        }
     }
 
     private var currentArticle: FeedArticle {
@@ -78,12 +97,29 @@ struct ArticleDetailView: View {
     var body: some View {
         Group {
             // Content Layer
-            if viewMode == .reader {
+            if experienceMode == .eventOverview, let overview = currentOverview {
+                EventOverviewReaderView(
+                    overview: overview,
+                    memberArticles: eventMemberArticles.isEmpty ? [currentArticle] : eventMemberArticles,
+                    onSelectArticle: { article in
+                        activeArticle = article
+                        highlightedPassage = nil
+                        experienceMode = .sourcePublication
+                    },
+                    onSelectCitation: { citation, article in
+                        if let article = article {
+                            activeArticle = article
+                        }
+                        highlightedPassage = citation.quote
+                        experienceMode = .sourcePublication
+                    }
+                )
+                .id(overview.id)
+            } else if viewMode == .reader {
                 readerView.id(activeArticle.id)
             } else {
                 webViewContainer
             }
-
         }
         .background(AppColor.background)
         .softScrollEdge()
@@ -107,7 +143,27 @@ struct ArticleDetailView: View {
             openInBrowser()
         }
         .onReceive(NotificationCenter.default.publisher(for: .toggleViewModeCommand)) { _ in
-            viewMode = (viewMode == .reader) ? .web : .reader
+            if currentOverview != nil {
+                experienceMode = (experienceMode == .eventOverview ? .sourcePublication : .eventOverview)
+            } else {
+                viewMode = (viewMode == .reader) ? .web : .reader
+            }
+        }
+        .task(id: activeArticle.id) {
+            if currentOverview == nil || !(currentOverview?.memberArticleIDs.contains(activeArticle.id) ?? false) {
+                if let ov = try? await articleStore.fetchEventOverview(forArticleID: activeArticle.id) {
+                    currentOverview = ov
+                    let members = articleStore.articles.filter { ov.memberArticleIDs.contains($0.id) }
+                    eventMemberArticles = members
+                } else {
+                    currentOverview = nil
+                    eventMemberArticles = []
+                    experienceMode = .sourcePublication
+                }
+            } else if let ov = currentOverview {
+                let members = articleStore.articles.filter { ov.memberArticleIDs.contains($0.id) }
+                eventMemberArticles = members
+            }
         }
         .task(id: "\(activeArticle.id):\(reloadGeneration)") {
             await ensureContentExtracted(forceRefresh: reloadGeneration > 0)
@@ -126,6 +182,48 @@ struct ArticleDetailView: View {
             VStack(spacing: 0) {
                 // 2. Editorial Content Hierarchy: Eyebrow -> Title -> AI Summary -> Body -> Terminal Affordance
                 VStack(alignment: .leading, spacing: 18) {
+                    // Highlighted passage cited in Event Overview
+                    if let passage = highlightedPassage {
+                        HStack(alignment: .top, spacing: 10) {
+                            Image(systemName: "quote.bubble.fill")
+                                .font(.system(size: 14))
+                                .foregroundColor(AppColor.accent)
+                                .padding(.top, 2)
+
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Cited in Event Overview")
+                                    .font(.system(size: 11, weight: .bold))
+                                    .foregroundColor(AppColor.accent)
+
+                                Text("“\(passage)”")
+                                    .font(.system(size: 13, weight: .medium, design: .serif))
+                                    .foregroundColor(AppColor.primaryText)
+                                    .lineSpacing(2)
+                            }
+
+                            Spacer()
+
+                            Button {
+                                highlightedPassage = nil
+                            } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .font(.system(size: 13))
+                                    .foregroundColor(AppColor.secondaryText)
+                            }
+                            .buttonStyle(.plain)
+                            .help("Dismiss citation highlight")
+                        }
+                        .padding(12)
+                        .background(AppColor.accent.opacity(0.1))
+                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .stroke(AppColor.accent.opacity(0.3), lineWidth: 1)
+                        )
+                        .accessibilityElement(children: .combine)
+                        .accessibilityLabel("Cited passage in event overview: \(passage)")
+                    }
+
                     // Eyebrow: Source, Date, Reading Time
                     HStack(spacing: 6) {
                         Text(displaySource.uppercased())
@@ -515,16 +613,28 @@ struct ArticleDetailView: View {
             .help("Next article (J)")
         }
         ToolbarItemGroup(placement: .principal) {
-            Toggle(isOn: Binding(get: { viewMode == .reader }, set: { if $0 { viewMode = .reader } })) {
-                Label("Reader", systemImage: "doc.richtext")
+            if currentOverview != nil {
+                Picker("Experience mode", selection: $experienceMode) {
+                    Text("Event overview").tag(ReaderExperienceMode.eventOverview)
+                    Text("Source publication").tag(ReaderExperienceMode.sourcePublication)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .help("Switch between event overview and source publication")
             }
-            .toggleStyle(.button)
-            .help("Read extracted article (W)")
-            Toggle(isOn: Binding(get: { viewMode == .web }, set: { if $0 { viewMode = .web } })) {
-                Label("Web", systemImage: "globe")
+
+            if currentOverview == nil || experienceMode == .sourcePublication {
+                Toggle(isOn: Binding(get: { viewMode == .reader }, set: { if $0 { viewMode = .reader } })) {
+                    Label("Reader", systemImage: "doc.richtext")
+                }
+                .toggleStyle(.button)
+                .help("Read extracted article (W)")
+                Toggle(isOn: Binding(get: { viewMode == .web }, set: { if $0 { viewMode = .web } })) {
+                    Label("Web", systemImage: "globe")
+                }
+                .toggleStyle(.button)
+                .help("View publisher website (W)")
             }
-            .toggleStyle(.button)
-            .help("View publisher website (W)")
         }
         ToolbarItemGroup(placement: .primaryAction) {
             if viewMode == .web {
@@ -643,7 +753,11 @@ struct ArticleDetailView: View {
             NSPasteboard.general.setString(currentArticle.link, forType: .string)
             return .handled
         } else if press.characters == "w" {
-            viewMode = (viewMode == .reader ? .web : .reader)
+            if currentOverview != nil {
+                experienceMode = (experienceMode == .eventOverview ? .sourcePublication : .eventOverview)
+            } else {
+                viewMode = (viewMode == .reader ? .web : .reader)
+            }
             return .handled
         }
         return .ignored
@@ -907,6 +1021,7 @@ struct ArticleDetailView: View {
         webAction = nil
         webCanGoBack = false
         webCanGoForward = false
+        highlightedPassage = nil
     }
 }
 
