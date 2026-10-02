@@ -7560,6 +7560,50 @@ struct NewsTests {
         let stored = try await db.fetchEventOverview(eventID: "event-edited")
         assertEqual(stored?.inputTextHash, editedHash, "Only the overview of the edited text is stored")
         assertEqual(stored?.id, editedResult?.id, "The stored overview is the one returned for the edit")
+
+        // A reader that closes after the next reader opened the same event cannot cancel that reader's overview.
+        let rehold = OpenGate()
+        for index in 0..<3 {
+            Task { _ = await queue.scheduleOverviewGeneration(eventID: "rehold-\(index)") { await rehold.wait(); return nil } }
+        }
+        await eventually("Held generations fill the overview queue again") { await queue.activeJobCount() == 3 }
+        let closingReader = UUID()
+        let nextReader = UUID()
+        let firstOpen = Task {
+            await coordinator.setVisibleEvent(eventID: "event-reopened", eventTitle: "Harbour bridge closed", membershipVersion: 1,
+                articles: articles, store: store, owner: closingReader)
+        }
+        await eventually("The first reader's request waits in the queue") { await coordinator.inFlightInputHash(for: "event-reopened") != nil }
+        let nextOpen = Task {
+            await coordinator.setVisibleEvent(eventID: "event-reopened", eventTitle: "Harbour bridge closed", membershipVersion: 1,
+                articles: articles, store: store, owner: nextReader)
+        }
+        await eventually("The next reader makes the event visible") { await coordinator.visibleEventOwner() == nextReader }
+        await coordinator.clearVisibleEvent(owner: closingReader)
+        assertEqual(await coordinator.visibleEventOwner(), nextReader, "A closing reader does not clear another reader's visible event")
+        assertTrue(await coordinator.inFlightInputHash(for: "event-reopened") != nil, "A closing reader does not cancel another reader's overview")
+        await rehold.open()
+        _ = await firstOpen.value
+        let reopened = await nextOpen.value
+        assertTrue(reopened != nil, "The next reader receives the overview")
+        let reopenedStored = try await db.fetchEventOverview(eventID: "event-reopened")
+        assertTrue(reopenedStored != nil, "The next reader's overview is stored")
+        // "event-edited" already cites passages of the same articles: citation keys are scoped to their overview.
+        let editedStored = try await db.fetchEventOverview(eventID: "event-edited")
+        assertTrue(editedStored != nil, "The earlier event's overview keeps its citations")
+        let sharedCitationIDs = Set(reopenedStored?.citations.keys.map { $0 } ?? []).intersection(editedStored?.citations.keys.map { $0 } ?? [])
+        assertFalse(sharedCitationIDs.isEmpty, "Both events cite the same passages under the same citation IDs")
+        assertTrue(reopenedStored?.facts.allSatisfy { $0.citationIDs.allSatisfy { reopenedStored?.citations[$0] != nil } } == true,
+            "Stored citation IDs read back as the composer wrote them")
+        assertEqual(DatabaseEngine.citationID(fromRowID: "cite_legacy_1", overviewID: "ov-1"), "cite_legacy_1", "Citation rows stored before scoped keys read unchanged")
+        await coordinator.clearVisibleEvent(owner: nextReader)
+        assertTrue(await coordinator.visibleEventOwner() == nil, "The reader that set the event clears it when it closes")
+
+        // Cancelling finishes before it returns, so a request for the same event made straight afterwards completes.
+        await coordinator.cancel(eventID: "event-reopened")
+        let afterCancel = await coordinator.requestOverview(eventID: "event-reopened", eventTitle: "Harbour bridge closed",
+            membershipVersion: 1, articles: editedArticles)
+        assertTrue(afterCancel != nil, "A request made right after cancelling the same event still completes")
         await db.close()
     }
 

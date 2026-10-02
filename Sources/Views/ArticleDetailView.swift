@@ -49,6 +49,8 @@ struct ArticleDetailView: View {
     @State private var highlightedPassage: String? = nil
     @State private var eventMemberArticles: [FeedArticle] = []
     @State private var isOverviewLoading: Bool = false
+    /// Identifies this reader to the overview coordinator, so closing it never clears another reader's event.
+    @State private var overviewOwner = UUID()
 
     @FocusState private var isViewFocused: Bool
 
@@ -163,8 +165,9 @@ struct ArticleDetailView: View {
         }
         .onAppear { isViewFocused = true }
         .onDisappear {
+            let owner = overviewOwner
             Task {
-                await OverviewGenerationCoordinator.shared.setVisibleEvent(eventID: nil)
+                await OverviewGenerationCoordinator.shared.clearVisibleEvent(owner: owner)
             }
         }
     }
@@ -1045,7 +1048,7 @@ struct ArticleDetailView: View {
             currentOverview = nil
             eventMemberArticles = []
             experienceMode = .sourcePublication
-            await OverviewGenerationCoordinator.shared.setVisibleEvent(eventID: nil)
+            await OverviewGenerationCoordinator.shared.clearVisibleEvent(owner: overviewOwner)
             return
         }
 
@@ -1065,6 +1068,13 @@ struct ArticleDetailView: View {
         let resolvedMembers = members.isEmpty ? [activeArticle] : members
         let eventTitle = resolvedMembers.first?.title ?? summary.members.first?.title ?? activeArticle.title
 
+        // Never show another event's overview while this one loads. The reader returns to the overview by
+        // itself only if it was already showing one (J/K across events); otherwise it stays on the article.
+        let returnToOverview = experienceMode == .eventOverview
+        if currentOverview?.eventID != eventID {
+            currentOverview = nil
+            experienceMode = .sourcePublication
+        }
         isOverviewLoading = true
 
         let doc = await OverviewGenerationCoordinator.shared.setVisibleEvent(
@@ -1072,7 +1082,8 @@ struct ArticleDetailView: View {
             eventTitle: eventTitle,
             membershipVersion: membershipVersion,
             articles: resolvedMembers,
-            store: articleStore
+            store: articleStore,
+            owner: overviewOwner
         )
 
         guard !Task.isCancelled else { return }
@@ -1081,7 +1092,9 @@ struct ArticleDetailView: View {
         if let doc = doc {
             currentOverview = doc
             eventMemberArticles = resolvedMembers
-            experienceMode = .eventOverview
+            if returnToOverview && viewMode == .reader {
+                experienceMode = .eventOverview
+            }
         }
     }
 

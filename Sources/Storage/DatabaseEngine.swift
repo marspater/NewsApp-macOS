@@ -2348,7 +2348,9 @@ actor DatabaseEngine {
 
         for citation in overview.citations.values {
             sqlite3_reset(citationStmt)
-            sqlite3_bind_text(citationStmt, 1, citation.id, -1, Self.sqliteTransient)
+            // Citation IDs are unique within one overview only (`cite_<passage>_<n>`), so the row key carries the
+            // overview ID: another event citing the same passage must not collide with this one.
+            sqlite3_bind_text(citationStmt, 1, Self.citationRowID(overviewID: overview.id, citationID: citation.id), -1, Self.sqliteTransient)
             sqlite3_bind_text(citationStmt, 2, overview.id, -1, Self.sqliteTransient)
             sqlite3_bind_text(citationStmt, 3, citation.articleID, -1, Self.sqliteTransient)
             sqlite3_bind_text(citationStmt, 4, citation.passageID, -1, Self.sqliteTransient)
@@ -2445,7 +2447,7 @@ actor DatabaseEngine {
         sqlite3_bind_text(citationStmt, 1, id, -1, Self.sqliteTransient)
         var citations: [OverviewCitation] = []
         while sqlite3_step(citationStmt) == SQLITE_ROW {
-            let citID = String(cString: sqlite3_column_text(citationStmt, 0))
+            let citID = Self.citationID(fromRowID: String(cString: sqlite3_column_text(citationStmt, 0)), overviewID: id)
             let articleID = String(cString: sqlite3_column_text(citationStmt, 1))
             let passageID = String(cString: sqlite3_column_text(citationStmt, 2))
             let passageFingerprint = String(cString: sqlite3_column_text(citationStmt, 3))
@@ -2496,6 +2498,16 @@ actor DatabaseEngine {
                 updatedAt: updatedAt
             )
         )
+    }
+
+    static func citationRowID(overviewID: String, citationID: String) -> String {
+        overviewID + "|" + citationID
+    }
+
+    /// Rows stored before overview-scoped keys carry the bare citation ID and are read unchanged.
+    static func citationID(fromRowID rowID: String, overviewID: String) -> String {
+        let prefix = overviewID + "|"
+        return rowID.hasPrefix(prefix) ? String(rowID.dropFirst(prefix.count)) : rowID
     }
 
     /// Resolves the event overview associated with a given article ID (via event membership or citations).
