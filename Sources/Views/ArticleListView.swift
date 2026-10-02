@@ -350,7 +350,7 @@ struct ArticleListView: View {
     private var headerBar: some View {
         HStack(spacing: AppSpacing.sm) {
             Button {
-                withAnimation(.easeInOut(duration: 0.2)) {
+                withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) {
                     columnVisibility = (columnVisibility == .detailOnly ? .all : .detailOnly)
                 }
             } label: {

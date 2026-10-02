@@ -13,6 +13,7 @@ struct SidebarView: View {
     @EnvironmentObject private var feedManager: FeedManager
     @EnvironmentObject private var savedStories: SavedStoriesManager
     @EnvironmentObject private var readManager: ReadManager
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     
     @State private var isSubscribePopoverPresented = false
     @State private var newFeedURL: String = ""
@@ -75,7 +76,7 @@ struct SidebarView: View {
             RoundedRectangle(cornerRadius: AppRadius.control)
                 .stroke(isDropTargeted ? AppColor.accent : Color.clear, lineWidth: 1.5)
                 .padding(AppSpacing.xxs)
-                .animation(AppMotion.quick, value: isDropTargeted)
+                .animation(reduceMotion ? nil : AppMotion.quick, value: isDropTargeted)
         )
     }
     
@@ -344,11 +345,11 @@ struct SidebarView: View {
     }
     
     private func showConfirmation(_ message: String) {
-        withAnimation(AppMotion.responsive) {
+        withAnimation(reduceMotion ? nil : AppMotion.responsive) {
             dropConfirmationMessage = message
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 4) {
-            withAnimation(AppMotion.responsive) {
+            withAnimation(reduceMotion ? nil : AppMotion.responsive) {
                 self.dropConfirmationMessage = nil
             }
         }
