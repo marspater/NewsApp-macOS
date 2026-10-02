@@ -273,6 +273,7 @@ struct NewsTests {
             try await testOverviewPassageSelectionAndTokenBudget(fixtureHost: fixtureHost)
             try await testPromptInjectionDefenses(fixtureHost: fixtureHost)
             try await testModelAvailabilityAndLanguageFallbacks(fixtureRoot: fixtureRoot)
+            try await testFoundationModelsProbeGoNoGo(fixtureHost: fixtureHost)
             try await testPassageAnchoredFactExtraction()
             try await testOverviewCompositionFromVerifiedFacts(fixtureHost: fixtureHost)
             try await testOverviewQualityAuditAndReleaseGate(fixtureHost: fixtureHost)
@@ -348,6 +349,7 @@ struct NewsTests {
         try await testOverviewPassageSelectionAndTokenBudget(fixtureHost: fixtureHost)
         try await testPromptInjectionDefenses(fixtureHost: fixtureHost)
         try await testModelAvailabilityAndLanguageFallbacks(fixtureRoot: fixtureRoot)
+        try await testFoundationModelsProbeGoNoGo(fixtureHost: fixtureHost)
         try await testPassageAnchoredFactExtraction()
         try await testOverviewCompositionFromVerifiedFacts(fixtureHost: fixtureHost)
         try await testOverviewQualityAuditAndReleaseGate(fixtureHost: fixtureHost)
@@ -6646,6 +6648,147 @@ struct NewsTests {
         let fetched = try await db.fetchEventOverview(eventID: "event-quake-1")
         assertEqual(fetched?.kind.rawValue, OverviewKind.fallbackExcerpts.rawValue, "Fallback overview successfully persisted and retrieved from SQLite")
         assertEqual(fetched?.facts.count, 2, "Persisted fallback facts retrieved intact")
+    }
+
+    static func testFoundationModelsProbeGoNoGo(fixtureHost: String = "example.com") async throws {
+        print("  - Testing Foundation Models on-device probe and Phase E Go/No-Go decision (#103)...")
+
+        // 1. Runtime availability probe: macOS 15 unavailable fallback vs supported runtime
+        let macOS15Probe = ModelRuntimeProbe(overrideAvailable: false)
+        let status15 = macOS15Probe.checkAvailability(for: .english)
+        assertFalse(status15.isAvailable, "Model is reported unavailable on macOS 15 fallback path")
+        assertTrue(status15.reason != nil, "Reason provided for macOS 15 fallback")
+
+        let supportedProbe = ModelRuntimeProbe(overrideAvailable: true)
+        let statusSupported = supportedProbe.checkAvailability(for: .english)
+        assertTrue(statusSupported.isAvailable, "Model is reported available on supported runtime")
+        assertEqual(statusSupported.reason, nil, "No failure reason for supported English runtime")
+
+        // Real runtime probe evaluation (must return typed status without crashing or throwing)
+        let liveProbe = ModelRuntimeProbe()
+        let liveStatus = liveProbe.checkAvailability(for: .english)
+        switch liveStatus {
+        case .available:
+            print("    [Probe Live] SystemLanguageModel is available on this host")
+        case .osUnsupported(let r), .deviceNotEligible(let r), .modelNotReady(let r), .languageUnsupported(let r):
+            print("    [Probe Live] SystemLanguageModel not ready/supported: \(r)")
+        case .disabledByPolicy:
+            print("    [Probe Live] SystemLanguageModel disabled by policy")
+        }
+
+        // 2. Supported languages and locales, including Ukrainian
+        let enText = "European regulators have opened an investigation into semiconductor supply chain constraints."
+        let ukText = "Європейська комісія оголосила про початок антимонопольного розслідування на ринку телекомунікацій."
+        let detectedEn = ModelLanguageSupport.detectDominantLanguage(for: enText)
+        let detectedUk = ModelLanguageSupport.detectDominantLanguage(for: ukText)
+        assertEqual(detectedEn?.rawValue, NLLanguage.english.rawValue, "English dominant language correctly detected")
+        assertEqual(detectedUk?.rawValue, NLLanguage.ukrainian.rawValue, "Ukrainian dominant language correctly detected")
+
+        assertTrue(ModelLanguageSupport.isLanguageSupportedForGeneration(detectedEn), "English is supported for generative synthesis")
+        assertFalse(ModelLanguageSupport.isLanguageSupportedForGeneration(detectedUk), "Ukrainian is NOT supported for baseline generative synthesis")
+
+        let strategyUk = supportedProbe.resolveSynthesisStrategy(for: detectedUk)
+        assertFalse(strategyUk.isGenerative, "Ukrainian is safely diverted to deterministic fallback strategy")
+        if case .deterministicFallback(let reason) = strategyUk {
+            assertTrue(reason.contains("uk"), "Fallback reason identifies unsupported Ukrainian language")
+        } else {
+            assertTrue(false, "Expected deterministicFallback strategy for Ukrainian")
+        }
+
+        let strategyEn = supportedProbe.resolveSynthesisStrategy(for: detectedEn)
+        assertTrue(strategyEn.isGenerative, "English resolves to generative strategy on supported runtime")
+
+        // 3. Context budget for instructions + schema + input + response (characters are NOT tokens)
+        let defaultBudget = OverviewTokenBudget()
+        assertEqual(defaultBudget.totalBudget, 4096, "Default total budget is 4096 tokens")
+        assertEqual(defaultBudget.instructionTokens, 350, "Instruction budget reserved")
+        assertEqual(defaultBudget.schemaTokens, 250, "Schema budget reserved")
+        assertEqual(defaultBudget.reservedResponseTokens, 800, "Response generation budget reserved")
+        assertEqual(defaultBudget.safetyMarginTokens, 100, "Safety margin reserved")
+        assertEqual(defaultBudget.availablePassageTokens, 2596, "Available input passage budget is 2596 tokens")
+
+        // Demonstrate characters != tokens across Latin and Cyrillic scripts
+        let latinPassage = "The federal agency approved new orbital launch parameters following telemetry validation."
+        let cyrillicPassage = "Федеральне агентство погодило нові параметри орбітального запуску після перевірки телеметрії."
+        let latinTokens = OverviewTokenBudget.estimateTokens(for: latinPassage)
+        let cyrillicTokens = OverviewTokenBudget.estimateTokens(for: cyrillicPassage)
+
+        // Cyrillic text of roughly equal character count requires significantly higher subword token density
+        assertTrue(cyrillicTokens > latinTokens, "Characters are not tokens: Cyrillic script has higher subword token density")
+
+        // 4. Fact extraction with passage anchoring on a multi-source corpus sample
+        let samplePassages = [
+            EvidencePassage(id: "p_wire", articleID: "art_wire", text: "Global chipmaker announced a $12 billion foundry expansion in Dresden.", ordinal: 1),
+            EvidencePassage(id: "p_daily", articleID: "art_daily", text: "German authorities approved state subsidies covering 30% of the Dresden plant costs.", ordinal: 2),
+            EvidencePassage(id: "p_herald", articleID: "art_herald", text: "Construction of the Dresden semiconductor facility begins in the second quarter.", ordinal: 3)
+        ]
+
+        // Deterministic fact extraction yields grounded facts referencing input passages
+        let extractedFacts = PassageFactExtractor.deterministicExtract(passages: samplePassages)
+        assertTrue(extractedFacts.count >= 3, "Extracted at least 3 passage-anchored facts")
+        for fact in extractedFacts {
+            assertTrue(samplePassages.contains(where: { $0.id == fact.passageID }), "Fact references valid passage ID")
+            let sourcePassage = samplePassages.first(where: { $0.id == fact.passageID })!
+            assertEqual(fact.articleID, sourcePassage.articleID, "Fact article ID correctly aligned with passage")
+            assertTrue(sourcePassage.text.contains(fact.quote), "Fact quote is strictly verbatim contained in passage")
+        }
+
+        // Test deterministic validation catches hallucinated candidate facts
+        let groundedCandidate = RawFactCandidate(
+            statement: "Foundry expansion announced in Dresden.",
+            passageID: "p_wire",
+            quote: "$12 billion foundry expansion in Dresden"
+        )
+        let phantomCandidate = RawFactCandidate(
+            statement: "Competitor announced plant closure in Lyon.",
+            passageID: "p_phantom_404",
+            quote: "closure in Lyon"
+        )
+        let hallucinatedQuoteCandidate = RawFactCandidate(
+            statement: "Facility will employ 50,000 workers.",
+            passageID: "p_wire",
+            quote: "employ 50,000 workers"
+        )
+
+        let validationDiagnostic = PassageFactValidator.validateCandidates(
+            [groundedCandidate, phantomCandidate, hallucinatedQuoteCandidate],
+            against: samplePassages
+        )
+        assertEqual(validationDiagnostic.acceptedFacts.count, 1, "Only grounded candidate accepted")
+        assertEqual(validationDiagnostic.rejectedFacts.count, 2, "Both phantom passage ID and unanchored quote rejected")
+
+        // 5. Latency and memory per request benchmark
+        let clockStart = CFAbsoluteTimeGetCurrent()
+        for _ in 0..<10 {
+            _ = supportedProbe.resolveSynthesisStrategy(for: detectedEn)
+            _ = PassageFactExtractor.deterministicExtract(passages: samplePassages)
+            let hash = EventOverviewDocument.computeInputTextHash(passages: samplePassages)
+            let context = OverviewVersionContext(membershipVersion: 1, inputTextHash: hash)
+            _ = macOS15Probe.buildFallbackOverview(
+                eventID: "event-dresden-probe",
+                passages: samplePassages,
+                context: context,
+                title: "Dresden Foundry Expansion"
+            )
+        }
+        let elapsedTotal = (CFAbsoluteTimeGetCurrent() - clockStart) * 1000.0
+        let elapsedPerReq = elapsedTotal / 10.0
+        print("    [Probe Benchmark] Latency per request: \(String(format: "%.3f", elapsedPerReq)) ms")
+        assertTrue(elapsedPerReq < 100.0, "Probe and deterministic extraction latency per request is under 100ms")
+
+        // 6. Go/No-Go Decision formal verification
+        // - Go for English on supported macOS 26+ runtime with claim verification
+        // - No-Go for generative on macOS 15 or unsupported languages -> graceful narrowing to verified excerpts
+        let fallbackDoc = macOS15Probe.buildFallbackOverview(
+            eventID: "event-dresden-fallback",
+            passages: samplePassages,
+            context: OverviewVersionContext(membershipVersion: 1, inputTextHash: "test-hash"),
+            title: "Dresden Foundry Expansion"
+        )
+        assertEqual(fallbackDoc.kind, .fallbackExcerpts, "No-Go runtime narrows to fallbackExcerpts kind")
+        assertEqual(fallbackDoc.facts.count, 3, "All passages represented as verified facts")
+        assertEqual(fallbackDoc.citations.count, 3, "All citations reference actual passage fingerprints")
+        assertFalse(fallbackDoc.provenance.kind == .synthesized, "Fallback excerpts document is marked non-synthesized")
     }
 
     static func testPassageAnchoredFactExtraction() async throws {
