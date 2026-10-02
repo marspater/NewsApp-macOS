@@ -1221,6 +1221,7 @@ actor DatabaseEngine {
         canonicalURL: String? = nil,
         eventID: String? = nil,
         includingOriginals: Bool = false,
+        publicationWindow: ClosedRange<Date>? = nil,
         muting: MuteRules = MuteRules()
     ) throws -> [FeedArticle] {
         guard let db = db else { throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Database not open"]) }
@@ -1263,6 +1264,11 @@ actor DatabaseEngine {
         if let eventID {
             query += " AND a.id IN (SELECT article_id FROM event_members WHERE event_id = ?)"
             params.append(("text", try resolvedEventID(eventID) ?? eventID))
+        }
+        if let publicationWindow {
+            query += " AND a.published_at >= ? AND a.published_at <= ?"
+            params += [("double", publicationWindow.lowerBound.timeIntervalSince1970),
+                       ("double", publicationWindow.upperBound.timeIntervalSince1970)]
         }
         let list = listConditions(section: section, isRead: isRead, isSaved: isSaved)
         query += list.sql

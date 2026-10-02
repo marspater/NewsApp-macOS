@@ -23,6 +23,7 @@ struct ArticleListView: View {
     @State private var focusedArticleID: String? = nil
     @State private var isShortcutsHelpPresented: Bool = false
     
+    @State private var briefing: FiniteBriefing?
     @State private var buffer = FeedUpdateBuffer()
     @State private var pageRequest = 0
     @State private var loadedPageRequest = 0
@@ -47,6 +48,8 @@ struct ArticleListView: View {
         !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
+    private var isBriefing: Bool { selectedTopic == "Briefing" && !isSearching }
+
     /// Muting applies to the feed lists and search; Saved Stories and History list everything the reader kept or opened.
     private var listMuting: MuteRules {
         isSearching || (selectedTopic != "Saved Stories" && selectedTopic != "History") ? appSettings.muteRules : MuteRules()
@@ -61,7 +64,7 @@ struct ArticleListView: View {
 
     /// Saved Stories and History list exactly what the reader kept or opened.
     private var groupingMode: FeedGroupingMode {
-        groupsEvents && selectedTopic != "Saved Stories" && selectedTopic != "History" ? .events : .publications
+        groupsEvents && !isBriefing && selectedTopic != "Saved Stories" && selectedTopic != "History" ? .events : .publications
     }
 
     private var entries: [FeedEntry] { buffer.displayed.entries(groupingMode) }
@@ -83,6 +86,7 @@ struct ArticleListView: View {
                         emptyStateView
                     } else {
                         articleGrid(proxy: proxy)
+                        if isBriefing { briefingCompletion }
                         if hasMoreResults {
                             Button("Load more articles") { pageRequest += 1 }
                                 .disabled(isLoadingPage)
@@ -157,6 +161,31 @@ struct ArticleListView: View {
             let identity = queryIdentity
             let runID = UUID()
             queryRunID = runID
+            if isBriefing {
+                queryError = nil
+                isLoadingPage = true
+                defer { if queryRunID == runID { isLoadingPage = false } }
+                do {
+                    if briefing == nil {
+                        let now = Date()
+                        let candidates = try await articleStore.database.fetchArticles(
+                            isRead: false, limit: FiniteBriefing.candidateLimit,
+                            publicationWindow: now.addingTimeInterval(-FiniteBriefing.duration)...now,
+                            muting: appSettings.muteRules)
+                        try Task.checkCancellation()
+                        briefing = FiniteBriefing(candidates: candidates, readIDs: readManager.readArticles, now: now)
+                    }
+                    buffer.replace(with: FeedSnapshot(articles: briefing?.articles ?? []))
+                    hasMoreResults = false
+                    mutedCount = 0
+                    loadedQuery = identity
+                } catch is CancellationError {
+                    // A newer selection owns the results.
+                } catch {
+                    if queryRunID == runID { queryError = "Could not load the briefing. Please try again." }
+                }
+                return
+            }
             let isNewQuery = loadedQuery != identity
             let isPaging = !isNewQuery && pageRequest != loadedPageRequest && cursor != nil
             loadedPageRequest = pageRequest
@@ -338,7 +367,7 @@ struct ArticleListView: View {
                     .font(AppTypography.display)
                     .foregroundStyle(AppColor.primaryText)
                 HStack(spacing: AppSpacing.xs) {
-                    Text("\(entries.count) stories · Your personal edition")
+                    Text(isBriefing ? "Up to 10 unread stories · Last 24 hours" : "\(entries.count) stories · Your personal edition")
                         .font(AppTypography.caption)
                         .foregroundStyle(AppColor.secondaryText)
                     if mutedCount > 0 && !listMuting.isEmpty {
@@ -353,6 +382,11 @@ struct ArticleListView: View {
             
             Spacer()
             
+            if isBriefing {
+                Button("New Briefing", action: startNewBriefing)
+                    .help("Select a new briefing from the latest unread stories")
+            }
+
             Toggle(isOn: $groupsEvents) {
                 Image(systemName: "square.stack.3d.up")
                     .font(.system(size: 14, weight: .medium))
@@ -361,6 +395,7 @@ struct ArticleListView: View {
             .buttonStyle(.plain)
             .foregroundColor(groupsEvents ? AppColor.accent : AppColor.secondaryText)
             .help(groupsEvents ? "Showing one card per event. Show individual publications (G)" : "Showing individual publications. Group coverage of the same event (G)")
+            .disabled(isBriefing)
             .accessibilityLabel("Group Coverage by Event")
             .accessibilityValue(groupsEvents ? "On" : "Off")
 
@@ -414,6 +449,27 @@ struct ArticleListView: View {
         .padding(.bottom, AppLayout.cardGap)
     }
     
+    private func startNewBriefing() {
+        briefing = nil
+        pageRequest += 1
+    }
+
+    private var briefingCompletion: some View {
+        VStack(spacing: AppSpacing.sm) {
+            if let briefing {
+                Text(briefing.isComplete(readManager.readArticles) ? "Briefing complete" : "\(briefing.readCount(readManager.readArticles)) of \(briefing.articles.count) stories read")
+                    .font(AppTypography.headline)
+                Text("Selection frozen at \(briefing.startedAt.formatted(date: .omitted, time: .shortened)). New stories stay in your regular feed.")
+                    .font(AppTypography.caption)
+                    .foregroundStyle(AppColor.secondaryText)
+                Button("Back to Today") { selectedTopic = "Today" }
+            }
+        }
+        .padding(AppSpacing.lg)
+        .frame(maxWidth: .infinity)
+        .accessibilityElement(children: .contain)
+    }
+
     // MARK: - Article Grid
     
     private func articleGrid(proxy _: ScrollViewProxy) -> some View {
@@ -478,14 +534,14 @@ struct ArticleListView: View {
                 return false
             }
             
-            if feedManager.isAnyFeedLoading {
+            if !isBriefing && feedManager.isAnyFeedLoading {
                 ProgressView()
                     .controlSize(.regular)
                     .padding(.bottom, 4)
                 Text("Refreshing news feeds...")
                     .font(AppTypography.body)
                     .foregroundColor(AppColor.secondaryText)
-            } else if (selectedTopic != "Saved Stories" && selectedTopic != "History") && !failedFeeds.isEmpty && filteredArticles.isEmpty {
+            } else if !isBriefing && (selectedTopic != "Saved Stories" && selectedTopic != "History") && !failedFeeds.isEmpty && filteredArticles.isEmpty {
                 VStack(spacing: 12) {
                     Image(systemName: "exclamationmark.triangle")
                         .font(.system(size: 32))
@@ -578,6 +634,7 @@ struct ArticleListView: View {
     
     private var emptyStateIcon: String {
         switch selectedTopic {
+        case "Briefing": return "text.book.closed"
         case "Today", "Unread": return "newspaper"
         case "Saved Stories": return "bookmark"
         case "History": return "clock"
@@ -587,6 +644,7 @@ struct ArticleListView: View {
     
     private var emptyStateTitle: String {
         switch selectedTopic {
+        case "Briefing": return "No Stories for This Briefing"
         case "Today": return "No Articles Yet"
         case "Unread": return "All Caught Up"
         case "Saved Stories": return "No Saved Stories"
@@ -597,6 +655,7 @@ struct ArticleListView: View {
     
     private var emptyStateText: String {
         switch selectedTopic {
+        case "Briefing": return "There are no unread, unmuted stories published in the last 24 hours. Your archive and normal feed remain available."
         case "Today": return "Subscribe to feeds or click refresh to load the latest stories."
         case "Unread": return "You've read all stories in your feeds. Check back later for updates."
         case "Saved Stories": return "Stories you bookmark will be kept here for easy reading."
@@ -647,6 +706,7 @@ struct ArticleListView: View {
                 toggleFocusedEventSources()
                 return .handled
             } else if press.characters == "g" {
+                guard !isBriefing else { return .ignored }
                 groupsEvents.toggle()
                 return .handled
             } else if press.characters == "u" {
