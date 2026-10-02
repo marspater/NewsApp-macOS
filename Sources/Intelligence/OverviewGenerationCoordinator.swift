@@ -39,6 +39,8 @@ actor OverviewGenerationCoordinator {
     /// an article edit changes the input hash without bumping the membership version.
     private var latestRequestedInputs: [String: (membershipVersion: Int, inputTextHash: String)] = [:]
     private var currentVisibleEventID: String?
+    /// The reader that set the visible event; only it may clear it (`clearVisibleEvent(owner:)`).
+    private var currentVisibleOwner: UUID?
 
     private let store: ArticleStore?
     private let queue: EnrichmentQueue
@@ -198,14 +200,16 @@ actor OverviewGenerationCoordinator {
         eventTitle: String? = nil,
         membershipVersion: Int? = nil,
         articles: [FeedArticle]? = nil,
-        store: ArticleStore? = nil
+        store: ArticleStore? = nil,
+        owner: UUID? = nil
     ) async -> EventOverviewDocument? {
         let previous = currentVisibleEventID
         currentVisibleEventID = eventID
+        currentVisibleOwner = eventID == nil ? nil : owner
 
         // If visible event changed, cancel generation for the previous event
         if let oldID = previous, oldID != eventID {
-            cancel(eventID: oldID, reason: .user)
+            await cancel(eventID: oldID, reason: .user)
         }
 
         // If new event is visible and data provided, trigger generation with visibleEvent priority
@@ -222,16 +226,24 @@ actor OverviewGenerationCoordinator {
         return nil
     }
 
+    /// Clears the visible event when the reader that set it closes. A reader that closes after another one
+    /// has made the same or a different event visible changes nothing, so it cannot cancel that reader's overview.
+    func clearVisibleEvent(owner: UUID) async {
+        guard currentVisibleOwner == owner, let eventID = currentVisibleEventID else { return }
+        currentVisibleEventID = nil
+        currentVisibleOwner = nil
+        await cancel(eventID: eventID, reason: .user)
+    }
+
     // MARK: - Cancellation
 
-    /// Cancels generation when the reader closes or event changes.
-    func cancel(eventID: String, reason: EnrichmentCancellationReason = .user) {
+    /// Cancels generation when the reader closes or event changes. The queue job is cancelled before this
+    /// returns, so a request for the same event made afterwards is never cancelled by it.
+    func cancel(eventID: String, reason: EnrichmentCancellationReason = .user) async {
         if let running = inFlightTasks.removeValue(forKey: eventID) {
             running.task.cancel()
         }
-        Task {
-            await queue.cancelOverview(eventID: eventID, reason: reason)
-        }
+        await queue.cancelOverview(eventID: eventID, reason: reason)
         logger.debug("Cancelled overview generation for \(eventID): \(reason.rawValue)")
     }
 
@@ -247,6 +259,11 @@ actor OverviewGenerationCoordinator {
     /// The input hash of the generation running for an event, if any.
     func inFlightInputHash(for eventID: String) -> String? {
         inFlightTasks[eventID]?.inputTextHash
+    }
+
+    /// The reader that set the visible event, if any.
+    func visibleEventOwner() -> UUID? {
+        currentVisibleOwner
     }
 
     // MARK: - Cache Access
