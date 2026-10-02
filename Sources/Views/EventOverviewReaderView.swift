@@ -208,7 +208,7 @@ struct EventOverviewReaderView: View {
                             .aspectRatio(contentMode: .fill)
                             .frame(maxHeight: 380)
                             .clipped()
-                            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                            .clipShape(RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous))
                     } else if phase.error != nil {
                         // Image failed to load: gracefully omit visual box
                         EmptyView()
@@ -216,7 +216,7 @@ struct EventOverviewReaderView: View {
                         Rectangle()
                             .fill(AppColor.surface)
                             .frame(height: 220)
-                            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                            .clipShape(RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous))
                             .overlay(ProgressView().scaleEffect(0.8))
                     }
                 }
@@ -278,9 +278,9 @@ struct EventOverviewReaderView: View {
             }
             .padding(16)
             .background(AppColor.cardBackground)
-            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous)
                     .stroke(borderStrokeColor, lineWidth: 1)
             )
         }
@@ -388,9 +388,9 @@ struct EventOverviewReaderView: View {
         }
         .padding(14)
         .background(AppColor.cardBackground)
-        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
+            RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous)
                 .stroke(borderStrokeColor, lineWidth: 1)
         )
     }
@@ -484,9 +484,9 @@ struct EventOverviewReaderView: View {
             }
             .padding(16)
             .background(AppColor.cardBackground)
-            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous)
                     .stroke(borderStrokeColor, lineWidth: 1)
             )
         }
@@ -543,9 +543,9 @@ struct EventOverviewReaderView: View {
             }
             .padding(16)
             .background(AppColor.cardBackground)
-            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous)
                     .stroke(borderStrokeColor, lineWidth: 1)
             )
         }
@@ -604,9 +604,9 @@ struct EventOverviewReaderView: View {
             }
             .padding(16)
             .background(AppColor.cardBackground)
-            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous)
                     .stroke(borderStrokeColor, lineWidth: 1)
             )
         }
