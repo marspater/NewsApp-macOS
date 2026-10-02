@@ -51,6 +51,7 @@ swiftc -swift-version 6 -O -parse-as-library -target arm64-apple-macos${TARGET_M
     Sources/Intelligence/PassageFactExtractor.swift \
     Sources/Intelligence/TensionMethodology.swift \
     Sources/Intelligence/OverviewComposer.swift \
+    Sources/Intelligence/OverviewTimelineBuilder.swift \
     Sources/Intelligence/OverviewQualityAuditor.swift \
     Sources/Intelligence/OverviewClaimVerifier.swift \
     Sources/Intelligence/OverviewTimelineExtractor.swift \

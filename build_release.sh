@@ -47,6 +47,7 @@ SWIFT_SOURCES=(
     Sources/Intelligence/PassageFactExtractor.swift
     Sources/Intelligence/TensionMethodology.swift
     Sources/Intelligence/OverviewComposer.swift
+    Sources/Intelligence/OverviewTimelineBuilder.swift
     Sources/Intelligence/OverviewQualityAuditor.swift
     Sources/Intelligence/OverviewClaimVerifier.swift
     Sources/Intelligence/OverviewTimelineExtractor.swift

@@ -34,6 +34,7 @@ swiftc "${TEST_OPT_FLAGS[@]}" -target $(uname -m)-apple-macos${TARGET_MACOS} \
     Sources/Intelligence/PassageFactExtractor.swift \
     Sources/Intelligence/TensionMethodology.swift \
     Sources/Intelligence/OverviewComposer.swift \
+    Sources/Intelligence/OverviewTimelineBuilder.swift \
     Sources/Intelligence/OverviewQualityAuditor.swift \
     Sources/Intelligence/OverviewClaimVerifier.swift \
     Sources/Intelligence/OverviewTimelineExtractor.swift \
