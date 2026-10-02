@@ -193,12 +193,12 @@ final class DOMElementNode: Sendable {
         }
         let identifiers = [className, idValue, dataComponent, attributes["data-testid"] ?? "", attributes["data-block"] ?? "", attributes["role"] ?? ""]
         return identifiers.contains {
-            $0.firstMatch(of: Self.auxiliaryPattern) != nil
+            Self.auxiliaryPattern.firstMatch(in: $0, range: NSRange($0.startIndex..., in: $0)) != nil
         }
     }
 
     // Token boundaries keep editorial "commentary" distinct from comment widgets.
-    private static var auxiliaryPattern: Regex<Substring> { #/(?i)(?:^|[^a-z0-9])(?:comments?|comment-thread|disqus|related(?:-content|-stories|-articles)?|links-block|newsletter|byline|timestamp-block|recommendations?|social-share|share-tools|promo|advertisement|outbrain|taboola|eventpromo|promolist|topiclist|uploaderembed)(?:$|[^a-z0-9])/# }
+    private static let auxiliaryPattern = try! NSRegularExpression(pattern: #"(?i)(?:^|[^a-z0-9])(?:comments?|comment-thread|disqus|related(?:-content|-stories|-articles)?|links-block|newsletter|byline|timestamp-block|recommendations?|social-share|share-tools|promo|advertisement|outbrain|taboola|eventpromo|promolist|topiclist|uploaderembed)(?:$|[^a-z0-9])"#)
 
     func readingBlocks(allowDivFallback: Bool = true) -> [DOMElementNode] {
         guard !isReaderExcluded else { return [] }

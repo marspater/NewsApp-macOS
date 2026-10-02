@@ -213,8 +213,14 @@ struct NewsTests {
     }
 
     static func runTests(fixtureHost: String = "example.com") async throws {
-        try StoryCorpus.run(evaluate: CommandLine.arguments.contains("--corpus-fingerprints"))
-        if CommandLine.arguments.contains("--corpus-fingerprints") { return }
+        if let index = CommandLine.arguments.firstIndex(of: "--corpus-cache-audit") {
+            guard CommandLine.arguments.indices.contains(index + 1) else { throw StoryCorpus.Failure.invalid("Missing private cache path") }
+            try StoryCorpus.auditCache(path: CommandLine.arguments[index + 1])
+            return
+        }
+        let corpusMode = CommandLine.arguments.contains("--corpus-fingerprints") || CommandLine.arguments.contains("--corpus-events")
+        try await StoryCorpus.run(evaluate: corpusMode)
+        if corpusMode { return }
         var fixtureURL = URLComponents()
         fixtureURL.scheme = "https"
         fixtureURL.host = fixtureHost
@@ -229,7 +235,7 @@ struct NewsTests {
                 exit(1)
             }
             print("🏃 Evaluating event clustering on \(path)...")
-            try await evaluateEventCorpus(path: path)
+            try await evaluateEventCorpus(path: path, selectedSplit: CommandLine.arguments.contains("--corpus-holdout") ? "holdout" : "tune")
             return
         }
         if CommandLine.arguments.contains("--performance-baseline") {
@@ -675,6 +681,11 @@ struct NewsTests {
     }
 
     static func testReaderParsingRegressions() async {
+        for (identifier, excluded) in [("article-commentary", false), ("comment-thread", true),
+                                       ("RELATED-ARTICLES", true), ("unrelated-content", false)] {
+            let node = DOMElementNode(tag: "div", attributes: ["class": identifier], text: "Publisher prose")
+            assertEqual(node.isReaderExcluded, excluded, "Cached exclusion regex preserves token boundaries and case matching")
+        }
         let topic = await ArticleClassifier.shared.classify(title: "NASA launches space telescope", description: "Astronomy mission", allowFoundationModels: false)
         assertEqual(topic.category, "Science", "Cheap ingestion classification works without generative inference")
         let pipeline = ContentExtractionPipeline.shared
@@ -3679,6 +3690,8 @@ struct NewsTests {
 
     static func testEventCorpusHarness(fixtureRoot: URL) async throws {
         print("  - Testing the labeled event corpus harness on the synthetic control set...")
+        assertTrue(EventCorpusMetrics().precision == nil, "No predicted positives cannot establish precision")
+        assertTrue(EventCorpusMetrics().recall == nil, "No labeled positives cannot establish recall")
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("news-corpus-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -3691,7 +3704,9 @@ struct NewsTests {
         }
         let file = directory.appendingPathComponent("corpus.json")
         try JSONSerialization.data(withJSONObject: ["articles": items]).write(to: file)
-        let metrics = try await evaluateEventCorpus(path: file.path)
+        let sealed = try await evaluateEventCorpus(path: file.path)
+        assertTrue(sealed["holdout"] == nil, "Default corpus evaluation leaves holdout sealed")
+        let metrics = try await evaluateEventCorpus(path: file.path, selectedSplit: "holdout")
         guard let holdout = metrics["holdout"] else { return assertTrue(false, "The holdout split is evaluated") }
         assertEqual(holdout.falsePositives, 0, "The synthetic control set has no false merges")
         assertTrue(holdout.truePositives >= 3, "The synthetic earthquake reports are linked")
@@ -3699,13 +3714,15 @@ struct NewsTests {
 
     struct EventCorpusMetrics {
         var truePositives = 0, falsePositives = 0, falseNegatives = 0, impureEvents = 0
-        var precision: Double { truePositives + falsePositives == 0 ? 1 : Double(truePositives) / Double(truePositives + falsePositives) }
-        var recall: Double { truePositives + falseNegatives == 0 ? 1 : Double(truePositives) / Double(truePositives + falseNegatives) }
+        var precision: Double? { truePositives + falsePositives == 0 ? nil : Double(truePositives) / Double(truePositives + falsePositives) }
+        var recall: Double? { truePositives + falseNegatives == 0 ? nil : Double(truePositives) / Double(truePositives + falseNegatives) }
         mutating func add(predicted: Bool, gold: Bool) {
             if predicted && gold { truePositives += 1 } else if predicted { falsePositives += 1 } else if gold { falseNegatives += 1 }
         }
         var line: String {
-            String(format: "precision %.3f (TP %ld, FP %ld), recall %.3f (FN %ld)", precision, truePositives, falsePositives, recall, falseNegatives)
+            let precisionText = precision.map { String(format: "%.3f", $0) } ?? "n/a"
+            let recallText = recall.map { String(format: "%.3f", $0) } ?? "n/a"
+            return "precision \(precisionText) (TP \(truePositives), FP \(falsePositives)), recall \(recallText) (FN \(falseNegatives))"
         }
     }
 
@@ -3715,7 +3732,7 @@ struct NewsTests {
     /// Format: {"articles": [{"id", "title", "description", "source", "published" (ISO 8601),
     /// "event" (label, or absent for singletons), "split" ("tune" or "holdout")}]}.
     @discardableResult
-    static func evaluateEventCorpus(path: String) async throws -> [String: EventCorpusMetrics] {
+    static func evaluateEventCorpus(path: String, selectedSplit: String = "tune") async throws -> [String: EventCorpusMetrics] {
         struct Corpus: Decodable {
             struct Item: Decodable {
                 let id: String, title: String, description: String?, source: String, published: Date, event: String?, split: String?
@@ -3726,30 +3743,14 @@ struct NewsTests {
         decoder.dateDecodingStrategy = .iso8601
         let corpus = try decoder.decode(Corpus.self, from: Data(contentsOf: URL(fileURLWithPath: path)))
         var results: [String: EventCorpusMetrics] = [:]
-        for split in Set(corpus.articles.map { $0.split ?? "holdout" }).sorted() {
-            let items = corpus.articles.filter { ($0.split ?? "holdout") == split }.sorted { $0.published < $1.published }
-            guard var clock = items.first?.published else { continue }
-            let db = DatabaseEngine(path: ":memory:")
-            try await db.open()
-            var index = 0
-            while index < items.count {
-                var batch: [FeedArticle] = []
-                while index < items.count, items[index].published <= clock {
-                    let item = items[index]
-                    batch.append(FeedArticle(storedID: item.id, title: item.title, link: "https://corpus.invalid/\(item.id)", guid: item.id,
-                                             description: item.description ?? "", pubDate: item.published, source: item.source))
-                    index += 1
-                }
-                if !batch.isEmpty {
-                    try await db.upsertArticles(batch)
-                    _ = try await EventClusterer.run(in: db, now: clock, limit: .max)
-                }
-                clock = clock.addingTimeInterval(6 * 3600)
-                if index < items.count, items[index].published > clock { clock = items[index].published }
+        for split in [selectedSplit] {
+            let items = corpus.articles.filter { ($0.split ?? "tune") == split }.sorted { $0.published < $1.published }
+            let articles = items.map { item in
+                FeedArticle(storedID: item.id, title: item.title, link: "https://corpus.invalid/\(item.id)", guid: item.id,
+                            description: item.description ?? "", pubDate: item.published, source: item.source)
             }
-            var predicted: [String?] = []
-            for item in items { predicted.append(try await db.eventID(forArticle: item.id)) }
-            await db.close()
+            let memberships = try await StoryCorpus.eventMemberships(articles: articles)
+            let predicted = items.map { memberships[$0.id] }
             let languages = items.map { EventMatchKey.language(of: $0.title + "\n" + ($0.description ?? "")) ?? "unknown" }
             var total = EventCorpusMetrics()
             var byLanguage: [String: EventCorpusMetrics] = [:], bySource: [String: EventCorpusMetrics] = [:]
