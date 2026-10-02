@@ -1,0 +1,20 @@
+{
+  "final_library_rows" : 10001,
+  "library_rows" : 10000,
+  "os" : "Version 27.0.1 (Build 26A434)",
+  "peak_process_rss_bytes" : 251068416,
+  "physical_memory_bytes" : 25769803776,
+  "publishers" : 20,
+  "refresh_one_mocked_feed_ms" : 30.294625001261011,
+  "scope" : "Seeded native MainView, text-only synthetic articles, offline. Time to first sampled bitmap containing the title; includes prior failed capture\/OCR polls but excludes successful OCR. Memory includes setup, SwiftUI and Vision. Not cold app launch, live network, or model timing.",
+  "snapshot_rows" : 500,
+  "window_height" : 800,
+  "window_to_first_card_bitmap_ms" : [
+    454.57783332676627,
+    398.5874583304394,
+    407.29337499942631,
+    421.90174999996088,
+    399.68820833018981
+  ],
+  "window_width" : 1100
+}
