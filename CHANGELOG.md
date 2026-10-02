@@ -4,6 +4,8 @@
 
 ### Fixed
 
+- An event overview requested after a member article was edited no longer receives, or stores, the overview still being generated from the earlier text; the running generation is cancelled and replaced (#154).
+
 - Skip FTS deletion/reindexing for unchanged searchable article fields during repeated refreshes; migrate existing libraries transactionally.
 
 - Preserve inline publisher formatting and feed HTML structure, retain image credits and candidates, curate responsive media, stabilize image layout and add native reader text sizes (phase C).
