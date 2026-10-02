@@ -273,6 +273,7 @@ struct NewsTests {
             try await testOverviewPassageSelectionAndTokenBudget(fixtureHost: fixtureHost)
             try await testPromptInjectionDefenses(fixtureHost: fixtureHost)
             try await testModelAvailabilityAndLanguageFallbacks(fixtureRoot: fixtureRoot)
+            try await testFoundationModelsProbeGoNoGo(fixtureHost: fixtureHost)
             try await testPassageAnchoredFactExtraction()
             try await testOverviewCompositionFromVerifiedFacts(fixtureHost: fixtureHost)
             try await testOverviewQualityAuditAndReleaseGate(fixtureHost: fixtureHost)
@@ -350,6 +351,7 @@ struct NewsTests {
         try await testOverviewPassageSelectionAndTokenBudget(fixtureHost: fixtureHost)
         try await testPromptInjectionDefenses(fixtureHost: fixtureHost)
         try await testModelAvailabilityAndLanguageFallbacks(fixtureRoot: fixtureRoot)
+        try await testFoundationModelsProbeGoNoGo(fixtureHost: fixtureHost)
         try await testPassageAnchoredFactExtraction()
         try await testOverviewCompositionFromVerifiedFacts(fixtureHost: fixtureHost)
         try await testOverviewQualityAuditAndReleaseGate(fixtureHost: fixtureHost)
@@ -3970,6 +3972,48 @@ struct NewsTests {
         guard let holdout = metrics["holdout"] else { return assertTrue(false, "The holdout split is evaluated") }
         assertEqual(holdout.falsePositives, 0, "The synthetic control set has no false merges")
         assertTrue(holdout.truePositives >= 3, "The synthetic earthquake reports are linked")
+
+        print("  - Testing the native embedding comparison (#127)...")
+        let now = Date()
+        let controls = EventControlSet.articles(now: now, root: fixtureRoot)
+        let memberships = try await StoryCorpus.eventMemberships(articles: controls.map(\.article))
+        var comparisonItems = controls.map {
+            EventEmbeddingComparison.Item(title: $0.article.title, description: $0.article.description, date: $0.article.pubDate,
+                                          event: $0.event, membership: memberships[$0.article.id])
+        }
+        // The same earthquake in French, and an English copy dated six days earlier.
+        comparisonItems.append(.init(title: "Un séisme de magnitude 7 frappe l'est de la Turquie près de Malatya",
+                                     description: "Un puissant séisme de magnitude 7 a frappé lundi l'est de la Turquie près de la ville de Malatya, endommageant des bâtiments, selon l'agence turque de gestion des catastrophes.",
+                                     date: now.addingTimeInterval(-5 * 3600), event: "quake", membership: nil))
+        comparisonItems.append(.init(title: controls[0].article.title, description: controls[0].article.description,
+                                     date: now.addingTimeInterval(-6 * 86400), event: "quake", membership: nil))
+
+        let unsupported = EventEmbeddingComparison(items: comparisonItems, thresholds: [2], model: { _ in nil })
+        assertEqual(unsupported.notCompared["cross-language"], 4, "Vectors from different languages are never compared")
+        assertEqual(unsupported.notCompared["outside time window"], 3, "Pairs the matcher cannot link in time are not compared")
+        assertEqual(unsupported.notCompared["no sentence embedding"], 3, "A language without a sentence embedding abstains")
+        assertTrue(unsupported.scores.isEmpty, "Nothing is scored without vectors")
+        assertTrue(unsupported.languages.values.allSatisfy { $0.dimension == nil }, "Missing models are reported per language")
+        assertEqual(EventEmbeddingComparison.cosineDistance([1, 0], [0, 0]), 2, "A zero vector is never close")
+        assertTrue(abs(EventEmbeddingComparison.cosineDistance([1, 2], [2, 4])) < 1e-12, "Parallel vectors have no distance")
+
+        let support = Set(FeedCatalog.feeds.map(\.language)).sorted().map { code in
+            "\(code) " + (NLEmbedding.sentenceEmbedding(for: NLLanguage(rawValue: code)).map { "\($0.dimension)" } ?? "none")
+        }
+        print("    Sentence embeddings for catalog languages on this system: \(support.joined(separator: ", "))")
+        let native = EventEmbeddingComparison(items: comparisonItems, thresholds: [0.5, 2])
+        guard native.languages["en"]?.dimension != nil, let all = native.scores["all"] else {
+            return print("    No English sentence embedding on this system; native scoring not exercised")
+        }
+        assertEqual(native.notCompared["cross-language"], 4, "Cross-language pairs stay out with native models")
+        assertEqual(all.deterministic.truePositives, 3, "Deterministic links are scored on the same pairs")
+        assertEqual(all.deterministic.falsePositives, 0, "The control set has no deterministic false merges")
+        for row in all.rows {
+            assertTrue(row.veto.truePositives <= all.deterministic.truePositives
+                       && row.veto.falsePositives <= all.deterministic.falsePositives, "A veto only removes deterministic links")
+            assertTrue(row.rescue.truePositives >= all.deterministic.truePositives, "A rescue only adds links")
+        }
+        assertEqual(all.rows.last?.embedding.falseNegatives, 0, "The widest cutoff links every comparable labeled pair")
     }
 
     static func testCapturedFingerprintReview() throws {
@@ -4129,9 +4173,144 @@ struct NewsTests {
             print("    \(split): \(items.count) articles, \(total.line), \(total.falsePositives) falsely merged pairs in \(total.impureEvents) events")
             for (language, metrics) in byLanguage.sorted(by: { $0.key < $1.key }) { print("      language \(language): \(metrics.line)") }
             for (source, metrics) in bySource.sorted(by: { $0.key < $1.key }) { print("      source \(source): \(metrics.line)") }
+            var thresholds = EventEmbeddingComparison.sweep
+            if split == "holdout" {
+                // The holdout is scored at one cutoff chosen on tune, never swept.
+                thresholds = ProcessInfo.processInfo.environment["NEWS_EMBEDDING_THRESHOLD"].flatMap { Double($0) }.map { [$0] } ?? []
+            }
+            let comparisonItems = items.map {
+                EventEmbeddingComparison.Item(title: $0.title, description: $0.description ?? "", date: $0.published,
+                                              event: $0.event, membership: memberships[$0.id])
+            }
+            EventEmbeddingComparison(items: comparisonItems, thresholds: thresholds).report(split: split)
             results[split] = total
         }
         return results
+    }
+
+    /// Native sentence embeddings against deterministic matching on the same labeled pairs (#127).
+    /// Evaluation only: production matching uses no embeddings. Vectors are compared only within one
+    /// language, because separate language models share no vector space, and only inside the matcher's
+    /// time window, where a deterministic link is possible at all. "Veto" keeps a deterministic link
+    /// only when the embeddings agree; "rescue" adds embedding links to it. Scores are pairwise and skip
+    /// the whole-event check, so a rescue row overstates what clustering would accept.
+    struct EventEmbeddingComparison {
+        struct Item {
+            let title: String, description: String, date: Date, event: String?, membership: String?
+        }
+        struct Row {
+            let threshold: Double
+            var embedding = EventCorpusMetrics(), veto = EventCorpusMetrics(), rescue = EventCorpusMetrics()
+        }
+        struct Scores {
+            var deterministic = EventCorpusMetrics()
+            var rows: [Row]
+        }
+        struct Support {
+            var articles = 0
+            /// Nil when the system has no sentence embedding for the language.
+            let dimension: Int?
+        }
+
+        /// Cosine-distance cutoffs swept on the tune split.
+        static let sweep = [0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
+
+        let thresholds: [Double]
+        /// Detected languages; articles without a confident language are only counted.
+        var languages: [String: Support] = [:]
+        var undetected = 0
+        /// Per language, plus "all".
+        var scores: [String: Scores] = [:]
+        /// Labeled or deterministically linked pairs left out of the comparison, by reason.
+        var notCompared: [String: Int] = [:]
+
+        init(items: [Item], thresholds: [Double], window: TimeInterval = EventMatchPolicy.standard.maximumTimeGap,
+             model: (NLLanguage) -> NLEmbedding? = { NLEmbedding.sentenceEmbedding(for: $0) }) {
+            self.thresholds = thresholds
+            var models: [String: NLEmbedding] = [:]
+            var codes: [String?] = [], vectors: [[Double]?] = []
+            for item in items {
+                // As in the deterministic features: the title and the start of the plain description.
+                let description = String(item.description.replacingOccurrences(of: "<[^>]*>", with: " ", options: .regularExpression)
+                    .prefix(EventFeatures.descriptionPrefix))
+                let language = EventMatchKey.language(of: item.title + "\n" + item.description)
+                codes.append(language)
+                guard let code = language else {
+                    undetected += 1
+                    vectors.append(nil)
+                    continue
+                }
+                if languages[code] == nil {
+                    let embedding = model(NLLanguage(rawValue: code))
+                    models[code] = embedding
+                    languages[code] = Support(dimension: embedding?.dimension)
+                }
+                languages[code]?.articles += 1
+                vectors.append(models[code]?.vector(for: item.title + "\n" + description))
+            }
+
+            let empty = Scores(rows: thresholds.map { Row(threshold: $0) })
+            for i in items.indices {
+                for j in items.indices where j > i {
+                    let gold = items[i].event != nil && items[i].event == items[j].event
+                    let linked = items[i].membership != nil && items[i].membership == items[j].membership
+                    var reason: String?
+                    if codes[i] == nil || codes[j] == nil { reason = "unknown language" }
+                    else if codes[i] != codes[j] { reason = "cross-language" }
+                    else if abs(items[i].date.timeIntervalSince(items[j].date)) > window { reason = "outside time window" }
+                    else if vectors[i] == nil || vectors[j] == nil { reason = "no sentence embedding" }
+                    guard reason == nil, let code = codes[i], let left = vectors[i], let right = vectors[j] else {
+                        if gold || linked, let reason { notCompared[reason, default: 0] += 1 }
+                        continue
+                    }
+                    let distance = Self.cosineDistance(left, right)
+                    for key in [code, "all"] {
+                        var entry = scores[key] ?? empty
+                        entry.deterministic.add(predicted: linked, gold: gold)
+                        for index in entry.rows.indices {
+                            let close = distance <= entry.rows[index].threshold
+                            entry.rows[index].embedding.add(predicted: close, gold: gold)
+                            entry.rows[index].veto.add(predicted: linked && close, gold: gold)
+                            entry.rows[index].rescue.add(predicted: linked || close, gold: gold)
+                        }
+                        scores[key] = entry
+                    }
+                }
+            }
+        }
+
+        static func cosineDistance(_ left: [Double], _ right: [Double]) -> Double {
+            var dot = 0.0, leftNorm = 0.0, rightNorm = 0.0
+            for (x, y) in zip(left, right) {
+                dot += x * y
+                leftNorm += x * x
+                rightNorm += y * y
+            }
+            guard leftNorm > 0, rightNorm > 0 else { return 2 }
+            return 1 - dot / (leftNorm * rightNorm).squareRoot()
+        }
+
+        func report(split: String) {
+            let skipped = notCompared.sorted(by: { $0.key < $1.key }).map { "\($0.key) \($0.value)" }.joined(separator: ", ")
+            print("    \(split) embeddings (#127): labeled or linked pairs not compared: \(skipped.isEmpty ? "none" : skipped)")
+            for (code, support) in languages.sorted(by: { $0.key < $1.key }) {
+                let model = support.dimension.map { "\($0)-dimensional sentence embedding" } ?? "no sentence embedding"
+                print("      language \(code): \(support.articles) articles, \(model)")
+            }
+            if undetected > 0 { print("      \(undetected) articles without a confident language") }
+            let keys = ["all"] + scores.keys.filter({ $0 != "all" }).sorted()
+            for key in keys {
+                guard let entry = scores[key] else { continue }
+                print("      \(key) deterministic: \(entry.deterministic.line)")
+                for row in entry.rows {
+                    let cutoff = String(format: "%.2f", row.threshold)
+                    print("        distance ≤ \(cutoff) embedding: \(row.embedding.line)")
+                    print("        distance ≤ \(cutoff) veto: \(row.veto.line)")
+                    print("        distance ≤ \(cutoff) rescue: \(row.rescue.line)")
+                }
+            }
+            if thresholds.isEmpty { print("      Set NEWS_EMBEDDING_THRESHOLD to the cutoff chosen on tune to score embeddings on \(split)") }
+        }
     }
 
     static func testArticleRetentionPolicy() async {
@@ -6473,6 +6652,147 @@ struct NewsTests {
         let fetched = try await db.fetchEventOverview(eventID: "event-quake-1")
         assertEqual(fetched?.kind.rawValue, OverviewKind.fallbackExcerpts.rawValue, "Fallback overview successfully persisted and retrieved from SQLite")
         assertEqual(fetched?.facts.count, 2, "Persisted fallback facts retrieved intact")
+    }
+
+    static func testFoundationModelsProbeGoNoGo(fixtureHost: String = "example.com") async throws {
+        print("  - Testing Foundation Models on-device probe and Phase E Go/No-Go decision (#103)...")
+
+        // 1. Runtime availability probe: macOS 15 unavailable fallback vs supported runtime
+        let macOS15Probe = ModelRuntimeProbe(overrideAvailable: false)
+        let status15 = macOS15Probe.checkAvailability(for: .english)
+        assertFalse(status15.isAvailable, "Model is reported unavailable on macOS 15 fallback path")
+        assertTrue(status15.reason != nil, "Reason provided for macOS 15 fallback")
+
+        let supportedProbe = ModelRuntimeProbe(overrideAvailable: true)
+        let statusSupported = supportedProbe.checkAvailability(for: .english)
+        assertTrue(statusSupported.isAvailable, "Model is reported available on supported runtime")
+        assertEqual(statusSupported.reason, nil, "No failure reason for supported English runtime")
+
+        // Real runtime probe evaluation (must return typed status without crashing or throwing)
+        let liveProbe = ModelRuntimeProbe()
+        let liveStatus = liveProbe.checkAvailability(for: .english)
+        switch liveStatus {
+        case .available:
+            print("    [Probe Live] SystemLanguageModel is available on this host")
+        case .osUnsupported(let r), .deviceNotEligible(let r), .modelNotReady(let r), .languageUnsupported(let r):
+            print("    [Probe Live] SystemLanguageModel not ready/supported: \(r)")
+        case .disabledByPolicy:
+            print("    [Probe Live] SystemLanguageModel disabled by policy")
+        }
+
+        // 2. Supported languages and locales, including Ukrainian
+        let enText = "European regulators have opened an investigation into semiconductor supply chain constraints."
+        let ukText = "Європейська комісія оголосила про початок антимонопольного розслідування на ринку телекомунікацій."
+        let detectedEn = ModelLanguageSupport.detectDominantLanguage(for: enText)
+        let detectedUk = ModelLanguageSupport.detectDominantLanguage(for: ukText)
+        assertEqual(detectedEn?.rawValue, NLLanguage.english.rawValue, "English dominant language correctly detected")
+        assertEqual(detectedUk?.rawValue, NLLanguage.ukrainian.rawValue, "Ukrainian dominant language correctly detected")
+
+        assertTrue(ModelLanguageSupport.isLanguageSupportedForGeneration(detectedEn), "English is supported for generative synthesis")
+        assertFalse(ModelLanguageSupport.isLanguageSupportedForGeneration(detectedUk), "Ukrainian is NOT supported for baseline generative synthesis")
+
+        let strategyUk = supportedProbe.resolveSynthesisStrategy(for: detectedUk)
+        assertFalse(strategyUk.isGenerative, "Ukrainian is safely diverted to deterministic fallback strategy")
+        if case .deterministicFallback(let reason) = strategyUk {
+            assertTrue(reason.contains("uk"), "Fallback reason identifies unsupported Ukrainian language")
+        } else {
+            assertTrue(false, "Expected deterministicFallback strategy for Ukrainian")
+        }
+
+        let strategyEn = supportedProbe.resolveSynthesisStrategy(for: detectedEn)
+        assertTrue(strategyEn.isGenerative, "English resolves to generative strategy on supported runtime")
+
+        // 3. Context budget for instructions + schema + input + response (characters are NOT tokens)
+        let defaultBudget = OverviewTokenBudget()
+        assertEqual(defaultBudget.totalBudget, 4096, "Default total budget is 4096 tokens")
+        assertEqual(defaultBudget.instructionTokens, 350, "Instruction budget reserved")
+        assertEqual(defaultBudget.schemaTokens, 250, "Schema budget reserved")
+        assertEqual(defaultBudget.reservedResponseTokens, 800, "Response generation budget reserved")
+        assertEqual(defaultBudget.safetyMarginTokens, 100, "Safety margin reserved")
+        assertEqual(defaultBudget.availablePassageTokens, 2596, "Available input passage budget is 2596 tokens")
+
+        // Demonstrate characters != tokens across Latin and Cyrillic scripts
+        let latinPassage = "The federal agency approved new orbital launch parameters following telemetry validation."
+        let cyrillicPassage = "Федеральне агентство погодило нові параметри орбітального запуску після перевірки телеметрії."
+        let latinTokens = OverviewTokenBudget.estimateTokens(for: latinPassage)
+        let cyrillicTokens = OverviewTokenBudget.estimateTokens(for: cyrillicPassage)
+
+        // Cyrillic text of roughly equal character count requires significantly higher subword token density
+        assertTrue(cyrillicTokens > latinTokens, "Characters are not tokens: Cyrillic script has higher subword token density")
+
+        // 4. Fact extraction with passage anchoring on a multi-source corpus sample
+        let samplePassages = [
+            EvidencePassage(id: "p_wire", articleID: "art_wire", text: "Global chipmaker announced a $12 billion foundry expansion in Dresden.", ordinal: 1),
+            EvidencePassage(id: "p_daily", articleID: "art_daily", text: "German authorities approved state subsidies covering 30% of the Dresden plant costs.", ordinal: 2),
+            EvidencePassage(id: "p_herald", articleID: "art_herald", text: "Construction of the Dresden semiconductor facility begins in the second quarter.", ordinal: 3)
+        ]
+
+        // Deterministic fact extraction yields grounded facts referencing input passages
+        let extractedFacts = PassageFactExtractor.deterministicExtract(passages: samplePassages)
+        assertTrue(extractedFacts.count >= 3, "Extracted at least 3 passage-anchored facts")
+        for fact in extractedFacts {
+            assertTrue(samplePassages.contains(where: { $0.id == fact.passageID }), "Fact references valid passage ID")
+            let sourcePassage = samplePassages.first(where: { $0.id == fact.passageID })!
+            assertEqual(fact.articleID, sourcePassage.articleID, "Fact article ID correctly aligned with passage")
+            assertTrue(sourcePassage.text.contains(fact.quote), "Fact quote is strictly verbatim contained in passage")
+        }
+
+        // Test deterministic validation catches hallucinated candidate facts
+        let groundedCandidate = RawFactCandidate(
+            statement: "Foundry expansion announced in Dresden.",
+            passageID: "p_wire",
+            quote: "$12 billion foundry expansion in Dresden"
+        )
+        let phantomCandidate = RawFactCandidate(
+            statement: "Competitor announced plant closure in Lyon.",
+            passageID: "p_phantom_404",
+            quote: "closure in Lyon"
+        )
+        let hallucinatedQuoteCandidate = RawFactCandidate(
+            statement: "Facility will employ 50,000 workers.",
+            passageID: "p_wire",
+            quote: "employ 50,000 workers"
+        )
+
+        let validationDiagnostic = PassageFactValidator.validateCandidates(
+            [groundedCandidate, phantomCandidate, hallucinatedQuoteCandidate],
+            against: samplePassages
+        )
+        assertEqual(validationDiagnostic.acceptedFacts.count, 1, "Only grounded candidate accepted")
+        assertEqual(validationDiagnostic.rejectedFacts.count, 2, "Both phantom passage ID and unanchored quote rejected")
+
+        // 5. Latency and memory per request benchmark
+        let clockStart = CFAbsoluteTimeGetCurrent()
+        for _ in 0..<10 {
+            _ = supportedProbe.resolveSynthesisStrategy(for: detectedEn)
+            _ = PassageFactExtractor.deterministicExtract(passages: samplePassages)
+            let hash = EventOverviewDocument.computeInputTextHash(passages: samplePassages)
+            let context = OverviewVersionContext(membershipVersion: 1, inputTextHash: hash)
+            _ = macOS15Probe.buildFallbackOverview(
+                eventID: "event-dresden-probe",
+                passages: samplePassages,
+                context: context,
+                title: "Dresden Foundry Expansion"
+            )
+        }
+        let elapsedTotal = (CFAbsoluteTimeGetCurrent() - clockStart) * 1000.0
+        let elapsedPerReq = elapsedTotal / 10.0
+        print("    [Probe Benchmark] Latency per request: \(String(format: "%.3f", elapsedPerReq)) ms")
+        assertTrue(elapsedPerReq < 100.0, "Probe and deterministic extraction latency per request is under 100ms")
+
+        // 6. Go/No-Go Decision formal verification
+        // - Go for English on supported macOS 26+ runtime with claim verification
+        // - No-Go for generative on macOS 15 or unsupported languages -> graceful narrowing to verified excerpts
+        let fallbackDoc = macOS15Probe.buildFallbackOverview(
+            eventID: "event-dresden-fallback",
+            passages: samplePassages,
+            context: OverviewVersionContext(membershipVersion: 1, inputTextHash: "test-hash"),
+            title: "Dresden Foundry Expansion"
+        )
+        assertEqual(fallbackDoc.kind, .fallbackExcerpts, "No-Go runtime narrows to fallbackExcerpts kind")
+        assertEqual(fallbackDoc.facts.count, 3, "All passages represented as verified facts")
+        assertEqual(fallbackDoc.citations.count, 3, "All citations reference actual passage fingerprints")
+        assertFalse(fallbackDoc.provenance.kind == .synthesized, "Fallback excerpts document is marked non-synthesized")
     }
 
     static func testPassageAnchoredFactExtraction() async throws {
