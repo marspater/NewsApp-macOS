@@ -218,6 +218,19 @@ struct NewsTests {
             try StoryCorpus.auditCache(path: CommandLine.arguments[index + 1])
             return
         }
+        if let index = CommandLine.arguments.firstIndex(of: "--corpus-capture") {
+            guard CommandLine.arguments.indices.contains(index + 1) else { throw StoryCorpus.Failure.invalid("Missing private capture directory") }
+            try await StoryCorpus.capture(directory: CommandLine.arguments[index + 1])
+            return
+        }
+        if let index = CommandLine.arguments.firstIndex(of: "--corpus-review") {
+            guard CommandLine.arguments.indices.contains(index + 1) else { throw StoryCorpus.Failure.invalid("Missing private capture directory") }
+            let review = try StoryCorpus.reviewCaptures(directory: CommandLine.arguments[index + 1],
+                                                        holdout: CommandLine.arguments.contains("--corpus-holdout"))
+            let data = try JSONSerialization.data(withJSONObject: review.report, options: [.sortedKeys])
+            print("CAPTURE_FINGERPRINT_REPORT " + String(decoding: data, as: UTF8.self))
+            return
+        }
         let corpusMode = CommandLine.arguments.contains("--corpus-fingerprints") || CommandLine.arguments.contains("--corpus-events")
         try await StoryCorpus.run(evaluate: corpusMode)
         if corpusMode { return }
@@ -271,6 +284,7 @@ struct NewsTests {
             await testEventFeedGroupingAndStability()
             try await testRefreshClustersEvents(fixtureRoot: fixtureRoot)
             try await testEventCorpusHarness(fixtureRoot: fixtureRoot)
+            try testCapturedFingerprintReview()
             try await testAuditPersistenceAndRoutingRegressions(fixtureRoot: fixtureRoot)
             try await testUndatedArticleOrdering()
             await testDatabaseEnginePersistence()
@@ -339,6 +353,7 @@ struct NewsTests {
         await testEventFeedGroupingAndStability()
         try await testRefreshClustersEvents(fixtureRoot: fixtureRoot)
         try await testEventCorpusHarness(fixtureRoot: fixtureRoot)
+        try testCapturedFingerprintReview()
         await testFTS5SearchAndOperators()
         try await testUnchangedFTSRefresh()
         await testMigrationCoordinatorAtomicity()
@@ -3710,6 +3725,100 @@ struct NewsTests {
         guard let holdout = metrics["holdout"] else { return assertTrue(false, "The holdout split is evaluated") }
         assertEqual(holdout.falsePositives, 0, "The synthetic control set has no false merges")
         assertTrue(holdout.truePositives >= 3, "The synthetic earthquake reports are linked")
+    }
+
+    static func testCapturedFingerprintReview() throws {
+        print("  - Testing the private captured-feed fingerprint review (#102)...")
+        let fileManager = FileManager.default
+        let directory = fileManager.temporaryDirectory.appendingPathComponent("news-capture-\(UUID().uuidString)")
+        try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+        try fileManager.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory.path)
+        defer { try? fileManager.removeItem(at: directory) }
+
+        func rejects(_ path: String) -> Bool { (try? StoryCorpus.privateDirectory(path)) == nil }
+        assertTrue(rejects("relative/captures"), "Relative capture directories are rejected")
+        assertTrue(rejects(directory.appendingPathComponent("missing").path), "A missing directory is not created implicitly")
+        assertTrue(rejects(fileManager.currentDirectoryPath), "Publisher text never lands in the checkout")
+        let shared = directory.appendingPathComponent("shared")
+        try fileManager.createDirectory(at: shared, withIntermediateDirectories: false)
+        try fileManager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: shared.path)
+        assertTrue(rejects(shared.path), "A directory other users can read is rejected")
+        assertFalse(rejects(directory.path), "A private directory is accepted")
+
+        let hosts = (0..<64).map { "publisher\($0).example" }
+        guard let tuningHost = hosts.first(where: { StoryCorpus.captureSplit(host: $0) == "tuning" }),
+              let holdoutHost = hosts.first(where: { StoryCorpus.captureSplit(host: $0) == "holdout" }) else {
+            return assertTrue(false, "Both splits are reachable")
+        }
+        let body = (1...60).map { "Captured report sentence \($0) adds one verifiable detail." }.joined(separator: " ")
+        func item(_ host: String, _ path: String, guid: String, text: String? = nil,
+                  published: Double? = 1_800_000_000) -> StoryCorpus.CapturedItem {
+            StoryCorpus.CapturedItem(feed: "https://\(host)/feed.xml", language: "en", source: "Publisher", link: "https://\(host)/\(path)",
+                                     guid: guid, title: "Council approves budget", description: "Short teaser.",
+                                     content: text ?? body, published: published)
+        }
+        let original = item(tuningHost, "news/budget", guid: "1")
+        let amp = item(tuningHost, "amp/news/budget", guid: "2")
+        let tracked = item(tuningHost, "news/budget?utm_source=rss", guid: "3")
+        let edited = item(tuningHost, "news/budget", guid: "4", text: body + " A correction was appended.")
+        let other = item(tuningHost, "news/other", guid: "5", text: body.replacingOccurrences(of: "verifiable", with: "separate"))
+        let short = item(tuningHost, "news/short", guid: "6", text: "Too short to fingerprint.")
+        let undated = item(tuningHost, "news/undated", guid: "7", published: nil)
+        let holdoutPair = [item(holdoutHost, "story", guid: "h1"), item(holdoutHost, "story?output=amp", guid: "h2")]
+
+        let parsed = original.article
+        let roundTrip = StoryCorpus.CapturedItem(feed: original.feed, language: "en", article: parsed)
+        assertEqual(roundTrip, original, "A parsed article is captured unchanged")
+        assertEqual(ArticleIdentity.publisherTextFingerprints(roundTrip.article), ArticleIdentity.publisherTextFingerprints(parsed),
+                    "Captured items reproduce the production fingerprint")
+        assertTrue(StoryCorpus.CapturedItem(feed: "f", language: "en", article: undated.article).published == nil, "Unknown dates stay unknown")
+
+        let first = try StoryCorpus.writeCapture(StoryCorpus.Capture(version: 1, capturedAt: 1_800_000_100,
+            items: [original, amp, tracked, edited, other, short] + holdoutPair), in: directory)
+        let permissions = try fileManager.attributesOfItem(atPath: first.path)[.posixPermissions] as? NSNumber
+        assertEqual(permissions?.intValue, 0o600, "Captured publisher text is readable only by its owner")
+        assertTrue((try? StoryCorpus.writeCapture(StoryCorpus.Capture(version: 1, capturedAt: 1_800_000_100, items: []), in: directory)) == nil,
+                   "An existing capture is never overwritten")
+        try StoryCorpus.writeCapture(StoryCorpus.Capture(version: 1, capturedAt: 1_800_000_200, items: [original, undated]), in: directory)
+
+        var review = try StoryCorpus.reviewCaptures(directory: directory.path, holdout: false)
+        assertEqual(review.captureFiles, 2, "Every capture file is read")
+        assertEqual(review.observations, 7, "Repeated observations count once and holdout hosts stay sealed")
+        assertEqual(review.eligible, 5, "Short and undated items are not fingerprinted")
+        assertEqual(review.sameURLShared, 1, "A stripped tracking parameter is the same URL")
+        assertEqual(review.sameURLDisjoint, 2, "An edited body at the same URL no longer shares a fingerprint")
+        assertEqual(review.total.candidates, 1, "One different-URL pair shares a fingerprint")
+        assertEqual(review.total.unlabeled, 1, "Unreviewed candidates abstain")
+        assertTrue(review.total.precision == nil && !review.gatePassed, "No adjudication, no precision")
+        let sheet = try Data(contentsOf: directory.appendingPathComponent("review-tuning.json"))
+        let key = StoryCorpus.capturePairKey(original.article.normalizedLink, amp.article.normalizedLink)
+        assertTrue(String(decoding: sheet, as: UTF8.self).contains(key), "The review sheet lists the candidate pair")
+        assertFalse(String(decoding: sheet, as: UTF8.self).contains("Captured report sentence"), "The review sheet carries no body text")
+        assertFalse(fileManager.fileExists(atPath: directory.appendingPathComponent("review-holdout.json").path), "The holdout stays sealed")
+
+        let holdoutKey = StoryCorpus.capturePairKey(holdoutPair[0].article.normalizedLink, holdoutPair[1].article.normalizedLink)
+        let labelsFile = directory.appendingPathComponent("labels.json")
+        try JSONSerialization.data(withJSONObject: [key: "same_document", holdoutKey: "same_document"]).write(to: labelsFile)
+        review = try StoryCorpus.reviewCaptures(directory: directory.path, holdout: false)
+        assertEqual([review.total.sameDocument, review.total.different, review.total.unlabeled], [1, 0, 0], "Labels are applied to their split")
+        assertEqual(review.byLanguage["en"]?.precision, 1, "Precision is reported per language")
+        assertEqual(review.bySource["Publisher"]?.candidates, 1, "Candidates are reported per source")
+        assertFalse(review.gatePassed, "Tuning never passes the release gate")
+        review = try StoryCorpus.reviewCaptures(directory: directory.path, holdout: true)
+        assertEqual([review.observations, review.total.candidates, review.total.sameDocument], [2, 1, 1], "The holdout is scored when unsealed")
+        assertFalse(review.gatePassed, "One candidate is too little support for the gate")
+        try JSONSerialization.data(withJSONObject: [key: "maybe"]).write(to: labelsFile, options: .atomic)
+        assertTrue((try? StoryCorpus.reviewCaptures(directory: directory.path, holdout: false)) == nil, "Unknown labels are rejected")
+
+        func metrics(_ same: Int, _ different: Int, unlabeled: Int = 0) -> StoryCorpus.CaptureMetrics {
+            StoryCorpus.CaptureMetrics(candidates: same + different + unlabeled, sameDocument: same, different: different)
+        }
+        assertTrue(StoryCorpus.captureGatePassed(split: "holdout", metrics: metrics(99, 1)), "99% over 100 adjudicated candidates passes")
+        assertFalse(StoryCorpus.captureGatePassed(split: "holdout", metrics: metrics(98, 2)), "Two errors in 100 fail")
+        assertFalse(StoryCorpus.captureGatePassed(split: "holdout", metrics: metrics(99, 0)), "Fewer than 100 candidates cannot pass")
+        assertFalse(StoryCorpus.captureGatePassed(split: "holdout", metrics: metrics(150, 0, unlabeled: 1)), "Unreviewed candidates block the gate")
+        assertFalse(StoryCorpus.captureGatePassed(split: "tuning", metrics: metrics(200, 0)), "Tuning never passes the gate")
+        assertTrue(abs((metrics(100, 0).precisionLowerBound ?? 0) - 0.963) < 0.001, "The Wilson bound reports sampling uncertainty")
     }
 
     struct EventCorpusMetrics {

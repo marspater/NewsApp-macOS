@@ -191,4 +191,238 @@ enum StoryCorpus {
         print("CACHE_CORPUS_AUDIT " + String(decoding: try JSONSerialization.data(withJSONObject: report, options: [.sortedKeys]), as: UTF8.self))
     }
 
+    // MARK: - Private real-publisher capture (#102)
+
+    /// One parsed feed item before identity resolution. A library export cannot replace this:
+    /// merged variants are collapsed into one stored row and their own text is gone.
+    struct CapturedItem: Codable, Hashable {
+        let feed: String
+        /// Curated feed language (BCP 47), never guessed from the domain.
+        let language: String
+        let source: String
+        let link: String
+        let guid: String?
+        let title: String
+        let description: String
+        let content: String?
+        let published: Double?
+
+        var article: FeedArticle {
+            FeedArticle(title: title, link: link, guid: guid, description: description,
+                        pubDate: published.map { Date(timeIntervalSince1970: $0) } ?? DateParser.unknownDate,
+                        source: source, fullContent: content)
+        }
+    }
+    struct Capture: Codable { let version: Int; let capturedAt: Double; let items: [CapturedItem] }
+    struct CaptureFeed: Decodable { let url: String; let language: String }
+
+    /// Different-URL fingerprint matches. Same-URL pairs are excluded: the URL already decides them.
+    struct CaptureMetrics {
+        var candidates = 0, sameDocument = 0, different = 0
+        var unlabeled: Int { candidates - sameDocument - different }
+        var precision: Double? { sameDocument + different == 0 ? nil : Double(sameDocument) / Double(sameDocument + different) }
+        /// Wilson 95% lower bound over adjudicated candidates, so small samples show their uncertainty.
+        var precisionLowerBound: Double? {
+            let n = Double(sameDocument + different)
+            guard n > 0 else { return nil }
+            let p = Double(sameDocument) / n, z = 1.959964
+            return (p + z * z / (2 * n) - z * ((p * (1 - p) + z * z / (4 * n)) / n).squareRoot()) / (1 + z * z / n)
+        }
+        mutating func add(_ label: String?) {
+            candidates += 1
+            if label == "same_document" { sameDocument += 1 } else if label == "different" { different += 1 }
+        }
+        var json: [String: Any] {
+            ["candidates": candidates, "sameDocument": sameDocument, "different": different, "unlabeled": unlabeled,
+             "precision": precision.map { $0 as Any } ?? NSNull(),
+             "precisionLowerBound95": precisionLowerBound.map { $0 as Any } ?? NSNull()]
+        }
+    }
+
+    struct CaptureReview {
+        var split = "tuning", captureFiles = 0, observations = 0, eligible = 0, sameURLShared = 0, sameURLDisjoint = 0
+        var eligibleByLanguage: [String: Int] = [:]
+        var total = CaptureMetrics()
+        var byLanguage: [String: CaptureMetrics] = [:], bySource: [String: CaptureMetrics] = [:]
+        var gatePassed = false
+
+        var report: [String: Any] {
+            ["split": split, "captureFiles": captureFiles, "observations": observations,
+             "fingerprintEligibleObservations": eligible, "eligibleObservationsByLanguage": eligibleByLanguage,
+             "sameURLPairsSharingFingerprint": sameURLShared, "sameURLPairsWithoutSharedFingerprint": sameURLDisjoint,
+             "differentURLCandidates": total.json, "byLanguage": byLanguage.mapValues(\.json), "bySource": bySource.mapValues(\.json),
+             "releaseGatePassed": gatePassed,
+             "gate": "holdout split, every candidate adjudicated, at least \(StoryCorpus.captureGateMinimumCandidates) candidates, precision >= 0.99",
+             "limitation": "Precision of different-URL fingerprint matches in captured feeds only; recall and event accuracy are not measured"]
+        }
+    }
+
+    /// Below 100 adjudicated candidates a single error cannot be resolved against the 1% budget.
+    static let captureGateMinimumCandidates = 100
+
+    static func captureGatePassed(split: String, metrics: CaptureMetrics) -> Bool {
+        split == "holdout" && metrics.unlabeled == 0 && metrics.candidates >= captureGateMinimumCandidates
+            && metrics.sameDocument * 100 >= 99 * (metrics.sameDocument + metrics.different)
+    }
+
+    /// Fingerprints include the host and canonical URLs never span hosts, so a host-level split keeps every
+    /// candidate family on one side and measures publishers that were not looked at during tuning.
+    static func captureSplit(host: String) -> String {
+        Int(ArticleIdentity.sha256Hex("news-capture-v1:" + host).prefix(8), radix: 16)! % 10 >= 7 ? "holdout" : "tuning"
+    }
+
+    /// Stable across runs and argument order; derived from canonical URLs only.
+    static func capturePairKey(_ first: String, _ second: String) -> String {
+        let (left, right) = first < second ? (first, second) : (second, first)
+        return String(ArticleIdentity.sha256Hex("news-capture-pair-v1:" + left + "\n" + right).prefix(16))
+    }
+
+    /// Publisher text stays in an existing directory that belongs to the user, is closed to everyone else
+    /// and lies outside the checkout.
+    static func privateDirectory(_ path: String) throws -> URL {
+        guard path.hasPrefix("/") else { throw Failure.invalid("Private corpus directory must be an absolute path") }
+        let url = URL(fileURLWithPath: path).resolvingSymlinksInPath()
+        let checkout = URL(fileURLWithPath: FileManager.default.currentDirectoryPath).resolvingSymlinksInPath()
+        guard url.path != checkout.path, !url.path.hasPrefix(checkout.path + "/") else {
+            throw Failure.invalid("Keep publisher text outside the checkout")
+        }
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory), isDirectory.boolValue else {
+            throw Failure.invalid("Private corpus directory does not exist")
+        }
+        let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
+        guard (attributes[.ownerAccountID] as? NSNumber)?.uint32Value == getuid(),
+              let permissions = (attributes[.posixPermissions] as? NSNumber)?.intValue, permissions & 0o077 == 0 else {
+            throw Failure.invalid("Private corpus directory must belong to you and be closed to other users (chmod 700)")
+        }
+        return url
+    }
+
+    static func writePrivate(_ data: Data, to file: URL, replacing: Bool) throws {
+        try data.write(to: file, options: replacing ? [.atomic] : [.withoutOverwriting])
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
+    }
+
+    @discardableResult
+    static func writeCapture(_ capture: Capture, in directory: URL) throws -> URL {
+        let file = directory.appendingPathComponent("capture-\(Int64(capture.capturedAt * 1000)).json")
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        try writePrivate(try encoder.encode(capture), to: file, replacing: false)
+        return file
+    }
+
+    /// Opt-in live capture of the catalog (plus an optional private feed list) through the app's own
+    /// networking and parsers. Opens no user database or settings; prints counts only.
+    static func capture(directory path: String) async throws {
+        let directory = try privateDirectory(path)
+        var feeds = FeedCatalog.feeds.map { CaptureFeed(url: $0.url, language: $0.language) }
+        if let index = CommandLine.arguments.firstIndex(of: "--corpus-feeds") {
+            guard CommandLine.arguments.indices.contains(index + 1) else { throw Failure.invalid("Missing feed list path") }
+            feeds += try JSONDecoder().decode([CaptureFeed].self, from: Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[index + 1])))
+        }
+        var languages: [String: String] = [:]
+        for feed in feeds where languages[feed.url] == nil { languages[feed.url] = feed.language }
+        let results = await FeedFetcher().fetchAllFeeds(urls: languages.keys.sorted())
+        var items: [CapturedItem] = []
+        var failed = 0
+        for result in results {
+            guard let articles = result.articles else { failed += 1; continue }
+            items += articles.map { CapturedItem(feed: result.urlString, language: languages[result.urlString] ?? "undetermined", article: $0) }
+        }
+        let file = try writeCapture(Capture(version: 1, capturedAt: Date().timeIntervalSince1970, items: items), in: directory)
+        let summary: [String: Any] = ["file": file.lastPathComponent, "feeds": languages.count, "failedFeeds": failed, "items": items.count]
+        print("CORPUS_CAPTURE " + String(decoding: try JSONSerialization.data(withJSONObject: summary, options: [.sortedKeys]), as: UTF8.self))
+    }
+
+    /// Lists different-URL fingerprint matches of one split for review and scores them against `labels.json`
+    /// (`{"<pair>": "same_document" | "different"}`). The review sheet carries URLs and titles, never body text.
+    static func reviewCaptures(directory path: String, holdout: Bool) throws -> CaptureReview {
+        let directory = try privateDirectory(path)
+        var review = CaptureReview()
+        review.split = holdout ? "holdout" : "tuning"
+        let files = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+            .filter { $0.lastPathComponent.hasPrefix("capture-") && $0.pathExtension == "json" }
+            .sorted { $0.lastPathComponent < $1.lastPathComponent }
+        review.captureFiles = files.count
+        var unique = Set<CapturedItem>()
+        for file in files {
+            let capture = try JSONDecoder().decode(Capture.self, from: Data(contentsOf: file))
+            guard capture.version == 1 else { throw Failure.invalid("Unsupported capture version") }
+            unique.formUnion(capture.items)
+        }
+        func host(_ item: CapturedItem) -> String { URLComponents(string: item.article.normalizedLink)?.host?.lowercased() ?? "" }
+        func order(_ item: CapturedItem) -> (String, String, String, String, Double, String) {
+            (item.link, item.feed, item.guid ?? "", item.title, item.published ?? -1, item.description)
+        }
+        let split = review.split
+        let items = unique.filter { captureSplit(host: host($0)) == split }.sorted { order($0) < order($1) }
+        review.observations = items.count
+        let canonical = items.map(\.article.normalizedLink)
+        let fingerprints = items.map { Set(ArticleIdentity.publisherTextFingerprints($0.article)) }
+
+        var byURL: [String: [Int]] = [:], byFingerprint: [String: [Int]] = [:]
+        for index in items.indices where !fingerprints[index].isEmpty {
+            review.eligible += 1
+            review.eligibleByLanguage[items[index].language, default: 0] += 1
+            byURL[canonical[index], default: []].append(index)
+            for fingerprint in fingerprints[index] { byFingerprint[fingerprint, default: []].append(index) }
+        }
+        for members in byURL.values {
+            for (offset, i) in members.enumerated() {
+                for j in members[(offset + 1)...] {
+                    if fingerprints[i].isDisjoint(with: fingerprints[j]) { review.sameURLDisjoint += 1 } else { review.sameURLShared += 1 }
+                }
+            }
+        }
+        var candidates: [String: (Int, Int)] = [:]
+        for members in byFingerprint.values {
+            for (offset, i) in members.enumerated() {
+                for j in members[(offset + 1)...] where canonical[i] != canonical[j] {
+                    let pair = canonical[i] < canonical[j] ? (i, j) : (j, i)
+                    let key = capturePairKey(canonical[i], canonical[j])
+                    if let existing = candidates[key], existing <= pair { continue }
+                    candidates[key] = pair
+                }
+            }
+        }
+
+        var labels: [String: String] = [:]
+        let labelsFile = directory.appendingPathComponent("labels.json")
+        if FileManager.default.fileExists(atPath: labelsFile.path) {
+            labels = try JSONDecoder().decode([String: String].self, from: Data(contentsOf: labelsFile))
+            guard labels.values.allSatisfy({ $0 == "same_document" || $0 == "different" }) else {
+                throw Failure.invalid("Labels must be same_document or different")
+            }
+        }
+        let formatter = ISO8601DateFormatter()
+        func side(_ index: Int) -> [String: Any] {
+            ["url": items[index].link, "canonicalURL": canonical[index], "title": items[index].title, "source": items[index].source,
+             "language": items[index].language, "feed": items[index].feed,
+             "published": items[index].published.map { formatter.string(from: Date(timeIntervalSince1970: $0)) as Any } ?? NSNull()]
+        }
+        var sheet: [[String: Any]] = []
+        for key in candidates.keys.sorted() {
+            let (i, j) = candidates[key]!
+            let label = labels[key]
+            let language = items[i].language == items[j].language ? items[i].language : "mixed"
+            review.total.add(label)
+            review.byLanguage[language, default: CaptureMetrics()].add(label)
+            for source in Set([items[i].source, items[j].source]) { review.bySource[source, default: CaptureMetrics()].add(label) }
+            sheet.append(["pair": key, "label": label.map { $0 as Any } ?? NSNull(), "left": side(i), "right": side(j)])
+        }
+        review.gatePassed = captureGatePassed(split: review.split, metrics: review.total)
+        let data = try JSONSerialization.data(withJSONObject: sheet, options: [.prettyPrinted, .sortedKeys])
+        try writePrivate(data, to: directory.appendingPathComponent("review-\(review.split).json"), replacing: true)
+        return review
+    }
+
+}
+
+extension StoryCorpus.CapturedItem {
+    init(feed: String, language: String, article: FeedArticle) {
+        self.init(feed: feed, language: language, source: article.source, link: article.link, guid: article.guid,
+                  title: article.title, description: article.description, content: article.fullContent,
+                  published: article.pubDate == DateParser.unknownDate ? nil : article.pubDate.timeIntervalSince1970)
+    }
 }

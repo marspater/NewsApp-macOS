@@ -64,4 +64,23 @@ cmp Tests/Fixtures/story-corpus/corpus-v1.json "$CORPUS_REBUILD_DIRECTORY/corpus
 
 Original URLs are linked from the W2E README: `topics.zip` (article URLs), `events_grouped_by_topic_with_manually_constructed_queries.csv` and `topicGroups.txt` (merged groups). Event prose is used only to count events/dates and is omitted from the output.
 
-Before closing #102: independently adjudicate imported same-event/different labels, obtain real same-document variants and licensed/local text, verify languages and timestamps, record text-input provenance privately, and measure the frozen holdout. Require ≥99% real-publisher fingerprint precision with positive-support and coverage counts; authored positives alone cannot pass. Event-clustering predictions remain a separate evaluation. `releaseGatePassed` stays false in this candidate scorer to prevent a synthetic-only green report from being treated as acceptance.
+Before closing #102: independently adjudicate imported same-event/different labels, obtain real same-document variants and licensed/local text, verify languages and timestamps, record text-input provenance privately, and measure the frozen holdout. Require ≥99% real-publisher fingerprint precision with positive-support and coverage counts; authored positives alone cannot pass. Event-clustering predictions remain a separate evaluation. `releaseGatePassed` stays false in this candidate scorer to prevent a synthetic-only green report from being treated as acceptance. The fingerprint gate is measured with the private capture below, not with this URL corpus.
+
+## Real-publisher capture for the fingerprint gate
+
+This URL corpus cannot measure the fingerprint gate: it has no publisher text and no observed same-document variants. A library export cannot either, because the app folds a matched variant into the existing row and keeps only its URL as an alias. Capture parsed feed items before identity resolution instead, into a private directory:
+
+```sh
+mkdir -m 700 ~/NewsCorpusCapture
+./test.sh --corpus-capture ~/NewsCorpusCapture   # repeat on several days; variants appear over time
+./test.sh --corpus-capture ~/NewsCorpusCapture --corpus-feeds ~/NewsCorpusCapture/feeds.json   # optional own feeds
+./test.sh --corpus-review ~/NewsCorpusCapture    # tuning sheet and report
+```
+
+- The directory must exist, belong to you, be closed to other users (`chmod 700`) and lie outside the checkout. Captures are written `0600` and never overwritten. The capture fetches the starter catalog (and optionally `[{"url": "…", "language": "en"}]` from `--corpus-feeds`) through the app's protected networking and parsers. It never opens the app's library or settings.
+- The split is by publisher host: 30% holdout by a fixed hash. Fingerprints include the host, so every candidate family stays on one side and the holdout measures publishers not looked at during tuning.
+- `review-<split>.json` lists each pair of distinct canonical URLs that share a fingerprint, with URLs, titles, sources, languages and dates, never body text. Open both URLs and record `{"<pair>": "same_document"}` or `"different"` in `labels.json` in the same directory. Same-URL pairs are counted but excluded: the URL already decides them.
+- `CAPTURE_FINGERPRINT_REPORT` prints counts only: candidates, adjudications, abstentions, precision and its Wilson 95% lower bound, overall, per curated feed language and per source.
+- Once tuning decisions are fixed, run the review once with `--corpus-holdout`. `releaseGatePassed` requires the holdout, every candidate adjudicated, at least 100 candidates and precision ≥ 99%. With fewer than 100, one error cannot be resolved against the 1% budget.
+
+Limits: this measures the precision of different-URL fingerprint matches only, not recall or event clustering. Summary-only feeds rarely reach the 400-character text threshold, so support may stay low; the report then shows the gate unmet rather than passing. Language comes from the curated feed entry, not detection. The reviewer sees that each pair is a predicted match, so this verifies positives; it is not a blind three-way labeling.
