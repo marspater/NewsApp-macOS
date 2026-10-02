@@ -8,6 +8,7 @@
 
 - Preserve inline publisher formatting and feed HTML structure, retain image credits and candidates, curate responsive media, stabilize image layout and add native reader text sizes (phase C).
 - Keep an opened article's extracted headings, lists, quotes and figures when a later refresh of a summary-only feed brings only images; previously the reader then showed the saved text as plain paragraphs and never fetched the page again. Documents already affected are fetched again when opened (#115).
+- Reader accessibility: the headline and publisher headings are announced with heading levels, the source line is read as one phrase, the citation highlight's dismiss button is its own labelled control, the headline is selectable, and Increase Contrast restores full-strength text and visible control borders (#123).
 
 - Retain protected redirect destinations and verified same-origin canonical URLs as document aliases; resolve relative reader images from the final response URL.
 - Reconcile confident historical same-document copies while preserving original rows, read/save histories and old-ID navigation; keep uncertain matches separate.
