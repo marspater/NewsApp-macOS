@@ -270,7 +270,7 @@ private final class SOCKSTunnel: @unchecked Sendable {
         source.receive(minimumIncompleteLength: 1, maximumLength: 32768) { [weak self] data, _, eof, error in
             guard let self, !self.finished, error == nil else { self?.finish(); return }
             self.touch()
-            destination.send(content: data, isComplete: eof, completion: .contentProcessed { [weak self] error in
+            destination.send(content: data, contentContext: eof ? .finalMessage : .defaultMessage, completion: .contentProcessed { [weak self] error in
                 guard let self, error == nil else { self?.finish(); return }
                 if eof {
                     self.closedDirections += 1

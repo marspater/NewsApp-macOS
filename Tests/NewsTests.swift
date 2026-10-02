@@ -260,6 +260,10 @@ struct NewsTests {
             try await runPerformanceBaseline()
             return
         }
+        if CommandLine.arguments.contains("--transport-cancellation") {
+            try await testTransportCancellation()
+            return
+        }
         if CommandLine.arguments.contains("--reader-live-pages") {
             await testLiveReader(pagesOnly: true)
             print("✅ Live reader pages passed")
@@ -402,6 +406,7 @@ struct NewsTests {
         await testStrictSemVerAndReleaseSecurity()
         await testNotificationModeTriageAndGrammar()
         try await testSocketNetworkBoundary()
+        try await testTransportCancellation()
         await testRefreshCoordinatorSingleFlightCoalescing()
         try await testFeedRemovalAndShutdown()
         try await testSleepAndWakeRefresh()
@@ -5401,6 +5406,154 @@ struct NewsTests {
         try await socketSend(client, Data(request.prefix(1)))
         try await socketSend(client, Data(request.dropFirst()))
         return (client, try await socketRead(client, count: 10))
+    }
+
+    /// Hold a real HTTP response open until cancellation closes the upstream socket.
+    static func holdCancellationResponse(_ connection: NWConnection, ready: SocketObservation,
+                                         closed: SocketObservation, request: Data = Data()) {
+        connection.receive(minimumIncompleteLength: 1, maximumLength: 32768) { bytes, _, eof, error in
+            guard error == nil, !eof, let bytes else { connection.cancel(); return }
+            let request = request + bytes
+            guard request.range(of: Data("\r\n\r\n".utf8)) != nil else {
+                holdCancellationResponse(connection, ready: ready, closed: closed, request: request)
+                return
+            }
+            let header = String(decoding: request, as: UTF8.self)
+            if header.hasPrefix("GET /drain ") {
+                ready.recordText("drain")
+                connection.receive(minimumIncompleteLength: 1, maximumLength: 32768) { bytes, _, eof, error in
+                    assertTrue(error == nil && eof && (bytes?.isEmpty ?? true), "The proxy forwards the client's write-close before the response")
+                    connection.send(content: Data(repeating: 120, count: 65536), contentContext: .finalMessage,
+                                    completion: .contentProcessed { error in
+                        assertTrue(error == nil, "The upstream sends its complete response after request EOF")
+                        closed.recordText("drain")
+                        connection.cancel()
+                    })
+                }
+                return
+            }
+            assertTrue(header.hasPrefix("GET /headers/") || header.hasPrefix("GET /body/"), "Only the cancellation fixture is requested")
+            let waitForClose: @Sendable () -> Void = {
+                ready.recordText(header)
+                connection.receive(minimumIncompleteLength: 1, maximumLength: 32768) { _, _, eof, error in
+                    assertTrue(eof || error != nil, "Cancellation closes the upstream transport")
+                    closed.recordText(header)
+                    connection.cancel()
+                }
+            }
+            if header.hasPrefix("GET /body/") {
+                // The response starts but cannot complete: only 4 KiB of the declared 1 MiB is sent.
+                var response = Data("HTTP/1.1 200 OK\r\nContent-Type: application/rss+xml\r\nContent-Length: 1048576\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n".utf8)
+                response.append(Data(repeating: 32, count: 4096))
+                connection.send(content: response, completion: .contentProcessed { error in
+                    assertTrue(error == nil, "The partial HTTP body is written before cancellation")
+                    waitForClose()
+                })
+            } else {
+                waitForClose()
+            }
+        }
+    }
+
+    @MainActor
+    static func testTransportCancellation() async throws {
+        print("  - Testing refresh shutdown over real HTTP/SOCKS sockets...")
+        let upstream = try NWListener(using: .tcp, on: .any)
+        let queue = DispatchQueue(label: "test.cancellation.upstream")
+        let ready = SocketObservation()
+        let closed = SocketObservation()
+        upstream.newConnectionHandler = { connection in
+            connection.start(queue: queue)
+            holdCancellationResponse(connection, ready: ready, closed: closed)
+        }
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            let once = SocketObservation()
+            upstream.stateUpdateHandler = { state in
+                if case .ready = state, once.claim() { continuation.resume() }
+                if case .failed(let error) = state, once.claim() { continuation.resume(throwing: error) }
+            }
+            queue.asyncAfter(deadline: .now() + 5) {
+                if once.claim() { upstream.cancel(); continuation.resume(throwing: FeedError.timeout) }
+            }
+            upstream.start(queue: queue)
+        }
+        defer { upstream.cancel() }
+        let port = upstream.port!
+        let observed = SocketObservation()
+        let proxy = NetworkBoundaryProxy(connector: { host, _ in
+            observed.record(host)
+            return NWConnection(host: "127.0.0.1", port: port, using: .tcp)
+        })
+        let (halfClosed, reply) = try await socksConnect(proxy, host: "93.184.216.34")
+        assertEqual(reply[1], 0, "The drain control uses the protected socket")
+        try await socketSend(halfClosed, Data("GET /drain HTTP/1.1\r\nHost: 93.184.216.34\r\n\r\n".utf8))
+        await eventually("The drain fixture receives the request before its write-close") { ready.count == 1 }
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            halfClosed.send(content: nil, contentContext: .finalMessage, completion: .contentProcessed { error in
+                if let error { continuation.resume(throwing: error) } else { continuation.resume() }
+            })
+        }
+        assertEqual(try await socketRead(halfClosed, count: 65536), Data(repeating: 120, count: 65536), "A half-closed request drains the entire response across relay buffers")
+        do {
+            _ = try await socketRead(halfClosed, count: 1)
+            assertTrue(false, "The response ends with forwarded EOF")
+        } catch let error as FeedError {
+            assertEqual(error, .network("EOF"), "The upstream write-close reaches the client after all response bytes")
+        }
+        halfClosed.cancel()
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.proxyConfigurations = [try await proxy.configuration()]
+        let client = SecureHTTPClient(configuration: configuration)
+        var samples: [String: [Double]] = [:]
+        for phase in ["headers", "body"] {
+            for index in 0..<5 {
+                let db = DatabaseEngine(path: ":memory:")
+                let store = ArticleStore(database: db)
+                await store.initialize()
+                let suite = "test.transport-cancellation.\(UUID().uuidString)"
+                let defaults = UserDefaults(suiteName: suite)!
+                let settings = AppSettings(defaults: defaults)
+                let feed = "http://93.184.216.34/\(phase)/\(index).xml"
+                settings.feedURLs = [feed]
+                settings.allowInsecureHTTP = true
+                settings.aiEnabled = false
+                let fetcher = FeedFetcher(client: client)
+                let manager = FeedManager(settings: settings, store: store, schedulesRefresh: false,
+                    fetchBatch: { urls, allowHTTP in await fetcher.fetchAllFeeds(urls: urls, allowHTTP: allowHTTP, state: db) },
+                    notifyBatch: { _, _ in })
+                let done = SocketObservation()
+                let count = ready.count
+                let refresh = Task {
+                    await manager.fetchFeedsAsync()
+                    let end = ContinuousClock.now
+                    done.recordText("finished")
+                    return end
+                }
+                await eventually("The real HTTP request reaches the held response") { ready.count == count + 1 }
+                assertTrue(manager.isAnyFeedLoading, "A stalled response keeps refresh active")
+                assertEqual(done.count, 0, "The incomplete HTTP response cannot finish before shutdown")
+                let start = ContinuousClock.now
+                manager.stopBackgroundWork()
+                await eventually("Shutdown completes without waiting for the network timeout", timeout: .seconds(2)) { done.count == 1 }
+                let duration = start.duration(to: await refresh.value)
+                let milliseconds = Double(duration.components.seconds) * 1000 + Double(duration.components.attoseconds) / 1e15
+                samples[phase, default: []].append(milliseconds)
+                await eventually("Shutdown closes the protected upstream socket", timeout: .seconds(2)) { closed.count == count + 1 }
+                assertFalse(manager.isAnyFeedLoading, "Shutdown clears refresh loading")
+                assertEqual(try await db.counts().total, 0, "Cancellation ingests no partial articles")
+                assertEqual(try await db.feedFetchStates()[feed], nil, "Cancellation records no feed failure or validators")
+                defaults.removePersistentDomain(forName: suite)
+                await db.close()
+            }
+        }
+        assertEqual(observed.count, 11, "The drain control and each cancellation sample use one protected connection")
+        assertTrue(observed.hosts.allSatisfy { $0 == "93.184.216.34" }, "Production resolution pins the public numeric address before fixture routing")
+        await proxy.stop()
+        let report: [String: Any] = ["samples_ms": samples, "samples_per_phase": 5,
+                                     "transport": "URLSession -> production SOCKS proxy -> controlled TCP fixture",
+                                     "response_bytes_sent": 4096, "response_bytes_declared": 1048576]
+        let data = try JSONSerialization.data(withJSONObject: report, options: [.sortedKeys])
+        print("TRANSPORT_CANCELLATION_REPORT " + String(decoding: data, as: UTF8.self))
     }
 
     @MainActor
