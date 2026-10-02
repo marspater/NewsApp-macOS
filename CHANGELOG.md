@@ -29,6 +29,8 @@
 
 ### Added
 
+- A one-time `FirstCard` signpost and log line record when the first story card appears, with the time since process start, for launch profiling (#104).
+
 - Add an opt-in isolated native rendered-card benchmark and integrated service budgets; distinguish unchanged refreshes from dense clustering work without modifying the real library.
 
 - Add an optional Briefing: up to ten unread stories from the last 24 hours, mixed across sources and categories, frozen until a new briefing is requested, with reading progress and completion.

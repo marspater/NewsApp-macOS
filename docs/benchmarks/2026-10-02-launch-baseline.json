@@ -1,0 +1,122 @@
+{
+  "date": "2026-10-02",
+  "command": "./script/launch_baseline.sh",
+  "bundle_identifier": "com.marspater.news.launchcheck",
+  "hardware": {
+    "cpu": "Apple M5",
+    "memory_bytes": 25769803776,
+    "model": "Mac17,3"
+  },
+  "macos": "27.0.1 (26A434)",
+  "notes": [
+    "run 1 launches after a bootstrap launch of the same build; run 2's first launch is the first of a newly built bundle",
+    "process_start_to_first_card_ms is logged by the app when the first card's onAppear runs; open_to_first_card_ms adds LaunchServices",
+    "footprint values are vmmap Physical footprint; peak is sampled 5 s after the first card"
+  ],
+  "runs": [
+    {
+      "library_stories": 10000,
+      "launches": [
+        {
+          "launch": 1,
+          "process_start_to_first_card_ms": 656.796,
+          "open_to_first_card_ms": 690.712,
+          "footprint_at_first_card_mib": 59.9,
+          "footprint_settled_mib": 69.2,
+          "footprint_peak_mib": 78.4
+        },
+        {
+          "launch": 2,
+          "process_start_to_first_card_ms": 678.248,
+          "open_to_first_card_ms": 709.267,
+          "footprint_at_first_card_mib": 67.8,
+          "footprint_settled_mib": 67.2,
+          "footprint_peak_mib": 84.1
+        },
+        {
+          "launch": 3,
+          "process_start_to_first_card_ms": 639.41,
+          "open_to_first_card_ms": 677.983,
+          "footprint_at_first_card_mib": 59.9,
+          "footprint_settled_mib": 62.9,
+          "footprint_peak_mib": 67.3
+        },
+        {
+          "launch": 4,
+          "process_start_to_first_card_ms": 657.782,
+          "open_to_first_card_ms": 689.57,
+          "footprint_at_first_card_mib": 59.6,
+          "footprint_settled_mib": 77.8,
+          "footprint_peak_mib": 87.1
+        },
+        {
+          "launch": 5,
+          "process_start_to_first_card_ms": 656.379,
+          "open_to_first_card_ms": 684.863,
+          "footprint_at_first_card_mib": 67.9,
+          "footprint_settled_mib": 67.4,
+          "footprint_peak_mib": 84.2
+        }
+      ],
+      "settle_seconds_before_memory_sample": 5,
+      "macos": "27.0.1",
+      "hardware": [
+        "Apple M5",
+        "25769803776",
+        "Mac17,3"
+      ]
+    },
+    {
+      "library_stories": 10000,
+      "launches": [
+        {
+          "launch": 1,
+          "process_start_to_first_card_ms": 1049.569,
+          "open_to_first_card_ms": 1087.422,
+          "footprint_at_first_card_mib": 60.2,
+          "footprint_settled_mib": 69.6,
+          "footprint_peak_mib": 78.7
+        },
+        {
+          "launch": 2,
+          "process_start_to_first_card_ms": 658.445,
+          "open_to_first_card_ms": 699.334,
+          "footprint_at_first_card_mib": 59.8,
+          "footprint_settled_mib": 62.0,
+          "footprint_peak_mib": 67.3
+        },
+        {
+          "launch": 3,
+          "process_start_to_first_card_ms": 667.745,
+          "open_to_first_card_ms": 700.992,
+          "footprint_at_first_card_mib": 60.0,
+          "footprint_settled_mib": 62.4,
+          "footprint_peak_mib": 67.0
+        },
+        {
+          "launch": 4,
+          "process_start_to_first_card_ms": 629.02,
+          "open_to_first_card_ms": 659.7,
+          "footprint_at_first_card_mib": 60.0,
+          "footprint_settled_mib": 69.0,
+          "footprint_peak_mib": 78.0
+        },
+        {
+          "launch": 5,
+          "process_start_to_first_card_ms": 630.728,
+          "open_to_first_card_ms": 665.673,
+          "footprint_at_first_card_mib": 60.0,
+          "footprint_settled_mib": 85.5,
+          "footprint_peak_mib": 88.2
+        }
+      ],
+      "settle_seconds_before_memory_sample": 5,
+      "macos": "27.0.1",
+      "hardware": [
+        "Apple M5",
+        "25769803776",
+        "Mac17,3"
+      ]
+    }
+  ]
+}

@@ -231,6 +231,11 @@ struct NewsTests {
             print("CAPTURE_FINGERPRINT_REPORT " + String(decoding: data, as: UTF8.self))
             return
         }
+        if let index = CommandLine.arguments.firstIndex(of: "--seed-launch-library") {
+            guard CommandLine.arguments.indices.contains(index + 1) else { throw StoryCorpus.Failure.invalid("Missing library path") }
+            try await seedLaunchLibrary(path: CommandLine.arguments[index + 1])
+            return
+        }
         if CommandLine.arguments.contains("--active-work-cancellation") {
             try await testActiveWorkCancellation()
             return
@@ -616,6 +621,26 @@ struct NewsTests {
         assertEqual(value(copy, "PRAGMA quick_check;"), "ok", "Migrated database passes quick_check")
         assertEqual(value(copy, "PRAGMA foreign_key_check;"), nil, "Migrated database has no dangling references")
         execute(copy, "INSERT INTO articles_fts(articles_fts) VALUES('integrity-check');")
+    }
+
+    /// Writes a new 10,000-story library for `script/launch_baseline.sh`: unread, recent and already clustered,
+    /// so launch measures loading a steady-state archive rather than a first-run clustering backlog.
+    static func seedLaunchLibrary(path: String) async throws {
+        guard !FileManager.default.fileExists(atPath: path) else { throw StoryCorpus.Failure.invalid("Refusing to overwrite \(path)") }
+        let db = DatabaseEngine(path: path)
+        try await db.open()
+        let now = Date()
+        let prose = (1...20).map { "Researchers in London compared observation \($0) with the published evidence and documented the results." }.joined(separator: " ")
+        let archive = (0..<10_000).map { index in
+            FeedArticle(title: "Research report \(index)", link: "https://launch.invalid/article/\(index)", guid: "launch-\(index)",
+                description: "Research evidence", pubDate: now.addingTimeInterval(-Double(index) * 15),
+                source: "Publisher \(index % 20)", fullContent: prose,
+                readerDocument: ReaderDocument(blocks: [ReaderBlock(kind: .paragraph, text: prose)]))
+        }
+        try await db.upsertArticles(archive, feedUrl: "https://launch.invalid/feed.xml")
+        try await db.markEventMatchProcessed(archive.map(\.id), matcherVersion: EventMatcher.version, at: now)
+        await db.close()
+        print("Seeded \(archive.count) stories at \(path)")
     }
 
     /// Opt-in controlled service timings; not a rendered UI or network benchmark.

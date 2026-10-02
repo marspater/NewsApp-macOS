@@ -498,6 +498,7 @@ struct ArticleListView: View {
                     openArticle(article)
                 }
                 .id(entry.id)
+                .onAppear(perform: NewsSignposts.firstCardAppeared)
             case .event(let summary, let representative, _):
                 EventCardView(
                     representative: representative,
@@ -512,6 +513,7 @@ struct ArticleListView: View {
                     separate: { member in separate(member, from: summary.eventID) }
                 )
                 .id(entry.id)
+                .onAppear(perform: NewsSignposts.firstCardAppeared)
             }
         }
     }
