@@ -275,6 +275,7 @@ struct NewsTests {
             try await testModelAvailabilityAndLanguageFallbacks(fixtureRoot: fixtureRoot)
             try await testPassageAnchoredFactExtraction()
             try await testOverviewCompositionFromVerifiedFacts(fixtureHost: fixtureHost)
+            try await testOverviewQualityAuditAndReleaseGate(fixtureHost: fixtureHost)
             try await testOnDemandOverviewGenerationAndCaching(fixtureHost: fixtureHost)
             try await testDeterministicClaimVerification(fixtureHost: fixtureHost)
             try await testHistoricalReconciliation(fixtureRoot: fixtureRoot)
@@ -348,6 +349,7 @@ struct NewsTests {
         try await testModelAvailabilityAndLanguageFallbacks(fixtureRoot: fixtureRoot)
         try await testPassageAnchoredFactExtraction()
         try await testOverviewCompositionFromVerifiedFacts(fixtureHost: fixtureHost)
+        try await testOverviewQualityAuditAndReleaseGate(fixtureHost: fixtureHost)
         try await testOnDemandOverviewGenerationAndCaching(fixtureHost: fixtureHost)
         try await testDeterministicClaimVerification(fixtureHost: fixtureHost)
         try await testHistoricalReconciliation(fixtureRoot: fixtureRoot)
@@ -6738,6 +6740,182 @@ struct NewsTests {
         )
         assertEqual(fallbackDoc.kind, OverviewKind.fallbackExcerpts, "Composer falls back to fallbackExcerpts when verified facts < 3")
         assertTrue(fallbackDoc.facts.count == 1, "Fallback contains available verified facts without fabricating ungrounded ones")
+    }
+
+    static func testOverviewQualityAuditAndReleaseGate(fixtureHost: String = "example.com") async throws {
+        print("  - Testing labeled overview quality audit and generative release gate...")
+
+        // 1. Standard Benchmark Control Suite Audit
+        let samples = OverviewControlSample.standardBenchmark(fixtureHost: fixtureHost)
+        assertEqual(samples.count, 3, "Control suite has 3 standard benchmark events")
+
+        let timingTracker = OverviewTimingTracker()
+        var benchmarkPairs: [(OverviewControlSample, EventOverviewDocument, TimeInterval?)] = []
+
+        for sample in samples {
+            let (doc, duration) = timingTracker.measure {
+                OverviewComposer.composeOverview(
+                    eventID: sample.eventID,
+                    eventTitle: sample.title,
+                    verifiedFacts: sample.groundTruthFacts,
+                    passages: sample.passages,
+                    articles: sample.articles
+                )
+            }
+            benchmarkPairs.append((sample, doc, duration))
+        }
+
+        let suiteReport = OverviewQualityAuditor.auditControlSamples(benchmarkPairs)
+
+        // Acceptance: manual audit of claim support on control sample
+        assertEqual(suiteReport.totalSamples, 3, "Audited 3 control samples")
+        assertTrue(suiteReport.totalClaims >= 6, "Total claims across benchmark >= 6 (actual: \(suiteReport.totalClaims))")
+        assertEqual(suiteReport.supportedClaims, suiteReport.totalClaims, "All ground truth claims supported")
+        assertEqual(suiteReport.unsupportedClaims, 0, "Zero unsupported claims in benchmark")
+        assertEqual(suiteReport.numberMismatchCount, 0, "Zero number mismatches in ground truth")
+        assertEqual(suiteReport.dateMismatchCount, 0, "Zero date mismatches in ground truth")
+        assertEqual(suiteReport.attributionErrorCount, 0, "Zero attribution errors in ground truth")
+        assertEqual(suiteReport.totalCriticalErrors, 0, "Zero critical errors in benchmark")
+        assertTrue(suiteReport.canReleaseGenerativeOverview, "Ground truth benchmark passes release gate")
+        assertFalse(suiteReport.isReleaseBlocked, "Ground truth benchmark is not release blocked")
+        assertFalse(OverviewQualityAuditor.isReleaseBlocked(by: suiteReport), "Suite auditor helper confirms gate open")
+
+        // Performance percentiles recorded
+        assertTrue(suiteReport.p50Duration != nil, "p50 overview time recorded")
+        assertTrue(suiteReport.p95Duration != nil, "p95 overview time recorded")
+        assertTrue(timingTracker.p50Duration != nil, "Tracker p50 duration computed")
+        assertTrue(timingTracker.p95Duration != nil, "Tracker p95 duration computed")
+
+        // Release gate decision on clean report
+        let cleanDecision = OverviewQualityAuditor.evaluateReleaseGate(report: suiteReport.sampleReports[0])
+        switch cleanDecision {
+        case .passed:
+            assertTrue(true, "Release gate passed for clean control sample")
+        case .blocked:
+            assertTrue(false, "Release gate should not be blocked for clean control sample")
+        }
+
+        // 2. Gate Verification: Critical Number Mismatch Blocks Release
+        let fundingSample = samples[0]
+        let perturbedNumberFact = OverviewFact(
+            id: "f-num-err",
+            text: "SwiftCloud raised $500 million in Series B funding led by Horizon Ventures.",
+            citationIDs: ["cite_pass-fund-1_1"]
+        )
+        let fundingCitation = OverviewCitation(
+            id: "cite_pass-fund-1_1",
+            articleID: "art-fund-1",
+            passageID: "pass-fund-1",
+            passageFingerprint: fundingSample.passages[0].fingerprint,
+            quote: "raised $50 million in Series B funding led by Horizon Ventures"
+        )
+        let numberMismatchDoc = EventOverviewDocument(
+            eventID: fundingSample.eventID,
+            version: OverviewVersionContext(membershipVersion: 1, inputTextHash: "hash-num"),
+            content: OverviewContent(
+                title: fundingSample.title,
+                summary: "Introduction text",
+                facts: [perturbedNumberFact],
+                citations: [fundingCitation]
+            )
+        )
+        let numberReport = OverviewQualityAuditor.auditOverview(numberMismatchDoc, passages: fundingSample.passages)
+        assertEqual(numberReport.numberMismatchCount, 1, "Detected 1 critical number mismatch ($500 million vs $50 million)")
+        assertEqual(numberReport.totalCriticalErrors, 1, "Total critical errors == 1")
+        assertTrue(numberReport.isReleaseBlocked, "Critical number mismatch blocks generative release")
+        assertFalse(numberReport.canReleaseGenerativeOverview, "Release allowed flag is false")
+        assertTrue(OverviewQualityAuditor.isReleaseBlocked(by: numberReport), "Release blocked helper returns true")
+
+        let numberGateDecision = OverviewQualityAuditor.evaluateReleaseGate(report: numberReport)
+        switch numberGateDecision {
+        case let .blocked(errors, reasons):
+            assertEqual(errors, 1, "Decision reports 1 critical error")
+            assertTrue(reasons.contains(where: { $0.contains("number mismatch") }), "Decision cites number mismatch")
+        case .passed:
+            assertTrue(false, "Gate must block on number mismatch")
+        }
+
+        // 3. Gate Verification: Critical Date Mismatch Blocks Release
+        let perturbedDateFact = OverviewFact(
+            id: "f-date-err",
+            text: "On November 1, 2026, SwiftCloud announced Series B funding.",
+            citationIDs: ["cite_pass-fund-1_1"]
+        )
+        let dateMismatchDoc = EventOverviewDocument(
+            eventID: fundingSample.eventID,
+            version: OverviewVersionContext(membershipVersion: 1, inputTextHash: "hash-date"),
+            content: OverviewContent(
+                title: fundingSample.title,
+                summary: "Introduction text",
+                facts: [perturbedDateFact],
+                citations: [fundingCitation]
+            )
+        )
+        let dateReport = OverviewQualityAuditor.auditOverview(dateMismatchDoc, passages: fundingSample.passages)
+        assertEqual(dateReport.dateMismatchCount, 1, "Detected 1 critical date mismatch (November vs October)")
+        assertTrue(dateReport.isReleaseBlocked, "Critical date mismatch blocks generative release")
+        assertFalse(dateReport.canReleaseGenerativeOverview, "Release allowed flag is false for date mismatch")
+
+        // 4. Gate Verification: Critical Attribution Error Blocks Release
+        let perturbedAttributionFact = OverviewFact(
+            id: "f-attr-err",
+            text: "Apple CEO Tim Cook announced the capital accelerates deployment.",
+            citationIDs: ["cite_pass-fund-1_1"]
+        )
+        let attributionMismatchDoc = EventOverviewDocument(
+            eventID: fundingSample.eventID,
+            version: OverviewVersionContext(membershipVersion: 1, inputTextHash: "hash-attr"),
+            content: OverviewContent(
+                title: fundingSample.title,
+                summary: "Introduction text",
+                facts: [perturbedAttributionFact],
+                citations: [fundingCitation]
+            )
+        )
+        let attributionReport = OverviewQualityAuditor.auditOverview(attributionMismatchDoc, passages: fundingSample.passages)
+        assertTrue(attributionReport.attributionErrorCount >= 1, "Detected critical attribution error (Tim Cook vs Jane Doe)")
+        assertTrue(attributionReport.isReleaseBlocked, "Critical attribution error blocks generative release")
+        assertFalse(attributionReport.canReleaseGenerativeOverview, "Release allowed flag is false for attribution error")
+
+        // 5. Gate Verification: Fabricated Quote in Citation Blocks Release
+        let fakeQuoteCitation = OverviewCitation(
+            id: "cite_pass-fund-1_fake",
+            articleID: "art-fund-1",
+            passageID: "pass-fund-1",
+            passageFingerprint: "fake-fp",
+            quote: "We have acquired all competitors in the market"
+        )
+        let fabricatedQuoteFact = OverviewFact(
+            id: "f-quote-err",
+            text: "SwiftCloud raised capital.",
+            citationIDs: ["cite_pass-fund-1_fake"]
+        )
+        let fabricatedQuoteDoc = EventOverviewDocument(
+            eventID: fundingSample.eventID,
+            version: OverviewVersionContext(membershipVersion: 1, inputTextHash: "hash-quote"),
+            content: OverviewContent(
+                title: fundingSample.title,
+                summary: "Introduction text",
+                facts: [fabricatedQuoteFact],
+                citations: [fakeQuoteCitation]
+            )
+        )
+        let quoteReport = OverviewQualityAuditor.auditOverview(fabricatedQuoteDoc, passages: fundingSample.passages)
+        assertTrue(quoteReport.attributionErrorCount >= 1, "Fabricated quote flagged as attribution error")
+        assertTrue(quoteReport.isReleaseBlocked, "Fabricated quote blocks generative release")
+
+        // 6. Timing Tracker Percentile Verification
+        let statsTracker = OverviewTimingTracker()
+        let durations: [TimeInterval] = [0.05, 0.10, 0.15, 0.20, 0.25, 0.30, 0.35, 0.40, 0.45, 0.50]
+        for d in durations {
+            statsTracker.record(duration: d)
+        }
+        assertEqual(statsTracker.durations.count, 10, "10 timings recorded")
+        let p50 = statsTracker.p50Duration!
+        let p95 = statsTracker.p95Duration!
+        assertTrue(p50 >= 0.25 && p50 <= 0.30, "p50 median timing in expected range (actual: \(p50))")
+        assertTrue(p95 >= 0.45 && p95 <= 0.50, "p95 tail timing in expected range (actual: \(p95))")
+        assertTrue(statsTracker.averageDuration != nil, "Average duration calculated")
     }
 
     /// Tests on-demand overview generation, caching, cooperative cancellation,
