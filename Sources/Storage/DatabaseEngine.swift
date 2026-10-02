@@ -2058,6 +2058,30 @@ actor DatabaseEngine {
 
     // MARK: - Event Overviews
 
+    /// Records an event overview only after deterministic verification of claims.
+    /// If verification fails, converts the overview to a safe fallback excerpts document
+    /// and stores that instead, guaranteeing a failed retelling is never stored as finished synthesized overview.
+    func recordVerifiedOverview(
+        _ overview: EventOverviewDocument,
+        passages: [EvidencePassage],
+        articles: [FeedArticle]
+    ) throws -> (saved: Bool, document: EventOverviewDocument) {
+        let report = OverviewClaimVerifier.verifyOverview(overview, passages: passages, articles: articles)
+        let documentToStore: EventOverviewDocument
+        if report.isFullyVerified {
+            documentToStore = overview
+        } else {
+            documentToStore = OverviewClaimVerifier.createFallbackOverview(
+                from: overview,
+                passages: passages,
+                articles: articles,
+                report: report
+            )
+        }
+        let saved = try recordEventOverview(documentToStore)
+        return (saved: saved, document: documentToStore)
+    }
+
     @discardableResult
     func recordEventOverview(_ overview: EventOverviewDocument) throws -> Bool {
         guard let db = db else { throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Database not open"]) }
