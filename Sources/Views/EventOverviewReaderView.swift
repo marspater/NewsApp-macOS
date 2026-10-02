@@ -54,6 +54,13 @@ struct EventOverviewReaderView: View {
         return formatter.localizedString(for: overview.updatedAt, relativeTo: Date())
     }
 
+    private func formatTimelineDate(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .none
+        return formatter.string(from: date)
+    }
+
     private var borderStrokeColor: Color {
         contrast == .increased ? AppColor.primaryText.opacity(0.3) : AppColor.borderSubtle
     }
@@ -429,7 +436,7 @@ struct EventOverviewReaderView: View {
                                 .foregroundColor(AppColor.accent)
 
                             if item.isFuturePlan {
-                                Text("Planned")
+                                Text("Plan")
                                     .font(.system(size: 9, weight: .bold))
                                     .foregroundColor(.white)
                                     .padding(.horizontal, 5)
@@ -437,8 +444,14 @@ struct EventOverviewReaderView: View {
                                     .background(Color.blue)
                                     .clipShape(Capsule())
                             }
+
+                            if let pubDate = item.publicationDate, item.eventDate != nil {
+                                Text("Reported \(formatTimelineDate(pubDate))")
+                                    .font(.system(size: 10))
+                                    .foregroundColor(AppColor.tertiaryText)
+                            }
                         }
-                        .frame(minWidth: 80, alignment: .leading)
+                        .frame(minWidth: 90, alignment: .leading)
 
                         VStack(alignment: .leading, spacing: 4) {
                             Text(item.summary)

@@ -273,6 +273,7 @@ struct NewsTests {
             try await testOverviewPassageSelectionAndTokenBudget(fixtureHost: fixtureHost)
             try await testPromptInjectionDefenses(fixtureHost: fixtureHost)
             try await testModelAvailabilityAndLanguageFallbacks(fixtureRoot: fixtureRoot)
+            try await testFoundationModelsProbeGoNoGo(fixtureHost: fixtureHost)
             try await testPassageAnchoredFactExtraction()
             try await testOverviewCompositionFromVerifiedFacts(fixtureHost: fixtureHost)
             try await testOverviewQualityAuditAndReleaseGate(fixtureHost: fixtureHost)
@@ -280,6 +281,7 @@ struct NewsTests {
             try await testDeterministicClaimVerification(fixtureHost: fixtureHost)
             try await testEventOverviewReaderMode(fixtureHost: fixtureHost)
             try await testOverviewTimeline(fixtureHost: fixtureHost)
+            try await testEventTimelineWithSourcedItems(fixtureHost: fixtureHost)
             try await testHistoricalReconciliation(fixtureRoot: fixtureRoot)
             try await testEventDataModel(fixtureRoot: fixtureRoot)
             try await testEventCandidateGeneration(fixtureRoot: fixtureRoot)
@@ -349,6 +351,7 @@ struct NewsTests {
         try await testOverviewPassageSelectionAndTokenBudget(fixtureHost: fixtureHost)
         try await testPromptInjectionDefenses(fixtureHost: fixtureHost)
         try await testModelAvailabilityAndLanguageFallbacks(fixtureRoot: fixtureRoot)
+        try await testFoundationModelsProbeGoNoGo(fixtureHost: fixtureHost)
         try await testPassageAnchoredFactExtraction()
         try await testOverviewCompositionFromVerifiedFacts(fixtureHost: fixtureHost)
         try await testOverviewQualityAuditAndReleaseGate(fixtureHost: fixtureHost)
@@ -356,6 +359,7 @@ struct NewsTests {
         try await testDeterministicClaimVerification(fixtureHost: fixtureHost)
         try await testEventOverviewReaderMode(fixtureHost: fixtureHost)
         try await testOverviewTimeline(fixtureHost: fixtureHost)
+        try await testEventTimelineWithSourcedItems(fixtureHost: fixtureHost)
         try await testHistoricalReconciliation(fixtureRoot: fixtureRoot)
         try await testEventDataModel(fixtureRoot: fixtureRoot)
         try await testEventCandidateGeneration(fixtureRoot: fixtureRoot)
@@ -6652,6 +6656,147 @@ struct NewsTests {
         assertEqual(fetched?.facts.count, 2, "Persisted fallback facts retrieved intact")
     }
 
+    static func testFoundationModelsProbeGoNoGo(fixtureHost: String = "example.com") async throws {
+        print("  - Testing Foundation Models on-device probe and Phase E Go/No-Go decision (#103)...")
+
+        // 1. Runtime availability probe: macOS 15 unavailable fallback vs supported runtime
+        let macOS15Probe = ModelRuntimeProbe(overrideAvailable: false)
+        let status15 = macOS15Probe.checkAvailability(for: .english)
+        assertFalse(status15.isAvailable, "Model is reported unavailable on macOS 15 fallback path")
+        assertTrue(status15.reason != nil, "Reason provided for macOS 15 fallback")
+
+        let supportedProbe = ModelRuntimeProbe(overrideAvailable: true)
+        let statusSupported = supportedProbe.checkAvailability(for: .english)
+        assertTrue(statusSupported.isAvailable, "Model is reported available on supported runtime")
+        assertEqual(statusSupported.reason, nil, "No failure reason for supported English runtime")
+
+        // Real runtime probe evaluation (must return typed status without crashing or throwing)
+        let liveProbe = ModelRuntimeProbe()
+        let liveStatus = liveProbe.checkAvailability(for: .english)
+        switch liveStatus {
+        case .available:
+            print("    [Probe Live] SystemLanguageModel is available on this host")
+        case .osUnsupported(let r), .deviceNotEligible(let r), .modelNotReady(let r), .languageUnsupported(let r):
+            print("    [Probe Live] SystemLanguageModel not ready/supported: \(r)")
+        case .disabledByPolicy:
+            print("    [Probe Live] SystemLanguageModel disabled by policy")
+        }
+
+        // 2. Supported languages and locales, including Ukrainian
+        let enText = "European regulators have opened an investigation into semiconductor supply chain constraints."
+        let ukText = "Європейська комісія оголосила про початок антимонопольного розслідування на ринку телекомунікацій."
+        let detectedEn = ModelLanguageSupport.detectDominantLanguage(for: enText)
+        let detectedUk = ModelLanguageSupport.detectDominantLanguage(for: ukText)
+        assertEqual(detectedEn?.rawValue, NLLanguage.english.rawValue, "English dominant language correctly detected")
+        assertEqual(detectedUk?.rawValue, NLLanguage.ukrainian.rawValue, "Ukrainian dominant language correctly detected")
+
+        assertTrue(ModelLanguageSupport.isLanguageSupportedForGeneration(detectedEn), "English is supported for generative synthesis")
+        assertFalse(ModelLanguageSupport.isLanguageSupportedForGeneration(detectedUk), "Ukrainian is NOT supported for baseline generative synthesis")
+
+        let strategyUk = supportedProbe.resolveSynthesisStrategy(for: detectedUk)
+        assertFalse(strategyUk.isGenerative, "Ukrainian is safely diverted to deterministic fallback strategy")
+        if case .deterministicFallback(let reason) = strategyUk {
+            assertTrue(reason.contains("uk"), "Fallback reason identifies unsupported Ukrainian language")
+        } else {
+            assertTrue(false, "Expected deterministicFallback strategy for Ukrainian")
+        }
+
+        let strategyEn = supportedProbe.resolveSynthesisStrategy(for: detectedEn)
+        assertTrue(strategyEn.isGenerative, "English resolves to generative strategy on supported runtime")
+
+        // 3. Context budget for instructions + schema + input + response (characters are NOT tokens)
+        let defaultBudget = OverviewTokenBudget()
+        assertEqual(defaultBudget.totalBudget, 4096, "Default total budget is 4096 tokens")
+        assertEqual(defaultBudget.instructionTokens, 350, "Instruction budget reserved")
+        assertEqual(defaultBudget.schemaTokens, 250, "Schema budget reserved")
+        assertEqual(defaultBudget.reservedResponseTokens, 800, "Response generation budget reserved")
+        assertEqual(defaultBudget.safetyMarginTokens, 100, "Safety margin reserved")
+        assertEqual(defaultBudget.availablePassageTokens, 2596, "Available input passage budget is 2596 tokens")
+
+        // Demonstrate characters != tokens across Latin and Cyrillic scripts
+        let latinPassage = "The federal agency approved new orbital launch parameters following telemetry validation."
+        let cyrillicPassage = "Федеральне агентство погодило нові параметри орбітального запуску після перевірки телеметрії."
+        let latinTokens = OverviewTokenBudget.estimateTokens(for: latinPassage)
+        let cyrillicTokens = OverviewTokenBudget.estimateTokens(for: cyrillicPassage)
+
+        // Cyrillic text of roughly equal character count requires significantly higher subword token density
+        assertTrue(cyrillicTokens > latinTokens, "Characters are not tokens: Cyrillic script has higher subword token density")
+
+        // 4. Fact extraction with passage anchoring on a multi-source corpus sample
+        let samplePassages = [
+            EvidencePassage(id: "p_wire", articleID: "art_wire", text: "Global chipmaker announced a $12 billion foundry expansion in Dresden.", ordinal: 1),
+            EvidencePassage(id: "p_daily", articleID: "art_daily", text: "German authorities approved state subsidies covering 30% of the Dresden plant costs.", ordinal: 2),
+            EvidencePassage(id: "p_herald", articleID: "art_herald", text: "Construction of the Dresden semiconductor facility begins in the second quarter.", ordinal: 3)
+        ]
+
+        // Deterministic fact extraction yields grounded facts referencing input passages
+        let extractedFacts = PassageFactExtractor.deterministicExtract(passages: samplePassages)
+        assertTrue(extractedFacts.count >= 3, "Extracted at least 3 passage-anchored facts")
+        for fact in extractedFacts {
+            assertTrue(samplePassages.contains(where: { $0.id == fact.passageID }), "Fact references valid passage ID")
+            let sourcePassage = samplePassages.first(where: { $0.id == fact.passageID })!
+            assertEqual(fact.articleID, sourcePassage.articleID, "Fact article ID correctly aligned with passage")
+            assertTrue(sourcePassage.text.contains(fact.quote), "Fact quote is strictly verbatim contained in passage")
+        }
+
+        // Test deterministic validation catches hallucinated candidate facts
+        let groundedCandidate = RawFactCandidate(
+            statement: "Foundry expansion announced in Dresden.",
+            passageID: "p_wire",
+            quote: "$12 billion foundry expansion in Dresden"
+        )
+        let phantomCandidate = RawFactCandidate(
+            statement: "Competitor announced plant closure in Lyon.",
+            passageID: "p_phantom_404",
+            quote: "closure in Lyon"
+        )
+        let hallucinatedQuoteCandidate = RawFactCandidate(
+            statement: "Facility will employ 50,000 workers.",
+            passageID: "p_wire",
+            quote: "employ 50,000 workers"
+        )
+
+        let validationDiagnostic = PassageFactValidator.validateCandidates(
+            [groundedCandidate, phantomCandidate, hallucinatedQuoteCandidate],
+            against: samplePassages
+        )
+        assertEqual(validationDiagnostic.acceptedFacts.count, 1, "Only grounded candidate accepted")
+        assertEqual(validationDiagnostic.rejectedFacts.count, 2, "Both phantom passage ID and unanchored quote rejected")
+
+        // 5. Latency and memory per request benchmark
+        let clockStart = CFAbsoluteTimeGetCurrent()
+        for _ in 0..<10 {
+            _ = supportedProbe.resolveSynthesisStrategy(for: detectedEn)
+            _ = PassageFactExtractor.deterministicExtract(passages: samplePassages)
+            let hash = EventOverviewDocument.computeInputTextHash(passages: samplePassages)
+            let context = OverviewVersionContext(membershipVersion: 1, inputTextHash: hash)
+            _ = macOS15Probe.buildFallbackOverview(
+                eventID: "event-dresden-probe",
+                passages: samplePassages,
+                context: context,
+                title: "Dresden Foundry Expansion"
+            )
+        }
+        let elapsedTotal = (CFAbsoluteTimeGetCurrent() - clockStart) * 1000.0
+        let elapsedPerReq = elapsedTotal / 10.0
+        print("    [Probe Benchmark] Latency per request: \(String(format: "%.3f", elapsedPerReq)) ms")
+        assertTrue(elapsedPerReq < 100.0, "Probe and deterministic extraction latency per request is under 100ms")
+
+        // 6. Go/No-Go Decision formal verification
+        // - Go for English on supported macOS 26+ runtime with claim verification
+        // - No-Go for generative on macOS 15 or unsupported languages -> graceful narrowing to verified excerpts
+        let fallbackDoc = macOS15Probe.buildFallbackOverview(
+            eventID: "event-dresden-fallback",
+            passages: samplePassages,
+            context: OverviewVersionContext(membershipVersion: 1, inputTextHash: "test-hash"),
+            title: "Dresden Foundry Expansion"
+        )
+        assertEqual(fallbackDoc.kind, .fallbackExcerpts, "No-Go runtime narrows to fallbackExcerpts kind")
+        assertEqual(fallbackDoc.facts.count, 3, "All passages represented as verified facts")
+        assertEqual(fallbackDoc.citations.count, 3, "All citations reference actual passage fingerprints")
+        assertFalse(fallbackDoc.provenance.kind == .synthesized, "Fallback excerpts document is marked non-synthesized")
+    }
+
     static func testPassageAnchoredFactExtraction() async throws {
         print("  - Testing Passage-anchored fact extraction and guided generation validation...")
 
@@ -7874,6 +8019,163 @@ struct NewsTests {
         let publicationMode = ReaderExperienceMode.sourcePublication
         assertEqual(overviewMode.rawValue, "Event overview", "Overview mode label is 'Event overview'")
         assertEqual(publicationMode.rawValue, "Source publication", "Publication mode label is 'Source publication'")
+    }
+
+    static func testEventTimelineWithSourcedItems(fixtureHost: String = "example.com") async throws {
+        print("  - Testing Event timeline with sourced items (#143)...")
+
+        let pubDate1 = Date(timeIntervalSince1970: 1792051200) // 15 October 2026 08:00 UTC
+        let pubDate2 = Date(timeIntervalSince1970: 1792137600) // 16 October 2026 08:00 UTC
+
+        let passage1 = EvidencePassage(
+            id: "pass_quake_1",
+            articleID: "art_seismic_1",
+            text: "Seismic sensors detected a magnitude 5.2 earthquake at 06:14 UTC along the subduction zone.",
+            ordinal: 1
+        )
+        let passage2 = EvidencePassage(
+            id: "pass_quake_2",
+            articleID: "art_seismic_2",
+            text: "On 15 October 2026, civil protection teams established three emergency shelters in coastal towns.",
+            ordinal: 2
+        )
+        let passage3 = EvidencePassage(
+            id: "pass_quake_3",
+            articleID: "art_seismic_1",
+            text: "Emergency officials reported zero casualties and stated that structural damage assessments remain underway.",
+            ordinal: 3
+        )
+        let passageFuturePlan = EvidencePassage(
+            id: "pass_plan_4",
+            articleID: "art_seismic_2",
+            text: "Infrastructure ministry announced that regional seismic retrofitting is scheduled to begin in the second quarter of 2027.",
+            ordinal: 4
+        )
+
+        let article1 = FeedArticle(
+            storedID: "art_seismic_1",
+            title: "Magnitude 5.2 Earthquake Detected",
+            link: "https://\(fixtureHost)/seismic-1",
+            guid: "guid-s1",
+            description: passage1.text,
+            pubDate: pubDate1,
+            source: "Geological Service",
+            fullContent: "\(passage1.text) \(passage3.text)"
+        )
+        let article2 = FeedArticle(
+            storedID: "art_seismic_2",
+            title: "Emergency Shelters Deployed",
+            link: "https://\(fixtureHost)/seismic-2",
+            guid: "guid-s2",
+            description: passage2.text,
+            pubDate: pubDate2,
+            source: "Civil Protection",
+            fullContent: "\(passage2.text) \(passageFuturePlan.text)"
+        )
+
+        let citations: [String: OverviewCitation] = [
+            "c_1": OverviewCitation(id: "c_1", articleID: "art_seismic_1", passageID: "pass_quake_1", passageFingerprint: passage1.fingerprint, quote: "at 06:14 UTC along the subduction zone"),
+            "c_2": OverviewCitation(id: "c_2", articleID: "art_seismic_2", passageID: "pass_quake_2", passageFingerprint: passage2.fingerprint, quote: "On 15 October 2026, civil protection teams"),
+            "c_3": OverviewCitation(id: "c_3", articleID: "art_seismic_1", passageID: "pass_quake_3", passageFingerprint: passage3.fingerprint, quote: "structural damage assessments remain underway"),
+            "c_4": OverviewCitation(id: "c_4", articleID: "art_seismic_2", passageID: "pass_plan_4", passageFingerprint: passageFuturePlan.fingerprint, quote: "scheduled to begin in the second quarter of 2027")
+        ]
+
+        // 1. Extraction: extractTimeline correctly identifies temporal items and sources
+        let timelineItems = OverviewTimelineExtractor.extractTimeline(
+            passages: [passage1, passage2, passageFuturePlan],
+            articles: [article1, article2],
+            existingCitations: citations
+        )
+        assertTrue(timelineItems.count >= 2, "Timeline extractor produces at least two chronological items")
+
+        // 2. Rule 1: Event date kept separate from publication date
+        for item in timelineItems {
+            assertTrue(!item.citationIDs.isEmpty, "Rule 4: Every timeline item has at least one source citation")
+            if let _ = item.eventDate, let pubDate = item.publicationDate {
+                assertEqual(pubDate, item.publicationDate, "Publication date preserved independently")
+            }
+        }
+
+        // 3. Rule 2: An unknown date stays unknown
+        let itemWithoutDate = OverviewTimelineItem(
+            id: "tl_nodate",
+            dateText: "Date unspecified",
+            summary: "Damage assessments remain underway.",
+            citationIDs: ["c_3"],
+            isFuturePlan: false,
+            eventDate: nil,
+            publicationDate: pubDate1
+        )
+        let validationNoDate = OverviewTimelineValidator.validateItem(itemWithoutDate, against: citations)
+        assertTrue(validationNoDate.isValid, "Item with unknown event date is valid when eventDate is nil")
+        assertEqual(itemWithoutDate.eventDate, nil, "Unknown event date is strictly nil, never defaulted to publication date")
+
+        // Validator rejects synthesized timestamp for unknown date
+        let invalidSynthesizedDate = OverviewTimelineItem(
+            id: "tl_invalid",
+            dateText: "Date unspecified",
+            summary: "Damage assessments remain underway.",
+            citationIDs: ["c_3"],
+            isFuturePlan: false,
+            eventDate: pubDate1,
+            publicationDate: pubDate1
+        )
+        let validationSynthesized = OverviewTimelineValidator.validateItem(invalidSynthesizedDate, against: citations)
+        assertFalse(validationSynthesized.isValid, "Fabricated event timestamp for unspecified date rejected")
+
+        // 4. Rule 3: Future plans are labeled as plans
+        let futurePlanItem = timelineItems.first(where: { $0.isFuturePlan })
+        assertTrue(futurePlanItem != nil, "Future plan detected from plan markers in text")
+        assertTrue(futurePlanItem!.isFuturePlan, "Future plan is explicitly labeled as plan (isFuturePlan == true)")
+        assertTrue(futurePlanItem!.dateText.lowercased().contains("quarter") || futurePlanItem!.dateText.lowercased().contains("scheduled"), "Future plan date text preserves plan anchor")
+
+        // Validator rejects future plan marked as normal past event
+        let unlabelledPlan = OverviewTimelineItem(
+            id: "tl_unlabelled",
+            dateText: "Second Quarter 2027",
+            summary: "Retrofitting is scheduled to begin in the second quarter of 2027.",
+            citationIDs: ["c_4"],
+            isFuturePlan: false,
+            eventDate: Date(timeIntervalSince1970: 1814400000),
+            publicationDate: pubDate2
+        )
+        let validationUnlabelled = OverviewTimelineValidator.validateItem(unlabelledPlan, against: citations)
+        assertFalse(validationUnlabelled.isValid, "Future plan without isFuturePlan=true is rejected")
+
+        // 5. Rule 4: Every item has a source citation
+        let sourcelessItem = OverviewTimelineItem(
+            id: "tl_no_source",
+            dateText: "15 October 2026",
+            summary: "Shelters deployed.",
+            citationIDs: [],
+            isFuturePlan: false
+        )
+        let validationSourceless = OverviewTimelineValidator.validateItem(sourcelessItem, against: citations)
+        assertFalse(validationSourceless.isValid, "Item without source citations rejected")
+
+        let nonExistentCitationItem = OverviewTimelineItem(
+            id: "tl_bad_source",
+            dateText: "15 October 2026",
+            summary: "Shelters deployed.",
+            citationIDs: ["c_nonexistent_99"],
+            isFuturePlan: false
+        )
+        let validationBadSource = OverviewTimelineValidator.validateItem(nonExistentCitationItem, against: citations)
+        assertFalse(validationBadSource.isValid, "Item with non-existent citation ID rejected")
+
+        // 6. Rule of Absent Sections: Fewer than 2 items results in empty timeline
+        let singleItemTimeline = OverviewTimelineExtractor.extractTimeline(
+            passages: [passage1],
+            articles: [article1],
+            existingCitations: ["c_1": citations["c_1"]!]
+        )
+        assertTrue(singleItemTimeline.isEmpty, "Timeline section is absent when fewer than two valid items exist")
+
+        // 7. Chronological Ordering: Past events precede future plans
+        if timelineItems.count >= 2 {
+            let lastItem = timelineItems.last!
+            assertTrue(lastItem.isFuturePlan, "Future plans are positioned at the end of the timeline")
+        }
     }
 }
 

@@ -148,19 +148,25 @@ public struct OverviewTimelineItem: Codable, Hashable, Sendable, Identifiable {
     public let summary: String
     public let citationIDs: [String]
     public let isFuturePlan: Bool
+    public let eventDate: Date?
+    public let publicationDate: Date?
 
     public init(
         id: String = UUID().uuidString,
         dateText: String,
         summary: String,
         citationIDs: [String] = [],
-        isFuturePlan: Bool = false
+        isFuturePlan: Bool = false,
+        eventDate: Date? = nil,
+        publicationDate: Date? = nil
     ) {
         self.id = id
         self.dateText = dateText
         self.summary = summary
         self.citationIDs = citationIDs
         self.isFuturePlan = isFuturePlan
+        self.eventDate = eventDate
+        self.publicationDate = publicationDate
     }
 }
 

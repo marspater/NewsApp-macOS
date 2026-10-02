@@ -33,6 +33,17 @@ public enum ModelAvailabilityStatus: Sendable, Equatable {
     }
 }
 
+/// Explicit Go/No-Go synthesis strategy resolved by probing system capabilities.
+public enum SynthesisStrategy: Sendable, Equatable {
+    case generativeModel(promptTokens: Int, maxResponseTokens: Int)
+    case deterministicFallback(reason: String)
+
+    public var isGenerative: Bool {
+        if case .generativeModel = self { return true }
+        return false
+    }
+}
+
 /// Evaluates language suitability for on-device Foundation Models.
 public struct ModelLanguageSupport: Sendable {
     /// Supported languages for Foundation Models generation in the baseline plan (English).
@@ -97,6 +108,28 @@ public struct ModelRuntimeProbe: Sendable {
         #else
         return .osUnsupported("FoundationModels framework is not available.")
         #endif
+    }
+
+    /// Evaluates runtime availability and resolves the Go/No-Go synthesis strategy for Phase E.
+    public func resolveSynthesisStrategy(
+        for language: NLLanguage?,
+        budget: OverviewTokenBudget = OverviewTokenBudget()
+    ) -> SynthesisStrategy {
+        let status = checkAvailability(for: language)
+        switch status {
+        case .available:
+            return .generativeModel(
+                promptTokens: budget.availablePassageTokens + budget.instructionTokens + budget.schemaTokens,
+                maxResponseTokens: budget.reservedResponseTokens
+            )
+        case .osUnsupported(let msg),
+             .deviceNotEligible(let msg),
+             .modelNotReady(let msg),
+             .languageUnsupported(let msg):
+            return .deterministicFallback(reason: msg)
+        case .disabledByPolicy:
+            return .deterministicFallback(reason: "On-device AI is disabled by policy.")
+        }
     }
 
     /// Builds a deterministic fallback overview when Foundation Models is unavailable or language is unsupported.
