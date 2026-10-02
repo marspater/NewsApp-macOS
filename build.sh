@@ -55,6 +55,7 @@ swiftc -swift-version 6 -O -parse-as-library -target arm64-apple-macos${TARGET_M
     Sources/Intelligence/EventClustering.swift \
     Sources/Intelligence/ContentExtractionPipeline.swift \
     Sources/Intelligence/EnrichmentQueue.swift \
+    Sources/Intelligence/OverviewGenerationCoordinator.swift \
     Sources/Services/NetworkBoundaryProxy.swift \
     Sources/Views/WebPreviewPolicy.swift \
     Sources/Services/SecureHTTPClient.swift \

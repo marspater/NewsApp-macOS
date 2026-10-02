@@ -51,6 +51,7 @@ SWIFT_SOURCES=(
     Sources/Intelligence/EventClustering.swift
     Sources/Intelligence/ContentExtractionPipeline.swift
     Sources/Intelligence/EnrichmentQueue.swift
+    Sources/Intelligence/OverviewGenerationCoordinator.swift
     Sources/Services/NetworkBoundaryProxy.swift
     Sources/Views/WebPreviewPolicy.swift
     Sources/Services/SecureHTTPClient.swift
