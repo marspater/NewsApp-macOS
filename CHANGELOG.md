@@ -19,6 +19,8 @@
 
 ### Added
 
+- Mute publishers and topics (Settings → Muting, or "Mute host" in a story's context menu). Hosts cover their subdomains; topics match whole words in headlines and feed summaries, ignoring case. Today, Unread, sections and search leave muted stories out before paging and say how many they hid, with "Show Muted Stories" and "Unmute All"; Saved Stories and History list everything, and muted stories never notify. Nothing is muted by default.
+- Define news tension methodology v1 (docs/methodology/tension-index-v1.md, experiment, not shown): a fixed panel of 12 English catalog feeds from six regions, UTC days with a majority coverage rule where missing or insufficient days are never zero, unique events, and deterministic classification of type, reported scale and escalation from verbatim anchored quotes. No score until calibration.
 - Add an opt-in starter catalog of 49 verified feeds in nine sets (world, politics, business, technology, science and health, culture and food, Ukraine, Europe, Asia/Middle East/Africa) with language, region, topic, publisher and availability metadata, reachable from Settings → Subscriptions → Browse Catalog. Nothing is subscribed automatically; custom RSS and removing any source work as before.
 
 ### Changed

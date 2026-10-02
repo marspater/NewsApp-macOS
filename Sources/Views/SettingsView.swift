@@ -16,6 +16,10 @@ struct SettingsView: View {
     @State private var cacheActionMessage: String? = nil
     @State private var opmlStatusMessage: String? = nil
     @State private var showsCatalog = false
+    @State private var newMutedSource = ""
+    @State private var newMutedTopic = ""
+    @State private var muteCounts = MuteRuleCounts()
+    @State private var confirmsUnmuteAll = false
     @ObservedObject private var updateChecker = UpdateChecker.shared
 
     var body: some View {
@@ -27,6 +31,10 @@ struct SettingsView: View {
             feedsTab
                 .tabItem { Label("Subscriptions", systemImage: "antenna.radiowaves.left.and.right") }
                 .tag(1)
+
+            mutingTab
+                .tabItem { Label("Muting", systemImage: "speaker.slash") }
+                .tag(8)
                 
             appearanceTab
                 .tabItem { Label("Appearance", systemImage: "paintbrush") }
@@ -52,7 +60,7 @@ struct SettingsView: View {
                 .tabItem { Label("Updates", systemImage: "arrow.triangle.2.circlepath") }
                 .tag(7)
         }
-        .frame(width: 620, height: 490)
+        .frame(width: 680, height: 490)
         .onAppear { calculateStorageSizes() }
     }
 
@@ -231,6 +239,97 @@ struct SettingsView: View {
         .sheet(isPresented: $showsCatalog) {
             FeedCatalogView()
         }
+    }
+
+    // MARK: - Muting Tab
+
+    private var mutingTab: some View {
+        Form {
+            Section {
+                Text("Muted stories leave Today, Unread, your sections, search and notifications. Saved Stories and History still list everything, and each list shows how many stories muting hides.")
+                    .font(.caption)
+                    .foregroundColor(AppColor.secondaryText)
+            }
+
+            Section("Sources") {
+                HStack(spacing: 10) {
+                    TextField("Publisher hostname, such as example.com", text: $newMutedSource)
+                        .textFieldStyle(.roundedBorder)
+                        .onSubmit(muteNewSource)
+                    Button("Mute", action: muteNewSource)
+                        .controlSize(.small)
+                        .disabled(MuteRules.host(newMutedSource) == nil)
+                }
+                Text("Hides stories whose link is on this host or one of its subdomains.")
+                    .font(.caption)
+                    .foregroundColor(AppColor.secondaryText)
+                ForEach(appSettings.muteRules.sources, id: \.self) { host in
+                    mutingRow(host, count: muteCounts.sources[host] ?? 0) { appSettings.unmuteSource(host) }
+                }
+            }
+
+            Section("Topics") {
+                HStack(spacing: 10) {
+                    TextField("Word or phrase", text: $newMutedTopic)
+                        .textFieldStyle(.roundedBorder)
+                        .onSubmit(muteNewTopic)
+                    Button("Mute", action: muteNewTopic)
+                        .controlSize(.small)
+                        .disabled(MuteRules.phrase(newMutedTopic).isEmpty)
+                }
+                Text("Matches whole words in headlines and feed summaries, ignoring case: “art” hides “Art fair” but not “Artist”.")
+                    .font(.caption)
+                    .foregroundColor(AppColor.secondaryText)
+                ForEach(appSettings.muteRules.topics, id: \.self) { topic in
+                    mutingRow(topic, count: muteCounts.topics[topic] ?? 0) { appSettings.unmuteTopic(topic) }
+                }
+            }
+
+            Section {
+                Button("Unmute All…", role: .destructive) { confirmsUnmuteAll = true }
+                    .disabled(appSettings.muteRules.isEmpty)
+            }
+        }
+        .formStyle(.grouped)
+        .padding(AppLayout.pageInset)
+        .task(id: appSettings.muteRules) {
+            if let counts = try? await articleStore.database.mutedRuleCounts(appSettings.muteRules) {
+                muteCounts = counts
+            }
+        }
+        .confirmationDialog("Unmute every source and topic?", isPresented: $confirmsUnmuteAll) {
+            Button("Unmute All", role: .destructive) { appSettings.clearMuting() }
+        } message: {
+            Text("Muted stories return to every list.")
+        }
+    }
+
+    private func mutingRow(_ rule: String, count: Int, unmute: @escaping () -> Void) -> some View {
+        HStack(spacing: 12) {
+            Text(rule)
+                .lineLimit(1)
+                .foregroundColor(AppColor.primaryText)
+            Spacer()
+            Text(count == 1 ? "1 stored story" : "\(count) stored stories")
+                .font(.caption)
+                .foregroundColor(AppColor.secondaryText)
+            Button(action: unmute) {
+                Image(systemName: "xmark.circle.fill")
+                    .foregroundColor(AppColor.secondaryText)
+            }
+            .buttonStyle(.plain)
+            .help("Unmute \(rule)")
+            .accessibilityLabel("Unmute \(rule)")
+        }
+        .accessibilityElement(children: .contain)
+    }
+
+    private func muteNewSource() {
+        if appSettings.muteSource(newMutedSource) != nil { newMutedSource = "" }
+    }
+
+    private func muteNewTopic() {
+        if appSettings.muteTopic(newMutedTopic) != nil { newMutedTopic = "" }
     }
 
     // MARK: - 3. Notifications Tab

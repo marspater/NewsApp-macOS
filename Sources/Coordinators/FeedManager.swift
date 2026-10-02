@@ -379,8 +379,11 @@ class FeedManager: NSObject, ObservableObject {
 
         guard !isStopped else { return }
         clusterEventsInBackground()
-        if appSettings.notificationsEnabled && !newArticles.isEmpty {
-            await notifyBatch(newArticles, appSettings.notificationMode)
+        // Muted stories never notify; they stay countable in the lists.
+        let muting = appSettings.muteRules
+        let notifiable = muting.isEmpty ? newArticles : newArticles.filter { !muting.mutes($0) }
+        if appSettings.notificationsEnabled && !notifiable.isEmpty {
+            await notifyBatch(notifiable, appSettings.notificationMode)
         }
         guard !Task.isCancelled, !isStopped else { return }
         enrichArticlesInBackground()

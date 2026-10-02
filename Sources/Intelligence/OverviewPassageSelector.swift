@@ -323,7 +323,8 @@ struct OverviewPassageSelector: Sendable {
         )
     }
 
-    private func extractRankedPassages(from article: FeedArticle) -> [EvidencePassage] {
+    /// Prose passages of the publisher's own text, best first; also the evidence for news tension classification.
+    func extractRankedPassages(from article: FeedArticle) -> [EvidencePassage] {
         var rawCandidates: [(text: String, ordinal: Int)] = []
 
         if let blocks = article.readerDocument?.blocks, !blocks.isEmpty {

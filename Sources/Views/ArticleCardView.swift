@@ -12,6 +12,7 @@ struct ArticleCardView: View {
     
     @EnvironmentObject private var readManager: ReadManager
     @EnvironmentObject private var savedStories: SavedStoriesManager
+    @EnvironmentObject private var appSettings: AppSettings
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isHovered = false
     
@@ -21,6 +22,16 @@ struct ArticleCardView: View {
     
     private var isSaved: Bool {
         savedStories.isSaved(article)
+    }
+
+    /// The muting action for this story's publisher host: unmute the rules covering it, or mute the host.
+    private var sourceMuting: (title: String, apply: () -> Void)? {
+        let covering = appSettings.muteRules.matchedSources(link: article.link)
+        if let rule = covering.first {
+            return ("Unmute \(rule)", { for source in covering { appSettings.unmuteSource(source) } })
+        }
+        guard let host = MuteRules.host(article.link) else { return nil }
+        return ("Mute \(host)", { _ = appSettings.muteSource(host) })
     }
     
     private var cardLayout: AnyLayout {
@@ -158,6 +169,12 @@ struct ArticleCardView: View {
                 )
             }
             
+            if let muting = sourceMuting {
+                Button(action: muting.apply) {
+                    Label(muting.title, systemImage: "speaker.slash")
+                }
+            }
+
             Divider()
             
             Button {
@@ -189,6 +206,11 @@ struct ArticleCardView: View {
                 savedStories.remove(article)
             } else {
                 savedStories.save(article)
+            }
+        }
+        .accessibilityActions {
+            if let muting = sourceMuting {
+                Button(muting.title, action: muting.apply)
             }
         }
     }

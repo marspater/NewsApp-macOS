@@ -56,6 +56,7 @@ actor DatabaseEngine {
             try executeSimple("PRAGMA journal_mode = WAL;")
             try executeSimple("PRAGMA synchronous = NORMAL;")
             try executeSimple("PRAGMA foreign_keys = ON;")
+            try registerFunctions()
 
             try migrateSchemaIfNeeded()
         } catch {
@@ -544,6 +545,15 @@ actor DatabaseEngine {
         }
     }
     
+    /// Muting predicates for list queries (`MuteRules`); both are pure functions of their arguments.
+    private func registerFunctions() throws {
+        let flags = SQLITE_UTF8 | SQLITE_DETERMINISTIC
+        guard sqlite3_create_function_v2(db, "news_muted_source", 2, flags, nil, mutedSourceFunction, nil, nil, nil) == SQLITE_OK,
+              sqlite3_create_function_v2(db, "news_muted_topic", 3, flags, nil, mutedTopicFunction, nil, nil, nil) == SQLITE_OK else {
+            throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Cannot register muting functions"])
+        }
+    }
+
     private func executeBound(_ sql: String, _ values: [String]) throws {
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
@@ -1115,6 +1125,80 @@ actor DatabaseEngine {
 
     private static let savedDocumentIDs = "SELECT article_id FROM article_state WHERE is_saved = 1 UNION SELECT r.duplicate_id FROM article_reconciliations r JOIN article_state s ON s.article_id = r.survivor_id WHERE s.is_saved = 1"
     private static let visibleArticle = "NOT EXISTS (SELECT 1 FROM article_reconciliations r WHERE r.duplicate_id = a.id)"
+    /// Binds `MuteRules.sourceParameter` and `MuteRules.topicParameter`, in that order.
+    private static let mutedArticle = "(news_muted_source(a.canonical_url, ?) OR news_muted_topic(a.title, a.description, ?))"
+
+    private typealias QueryParameter = (type: String, val: Any)
+
+    private func bind(_ params: [QueryParameter], to statement: OpaquePointer?) {
+        for (idx, p) in params.enumerated() {
+            let col = Int32(idx + 1)
+            if p.type == "int", let v = p.val as? Int {
+                sqlite3_bind_int(statement, col, Int32(v))
+            } else if p.type == "double", let v = p.val as? Double {
+                sqlite3_bind_double(statement, col, v)
+            } else if p.type == "text", let v = p.val as? String {
+                sqlite3_bind_text(statement, col, v, -1, Self.sqliteTransient)
+            }
+        }
+    }
+
+    private static func mutingParameters(_ muting: MuteRules) -> [QueryParameter] {
+        [("text", muting.sourceParameter), ("text", muting.topicParameter)]
+    }
+
+    /// Read, saved and section conditions shared by list pages and their muted counts.
+    private func listConditions(section: String?, isRead: Bool?, isSaved: Bool?) -> (sql: String, params: [QueryParameter]) {
+        var sql = ""
+        var params: [QueryParameter] = []
+        if let read = isRead {
+            sql += " AND s.is_read = ?"
+            params.append(("int", read ? 1 : 0))
+        }
+        if let saved = isSaved {
+            sql += " AND s.is_saved = ?"
+            params.append(("int", saved ? 1 : 0))
+        }
+        if let sec = section, !["Today", "Unread", "Saved Stories", "History"].contains(sec) {
+            let terms = ArticleSection.keywords[sec] ?? [sec.lowercased()]
+            sql += " AND (" + terms.map { _ in "instr(lower(a.title || ' ' || coalesce(a.description, '') || ' ' || coalesce(a.category, '')), ?) > 0" }.joined(separator: " OR ") + ")"
+            params += terms.map { ("text", $0) }
+        }
+        return (sql, params)
+    }
+
+    /// The full-text join and operator conditions shared by search pages and their muted counts.
+    private func searchConditions(_ parsed: ArticleFilterQuery) -> (join: String, sql: String, params: [QueryParameter]) {
+        var join = " WHERE 1=1"
+        var sql = ""
+        var params: [QueryParameter] = []
+        if !parsed.terms.isEmpty {
+            join = " JOIN articles_fts fts ON fts.article_id = a.id WHERE articles_fts MATCH ?"
+            // Sanitize FTS search term: wrap terms with quotes or escape special FTS characters
+            let sanitizedFtsTerm = parsed.terms.map { term in
+                let cleaned = term.replacingOccurrences(of: "\"", with: "")
+                return "\"\(cleaned)\"*"
+            }.joined(separator: " ")
+            params.append(("text", sanitizedFtsTerm))
+        }
+        if let sf = parsed.sourceFilter {
+            sql += " AND a.source LIKE ?"
+            params.append(("text", "%\(sf)%"))
+        }
+        if let cf = parsed.categoryFilter {
+            sql += " AND a.category LIKE ?"
+            params.append(("text", "%\(cf)%"))
+        }
+        if let rf = parsed.isReadFilter {
+            sql += " AND s.is_read = ?"
+            params.append(("int", rf ? 1 : 0))
+        }
+        if let sv = parsed.isSavedFilter {
+            sql += " AND s.is_saved = ?"
+            params.append(("int", sv ? 1 : 0))
+        }
+        return (join, sql, params)
+    }
 
     // MARK: - Article Queries
     
@@ -1127,7 +1211,8 @@ actor DatabaseEngine {
         id: String? = nil,
         canonicalURL: String? = nil,
         eventID: String? = nil,
-        includingOriginals: Bool = false
+        includingOriginals: Bool = false,
+        muting: MuteRules = MuteRules()
     ) throws -> [FeedArticle] {
         guard let db = db else { throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Database not open"]) }
         
@@ -1145,7 +1230,7 @@ actor DatabaseEngine {
 
         
         if !includingOriginals { query += " AND " + Self.visibleArticle }
-        var params: [(type: String, val: Any)] = []
+        var params: [QueryParameter] = []
         
         if let id {
             query += " AND a.id = ?"
@@ -1170,20 +1255,13 @@ actor DatabaseEngine {
             query += " AND a.id IN (SELECT article_id FROM event_members WHERE event_id = ?)"
             params.append(("text", try resolvedEventID(eventID) ?? eventID))
         }
-        if let read = isRead {
-            query += " AND s.is_read = ?"
-            params.append(("int", read ? 1 : 0))
-        }
-        
-        if let saved = isSaved {
-            query += " AND s.is_saved = ?"
-            params.append(("int", saved ? 1 : 0))
-        }
-        
-        if let sec = section, !["Today", "Unread", "Saved Stories", "History"].contains(sec) {
-            let terms = ArticleSection.keywords[sec] ?? [sec.lowercased()]
-            query += " AND (" + terms.map { _ in "instr(lower(a.title || ' ' || coalesce(a.description, '') || ' ' || coalesce(a.category, '')), ?) > 0" }.joined(separator: " OR ") + ")"
-            params += terms.map { ("text", $0) }
+        let list = listConditions(section: section, isRead: isRead, isSaved: isSaved)
+        query += list.sql
+        params += list.params
+        // Muting is a predicate before LIMIT, so every page is full and cursors stay exact.
+        if !muting.isEmpty {
+            query += " AND NOT " + Self.mutedArticle
+            params += Self.mutingParameters(muting)
         }
         if let after {
             query += " AND (\(Self.articleDateOrder) < ? OR (\(Self.articleDateOrder) = ? AND a.id > ?))"
@@ -1204,16 +1282,7 @@ actor DatabaseEngine {
         }
         defer { sqlite3_finalize(stmt) }
         
-        for (idx, p) in params.enumerated() {
-            let col = Int32(idx + 1)
-            if p.type == "int", let v = p.val as? Int {
-                sqlite3_bind_int(stmt, col, Int32(v))
-            } else if p.type == "double", let v = p.val as? Double {
-                sqlite3_bind_double(stmt, col, v)
-            } else if p.type == "text", let v = p.val as? String {
-                sqlite3_bind_text(stmt, col, v, -1, Self.sqliteTransient)
-            }
-        }
+        bind(params, to: stmt)
         
         var results: [FeedArticle] = []
         var status = sqlite3_step(stmt)
@@ -1237,17 +1306,14 @@ actor DatabaseEngine {
     func searchArticles(
         query: String,
         limit: Int = 100,
-        after: ArticleQueryCursor? = nil
+        after: ArticleQueryCursor? = nil,
+        muting: MuteRules = MuteRules()
     ) throws -> [FeedArticle] {
         guard let db = db else { throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Database not open"]) }
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return [] }
         
         let parsed = ArticleFilterQuery.parse(trimmed)
-        let sourceFilter = parsed.sourceFilter
-        let categoryFilter = parsed.categoryFilter
-        let readFilter = parsed.isReadFilter
-        let savedFilter = parsed.isSavedFilter
         let cleanTerms = parsed.terms
 
         var sql = """
@@ -1263,38 +1329,13 @@ actor DatabaseEngine {
 
         
         sql = sql.replacingOccurrences(of: "a.reader_document\n", with: "a.reader_document, " + (cleanTerms.isEmpty ? Self.articleDateOrder : "fts.rank") + "\n")
-        var params: [(type: String, val: Any)] = []
-        
         let hasFTS = !cleanTerms.isEmpty
-        if hasFTS {
-            sql += " JOIN articles_fts fts ON fts.article_id = a.id WHERE articles_fts MATCH ?"
-            // Sanitize FTS search term: wrap terms with quotes or escape special FTS characters
-            let sanitizedFtsTerm = cleanTerms.map { term in
-                let cleaned = term.replacingOccurrences(of: "\"", with: "")
-                return "\"\(cleaned)\"*"
-            }.joined(separator: " ")
-            params.append(("text", sanitizedFtsTerm))
-        } else {
-            sql += " WHERE 1=1"
-        }
-        
-        sql += " AND " + Self.visibleArticle
-
-        if let sf = sourceFilter {
-            sql += " AND a.source LIKE ?"
-            params.append(("text", "%\(sf)%"))
-        }
-        if let cf = categoryFilter {
-            sql += " AND a.category LIKE ?"
-            params.append(("text", "%\(cf)%"))
-        }
-        if let rf = readFilter {
-            sql += " AND s.is_read = ?"
-            params.append(("int", rf ? 1 : 0))
-        }
-        if let sv = savedFilter {
-            sql += " AND s.is_saved = ?"
-            params.append(("int", sv ? 1 : 0))
+        let conditions = searchConditions(parsed)
+        sql += conditions.join + " AND " + Self.visibleArticle + conditions.sql
+        var params = conditions.params
+        if !muting.isEmpty {
+            sql += " AND NOT " + Self.mutedArticle
+            params += Self.mutingParameters(muting)
         }
         
         if let after {
@@ -1319,16 +1360,7 @@ actor DatabaseEngine {
         }
         defer { sqlite3_finalize(stmt) }
         
-        for (idx, p) in params.enumerated() {
-            let col = Int32(idx + 1)
-            if p.type == "int", let v = p.val as? Int {
-                sqlite3_bind_int(stmt, col, Int32(v))
-            } else if p.type == "double", let v = p.val as? Double {
-                sqlite3_bind_double(stmt, col, v)
-            } else if p.type == "text", let v = p.val as? String {
-                sqlite3_bind_text(stmt, col, v, -1, Self.sqliteTransient)
-            }
-        }
+        bind(params, to: stmt)
         
         var results: [FeedArticle] = []
         var status = sqlite3_step(stmt)
@@ -1984,6 +2016,114 @@ actor DatabaseEngine {
         return (unread: unread, saved: saved, total: total)
     }
     
+    /// How many stories muting removes from a list or search, across every page, under the list's own filters.
+    func mutedArticleCount(
+        section: String? = nil,
+        isRead: Bool? = nil,
+        isSaved: Bool? = nil,
+        search: String? = nil,
+        muting: MuteRules
+    ) throws -> Int {
+        guard let db = db else { throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Database not open"]) }
+        guard !muting.isEmpty else { return 0 }
+        var sql = "SELECT count(*) FROM articles a JOIN article_state s ON s.article_id = a.id"
+        var params: [QueryParameter]
+        let searchText = search?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if searchText.isEmpty {
+            let conditions = listConditions(section: section, isRead: isRead, isSaved: isSaved)
+            sql += " WHERE " + Self.visibleArticle + conditions.sql
+            params = conditions.params
+        } else {
+            let conditions = searchConditions(ArticleFilterQuery.parse(searchText))
+            sql += conditions.join + " AND " + Self.visibleArticle + conditions.sql
+            params = conditions.params
+        }
+        sql += " AND " + Self.mutedArticle
+        params += Self.mutingParameters(muting)
+
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to prepare muted count: \(String(cString: sqlite3_errmsg(db)))"])
+        }
+        defer { sqlite3_finalize(stmt) }
+        bind(params, to: stmt)
+        guard sqlite3_step(stmt) == SQLITE_ROW else {
+            throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: String(cString: sqlite3_errmsg(db))])
+        }
+        return Int(sqlite3_column_int64(stmt, 0))
+    }
+
+    /// Stored stories each muting rule covers, for the muting settings. One pass over the library.
+    func mutedRuleCounts(_ rules: MuteRules) throws -> MuteRuleCounts {
+        guard let db = db else { throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Database not open"]) }
+        var counts = MuteRuleCounts()
+        guard !rules.isEmpty else { return counts }
+        let sql = "SELECT a.canonical_url, a.title, coalesce(a.description, '') FROM articles a WHERE \(Self.visibleArticle);"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to prepare muting counts"])
+        }
+        defer { sqlite3_finalize(stmt) }
+        func text(_ column: Int32) -> String {
+            sqlite3_column_text(stmt, column).map { String(cString: $0) } ?? ""
+        }
+        var status = sqlite3_step(stmt)
+        while status == SQLITE_ROW {
+            try Task.checkCancellation()
+            for source in rules.matchedSources(link: text(0)) { counts.sources[source, default: 0] += 1 }
+            for topic in rules.matchedTopics(title: text(1), description: text(2)) { counts.topics[topic, default: 0] += 1 }
+            status = sqlite3_step(stmt)
+        }
+        guard status == SQLITE_DONE else {
+            throw NSError(domain: "DatabaseEngine", code: Int(status), userInfo: [NSLocalizedDescriptionKey: String(cString: sqlite3_errmsg(db))])
+        }
+        return counts
+    }
+
+    /// Stored articles a set of feeds delivered with a publication date inside `day`, with their event, for the news
+    /// tension experiment. One row per article and delivering feed; undated stories never fall inside a day.
+    func tensionCorpus(day: DateInterval, feedURLs: [String]) throws -> [TensionCorpusRow] {
+        guard let db = db else { throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Database not open"]) }
+        guard !feedURLs.isEmpty else { return [] }
+        let sql = """
+        SELECT a.id, a.guid, a.canonical_url, a.title, a.description, a.content,
+               a.published_at, a.source, a.image_url, a.category,
+               ae.summary, ae.content_fetched,
+               s.is_read, s.is_saved,
+               ae.key_points, ae.entities, ae.sentiment, a.reader_document, af.feed_url, em.event_id
+        FROM articles a
+        JOIN article_state s ON s.article_id = a.id
+        JOIN article_feeds af ON af.article_id = a.id
+        LEFT JOIN article_enrichment ae ON ae.article_id = a.id
+        LEFT JOIN event_members em ON em.article_id = a.id
+        WHERE af.feed_url IN (\(Array(repeating: "?", count: feedURLs.count).joined(separator: ", ")))
+          AND a.published_at >= ? AND a.published_at < ? AND \(Self.visibleArticle)
+        ORDER BY a.published_at, a.id, af.feed_url;
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to prepare tension corpus: \(String(cString: sqlite3_errmsg(db)))"])
+        }
+        defer { sqlite3_finalize(stmt) }
+        var params: [QueryParameter] = feedURLs.map { ("text", $0) }
+        params += [("double", day.start.timeIntervalSince1970), ("double", day.end.timeIntervalSince1970)]
+        bind(params, to: stmt)
+        var rows: [TensionCorpusRow] = []
+        var status = sqlite3_step(stmt)
+        while status == SQLITE_ROW {
+            try Task.checkCancellation()
+            if let article = parseArticleRow(stmt), let feedURL = sqlite3_column_text(stmt, 18).map({ String(cString: $0) }) {
+                rows.append(TensionCorpusRow(article: article, feedURL: feedURL,
+                                             eventID: sqlite3_column_text(stmt, 19).map { String(cString: $0) }))
+            }
+            status = sqlite3_step(stmt)
+        }
+        guard status == SQLITE_DONE else {
+            throw NSError(domain: "DatabaseEngine", code: Int(status), userInfo: [NSLocalizedDescriptionKey: String(cString: sqlite3_errmsg(db))])
+        }
+        return rows
+    }
+
     // MARK: - Row Parser
     
     private func parseArticleRow(_ stmt: OpaquePointer?) -> FeedArticle? {
@@ -2824,4 +2964,20 @@ actor DatabaseEngine {
         }
     }
 
+}
+
+// MARK: - SQLite functions
+
+/// `news_muted_source(url, hosts)`: 1 when the URL's host is a muted host or one of its subdomains.
+private func mutedSourceFunction(_ context: OpaquePointer?, _ count: Int32, _ values: UnsafeMutablePointer<OpaquePointer?>?) {
+    guard count == 2, let values else { return sqlite3_result_int(context, 0) }
+    func text(_ index: Int) -> String { sqlite3_value_text(values[index]).map { String(cString: $0) } ?? "" }
+    sqlite3_result_int(context, MuteRules.sourceList(text(1), mutes: text(0)) ? 1 : 0)
+}
+
+/// `news_muted_topic(title, description, phrases)`: 1 when the headline or summary contains a muted phrase as whole words.
+private func mutedTopicFunction(_ context: OpaquePointer?, _ count: Int32, _ values: UnsafeMutablePointer<OpaquePointer?>?) {
+    guard count == 3, let values else { return sqlite3_result_int(context, 0) }
+    func text(_ index: Int) -> String { sqlite3_value_text(values[index]).map { String(cString: $0) } ?? "" }
+    sqlite3_result_int(context, MuteRules.topicList(text(2), mutes: text(0) + "\n" + text(1)) ? 1 : 0)
 }
