@@ -434,6 +434,16 @@ struct SettingsView: View {
                 }
                 .padding(.vertical, 4)
             }
+
+            Section("News Tension Index (Experiment)") {
+                Toggle("Collect Panel Feeds for Tension Indicator", isOn: Binding(
+                    get: { appSettings.tensionCollectionOptIn },
+                    set: { feedManager.setTensionCollectionOptIn($0) }
+                ))
+                Text("Fetches articles from the 12 international panel feeds to calculate the news tension indicator. These articles are stored locally for tension analysis and will not generate unread notifications unless you subscribe to the feeds directly.")
+                    .font(.caption)
+                    .foregroundColor(AppColor.secondaryText)
+            }
         }
         .formStyle(.grouped)
         .padding(AppLayout.pageInset)

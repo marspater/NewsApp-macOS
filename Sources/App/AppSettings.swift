@@ -17,6 +17,7 @@ final class AppSettings: ObservableObject {
     static let allowInsecureHTTPKey = "allow_insecure_http"
     static let mutedSourcesKey = "muted_sources"
     static let mutedTopicsKey = "muted_topics"
+    static let tensionCollectionOptInKey = "tension_collection_opt_in"
 
     enum NotificationMode: String, CaseIterable, Identifiable, Sendable {
         case full = "full"         // Headlines + snippets + images
@@ -65,6 +66,7 @@ final class AppSettings: ObservableObject {
     @Published var privateNotificationsEnabled: Bool
     @Published var notificationMode: NotificationMode
     @Published var allowInsecureHTTP: Bool
+    @Published var tensionCollectionOptIn: Bool
     /// The reader's muted publisher hosts and topics; empty unless the reader adds rules.
     @Published private(set) var muteRules: MuteRules
 
@@ -121,8 +123,20 @@ final class AppSettings: ObservableObject {
         }
 
         self.allowInsecureHTTP = defaults.bool(forKey: Self.allowInsecureHTTPKey)
+        self.tensionCollectionOptIn = defaults.bool(forKey: Self.tensionCollectionOptInKey)
         self.muteRules = MuteRules(sources: defaults.stringArray(forKey: Self.mutedSourcesKey) ?? [],
                                    topics: defaults.stringArray(forKey: Self.mutedTopicsKey) ?? [])
+    }
+
+    /// Feed URLs to fetch during refresh: user subscriptions, plus panel feeds when opted in to tension collection.
+    var effectiveFeedURLs: [String] {
+        guard tensionCollectionOptIn else { return feedURLs }
+        var result = feedURLs
+        let panelURLs = TensionMethodology.v1.panel.map(\.url)
+        for url in panelURLs where !result.contains(url) {
+            result.append(url)
+        }
+        return result
     }
 
     // MARK: - URL Normalization
@@ -237,6 +251,11 @@ final class AppSettings: ObservableObject {
     func setAllowInsecureHTTP(_ allowed: Bool) {
         allowInsecureHTTP = allowed
         defaults.set(allowed, forKey: Self.allowInsecureHTTPKey)
+    }
+
+    func setTensionCollectionOptIn(_ enabled: Bool) {
+        tensionCollectionOptIn = enabled
+        defaults.set(enabled, forKey: Self.tensionCollectionOptInKey)
     }
 
     // MARK: - Muting

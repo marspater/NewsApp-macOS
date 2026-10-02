@@ -64,9 +64,15 @@ Cues are English words and phrases matched as whole words after lowercasing (`ri
 
 Every classification records the methodology version and the IDs of the facts behind its type, figures and escalation, so an explanation can describe known contributions without inventing them. A language model may phrase such an explanation; it never chooses a type, a magnitude or a score.
 
-## 6. Calibration hand-off (#158)
+## 6. Calibration hand-off (#158) and opt-in collection (#160)
 
-Calibration receives, per comparable day, the unique events with type, the two magnitudes, escalation, reporting feeds and regions, and the fact IDs. It must set and document from a historical sample: the weight of each type, magnitude and escalation state; whether coverage breadth weighs in; the aggregation into a daily value and any smoothing; and whether the coverage rule of §3 holds up. It also measures the classifier's errors on that sample (negation, quoted history, missing nationality nouns before figures, cue gaps). Numbers that are not derived from the sample are not used for a nice-looking value.
+Calibration receives, per comparable day, the unique events with type, the two magnitudes, escalation, reporting feeds and regions, and the fact IDs. Weights, aggregation and smoothing have been calibrated on the frozen 14-day historical sample corpus ([#158](https://github.com/marspater/NewsApp-macOS/issues/158)) and normative calibration parameters are documented in [`docs/methodology/tension-calibration-v1.md`](tension-calibration-v1.md).
+
+Calibrated parameters (`TensionWeights.calibratedV1`):
+- Type weights: armed conflict (10.0), terrorism (8.0), disaster (6.0), civil unrest (4.0), coercion (4.0), health emergency (4.0), cyberattack (3.0).
+- Scale factor: $S = 25.0$ in $100 \times (1 - e^{-\text{raw}/S})$.
+- Smoothing: 7-day trailing EMA ($\alpha = 0.25$). Missing or insufficient days are never treated as zero and do not corrupt the series.
+- Opt-in collection ([#160](https://github.com/marspater/NewsApp-macOS/issues/160)): fetching the 12 panel feeds beyond user subscriptions requires an explicit toggle in Settings (`tensionCollectionOptIn`, default `false`). Unread notifications are strictly isolated to user-subscribed feeds.
 
 ## 7. Versioning
 
