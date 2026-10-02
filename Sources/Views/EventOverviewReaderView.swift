@@ -400,7 +400,7 @@ struct EventOverviewReaderView: View {
     @ViewBuilder
     private var evidenceSections: some View {
         // Sections without enough data are absent
-        if !overview.timeline.isEmpty || !overview.perspectives.isEmpty || overview.thematicAngle != nil {
+        if !overview.timeline.isEmpty || !overview.perspectives.isEmpty || overview.thematicAngle != nil || overview.coverageSentiment != nil {
             VStack(alignment: .leading, spacing: 22) {
                 // Timeline
                 if !overview.timeline.isEmpty {
@@ -415,6 +415,11 @@ struct EventOverviewReaderView: View {
                 // Thematic angle
                 if let angle = overview.thematicAngle {
                     thematicAngleSection(angle)
+                }
+
+                // Coverage tone / sentiment (only when evaluation justifies it)
+                if let sentiment = overview.coverageSentiment {
+                    sentimentSection(sentiment)
                 }
             }
         }
@@ -598,6 +603,40 @@ struct EventOverviewReaderView: View {
                 }
             }
             .padding(16)
+            .background(AppColor.cardBackground)
+            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .stroke(borderStrokeColor, lineWidth: 1)
+            )
+        }
+    }
+
+    private func sentimentSection(_ sentiment: OverviewCoverageSentiment) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Coverage tone")
+                .font(.system(size: 18, weight: .bold))
+                .foregroundColor(AppColor.primaryText)
+                .accessibilityHeading(.h2)
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 8) {
+                    Image(systemName: "text.magnifyingglass")
+                        .foregroundColor(AppColor.secondaryText)
+                    Text("\(sentiment.label) tone · automated estimate")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundColor(AppColor.primaryText)
+                }
+
+                if let rationale = sentiment.rationale, !rationale.isEmpty {
+                    Text(rationale)
+                        .font(.system(size: 12))
+                        .foregroundColor(AppColor.secondaryText)
+                        .lineSpacing(2)
+                }
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
             .background(AppColor.cardBackground)
             .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
             .overlay(
