@@ -7586,7 +7586,16 @@ struct NewsTests {
         _ = await firstOpen.value
         let reopened = await nextOpen.value
         assertTrue(reopened != nil, "The next reader receives the overview")
-        assertTrue(try await db.fetchEventOverview(eventID: "event-reopened") != nil, "The next reader's overview is stored")
+        let reopenedStored = try await db.fetchEventOverview(eventID: "event-reopened")
+        assertTrue(reopenedStored != nil, "The next reader's overview is stored")
+        // "event-edited" already cites passages of the same articles: citation keys are scoped to their overview.
+        let editedStored = try await db.fetchEventOverview(eventID: "event-edited")
+        assertTrue(editedStored != nil, "The earlier event's overview keeps its citations")
+        let sharedCitationIDs = Set(reopenedStored?.citations.keys.map { $0 } ?? []).intersection(editedStored?.citations.keys.map { $0 } ?? [])
+        assertFalse(sharedCitationIDs.isEmpty, "Both events cite the same passages under the same citation IDs")
+        assertTrue(reopenedStored?.facts.allSatisfy { $0.citationIDs.allSatisfy { reopenedStored?.citations[$0] != nil } } == true,
+            "Stored citation IDs read back as the composer wrote them")
+        assertEqual(DatabaseEngine.citationID(fromRowID: "cite_legacy_1", overviewID: "ov-1"), "cite_legacy_1", "Citation rows stored before scoped keys read unchanged")
         await coordinator.clearVisibleEvent(owner: nextReader)
         assertTrue(await coordinator.visibleEventOwner() == nil, "The reader that set the event clears it when it closes")
 

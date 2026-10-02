@@ -21,6 +21,14 @@ In both lifecycle cases the overview silently did not appear until the article w
 
 No schema change.
 
+## Found by the new test: citation keys collide across events
+
+CI on the first push failed one assertion: the next reader received its overview, but it was not stored.
+
+- **Cause:** citation IDs are `cite_<passageID>_<n>`, unique only within one overview, while `event_overview_citations.id` is a global primary key. The test's earlier event already held an overview citing the same passages. The insert of the second overview hit the primary key and rolled back, and `try?` in the coordinator turned the error into "not saved".
+- **Real-world trigger:** "Not the Same Event" or a split moves articles into a new event while the old overview still cites them. The new event's overview is then never stored and is regenerated on every open.
+- **Fix:** citation rows are written as `<overviewID>|<citationID>` (overview IDs are UUIDs). `fetchEventOverview` strips the prefix, so documents read back with the IDs the composer wrote. Rows stored before the change read unchanged. No schema change; the delete-before-insert of an event's own previous overview still cascades its citations.
+
 ## Verification
 
 The authoring environment was a Linux container without a Swift toolchain. Nothing was compiled or run locally; macOS CI provides compile and test results. The view change has no automated test and belongs to the native check in #155.
@@ -28,4 +36,5 @@ The authoring environment was a Linux container without a Swift toolchain. Nothi
 - `testOverviewGenerationCancellationAndSupersession` gains two cases (full suite and `--story-regressions`), with the queue held by gated jobs:
   - **Closing reader:** one reader closes after a second reader made the same event visible. The second reader stays the visible owner, its generation stays in flight, and it receives and stores the overview.
   - **Request after cancel:** a request made right after `cancel(eventID:)` returns completes. This states the contract; it does not reproduce the old timing race deterministically.
+- The same test now also asserts that both events' overviews are stored, that they share citation IDs (the collision precondition) and that citation IDs read back unchanged, plus a legacy row ID read check.
 - tree-sitter-swift parse matches the base. `python3 script/evaluation/evaluate.py` and `git diff --check` passed.

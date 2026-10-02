@@ -5,6 +5,7 @@
 ### Fixed
 
 - Opening an article that belongs to an event no longer switches the reader to the event overview when it finishes generating, including out of the web view; the overview is offered in the toolbar. Closing a reader and quickly opening another article of the same event no longer cancels that article's overview.
+- An event overview that cites the same passage as another event's stored overview, for example after "Not the Same Event" moves an article, is now stored instead of silently failing and being regenerated on every open.
 
 - An event overview requested after a member article was edited no longer receives, or stores, the overview still being generated from the earlier text; the running generation is cancelled and replaced (#154).
 
