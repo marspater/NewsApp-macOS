@@ -27,6 +27,11 @@ struct FeedArticle: Identifiable, Codable, Hashable, Sendable {
     var sentimentLabel: String?
     var readerDocument: ReaderDocument?
 
+    /// Publisher inputs only. Length prefixes prevent ambiguous field boundaries.
+    var publisherInputHash: String {
+        PublisherContentRevision.inputHash(title: title, description: description, content: fullContent)
+    }
+
     var publicationDateText: String {
         pubDate == DateParser.unknownDate ? "Date unavailable" : pubDate.formatted(date: .abbreviated, time: .omitted)
     }
@@ -257,5 +262,25 @@ public struct ReaderImageCandidate: Codable, Hashable, Sendable {
               height.map({ $0 >= 80 && $0 <= 16_384 }) ?? true else { return false }
         let path = URL(string: url)?.path.lowercased() ?? ""
         return path.range(of: #"(?:^|[./_-])(?:logo|favicon|tracking|pixel|spacer|advertisement|avatar)(?:[./_-]|$)"#, options: .regularExpression) == nil
+    }
+}
+
+/// Locally observed publisher-input versions, not verified correction or fact-check claims.
+struct PublisherContentRevision: Equatable, Sendable, Identifiable {
+    enum Kind: String, Sendable { case snapshot, extraction, publisherUpdate = "publisher_update" }
+    let version: Int
+    let observedAt: Date
+    let kind: Kind
+    let changedFields: Int
+    let inputHash: String
+    var id: Int { version }
+
+    var changeDescription: String {
+        [(1, "Title"), (2, "Feed summary"), (4, "Article body")]
+            .filter { changedFields & $0.0 != 0 }.map { $0.1 }.joined(separator: ", ")
+    }
+
+    static func inputHash(title: String, description: String, content: String?) -> String {
+        ArticleIdentity.sha256Hex([title, description, content ?? ""].map { "\($0.utf8.count):\($0)" }.joined())
     }
 }

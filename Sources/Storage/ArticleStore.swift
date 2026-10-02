@@ -201,9 +201,9 @@ final class ArticleStore: ObservableObject {
     @discardableResult
     func setSaved(article: FeedArticle, isSaved nextState: Bool) async -> Bool {
         do {
-            try await database.upsertArticles([article], feedUrl: nil)
-            var storedArticle = article
-            storedArticle.storedID = try await database.resolvedArticleID(for: article)
+            _ = try await database.upsertArticles([article], preservingStoredContent: true)
+            let id = try await database.resolvedArticleID(for: article)
+            guard let storedArticle = try await database.fetchArticles(limit: 1, id: id).first else { return false }
             try await database.setSaved(articleId: storedArticle.id, isSaved: nextState)
             if nextState {
                 if !savedArticles.contains(where: { $0.id == storedArticle.id }) {
@@ -226,6 +226,7 @@ final class ArticleStore: ObservableObject {
     
     // MARK: - Enrichment
     
+    @discardableResult
     func updateEnrichment(
         id: String,
         summary: String? = nil,
@@ -236,88 +237,52 @@ final class ArticleStore: ObservableObject {
         content: String? = nil,
         image: String? = nil,
         readerDocument: ReaderDocument? = nil,
-        identityEvidence: DocumentIdentityEvidence? = nil
-    ) async {
+        identityEvidence: DocumentIdentityEvidence? = nil,
+        expectedInputHash: String? = nil
+    ) async -> Bool {
         do {
             let id = try await database.resolvedArticleID(id)
-            try await database.updateEnrichment(
+            guard try await database.updateEnrichment(
                 articleId: id,
                 update: .init(summary: summary, category: category, sentiment: sentiment,
                               entities: entities, topics: topics, content: content,
-                              image: image, readerDocument: readerDocument)
-            )
-            
+                              image: image, readerDocument: readerDocument, expectedInputHash: expectedInputHash)
+            ) else { return false }
             if let identityEvidence {
-                do {
-                    try await database.recordDocumentIdentity(identityEvidence, articleID: id)
-                } catch {
-                    // Content has already persisted; an optional alias failure must
-                    // not prevent the reader/list caches from reflecting that content.
-                    logger.error("Failed to record document identity: \(error.localizedDescription)")
-                }
+                do { try await database.recordDocumentIdentity(identityEvidence, articleID: id) }
+                catch { logger.error("Failed to record document identity: \(error.localizedDescription)") }
             }
-
-            // Update in-memory articles array
-            if let idx = articles.firstIndex(where: { $0.id == id }) {
-                var updated = articles[idx]
-                if let s = summary { updated.aiSummary = s }
-                if let category { updated.category = category }
-                if let c = content {
-                    updated.fullContent = c
-                    updated.contentFetched = true
-                    updated.readerDocument = readerDocument
-                }
-                if let document = readerDocument, document.version >= 4 {
-                    updated.imageUrl = document.leadImageURL
-                } else if let img = image, updated.imageUrl == nil { updated.imageUrl = img }
-                articles[idx] = updated
-            }
-            if let idx = savedArticles.firstIndex(where: { $0.id == id }) {
-                if let content {
-                    savedArticles[idx].fullContent = content
-                    savedArticles[idx].readerDocument = readerDocument
-                    savedArticles[idx].contentFetched = true
-                }
-                if let document = readerDocument, document.version >= 4 {
-                    savedArticles[idx].imageUrl = document.leadImageURL
-                }
-                if let category { savedArticles[idx].category = category }
-                if let summary { savedArticles[idx].aiSummary = summary }
-            }
-            revision &+= 1
+            try await publishStoredArticle(id)
+            return true
         } catch {
             logger.error("Failed to update enrichment: \(error.localizedDescription)")
+            return false
         }
     }
-    
+
+    /// Hydrate the persisted result, including fields invalidated by publisher-input changes.
+    private func publishStoredArticle(_ id: String) async throws {
+        guard let updated = try await database.fetchArticles(limit: 1, id: id).first else { return }
+        if let index = articles.firstIndex(where: { $0.id == id }) { articles[index] = updated }
+        if let index = savedArticles.firstIndex(where: { $0.id == id }) { savedArticles[index] = updated }
+        revision &+= 1
+    }
+
     // MARK: - Structured Article Analysis
-    
-    func saveArticleAnalysis(_ analysis: ArticleAnalysis, for articleId: String) async {
+
+    @discardableResult
+    func saveArticleAnalysis(_ analysis: ArticleAnalysis, for articleId: String, expectedInputHash: String? = nil) async -> Bool {
         do {
             let articleId = try await database.resolvedArticleID(articleId)
-            try await database.saveArticleAnalysis(analysis, for: articleId)
-            func applyingAnalysis(to article: FeedArticle) -> FeedArticle {
-                var updated = article
-                updated.aiSummary = analysis.summary
-                updated.keyPoints = analysis.keyPoints
-                updated.entities = analysis.entities
-                updated.sentimentScore = analysis.sentiment?.score
-                updated.sentimentLabel = analysis.sentiment?.label
-                if let category = analysis.category { updated.category = category }
-                return updated
-            }
-            if let idx = articles.firstIndex(where: { $0.id == articleId }) {
-                articles[idx] = applyingAnalysis(to: articles[idx])
-            }
-            if let idx = savedArticles.firstIndex(where: { $0.id == articleId }) {
-                savedArticles[idx] = applyingAnalysis(to: savedArticles[idx])
-            }
-            revision &+= 1
+            guard try await database.saveArticleAnalysis(analysis, for: articleId, expectedInputHash: expectedInputHash) else { return false }
+            try await publishStoredArticle(articleId)
+            return true
         } catch {
             logger.error("Failed to save article analysis: \(error.localizedDescription)")
+            return false
         }
     }
-    
+
     func fetchArticleAnalysis(for articleId: String) async -> ArticleAnalysis? {
         await database.fetchArticleAnalysis(for: articleId)
     }
@@ -408,8 +373,8 @@ final class ArticleStore: ObservableObject {
     }
 
     @discardableResult
-    func recordEventOverview(_ document: EventOverviewDocument) async throws -> Bool {
-        try await database.recordEventOverview(document)
+    func recordEventOverview(_ document: EventOverviewDocument, expectedArticleInputs: [String: String]? = nil) async throws -> Bool {
+        try await database.recordEventOverview(document, expectedArticleInputs: expectedArticleInputs)
     }
 
     func fetchEventOverview(eventID: String) async throws -> EventOverviewDocument? {

@@ -293,6 +293,7 @@ struct NewsTests {
             try await testEventReadingState(fixtureRoot: fixtureRoot)
             await testEventFeedGroupingAndStability()
         try await testFiniteBriefing()
+        try await testPublisherContentProvenance()
             try await testRefreshClustersEvents(fixtureRoot: fixtureRoot)
             try await testEventCorpusHarness(fixtureRoot: fixtureRoot)
             try testCapturedFingerprintReview()
@@ -375,6 +376,7 @@ struct NewsTests {
         try await testEventReadingState(fixtureRoot: fixtureRoot)
         await testEventFeedGroupingAndStability()
         try await testFiniteBriefing()
+        try await testPublisherContentProvenance()
         try await testRefreshClustersEvents(fixtureRoot: fixtureRoot)
         try await testEventCorpusHarness(fixtureRoot: fixtureRoot)
         try testCapturedFingerprintReview()
@@ -447,6 +449,7 @@ struct NewsTests {
         var handle: OpaquePointer?
         assertEqual(sqlite3_open(path, &handle), SQLITE_OK, "Open isolated FTS observation")
         defer { sqlite3_close(handle) }
+        assertEqual(sqlite3_create_function_v2(handle, "news_publisher_input", 3, SQLITE_UTF8 | SQLITE_DETERMINISTIC, nil, publisherInputFunction, nil, nil, nil), SQLITE_OK, "Register publisher hashing on the isolated FTS writer")
         func rowID() -> Int64 {
             var statement: OpaquePointer?
             assertEqual(sqlite3_prepare_v2(handle, "SELECT rowid FROM articles_fts WHERE article_id='fts';", -1, &statement, nil), SQLITE_OK, "Observe FTS row")
@@ -2586,7 +2589,7 @@ struct NewsTests {
         await cancelledDB.close()
         let db = DatabaseEngine(path: copyPath)
         try await db.open()
-        assertEqual(value(copyPath, "PRAGMA user_version;"), "14", "Copied v4 library upgrades to the current schema")
+        assertEqual(value(copyPath, "PRAGMA user_version;"), "15", "Copied v4 library upgrades to the current schema")
         assertEqual(value(originalPath, "PRAGMA user_version;"), "4", "Original fixture stays untouched")
         assertEqual(try await db.fetchArticles(limit: nil).count, 3, "Migration keeps historical rows")
         assertEqual(value(copyPath, "SELECT read_at FROM article_state WHERE article_id = 'alias-first';"), originalReadAt, "Migration preserves read history timestamp")
@@ -2695,7 +2698,7 @@ struct NewsTests {
         }
         let body = (1...65).map { "Historical evidence \($0) preserves the publisher's distinctive reporting." }.joined(separator: " ")
         let url = fixtureRoot.appendingPathComponent("historical/story").absoluteString
-        execute("DROP TABLE article_reconciliation_history; DROP TABLE article_reconciliations; PRAGMA user_version = 8;")
+        execute("DROP TRIGGER trg_publisher_content_insert; DROP TRIGGER trg_publisher_content_update; DROP TABLE publisher_content_revisions; DROP TABLE article_reconciliation_history; DROP TABLE article_reconciliations; PRAGMA user_version = 8;")
         let rows = [("historical-a", url, body), ("historical-b", url, body), ("historical-c", url, body),
                     ("uncertain", url, body + " Different reporting."), ("short-body", url, "Short body"),
                     ("reprint", fixtureRoot.appendingPathComponent("another/story").absoluteString, body),
@@ -2757,13 +2760,14 @@ struct NewsTests {
         assertEqual(value(failure, "SELECT is_saved FROM article_state WHERE article_id='historical-a';"), "0", "Injected failure rolls back survivor state union")
         assertEqual(value(failure, "SELECT article_id FROM article_aliases WHERE value='observed-variant-b';"), "historical-b", "Injected failure preserves old aliases")
         try await migrated.open()
-        assertEqual(value(copy, "PRAGMA user_version;"), "14", "Copied library upgrades to the current schema")
+        assertEqual(value(copy, "PRAGMA user_version;"), "15", "Copied library upgrades to the current schema")
         assertEqual(value(path, "PRAGMA user_version;"), "8", "Original fixture remains untouched")
         assertEqual(try await migrated.fetchArticles(limit: nil).count, 6, "Only confident same-URL text copies are hidden")
         assertEqual(try await migrated.fetchArticles(limit: nil, includingOriginals: true).count, 8, "Every stored original remains reachable")
         assertEqual(try await migrated.fetchArticles(id: "historical-b").first?.id, "historical-a", "Old IDs navigate to the survivor")
         assertEqual(try await migrated.fetchArticles(id: "observed-variant-b").first?.id, "historical-a", "Observed old ID aliases follow the survivor")
-        assertEqual(try await migrated.fetchArticles(id: "historical-b", includingOriginals: true).first?.aiSummary, "Original generated summary", "Original enrichment is retained")
+        assertEqual(try await migrated.fetchArticles(id: "historical-b", includingOriginals: true).first?.aiSummary, nil, "Unversioned original analysis is invalidated by the provenance migration")
+        assertEqual(try await migrated.fetchArticles(id: "historical-b", includingOriginals: true).first?.fullContent, body, "Original publisher text is retained")
         assertTrue(try await migrated.isRead(articleId: "historical-b"), "Read flags are unioned")
         assertTrue(try await migrated.isSaved(articleId: "historical-a"), "Saved flags are unioned")
         assertEqual(value(copy, "SELECT read_at || ':' || saved_at FROM article_state WHERE article_id='historical-a';"), "33.0:44.0", "Survivor carries latest known history timestamps")
@@ -3486,7 +3490,7 @@ struct NewsTests {
 
         let db = DatabaseEngine(path: copy)
         try await db.open()
-        assertEqual(value(copy, "PRAGMA user_version;"), "14", "Copied v11 library upgrades to the event schema")
+        assertEqual(value(copy, "PRAGMA user_version;"), "15", "Copied v11 library upgrades to the current schema")
         assertEqual(value(path, "PRAGMA user_version;"), "11", "Original v11 fixture stays untouched")
         assertEqual(try await db.fetchArticles(limit: nil).count, 5, "Event migration keeps every article")
         assertTrue(try await db.isRead(articleId: "event-a"), "Event migration keeps read state")
@@ -3692,6 +3696,7 @@ struct NewsTests {
         func execute(_ sql: String) {
             var handle: OpaquePointer?
             assertEqual(sqlite3_open(path, &handle), SQLITE_OK, "Open cluster fixture")
+            assertEqual(sqlite3_create_function_v2(handle, "news_publisher_input", 3, SQLITE_UTF8 | SQLITE_DETERMINISTIC, nil, publisherInputFunction, nil, nil, nil), SQLITE_OK, "Register publisher hashing on the isolated cluster writer")
             assertEqual(sqlite3_exec(handle, sql, nil, nil, nil), SQLITE_OK, "Edit cluster fixture")
             sqlite3_close(handle)
         }
@@ -3851,7 +3856,7 @@ struct NewsTests {
         assertEqual(value(copy, "SELECT count(*) FROM sqlite_master WHERE name IN ('event_match_state','event_exclusions','event_state');"), "0", "Cancelled v14 migration rolls back its tables")
         let migrated = DatabaseEngine(path: copy)
         try await migrated.open()
-        assertEqual(value(copy, "PRAGMA user_version;"), "14", "Copied v13 library upgrades to v14")
+        assertEqual(value(copy, "PRAGMA user_version;"), "15", "Copied v13 library upgrades to the current schema")
         assertEqual(value(path, "PRAGMA user_version;"), "13", "Original v13 fixture stays untouched")
         assertEqual(try await migrated.fetchEvent(id: event.id)?.memberArticleIDs.count, 5, "Migration keeps events and members")
         assertTrue(try await migrated.isSaved(articleId: "second"), "Migration keeps saved state")
@@ -3999,6 +4004,132 @@ struct NewsTests {
         assertTrue(ids.contains("boundary"), "The lower time boundary is included")
         assertFalse(ids.contains("old") || ids.contains("future") || ids.contains("undated") || ids.contains("read"), "SQLite filters the exact window and read state before selection")
         assertEqual(try await db.fetchArticles(limit: nil).count, candidates.count, "The briefing leaves archive access intact")
+    }
+
+    @MainActor
+    static func testPublisherContentProvenance() async throws {
+        print("  - Testing publisher-input provenance, invalidation and stale-result rejection (#164)...")
+        let db = DatabaseEngine(path: ":memory:")
+        try await db.open()
+        let article = FeedArticle(storedID: "provenance-story", title: "Harbor bridge opens", link: "https://example.com/provenance-story",
+            guid: "provenance-story", description: "The bridge opens on Tuesday.", pubDate: Date(), source: "Harbor News", category: "World")
+        let companion = FeedArticle(storedID: "provenance-companion", title: "Harbor bridge traffic begins", link: "https://example.com/provenance-companion",
+            guid: "provenance-companion", description: "Traffic begins on Tuesday.", pubDate: article.pubDate, source: "City News")
+        _ = try await db.upsertArticles([article, companion])
+        try await db.markRead(articleId: article.id, isRead: true)
+        try await db.setSaved(articleId: article.id, isSaved: true)
+        let analysis = ArticleAnalysis(summary: "Bridge opens.", keyPoints: ["Traffic begins"], entities: [], category: "World", sentiment: nil, modelIdentifier: "test", analysisVersion: 2)
+        assertTrue(try await db.saveArticleAnalysis(analysis, for: article.id, expectedInputHash: article.publisherInputHash), "Analysis saves only against its captured publisher input")
+        _ = try await db.upsertArticles([article])
+        assertTrue(await db.fetchArticleAnalysis(for: article.id) != nil, "An unchanged refresh keeps analysis")
+        assertEqual(try await db.publisherContentRevisions(for: article.id).count, 1, "An unchanged refresh creates no revision")
+        var staleSnapshot = article
+        staleSnapshot.aiSummary = "Unversioned imported analysis"
+        _ = try await db.upsertArticles([staleSnapshot])
+        assertEqual(await db.fetchArticleAnalysis(for: article.id)?.summary, analysis.summary, "An unversioned snapshot cannot overwrite valid analysis")
+        let body = "The city opened the Harbor bridge on Tuesday after its final structural inspections."
+        assertTrue(try await db.updateEnrichment(articleId: article.id, update: .init(content: body)), "Initial extraction persists")
+        let extracted = try await db.fetchArticles(id: article.id).first!
+        let extraction = try await db.publisherContentRevisions(for: article.id).first!
+        assertEqual(extraction.kind, .extraction, "First body extraction is not a publisher update")
+        assertEqual(extraction.inputHash, extracted.publisherInputHash, "SQLite and Swift hash the same input fields")
+        assertEqual(await db.fetchArticleAnalysis(for: article.id), nil, "A newly extracted input invalidates old analysis")
+        assertTrue(try await db.saveArticleAnalysis(analysis, for: article.id, expectedInputHash: extracted.publisherInputHash), "Fresh body analysis saves")
+        let event = try await db.createEvent(memberArticleIDs: [article.id, companion.id])
+        let overview = EventOverviewDocument(eventID: event.id,
+            version: OverviewVersionContext(membershipVersion: event.membershipVersion, inputTextHash: "test-input"),
+            content: OverviewContent(title: "Harbor bridge", summary: "A sourced test overview.", facts: [], citations: []),
+            provenance: OverviewProvenance(memberArticleIDs: [article.id, companion.id]))
+        assertTrue(try await db.recordEventOverview(overview), "Overview stored before publisher change")
+        let revisedBody = body + " The eastbound lane remains closed for further work."
+        assertTrue(try await db.updateEnrichment(articleId: article.id, update: .init(content: revisedBody)), "A body update persists")
+        let changed = try await db.fetchArticles(id: article.id).first!
+        let update = try await db.publisherContentRevisions(for: article.id).first!
+        assertEqual(update.kind, .publisherUpdate, "A changed existing body is a locally observed publisher update")
+        assertEqual(update.changeDescription, "Article body", "Provenance identifies the changed field")
+        assertEqual(await db.fetchArticleAnalysis(for: article.id), nil, "A body update invalidates generated analysis")
+        assertEqual(try await db.fetchEventOverview(eventID: event.id), nil, "Affected event overviews are invalidated atomically")
+        assertFalse(try await db.saveArticleAnalysis(analysis, for: article.id, expectedInputHash: extracted.publisherInputHash), "An in-flight result cannot save against changed input")
+        assertFalse(try await db.updateEnrichment(articleId: article.id, update: .init(category: "Science", expectedInputHash: extracted.publisherInputHash)), "Stale classification cannot overwrite the new article")
+        assertFalse(try await db.recordEventOverview(overview, expectedArticleInputs: [article.id: extracted.publisherInputHash]), "A stale overview cannot resurrect an invalidated document")
+        assertTrue(try await db.saveArticleAnalysis(analysis, for: article.id, expectedInputHash: changed.publisherInputHash), "Current input is analyzable again")
+        assertTrue(try await db.isRead(articleId: article.id), "Revisions preserve read state")
+        assertTrue(try await db.isSaved(articleId: article.id), "Revisions preserve saved state")
+        let store = ArticleStore(database: db)
+        await store.initialize()
+        assertTrue(await store.setSaved(article: extracted, isSaved: true), "Saving an older reader snapshot still works")
+        assertEqual(try await db.fetchArticles(id: article.id).first?.fullContent, revisedBody, "Saving cannot revert publisher content")
+        assertEqual(try await db.publisherContentRevisions(for: article.id).first?.version, update.version, "Saving creates no false update")
+        for index in 0..<25 {
+            _ = try await db.updateEnrichment(articleId: article.id, update: .init(content: revisedBody + " Observation \(index)."))
+        }
+        let history = try await db.publisherContentRevisions(for: article.id)
+        assertEqual(history.count, 20, "Observation metadata is bounded")
+        assertEqual(history.first?.version, update.version + 25, "Version numbers remain monotonic after pruning")
+        _ = try await db.updateEnrichment(articleId: companion.id, update: .init(content: body))
+        let feedUpdate = FeedArticle(storedID: companion.id, title: "Harbor bridge traffic begins tomorrow", link: companion.link,
+            guid: companion.guid, description: "Traffic starts on Wednesday.", pubDate: companion.pubDate, source: companion.source)
+        _ = try await db.upsertArticles([feedUpdate])
+        let feedRevision = try await db.publisherContentRevisions(for: companion.id).first!
+        assertEqual(feedRevision.kind, .publisherUpdate, "Changed feed text is an observed publisher update")
+        assertEqual(feedRevision.changedFields, 3, "Title and summary changes are distinguished from body changes")
+        let beforePurge = try await db.publisherContentRevisions(for: companion.id)
+        try await db.clearArticleCache()
+        assertEqual(try await db.publisherContentRevisions(for: companion.id), beforePurge, "A local cache purge is not a publisher update")
+        assertTrue(try await db.fetchArticles(id: article.id).first?.fullContent != nil, "Saved publisher bodies survive cache purging")
+        let coordinator = OverviewGenerationCoordinator(store: store, queue: EnrichmentQueue(store: store))
+        let cachedOverview = await coordinator.requestOverview(eventID: event.id, eventTitle: "Harbor bridge",
+            membershipVersion: event.membershipVersion, articles: [article, companion])
+        assertTrue(cachedOverview != nil, "An overview can be generated from current stored inputs")
+        _ = try await db.updateEnrichment(articleId: article.id, update: .init(content: revisedBody + " The city announced an additional inspection."))
+        let regenerated = await coordinator.requestOverview(eventID: event.id, eventTitle: "Harbor bridge",
+            membershipVersion: event.membershipVersion, articles: [article, companion])
+        assertTrue(regenerated != nil && regenerated?.id != cachedOverview?.id, "Publisher updates bypass an old memory cache even with unchanged membership and frozen request snapshots")
+
+        // Upgrade a copied v14 fixture; the original and all durable publisher/user state survive.
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("news-provenance-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let original = root.appendingPathComponent("v14.sqlite")
+        let legacy = DatabaseEngine(path: original.path)
+        try await legacy.open()
+        _ = try await legacy.upsertArticles([changed])
+        try await legacy.markRead(articleId: changed.id, isRead: true)
+        try await legacy.setSaved(articleId: changed.id, isSaved: true)
+        _ = try await legacy.saveArticleAnalysis(analysis, for: changed.id)
+        await legacy.close()
+        var handle: OpaquePointer?
+        assertEqual(sqlite3_open(original.path, &handle), SQLITE_OK, "Open only the owned migration fixture")
+        assertEqual(sqlite3_exec(handle, "DROP TRIGGER trg_publisher_content_insert; DROP TRIGGER trg_publisher_content_update; DROP TABLE publisher_content_revisions; ALTER TABLE article_enrichment DROP COLUMN input_content_version; ALTER TABLE article_enrichment DROP COLUMN input_text_hash; PRAGMA user_version=14;", nil, nil, nil), SQLITE_OK, "Reconstruct v14 provenance-free fixture")
+        sqlite3_close(handle)
+        let copy = root.appendingPathComponent("upgraded.sqlite")
+        try FileManager.default.copyItem(at: original, to: copy)
+        let migrated = DatabaseEngine(path: copy.path)
+        let cancelled = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            try await migrated.open()
+        }
+        do { try await cancelled.value; assertTrue(false, "Cancelled provenance migration must throw") } catch is CancellationError { }
+        try await migrated.open()
+        assertEqual(try await migrated.publisherContentRevisions(for: changed.id).first?.kind, .snapshot, "Migration records a baseline, not a fabricated update")
+        assertEqual(await migrated.fetchArticleAnalysis(for: changed.id), nil, "Unversioned legacy analysis must regenerate")
+        assertEqual(try await migrated.fetchArticles(id: changed.id).first?.fullContent, revisedBody, "Migration preserves the saved publisher body")
+        assertTrue(try await migrated.isRead(articleId: changed.id), "Migration preserves read state")
+        assertTrue(try await migrated.isSaved(articleId: changed.id), "Migration preserves saved state")
+        await migrated.close()
+        func value(_ file: URL, _ sql: String) -> String? {
+            var connection: OpaquePointer?, statement: OpaquePointer?
+            assertEqual(sqlite3_open(file.path, &connection), SQLITE_OK, "Inspect only the owned provenance fixture")
+            defer { sqlite3_close(connection) }
+            assertEqual(sqlite3_prepare_v2(connection, sql, -1, &statement, nil), SQLITE_OK, "Prepare provenance inspection")
+            defer { sqlite3_finalize(statement) }
+            guard sqlite3_step(statement) == SQLITE_ROW else { return nil }
+            return sqlite3_column_text(statement, 0).map { String(cString: $0) }
+        }
+        assertEqual(value(copy, "PRAGMA user_version;"), "15", "Provenance schema upgrades to v15")
+        assertEqual(value(original, "PRAGMA user_version;"), "14", "Original v14 fixture remains untouched")
+        assertEqual(value(copy, "PRAGMA quick_check;"), "ok", "Upgraded provenance library passes quick_check")
+        assertEqual(value(copy, "PRAGMA foreign_key_check;"), nil, "Provenance has no dangling article references")
     }
 
     static func testEventCorpusHarness(fixtureRoot: URL) async throws {
