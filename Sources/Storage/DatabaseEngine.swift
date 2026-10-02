@@ -2080,6 +2080,50 @@ actor DatabaseEngine {
         return counts
     }
 
+    /// Stored articles a set of feeds delivered with a publication date inside `day`, with their event, for the news
+    /// tension experiment. One row per article and delivering feed; undated stories never fall inside a day.
+    func tensionCorpus(day: DateInterval, feedURLs: [String]) throws -> [TensionCorpusRow] {
+        guard let db = db else { throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Database not open"]) }
+        guard !feedURLs.isEmpty else { return [] }
+        let sql = """
+        SELECT a.id, a.guid, a.canonical_url, a.title, a.description, a.content,
+               a.published_at, a.source, a.image_url, a.category,
+               ae.summary, ae.content_fetched,
+               s.is_read, s.is_saved,
+               ae.key_points, ae.entities, ae.sentiment, a.reader_document, af.feed_url, em.event_id
+        FROM articles a
+        JOIN article_state s ON s.article_id = a.id
+        JOIN article_feeds af ON af.article_id = a.id
+        LEFT JOIN article_enrichment ae ON ae.article_id = a.id
+        LEFT JOIN event_members em ON em.article_id = a.id
+        WHERE af.feed_url IN (\(Array(repeating: "?", count: feedURLs.count).joined(separator: ", ")))
+          AND a.published_at >= ? AND a.published_at < ? AND \(Self.visibleArticle)
+        ORDER BY a.published_at, a.id, af.feed_url;
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to prepare tension corpus: \(String(cString: sqlite3_errmsg(db)))"])
+        }
+        defer { sqlite3_finalize(stmt) }
+        var params: [QueryParameter] = feedURLs.map { ("text", $0) }
+        params += [("double", day.start.timeIntervalSince1970), ("double", day.end.timeIntervalSince1970)]
+        bind(params, to: stmt)
+        var rows: [TensionCorpusRow] = []
+        var status = sqlite3_step(stmt)
+        while status == SQLITE_ROW {
+            try Task.checkCancellation()
+            if let article = parseArticleRow(stmt), let feedURL = sqlite3_column_text(stmt, 18).map({ String(cString: $0) }) {
+                rows.append(TensionCorpusRow(article: article, feedURL: feedURL,
+                                             eventID: sqlite3_column_text(stmt, 19).map { String(cString: $0) }))
+            }
+            status = sqlite3_step(stmt)
+        }
+        guard status == SQLITE_DONE else {
+            throw NSError(domain: "DatabaseEngine", code: Int(status), userInfo: [NSLocalizedDescriptionKey: String(cString: sqlite3_errmsg(db))])
+        }
+        return rows
+    }
+
     // MARK: - Row Parser
     
     private func parseArticleRow(_ stmt: OpaquePointer?) -> FeedArticle? {

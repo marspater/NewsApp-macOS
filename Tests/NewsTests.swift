@@ -319,6 +319,7 @@ struct NewsTests {
         try await testFeedCatalog()
         try await testFeedHealth()
         try await testUserMuting()
+        try await testTensionMethodology()
         try await testUndatedArticleOrdering()
         try await testReaderFigures(fixtureRoot: fixtureRoot)
         await testReaderParsingRegressions()
@@ -1886,6 +1887,131 @@ struct NewsTests {
         assertEqual(notified, [stories[3].title], "Only unmuted new stories notify")
         assertEqual(manager.articles.count, 2, "Muted stories are still stored")
         manager.stopBackgroundWork()
+    }
+
+    static func testTensionMethodology() async throws {
+        print("  - Testing the news tension methodology: panel, coverage, unique events and classification...")
+        let methodology = TensionMethodology.v1
+        let panel = methodology.panel
+        assertEqual(Set(panel.map(\.catalogID)).count, panel.count, "Panel feeds are unique")
+        for member in panel {
+            let entry = FeedCatalog.feeds.first { $0.id == member.catalogID }
+            assertEqual(entry?.url, member.url, "Panel feed \(member.catalogID) matches the catalog; a changed entry needs a new methodology version")
+            assertEqual(entry?.language, methodology.language, "Panel feed \(member.catalogID) publishes in the methodology language")
+        }
+        assertEqual(methodology.panelRegions.count, 6, "The v1 panel spans six regions")
+        assertFalse(methodology.panelRegions.contains(.latinAmerica) || methodology.panelRegions.contains(.oceania), "Latin America and Oceania are stated v1 gaps")
+        assertTrue(methodology.minimumReportingFeeds * 2 > panel.count, "A comparable day needs most panel feeds")
+        assertTrue(methodology.minimumReportingRegions * 2 > methodology.panelRegions.count, "A comparable day needs most panel regions")
+        assertTrue(TensionMethodology.disclaimer.contains("not how dangerous the world is"), "The indicator describes the corpus, not world danger")
+
+        // Coverage: a missing day is never zero, and a regional slice is never the world.
+        func url(_ id: String) -> String { panel.first { $0.catalogID == id }?.url ?? "" }
+        let european = panel.filter { $0.region == .europe }.map(\.url)
+        assertEqual(methodology.coverage(reportingFeedURLs: []).status, .noData, "A day without panel items has no data")
+        assertEqual(methodology.coverage(reportingFeedURLs: ["https://example.com/feed.xml"]).status, .noData, "Feeds outside the panel do not count")
+        assertEqual(methodology.coverage(reportingFeedURLs: Set(european + [url("cbc-world"), url("al-jazeera")])).status, .insufficient,
+                    "Seven feeds from three regions are not a comparable day")
+        assertEqual(methodology.coverage(reportingFeedURLs: Set(Array(european.prefix(4)) + [url("cbc-world"), url("al-jazeera"), url("cna")])).status, .sufficient,
+                    "Seven feeds from four regions are a comparable day")
+
+        let day = TensionMethodology.day(containing: Date(timeIntervalSince1970: 1_789_948_800 + 50_000))
+        assertEqual(day, DateInterval(start: Date(timeIntervalSince1970: 1_789_948_800), duration: 86_400), "Observation days are UTC calendar days")
+        assertTrue(methodology.isProvisional(day, now: day.end.addingTimeInterval(3_600)), "A day stays provisional just after it ends")
+        assertFalse(methodology.isProvisional(day, now: day.end.addingTimeInterval(86_400)), "A day is final a day after it ends")
+
+        // Classification reads anchored quotes only, deterministically.
+        func fact(_ id: String, _ quote: String) -> PassageAnchoredFact {
+            PassageAnchoredFact(id: id, statement: "A model restatement that mentions an airstrike", passageID: "p-\(id)", quote: quote, articleID: "article")
+        }
+        let strike = TensionEventClassifier.classify([
+            fact("f1", "Airstrikes hit the port overnight, and at least 12 people were killed."),
+            fact("f2", "The death toll rose to 45 on Tuesday as fighting intensified."),
+            fact("f3", "Officials said 3,400 residents were displaced.")
+        ])
+        assertEqual(strike.methodologyVersion, 1, "Classifications record the methodology version")
+        assertEqual(strike.type, .armedConflict, "Conflict cues set the type")
+        assertEqual(strike.typeEvidence, ["f1", "f2"], "Type evidence lists the supporting facts")
+        assertEqual(strike.deaths, .tens, "The largest reported death figure sets its order of magnitude")
+        assertEqual(strike.affected, .thousands, "Displacement is recorded apart from deaths")
+        assertEqual(strike.magnitudeEvidence, ["f1", "f2", "f3"], "Every fact with a figure is evidence")
+        assertEqual(strike.escalation, .escalating, "Explicit escalation is reported")
+        assertEqual(strike.escalationEvidence, ["f2"], "Escalation evidence lists its fact")
+        assertEqual(TensionEventClassifier.classify([fact("s1", "Officials met on Monday.")]).type, nil, "Model statements are never read")
+
+        let truce = TensionEventClassifier.classify([
+            fact("t1", "Both sides agreed to a ceasefire on Monday."),
+            fact("t2", "The government rejected a ceasefire last week.")
+        ])
+        assertEqual(truce.escalation, .deescalating, "A ceasefire de-escalates")
+        assertEqual(truce.escalationEvidence, ["t1"], "A negated cue does not count")
+        assertEqual(TensionEventClassifier.classify([fact("c1", "The ceasefire collapsed within hours.")]).escalation, .noSignal,
+                    "A collapsed ceasefire is not de-escalation")
+        let unrest = TensionEventClassifier.classify([
+            fact("u1", "Protests escalated in the capital."),
+            fact("u2", "Police lifted the curfew on Sunday.")
+        ])
+        assertEqual(unrest.type, .civilUnrest, "Unrest cues set the type")
+        assertEqual(unrest.escalation, .mixed, "Opposite signals are reported as mixed")
+        assertEqual(TensionEventClassifier.classify([fact("x1", "An earthquake struck as protesters gathered.")]).type, .civilUnrest,
+                    "Ties follow the declared type order")
+        assertEqual(TensionEventClassifier.classify([fact("w1", "The riotous party and floodlights drew crowds.")]).type, nil,
+                    "Cues never match inside longer words")
+        assertEqual(TensionEventClassifier.classify([fact("w2", "A trade war over tariffs deepened.")]).type, nil, "A bare \"war\" is not a conflict cue")
+        assertEqual(TensionFigures("The 2004 tsunami killed 230,000 people.").deaths, 230_000, "Years are not figures; the reported toll is")
+        let year = TensionFigures("In 2023 floods hit the region.")
+        assertEqual(year.deaths + year.affected, 0, "A year alone is not a figure")
+        assertEqual(TensionFigures("More than 1.5 million people have been displaced.").affected, 1_500_000, "Multipliers are applied")
+        assertEqual(TensionFigures("Hundreds of residents were displaced by the floods.").affected, 200, "Quantity words map into their magnitude")
+        assertEqual([0, 9, 10, 999, 1_000].map(TensionMagnitude.init(count:)), [.notReported, .units, .tens, .hundreds, .thousands],
+                    "Magnitudes are orders of magnitude")
+
+        // A day's corpus: panel feeds only, unique events counted once.
+        let db = DatabaseEngine(path: ":memory:")
+        try await db.open()
+        let noon = day.start.addingTimeInterval(43_200)
+        func story(_ index: Int, _ title: String, _ summary: String, date: Date? = nil) -> FeedArticle {
+            FeedArticle(title: title, link: "https://news.example/\(index)", guid: "tension-\(index)", description: summary,
+                        pubDate: date ?? noon.addingTimeInterval(Double(index) * 60), source: "Panel")
+        }
+        let reports: [(String, FeedArticle)] = [
+            ("bbc-world", story(1, "Earthquake strikes coastal city", "A strong earthquake struck the coastal city on Monday, and at least 120 people were killed.")),
+            ("al-jazeera", story(2, "Coastal earthquake toll climbs", "Rescuers searched collapsed buildings after the earthquake as the death toll rose to 150.")),
+            ("guardian-world", story(3, "Election results announced", "Officials announced the results of the national election on Monday afternoon.")),
+            ("cbc-world", story(4, "Protests over fuel prices", "Thousands of demonstrators marched as police used tear gas near parliament.")),
+            ("the-hindu", story(5, "Talks on river water", "Delegations from both countries met to discuss sharing water from the river.")),
+            ("cna", story(6, "Port reopens after typhoon", "The port reopened on Monday after the typhoon forced a two-day closure.")),
+            ("africanews", story(7, "Vaccination drive expands", "Health workers expanded a vaccination drive after a cholera outbreak in the region.")),
+            ("dawn", story(8, "Undated archive item", "An undated item that must never fall inside an observation day.", date: DateParser.unknownDate)),
+            ("france-24", story(9, "Next day report", "A report published after the observation day ended must not count.", date: day.end.addingTimeInterval(60)))
+        ]
+        for (catalogID, article) in reports { try await db.upsertArticles([article], feedUrl: url(catalogID)) }
+        try await db.upsertArticles([story(10, "Earthquake aftershock felt", "A subscribed feed outside the panel reported the earthquake aftershock in the city.")],
+                                    feedUrl: "https://example.com/feed.xml")
+        let stored = try await db.fetchArticles(limit: nil)
+        func storedID(_ title: String) -> String { stored.first { $0.title == title }?.id ?? "" }
+        let quake = try await db.createEvent(memberArticleIDs: [storedID("Earthquake strikes coastal city"), storedID("Coastal earthquake toll climbs"),
+                                                                storedID("Earthquake aftershock felt")])
+        let rows = try await db.tensionCorpus(day: day, feedURLs: panel.map(\.url))
+        assertEqual(Set(rows.map(\.article.title)).count, 7, "The corpus holds the day's dated panel items only")
+        assertFalse(rows.contains { $0.feedURL == "https://example.com/feed.xml" }, "Subscriptions outside the panel are not corpus")
+        let assessment = TensionDayAssessor.assess(day: day, rows: rows, now: day.end.addingTimeInterval(3_600))
+        assertEqual(assessment.coverage.status, .sufficient, "Seven panel feeds from six regions are a comparable day")
+        assertTrue(assessment.isProvisional, "The assessment says the day can still change")
+        assertEqual(assessment.events.count, 6, "Two reports of one earthquake count as one unique event")
+        let quakeDay = assessment.events.first { $0.key == quake.id }
+        assertEqual(quakeDay?.reporting.map(\.catalogID), ["bbc-world", "al-jazeera"], "An event records which panel feeds reported it")
+        assertEqual(quakeDay?.articleIDs.count, 2, "Event members outside the panel are not classified")
+        assertEqual(quakeDay?.classification.type, .disaster, "The earthquake is classified as a disaster")
+        assertEqual(quakeDay?.classification.deaths, .hundreds, "The larger anchored toll sets the magnitude")
+        let election = assessment.events.first { $0.key == storedID("Election results announced") }
+        assertEqual(election?.classification.type, nil, "A story without cues counts as an event but not as tension")
+        let thin = TensionDayAssessor.assess(day: day, rows: rows.filter { $0.feedURL == url("bbc-world") }, now: day.end.addingTimeInterval(3_600))
+        assertEqual(thin.coverage.status, .insufficient, "One feed is not a comparable day")
+        assertTrue(thin.events.isEmpty, "An insufficient day classifies nothing")
+        let nextDay = TensionMethodology.day(containing: day.end.addingTimeInterval(86_400 + 60))
+        assertEqual(TensionDayAssessor.assess(day: nextDay, rows: [], now: Date()).coverage.status, .noData, "A day without panel items is a gap")
+        await db.close()
     }
 
     @MainActor

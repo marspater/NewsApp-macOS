@@ -45,6 +45,7 @@ SWIFT_SOURCES=(
     Sources/Intelligence/PromptDefense.swift
     Sources/Intelligence/ModelAvailability.swift
     Sources/Intelligence/PassageFactExtractor.swift
+    Sources/Intelligence/TensionMethodology.swift
     Sources/Intelligence/OverviewComposer.swift
     Sources/Intelligence/EventCandidates.swift
     Sources/Intelligence/EventMatcher.swift
