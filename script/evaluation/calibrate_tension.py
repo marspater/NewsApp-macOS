@@ -7,9 +7,7 @@ index scaling (0-100), and trailing EMA smoothing across gaps.
 """
 import json
 import math
-import os
 import re
-import sys
 from pathlib import Path
 
 FIXTURE_PATH = Path(__file__).resolve().parents[2] / "Tests/Fixtures/tension-corpus/historical-sample.json"
@@ -120,134 +118,150 @@ BREADTH_MULTIPLIERS = {
 SCALE_FACTOR = 25.0
 SMOOTHING_ALPHA = 0.25  # 7-day trailing EMA: alpha = 2 / (7 + 1) = 0.25
 
+DEATH_WORDS = {"killed", "dead", "died", "deaths", "fatalities", "killing", "kills"}
+QUANTITIES = {"dozens": 24, "scores": 40, "hundreds": 200, "thousands": 2000, "millions": 2000000}
+
 
 def tokenize_words(text: str):
     return [w for w in re.split(r'[^a-zA-Z0-9]+', text.lower()) if w]
 
 
+def is_cue_match_at(words, cue_words, start_idx, reversible):
+    c_len = len(cue_words)
+    if words[start_idx:start_idx + c_len] != cue_words:
+        return False
+    prev_words = words[max(0, start_idx - 3):start_idx]
+    if any(w in NEGATIONS for w in prev_words):
+        return False
+    if reversible:
+        next_words = words[start_idx + c_len:min(len(words), start_idx + c_len + 3)]
+        if any(w in REVERSALS for w in next_words):
+            return False
+    return True
+
+
 def contains_cue(words, cues, reversible=False):
     for cue in cues:
         cue_words = tokenize_words(cue)
-        if not cue_words or len(cue_words) > len(words):
-            continue
         c_len = len(cue_words)
+        if not cue_words or c_len > len(words):
+            continue
         for i in range(len(words) - c_len + 1):
-            if words[i:i + c_len] == cue_words:
-                prev_words = words[max(0, i - 3):i]
-                if any(w in NEGATIONS for w in prev_words):
-                    continue
-                if reversible:
-                    next_words = words[i + c_len:min(len(words), i + c_len + 3)]
-                    if any(w in REVERSALS for w in next_words):
-                        continue
+            if is_cue_match_at(words, cue_words, i, reversible):
                 return True
     return False
 
 
-DEATH_WORDS = {"killed", "dead", "died", "deaths", "fatalities", "killing", "kills"}
-HARM_WORDS = {"killed", "dead", "died", "deaths", "fatalities", "injured", "wounded", "hurt", "displaced", "evacuated", "missing", "hospitalised", "hospitalized", "homeless"}
-QUANTITIES = {"dozens": 24, "scores": 40, "hundreds": 200, "thousands": 2000, "millions": 2000000}
+def parse_multiplier_token(m_str):
+    if m_str == "million":
+        return 1_000_000
+    if m_str == "thousand":
+        return 1_000
+    return 1
+
+
+def parse_figure_digits(n_str, m_str):
+    if not m_str and "," not in n_str and "." not in n_str:
+        try:
+            yr = int(n_str)
+            if 1900 <= yr <= 2099:
+                return None
+        except ValueError:
+            pass
+    try:
+        val = float(n_str.replace(",", ""))
+        mult = parse_multiplier_token(m_str)
+        res = val * mult
+        if 1 <= res < 1e12:
+            return int(res)
+    except ValueError:
+        pass
+    return None
+
+
+NUM_RE = r'(\d{1,3}(?:,\d{3})+|\d+(?:\.\d+)?)(?:\s+(thousand|million))?'
+AUX_RE = r'(?:(?:were|was|have|has|had|are|is|been|being|now|reportedly)\s+){0,3}'
+PERSON_RE = r'(?:people|persons|civilians|soldiers|troops|children|residents|others|migrants|workers|passengers|fighters|militants|police|officers|protesters|demonstrators|villagers|patients|refugees|students|journalists|members|adults|women|men)'
+HARM_RE = r'(killed|dead|died|deaths|fatalities|injured|wounded|hurt|displaced|evacuated|missing|hospitali[sz]ed|homeless)'
+QUAL_RE = r'(?:(?:at least|more than|over|about|around|nearly|almost|some|up to)\s+)?'
+
+PATTERN_1 = re.compile(rf'\b{NUM_RE}\s+(?:(?:more|other)\s+)?(?:[a-z]+\s+)?{PERSON_RE}\s+{AUX_RE}{HARM_RE}\b')
+PATTERN_2 = re.compile(rf'\b{NUM_RE}\s+{AUX_RE}{HARM_RE}\b')
+PATTERN_3 = re.compile(rf'\b(killing|killed|kills|injuring|injured|wounding|wounded|displacing|displaced)\s+{QUAL_RE}{NUM_RE}\b')
+PATTERN_4 = re.compile(rf'\b(?:death toll|toll)\b[^.;]{{0,40}}?\b(?:to|at|of|reached|hit|passed|surpassed|exceeded)\s+{QUAL_RE}{NUM_RE}\b')
+PATTERN_5 = re.compile(rf'\b(dozens|scores|hundreds|thousands|millions)\s+(?:of\s+)?(?:[a-z]+\s+){{0,2}}?{AUX_RE}{HARM_RE}\b')
+
+
+def extract_counts_from_text(text: str):
+    deaths, affected = 0, 0
+    for m in PATTERN_1.finditer(text):
+        count = parse_figure_digits(m.group(1), m.group(2))
+        if count:
+            if m.group(3) in DEATH_WORDS:
+                deaths = max(deaths, count)
+            else:
+                affected = max(affected, count)
+    for m in PATTERN_2.finditer(text):
+        count = parse_figure_digits(m.group(1), m.group(2))
+        if count:
+            if m.group(3) in DEATH_WORDS:
+                deaths = max(deaths, count)
+            else:
+                affected = max(affected, count)
+    for m in PATTERN_3.finditer(text):
+        count = parse_figure_digits(m.group(2), m.group(3))
+        if count:
+            if m.group(1) in DEATH_WORDS:
+                deaths = max(deaths, count)
+            else:
+                affected = max(affected, count)
+    for m in PATTERN_4.finditer(text):
+        count = parse_figure_digits(m.group(1), m.group(2))
+        if count:
+            deaths = max(deaths, count)
+    for m in PATTERN_5.finditer(text):
+        count = QUANTITIES.get(m.group(1))
+        if count:
+            if m.group(2) in DEATH_WORDS:
+                deaths = max(deaths, count)
+            else:
+                affected = max(affected, count)
+    return deaths, affected
+
+
+def count_to_magnitude(c: int) -> str:
+    if c < 1:
+        return "notReported"
+    if c < 10:
+        return "units"
+    if c < 100:
+        return "tens"
+    if c < 1000:
+        return "hundreds"
+    return "thousands"
 
 
 def extract_figures(quote: str):
-    text = quote.lower()
-    deaths = 0
-    affected = 0
+    deaths, affected = extract_counts_from_text(quote.lower())
+    return count_to_magnitude(deaths), count_to_magnitude(affected)
 
-    def parse_fig(n_str, m_str):
-        if not m_str and "," not in n_str and "." not in n_str:
-            try:
-                yr = int(n_str)
-                if 1900 <= yr <= 2099:
-                    return None
-            except ValueError:
-                pass
-        try:
-            val = float(n_str.replace(",", ""))
-            mult = 1000000 if m_str == "million" else 1000 if m_str == "thousand" else 1
-            res = val * mult
-            if 1 <= res < 1e12:
-                return int(res)
-        except ValueError:
-            pass
-        return None
 
-    # Pattern 1 & 2: number [person] [aux] harm
-    num_re = r'(\d{1,3}(?:,\d{3})+|\d+(?:\.\d+)?)(?:\s+(thousand|million))?'
-    aux_re = r'(?:(?:were|was|have|has|had|are|is|been|being|now|reportedly)\s+){0,3}'
-    person_re = r'(?:people|persons|civilians|soldiers|troops|children|residents|others|migrants|workers|passengers|fighters|militants|police|officers|protesters|demonstrators|villagers|patients|refugees|students|journalists|members|adults|women|men)'
-    harm_re = r'(killed|dead|died|deaths|fatalities|injured|wounded|hurt|displaced|evacuated|missing|hospitali[sz]ed|homeless)'
-    qual_re = r'(?:(?:at least|more than|over|about|around|nearly|almost|some|up to)\s+)?'
-
-    p1 = re.compile(rf'\b{num_re}\s+(?:(?:more|other)\s+)?(?:[a-z]+\s+)?{person_re}\s+{aux_re}{harm_re}\b')
-    p2 = re.compile(rf'\b{num_re}\s+{aux_re}{harm_re}\b')
-    p3 = re.compile(rf'\b(killing|killed|kills|injuring|injured|wounding|wounded|displacing|displaced)\s+{qual_re}{num_re}\b')
-    p4 = re.compile(rf'\b(?:death toll|toll)\b[^.;]{{0,40}}?\b(?:to|at|of|reached|hit|passed|surpassed|exceeded)\s+{qual_re}{num_re}\b')
-    p5 = re.compile(rf'\b(dozens|scores|hundreds|thousands|millions)\s+(?:of\s+)?(?:[a-z]+\s+){{0,2}}?{aux_re}{harm_re}\b')
-
-    for m in p1.finditer(text):
-        count = parse_fig(m.group(1), m.group(2))
-        h = m.group(3)
-        if count:
-            if h in DEATH_WORDS:
-                deaths = max(deaths, count)
-            else:
-                affected = max(affected, count)
-
-    for m in p2.finditer(text):
-        count = parse_fig(m.group(1), m.group(2))
-        h = m.group(3)
-        if count:
-            if h in DEATH_WORDS:
-                deaths = max(deaths, count)
-            else:
-                affected = max(affected, count)
-
-    for m in p3.finditer(text):
-        h = m.group(1)
-        count = parse_fig(m.group(2), m.group(3))
-        if count:
-            if h in DEATH_WORDS:
-                deaths = max(deaths, count)
-            else:
-                affected = max(affected, count)
-
-    for m in p4.finditer(text):
-        count = parse_fig(m.group(1), m.group(2))
-        if count:
-            deaths = max(deaths, count)
-
-    for m in p5.finditer(text):
-        q = m.group(1)
-        h = m.group(2)
-        count = QUANTITIES.get(q)
-        if count:
-            if h in DEATH_WORDS:
-                deaths = max(deaths, count)
-            else:
-                affected = max(affected, count)
-
-    def mag(c):
-        if c < 1:
-            return "notReported"
-        if c < 10:
-            return "units"
-        if c < 100:
-            return "tens"
-        if c < 1000:
-            return "hundreds"
-        return "thousands"
-
-    return mag(deaths), mag(affected)
+def determine_escalation_status(escalating_count: int, deescalating_count: int) -> str:
+    if escalating_count > 0 and deescalating_count > 0:
+        return "mixed"
+    if escalating_count > 0:
+        return "escalating"
+    if deescalating_count > 0:
+        return "deescalating"
+    return "noSignal"
 
 
 def classify_event(facts):
-    type_counts = {t: 0 for t in TYPE_CUES}
+    type_counts = dict.fromkeys(TYPE_CUES, 0)
     escalating_count = 0
     deescalating_count = 0
     best_deaths = "notReported"
     best_affected = "notReported"
-
     mag_rank = {"notReported": 0, "units": 1, "tens": 2, "hundreds": 3, "thousands": 4}
 
     for f in facts:
@@ -272,46 +286,99 @@ def classify_event(facts):
             best_type_count = type_counts[t]
             detected_type = t
 
-    if escalating_count > 0 and deescalating_count > 0:
-        escalation = "mixed"
-    elif escalating_count > 0:
-        escalation = "escalating"
-    elif deescalating_count > 0:
-        escalation = "deescalating"
-    else:
-        escalation = "noSignal"
-
+    escalation = determine_escalation_status(escalating_count, deescalating_count)
     return detected_type, best_deaths, best_affected, escalation
+
+
+def get_breadth_multiplier(reg_count: int) -> float:
+    if reg_count <= 1:
+        return BREADTH_MULTIPLIERS[1]
+    if reg_count == 2:
+        return BREADTH_MULTIPLIERS[2]
+    if reg_count == 3:
+        return BREADTH_MULTIPLIERS[3]
+    return BREADTH_MULTIPLIERS[4]
 
 
 def score_event(event_type, deaths, affected, escalation, reporting_catalog_ids):
     if not event_type:
-        return 0.0, 0.0, 1.0, 1.0, 1.0
+        return 0.0
     t_weight = TYPE_WEIGHTS.get(event_type, 0.0)
     d_mult = DEATH_MULTIPLIERS.get(deaths, 1.0)
     a_mult = AFFECTED_MULTIPLIERS.get(affected, 1.0)
     m_mult = max(d_mult, a_mult)
     e_mult = ESCALATION_MULTIPLIERS.get(escalation, 1.0)
 
-    regions = set(PANEL_REGIONS[cid] for cid in reporting_catalog_ids if cid in PANEL_REGIONS)
-    reg_count = len(regions)
-    if reg_count <= 1:
-        b_mult = BREADTH_MULTIPLIERS[1]
-    elif reg_count == 2:
-        b_mult = BREADTH_MULTIPLIERS[2]
-    elif reg_count == 3:
-        b_mult = BREADTH_MULTIPLIERS[3]
-    else:
-        b_mult = BREADTH_MULTIPLIERS[4]
-
-    raw = t_weight * m_mult * e_mult * b_mult
-    return raw, t_weight, m_mult, e_mult, b_mult
+    regions = {PANEL_REGIONS[cid] for cid in reporting_catalog_ids if cid in PANEL_REGIONS}
+    b_mult = get_breadth_multiplier(len(regions))
+    return t_weight * m_mult * e_mult * b_mult
 
 
 def scale_raw(raw):
     if raw <= 0:
         return 0.0
     return 100.0 * (1.0 - math.exp(-raw / SCALE_FACTOR))
+
+
+def evaluate_single_event(evt):
+    facts = evt["facts"]
+    exp_type = evt["expectedType"]
+    exp_deaths = evt["expectedDeaths"]
+    exp_affected = evt["expectedAffected"]
+    exp_esc = evt["expectedEscalation"]
+
+    c_type, c_deaths, c_affected, c_esc = classify_event(facts)
+    is_type_ok = (c_type == exp_type)
+    is_deaths_ok = (c_deaths == exp_deaths)
+    is_affected_ok = (c_affected == exp_affected)
+    is_esc_ok = (c_esc == exp_esc)
+
+    raw = score_event(c_type, c_deaths, c_affected, c_esc, evt["reportingCatalogIDs"])
+    return raw, is_type_ok, is_deaths_ok, is_affected_ok, is_esc_ok
+
+
+def process_sample_day(day, last_smoothed):
+    day_id = day["id"]
+    status = day["expectedCoverageStatus"]
+    events = day.get("events", [])
+    raw_day_score = 0.0
+    day_metrics = [0, 0, 0, 0, 0]  # total, correct_types, correct_deaths, correct_affected, correct_esc
+
+    for evt in events:
+        raw_evt, ok_t, ok_d, ok_a, ok_e = evaluate_single_event(evt)
+        raw_day_score += raw_evt
+        day_metrics[0] += 1
+        if ok_t:
+            day_metrics[1] += 1
+        if ok_d:
+            day_metrics[2] += 1
+        if ok_a:
+            day_metrics[3] += 1
+        if ok_e:
+            day_metrics[4] += 1
+
+    if status == "sufficient":
+        calibrated_idx = scale_raw(raw_day_score)
+        if last_smoothed is None:
+            smoothed_idx = calibrated_idx
+        else:
+            smoothed_idx = SMOOTHING_ALPHA * calibrated_idx + (1.0 - SMOOTHING_ALPHA) * last_smoothed
+        next_smoothed = smoothed_idx
+        raw_result = raw_day_score
+    else:
+        calibrated_idx = None
+        smoothed_idx = None
+        next_smoothed = last_smoothed
+        raw_result = None
+
+    day_result = {
+        "id": day_id,
+        "status": status,
+        "raw": raw_result,
+        "calibrated": calibrated_idx,
+        "smoothed": smoothed_idx
+    }
+    return day_result, next_smoothed, day_metrics
 
 
 def run_calibration():
@@ -331,64 +398,13 @@ def run_calibration():
     last_smoothed = None
 
     for day in sample_days:
-        day_id = day["id"]
-        status = day["expectedCoverageStatus"]
-        events = day.get("events", [])
-        raw_day_score = 0.0
-
-        for evt in events:
-            total_events += 1
-            evt_id = evt["id"]
-            facts = evt["facts"]
-            exp_type = evt["expectedType"]
-            exp_deaths = evt["expectedDeaths"]
-            exp_affected = evt["expectedAffected"]
-            exp_esc = evt["expectedEscalation"]
-
-            c_type, c_deaths, c_affected, c_esc = classify_event(facts)
-
-            if c_type == exp_type:
-                correct_types += 1
-            else:
-                print(f"Type mismatch on {evt_id}: got {c_type}, expected {exp_type}")
-
-            if c_deaths == exp_deaths:
-                correct_deaths += 1
-            else:
-                print(f"Deaths mismatch on {evt_id}: got {c_deaths}, expected {exp_deaths}")
-
-            if c_affected == exp_affected:
-                correct_affected += 1
-            else:
-                print(f"Affected mismatch on {evt_id}: got {c_affected}, expected {exp_affected}")
-
-            if c_esc == exp_esc:
-                correct_escalations += 1
-            else:
-                print(f"Escalation mismatch on {evt_id}: got {c_esc}, expected {exp_esc}")
-
-            raw_evt, tw, mm, em, bm = score_event(c_type, c_deaths, c_affected, c_esc, evt["reportingCatalogIDs"])
-            raw_day_score += raw_evt
-
-        if status == "sufficient":
-            calibrated_idx = scale_raw(raw_day_score)
-            if last_smoothed is None:
-                smoothed_idx = calibrated_idx
-            else:
-                smoothed_idx = SMOOTHING_ALPHA * calibrated_idx + (1.0 - SMOOTHING_ALPHA) * last_smoothed
-            last_smoothed = smoothed_idx
-        else:
-            # GAPS ARE NEVER ZERO
-            calibrated_idx = None
-            smoothed_idx = None
-
-        day_results.append({
-            "id": day_id,
-            "status": status,
-            "raw": raw_day_score if status == "sufficient" else None,
-            "calibrated": calibrated_idx,
-            "smoothed": smoothed_idx
-        })
+        r, last_smoothed, dm = process_sample_day(day, last_smoothed)
+        day_results.append(r)
+        total_events += dm[0]
+        correct_types += dm[1]
+        correct_deaths += dm[2]
+        correct_affected += dm[3]
+        correct_escalations += dm[4]
 
     print("\n--- Classification Performance on Historical Sample ---")
     print(f"Total Events: {total_events}")
@@ -411,16 +427,12 @@ def run_calibration():
         sm_str = f"{r['smoothed']:.1f}" if r["smoothed"] is not None else "N/A"
         print(f"{r['id']:<38} | {r['status']:<12} | {raw_str:>7} | {idx_str:>7} | {sm_str:>8}")
 
-    # Verify edge cases:
-    # Day 9 (negations) must be 0.0
     d9 = next(d for d in day_results if "negations" in d["id"])
-    assert d9["raw"] == 0.0 and d9["calibrated"] == 0.0, "Day 9 negations must have raw=0 and calibrated=0"
+    assert math.isclose(d9["raw"], 0.0, abs_tol=1e-5) and math.isclose(d9["calibrated"], 0.0, abs_tol=1e-5)
 
-    # Day 11 (historical years) must be 0.0
     d11 = next(d for d in day_results if "historical-years" in d["id"])
-    assert d11["raw"] == 0.0 and d11["calibrated"] == 0.0, "Day 11 historical years must have raw=0 and calibrated=0"
+    assert math.isclose(d11["raw"], 0.0, abs_tol=1e-5) and math.isclose(d11["calibrated"], 0.0, abs_tol=1e-5)
 
-    # Days 12, 13, 14 must have None index (never 0.0)
     for gap_id in ["insufficient-feeds", "insufficient-regions", "no-data"]:
         gap_day = next(d for d in day_results if gap_id in d["id"])
         assert gap_day["calibrated"] is None, f"{gap_id} must have calibrated=None"

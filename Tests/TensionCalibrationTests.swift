@@ -101,9 +101,9 @@ final class TensionCalibrationTests {
         print("  - Testing event scoring formula...")
         let weights = TensionWeights.calibratedV1
 
-        let bbc = TensionPanelMember(catalogID: "bbc-world", url: "https://feeds.bbci.co.uk/news/world/rss.xml", region: .europe)
-        let aj = TensionPanelMember(catalogID: "al-jazeera", url: "https://www.aljazeera.com/xml/rss/all.xml", region: .middleEastNorthAfrica)
-        let cbc = TensionPanelMember(catalogID: "cbc-world", url: "https://www.cbc.ca/webfeed/rss/rss-world", region: .northAmerica)
+        let bbc = TensionMethodology.v1.panel.first(where: { $0.catalogID == "bbc-world" })!
+        let aj = TensionMethodology.v1.panel.first(where: { $0.catalogID == "al-jazeera" })!
+        let cbc = TensionMethodology.v1.panel.first(where: { $0.catalogID == "cbc-world" })!
 
         let classification = TensionEventClassification(
             methodologyVersion: 1,
@@ -531,29 +531,29 @@ final class TensionCalibrationTests {
 
     static func testNotificationIsolationForOptInFeeds() {
         print("  - Testing that opt-in panel feeds do not produce notifications for non-subscribed feeds...")
-        let userFeeds = ["https://feeds.bbci.co.uk/news/rss.xml"]
-        let panelOnlyFeed = "https://www.france24.com/en/rss"
+        let userFeeds = [TensionMethodology.v1.panel[0].url]
+        let panelOnlyFeed = TensionMethodology.v1.panel[1].url
 
         let articleFromUserFeed = FeedArticle(
             storedID: "art-user-1",
             identityFeedURL: userFeeds[0],
             title: "User Feed Article",
-            link: "https://bbc.com/1",
+            link: userFeeds[0] + "/article1",
             guid: "guid-user-1",
             description: "Desc",
             pubDate: Date(),
-            source: "BBC News"
+            source: "Publisher 1"
         )
 
         let articleFromPanelFeed = FeedArticle(
             storedID: "art-panel-1",
             identityFeedURL: panelOnlyFeed,
             title: "Panel Only Article",
-            link: "https://france24.com/1",
+            link: panelOnlyFeed + "/article1",
             guid: "guid-panel-1",
             description: "Desc",
             pubDate: Date(),
-            source: "France 24"
+            source: "Publisher 2"
         )
 
         // Simulating FeedManager notification isolation logic:
