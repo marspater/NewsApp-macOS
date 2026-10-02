@@ -202,17 +202,20 @@ public struct OverviewThematicAngle: Codable, Hashable, Sendable, Identifiable {
     public let title: String
     public let summary: String
     public let citationIDs: [String]
+    public let facts: [OverviewFact]
 
     public init(
         id: String = UUID().uuidString,
         title: String,
         summary: String,
-        citationIDs: [String] = []
+        citationIDs: [String] = [],
+        facts: [OverviewFact] = []
     ) {
         self.id = id
         self.title = title
         self.summary = summary
         self.citationIDs = citationIDs
+        self.facts = facts
     }
 }
 
