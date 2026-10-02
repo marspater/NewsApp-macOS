@@ -3964,6 +3964,48 @@ struct NewsTests {
         guard let holdout = metrics["holdout"] else { return assertTrue(false, "The holdout split is evaluated") }
         assertEqual(holdout.falsePositives, 0, "The synthetic control set has no false merges")
         assertTrue(holdout.truePositives >= 3, "The synthetic earthquake reports are linked")
+
+        print("  - Testing the native embedding comparison (#127)...")
+        let now = Date()
+        let controls = EventControlSet.articles(now: now, root: fixtureRoot)
+        let memberships = try await StoryCorpus.eventMemberships(articles: controls.map(\.article))
+        var items = controls.map {
+            EventEmbeddingComparison.Item(title: $0.article.title, description: $0.article.description, date: $0.article.pubDate,
+                                          event: $0.event, membership: memberships[$0.article.id])
+        }
+        // The same earthquake in French, and an English copy dated six days earlier.
+        items.append(.init(title: "Un séisme de magnitude 7 frappe l'est de la Turquie près de Malatya",
+                           description: "Un puissant séisme de magnitude 7 a frappé lundi l'est de la Turquie près de la ville de Malatya, endommageant des bâtiments, selon l'agence turque de gestion des catastrophes.",
+                           date: now.addingTimeInterval(-5 * 3600), event: "quake", membership: nil))
+        items.append(.init(title: controls[0].article.title, description: controls[0].article.description,
+                           date: now.addingTimeInterval(-6 * 86400), event: "quake", membership: nil))
+
+        let unsupported = EventEmbeddingComparison(items: items, thresholds: [2], model: { _ in nil })
+        assertEqual(unsupported.notCompared["cross-language"], 4, "Vectors from different languages are never compared")
+        assertEqual(unsupported.notCompared["outside time window"], 3, "Pairs the matcher cannot link in time are not compared")
+        assertEqual(unsupported.notCompared["no sentence embedding"], 3, "A language without a sentence embedding abstains")
+        assertTrue(unsupported.scores.isEmpty, "Nothing is scored without vectors")
+        assertTrue(unsupported.languages.values.allSatisfy { $0.dimension == nil }, "Missing models are reported per language")
+        assertEqual(EventEmbeddingComparison.cosineDistance([1, 0], [0, 0]), 2, "A zero vector is never close")
+        assertTrue(abs(EventEmbeddingComparison.cosineDistance([1, 2], [2, 4])) < 1e-12, "Parallel vectors have no distance")
+
+        let support = Set(FeedCatalog.feeds.map(\.language)).sorted().map { code in
+            "\(code) " + (NLEmbedding.sentenceEmbedding(for: NLLanguage(rawValue: code)).map { "\($0.dimension)" } ?? "none")
+        }
+        print("    Sentence embeddings for catalog languages on this system: \(support.joined(separator: ", "))")
+        let native = EventEmbeddingComparison(items: items, thresholds: [0.5, 2])
+        guard native.languages["en"]?.dimension != nil, let all = native.scores["all"] else {
+            return print("    No English sentence embedding on this system; native scoring not exercised")
+        }
+        assertEqual(native.notCompared["cross-language"], 4, "Cross-language pairs stay out with native models")
+        assertEqual(all.deterministic.truePositives, 3, "Deterministic links are scored on the same pairs")
+        assertEqual(all.deterministic.falsePositives, 0, "The control set has no deterministic false merges")
+        for row in all.rows {
+            assertTrue(row.veto.truePositives <= all.deterministic.truePositives
+                       && row.veto.falsePositives <= all.deterministic.falsePositives, "A veto only removes deterministic links")
+            assertTrue(row.rescue.truePositives >= all.deterministic.truePositives, "A rescue only adds links")
+        }
+        assertEqual(all.rows.last?.embedding.falseNegatives, 0, "The widest cutoff links every comparable labeled pair")
     }
 
     static func testCapturedFingerprintReview() throws {
@@ -4123,9 +4165,144 @@ struct NewsTests {
             print("    \(split): \(items.count) articles, \(total.line), \(total.falsePositives) falsely merged pairs in \(total.impureEvents) events")
             for (language, metrics) in byLanguage.sorted(by: { $0.key < $1.key }) { print("      language \(language): \(metrics.line)") }
             for (source, metrics) in bySource.sorted(by: { $0.key < $1.key }) { print("      source \(source): \(metrics.line)") }
+            var thresholds = EventEmbeddingComparison.sweep
+            if split == "holdout" {
+                // The holdout is scored at one cutoff chosen on tune, never swept.
+                thresholds = ProcessInfo.processInfo.environment["NEWS_EMBEDDING_THRESHOLD"].flatMap { Double($0) }.map { [$0] } ?? []
+            }
+            let comparisonItems = items.map {
+                EventEmbeddingComparison.Item(title: $0.title, description: $0.description ?? "", date: $0.published,
+                                              event: $0.event, membership: memberships[$0.id])
+            }
+            EventEmbeddingComparison(items: comparisonItems, thresholds: thresholds).report(split: split)
             results[split] = total
         }
         return results
+    }
+
+    /// Native sentence embeddings against deterministic matching on the same labeled pairs (#127).
+    /// Evaluation only: production matching uses no embeddings. Vectors are compared only within one
+    /// language, because separate language models share no vector space, and only inside the matcher's
+    /// time window, where a deterministic link is possible at all. "Veto" keeps a deterministic link
+    /// only when the embeddings agree; "rescue" adds embedding links to it. Scores are pairwise and skip
+    /// the whole-event check, so a rescue row overstates what clustering would accept.
+    struct EventEmbeddingComparison {
+        struct Item {
+            let title: String, description: String, date: Date, event: String?, membership: String?
+        }
+        struct Row {
+            let threshold: Double
+            var embedding = EventCorpusMetrics(), veto = EventCorpusMetrics(), rescue = EventCorpusMetrics()
+        }
+        struct Scores {
+            var deterministic = EventCorpusMetrics()
+            var rows: [Row]
+        }
+        struct Support {
+            var articles = 0
+            /// Nil when the system has no sentence embedding for the language.
+            let dimension: Int?
+        }
+
+        /// Cosine-distance cutoffs swept on the tune split.
+        static let sweep = [0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
+
+        let thresholds: [Double]
+        /// Detected languages; articles without a confident language are only counted.
+        var languages: [String: Support] = [:]
+        var undetected = 0
+        /// Per language, plus "all".
+        var scores: [String: Scores] = [:]
+        /// Labeled or deterministically linked pairs left out of the comparison, by reason.
+        var notCompared: [String: Int] = [:]
+
+        init(items: [Item], thresholds: [Double], window: TimeInterval = EventMatchPolicy.standard.maximumTimeGap,
+             model: (NLLanguage) -> NLEmbedding? = { NLEmbedding.sentenceEmbedding(for: $0) }) {
+            self.thresholds = thresholds
+            var models: [String: NLEmbedding] = [:]
+            var codes: [String?] = [], vectors: [[Double]?] = []
+            for item in items {
+                // As in the deterministic features: the title and the start of the plain description.
+                let description = String(item.description.replacingOccurrences(of: "<[^>]*>", with: " ", options: .regularExpression)
+                    .prefix(EventFeatures.descriptionPrefix))
+                let language = EventMatchKey.language(of: item.title + "\n" + item.description)
+                codes.append(language)
+                guard let code = language else {
+                    undetected += 1
+                    vectors.append(nil)
+                    continue
+                }
+                if languages[code] == nil {
+                    let embedding = model(NLLanguage(rawValue: code))
+                    models[code] = embedding
+                    languages[code] = Support(dimension: embedding?.dimension)
+                }
+                languages[code]?.articles += 1
+                vectors.append(models[code]?.vector(for: item.title + "\n" + description))
+            }
+
+            let empty = Scores(rows: thresholds.map { Row(threshold: $0) })
+            for i in items.indices {
+                for j in items.indices where j > i {
+                    let gold = items[i].event != nil && items[i].event == items[j].event
+                    let linked = items[i].membership != nil && items[i].membership == items[j].membership
+                    var reason: String?
+                    if codes[i] == nil || codes[j] == nil { reason = "unknown language" }
+                    else if codes[i] != codes[j] { reason = "cross-language" }
+                    else if abs(items[i].date.timeIntervalSince(items[j].date)) > window { reason = "outside time window" }
+                    else if vectors[i] == nil || vectors[j] == nil { reason = "no sentence embedding" }
+                    guard reason == nil, let code = codes[i], let left = vectors[i], let right = vectors[j] else {
+                        if gold || linked, let reason { notCompared[reason, default: 0] += 1 }
+                        continue
+                    }
+                    let distance = Self.cosineDistance(left, right)
+                    for key in [code, "all"] {
+                        var entry = scores[key] ?? empty
+                        entry.deterministic.add(predicted: linked, gold: gold)
+                        for index in entry.rows.indices {
+                            let close = distance <= entry.rows[index].threshold
+                            entry.rows[index].embedding.add(predicted: close, gold: gold)
+                            entry.rows[index].veto.add(predicted: linked && close, gold: gold)
+                            entry.rows[index].rescue.add(predicted: linked || close, gold: gold)
+                        }
+                        scores[key] = entry
+                    }
+                }
+            }
+        }
+
+        static func cosineDistance(_ left: [Double], _ right: [Double]) -> Double {
+            var dot = 0.0, leftNorm = 0.0, rightNorm = 0.0
+            for (x, y) in zip(left, right) {
+                dot += x * y
+                leftNorm += x * x
+                rightNorm += y * y
+            }
+            guard leftNorm > 0, rightNorm > 0 else { return 2 }
+            return 1 - dot / (leftNorm * rightNorm).squareRoot()
+        }
+
+        func report(split: String) {
+            let skipped = notCompared.sorted(by: { $0.key < $1.key }).map { "\($0.key) \($0.value)" }.joined(separator: ", ")
+            print("    \(split) embeddings (#127): labeled or linked pairs not compared: \(skipped.isEmpty ? "none" : skipped)")
+            for (code, support) in languages.sorted(by: { $0.key < $1.key }) {
+                let model = support.dimension.map { "\($0)-dimensional sentence embedding" } ?? "no sentence embedding"
+                print("      language \(code): \(support.articles) articles, \(model)")
+            }
+            if undetected > 0 { print("      \(undetected) articles without a confident language") }
+            let keys = ["all"] + scores.keys.filter({ $0 != "all" }).sorted()
+            for key in keys {
+                guard let entry = scores[key] else { continue }
+                print("      \(key) deterministic: \(entry.deterministic.line)")
+                for row in entry.rows {
+                    let cutoff = String(format: "%.2f", row.threshold)
+                    print("        distance ≤ \(cutoff) embedding: \(row.embedding.line)")
+                    print("        distance ≤ \(cutoff) veto: \(row.veto.line)")
+                    print("        distance ≤ \(cutoff) rescue: \(row.rescue.line)")
+                }
+            }
+            if thresholds.isEmpty { print("      Set NEWS_EMBEDDING_THRESHOLD to the cutoff chosen on tune to score embeddings on \(split)") }
+        }
     }
 
     static func testArticleRetentionPolicy() async {
