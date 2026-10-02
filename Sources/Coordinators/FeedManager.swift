@@ -50,6 +50,12 @@ class FeedManager: NSObject, ObservableObject {
     private var needsClusteringPass = false
     private var backgroundTimer: Timer?
     private var backgroundActivity: NSBackgroundActivityScheduler?
+    private var powerObservers: [AnyCancellable] = []
+    private var wakeTask: Task<Void, Never>?
+    private var refreshInterruptedBySleep = false
+    private var lastRefreshCompletedAt: Date?
+    private let wakeRefreshDelay: Duration
+    private let now: () -> Date
 
     // Backward-compatibility forwarders for existing UI / View bindings
     var feedURLs: [String] { appSettings.feedURLs }
@@ -67,7 +73,10 @@ class FeedManager: NSObject, ObservableObject {
          allowsBackgroundWork: @escaping @MainActor () -> Bool = {
              let info = ProcessInfo.processInfo
              return !info.isLowPowerModeEnabled && info.thermalState.rawValue < ProcessInfo.ThermalState.serious.rawValue
-         }) {
+         },
+         powerEvents: NotificationCenter? = nil,
+         wakeRefreshDelay: Duration = .seconds(10),
+         now: @escaping () -> Date = { Date() }) {
         let store = store ?? ArticleStore.shared
         let state = store.database
         self.appSettings = settings ?? AppSettings.shared
@@ -78,6 +87,8 @@ class FeedManager: NSObject, ObservableObject {
         self.notifyBatch = notifyBatch
         self.enrichmentQueue = enrichmentQueue ?? EnrichmentQueue(store: store)
         self.allowsBackgroundWork = allowsBackgroundWork
+        self.wakeRefreshDelay = wakeRefreshDelay
+        self.now = now
         super.init()
         storeUpdates = articleStore.$articles.sink { [weak self] articles in
             self?.articles = articles
@@ -86,6 +97,17 @@ class FeedManager: NSObject, ObservableObject {
             .sink { [weak self] _ in
                 MainActor.assumeIsolated { self?.stopBackgroundWork() }
             }
+        // NSWorkspace posts sleep and wake on the main thread.
+        if let center = powerEvents ?? (schedulesRefresh ? NSWorkspace.shared.notificationCenter : nil) {
+            powerObservers = [
+                center.publisher(for: NSWorkspace.willSleepNotification).sink { [weak self] _ in
+                    MainActor.assumeIsolated { self?.systemWillSleep() }
+                },
+                center.publisher(for: NSWorkspace.didWakeNotification).sink { [weak self] _ in
+                    MainActor.assumeIsolated { self?.systemDidWake() }
+                }
+            ]
+        }
         loadCachedArticles()
         if schedulesRefresh { startBackgroundFetch() }
     }
@@ -226,11 +248,7 @@ class FeedManager: NSObject, ObservableObject {
         let intervalSeconds = appSettings.fetchIntervalMinutes * 60
 
         // 1. Foreground Timer: regular updates while application is active
-        backgroundTimer = Timer.scheduledTimer(withTimeInterval: intervalSeconds, repeats: true) { [weak self] _ in
-            Task { @MainActor [weak self] in
-                await self?.fetchFeedsAsync()
-            }
-        }
+        scheduleForegroundTimer()
 
         // 2. NSBackgroundActivityScheduler: opportunistic background execution
         // Stable persistent identifier as required by Apple scheduling heuristics
@@ -259,6 +277,50 @@ class FeedManager: NSObject, ObservableObject {
         self.backgroundActivity = activity
     }
 
+    private func scheduleForegroundTimer() {
+        backgroundTimer?.invalidate()
+        backgroundTimer = Timer.scheduledTimer(withTimeInterval: appSettings.fetchIntervalMinutes * 60, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                await self?.fetchFeedsAsync()
+            }
+        }
+    }
+
+    // MARK: - Sleep and Wake
+
+    /// Requests cut off by sleep would be recorded as feed failures and back healthy feeds off.
+    /// A cancelled refresh records nothing; it is repeated after wake.
+    private func systemWillSleep() {
+        wakeTask?.cancel()
+        wakeTask = nil
+        guard refreshTask != nil else { return }
+        refreshInterruptedBySleep = true
+        cancelRefresh()
+    }
+
+    /// Timers do not advance while the Mac sleeps. After wake, give the network a moment, refresh once if a
+    /// refresh was interrupted or the last one is older than the interval, and count the next interval from there.
+    private func systemDidWake() {
+        guard !isStopped else { return }
+        wakeTask?.cancel()
+        wakeTask = Task { [weak self, wakeRefreshDelay] in
+            try? await Task.sleep(for: wakeRefreshDelay)
+            guard let self, !Task.isCancelled, !self.isStopped, self.needsRefreshAfterWake else { return }
+            if self.backgroundTimer != nil { self.scheduleForegroundTimer() }
+            await self.fetchFeedsAsync()
+        }
+    }
+
+    private var needsRefreshAfterWake: Bool {
+        guard !refreshInterruptedBySleep, let last = lastRefreshCompletedAt else { return true }
+        return now().timeIntervalSince(last) >= appSettings.fetchIntervalMinutes * 60
+    }
+
+    /// Resolves once the check after the latest wake, and any refresh it started, has finished.
+    func waitForWakeRefresh() async {
+        await wakeTask?.value
+    }
+
     // MARK: - Ingestion Pipeline
 
     func fetchFeeds() {
@@ -279,6 +341,8 @@ class FeedManager: NSObject, ObservableObject {
         backgroundTimer = nil
         backgroundActivity?.invalidate()
         backgroundActivity = nil
+        wakeTask?.cancel()
+        wakeTask = nil
         cancelRefresh()
         enrichmentTask?.cancel()
         enrichmentTask = nil
@@ -310,6 +374,8 @@ class FeedManager: NSObject, ObservableObject {
         refreshTask = nil
         refreshRunID = nil
         isAnyFeedLoading = false
+        lastRefreshCompletedAt = now()
+        refreshInterruptedBySleep = false
 
         guard !isStopped else { return }
         clusterEventsInBackground()
