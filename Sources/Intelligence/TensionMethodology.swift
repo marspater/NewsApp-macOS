@@ -365,3 +365,238 @@ enum TensionDayAssessor {
                                     isProvisional: methodology.isProvisional(day, now: now), events: events)
     }
 }
+
+// MARK: - Calibration and Scoring (#158)
+
+/// Calibrated weights and parameters derived from the historical sample corpus (Issue #158).
+struct TensionWeights: Equatable, Codable, Sendable {
+    let typeWeights: [TensionEventType: Double]
+    let deathMultipliers: [TensionMagnitude: Double]
+    let affectedMultipliers: [TensionMagnitude: Double]
+    let escalationMultipliers: [TensionEscalation: Double]
+    let breadthMultipliers: [Int: Double]
+    let scaleFactor: Double
+    let smoothingAlpha: Double
+
+    init(
+        typeWeights: [TensionEventType: Double],
+        deathMultipliers: [TensionMagnitude: Double],
+        affectedMultipliers: [TensionMagnitude: Double],
+        escalationMultipliers: [TensionEscalation: Double],
+        breadthMultipliers: [Int: Double],
+        scaleFactor: Double,
+        smoothingAlpha: Double
+    ) {
+        self.typeWeights = typeWeights
+        self.deathMultipliers = deathMultipliers
+        self.affectedMultipliers = affectedMultipliers
+        self.escalationMultipliers = escalationMultipliers
+        self.breadthMultipliers = breadthMultipliers
+        self.scaleFactor = scaleFactor
+        self.smoothingAlpha = smoothingAlpha
+    }
+
+    static let calibratedV1 = TensionWeights(
+        typeWeights: [
+            .armedConflict: 10.0,
+            .terrorism: 8.0,
+            .disaster: 6.0,
+            .civilUnrest: 4.0,
+            .coercion: 4.0,
+            .healthEmergency: 4.0,
+            .cyberAttack: 3.0
+        ],
+        deathMultipliers: [
+            .notReported: 1.0,
+            .units: 1.2,
+            .tens: 1.5,
+            .hundreds: 2.0,
+            .thousands: 2.5
+        ],
+        affectedMultipliers: [
+            .notReported: 1.0,
+            .units: 1.1,
+            .tens: 1.25,
+            .hundreds: 1.5,
+            .thousands: 2.0
+        ],
+        escalationMultipliers: [
+            .noSignal: 1.0,
+            .escalating: 1.3,
+            .deescalating: 0.7,
+            .mixed: 1.0
+        ],
+        breadthMultipliers: [
+            1: 0.85,
+            2: 1.0,
+            3: 1.15,
+            4: 1.30
+        ],
+        scaleFactor: 25.0,
+        smoothingAlpha: 0.25
+    )
+
+    func magnitudeMultiplier(deaths: TensionMagnitude, affected: TensionMagnitude) -> Double {
+        let dMult = deathMultipliers[deaths] ?? 1.0
+        let aMult = affectedMultipliers[affected] ?? 1.0
+        return max(dMult, aMult)
+    }
+
+    func breadthMultiplier(regionCount: Int) -> Double {
+        if regionCount <= 1 { return breadthMultipliers[1] ?? 0.85 }
+        if regionCount == 2 { return breadthMultipliers[2] ?? 1.0 }
+        if regionCount == 3 { return breadthMultipliers[3] ?? 1.15 }
+        return breadthMultipliers[4] ?? 1.30
+    }
+
+    /// Continuous monotonic scaling: maps raw event score sums into a 0...100 index.
+    func scaleRawScore(_ raw: Double) -> Double {
+        guard raw > 0 else { return 0.0 }
+        let scaled = 100.0 * (1.0 - exp(-raw / scaleFactor))
+        return min(100.0, max(0.0, scaled))
+    }
+}
+
+/// Scoring breakdown for a single unique event on an observation day.
+struct TensionEventScore: Equatable, Sendable {
+    let key: String
+    let rawScore: Double
+    let typeWeight: Double
+    let magnitudeMultiplier: Double
+    let escalationMultiplier: Double
+    let breadthMultiplier: Double
+
+    init(
+        key: String,
+        rawScore: Double,
+        typeWeight: Double,
+        magnitudeMultiplier: Double,
+        escalationMultiplier: Double,
+        breadthMultiplier: Double
+    ) {
+        self.key = key
+        self.rawScore = rawScore
+        self.typeWeight = typeWeight
+        self.magnitudeMultiplier = magnitudeMultiplier
+        self.escalationMultiplier = escalationMultiplier
+        self.breadthMultiplier = breadthMultiplier
+    }
+}
+
+/// Scored evaluation of an observation day with raw, calibrated, and smoothed indices.
+struct TensionDayScore: Equatable, Sendable {
+    let day: DateInterval
+    let coverageStatus: TensionCoverage.Status
+    /// Nil when coverage is insufficient or noData: gaps are never zero.
+    let rawDailyScore: Double?
+    /// Continuous index in [0, 100], or nil when coverage is insufficient.
+    let calibratedIndex: Double?
+    /// Trailing 7-day EMA smoothing, or nil when coverage is insufficient.
+    let smoothedIndex: Double?
+    let eventScores: [TensionEventScore]
+    let isProvisional: Bool
+
+    init(
+        day: DateInterval,
+        coverageStatus: TensionCoverage.Status,
+        rawDailyScore: Double?,
+        calibratedIndex: Double?,
+        smoothedIndex: Double?,
+        eventScores: [TensionEventScore],
+        isProvisional: Bool
+    ) {
+        self.day = day
+        self.coverageStatus = coverageStatus
+        self.rawDailyScore = rawDailyScore
+        self.calibratedIndex = calibratedIndex
+        self.smoothedIndex = smoothedIndex
+        self.eventScores = eventScores
+        self.isProvisional = isProvisional
+    }
+}
+
+enum TensionCalibrator {
+    static func scoreEvent(_ event: TensionEventDay, weights: TensionWeights = .calibratedV1) -> TensionEventScore {
+        guard let type = event.classification.type else {
+            return TensionEventScore(
+                key: event.key,
+                rawScore: 0.0,
+                typeWeight: 0.0,
+                magnitudeMultiplier: 1.0,
+                escalationMultiplier: 1.0,
+                breadthMultiplier: 1.0
+            )
+        }
+        let tWeight = weights.typeWeights[type] ?? 0.0
+        let mMult = weights.magnitudeMultiplier(deaths: event.classification.deaths, affected: event.classification.affected)
+        let eMult = weights.escalationMultipliers[event.classification.escalation] ?? 1.0
+        let regions = Set(event.reporting.map(\.region))
+        let bMult = weights.breadthMultiplier(regionCount: regions.count)
+        let raw = tWeight * mMult * eMult * bMult
+        return TensionEventScore(
+            key: event.key,
+            rawScore: raw,
+            typeWeight: tWeight,
+            magnitudeMultiplier: mMult,
+            escalationMultiplier: eMult,
+            breadthMultiplier: bMult
+        )
+    }
+
+    static func scoreDay(
+        assessment: TensionDayAssessment,
+        previousSmoothedIndex: Double? = nil,
+        weights: TensionWeights = .calibratedV1
+    ) -> TensionDayScore {
+        guard assessment.coverage.status == .sufficient else {
+            return TensionDayScore(
+                day: assessment.day,
+                coverageStatus: assessment.coverage.status,
+                rawDailyScore: nil,
+                calibratedIndex: nil,
+                smoothedIndex: nil,
+                eventScores: [],
+                isProvisional: assessment.isProvisional
+            )
+        }
+
+        let eventScores = assessment.events.map { scoreEvent($0, weights: weights) }
+        let rawDaily = eventScores.reduce(0.0) { $0 + $1.rawScore }
+        let calibrated = weights.scaleRawScore(rawDaily)
+
+        let smoothed: Double
+        if let prev = previousSmoothedIndex {
+            smoothed = weights.smoothingAlpha * calibrated + (1.0 - weights.smoothingAlpha) * prev
+        } else {
+            smoothed = calibrated
+        }
+
+        return TensionDayScore(
+            day: assessment.day,
+            coverageStatus: assessment.coverage.status,
+            rawDailyScore: rawDaily,
+            calibratedIndex: calibrated,
+            smoothedIndex: smoothed,
+            eventScores: eventScores,
+            isProvisional: assessment.isProvisional
+        )
+    }
+
+    static func scoreSeries(
+        assessments: [TensionDayAssessment],
+        weights: TensionWeights = .calibratedV1
+    ) -> [TensionDayScore] {
+        var results: [TensionDayScore] = []
+        var lastSmoothed: Double? = nil
+        let sorted = assessments.sorted { $0.day.start < $1.day.start }
+        for assessment in sorted {
+            let dayScore = scoreDay(assessment: assessment, previousSmoothedIndex: lastSmoothed, weights: weights)
+            if let s = dayScore.smoothedIndex {
+                lastSmoothed = s
+            }
+            results.append(dayScore)
+        }
+        return results
+    }
+}
+

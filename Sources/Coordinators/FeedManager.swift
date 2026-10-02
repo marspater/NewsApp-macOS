@@ -194,6 +194,10 @@ class FeedManager: NSObject, ObservableObject {
         appSettings.setPrivateNotificationsEnabled(enabled)
     }
 
+    func setTensionCollectionOptIn(_ enabled: Bool) {
+        appSettings.setTensionCollectionOptIn(enabled)
+    }
+
     // MARK: - Section Keyword Matching
 
     func articles(for section: String) -> [FeedArticle] {
@@ -390,10 +394,11 @@ class FeedManager: NSObject, ObservableObject {
     }
 
     private func performRefreshPipeline() async -> [FeedArticle] {
-        let signpostState = NewsSignposts.begin(NewsSignposts.feeds, name: "RefreshFeeds", metadata: "feeds=\(appSettings.feedURLs.count)")
+        let targetURLs = appSettings.effectiveFeedURLs
+        let signpostState = NewsSignposts.begin(NewsSignposts.feeds, name: "RefreshFeeds", metadata: "feeds=\(targetURLs.count)")
         defer { NewsSignposts.end(NewsSignposts.feeds, name: "RefreshFeeds", state: signpostState) }
 
-        for url in appSettings.feedURLs {
+        for url in targetURLs {
             if case .failed(let err) = feedStatuses[url], case .blockedHost = err {
                 continue
             }
@@ -402,13 +407,13 @@ class FeedManager: NSObject, ObservableObject {
         isAnyFeedLoading = true
 
 
-        let results = await fetchBatch(appSettings.feedURLs, appSettings.allowInsecureHTTP)
+        let results = await fetchBatch(targetURLs, appSettings.allowInsecureHTTP)
 
         var insertedIDs = Set<String>()
         var allParsed = [FeedArticle]()
         for res in results {
             guard !Task.isCancelled else { return [] }
-            guard appSettings.feedURLs.contains(res.urlString) else { continue }
+            guard targetURLs.contains(res.urlString) else { continue }
             if let err = res.error {
                 feedStatuses[res.urlString] = .failed(err)
             } else {
@@ -429,7 +434,12 @@ class FeedManager: NSObject, ObservableObject {
         allParsed.sort { $0.pubDate > $1.pubDate }
 
         var notifiedIDs = Set<String>()
-        let newArticles = allParsed.filter { insertedIDs.contains($0.id) && notifiedIDs.insert($0.id).inserted }
+        let userSubscribed = Set(appSettings.feedURLs)
+        let newArticles = allParsed.filter {
+            insertedIDs.contains($0.id) &&
+            userSubscribed.contains($0.identityFeedURL ?? "") &&
+            notifiedIDs.insert($0.id).inserted
+        }
 
         do {
             let stored = try await articleStore.fetchArticles()
