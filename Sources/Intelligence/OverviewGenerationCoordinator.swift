@@ -26,8 +26,18 @@ actor OverviewGenerationCoordinator {
     static let shared = OverviewGenerationCoordinator()
     private let logger = Logger(subsystem: "com.marspater.news", category: "OverviewCoordinator")
 
+    /// A running generation and the inputs it was started from.
+    private struct InFlightGeneration {
+        let task: Task<EventOverviewDocument?, Never>
+        let membershipVersion: Int
+        let inputTextHash: String
+    }
+
     private var memoryCache: [String: EventOverviewDocument] = [:]
-    private var inFlightTasks: [String: Task<EventOverviewDocument?, Never>] = [:]
+    private var inFlightTasks: [String: InFlightGeneration] = [:]
+    /// The inputs of the most recent request per event. Only a result built from them may be committed:
+    /// an article edit changes the input hash without bumping the membership version.
+    private var latestRequestedInputs: [String: (membershipVersion: Int, inputTextHash: String)] = [:]
     private var currentVisibleEventID: String?
 
     private let store: ArticleStore?
@@ -57,6 +67,7 @@ actor OverviewGenerationCoordinator {
         )
         let sortedFingerprints = selection.passages.map { $0.fingerprint }.sorted().joined(separator: ":")
         let inputTextHash = ArticleIdentity.sha256Hex(sortedFingerprints.isEmpty ? eventTitle : sortedFingerprints)
+        latestRequestedInputs[eventID] = (membershipVersion, inputTextHash)
 
         // 1. Check memory cache first
         if let cached = memoryCache[eventID],
@@ -76,9 +87,13 @@ actor OverviewGenerationCoordinator {
             return stored
         }
 
-        // 3. Return existing in-flight task if identical request is already running
+        // 3. Join a running generation only if it was started from the same inputs; otherwise it is superseded
         if let running = inFlightTasks[eventID] {
-            return await running.value
+            if running.membershipVersion == membershipVersion && running.inputTextHash == inputTextHash {
+                return await running.task.value
+            }
+            running.task.cancel()
+            inFlightTasks.removeValue(forKey: eventID)
         }
 
         let passages = selection.passages
@@ -117,32 +132,44 @@ actor OverviewGenerationCoordinator {
             guard let generated = document, !Task.isCancelled else { return nil }
 
             // Stale check before saving: a stale result never overwrites a newer version
-            await self.commitGeneratedOverview(
+            let isCurrent = await self.commitGeneratedOverview(
                 generated,
                 eventID: eventID,
                 membershipVersion: membershipVersion,
+                inputTextHash: inputTextHash,
                 targetStore: targetStore
             )
-
-            return generated
+            return isCurrent ? generated : nil
         }
 
-        inFlightTasks[eventID] = task
+        inFlightTasks[eventID] = InFlightGeneration(task: task, membershipVersion: membershipVersion, inputTextHash: inputTextHash)
         let result = await task.value
-        inFlightTasks.removeValue(forKey: eventID)
+        // A newer request may have replaced this entry while it ran.
+        if inFlightTasks[eventID]?.task == task {
+            inFlightTasks.removeValue(forKey: eventID)
+        }
         return result
     }
 
+    /// Returns false when the result was built from superseded inputs and must not reach the caller.
     private func commitGeneratedOverview(
         _ document: EventOverviewDocument,
         eventID: String,
         membershipVersion: Int,
+        inputTextHash: String,
         targetStore: ArticleStore
-    ) async {
+    ) async -> Bool {
+        // A result from inputs that are no longer the latest requested is stale, even at the same membership version
+        if let latest = latestRequestedInputs[eventID],
+           latest.membershipVersion != membershipVersion || latest.inputTextHash != inputTextHash {
+            logger.info("Dropping overview result for \(eventID) built from superseded inputs")
+            return false
+        }
+
         // If memory cache already holds a newer membership version, drop stale result
         if let existing = memoryCache[eventID], existing.membershipVersion > membershipVersion {
             logger.info("Dropping stale overview result for \(eventID): v\(membershipVersion) < current v\(existing.membershipVersion)")
-            return
+            return true
         }
 
         // DatabaseEngine also atomically prevents an older result from overwriting newer
@@ -151,6 +178,7 @@ actor OverviewGenerationCoordinator {
             memoryCache[eventID] = document
             logger.debug("Committed overview for event \(eventID) v\(membershipVersion)")
         }
+        return true
     }
 
     // MARK: - Visible Event Management & Automatic Cancellation
@@ -187,8 +215,8 @@ actor OverviewGenerationCoordinator {
 
     /// Cancels generation when the reader closes or event changes.
     func cancel(eventID: String, reason: EnrichmentCancellationReason = .user) {
-        if let task = inFlightTasks.removeValue(forKey: eventID) {
-            task.cancel()
+        if let running = inFlightTasks.removeValue(forKey: eventID) {
+            running.task.cancel()
         }
         Task {
             await queue.cancelOverview(eventID: eventID, reason: reason)
@@ -198,11 +226,16 @@ actor OverviewGenerationCoordinator {
 
     /// Cancels all in-flight overview generations.
     func cancelAll() {
-        for (_, task) in inFlightTasks {
-            task.cancel()
+        for (_, running) in inFlightTasks {
+            running.task.cancel()
         }
         inFlightTasks.removeAll()
         logger.info("Cancelled all in-flight overview generation tasks")
+    }
+
+    /// The input hash of the generation running for an event, if any.
+    func inFlightInputHash(for eventID: String) -> String? {
+        inFlightTasks[eventID]?.inputTextHash
     }
 
     // MARK: - Cache Access

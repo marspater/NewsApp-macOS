@@ -278,6 +278,7 @@ struct NewsTests {
             try await testOverviewCompositionFromVerifiedFacts(fixtureHost: fixtureHost)
             try await testOverviewQualityAuditAndReleaseGate(fixtureHost: fixtureHost)
             try await testOnDemandOverviewGenerationAndCaching(fixtureHost: fixtureHost)
+            try await testOverviewGenerationCancellationAndSupersession(fixtureHost: fixtureHost)
             try await testDeterministicClaimVerification(fixtureHost: fixtureHost)
             try await testEventOverviewReaderMode(fixtureHost: fixtureHost)
             try await testOverviewTimeline(fixtureHost: fixtureHost)
@@ -360,6 +361,7 @@ struct NewsTests {
         try await testOverviewCompositionFromVerifiedFacts(fixtureHost: fixtureHost)
         try await testOverviewQualityAuditAndReleaseGate(fixtureHost: fixtureHost)
         try await testOnDemandOverviewGenerationAndCaching(fixtureHost: fixtureHost)
+        try await testOverviewGenerationCancellationAndSupersession(fixtureHost: fixtureHost)
         try await testDeterministicClaimVerification(fixtureHost: fixtureHost)
         try await testEventOverviewReaderMode(fixtureHost: fixtureHost)
         try await testOverviewTimeline(fixtureHost: fixtureHost)
@@ -7446,6 +7448,77 @@ struct NewsTests {
         let storedDoc = try await db.fetchEventOverview(eventID: "event-phosphine")
         assertEqual(storedDoc?.membershipVersion, 2, "Stored overview retains newer version 2")
         assertFalse(storedDoc?.id == "doc-stale-v1", "Stale v1 document did not overwrite newer version")
+    }
+
+    /// #154: a reader closed during generation stores nothing, and an article edited during generation
+    /// supersedes the running generation even though the event's membership version is unchanged.
+    @MainActor
+    static func testOverviewGenerationCancellationAndSupersession(fixtureHost: String) async throws {
+        print("  - Testing overview generation cancelled by the reader and superseded by an article edit...")
+        func report(_ index: Int, _ text: String) -> FeedArticle {
+            FeedArticle(storedID: "art-edit-\(index)", title: "Harbour bridge inspection \(index)",
+                link: "https://\(fixtureHost)/harbour/bridge-\(index)", guid: "g-edit-\(index)", description: text,
+                pubDate: Date(timeIntervalSince1970: 1700000000 + Double(index) * 600), source: "Publisher \(index)", fullContent: text)
+        }
+        let articles = [
+            report(1, "Engineers closed the harbour bridge after inspectors found corrosion in two main support cables."),
+            report(2, "The city transport office said ferries would run every twenty minutes while the bridge stays closed."),
+            report(3, "Inspectors expect to publish a full assessment of the cable corrosion within three weeks.")
+        ]
+        var editedArticles = articles
+        editedArticles[1] = report(2, "The city transport office corrected its notice: ferries will run every ten minutes while the bridge stays closed.")
+
+        let db = DatabaseEngine(path: ":memory:")
+        try await db.open()
+        _ = try await db.upsertArticles(articles)
+        let store = ArticleStore(database: db)
+        let queue = EnrichmentQueue(store: store)
+        let coordinator = OverviewGenerationCoordinator(store: store, queue: queue)
+
+        // Fill the bounded queue so requests stay in flight until the gate opens.
+        let hold = OpenGate()
+        for index in 0..<3 {
+            Task { _ = await queue.scheduleOverviewGeneration(eventID: "hold-\(index)") { await hold.wait(); return nil } }
+        }
+        await eventually("Held generations fill the overview queue") { await queue.activeJobCount() == 3 }
+
+        // Reader closed during generation
+        let closed = Task {
+            await coordinator.requestOverview(eventID: "event-closed", eventTitle: "Harbour bridge closed", membershipVersion: 1, articles: articles)
+        }
+        await eventually("The request waits in the queue") { await coordinator.inFlightInputHash(for: "event-closed") != nil }
+        await coordinator.cancel(eventID: "event-closed")
+        let closedResult = await closed.value
+        assertTrue(closedResult == nil, "A generation cancelled when the reader closes returns no overview")
+        assertTrue(await coordinator.inFlightInputHash(for: "event-closed") == nil, "Nothing stays in flight after the reader closes")
+        assertTrue(try await db.fetchEventOverview(eventID: "event-closed") == nil, "A cancelled generation stores nothing")
+
+        // Article edited during generation, same membership version
+        let original = Task {
+            await coordinator.requestOverview(eventID: "event-edited", eventTitle: "Harbour bridge closed", membershipVersion: 1, articles: articles)
+        }
+        await eventually("The original request waits in the queue") { await coordinator.inFlightInputHash(for: "event-edited") != nil }
+        let originalHash = await coordinator.inFlightInputHash(for: "event-edited")
+        let edited = Task {
+            await coordinator.requestOverview(eventID: "event-edited", eventTitle: "Harbour bridge closed", membershipVersion: 1, articles: editedArticles)
+        }
+        await eventually("The request after the edit replaces the running generation") {
+            let hash = await coordinator.inFlightInputHash(for: "event-edited")
+            return hash != nil && hash != originalHash
+        }
+        let editedHash = await coordinator.inFlightInputHash(for: "event-edited")
+        await hold.open()
+
+        let originalResult = await original.value
+        let editedResult = await edited.value
+        assertTrue(originalHash != nil && editedHash != nil && originalHash != editedHash, "Editing an article changes the overview inputs")
+        assertTrue(originalResult == nil, "A generation from the article's earlier text is superseded, not returned")
+        assertEqual(editedResult?.inputTextHash, editedHash, "The request after the edit receives an overview of the edited text")
+        assertEqual(editedResult?.membershipVersion, 1, "The edit does not change the membership version")
+        let stored = try await db.fetchEventOverview(eventID: "event-edited")
+        assertEqual(stored?.inputTextHash, editedHash, "Only the overview of the edited text is stored")
+        assertEqual(stored?.id, editedResult?.id, "The stored overview is the one returned for the edit")
+        await db.close()
     }
 
     /// Tests deterministic verification of overview claims, citations, numbers, units, currency,
