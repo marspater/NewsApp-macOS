@@ -35,6 +35,7 @@ SWIFT_SOURCES=(
     Sources/Services/IPAddressValidator.swift
     Sources/Models/ArticleIdentity.swift
     Sources/Models/EventOverview.swift
+    Sources/Models/EventFeed.swift
     Sources/Storage/DatabaseEngine.swift
     Sources/Storage/MigrationCoordinator.swift
     Sources/Storage/ArticleStore.swift
@@ -45,6 +46,8 @@ SWIFT_SOURCES=(
     Sources/Intelligence/PassageFactExtractor.swift
     Sources/Intelligence/OverviewComposer.swift
     Sources/Intelligence/EventCandidates.swift
+    Sources/Intelligence/EventMatcher.swift
+    Sources/Intelligence/EventClustering.swift
     Sources/Intelligence/ContentExtractionPipeline.swift
     Sources/Intelligence/EnrichmentQueue.swift
     Sources/Services/NetworkBoundaryProxy.swift

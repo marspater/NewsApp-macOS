@@ -20,6 +20,8 @@ final class ArticleStore: ObservableObject {
     @Published private(set) var isReady: Bool = false
     
     @Published private(set) var revision: UInt64 = 0
+    /// Bumped when clustering or the reader changes events; the feed regroups on it.
+    @Published private(set) var eventRevision: UInt64 = 0
     @Published var operationError: String?
 
     init(database: DatabaseEngine? = nil, migrationCoordinator: MigrationCoordinator? = nil) {
@@ -353,6 +355,44 @@ final class ArticleStore: ObservableObject {
         } catch {
             logger.error("Failed to prune old articles: \(error.localizedDescription)")
             return 0
+        }
+    }
+
+    // MARK: - Events
+
+    func noteEventsChanged() {
+        eventRevision &+= 1
+    }
+
+    func eventFeedSummaries(for articleIDs: [String]) async throws -> [EventFeedSummary] {
+        try await database.eventFeedSummaries(forArticles: articleIDs)
+    }
+
+    func eventMemberArticles(eventID: String) async throws -> [FeedArticle] {
+        try await database.fetchArticles(limit: nil, eventID: eventID)
+    }
+
+    /// Records the event version the reader has seen. Article read and saved state stay as they are.
+    func markEventSeen(_ eventID: String) async {
+        do {
+            let before = try await database.eventSeenVersion(eventID)
+            if try await database.markEventSeen(eventID) != before { eventRevision &+= 1 }
+        } catch {
+            logger.error("Failed to record event reading state: \(error.localizedDescription)")
+        }
+    }
+
+    /// "These are different events": a local exclusion that later refreshes and passes respect.
+    @discardableResult
+    func separateArticle(_ articleID: String, fromEvent eventID: String) async -> Bool {
+        do {
+            try await database.separateArticle(articleID, fromEvent: eventID)
+            eventRevision &+= 1
+            return true
+        } catch {
+            operationError = "This article could not be separated from the event. Please try again."
+            logger.error("Failed to separate article from event: \(error.localizedDescription)")
+            return false
         }
     }
 
