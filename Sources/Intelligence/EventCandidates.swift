@@ -44,8 +44,8 @@ struct EventMatchKey: Hashable, Sendable {
     }
 
     /// Dominant language when the recognizer is reasonably sure; nil otherwise.
-    static func language(of text: String) -> String? {
-        let recognizer = NLLanguageRecognizer()
+    static func language(of text: String, using recognizer: NLLanguageRecognizer = NLLanguageRecognizer()) -> String? {
+        recognizer.reset()
         recognizer.processString(text)
         guard let language = recognizer.dominantLanguage,
               (recognizer.languageHypotheses(withMaximum: 1)[language] ?? 0) >= 0.5 else { return nil }
@@ -93,10 +93,12 @@ enum EventCandidateFinder {
             activeSince: now.addingTimeInterval(-policy.activeEventLifetime),
             excluding: article.id, limit: policy.limit * 2)
         var candidates: [EventCandidate] = []
+        // Reset between candidates so language evidence cannot leak from the previous article.
+        let recognizer = NLLanguageRecognizer()
         for row in rows where candidates.count < policy.limit {
             try Task.checkCancellation()
             // Different languages are not compared directly; unknown languages stay eligible.
-            if let language = key.language, let other = EventMatchKey.language(of: row.title + "\n" + String(row.description.prefix(600))),
+            if let language = key.language, let other = EventMatchKey.language(of: row.title + "\n" + String(row.description.prefix(600)), using: recognizer),
                other != language { continue }
             candidates.append(EventCandidate(articleID: row.id, eventID: row.eventID))
         }

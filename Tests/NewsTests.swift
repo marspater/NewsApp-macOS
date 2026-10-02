@@ -3640,13 +3640,23 @@ struct NewsTests {
                         guid: id, description: description, pubDate: now.addingTimeInterval(-hoursAgo * 3600), source: "Publisher \(id)")
         }
         let english = "A strong earthquake struck the Lviv region overnight, officials said on Tuesday morning."
+        let german = "Ein starkes Erdbeben hat in der Nacht die Region Lviv erschüttert, berichten die Behörden am Dienstag."
+        let recognizer = NLLanguageRecognizer()
+        let languageTexts = [english, german, "", german, english, ""]
+        assertEqual(EventMatchKey.language(of: english), "en", "Language regression includes confident English")
+        assertEqual(EventMatchKey.language(of: german), "de", "Language regression includes confident German")
+        assertEqual(EventMatchKey.language(of: ""), nil, "Empty text has no detected language")
+        for text in languageTexts {
+            assertEqual(EventMatchKey.language(of: text, using: recognizer), EventMatchKey.language(of: text),
+                        "Reusing the recognizer preserves independent language results, including nil")
+        }
         let target = article("target", "Earthquake strikes Lviv region overnight", english, hoursAgo: 0)
         try await db.upsertArticles([
             target,
             article("recent", "Lviv earthquake damages homes", english, hoursAgo: 20),
             article("old", "Lviv earthquake damages homes", english, hoursAgo: 120),
             article("unrelated", "Central bank holds interest rates", "The central bank left its benchmark rate unchanged.", hoursAgo: 2),
-            article("german", "Erdbeben erschüttert Lviv", "Ein starkes Erdbeben hat in der Nacht die Region Lviv erschüttert, berichten die Behörden am Dienstag.", hoursAgo: 3),
+            article("german", "Erdbeben erschüttert Lviv", german, hoursAgo: 3),
             article("active", "Earthquake in Lviv: rescuers search buildings", english, hoursAgo: 5),
             article("closed", "Earthquake in Lviv: aftershocks expected", english, hoursAgo: 6)
         ])
