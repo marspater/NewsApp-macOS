@@ -19,6 +19,7 @@ swiftc "${TEST_OPT_FLAGS[@]}" -target $(uname -m)-apple-macos${TARGET_MACOS} \
     Sources/Models/FeedError.swift \
     Sources/Models/FeedFetchState.swift \
     Sources/Models/FeedCatalog.swift \
+    Sources/Models/MuteRules.swift \
     Sources/Services/IPAddressValidator.swift \
     Sources/Models/ArticleIdentity.swift \
     Sources/Models/EventOverview.swift \

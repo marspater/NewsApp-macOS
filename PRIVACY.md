@@ -11,6 +11,7 @@ NewsApp is engineered with a **local-first, zero-telemetry architecture**. Readi
   ~/Library/Containers/com.marspater.news/Data/Library/Application Support/com.marspater.news/news.sqlite3
   ```
 * **Separation of Concerns**: Ephemeral HTTP response caches (`URLCache`) are strictly segregated from durable user data. Clearing the HTTP cache does not alter bookmarks, read markers, or custom feed hierarchies.
+* **Muting**: Muted publisher hosts and topic words are stored in the app's local preferences and applied on your Mac; they are never sent anywhere.
 * **No Account Required**: The application does not require user registration, account creation, or cloud authentication.
 
 ---

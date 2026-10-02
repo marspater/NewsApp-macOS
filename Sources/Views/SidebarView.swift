@@ -212,8 +212,14 @@ struct SidebarView: View {
     private var inboxSection: some View {
         Section("Inbox") {
             topicRow(title: "Today", icon: "newspaper.fill", isLoading: feedManager.isAnyFeedLoading, accessibility: "Today's Articles")
-            topicRow(title: "Unread", icon: "circle.circle.fill", badge: feedManager.articles.filter { !readManager.isRead($0.id) }.count, accessibility: "Unread Articles")
+            topicRow(title: "Unread", icon: "circle.circle.fill", badge: unreadBadge, accessibility: "Unread Articles")
         }
+    }
+
+    /// Unread stories the Unread list can show: muted stories are left out, as they are from the list.
+    private var unreadBadge: Int {
+        let muting = appSettings.muteRules
+        return feedManager.articles.filter { !readManager.isRead($0.id) && (muting.isEmpty || !muting.mutes($0)) }.count
     }
     
     private var librarySection: some View {

@@ -318,6 +318,7 @@ struct NewsTests {
         try await testRefreshEndsAtCollection()
         try await testFeedCatalog()
         try await testFeedHealth()
+        try await testUserMuting()
         try await testUndatedArticleOrdering()
         try await testReaderFigures(fixtureRoot: fixtureRoot)
         await testReaderParsingRegressions()
@@ -1780,6 +1781,111 @@ struct NewsTests {
         }
         failures.forEach { print("    ✗ \($0)") }
         assertTrue(failures.isEmpty, "Every catalog feed fetches and parses (\(failures.count) of \(FeedCatalog.feeds.count) failed)")
+    }
+
+    @MainActor
+    static func testUserMuting() async throws {
+        print("  - Testing user-controlled source and topic muting...")
+        var rules = MuteRules()
+        assertEqual(rules.addSource("https://www.Example.com/world?id=1"), "example.com", "A URL mutes its publisher host")
+        assertEqual(rules.addSource("EXAMPLE.com"), nil, "A host is muted once")
+        assertEqual(MuteRules.host("not a host"), nil, "Text with spaces is not a host")
+        assertEqual(MuteRules.host("localhost"), nil, "A muted host needs a domain")
+        assertEqual(MuteRules.host("news..example.com"), nil, "Empty host labels are rejected")
+        assertTrue(rules.mutesSource(link: "https://news.example.com/a"), "A host covers its subdomains")
+        assertFalse(rules.mutesSource(link: "https://badexample.com/a"), "A host does not cover another name ending in it")
+        assertFalse(rules.mutesSource(link: "https://example.com.attacker.net/a"), "A host does not cover a name that only contains it")
+        assertFalse(rules.mutesSource(link: ""), "A story without a document URL is never source-muted")
+        assertFalse(rules.mutesTopic(title: "Example.com launches", description: ""), "Source rules never match words")
+
+        assertEqual(rules.addTopic("  Climate   change "), "Climate change", "Topics keep the reader's words with whitespace collapsed")
+        assertEqual(rules.addTopic("CLIMATE CHANGE"), nil, "A topic is muted once in any letter case")
+        assertEqual(rules.addTopic("?!"), nil, "A topic needs a word")
+        assertEqual(rules.addTopic(String(repeating: "a", count: MuteRules.topicLength + 1)), nil, "Overlong topics are rejected")
+        for topic in ["art", "Війна", "covid-19", "cafe"] { assertEqual(rules.addTopic(topic), topic, "Topic \(topic) is added") }
+        func mutesTopic(_ title: String, _ description: String = "") -> Bool {
+            rules.mutesTopic(title: title, description: description)
+        }
+        assertTrue(mutesTopic("Modern art fair opens"), "A topic matches a whole word in the headline")
+        assertTrue(mutesTopic("Gallery news", "The Art's new home"), "Topics match in the feed summary and before apostrophes")
+        assertFalse(mutesTopic("Artist wins prize"), "A topic never matches inside a longer word")
+        assertTrue(mutesTopic("Climate-change protests grow"), "Phrases match across punctuation")
+        assertFalse(mutesTopic("Climate policy change"), "Phrase words must be adjacent and in order")
+        assertTrue(mutesTopic("ВІЙНА триває"), "Matching ignores letter case beyond ASCII")
+        assertFalse(mutesTopic("Війни не буде"), "Other word forms are other words")
+        assertTrue(mutesTopic("COVID 19 cases fall"), "A hyphenated topic matches the same words")
+        assertFalse(mutesTopic("Best café in town"), "Diacritics are significant")
+        assertFalse(rules.mutesSource(link: "https://art.org/climate-change"), "Topic rules never match links")
+        assertEqual(rules.matchedTopics(title: "Art and climate change", description: ""), ["Climate change", "art"], "Each covering topic is reported")
+        assertEqual(MuteRules(sources: rules.sources, topics: rules.topics), rules, "Stored rules restore unchanged")
+
+        // SQLite applies muting before LIMIT and reports what it hid.
+        let db = DatabaseEngine(path: ":memory:")
+        try await db.open()
+        func story(_ index: Int, _ link: String, _ title: String, _ description: String = "") -> FeedArticle {
+            FeedArticle(title: title, link: link, guid: "mute-\(index)", description: description,
+                        pubDate: Date(timeIntervalSince1970: 1_700_000_000 - Double(index) * 60), source: "Publisher")
+        }
+        let stories = [
+            story(0, "https://www.example.com/0", "Example lead"),
+            story(1, "https://news.example.com/1", "Example subdomain"),
+            story(2, "https://other.org/2", "Climate change summit"),
+            story(3, "https://other.org/3", "Budget passes", "Markets react"),
+            story(4, "https://other.org/4", "Artist profile", "A gallery opening"),
+            story(5, "https://other.org/5", "Election results", "Art market shrugs"),
+            story(6, "https://other.org/6", "Weather")
+        ]
+        try await db.upsertArticles(stories)
+        let muting = MuteRules(sources: ["example.com"], topics: ["Climate change", "art"])
+        let firstPage = try await db.fetchArticles(limit: 1, muting: muting)
+        assertEqual(firstPage.map(\.id), [stories[3].id], "The first page is filled from unmuted stories, not trimmed after LIMIT")
+        let remainder = try await db.fetchArticles(limit: nil, after: ArticleQueryCursor(firstPage[0]), muting: muting)
+        assertEqual((firstPage + remainder).map(\.id), [stories[3].id, stories[4].id, stories[6].id], "Cursor pages continue over unmuted stories only")
+        assertEqual(try await db.mutedArticleCount(muting: muting), 4, "The list counts every muted story, beyond the first page")
+        assertEqual(try await db.fetchArticles(limit: nil).count, stories.count, "Nothing is hidden without rules")
+        assertEqual(try await db.mutedArticleCount(muting: MuteRules()), 0, "No rules hide no stories")
+        try await db.markRead(articleId: stories[0].id, isRead: true)
+        assertEqual(try await db.mutedArticleCount(isRead: false, muting: muting), 3, "Hidden counts use the list's own filters")
+        try await db.setSaved(articleId: stories[2].id, isSaved: true)
+        assertEqual(try await db.fetchArticles(isSaved: true).map(\.id), [stories[2].id], "Saved Stories, queried without rules, keep muted stories")
+        assertTrue(try await db.searchArticles(query: "example", muting: muting).isEmpty, "Search applies muting")
+        assertEqual(try await db.searchArticles(query: "example").count, 2, "Search without rules finds the muted stories")
+        assertEqual(try await db.mutedArticleCount(search: "example", muting: muting), 2, "Search reports how many stories muting hid")
+        let ruleCounts = try await db.mutedRuleCounts(muting)
+        assertEqual(ruleCounts.sources, ["example.com": 2], "Settings count the stories each source rule covers")
+        assertEqual(ruleCounts.topics, ["Climate change": 1, "art": 1], "Settings count the stories each topic rule covers")
+        await db.close()
+
+        // Rules persist with the reader's settings; Unmute All clears them.
+        let suite = "test.muting.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = AppSettings(defaults: defaults)
+        assertTrue(settings.muteRules.isEmpty, "Nothing is muted by default")
+        assertEqual(settings.muteSource("https://www.example.com/a"), "example.com", "Settings mute a host from a story link")
+        assertEqual(settings.muteSource("example.com"), nil, "A muted host is not added twice")
+        assertEqual(settings.muteTopic("Election"), "Election", "Settings mute a topic")
+        assertEqual(AppSettings(defaults: defaults).muteRules, settings.muteRules, "Muting persists across launches")
+        settings.unmuteTopic("Election")
+        assertEqual(AppSettings(defaults: defaults).muteRules.topics, [], "Unmuting a topic is stored")
+        settings.clearMuting()
+        assertTrue(AppSettings(defaults: defaults).muteRules.isEmpty, "Unmute All clears the stored rules")
+
+        // Muted stories never notify.
+        settings.feedURLs = ["https://other.org/feed.xml"]
+        settings.aiEnabled = false
+        settings.notificationsEnabled = true
+        settings.muteSource("example.com")
+        let store = ArticleStore(database: DatabaseEngine(path: ":memory:"))
+        await store.initialize()
+        var notified: [String] = []
+        let manager = FeedManager(settings: settings, store: store, schedulesRefresh: false,
+            fetchBatch: { urls, _ in urls.map { ($0, [stories[0], stories[3]], nil, nil) } },
+            notifyBatch: { articles, _ in notified.append(contentsOf: articles.map(\.title)) })
+        await manager.fetchFeedsAsync()
+        assertEqual(notified, [stories[3].title], "Only unmuted new stories notify")
+        assertEqual(manager.articles.count, 2, "Muted stories are still stored")
+        manager.stopBackgroundWork()
     }
 
     @MainActor

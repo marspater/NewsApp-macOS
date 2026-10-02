@@ -15,6 +15,8 @@ final class AppSettings: ObservableObject {
     static let privateNotificationsEnabledKey = "private_notifications_enabled"
     static let notificationModeKey = "notification_mode"
     static let allowInsecureHTTPKey = "allow_insecure_http"
+    static let mutedSourcesKey = "muted_sources"
+    static let mutedTopicsKey = "muted_topics"
 
     enum NotificationMode: String, CaseIterable, Identifiable, Sendable {
         case full = "full"         // Headlines + snippets + images
@@ -63,6 +65,8 @@ final class AppSettings: ObservableObject {
     @Published var privateNotificationsEnabled: Bool
     @Published var notificationMode: NotificationMode
     @Published var allowInsecureHTTP: Bool
+    /// The reader's muted publisher hosts and topics; empty unless the reader adds rules.
+    @Published private(set) var muteRules: MuteRules
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -117,6 +121,8 @@ final class AppSettings: ObservableObject {
         }
 
         self.allowInsecureHTTP = defaults.bool(forKey: Self.allowInsecureHTTPKey)
+        self.muteRules = MuteRules(sources: defaults.stringArray(forKey: Self.mutedSourcesKey) ?? [],
+                                   topics: defaults.stringArray(forKey: Self.mutedTopicsKey) ?? [])
     }
 
     // MARK: - URL Normalization
@@ -231,6 +237,49 @@ final class AppSettings: ObservableObject {
     func setAllowInsecureHTTP(_ allowed: Bool) {
         allowInsecureHTTP = allowed
         defaults.set(allowed, forKey: Self.allowInsecureHTTPKey)
+    }
+
+    // MARK: - Muting
+
+    /// Mutes a publisher host given as a hostname or URL. Returns the stored host, or nil if nothing was added.
+    @discardableResult
+    func muteSource(_ raw: String) -> String? {
+        var rules = muteRules
+        guard let host = rules.addSource(raw) else { return nil }
+        setMuteRules(rules)
+        return host
+    }
+
+    /// Mutes a topic word or phrase. Returns the stored topic, or nil if nothing was added.
+    @discardableResult
+    func muteTopic(_ raw: String) -> String? {
+        var rules = muteRules
+        guard let topic = rules.addTopic(raw) else { return nil }
+        setMuteRules(rules)
+        return topic
+    }
+
+    func unmuteSource(_ host: String) {
+        var rules = muteRules
+        rules.removeSource(host)
+        setMuteRules(rules)
+    }
+
+    func unmuteTopic(_ topic: String) {
+        var rules = muteRules
+        rules.removeTopic(topic)
+        setMuteRules(rules)
+    }
+
+    /// Removes every muting rule.
+    func clearMuting() {
+        setMuteRules(MuteRules())
+    }
+
+    private func setMuteRules(_ rules: MuteRules) {
+        muteRules = rules
+        defaults.set(rules.sources, forKey: Self.mutedSourcesKey)
+        defaults.set(rules.topics, forKey: Self.mutedTopicsKey)
     }
 
     // MARK: - OPML Portability

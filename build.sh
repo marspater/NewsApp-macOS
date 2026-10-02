@@ -36,6 +36,7 @@ swiftc -swift-version 6 -O -parse-as-library -target arm64-apple-macos${TARGET_M
     Sources/Models/FeedError.swift \
     Sources/Models/FeedFetchState.swift \
     Sources/Models/FeedCatalog.swift \
+    Sources/Models/MuteRules.swift \
     Sources/Services/IPAddressValidator.swift \
     Sources/Models/ArticleIdentity.swift \
     Sources/Models/EventOverview.swift \
