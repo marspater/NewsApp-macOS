@@ -891,7 +891,8 @@ struct ArticleDetailView: View {
     // MARK: - Independent Extraction & Analysis
 
     private func ensureContentExtracted(forceRefresh: Bool = false) async {
-        if !forceRefresh, currentArticle.readerDocument.map({ (1...ReaderDocument.currentVersion).contains($0.version) }) == true,
+        // A stored document stands in for extraction only with publisher text; feed media alone does not.
+        if !forceRefresh, currentArticle.readerDocument.map({ (1...ReaderDocument.currentVersion).contains($0.version) && $0.hasPublisherText }) == true,
            let existing = currentArticle.fullContent, !ArticleContentRedactor.redactAndSplit(existing).isEmpty {
             contentState = .ready
             return
