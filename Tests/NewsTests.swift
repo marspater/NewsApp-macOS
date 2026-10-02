@@ -284,6 +284,7 @@ struct NewsTests {
             try await testEventTimelineWithSourcedItems(fixtureHost: fixtureHost)
             try await testAttributedPerspectivesOfParticipantsAndPublishers(fixtureHost: fixtureHost)
             try await testThematicAngleFromExistingFacts(fixtureHost: fixtureHost)
+            try await testCoverageSentimentEvaluation(fixtureHost: fixtureHost)
             try await testHistoricalReconciliation(fixtureRoot: fixtureRoot)
             try await testEventDataModel(fixtureRoot: fixtureRoot)
             try await testEventCandidateGeneration(fixtureRoot: fixtureRoot)
@@ -364,6 +365,7 @@ struct NewsTests {
         try await testEventTimelineWithSourcedItems(fixtureHost: fixtureHost)
         try await testAttributedPerspectivesOfParticipantsAndPublishers(fixtureHost: fixtureHost)
         try await testThematicAngleFromExistingFacts(fixtureHost: fixtureHost)
+        try await testCoverageSentimentEvaluation(fixtureHost: fixtureHost)
         try await testHistoricalReconciliation(fixtureRoot: fixtureRoot)
         try await testEventDataModel(fixtureRoot: fixtureRoot)
         try await testEventCandidateGeneration(fixtureRoot: fixtureRoot)
@@ -8584,6 +8586,115 @@ struct NewsTests {
             existingCitations: [:]
         )
         assertEqual(noThematicAngle, nil, "Absent sections rule: Thematic angle is nil when insufficient thematic facts exist")
+    }
+
+    // MARK: - Coverage Sentiment Evaluation (Issue #146)
+
+    static func testCoverageSentimentEvaluation(fixtureHost: String = "example.com") async throws {
+        print("=== Testing Coverage Sentiment Evaluation on Corpus (Issue #146) ===")
+
+        // 1. Evaluate frozen corpus across news categories and languages
+        let evaluator = CoverageSentimentEvaluator.shared
+        let metrics = evaluator.runCorpusEvaluation()
+
+        assertTrue(metrics.totalEvaluated >= 8, "Corpus must contain diverse evaluated samples")
+        assertTrue(metrics.objectiveCrisisCount >= 4, "Corpus must contain adverse crisis hard news reports")
+        assertTrue(metrics.objectiveCrisisFalseNegatives >= 3, "Raw lexical sentiment falsely flags objective crisis news as critical/negative")
+        assertTrue(metrics.falseNegativityOnObjectiveEvents > 0.50, "Lexical sentiment exhibits >50% false negativity on factual disaster reports")
+        assertTrue(metrics.multilingualCoverageRate < 0.60, "Native sentiment model is absent for majority of catalog languages (uk, pl, nl)")
+
+        // 2. Evaluation decision: NO-GO for default overview section
+        assertFalse(metrics.justifiesOverviewSection, "Acceptance gate: sentiment must NOT ship unless evaluation justifies it")
+        assertTrue(metrics.rationale.contains("absent sections rule"), "Rationale must cite absent sections rule")
+
+        // 3. Gate enforcement for synthesis
+        let dummyPassages: [EvidencePassage] = []
+        assertFalse(CoverageSentimentEvaluator.shouldIncludeInOverview(passages: dummyPassages), "Passage overview inclusion gate must evaluate to false")
+        assertEqual(CoverageSentimentEvaluator.synthesizeCoverageSentiment(passages: dummyPassages), nil, "Coverage sentiment synthesis must return nil when gate is false")
+
+        let testArticle = FeedArticle(
+            title: "Transit rail reopened after junction maintenance",
+            link: "https://\(fixtureHost)/transit/update",
+            guid: "guid_sentiment_test_1",
+            description: "Transit crews completed repairs.",
+            pubDate: Date(),
+            source: "Transit Daily"
+        )
+        assertFalse(CoverageSentimentEvaluator.shouldIncludeInOverview(for: [testArticle]), "Article overview inclusion gate must evaluate to false")
+        assertEqual(CoverageSentimentEvaluator.synthesizeCoverageSentiment(for: [testArticle]), nil, "Article coverage sentiment synthesis must return nil")
+
+        // 4. Overview composition integration: sentiment remains absent
+        let passage = EvidencePassage(
+            id: "pass_sent_1",
+            articleID: testArticle.id,
+            text: "Transit rail operations resumed after electrical repairs were certified by safety engineers.",
+            ordinal: 0
+        )
+        let fact = PassageAnchoredFact(
+            id: "fact_sent_1",
+            statement: "Transit operations resumed following certified safety repairs.",
+            passageID: passage.id,
+            quote: "Transit rail operations resumed after electrical repairs were certified by safety engineers.",
+            articleID: testArticle.id
+        )
+        let fact2 = PassageAnchoredFact(
+            id: "fact_sent_2",
+            statement: "Electrical repairs were certified by safety engineers.",
+            passageID: passage.id,
+            quote: "electrical repairs were certified by safety engineers",
+            articleID: testArticle.id
+        )
+        let fact3 = PassageAnchoredFact(
+            id: "fact_sent_3",
+            statement: "Crews completed track maintenance on the main junction corridor.",
+            passageID: passage.id,
+            quote: "Transit rail operations resumed",
+            articleID: testArticle.id
+        )
+
+        let composedDoc = OverviewComposer.composeOverview(
+            eventID: "ev_sent_test",
+            eventTitle: "Transit operations restored",
+            verifiedFacts: [fact, fact2, fact3],
+            passages: [passage],
+            articles: [testArticle]
+        )
+
+        assertEqual(composedDoc.coverageSentiment, nil, "Composed overview must have nil coverageSentiment per evaluation decision")
+        assertEqual(composedDoc.evidenceSections?.coverageSentiment, nil, "OverviewEvidenceSections must omit sentiment when evaluation does not justify it")
+
+        // 5. Calibrated safe text tone assessment
+        let crisisHeadline = "A magnitude 6.8 earthquake struck the northern coast, damaging residential structures and injuring 18 residents."
+        let crisisTone = CoverageSentimentEvaluator.assessTextToneSafely(crisisHeadline)
+        assertTrue(crisisTone.isConfoundedByEventAdversity, "Must detect that crisis vocabulary confounds lexical sentiment")
+        assertEqual(crisisTone.label, "Neutral", "Confounded crisis report must be safely calibrated to Neutral reporting tone")
+
+        let editorialText = "The municipal administration's disastrous decision to defund maintenance is a shameful and reckless policy."
+        let editorialTone = CoverageSentimentEvaluator.assessTextToneSafely(editorialText)
+        assertFalse(editorialTone.isConfoundedByEventAdversity, "Explicit editorial markers must prevent adversity confusion")
+        assertEqual(editorialTone.label, "Critical", "Editorial opinion piece must be recognized as Critical tone")
+
+        // 6. Model serialization and empty state invariants
+        let customSentiment = OverviewCoverageSentiment(
+            score: -0.1,
+            label: "Neutral",
+            confidence: 0.85,
+            rationale: "Calibrated objective tone"
+        )
+        let encoder = JSONEncoder()
+        let decoder = JSONDecoder()
+        let encodedData = try encoder.encode(customSentiment)
+        let decodedSentiment = try decoder.decode(OverviewCoverageSentiment.self, from: encodedData)
+        assertEqual(decodedSentiment.score, customSentiment.score, "Decoded score matches")
+        assertEqual(decodedSentiment.label, customSentiment.label, "Decoded label matches")
+        assertEqual(decodedSentiment.confidence, customSentiment.confidence, "Decoded confidence matches")
+        assertEqual(decodedSentiment.rationale, customSentiment.rationale, "Decoded rationale matches")
+
+        let emptyEvidence = OverviewEvidenceSections()
+        assertTrue(emptyEvidence.isEmpty, "Default OverviewEvidenceSections is empty")
+
+        let sentimentEvidence = OverviewEvidenceSections(coverageSentiment: customSentiment)
+        assertFalse(sentimentEvidence.isEmpty, "OverviewEvidenceSections with sentiment is not empty")
     }
 }
 

@@ -219,24 +219,42 @@ public struct OverviewThematicAngle: Codable, Hashable, Sendable, Identifiable {
     }
 }
 
-/// Optional structured evidence sections: chronological timeline, participant perspectives, and thematic angle.
+/// Optional evaluated tone of coverage; omitted when evidence or corpus evaluation does not justify it.
+public struct OverviewCoverageSentiment: Codable, Hashable, Sendable {
+    public let score: Double
+    public let label: String
+    public let confidence: Double
+    public let rationale: String?
+
+    public init(score: Double, label: String, confidence: Double, rationale: String? = nil) {
+        self.score = score
+        self.label = label
+        self.confidence = confidence
+        self.rationale = rationale
+    }
+}
+
+/// Optional structured evidence sections: chronological timeline, participant perspectives, thematic angle, and evaluated coverage sentiment.
 public struct OverviewEvidenceSections: Codable, Hashable, Sendable {
     public let timeline: [OverviewTimelineItem]
     public let perspectives: [OverviewPerspective]
     public let thematicAngle: OverviewThematicAngle?
+    public let coverageSentiment: OverviewCoverageSentiment?
 
     public var isEmpty: Bool {
-        timeline.isEmpty && perspectives.isEmpty && thematicAngle == nil
+        timeline.isEmpty && perspectives.isEmpty && thematicAngle == nil && coverageSentiment == nil
     }
 
     public init(
         timeline: [OverviewTimelineItem] = [],
         perspectives: [OverviewPerspective] = [],
-        thematicAngle: OverviewThematicAngle? = nil
+        thematicAngle: OverviewThematicAngle? = nil,
+        coverageSentiment: OverviewCoverageSentiment? = nil
     ) {
         self.timeline = timeline
         self.perspectives = perspectives
         self.thematicAngle = thematicAngle
+        self.coverageSentiment = coverageSentiment
     }
 }
 
@@ -339,6 +357,7 @@ public struct EventOverviewDocument: Codable, Hashable, Sendable, Identifiable {
     public var timeline: [OverviewTimelineItem] { evidenceSections?.timeline ?? [] }
     public var perspectives: [OverviewPerspective] { evidenceSections?.perspectives ?? [] }
     public var thematicAngle: OverviewThematicAngle? { evidenceSections?.thematicAngle }
+    public var coverageSentiment: OverviewCoverageSentiment? { evidenceSections?.coverageSentiment }
     public var memberArticleIDs: [String] { provenance.memberArticleIDs }
     public var kind: OverviewKind { provenance.kind }
     public var createdAt: Date { provenance.createdAt }

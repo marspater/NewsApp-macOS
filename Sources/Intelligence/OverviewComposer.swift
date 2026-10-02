@@ -226,12 +226,22 @@ public struct OverviewComposer: Sendable {
             existingCitations: citationsMap
         )
 
+        // Evaluate optional sentiment of coverage (Issue #146)
+        // Sentiment ships only if evaluation justifies it; otherwise omitted per absent sections rule.
+        let coverageSentiment: OverviewCoverageSentiment?
+        if CoverageSentimentEvaluator.shouldIncludeInOverview(for: articles) {
+            coverageSentiment = CoverageSentimentEvaluator.synthesizeCoverageSentiment(for: articles)
+        } else {
+            coverageSentiment = nil
+        }
+
         let evidenceSections: OverviewEvidenceSections?
-        if !timelineItems.isEmpty || !perspectives.isEmpty || thematicAngle != nil {
+        if !timelineItems.isEmpty || !perspectives.isEmpty || thematicAngle != nil || coverageSentiment != nil {
             evidenceSections = OverviewEvidenceSections(
                 timeline: timelineItems,
                 perspectives: perspectives,
-                thematicAngle: thematicAngle
+                thematicAngle: thematicAngle,
+                coverageSentiment: coverageSentiment
             )
         } else {
             evidenceSections = nil
@@ -273,7 +283,8 @@ public struct OverviewComposer: Sendable {
             evidenceSections: OverviewEvidenceSections(
                 timeline: timeline.items,
                 perspectives: document.perspectives,
-                thematicAngle: document.thematicAngle
+                thematicAngle: document.thematicAngle,
+                coverageSentiment: document.coverageSentiment
             )
         )
         return EventOverviewDocument(
