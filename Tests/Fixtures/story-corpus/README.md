@@ -50,15 +50,16 @@ Holdout evaluation requires both `--corpus-holdout` in the native runner and `--
 
 ## Rebuild and remaining acceptance work
 
-The builder uses Python's standard library and makes no network requests. Output must be a new `.json` file under the fixture directory or the system temporary directory; existing files and output symlinks are rejected. With the original input files (checksums in provenance):
+The builder uses Python's standard library and makes no network requests. Output must be a new `.json` file under the fixture directory or the system temporary directory; existing files and output symlinks are rejected. The parent directory must belong to the current user and be unwritable by other users. With the original input files (checksums in provenance):
 
 ```sh
+CORPUS_REBUILD_DIRECTORY=$(mktemp -d)
 python3 script/evaluation/build_corpus.py \
   --articles /tmp/news-w2e-topics.zip \
   --events /tmp/news-w2e-events.tsv \
   --groups /tmp/news-w2e-groups.txt \
-  --output /tmp/corpus-v1-rebuilt.json
-cmp Tests/Fixtures/story-corpus/corpus-v1.json /tmp/corpus-v1-rebuilt.json
+  --output "$CORPUS_REBUILD_DIRECTORY/corpus-v1-rebuilt.json"
+cmp Tests/Fixtures/story-corpus/corpus-v1.json "$CORPUS_REBUILD_DIRECTORY/corpus-v1-rebuilt.json"
 ```
 
 Original URLs are linked from the W2E README: `topics.zip` (article URLs), `events_grouped_by_topic_with_manually_constructed_queries.csv` and `topicGroups.txt` (merged groups). Event prose is used only to count events/dates and is omitted from the output.

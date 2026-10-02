@@ -104,6 +104,15 @@ def self_check(corpus):
         else:
             raise AssertionError('Existing output replaced')
         require(json.loads(output.read_text()) == {'test': True}, 'Output changed after rejected overwrite')
+        shared = pathlib.Path(directory) / 'shared'
+        shared.mkdir()
+        shared.chmod(0o777)
+        try:
+            write_corpus({}, shared / 'output.json')
+        except ValueError:
+            pass
+        else:
+            raise AssertionError('Shared writable output directory accepted')
         link = pathlib.Path(directory) / 'link.json'
         link.symlink_to(output)
         for forbidden in [link, pathlib.Path(directory) / 'wrong.txt', pathlib.Path('/dev/news-corpus-not-created.json')]:

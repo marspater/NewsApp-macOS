@@ -4,6 +4,7 @@ import argparse
 import datetime
 import hashlib
 import json
+import os
 import pathlib
 import tempfile
 import urllib.parse
@@ -186,9 +187,12 @@ def write_corpus(result, destination):
         raise ValueError('Output must not be a symlink')
     output = destination.resolve()
     fixture = pathlib.Path(__file__).resolve().parents[2] / 'Tests/Fixtures/story-corpus'
-    roots = (fixture.resolve(), pathlib.Path(tempfile.gettempdir()).resolve(), pathlib.Path('/tmp').resolve())
+    roots = (fixture.resolve(), pathlib.Path(tempfile.gettempdir()).resolve())
     if output.suffix != '.json' or not any(output.is_relative_to(root) for root in roots):
         raise ValueError('Output must be a new JSON file inside the fixture or temporary directory')
+    parent = output.parent.stat()
+    if parent.st_uid != os.getuid() or parent.st_mode & 0o022:
+        raise ValueError('Output directory must be owned by the current user and not writable by others')
     with output.open('x', encoding='utf-8') as handle:
         handle.write(json.dumps(result, ensure_ascii=False, indent=2) + '\n')
 
