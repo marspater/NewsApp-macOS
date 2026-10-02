@@ -192,29 +192,24 @@ PATTERN_4 = re.compile(rf'\b(?:death toll|toll)\b[^.;]{{0,40}}?\b(?:to|at|of|rea
 PATTERN_5 = re.compile(rf'\b(dozens|scores|hundreds|thousands|millions)\s+(?:of\s+)?(?:[a-z]+\s+){{0,2}}?{AUX_RE}{HARM_RE}\b')
 
 
-def extract_counts_from_text(text: str):
-    deaths, affected = 0, 0
-    for m in PATTERN_1.finditer(text):
-        count = parse_figure_digits(m.group(1), m.group(2))
-        if count:
-            if m.group(3) in DEATH_WORDS:
-                deaths = max(deaths, count)
-            else:
-                affected = max(affected, count)
-    for m in PATTERN_2.finditer(text):
-        count = parse_figure_digits(m.group(1), m.group(2))
-        if count:
-            if m.group(3) in DEATH_WORDS:
-                deaths = max(deaths, count)
-            else:
-                affected = max(affected, count)
-    for m in PATTERN_3.finditer(text):
-        count = parse_figure_digits(m.group(2), m.group(3))
-        if count:
-            if m.group(1) in DEATH_WORDS:
-                deaths = max(deaths, count)
-            else:
-                affected = max(affected, count)
+def _scan_digit_patterns(text: str, deaths: int, affected: int):
+    specs = [
+        (PATTERN_1, (1, 2), 3),
+        (PATTERN_2, (1, 2), 3),
+        (PATTERN_3, (2, 3), 1),
+    ]
+    for pat, (n1, n2), word_idx in specs:
+        for m in pat.finditer(text):
+            count = parse_figure_digits(m.group(n1), m.group(n2))
+            if count:
+                if m.group(word_idx) in DEATH_WORDS:
+                    deaths = max(deaths, count)
+                else:
+                    affected = max(affected, count)
+    return deaths, affected
+
+
+def _scan_toll_and_quantities(text: str, deaths: int, affected: int):
     for m in PATTERN_4.finditer(text):
         count = parse_figure_digits(m.group(1), m.group(2))
         if count:
@@ -227,6 +222,11 @@ def extract_counts_from_text(text: str):
             else:
                 affected = max(affected, count)
     return deaths, affected
+
+
+def extract_counts_from_text(text: str):
+    deaths, affected = _scan_digit_patterns(text, 0, 0)
+    return _scan_toll_and_quantities(text, deaths, affected)
 
 
 def count_to_magnitude(c: int) -> str:
@@ -256,13 +256,17 @@ def determine_escalation_status(escalating_count: int, deescalating_count: int) 
     return "noSignal"
 
 
-def classify_event(facts):
-    type_counts = dict.fromkeys(TYPE_CUES, 0)
-    escalating_count = 0
-    deescalating_count = 0
-    best_deaths = "notReported"
-    best_affected = "notReported"
+def _update_magnitudes(best_deaths: str, best_affected: str, d_mag: str, a_mag: str):
     mag_rank = {"notReported": 0, "units": 1, "tens": 2, "hundreds": 3, "thousands": 4}
+    new_deaths = d_mag if mag_rank[d_mag] > mag_rank[best_deaths] else best_deaths
+    new_affected = a_mag if mag_rank[a_mag] > mag_rank[best_affected] else best_affected
+    return new_deaths, new_affected
+
+
+def _aggregate_facts(facts):
+    type_counts = dict.fromkeys(TYPE_CUES, 0)
+    esc_count, deesc_count = 0, 0
+    best_deaths, best_affected = "notReported", "notReported"
 
     for f in facts:
         words = tokenize_words(f["quote"])
@@ -270,23 +274,29 @@ def classify_event(facts):
             if contains_cue(words, cues):
                 type_counts[t] += 1
         if contains_cue(words, ESCALATING_CUES):
-            escalating_count += 1
+            esc_count += 1
         if contains_cue(words, DEESCALATING_CUES, reversible=True):
-            deescalating_count += 1
+            deesc_count += 1
         d_mag, a_mag = extract_figures(f["quote"])
-        if mag_rank[d_mag] > mag_rank[best_deaths]:
-            best_deaths = d_mag
-        if mag_rank[a_mag] > mag_rank[best_affected]:
-            best_affected = a_mag
+        best_deaths, best_affected = _update_magnitudes(best_deaths, best_affected, d_mag, a_mag)
 
+    return type_counts, esc_count, deesc_count, best_deaths, best_affected
+
+
+def _detect_primary_type(type_counts):
     detected_type = None
-    best_type_count = 0
-    for t in TYPE_CUES:
-        if type_counts[t] > best_type_count:
-            best_type_count = type_counts[t]
+    best_count = 0
+    for t, count in type_counts.items():
+        if count > best_count:
+            best_count = count
             detected_type = t
+    return detected_type
 
-    escalation = determine_escalation_status(escalating_count, deescalating_count)
+
+def classify_event(facts):
+    type_counts, esc_count, deesc_count, best_deaths, best_affected = _aggregate_facts(facts)
+    detected_type = _detect_primary_type(type_counts)
+    escalation = determine_escalation_status(esc_count, deesc_count)
     return detected_type, best_deaths, best_affected, escalation
 
 
