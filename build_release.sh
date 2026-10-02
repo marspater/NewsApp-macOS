@@ -45,6 +45,7 @@ SWIFT_SOURCES=(
     Sources/Intelligence/ModelAvailability.swift
     Sources/Intelligence/PassageFactExtractor.swift
     Sources/Intelligence/OverviewComposer.swift
+    Sources/Intelligence/OverviewQualityAuditor.swift
     Sources/Intelligence/EventCandidates.swift
     Sources/Intelligence/EventMatcher.swift
     Sources/Intelligence/EventClustering.swift
