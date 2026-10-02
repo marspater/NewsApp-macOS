@@ -70,12 +70,15 @@ def report(corpus, prediction, split):
     docs = validate(corpus)
     pairs = [p for p in corpus['pairs'] if p['split'] == split]
     task = prediction['task']
-    require(task in {'three_way', 'document_identity'}, 'Unknown evaluation task')
+    require(task in {'three_way', 'document_identity', 'event_clustering'}, 'Unknown evaluation task')
     if task == 'document_identity':
         pairs = [dict(p, label='different' if p['label'] == 'same_event' else p['label']) for p in pairs]
+    if task == 'event_clustering':
+        pairs = [dict(p, label='same_event' if p['label'] == 'same_document' else p['label']) for p in pairs]
     predictions = prediction['predictions']
     require(set(predictions) == {p['id'] for p in pairs}, 'Predictions must cover exactly the requested split (null for abstentions)')
-    allowed = LABELS if task == 'three_way' else {'same_document', 'different'}
+    allowed = {'three_way': LABELS, 'document_identity': {'same_document', 'different'},
+               'event_clustering': {'same_event', 'different'}}[task]
     require(all(value is None or value in allowed for value in predictions.values()), 'Unknown predicted label')
     result = {'algorithm': prediction['algorithm'], 'task': task, 'split': split, 'releaseGatePassed': False,
               'limitations': ['Imported topic labels still need independent event/document review.',
@@ -145,6 +148,9 @@ def self_check(corpus):
     assert math.isclose(result['overall']['accuracyEvaluated'], 1) and not result['releaseGatePassed']
     prediction['task'] = 'document_identity'
     prediction['predictions'] = {p['id']: 'different' if p['label'] == 'same_event' else p['label'] for p in tuning}
+    assert math.isclose(report(corpus, prediction, 'tuning')['overall']['accuracyEvaluated'], 1)
+    prediction['task'] = 'event_clustering'
+    prediction['predictions'] = {p['id']: 'same_event' if p['label'] == 'same_document' else p['label'] for p in tuning}
     assert math.isclose(report(corpus, prediction, 'tuning')['overall']['accuracyEvaluated'], 1)
     prediction['predictions'].pop(tuning[0]['id'])
     try:
