@@ -328,3 +328,22 @@ public struct EventOverviewDocument: Codable, Hashable, Sendable, Identifiable {
         return ArticleIdentity.sha256Hex(combined)
     }
 }
+
+/// A real-world event and the stored articles that report it. Members are referenced by surviving
+/// article ID only; source text stays on the article rows. `membershipVersion` grows whenever the
+/// member set changes, so overviews bound to an older version are stale.
+public struct StoryEvent: Codable, Hashable, Sendable, Identifiable {
+    public let id: String
+    public let membershipVersion: Int
+    public let memberArticleIDs: [String]
+    public let createdAt: Date
+    public let updatedAt: Date
+
+    public init(id: String, membershipVersion: Int, memberArticleIDs: [String], createdAt: Date, updatedAt: Date) {
+        self.id = id
+        self.membershipVersion = membershipVersion
+        self.memberArticleIDs = memberArticleIDs
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+    }
+}

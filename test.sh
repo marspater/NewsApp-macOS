@@ -29,6 +29,7 @@ swiftc "${TEST_OPT_FLAGS[@]}" -target $(uname -m)-apple-macos${TARGET_MACOS} \
     Sources/Intelligence/ModelAvailability.swift \
     Sources/Intelligence/PassageFactExtractor.swift \
     Sources/Intelligence/OverviewComposer.swift \
+    Sources/Intelligence/EventCandidates.swift \
     Sources/Intelligence/ContentExtractionPipeline.swift \
     Sources/Intelligence/EnrichmentQueue.swift \
     Sources/Services/NetworkBoundaryProxy.swift \

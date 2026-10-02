@@ -472,6 +472,36 @@ actor DatabaseEngine {
                 throw error
             }
         }
+        if version < 13 {
+            try beginTransaction()
+            do {
+                try Task.checkCancellation()
+                // An article belongs to at most one event. A merged event keeps its row as a forward
+                // to the survivor so links to the old ID still resolve.
+                try executeSimple("""
+                CREATE TABLE IF NOT EXISTS events (
+                    id TEXT PRIMARY KEY,
+                    membership_version INTEGER NOT NULL DEFAULT 1,
+                    merged_into TEXT REFERENCES events(id) ON DELETE SET NULL,
+                    created_at REAL NOT NULL,
+                    updated_at REAL NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_events_merged_into ON events(merged_into);
+                CREATE TABLE IF NOT EXISTS event_members (
+                    article_id TEXT PRIMARY KEY REFERENCES articles(id) ON DELETE CASCADE,
+                    event_id TEXT NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+                    joined_version INTEGER NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_event_members_event ON event_members(event_id);
+                """)
+                try Task.checkCancellation()
+                try setUserVersion(13)
+                try commitTransaction()
+            } catch {
+                try? rollbackTransaction()
+                throw error
+            }
+        }
     }
     
     private func executeBound(_ sql: String, _ values: [String]) throws {
@@ -1870,6 +1900,7 @@ actor DatabaseEngine {
         sqlite3_bind_double(stmt, 2, cutoff)
         if sqlite3_step(stmt) == SQLITE_DONE {
             let changes = Int(sqlite3_changes(db))
+            try pruneEmptyEvents()
             if changes > 0 {
                 logger.info("Pruned \(changes) read articles older than \(keepReadDays) days")
             }
@@ -2248,6 +2279,274 @@ actor DatabaseEngine {
         guard db != nil else { return }
         try executeSimple("DELETE FROM event_overviews;")
         logger.info("Cleared all event overviews and citations.")
+    }
+
+    // MARK: - Events
+
+    private enum EventValue {
+        case text(String), integer(Int), real(Double)
+    }
+
+    private static func eventError(_ message: String) -> NSError {
+        NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: message])
+    }
+
+    /// Runs one statement and returns its rows as text columns (NULL as nil).
+    @discardableResult
+    private func eventRows(_ sql: String, _ values: [EventValue] = []) throws -> [[String?]] {
+        guard let db = db else { throw Self.eventError("Database not open") }
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+            throw Self.eventError("Cannot prepare event statement: \(String(cString: sqlite3_errmsg(db)))")
+        }
+        defer { sqlite3_finalize(statement) }
+        for (index, value) in values.enumerated() {
+            let position = Int32(index + 1)
+            switch value {
+            case .text(let text): sqlite3_bind_text(statement, position, text, -1, Self.sqliteTransient)
+            case .integer(let number): sqlite3_bind_int64(statement, position, Int64(number))
+            case .real(let number): sqlite3_bind_double(statement, position, number)
+            }
+        }
+        var rows: [[String?]] = []
+        var status = sqlite3_step(statement)
+        while status == SQLITE_ROW {
+            rows.append((0..<sqlite3_column_count(statement)).map { column in
+                sqlite3_column_text(statement, column).map { String(cString: $0) }
+            })
+            status = sqlite3_step(statement)
+        }
+        guard status == SQLITE_DONE else {
+            throw Self.eventError("Cannot execute event statement: \(String(cString: sqlite3_errmsg(db)))")
+        }
+        return rows
+    }
+
+    private func inEventTransaction<T>(_ body: () throws -> T) throws -> T {
+        try beginTransaction()
+        defer {
+            if sqlite3_get_autocommit(db) == 0 { try? rollbackTransaction() }
+        }
+        let result = try body()
+        try commitTransaction()
+        return result
+    }
+
+    /// The live event an ID refers to, following merge forwards; nil once the event is gone.
+    func resolvedEventID(_ id: String) throws -> String? {
+        var current = id
+        var visited = Set<String>()
+        while visited.insert(current).inserted {
+            guard let row = try eventRows("SELECT merged_into FROM events WHERE id = ?;", [.text(current)]).first else { return nil }
+            guard let next = row[0] else { return current }
+            current = next
+        }
+        return nil
+    }
+
+    func fetchEvent(id: String) throws -> StoryEvent? {
+        guard let live = try resolvedEventID(id),
+              let row = try eventRows("SELECT membership_version, created_at, updated_at FROM events WHERE id = ?;", [.text(live)]).first else {
+            return nil
+        }
+        let members = try eventRows("SELECT article_id FROM event_members WHERE event_id = ? ORDER BY article_id;", [.text(live)]).compactMap { $0[0] }
+        return StoryEvent(
+            id: live,
+            membershipVersion: row[0].flatMap { Int($0) } ?? 1,
+            memberArticleIDs: members,
+            createdAt: Date(timeIntervalSince1970: row[1].flatMap { Double($0) } ?? 0),
+            updatedAt: Date(timeIntervalSince1970: row[2].flatMap { Double($0) } ?? 0)
+        )
+    }
+
+    /// The event that currently holds an article; old article IDs resolve to the stored document.
+    func eventID(forArticle articleID: String) throws -> String? {
+        guard let member = try memberArticleID(articleID) else { return nil }
+        return try eventRows("SELECT event_id FROM event_members WHERE article_id = ?;", [.text(member)]).first?[0]
+    }
+
+    /// Creates an event with a new stable ID. Articles already in another event move here.
+    @discardableResult
+    func createEvent(memberArticleIDs articleIDs: [String], at date: Date = Date()) throws -> StoryEvent {
+        let id = try inEventTransaction { () throws -> String in
+            try insertEvent(members: try resolvedMembers(articleIDs), at: date.timeIntervalSince1970)
+        }
+        return try requireEvent(id)
+    }
+
+    @discardableResult
+    func addArticles(_ articleIDs: [String], toEvent eventID: String, at date: Date = Date()) throws -> StoryEvent {
+        let id = try inEventTransaction { () throws -> String in
+            let target = try liveEvent(eventID)
+            let now = date.timeIntervalSince1970
+            if try assignMembers(try resolvedMembers(articleIDs), to: target.id, joinedVersion: target.version + 1, at: now) {
+                try bumpMembershipVersion(target.id, at: now)
+            }
+            return target.id
+        }
+        return try requireEvent(id)
+    }
+
+    /// Removes articles from an event. An event left empty keeps its ID until retention drops it.
+    @discardableResult
+    func removeArticles(_ articleIDs: [String], fromEvent eventID: String, at date: Date = Date()) throws -> StoryEvent {
+        let id = try inEventTransaction { () throws -> String in
+            let target = try liveEvent(eventID)
+            var changed = false
+            for member in try resolvedMembers(articleIDs) {
+                try eventRows("DELETE FROM event_members WHERE article_id = ? AND event_id = ?;", [.text(member), .text(target.id)])
+                if sqlite3_changes(db) > 0 { changed = true }
+            }
+            if changed { try bumpMembershipVersion(target.id, at: date.timeIntervalSince1970) }
+            return target.id
+        }
+        return try requireEvent(id)
+    }
+
+    /// Moves every member of `absorbedID` into `survivorID`. The absorbed ID forwards to the survivor,
+    /// so stored links keep resolving; article rows and their read/save state are untouched.
+    @discardableResult
+    func mergeEvents(_ absorbedID: String, into survivorID: String, at date: Date = Date()) throws -> StoryEvent {
+        let id = try inEventTransaction { () throws -> String in
+            let survivor = try liveEvent(survivorID)
+            let absorbed = try liveEvent(absorbedID)
+            guard absorbed.id != survivor.id else { return survivor.id }
+            let now = date.timeIntervalSince1970
+            try eventRows("UPDATE event_members SET event_id = ?, joined_version = ? WHERE event_id = ?;",
+                          [.text(survivor.id), .integer(survivor.version + 1), .text(absorbed.id)])
+            let moved = sqlite3_changes(db) > 0
+            // Forwards stay one hop deep.
+            try eventRows("UPDATE events SET merged_into = ? WHERE merged_into = ?;", [.text(survivor.id), .text(absorbed.id)])
+            try eventRows("UPDATE events SET merged_into = ?, membership_version = membership_version + 1, updated_at = ? WHERE id = ?;",
+                          [.text(survivor.id), .real(now), .text(absorbed.id)])
+            if moved { try bumpMembershipVersion(survivor.id, at: now) }
+            return survivor.id
+        }
+        return try requireEvent(id)
+    }
+
+    /// Moves some members into a new event with its own stable ID. The original keeps its ID and the
+    /// remaining members; both member sets stay non-empty.
+    @discardableResult
+    func splitEvent(_ eventID: String, movingArticles articleIDs: [String], at date: Date = Date()) throws -> StoryEvent {
+        let id = try inEventTransaction { () throws -> String in
+            let source = try liveEvent(eventID)
+            let moving = try resolvedMembers(articleIDs)
+            let current = Set(try eventRows("SELECT article_id FROM event_members WHERE event_id = ?;", [.text(source.id)]).compactMap { $0[0] })
+            guard !moving.isEmpty, Set(moving).isSubset(of: current), moving.count < current.count else {
+                throw Self.eventError("A split moves some, but not all, members of the event")
+            }
+            return try insertEvent(members: moving, at: date.timeIntervalSince1970)
+        }
+        return try requireEvent(id)
+    }
+
+    private func requireEvent(_ id: String) throws -> StoryEvent {
+        guard let event = try fetchEvent(id: id) else { throw Self.eventError("Unknown event") }
+        return event
+    }
+
+    private func liveEvent(_ id: String) throws -> (id: String, version: Int) {
+        guard let live = try resolvedEventID(id),
+              let version = try eventRows("SELECT membership_version FROM events WHERE id = ?;", [.text(live)]).first?[0].flatMap({ Int($0) }) else {
+            throw Self.eventError("Unknown event")
+        }
+        return (live, version)
+    }
+
+    private func insertEvent(members: [String], at now: Double) throws -> String {
+        guard !members.isEmpty else { throw Self.eventError("An event needs at least one article") }
+        let id = UUID().uuidString
+        try eventRows("INSERT INTO events(id, membership_version, created_at, updated_at) VALUES (?, 1, ?, ?);",
+                      [.text(id), .real(now), .real(now)])
+        _ = try assignMembers(members, to: id, joinedVersion: 1, at: now)
+        return id
+    }
+
+    /// Membership references the surviving stored document, never an alias or a reconciled copy.
+    private func memberArticleID(_ id: String) throws -> String? {
+        var resolved = try resolvedArticleID(id)
+        if let survivor = try eventRows("SELECT survivor_id FROM article_reconciliations WHERE duplicate_id = ?;", [.text(resolved)]).first?[0] {
+            resolved = survivor
+        }
+        return try eventRows("SELECT 1 FROM articles WHERE id = ?;", [.text(resolved)]).isEmpty ? nil : resolved
+    }
+
+    private func resolvedMembers(_ articleIDs: [String]) throws -> [String] {
+        var seen = Set<String>()
+        var members: [String] = []
+        for articleID in articleIDs {
+            guard let member = try memberArticleID(articleID) else { throw Self.eventError("Unknown event member article") }
+            if seen.insert(member).inserted { members.append(member) }
+        }
+        return members
+    }
+
+    /// Moves members into `eventID`; every event that loses an article gains one membership version.
+    /// Returns whether the target's member set changed.
+    private func assignMembers(_ members: [String], to eventID: String, joinedVersion: Int, at now: Double) throws -> Bool {
+        var losing = Set<String>()
+        var changed = false
+        for member in members {
+            try Task.checkCancellation()
+            let previous = try eventRows("SELECT event_id FROM event_members WHERE article_id = ?;", [.text(member)]).first?[0]
+            if previous == eventID { continue }
+            if let previous { losing.insert(previous) }
+            try eventRows("""
+            INSERT INTO event_members(article_id, event_id, joined_version) VALUES (?, ?, ?)
+            ON CONFLICT(article_id) DO UPDATE SET event_id = excluded.event_id, joined_version = excluded.joined_version;
+            """, [.text(member), .text(eventID), .integer(joinedVersion)])
+            changed = true
+        }
+        for event in losing {
+            try bumpMembershipVersion(event, at: now)
+        }
+        return changed
+    }
+
+    private func bumpMembershipVersion(_ eventID: String, at now: Double) throws {
+        try eventRows("UPDATE events SET membership_version = membership_version + 1, updated_at = ? WHERE id = ?;",
+                      [.real(now), .text(eventID)])
+    }
+
+    /// Event-matching candidates: FTS hits within `window` of `date`, best ranked first and capped at
+    /// `limit`. Hidden reconciled copies, `articleID` itself and members of events unchanged since
+    /// `activeSince` are excluded, so closed events never grow.
+    func eventCandidateRows(
+        matching query: String, around date: Date, window: TimeInterval,
+        activeSince: Date, excluding articleID: String, limit: Int
+    ) throws -> [(id: String, title: String, description: String, eventID: String?)] {
+        let sql = """
+        SELECT a.id, a.title, coalesce(a.description, ''), m.event_id
+        FROM articles_fts fts
+        JOIN articles a ON a.id = fts.article_id
+        LEFT JOIN event_members m ON m.article_id = a.id
+        LEFT JOIN events e ON e.id = m.event_id
+        WHERE articles_fts MATCH ? AND a.id != ?
+            AND \(Self.articleDateOrder) BETWEEN ? AND ?
+            AND \(Self.visibleArticle)
+            AND (m.event_id IS NULL OR e.updated_at >= ?)
+        ORDER BY fts.rank, a.id
+        LIMIT ?;
+        """
+        let center = date.timeIntervalSince1970
+        return try eventRows(sql, [.text(query), .text(articleID), .real(center - window), .real(center + window),
+                                   .real(activeSince.timeIntervalSince1970), .integer(limit)]).compactMap { row in
+            guard let id = row[0], let title = row[1] else { return nil }
+            return (id: id, title: title, description: row[2] ?? "", eventID: row[3])
+        }
+    }
+
+    /// Drops events left without members unless an overview still refers to them. A forward dies with
+    /// its survivor; merges keep forwards one hop deep, so two passes clear them.
+    private func pruneEmptyEvents() throws {
+        for _ in 0..<2 {
+            try executeSimple("""
+            DELETE FROM events WHERE merged_into IS NULL
+                AND NOT EXISTS (SELECT 1 FROM event_members m WHERE m.event_id = events.id)
+                AND NOT EXISTS (SELECT 1 FROM event_overviews o WHERE o.event_id = events.id);
+            """)
+        }
     }
 
 }
