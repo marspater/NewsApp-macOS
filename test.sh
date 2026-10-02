@@ -37,6 +37,7 @@ swiftc "${TEST_OPT_FLAGS[@]}" -target $(uname -m)-apple-macos${TARGET_MACOS} \
     Sources/Intelligence/EventClustering.swift \
     Sources/Intelligence/ContentExtractionPipeline.swift \
     Sources/Intelligence/EnrichmentQueue.swift \
+    Sources/Intelligence/OverviewGenerationCoordinator.swift \
     Sources/Services/NetworkBoundaryProxy.swift \
     Sources/Views/WebPreviewPolicy.swift \
     Sources/Services/SecureHTTPClient.swift \

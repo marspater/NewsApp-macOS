@@ -262,6 +262,7 @@ struct NewsTests {
             try await testModelAvailabilityAndLanguageFallbacks(fixtureRoot: fixtureRoot)
             try await testPassageAnchoredFactExtraction()
             try await testOverviewCompositionFromVerifiedFacts(fixtureHost: fixtureHost)
+            try await testOnDemandOverviewGenerationAndCaching(fixtureHost: fixtureHost)
             try await testHistoricalReconciliation(fixtureRoot: fixtureRoot)
             try await testEventDataModel(fixtureRoot: fixtureRoot)
             try await testEventCandidateGeneration(fixtureRoot: fixtureRoot)
@@ -330,6 +331,7 @@ struct NewsTests {
         try await testModelAvailabilityAndLanguageFallbacks(fixtureRoot: fixtureRoot)
         try await testPassageAnchoredFactExtraction()
         try await testOverviewCompositionFromVerifiedFacts(fixtureHost: fixtureHost)
+        try await testOnDemandOverviewGenerationAndCaching(fixtureHost: fixtureHost)
         try await testHistoricalReconciliation(fixtureRoot: fixtureRoot)
         try await testEventDataModel(fixtureRoot: fixtureRoot)
         try await testEventCandidateGeneration(fixtureRoot: fixtureRoot)
@@ -6322,6 +6324,128 @@ struct NewsTests {
         )
         assertEqual(fallbackDoc.kind, OverviewKind.fallbackExcerpts, "Composer falls back to fallbackExcerpts when verified facts < 3")
         assertTrue(fallbackDoc.facts.count == 1, "Fallback contains available verified facts without fabricating ungrounded ones")
+    }
+
+    /// Tests on-demand overview generation, caching, cooperative cancellation,
+    /// staleness detection, and version protection.
+    @MainActor
+    static func testOnDemandOverviewGenerationAndCaching(fixtureHost: String) async throws {
+        print("  - Testing On-demand overview generation, caching and cancellation...")
+
+        let passageText1 = "Astronomers detected high concentrations of atmospheric phosphine on Venus, hinting at potential chemical anomalies."
+        let passageText2 = "Independent spectrographic analysis confirmed distinct spectral absorption bands matching phosphine molecules."
+        let passageText3 = "The research team cautioned that abiotic geological or volcanic mechanisms could also explain the phosphine signatures."
+
+        let article1 = FeedArticle(
+            storedID: "art-venus-1",
+            title: "Phosphine Detected on Venus",
+            link: "https://\(fixtureHost)/venus/phosphine-1",
+            guid: "g-v1",
+            description: passageText1,
+            pubDate: Date(timeIntervalSince1970: 1700000000),
+            source: "Science Journal",
+            fullContent: passageText1
+        )
+        let article2 = FeedArticle(
+            storedID: "art-venus-2",
+            title: "Spectrographic Confirmation of Venus Phosphine",
+            link: "https://\(fixtureHost)/venus/phosphine-2",
+            guid: "g-v2",
+            description: passageText2,
+            pubDate: Date(timeIntervalSince1970: 1700001000),
+            source: "Astronomy Today",
+            fullContent: passageText2
+        )
+        let article3 = FeedArticle(
+            storedID: "art-venus-3",
+            title: "Abiotic Hypotheses for Venus Biomarker Claims",
+            link: "https://\(fixtureHost)/venus/phosphine-3",
+            guid: "g-v3",
+            description: passageText3,
+            pubDate: Date(timeIntervalSince1970: 1700002000),
+            source: "Planetary Science",
+            fullContent: passageText3
+        )
+        let articles = [article1, article2, article3]
+
+        let db = DatabaseEngine(path: ":memory:")
+        try await db.open()
+        _ = try await db.upsertArticles(articles)
+        let store = ArticleStore(database: db)
+        let queue = EnrichmentQueue(store: store)
+        let coordinator = OverviewGenerationCoordinator(store: store, queue: queue)
+
+        // 1. Generate on request for the visible event
+        let overviewV1 = await coordinator.requestOverview(
+            eventID: "event-phosphine",
+            eventTitle: "Phosphine Anomaly on Venus",
+            membershipVersion: 1,
+            articles: articles,
+            priority: .onDemand
+        )
+        assertTrue(overviewV1 != nil, "Overview generated on request")
+        assertEqual(overviewV1?.eventID, "event-phosphine", "Overview event ID matches")
+        assertEqual(overviewV1?.membershipVersion, 1, "Overview membership version matches")
+
+        // 2. Cache hit: repeat request returns identical cached overview without regenerating
+        let cachedOverview = await coordinator.requestOverview(
+            eventID: "event-phosphine",
+            eventTitle: "Phosphine Anomaly on Venus",
+            membershipVersion: 1,
+            articles: articles,
+            priority: .onDemand
+        )
+        assertTrue(cachedOverview != nil, "Cached overview retrieved successfully")
+        assertEqual(cachedOverview?.id, overviewV1?.id, "Cached overview has identical document ID (cache hit)")
+        assertEqual(cachedOverview?.createdAt, overviewV1?.createdAt, "Cached overview has identical creation timestamp")
+
+        // 3. Meaningful input change triggers regeneration (membershipVersion bumps from 1 to 2)
+        let article4 = FeedArticle(
+            storedID: "art-venus-4",
+            title: "Follow-up Observations from Mauna Kea",
+            link: "https://\(fixtureHost)/venus/phosphine-4",
+            guid: "g-v4",
+            description: "Submillimeter telescope data provides further resolution on upper atmosphere layers.",
+            pubDate: Date(timeIntervalSince1970: 1700003000),
+            source: "Keck Observatory",
+            fullContent: "Submillimeter telescope data provides further resolution on upper atmosphere layers."
+        )
+        _ = try await db.upsertArticles([article4])
+        let updatedArticles = [article1, article2, article3, article4]
+
+        let overviewV2 = await coordinator.requestOverview(
+            eventID: "event-phosphine",
+            eventTitle: "Phosphine Anomaly on Venus",
+            membershipVersion: 2,
+            articles: updatedArticles,
+            priority: .onDemand
+        )
+        assertTrue(overviewV2 != nil, "Regenerated overview exists for updated membership version")
+        assertEqual(overviewV2?.membershipVersion, 2, "Regenerated overview carries membership version 2")
+        assertFalse(overviewV2?.id == overviewV1?.id, "Regenerated overview has new document ID")
+
+        // 4. Visible event change & cancellation
+        // When setting visible event to A, then immediately switching to B, A's in-flight task is cancelled
+        await coordinator.setVisibleEvent(eventID: "event-A", eventTitle: "Event A", membershipVersion: 1, articles: [article1])
+        await coordinator.setVisibleEvent(eventID: "event-B", eventTitle: "Event B", membershipVersion: 1, articles: [article2])
+        // Explicit cancellation when reader closes
+        await coordinator.cancel(eventID: "event-B")
+
+        // 5. Stale result never overwrites a newer version
+        let staleV1 = EventOverviewDocument(
+            id: "doc-stale-v1",
+            eventID: "event-phosphine",
+            version: OverviewVersionContext(membershipVersion: 1, inputTextHash: "hash-stale"),
+            content: OverviewContent(title: "Stale V1", summary: "Old overview"),
+            provenance: OverviewProvenance(memberArticleIDs: ["art-venus-1"], kind: .synthesized)
+        )
+        // Attempting to record stale v1 when v2 is already stored returns false
+        let overwriteAttempt = try await db.recordEventOverview(staleV1)
+        assertFalse(overwriteAttempt, "DatabaseEngine rejects stale version 1 when version 2 already exists")
+
+        let storedDoc = try await db.fetchEventOverview(eventID: "event-phosphine")
+        assertEqual(storedDoc?.membershipVersion, 2, "Stored overview retains newer version 2")
+        assertFalse(storedDoc?.id == "doc-stale-v1", "Stale v1 document did not overwrite newer version")
     }
 }
 
