@@ -13,7 +13,7 @@ Build on Apple silicon with Xcode 27 selected. The deployment target remains mac
 ```sh
 ./test.sh                         # Full regressions; also run by the commit hook
 ./test.sh --story-regressions     # Focused offline identity, reader and persistence checks
-./test.sh --performance-baseline --active-work-cancellation # Active clustering and ingestion cancellation; temporary stress fixtures
+./test.sh --performance-baseline --active-work-cancellation # Active clustering, ingestion and feed parsing cancellation; temporary stress fixtures
 ./script/native_performance_baseline.sh # Isolated MainView window, rendered-card samples and process memory
 ./test.sh --performance-baseline  # Opt-in optimized synthetic core-service timings
 ./test.sh --transport-cancellation # Optimized refresh shutdown over controlled HTTP/SOCKS sockets

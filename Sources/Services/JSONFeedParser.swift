@@ -49,6 +49,7 @@ class JSONFeedParser {
             
             var articles = [FeedArticle]()
             for item in feed.items.prefix(500) {
+                if Task.isCancelled { return nil }
                 let link = item.url ?? item.link ?? item.id ?? ""
                 if link.isEmpty { continue }
                 

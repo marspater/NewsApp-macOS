@@ -100,7 +100,8 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
 
     func parser(_ parser: XMLParser, didStartElement elementName: String, namespaceURI: String?, qualifiedName _: String?, attributes attributeDict: [String: String] = [:]) {
         currentNestingDepth += 1
-        if currentNestingDepth > maxNestingDepth {
+        // A cancelled refresh stops here instead of extracting the rest of the feed.
+        if currentNestingDepth > maxNestingDepth || Task.isCancelled {
             parser.abortParsing()
             return
         }

@@ -3951,7 +3951,7 @@ struct NewsTests {
     }
 
     static func testActiveWorkCancellation() async throws {
-        print("  - Testing cancellation during real clustering and transactional ingestion...")
+        print("  - Testing cancellation during real clustering, transactional ingestion and feed parsing...")
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("news-active-cancel-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -4086,9 +4086,52 @@ struct NewsTests {
             matcherVersion: EventMatcher.version, limit: 1).isEmpty, "Resumed clustering drains remaining rows")
         assertEqual(try await EventClusterer.run(in: clustering, now: now).processed, 0, "The resumed archive is not recomputed")
         await clustering.close()
+
+        // Feed parsing extracts every item's HTML; a cancelled refresh must not finish that work or keep its result.
+        let paragraph = "<p>Controlled publisher prose describes <em>research</em> and independent observations in detail.</p>"
+        let items = (0..<500).map { index in
+            "<item><title>Parsed report \(index)</title><link>https://cancel.example/parse/\(index)</link><guid>parse-\(index)</guid>"
+                + "<description>Report \(index)</description><content:encoded><![CDATA[<h2>Section</h2>"
+                + String(repeating: paragraph, count: 15) + "]]></content:encoded></item>"
+        }.joined()
+        let feedData = Data(("<?xml version=\"1.0\"?><rss version=\"2.0\" xmlns:content=\"http://purl.org/rss/1.0/modules/content/\">"
+            + "<channel><title>Publisher</title>" + items + "</channel></rss>").utf8)
+        let fullStart = ProcessInfo.processInfo.systemUptime
+        assertEqual(FeedXMLParser(data: feedData, feedURL: feed).parse().count, 500, "The uncancelled fixture parses every item")
+        let fullParse = ProcessInfo.processInfo.systemUptime - fullStart
+        assertTrue(fullParse > 0.1, "The parsing fixture runs long enough to cancel mid-feed")
+        for _ in 0..<sampleCount {
+            let started = SocketObservation()
+            let done = SocketObservation()
+            let parse = Task.detached { () -> (Int, Double) in
+                started.recordText("started")
+                let parsed = FeedXMLParser(data: feedData, feedURL: feed).parse().count
+                let end = ProcessInfo.processInfo.systemUptime
+                done.recordText("finished")
+                return (parsed, end)
+            }
+            await eventually("Feed parsing starts before cancellation") { started.count == 1 }
+            try await Task.sleep(for: .seconds(fullParse / 4))
+            assertEqual(done.count, 0, "Feed parsing is active when cancelled")
+            let start = ProcessInfo.processInfo.systemUptime
+            parse.cancel()
+            await eventually("Active feed parsing stops within its deadline", timeout: .seconds(2)) { done.count == 1 }
+            let (parsed, end) = await parse.value
+            assertEqual(parsed, 0, "A cancelled parse returns no articles")
+            samples["feed_parsing", default: []].append((end - start) * 1000)
+        }
+        let jsonFeed = Data(#"{"version":"https://jsonfeed.org/version/1.1","items":[{"id":"1","url":"https://cancel.example/json/1","content_html":"<p>Body</p>"}]}"#.utf8)
+        let cancelledJSON = await Task.detached { () -> Int? in
+            withUnsafeCurrentTask { $0?.cancel() }
+            return JSONFeedParser.parse(data: jsonFeed, feedURL: feed)?.count
+        }.value
+        assertEqual(cancelledJSON, nil, "A cancelled JSON Feed parse returns no articles")
+        assertEqual(JSONFeedParser.parse(data: jsonFeed, feedURL: feed)?.count, 1, "The same JSON Feed parses when not cancelled")
+
         let report: [String: Any] = ["samples_ms": samples, "samples_per_operation": sampleCount, "ingestion_batch_rows": batch.count,
             "ingestion_body_characters": body.count, "wal_spill_threshold_bytes": 1_048_576,
             "clustering_library_rows": articles.count, "clustering_pending_at_cancel": pendingAtCancel,
+            "parsing_feed_items": 500, "parsing_feed_bytes": feedData.count, "parsing_uncancelled_ms": fullParse * 1000,
             "sqlite_version": String(cString: sqlite3_libversion())]
         print("ACTIVE_CANCELLATION_REPORT " + String(decoding: try JSONSerialization.data(withJSONObject: report, options: [.sortedKeys]), as: UTF8.self))
     }
