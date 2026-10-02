@@ -36,6 +36,7 @@ swiftc "${TEST_OPT_FLAGS[@]}" -target $(uname -m)-apple-macos${TARGET_MACOS} \
     Sources/Intelligence/OverviewComposer.swift \
     Sources/Intelligence/OverviewQualityAuditor.swift \
     Sources/Intelligence/OverviewClaimVerifier.swift \
+    Sources/Intelligence/OverviewTimelineExtractor.swift \
     Sources/Intelligence/EventCandidates.swift \
     Sources/Intelligence/EventMatcher.swift \
     Sources/Intelligence/EventClustering.swift \

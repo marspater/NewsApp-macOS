@@ -53,6 +53,7 @@ swiftc -swift-version 6 -O -parse-as-library -target arm64-apple-macos${TARGET_M
     Sources/Intelligence/OverviewComposer.swift \
     Sources/Intelligence/OverviewQualityAuditor.swift \
     Sources/Intelligence/OverviewClaimVerifier.swift \
+    Sources/Intelligence/OverviewTimelineExtractor.swift \
     Sources/Intelligence/EventCandidates.swift \
     Sources/Intelligence/EventMatcher.swift \
     Sources/Intelligence/EventClustering.swift \
