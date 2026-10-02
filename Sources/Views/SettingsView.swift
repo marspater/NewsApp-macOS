@@ -8,6 +8,7 @@ struct SettingsView: View {
     @EnvironmentObject var themeManager: ThemeManager
     @EnvironmentObject var readManager: ReadManager
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.openWindow) private var openWindow
     
     @State private var newFeedURL: String = ""
     @State private var selectedTab = 0
@@ -443,6 +444,7 @@ struct SettingsView: View {
                 Text("Fetches articles from the 12 international panel feeds to calculate the news tension indicator. These articles are stored locally for tension analysis and will not generate unread notifications unless you subscribe to the feeds directly.")
                     .font(.caption)
                     .foregroundColor(AppColor.secondaryText)
+                Button("Show News Tension…") { openWindow(id: "tension") }
             }
         }
         .formStyle(.grouped)

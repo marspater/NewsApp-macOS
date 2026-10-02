@@ -2290,6 +2290,20 @@ struct NewsTests {
         assertTrue(thin.events.isEmpty, "An insufficient day classifies nothing")
         let nextDay = TensionMethodology.day(containing: day.end.addingTimeInterval(86_400 + 60))
         assertEqual(TensionDayAssessor.assess(day: nextDay, rows: [], now: Date()).coverage.status, .noData, "A day without panel items is a gap")
+
+        // History for the view (#159): starts when collection began, keeps later gaps as nil, never zero.
+        let history = try await TensionHistory.load(from: db, now: nextDay.start.addingTimeInterval(3_600), days: 5)
+        assertEqual(history.map(\.score.day.start), [day.start, day.end, nextDay.start], "Days before the first panel item are omitted")
+        assertEqual(history.map(\.coverage.status), [.sufficient, .insufficient, .noData], "Later thin and empty days stay in the series")
+        assertTrue(history[0].score.calibratedIndex != nil, "A comparable day has an index")
+        assertTrue(history.dropFirst().allSatisfy { $0.score.calibratedIndex == nil && $0.score.smoothedIndex == nil }, "Gaps are nil, never zero")
+        assertEqual(history[0].contributions.first?.score.key, quake.id, "The earthquake contributes most")
+        assertTrue(history[0].contributions.first?.title.contains("arthquake") == true, "A contribution names one of its panel stories")
+        assertFalse(history[0].contributions.contains { $0.score.key == storedID("Election results announced") }, "Untyped events contribute nothing")
+        assertTrue(zip(history[0].contributions, history[0].contributions.dropFirst()).allSatisfy { $0.score.rawScore >= $1.score.rawScore },
+                   "Contributions are ordered by size")
+        assertTrue(try await TensionHistory.load(from: db, now: day.start.addingTimeInterval(-86_400 * 3), days: 2).isEmpty,
+                   "Before collection began there is no series")
         await db.close()
     }
 

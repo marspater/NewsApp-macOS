@@ -29,6 +29,8 @@
 
 ### Added
 
+- News Tension window (experiment): a Swift Charts history of the panel's tension index by UTC day, with coverage, the largest event contributions and the methodology. Days without enough coverage are shown as gaps, never zero, and the history starts when panel collection began (#159).
+
 - Add an opt-in isolated native rendered-card benchmark and integrated service budgets; distinguish unchanged refreshes from dense clustering work without modifying the real library.
 
 - Add an optional Briefing: up to ten unread stories from the last 24 hours, mixed across sources and categories, frozen until a new briefing is requested, with reading progress and completion.

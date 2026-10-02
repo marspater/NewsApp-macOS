@@ -1,8 +1,8 @@
 import Foundation
 
 // News tension (experiment, #99). The normative text is docs/methodology/tension-index-v1.md; change it and this file
-// together and bump `TensionMethodology.version`. Nothing here produces a score: weights and smoothing come from
-// calibration on a historical sample (#158), and the view (#159) is separate. The rest of the app does not depend on it.
+// together and bump `TensionMethodology.version`. Weights and smoothing come from calibration (#158); `TensionHistory`
+// feeds the separate view (#159). The rest of the app does not depend on it.
 
 // MARK: - Methodology
 
@@ -600,3 +600,50 @@ enum TensionCalibrator {
     }
 }
 
+
+// MARK: - History (#159)
+
+/// One observation day as the tension view shows it: its score, coverage and the stories behind its largest
+/// contributions. Gap days keep a nil index.
+struct TensionHistoryDay: Sendable {
+    let score: TensionDayScore
+    let coverage: TensionCoverage
+    /// Positive event contributions, largest first.
+    let contributions: [TensionContribution]
+}
+
+/// An event's share of a day's score, with the headline of one of its panel stories.
+struct TensionContribution: Sendable {
+    let score: TensionEventScore
+    let title: String
+}
+
+enum TensionHistory {
+    /// Scores the most recent `days` UTC days from the stored panel corpus. The series starts at the first day any
+    /// panel feed reported, so without a historical corpus it starts on the day collection began; later days without
+    /// enough coverage stay in the series as gaps, never zeros.
+    static func load(from database: DatabaseEngine, now: Date, days: Int = 30,
+                     methodology: TensionMethodology = .v1, weights: TensionWeights = .calibratedV1) async throws -> [TensionHistoryDay] {
+        let today = TensionMethodology.day(containing: now)
+        var assessments: [TensionDayAssessment] = []
+        var titles: [String: String] = [:]
+        for offset in (0..<days).reversed() {
+            try Task.checkCancellation()
+            let start = today.start.addingTimeInterval(-Double(offset) * 24 * 60 * 60)
+            let day = TensionMethodology.day(containing: start)
+            let rows = try await database.tensionCorpus(day: day, feedURLs: methodology.panel.map(\.url))
+            for row in rows { titles[row.article.id] = row.article.title }
+            let assessment = TensionDayAssessor.assess(day: day, rows: rows, now: now, methodology: methodology)
+            guard !assessments.isEmpty || assessment.coverage.status != .noData else { continue }
+            assessments.append(assessment)
+        }
+        let scores = TensionCalibrator.scoreSeries(assessments: assessments, weights: weights)
+        return zip(assessments, scores).map { assessment, score in
+            let contributions = score.eventScores.filter { $0.rawScore > 0 }.sorted { $0.rawScore > $1.rawScore }.map { event in
+                let articleIDs = assessment.events.first { $0.key == event.key }?.articleIDs ?? []
+                return TensionContribution(score: event, title: articleIDs.lazy.compactMap { titles[$0] }.first ?? event.key)
+            }
+            return TensionHistoryDay(score: score, coverage: assessment.coverage, contributions: contributions)
+        }
+    }
+}
