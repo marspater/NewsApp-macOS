@@ -283,6 +283,7 @@ struct NewsTests {
             try await testOverviewTimeline(fixtureHost: fixtureHost)
             try await testEventTimelineWithSourcedItems(fixtureHost: fixtureHost)
             try await testAttributedPerspectivesOfParticipantsAndPublishers(fixtureHost: fixtureHost)
+            try await testThematicAngleFromExistingFacts(fixtureHost: fixtureHost)
             try await testHistoricalReconciliation(fixtureRoot: fixtureRoot)
             try await testEventDataModel(fixtureRoot: fixtureRoot)
             try await testEventCandidateGeneration(fixtureRoot: fixtureRoot)
@@ -362,6 +363,7 @@ struct NewsTests {
         try await testOverviewTimeline(fixtureHost: fixtureHost)
         try await testEventTimelineWithSourcedItems(fixtureHost: fixtureHost)
         try await testAttributedPerspectivesOfParticipantsAndPublishers(fixtureHost: fixtureHost)
+        try await testThematicAngleFromExistingFacts(fixtureHost: fixtureHost)
         try await testHistoricalReconciliation(fixtureRoot: fixtureRoot)
         try await testEventDataModel(fixtureRoot: fixtureRoot)
         try await testEventCandidateGeneration(fixtureRoot: fixtureRoot)
@@ -8376,6 +8378,183 @@ struct NewsTests {
             existingCitations: ["c_1": citations["c_1"]!]
         )
         assertTrue(emptyPerspectives.isEmpty, "Absent section rule: Section omitted when no verified attributed perspective exists")
+    }
+
+    static func testThematicAngleFromExistingFacts(fixtureHost: String = "example.com") async throws {
+        print("=== Testing Thematic Angle from Existing Facts (Issue #145) ===")
+
+        let pubDate = Date(timeIntervalSince1970: 1776300000)
+
+        // Passage 1: Verified financial transaction fact
+        let passage1 = EvidencePassage(
+            id: "pass_fin_1",
+            articleID: "art_fin_1",
+            text: "The acquisition price was officially closed at $4.2 billion in cash and equity.",
+            ordinal: 1
+        )
+        // Passage 2: Target company earnings
+        let passage2 = EvidencePassage(
+            id: "pass_fin_2",
+            articleID: "art_fin_1",
+            text: "Target firm reported annual recurring revenue of $850 million with 32% year-over-year growth.",
+            ordinal: 2
+        )
+        // Passage 3: Headcount and operational figures
+        let passage3 = EvidencePassage(
+            id: "pass_fin_3",
+            articleID: "art_fin_1",
+            text: "The combined enterprise will maintain 12,000 employees across 18 regional hubs.",
+            ordinal: 3
+        )
+        // Passage 4: Generic qualitative text with no thematic metrics
+        let passageGeneric = EvidencePassage(
+            id: "pass_gen_4",
+            articleID: "art_fin_1",
+            text: "Representatives praised the collaborative spirit of the negotiations.",
+            ordinal: 4
+        )
+
+        _ = FeedArticle(
+            storedID: "art_fin_1",
+            title: "Major Tech Acquisition Closes",
+            link: "https://\(fixtureHost)/finance-1",
+            guid: "guid-f1",
+            description: passage1.text,
+            pubDate: pubDate,
+            source: "Financial Daily",
+            fullContent: "\(passage1.text) \(passage2.text) \(passage3.text) \(passageGeneric.text)"
+        )
+
+        let citations: [String: OverviewCitation] = [
+            "c_fin_1": OverviewCitation(
+                id: "c_fin_1",
+                articleID: "art_fin_1",
+                passageID: "pass_fin_1",
+                passageFingerprint: passage1.fingerprint,
+                quote: "The acquisition price was officially closed at $4.2 billion"
+            ),
+            "c_fin_2": OverviewCitation(
+                id: "c_fin_2",
+                articleID: "art_fin_1",
+                passageID: "pass_fin_2",
+                passageFingerprint: passage2.fingerprint,
+                quote: "annual recurring revenue of $850 million with 32% year-over-year growth"
+            ),
+            "c_fin_3": OverviewCitation(
+                id: "c_fin_3",
+                articleID: "art_fin_1",
+                passageID: "pass_fin_3",
+                passageFingerprint: passage3.fingerprint,
+                quote: "maintain 12,000 employees across 18 regional hubs"
+            )
+        ]
+
+        let fact1 = PassageAnchoredFact(
+            statement: "Acquisition price closed at $4.2 billion in cash and equity.",
+            passageID: "pass_fin_1",
+            quote: "The acquisition price was officially closed at $4.2 billion",
+            articleID: "art_fin_1"
+        )
+        let fact2 = PassageAnchoredFact(
+            statement: "Target company reported $850 million in annual recurring revenue with 32% growth.",
+            passageID: "pass_fin_2",
+            quote: "annual recurring revenue of $850 million with 32% year-over-year growth",
+            articleID: "art_fin_1"
+        )
+        let fact3 = PassageAnchoredFact(
+            statement: "Combined enterprise retains 12,000 employees across 18 regional hubs.",
+            passageID: "pass_fin_3",
+            quote: "maintain 12,000 employees across 18 regional hubs",
+            articleID: "art_fin_1"
+        )
+        let factGeneric = PassageAnchoredFact(
+            statement: "Negotiations proceeded in a collaborative spirit.",
+            passageID: "pass_gen_4",
+            quote: "collaborative spirit of the negotiations",
+            articleID: "art_fin_1"
+        )
+
+        // 1. Extraction: extractThematicAngle identifies financial figures angle from quantitative facts
+        let angle = OverviewThematicAngleExtractor.extractThematicAngle(
+            facts: [fact1, fact2, fact3, factGeneric],
+            passages: [passage1, passage2, passage3, passageGeneric],
+            existingCitations: citations
+        )
+
+        assertTrue(angle != nil, "Extractor discovers thematic angle from evidence facts")
+        assertEqual(angle?.title, "Financial figures", "Identifies financial figures title")
+        assertTrue((angle?.facts.count ?? 0) >= 2, "Contains at least 2 quantitative/thematic facts")
+        assertFalse(angle?.citationIDs.isEmpty ?? true, "Angle has non-empty citations")
+
+        // 2. Rule 1: No forecasts
+        // Extractor never includes forecasts or projections in thematic facts
+        for fact in angle?.facts ?? [] {
+            assertFalse(OverviewThematicAngleValidator.isForecast(fact.text), "Rule 1: Angle fact does not contain speculative forecasts")
+        }
+
+        // Validator rejects candidate with forward-looking forecast
+        let forecastFact = OverviewFact(
+            id: "f_forecast",
+            text: "Stock price is forecast to surge by 45% over the next two fiscal years.",
+            citationIDs: ["c_fin_1"]
+        )
+        let forecastAngle = OverviewThematicAngle(
+            id: "ang_forecast",
+            title: "Financial figures",
+            summary: "Revenue is projected to triple by 2030.",
+            citationIDs: ["c_fin_1"],
+            facts: [forecastFact]
+        )
+        let valForecast = OverviewThematicAngleValidator.validateAngle(forecastAngle, against: citations)
+        assertFalse(valForecast.isValid, "Rule 1: Angle with forecast/projections is rejected")
+
+        // 3. Rule 2: No investment advice
+        let adviceFact = OverviewFact(
+            id: "f_advice",
+            text: "Analysts issue a strong buy recommendation for retail investors.",
+            citationIDs: ["c_fin_1"]
+        )
+        let adviceAngle = OverviewThematicAngle(
+            id: "ang_advice",
+            title: "Financial figures",
+            summary: "Investors should buy shares before the dividend ex-date.",
+            citationIDs: ["c_fin_1"],
+            facts: [adviceFact]
+        )
+        let valAdvice = OverviewThematicAngleValidator.validateAngle(adviceAngle, against: citations)
+        assertFalse(valAdvice.isValid, "Rule 2: Angle with investment advice or stock ratings is rejected")
+
+        // 4. Rule 3: Every fact cited
+        for fact in angle?.facts ?? [] {
+            assertFalse(fact.citationIDs.isEmpty, "Rule 3: Every thematic fact has citation IDs")
+            for citID in fact.citationIDs {
+                assertTrue(citations[citID] != nil, "Rule 3: Fact citation ID exists in citations map")
+            }
+        }
+
+        // Validator rejects fact without citation
+        let uncitedFact = OverviewFact(
+            id: "f_uncited",
+            text: "Uncited financial figure.",
+            citationIDs: []
+        )
+        let uncitedAngle = OverviewThematicAngle(
+            id: "ang_uncited",
+            title: "Financial figures",
+            summary: "Summary text.",
+            citationIDs: ["c_fin_1"],
+            facts: [uncitedFact]
+        )
+        let valUncited = OverviewThematicAngleValidator.validateAngle(uncitedAngle, against: citations)
+        assertFalse(valUncited.isValid, "Rule 3: Angle with uncited fact is rejected")
+
+        // 5. Absent sections rule: section omitted when fewer than 2 thematic facts exist
+        let noThematicAngle = OverviewThematicAngleExtractor.extractThematicAngle(
+            facts: [factGeneric],
+            passages: [passageGeneric],
+            existingCitations: [:]
+        )
+        assertEqual(noThematicAngle, nil, "Absent sections rule: Thematic angle is nil when insufficient thematic facts exist")
     }
 }
 

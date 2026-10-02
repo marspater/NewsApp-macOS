@@ -220,12 +220,18 @@ public struct OverviewComposer: Sendable {
             existingCitations: citationsMap
         )
 
+        let thematicAngle = OverviewThematicAngleExtractor.extractThematicAngle(
+            facts: validFacts,
+            passages: passages,
+            existingCitations: citationsMap
+        )
+
         let evidenceSections: OverviewEvidenceSections?
-        if !timelineItems.isEmpty || !perspectives.isEmpty {
+        if !timelineItems.isEmpty || !perspectives.isEmpty || thematicAngle != nil {
             evidenceSections = OverviewEvidenceSections(
                 timeline: timelineItems,
                 perspectives: perspectives,
-                thematicAngle: nil
+                thematicAngle: thematicAngle
             )
         } else {
             evidenceSections = nil

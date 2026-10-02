@@ -553,13 +553,41 @@ struct EventOverviewReaderView: View {
                 .foregroundColor(AppColor.primaryText)
                 .accessibilityHeading(.h2)
 
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 10) {
                 Text(angle.summary)
                     .font(.system(size: 14, weight: .regular))
                     .lineSpacing(4)
                     .foregroundColor(AppColor.primaryText)
 
-                if !angle.citationIDs.isEmpty {
+                if !angle.facts.isEmpty {
+                    VStack(alignment: .leading, spacing: 8) {
+                        ForEach(angle.facts) { fact in
+                            HStack(alignment: .top, spacing: 8) {
+                                Image(systemName: "circle.fill")
+                                    .font(.system(size: 5))
+                                    .foregroundColor(AppColor.accent)
+                                    .padding(.top, 6)
+
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(fact.text)
+                                        .font(.system(size: 13, weight: .regular))
+                                        .foregroundColor(AppColor.primaryText)
+
+                                    if !fact.citationIDs.isEmpty {
+                                        HStack(spacing: 4) {
+                                            ForEach(fact.citationIDs, id: \.self) { citID in
+                                                if let citation = overview.citations[citID] {
+                                                    citationPill(citation)
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    .padding(.top, 4)
+                } else if !angle.citationIDs.isEmpty {
                     HStack(spacing: 4) {
                         ForEach(angle.citationIDs, id: \.self) { citID in
                             if let citation = overview.citations[citID] {
