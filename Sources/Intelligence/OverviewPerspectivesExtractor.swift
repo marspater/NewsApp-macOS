@@ -336,78 +336,64 @@ struct OverviewPerspectivesExtractor: Sendable {
         wireSource: String?,
         publisher: String?
     ) -> [ExtractedCandidate] {
-        var results: [ExtractedCandidate] = []
-
         // Pattern 1: "[Quote]," (said|announced|stated|argued|warned|noted) [Participant].
         let patternQuoteFirst = #"\"([^\"]{10,250})\",?\s*(?:said|stated|announced|noted|argued|warned|confirmed|declared|emphasized|urged|reiterated|cautioned|explained)\s+([A-Z][A-Za-z0-9\s,\.\-]{2,60})"#
-        if let regex = try? NSRegularExpression(pattern: patternQuoteFirst) {
-            let nsString = text as NSString
-            let matches = regex.matches(in: text, range: NSRange(location: 0, length: nsString.length))
-            for m in matches where m.numberOfRanges >= 3 {
-                let quoteStr = nsString.substring(with: m.range(at: 1)).trimmingCharacters(in: .whitespacesAndNewlines)
-                let participantStr = cleanParticipant(nsString.substring(with: m.range(at: 2)))
-                if !participantStr.isEmpty {
-                    results.append(ExtractedCandidate(
-                        participant: participantStr,
-                        position: quoteStr,
-                        quote: quoteStr,
-                        citationID: citationID,
-                        passageID: passageID,
-                        articleID: articleID,
-                        originalWireSource: wireSource,
-                        sourcePublisher: publisher
-                    ))
-                }
-            }
-        }
-
         // Pattern 2: [Participant] (said that|stated that|announced that|argued that|warned that|noted that|confirmed that) [Statement].
         let patternSpeakerFirst = #"([A-Z][A-Za-z0-9\s,\.\-]{2,60})\s+(?:said that|stated that|announced that|argued that|warned that|noted that|confirmed that|emphasized that|urged that)\s+([^\.\n]{15,200})"#
-        if let regex = try? NSRegularExpression(pattern: patternSpeakerFirst) {
-            let nsString = text as NSString
-            let matches = regex.matches(in: text, range: NSRange(location: 0, length: nsString.length))
-            for m in matches where m.numberOfRanges >= 3 {
-                let participantStr = cleanParticipant(nsString.substring(with: m.range(at: 1)))
-                let statementStr = nsString.substring(with: m.range(at: 2)).trimmingCharacters(in: .whitespacesAndNewlines)
-                if !participantStr.isEmpty && statementStr.count >= 10 {
-                    results.append(ExtractedCandidate(
-                        participant: participantStr,
-                        position: statementStr,
-                        quote: statementStr,
-                        citationID: citationID,
-                        passageID: passageID,
-                        articleID: articleID,
-                        originalWireSource: wireSource,
-                        sourcePublisher: publisher
-                    ))
-                }
-            }
-        }
-
         // Pattern 3: According to [Participant], [Statement].
         let patternAccordingTo = #"According to\s+([A-Z][A-Za-z0-9\s,\.\-]{2,60}),\s+([^\.\n]{15,200})"#
-        if let regex = try? NSRegularExpression(pattern: patternAccordingTo) {
-            let nsString = text as NSString
-            let matches = regex.matches(in: text, range: NSRange(location: 0, length: nsString.length))
-            for m in matches where m.numberOfRanges >= 3 {
-                let participantStr = cleanParticipant(nsString.substring(with: m.range(at: 1)))
-                let statementStr = nsString.substring(with: m.range(at: 2)).trimmingCharacters(in: .whitespacesAndNewlines)
-                if !participantStr.isEmpty && statementStr.count >= 10 {
-                    results.append(ExtractedCandidate(
-                        participant: participantStr,
-                        position: statementStr,
-                        quote: statementStr,
-                        citationID: citationID,
-                        passageID: passageID,
-                        articleID: articleID,
-                        originalWireSource: wireSource,
-                        sourcePublisher: publisher
-                    ))
-                }
+
+        // Group order and minimum statement length per pattern; matches keep pattern order.
+        let attributions: [(pattern: String, participantGroup: Int, statementGroup: Int, minimumLength: Int)] = [
+            (patternQuoteFirst, 2, 1, 0),
+            (patternSpeakerFirst, 1, 2, 10),
+            (patternAccordingTo, 1, 2, 10)
+        ]
+        var results: [ExtractedCandidate] = []
+        for attribution in attributions {
+            let matches = attributedMatches(
+                of: attribution.pattern,
+                in: text,
+                participantGroup: attribution.participantGroup,
+                statementGroup: attribution.statementGroup,
+                minimumStatementLength: attribution.minimumLength
+            )
+            for match in matches {
+                results.append(ExtractedCandidate(
+                    participant: match.participant,
+                    position: match.statement,
+                    quote: match.statement,
+                    citationID: citationID,
+                    passageID: passageID,
+                    articleID: articleID,
+                    originalWireSource: wireSource,
+                    sourcePublisher: publisher
+                ))
             }
         }
 
         return results
+    }
+
+    /// Runs one attribution pattern and keeps matches that name a participant and carry a statement
+    /// of at least `minimumStatementLength` characters.
+    private static func attributedMatches(
+        of pattern: String,
+        in text: String,
+        participantGroup: Int,
+        statementGroup: Int,
+        minimumStatementLength: Int
+    ) -> [(participant: String, statement: String)] {
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
+        let nsString = text as NSString
+        let matches = regex.matches(in: text, range: NSRange(location: 0, length: nsString.length))
+        return matches.compactMap { match -> (participant: String, statement: String)? in
+            guard match.numberOfRanges >= 3 else { return nil }
+            let participant = cleanParticipant(nsString.substring(with: match.range(at: participantGroup)))
+            let statement = nsString.substring(with: match.range(at: statementGroup)).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !participant.isEmpty, statement.count >= minimumStatementLength else { return nil }
+            return (participant, statement)
+        }
     }
 
     /// Strips leading conjunctions, wire datelines, or trailing punctuation from participant strings.
