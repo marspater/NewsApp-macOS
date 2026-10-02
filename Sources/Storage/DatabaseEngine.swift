@@ -543,14 +543,78 @@ actor DatabaseEngine {
                 throw error
             }
         }
+        if version < 15 {
+            try beginTransaction()
+            do {
+                try Task.checkCancellation()
+                let columns = try columnNames(of: "article_enrichment")
+                for (name, definition) in [("input_content_version", "INTEGER"), ("input_text_hash", "TEXT")]
+                where !columns.contains(name) {
+                    try executeSimple("ALTER TABLE article_enrichment ADD COLUMN \(name) \(definition);")
+                }
+                try executeSimple("""
+                CREATE TABLE IF NOT EXISTS publisher_content_revisions (
+                    article_id TEXT NOT NULL REFERENCES articles(id) ON DELETE CASCADE,
+                    version INTEGER NOT NULL,
+                    observed_at REAL NOT NULL,
+                    kind TEXT NOT NULL,
+                    changed_fields INTEGER NOT NULL,
+                    input_text_hash TEXT NOT NULL,
+                    PRIMARY KEY (article_id, version)
+                );
+                INSERT OR IGNORE INTO publisher_content_revisions
+                SELECT id, 1, \(Date().timeIntervalSince1970), 'snapshot', 0,
+                       news_publisher_input(title, coalesce(description, ''), content) FROM articles;
+                -- Legacy generated results have no input provenance; keep publisher bodies and user state.
+                UPDATE article_enrichment SET summary = NULL, key_points = NULL, sentiment = NULL,
+                    entities = NULL, topics = NULL, category = NULL, confidence = NULL,
+                    model_identifier = NULL, analysis_version = NULL, input_content_version = NULL, input_text_hash = NULL;
+                DROP TRIGGER IF EXISTS trg_publisher_content_insert;
+                CREATE TRIGGER trg_publisher_content_insert AFTER INSERT ON articles
+                BEGIN
+                    INSERT INTO publisher_content_revisions VALUES (new.id, 1, new.created_at, 'snapshot', 0,
+                        news_publisher_input(new.title, coalesce(new.description, ''), new.content));
+                END;
+                DROP TRIGGER IF EXISTS trg_publisher_content_update;
+                CREATE TRIGGER trg_publisher_content_update AFTER UPDATE OF title, description, content ON articles
+                WHEN old.title IS NOT new.title OR old.description IS NOT new.description OR old.content IS NOT new.content
+                BEGIN
+                    UPDATE article_enrichment SET summary = NULL, key_points = NULL, sentiment = NULL,
+                        entities = NULL, topics = NULL, category = NULL, confidence = NULL,
+                        model_identifier = NULL, analysis_version = NULL, input_content_version = NULL, input_text_hash = NULL
+                        WHERE article_id = new.id;
+                    DELETE FROM event_overviews WHERE event_id IN (SELECT event_id FROM event_members WHERE article_id = new.id)
+                        OR id IN (SELECT overview_id FROM event_overview_citations WHERE article_id = new.id);
+                    INSERT INTO publisher_content_revisions
+                    SELECT new.id, coalesce(max(version), 0) + 1, new.updated_at,
+                        CASE WHEN old.title IS NOT new.title OR old.description IS NOT new.description OR coalesce(old.content, '') != ''
+                             THEN 'publisher_update' ELSE 'extraction' END,
+                        (old.title IS NOT new.title) + 2 * (old.description IS NOT new.description) + 4 * (old.content IS NOT new.content),
+                        news_publisher_input(new.title, coalesce(new.description, ''), new.content)
+                    FROM publisher_content_revisions WHERE article_id = new.id
+                    HAVING old.title IS NOT new.title OR old.description IS NOT new.description OR new.content IS NOT NULL;
+                    -- Keep compact metadata for the latest twenty observations, not publisher body copies.
+                    DELETE FROM publisher_content_revisions WHERE article_id = new.id AND version <
+                        (SELECT max(version) - 19 FROM publisher_content_revisions WHERE article_id = new.id);
+                END;
+                """)
+                try Task.checkCancellation()
+                try setUserVersion(15)
+                try commitTransaction()
+            } catch {
+                try? rollbackTransaction()
+                throw error
+            }
+        }
     }
     
     /// Muting predicates for list queries (`MuteRules`); both are pure functions of their arguments.
     private func registerFunctions() throws {
         let flags = SQLITE_UTF8 | SQLITE_DETERMINISTIC
-        guard sqlite3_create_function_v2(db, "news_muted_source", 2, flags, nil, mutedSourceFunction, nil, nil, nil) == SQLITE_OK,
+        guard sqlite3_create_function_v2(db, "news_publisher_input", 3, flags, nil, publisherInputFunction, nil, nil, nil) == SQLITE_OK,
+              sqlite3_create_function_v2(db, "news_muted_source", 2, flags, nil, mutedSourceFunction, nil, nil, nil) == SQLITE_OK,
               sqlite3_create_function_v2(db, "news_muted_topic", 3, flags, nil, mutedTopicFunction, nil, nil, nil) == SQLITE_OK else {
-            throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Cannot register muting functions"])
+            throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Cannot register database functions"])
         }
     }
 
@@ -838,7 +902,7 @@ actor DatabaseEngine {
     /// `validators` accompany a fresh 200 response. They and the response's content stats are written in the same
     /// transaction as the articles, so a feed is only ever answered "not modified" for content that was durably ingested.
     @discardableResult
-    func upsertArticles(_ articles: [FeedArticle], feedUrl: String? = nil, validators: FeedValidators? = nil) throws -> Set<String> {
+    func upsertArticles(_ articles: [FeedArticle], feedUrl: String? = nil, validators: FeedValidators? = nil, preservingStoredContent: Bool = false) throws -> Set<String> {
         guard let db = db else { throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Database not open"]) }
         guard !articles.isEmpty else { return [] }
         
@@ -947,33 +1011,37 @@ actor DatabaseEngine {
             }
             if existenceStatus == SQLITE_DONE { insertedIDs.insert(id) }
 
+            // Bookmarking a frozen/aliased snapshot must register identity without reverting publisher content.
+            let preserveExisting = preservingStoredContent && existenceStatus == SQLITE_ROW
             // 1. Insert/Update Article
-            sqlite3_reset(artStmt)
-            sqlite3_bind_text(artStmt, 1, id, -1, Self.sqliteTransient)
-            if let g = article.guid { sqlite3_bind_text(artStmt, 2, g, -1, Self.sqliteTransient) } else { sqlite3_bind_null(artStmt, 2) }
-            sqlite3_bind_text(artStmt, 3, canonical, -1, Self.sqliteTransient)
-            sqlite3_bind_text(artStmt, 4, article.title, -1, Self.sqliteTransient)
-            sqlite3_bind_text(artStmt, 5, article.description, -1, Self.sqliteTransient)
-            if let c = article.fullContent { sqlite3_bind_text(artStmt, 6, c, -1, Self.sqliteTransient) } else { sqlite3_bind_null(artStmt, 6) }
-            sqlite3_bind_double(artStmt, 7, pubDate)
-            sqlite3_bind_text(artStmt, 8, article.source, -1, Self.sqliteTransient)
-            if let img = article.imageUrl { sqlite3_bind_text(artStmt, 9, img, -1, Self.sqliteTransient) } else { sqlite3_bind_null(artStmt, 9) }
-            if let cat = article.category { sqlite3_bind_text(artStmt, 10, cat, -1, Self.sqliteTransient) } else { sqlite3_bind_null(artStmt, 10) }
-            if let f = identityFeedURL { sqlite3_bind_text(artStmt, 11, f, -1, Self.sqliteTransient) } else { sqlite3_bind_null(artStmt, 11) }
-            sqlite3_bind_double(artStmt, 12, now)
-            sqlite3_bind_double(artStmt, 13, now)
-            if let document = article.readerDocument {
-                let encoded = String(decoding: try JSONEncoder().encode(document), as: UTF8.self)
-                sqlite3_bind_text(artStmt, 14, encoded, -1, Self.sqliteTransient)
-            } else { sqlite3_bind_null(artStmt, 14) }
+            if !preserveExisting {
+                sqlite3_reset(artStmt)
+                sqlite3_bind_text(artStmt, 1, id, -1, Self.sqliteTransient)
+                if let g = article.guid { sqlite3_bind_text(artStmt, 2, g, -1, Self.sqliteTransient) } else { sqlite3_bind_null(artStmt, 2) }
+                sqlite3_bind_text(artStmt, 3, canonical, -1, Self.sqliteTransient)
+                sqlite3_bind_text(artStmt, 4, article.title, -1, Self.sqliteTransient)
+                sqlite3_bind_text(artStmt, 5, article.description, -1, Self.sqliteTransient)
+                if let c = article.fullContent { sqlite3_bind_text(artStmt, 6, c, -1, Self.sqliteTransient) } else { sqlite3_bind_null(artStmt, 6) }
+                sqlite3_bind_double(artStmt, 7, pubDate)
+                sqlite3_bind_text(artStmt, 8, article.source, -1, Self.sqliteTransient)
+                if let img = article.imageUrl { sqlite3_bind_text(artStmt, 9, img, -1, Self.sqliteTransient) } else { sqlite3_bind_null(artStmt, 9) }
+                if let cat = article.category { sqlite3_bind_text(artStmt, 10, cat, -1, Self.sqliteTransient) } else { sqlite3_bind_null(artStmt, 10) }
+                if let f = identityFeedURL { sqlite3_bind_text(artStmt, 11, f, -1, Self.sqliteTransient) } else { sqlite3_bind_null(artStmt, 11) }
+                sqlite3_bind_double(artStmt, 12, now)
+                sqlite3_bind_double(artStmt, 13, now)
+                if let document = article.readerDocument {
+                    let encoded = String(decoding: try JSONEncoder().encode(document), as: UTF8.self)
+                    sqlite3_bind_text(artStmt, 14, encoded, -1, Self.sqliteTransient)
+                } else { sqlite3_bind_null(artStmt, 14) }
 
-            sqlite3_bind_int(artStmt, 15, validLink ? 1 : 0)
-            sqlite3_bind_double(artStmt, 16, DateParser.unknownDate.timeIntervalSince1970)
-            sqlite3_bind_int(artStmt, 17, article.readerDocument?.hasPublisherText == true ? 1 : 0)
+                sqlite3_bind_int(artStmt, 15, validLink ? 1 : 0)
+                sqlite3_bind_double(artStmt, 16, DateParser.unknownDate.timeIntervalSince1970)
+                sqlite3_bind_int(artStmt, 17, article.readerDocument?.hasPublisherText == true ? 1 : 0)
 
-            if sqlite3_step(artStmt) != SQLITE_DONE {
-                try rollbackTransaction()
-                throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to step article insert"])
+                if sqlite3_step(artStmt) != SQLITE_DONE {
+                    try rollbackTransaction()
+                    throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to step article insert"])
+                }
             }
 
             try recordAlias(kind: "id", value: id, articleID: id)
@@ -1008,18 +1076,21 @@ actor DatabaseEngine {
             }
 
             // 3. Insert Enrichment
-            sqlite3_reset(enrichStmt)
-            sqlite3_bind_text(enrichStmt, 1, id, -1, Self.sqliteTransient)
-            if let s = article.aiSummary { sqlite3_bind_text(enrichStmt, 2, s, -1, Self.sqliteTransient) } else { sqlite3_bind_null(enrichStmt, 2) }
-            sqlite3_bind_int(enrichStmt, 3, article.contentFetched ? 1 : 0)
-            if article.aiSummary != nil || article.contentFetched {
-                sqlite3_bind_double(enrichStmt, 4, now)
-            } else {
-                sqlite3_bind_null(enrichStmt, 4)
-            }
-            if sqlite3_step(enrichStmt) != SQLITE_DONE {
-                try rollbackTransaction()
-                throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to step enrichment insert"])
+            if !preserveExisting {
+                sqlite3_reset(enrichStmt)
+                sqlite3_bind_text(enrichStmt, 1, id, -1, Self.sqliteTransient)
+                // Feed/legacy snapshots carry no analysis-input provenance. Only guarded analysis writes supply summaries.
+                sqlite3_bind_null(enrichStmt, 2)
+                sqlite3_bind_int(enrichStmt, 3, article.contentFetched ? 1 : 0)
+                if article.aiSummary != nil || article.contentFetched {
+                    sqlite3_bind_double(enrichStmt, 4, now)
+                } else {
+                    sqlite3_bind_null(enrichStmt, 4)
+                }
+                if sqlite3_step(enrichStmt) != SQLITE_DONE {
+                    try rollbackTransaction()
+                    throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to step enrichment insert"])
+                }
             }
         }
         
@@ -1228,7 +1299,7 @@ actor DatabaseEngine {
         
         var query = """
         SELECT a.id, a.guid, a.canonical_url, a.title, a.description, a.content,
-               a.published_at, a.source, a.image_url, a.category,
+               a.published_at, a.source, a.image_url, coalesce(ae.category, a.category),
                ae.summary, ae.content_fetched,
                s.is_read, s.is_saved,
                ae.key_points, ae.entities, ae.sentiment, a.reader_document, \(Self.articleDateOrder)
@@ -1333,7 +1404,7 @@ actor DatabaseEngine {
 
         var sql = """
         SELECT a.id, a.guid, a.canonical_url, a.title, a.description, a.content,
-               a.published_at, a.source, a.image_url, a.category,
+               a.published_at, a.source, a.image_url, coalesce(ae.category, a.category),
                ae.summary, ae.content_fetched,
                s.is_read, s.is_saved,
                ae.key_points, ae.entities, ae.sentiment, a.reader_document
@@ -1670,6 +1741,17 @@ actor DatabaseEngine {
         return urls
     }
 
+    func publisherContentRevisions(for articleID: String) throws -> [PublisherContentRevision] {
+        let id = try resolvedArticleID(articleID)
+        return try eventRows("SELECT version, observed_at, kind, changed_fields, input_text_hash FROM publisher_content_revisions WHERE article_id = ? ORDER BY version DESC LIMIT 20;", [.text(id)]).compactMap { row in
+            guard let version = row[0].flatMap(Int.init), let timestamp = row[1].flatMap(Double.init),
+                  let kind = row[2].flatMap(PublisherContentRevision.Kind.init(rawValue:)),
+                  let fields = row[3].flatMap(Int.init), let hash = row[4] else { return nil }
+            return PublisherContentRevision(version: version, observedAt: Date(timeIntervalSince1970: timestamp),
+                                            kind: kind, changedFields: fields, inputHash: hash)
+        }
+    }
+
     // MARK: - Enrichment Update
     
     struct EnrichmentUpdate: Sendable {
@@ -1681,10 +1763,15 @@ actor DatabaseEngine {
         var content: String? = nil
         var image: String? = nil
         var readerDocument: ReaderDocument? = nil
+        var expectedInputHash: String? = nil
     }
 
-    func updateEnrichment(articleId: String, update: EnrichmentUpdate) throws {
+    @discardableResult
+    func updateEnrichment(articleId: String, update: EnrichmentUpdate) throws -> Bool {
         let articleId = try resolvedArticleID(articleId)
+        if let expected = update.expectedInputHash {
+            guard try fetchArticles(limit: 1, id: articleId).first?.publisherInputHash == expected else { return false }
+        }
         let summary = update.summary
         let category = update.category
         let sentiment = update.sentiment
@@ -1792,17 +1879,23 @@ actor DatabaseEngine {
             }
         }
         try commitTransaction()
+        return true
     }
 
     /// Persists structured ArticleAnalysis into article_enrichment.
-    func saveArticleAnalysis(_ analysis: ArticleAnalysis, for articleId: String) throws {
+    @discardableResult
+    func saveArticleAnalysis(_ analysis: ArticleAnalysis, for articleId: String, expectedInputHash: String? = nil) throws -> Bool {
         let articleId = try resolvedArticleID(articleId)
+        guard let article = try fetchArticles(limit: 1, id: articleId).first else { return false }
+        let inputHash = article.publisherInputHash
+        if let expectedInputHash, expectedInputHash != inputHash { return false }
+        let inputVersion = try publisherContentRevisions(for: articleId).first?.version ?? 1
         guard let db = db else { throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Database not open"]) }
 
         let sql = """
         INSERT INTO article_enrichment (
-            article_id, summary, key_points, category, confidence, sentiment, entities, model_identifier, analysis_version, enriched_at, content_fetched
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+            article_id, summary, key_points, category, confidence, sentiment, entities, model_identifier, analysis_version, enriched_at, content_fetched, input_content_version, input_text_hash
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
         ON CONFLICT(article_id) DO UPDATE SET
             summary = excluded.summary,
             key_points = excluded.key_points,
@@ -1813,7 +1906,9 @@ actor DatabaseEngine {
             model_identifier = excluded.model_identifier,
             analysis_version = excluded.analysis_version,
             enriched_at = excluded.enriched_at,
-            content_fetched = 1;
+            content_fetched = 1,
+            input_content_version = excluded.input_content_version,
+            input_text_hash = excluded.input_text_hash;
         """
 
         var stmt: OpaquePointer?
@@ -1856,11 +1951,14 @@ actor DatabaseEngine {
         sqlite3_bind_text(stmt, 8, analysis.modelIdentifier, -1, Self.sqliteTransient)
         sqlite3_bind_int(stmt, 9, Int32(analysis.analysisVersion))
         sqlite3_bind_double(stmt, 10, now)
+        sqlite3_bind_int(stmt, 11, Int32(inputVersion))
+        sqlite3_bind_text(stmt, 12, inputHash, -1, Self.sqliteTransient)
 
         if sqlite3_step(stmt) != SQLITE_DONE {
             let msg = String(cString: sqlite3_errmsg(db))
             throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Step failed: \(msg)"])
         }
+        return true
     }
 
     /// Fetches persisted ArticleAnalysis for an article (if previously analyzed).
@@ -1869,13 +1967,17 @@ actor DatabaseEngine {
         let sql = """
         SELECT summary, key_points, category, sentiment, entities, model_identifier, analysis_version
         FROM article_enrichment
-        WHERE article_id = ? AND summary IS NOT NULL;
+        WHERE article_id = ? AND summary IS NOT NULL AND input_text_hash = ?
+            AND input_content_version = (SELECT max(version) FROM publisher_content_revisions WHERE article_id = ?);
         """
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return nil }
         defer { sqlite3_finalize(stmt) }
 
+        guard let article = try? fetchArticles(limit: 1, id: articleId).first else { return nil }
         sqlite3_bind_text(stmt, 1, articleId, -1, Self.sqliteTransient)
+        sqlite3_bind_text(stmt, 2, article.publisherInputHash, -1, Self.sqliteTransient)
+        sqlite3_bind_text(stmt, 3, articleId, -1, Self.sqliteTransient)
         guard sqlite3_step(stmt) == SQLITE_ROW else { return nil }
 
         guard let summaryCStr = sqlite3_column_text(stmt, 0) else { return nil }
@@ -2102,7 +2204,7 @@ actor DatabaseEngine {
         guard !feedURLs.isEmpty else { return [] }
         let sql = """
         SELECT a.id, a.guid, a.canonical_url, a.title, a.description, a.content,
-               a.published_at, a.source, a.image_url, a.category,
+               a.published_at, a.source, a.image_url, coalesce(ae.category, a.category),
                ae.summary, ae.content_fetched,
                s.is_read, s.is_saved,
                ae.key_points, ae.entities, ae.sentiment, a.reader_document, af.feed_url, em.event_id
@@ -2238,12 +2340,18 @@ actor DatabaseEngine {
     }
 
     @discardableResult
-    func recordEventOverview(_ overview: EventOverviewDocument) throws -> Bool {
+    func recordEventOverview(_ overview: EventOverviewDocument, expectedArticleInputs: [String: String]? = nil) throws -> Bool {
         guard let db = db else { throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Database not open"]) }
 
         try beginTransaction()
         defer {
             if sqlite3_get_autocommit(db) == 0 { try? rollbackTransaction() }
+        }
+
+        if let expectedArticleInputs {
+            for (id, hash) in expectedArticleInputs {
+                guard try fetchArticles(limit: 1, id: id).first?.publisherInputHash == hash else { return false }
+            }
         }
 
         // Check if an existing overview exists for this event
@@ -3048,4 +3156,12 @@ private func mutedTopicFunction(_ context: OpaquePointer?, _ count: Int32, _ val
     guard count == 3, let values else { return sqlite3_result_int(context, 0) }
     func text(_ index: Int) -> String { sqlite3_value_text(values[index]).map { String(cString: $0) } ?? "" }
     sqlite3_result_int(context, MuteRules.topicList(text(2), mutes: text(0) + "\n" + text(1)) ? 1 : 0)
+}
+
+/// Pure SQLite bridge; publisher text is hashed locally and never logged.
+func publisherInputFunction(_ context: OpaquePointer?, _ count: Int32, _ arguments: UnsafeMutablePointer<OpaquePointer?>?) {
+    guard count == 3, let arguments else { sqlite3_result_null(context); return }
+    func text(_ index: Int) -> String { sqlite3_value_text(arguments[index]).map { String(cString: $0) } ?? "" }
+    let hash = PublisherContentRevision.inputHash(title: text(0), description: text(1), content: text(2))
+    sqlite3_result_text(context, hash, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
 }

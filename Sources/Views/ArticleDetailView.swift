@@ -36,6 +36,7 @@ struct ArticleDetailView: View {
     @State private var webLoadError: String?
     @State private var webAction: WebNavigationAction? = nil
 
+    @State private var publisherRevisions: [PublisherContentRevision] = []
     @State private var analysis: ArticleAnalysis? = nil
     @State private var isAnalyzing: Bool = false
     @State private var analysisError: String? = nil
@@ -169,9 +170,22 @@ struct ArticleDetailView: View {
         .task(id: "\(activeArticle.id):\(reloadGeneration)") {
             await ensureContentExtracted(forceRefresh: reloadGeneration > 0)
         }
-        .task(id: summaryExpanded ? activeArticle.id : nil) {
+        .task(id: summaryExpanded ? "\(activeArticle.id):\(currentArticle.publisherInputHash)" : nil) {
             guard summaryExpanded else { return }
             await startArticleAnalysis()
+        }
+        .task(id: "\(activeArticle.id):\(articleStore.revision)") {
+            let id = activeArticle.id
+            let revisions = try? await articleStore.database.publisherContentRevisions(for: id)
+            guard !Task.isCancelled, activeArticle.id == id else { return }
+            publisherRevisions = revisions ?? []
+        }
+        .onChange(of: currentArticle.publisherInputHash) { _, _ in
+            analysis = nil
+            analysisError = nil
+            isAnalyzing = false
+            currentOverview = nil
+            experienceMode = .sourcePublication
         }
         .onAppear { isViewFocused = true }
     }
@@ -261,6 +275,8 @@ struct ArticleDetailView: View {
                         .accessibilityHeading(.h1)
                         .textSelection(.enabled)
 
+                    publisherUpdates
+
                     // On-device AI Analysis Section
                     heroImageHeader
 
@@ -299,6 +315,25 @@ struct ArticleDetailView: View {
         }
         .softScrollEdge()
 
+    }
+
+    @ViewBuilder
+    private var publisherUpdates: some View {
+        let updates = publisherRevisions.filter { $0.kind == .publisherUpdate }
+        if let latest = updates.first {
+            DisclosureGroup("Publisher updated · \(latest.observedAt.formatted(date: .abbreviated, time: .shortened))") {
+                VStack(alignment: .leading, spacing: AppSpacing.sm) {
+                    Text("Changes observed on this Mac. An update is not a verified correction.")
+                    ForEach(updates) { revision in
+                        Text("Version \(revision.version) · \(revision.changeDescription) · \(revision.observedAt.formatted(date: .abbreviated, time: .shortened))")
+                    }
+                }
+                .font(AppTypography.caption)
+                .padding(.top, AppSpacing.sm)
+            }
+            .font(AppTypography.bodySmall)
+            .foregroundStyle(AppColor.secondaryText)
+        }
     }
 
     @ViewBuilder
@@ -928,6 +963,7 @@ struct ArticleDetailView: View {
         }
         let allowInsecure = appSettings.allowInsecureHTTP
         let targetId = currentArticle.id
+        let expectedInputHash = currentArticle.publisherInputHash
 
         guard !Task.isCancelled else { return }
         contentState = .loading
@@ -952,14 +988,19 @@ struct ArticleDetailView: View {
                     } catch is CancellationError { return }
                     catch { /* Recurrence is optional; protected images still use local filters. */ }
                 }
-                await articleStore.updateEnrichment(
+                let saved = await articleStore.updateEnrichment(
                     id: targetId,
                     content: content,
                     image: imageUrl,
                     readerDocument: document,
-                    identityEvidence: extraction.evidence
+                    identityEvidence: extraction.evidence,
+                    expectedInputHash: expectedInputHash
                 )
                 guard !Task.isCancelled, activeArticle.id == targetId else { return }
+                guard saved else {
+                    contentState = .fallback(reason: "Publisher content changed while loading. Reload to try again.")
+                    return
+                }
                 var updated = self.activeArticle
                 updated.fullContent = content
                 updated.readerDocument = document
@@ -986,12 +1027,14 @@ struct ArticleDetailView: View {
     private func startArticleAnalysis() async {
         guard !Task.isCancelled else { return }
         let targetID = activeArticle.id
+        let targetArticle = currentArticle
         analysisError = nil
         isAnalyzing = false
 
         // Preserve persisted model identity and analysis version.
         if let cached = await articleStore.fetchArticleAnalysis(for: activeArticle.id), cached.analysisVersion >= 2 {
-            guard !Task.isCancelled, activeArticle.id == targetID else { return }
+            guard !Task.isCancelled, activeArticle.id == targetID,
+                  currentArticle.publisherInputHash == targetArticle.publisherInputHash else { return }
             self.analysis = cached
             return
         }
@@ -1000,7 +1043,6 @@ struct ArticleDetailView: View {
         guard !Task.isCancelled, activeArticle.id == targetID, appSettings.aiEnabled else { return }
 
         isAnalyzing = true
-        let targetArticle = currentArticle
 
         do {
             try Task.checkCancellation()
@@ -1020,8 +1062,13 @@ struct ArticleDetailView: View {
 
             try Task.checkCancellation()
 
-            await articleStore.saveArticleAnalysis(result, for: targetArticle.id)
+            let saved = await articleStore.saveArticleAnalysis(result, for: targetArticle.id, expectedInputHash: targetArticle.publisherInputHash)
             guard !Task.isCancelled, activeArticle.id == targetArticle.id else { return }
+            guard saved, currentArticle.publisherInputHash == targetArticle.publisherInputHash else {
+                isAnalyzing = false
+                analysisError = "Publisher content changed during analysis. Open the summary again to retry."
+                return
+            }
             self.analysis = result
             self.isAnalyzing = false
         } catch is CancellationError {

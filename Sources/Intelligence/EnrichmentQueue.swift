@@ -326,7 +326,8 @@ actor EnrichmentQueue {
             entities: nil,
             topics: nil,
             content: nil,
-            image: nil
+            image: nil,
+            expectedInputHash: article.publisherInputHash
         )
 
         guard jobs[articleId]?.generation == generation, !Task.isCancelled else { return }

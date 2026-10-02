@@ -50,6 +50,17 @@ actor OverviewGenerationCoordinator {
         articles: [FeedArticle],
         priority: OverviewRequestPriority = .onDemand
     ) async -> EventOverviewDocument? {
+        let targetStore: ArticleStore
+        if let store { targetStore = store } else { targetStore = await ArticleStore.shared }
+        // A reader may hold a frozen snapshot; generate from the current stored publisher inputs.
+        var currentArticles: [FeedArticle] = []
+        for article in articles {
+            let stored = try? await targetStore.database.fetchArticles(limit: 1, id: article.id).first
+            currentArticles.append(stored ?? article)
+        }
+        let articles = currentArticles
+        let expectedArticleInputs = Dictionary(articles.map { ($0.id, $0.publisherInputHash) }, uniquingKeysWith: { first, _ in first })
+
         // Step A: Token-budgeted representative passage selection
         let selection = OverviewPassageSelector().selectPassages(
             from: articles,
@@ -58,20 +69,14 @@ actor OverviewGenerationCoordinator {
         let sortedFingerprints = selection.passages.map { $0.fingerprint }.sorted().joined(separator: ":")
         let inputTextHash = ArticleIdentity.sha256Hex(sortedFingerprints.isEmpty ? eventTitle : sortedFingerprints)
 
-        // 1. Check memory cache first
-        if let cached = memoryCache[eventID],
-           !cached.isStale(currentMembershipVersion: membershipVersion, currentInputTextHash: inputTextHash) {
-            logger.debug("Memory cache hit for event \(eventID) v\(membershipVersion)")
-            return cached
-        }
-
-        // 2. Check persistent store cache
-        let targetStore: ArticleStore
-        if let store { targetStore = store } else { targetStore = await ArticleStore.shared }
-
+        // Persistent storage is authoritative: publisher-input changes atomically remove old overviews.
         if let stored = try? await targetStore.fetchEventOverview(eventID: eventID),
            !stored.isStale(currentMembershipVersion: membershipVersion, currentInputTextHash: inputTextHash) {
             logger.debug("Store cache hit for event \(eventID) v\(membershipVersion)")
+            if let cached = memoryCache[eventID], cached.id == stored.id,
+               !cached.isStale(currentMembershipVersion: membershipVersion, currentInputTextHash: inputTextHash) {
+                return cached
+            }
             memoryCache[eventID] = stored
             return stored
         }
@@ -117,12 +122,13 @@ actor OverviewGenerationCoordinator {
             guard let generated = document, !Task.isCancelled else { return nil }
 
             // Stale check before saving: a stale result never overwrites a newer version
-            await self.commitGeneratedOverview(
+            guard await self.commitGeneratedOverview(
                 generated,
                 eventID: eventID,
                 membershipVersion: membershipVersion,
-                targetStore: targetStore
-            )
+                targetStore: targetStore,
+                expectedArticleInputs: expectedArticleInputs
+            ) else { return nil }
 
             return generated
         }
@@ -137,20 +143,22 @@ actor OverviewGenerationCoordinator {
         _ document: EventOverviewDocument,
         eventID: String,
         membershipVersion: Int,
-        targetStore: ArticleStore
-    ) async {
+        targetStore: ArticleStore,
+        expectedArticleInputs: [String: String]
+    ) async -> Bool {
         // If memory cache already holds a newer membership version, drop stale result
         if let existing = memoryCache[eventID], existing.membershipVersion > membershipVersion {
             logger.info("Dropping stale overview result for \(eventID): v\(membershipVersion) < current v\(existing.membershipVersion)")
-            return
+            return false
         }
 
         // DatabaseEngine also atomically prevents an older result from overwriting newer
-        let saved = (try? await targetStore.recordEventOverview(document)) ?? false
+        let saved = (try? await targetStore.recordEventOverview(document, expectedArticleInputs: expectedArticleInputs)) ?? false
         if saved {
             memoryCache[eventID] = document
             logger.debug("Committed overview for event \(eventID) v\(membershipVersion)")
         }
+        return saved
     }
 
     // MARK: - Visible Event Management & Automatic Cancellation
