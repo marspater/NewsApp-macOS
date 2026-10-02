@@ -58,7 +58,8 @@ actor OverviewGenerationCoordinator {
         eventTitle: String,
         membershipVersion: Int,
         articles: [FeedArticle],
-        priority: OverviewRequestPriority = .onDemand
+        priority: OverviewRequestPriority = .onDemand,
+        store: ArticleStore? = nil
     ) async -> EventOverviewDocument? {
         // Step A: Token-budgeted representative passage selection
         let selection = OverviewPassageSelector().selectPassages(
@@ -78,7 +79,13 @@ actor OverviewGenerationCoordinator {
 
         // 2. Check persistent store cache
         let targetStore: ArticleStore
-        if let store { targetStore = store } else { targetStore = await ArticleStore.shared }
+        if let store {
+            targetStore = store
+        } else if let selfStore = self.store {
+            targetStore = selfStore
+        } else {
+            targetStore = await ArticleStore.shared
+        }
 
         if let stored = try? await targetStore.fetchEventOverview(eventID: eventID),
            !stored.isStale(currentMembershipVersion: membershipVersion, currentInputTextHash: inputTextHash) {
@@ -185,12 +192,14 @@ actor OverviewGenerationCoordinator {
 
     /// Updates the currently visible event.
     /// Automatically cancels generation for the previous event if it changed.
+    @discardableResult
     func setVisibleEvent(
         eventID: String?,
         eventTitle: String? = nil,
         membershipVersion: Int? = nil,
-        articles: [FeedArticle]? = nil
-    ) async {
+        articles: [FeedArticle]? = nil,
+        store: ArticleStore? = nil
+    ) async -> EventOverviewDocument? {
         let previous = currentVisibleEventID
         currentVisibleEventID = eventID
 
@@ -201,14 +210,16 @@ actor OverviewGenerationCoordinator {
 
         // If new event is visible and data provided, trigger generation with visibleEvent priority
         if let newID = eventID, let title = eventTitle, let version = membershipVersion, let arts = articles {
-            _ = await requestOverview(
+            return await requestOverview(
                 eventID: newID,
                 eventTitle: title,
                 membershipVersion: version,
                 articles: arts,
-                priority: .visibleEvent
+                priority: .visibleEvent,
+                store: store
             )
         }
+        return nil
     }
 
     // MARK: - Cancellation
@@ -243,14 +254,21 @@ actor OverviewGenerationCoordinator {
     func cachedOverview(
         for eventID: String,
         currentMembershipVersion: Int,
-        currentInputTextHash: String
+        currentInputTextHash: String,
+        store: ArticleStore? = nil
     ) async -> EventOverviewDocument? {
         if let cached = memoryCache[eventID],
            !cached.isStale(currentMembershipVersion: currentMembershipVersion, currentInputTextHash: currentInputTextHash) {
             return cached
         }
         let targetStore: ArticleStore
-        if let store { targetStore = store } else { targetStore = await ArticleStore.shared }
+        if let store {
+            targetStore = store
+        } else if let selfStore = self.store {
+            targetStore = selfStore
+        } else {
+            targetStore = await ArticleStore.shared
+        }
         if let stored = try? await targetStore.fetchEventOverview(eventID: eventID),
            !stored.isStale(currentMembershipVersion: currentMembershipVersion, currentInputTextHash: currentInputTextHash) {
             memoryCache[eventID] = stored
