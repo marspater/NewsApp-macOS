@@ -3969,18 +3969,18 @@ struct NewsTests {
         let now = Date()
         let controls = EventControlSet.articles(now: now, root: fixtureRoot)
         let memberships = try await StoryCorpus.eventMemberships(articles: controls.map(\.article))
-        var items = controls.map {
+        var comparisonItems = controls.map {
             EventEmbeddingComparison.Item(title: $0.article.title, description: $0.article.description, date: $0.article.pubDate,
                                           event: $0.event, membership: memberships[$0.article.id])
         }
         // The same earthquake in French, and an English copy dated six days earlier.
-        items.append(.init(title: "Un séisme de magnitude 7 frappe l'est de la Turquie près de Malatya",
-                           description: "Un puissant séisme de magnitude 7 a frappé lundi l'est de la Turquie près de la ville de Malatya, endommageant des bâtiments, selon l'agence turque de gestion des catastrophes.",
-                           date: now.addingTimeInterval(-5 * 3600), event: "quake", membership: nil))
-        items.append(.init(title: controls[0].article.title, description: controls[0].article.description,
-                           date: now.addingTimeInterval(-6 * 86400), event: "quake", membership: nil))
+        comparisonItems.append(.init(title: "Un séisme de magnitude 7 frappe l'est de la Turquie près de Malatya",
+                                     description: "Un puissant séisme de magnitude 7 a frappé lundi l'est de la Turquie près de la ville de Malatya, endommageant des bâtiments, selon l'agence turque de gestion des catastrophes.",
+                                     date: now.addingTimeInterval(-5 * 3600), event: "quake", membership: nil))
+        comparisonItems.append(.init(title: controls[0].article.title, description: controls[0].article.description,
+                                     date: now.addingTimeInterval(-6 * 86400), event: "quake", membership: nil))
 
-        let unsupported = EventEmbeddingComparison(items: items, thresholds: [2], model: { _ in nil })
+        let unsupported = EventEmbeddingComparison(items: comparisonItems, thresholds: [2], model: { _ in nil })
         assertEqual(unsupported.notCompared["cross-language"], 4, "Vectors from different languages are never compared")
         assertEqual(unsupported.notCompared["outside time window"], 3, "Pairs the matcher cannot link in time are not compared")
         assertEqual(unsupported.notCompared["no sentence embedding"], 3, "A language without a sentence embedding abstains")
@@ -3993,7 +3993,7 @@ struct NewsTests {
             "\(code) " + (NLEmbedding.sentenceEmbedding(for: NLLanguage(rawValue: code)).map { "\($0.dimension)" } ?? "none")
         }
         print("    Sentence embeddings for catalog languages on this system: \(support.joined(separator: ", "))")
-        let native = EventEmbeddingComparison(items: items, thresholds: [0.5, 2])
+        let native = EventEmbeddingComparison(items: comparisonItems, thresholds: [0.5, 2])
         guard native.languages["en"]?.dimension != nil, let all = native.scores["all"] else {
             return print("    No English sentence embedding on this system; native scoring not exercised")
         }
