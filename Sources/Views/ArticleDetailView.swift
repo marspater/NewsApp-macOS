@@ -27,6 +27,7 @@ struct ArticleDetailView: View {
     @EnvironmentObject private var savedStories: SavedStoriesManager
     @EnvironmentObject private var readManager: ReadManager
     @EnvironmentObject private var themeManager: ThemeManager
+    @Environment(\.colorSchemeContrast) private var contrast
 
     @State private var viewMode: DetailViewMode = .reader
     @State private var isWebLoading: Bool = false
@@ -185,21 +186,25 @@ struct ArticleDetailView: View {
                     // Highlighted passage cited in Event Overview
                     if let passage = highlightedPassage {
                         HStack(alignment: .top, spacing: 10) {
-                            Image(systemName: "quote.bubble.fill")
-                                .font(.system(size: 14))
-                                .foregroundColor(AppColor.accent)
-                                .padding(.top, 2)
-
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text("Cited in Event Overview")
-                                    .font(.system(size: 11, weight: .bold))
+                            HStack(alignment: .top, spacing: 10) {
+                                Image(systemName: "quote.bubble.fill")
+                                    .font(.system(size: 14))
                                     .foregroundColor(AppColor.accent)
+                                    .padding(.top, 2)
 
-                                Text("“\(passage)”")
-                                    .font(.system(size: 13, weight: .medium, design: .serif))
-                                    .foregroundColor(AppColor.primaryText)
-                                    .lineSpacing(2)
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("Cited in Event Overview")
+                                        .font(.system(size: 11, weight: .bold))
+                                        .foregroundColor(AppColor.accent)
+
+                                    Text("“\(passage)”")
+                                        .font(.system(size: 13, weight: .medium, design: .serif))
+                                        .foregroundColor(AppColor.primaryText)
+                                        .lineSpacing(2)
+                                }
                             }
+                            .accessibilityElement(children: .combine)
+                            .accessibilityLabel("Cited passage in event overview: \(passage)")
 
                             Spacer()
 
@@ -212,16 +217,15 @@ struct ArticleDetailView: View {
                             }
                             .buttonStyle(.plain)
                             .help("Dismiss citation highlight")
+                            .accessibilityLabel("Dismiss citation highlight")
                         }
                         .padding(12)
                         .background(AppColor.accent.opacity(0.1))
                         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                         .overlay(
                             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                .stroke(AppColor.accent.opacity(0.3), lineWidth: 1)
+                                .stroke(AppColor.accent.opacity(contrast == .increased ? 1 : 0.3), lineWidth: 1)
                         )
-                        .accessibilityElement(children: .combine)
-                        .accessibilityLabel("Cited passage in event overview: \(passage)")
                     }
 
                     // Eyebrow: Source, Date, Reading Time
@@ -232,25 +236,30 @@ struct ArticleDetailView: View {
                             .foregroundColor(AppColor.accent)
 
                         Text("·")
-                            .foregroundColor(AppColor.tertiaryText)
+                            .foregroundColor(tertiaryText)
 
                         Text(currentArticle.publicationDateText)
                             .font(.system(size: 12, weight: .medium))
                             .foregroundColor(AppColor.secondaryText)
 
                         Text("·")
-                            .foregroundColor(AppColor.tertiaryText)
+                            .foregroundColor(tertiaryText)
 
                         Text(readingTimeEstimate)
                             .font(.system(size: 12, weight: .medium))
                             .foregroundColor(AppColor.secondaryText)
                     }
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel("\(displaySource), \(currentArticle.publicationDateText), \(readingTimeEstimate)")
 
                     // Headline
                     Text(currentArticle.title)
                         .font(AppTypography.titleFont(for: themeManager.articleTheme, scale: readerTextScale))
                         .foregroundColor(AppColor.primaryText)
                         .lineSpacing(3)
+                        .accessibilityAddTraits(.isHeader)
+                        .accessibilityHeading(.h1)
+                        .textSelection(.enabled)
 
                     // On-device AI Analysis Section
                     heroImageHeader
@@ -373,13 +382,13 @@ struct ArticleDetailView: View {
             Text(currentArticle.fullContent == nil ? "FEED SUMMARY PREVIEW" : "PREVIOUSLY SAVED TEXT")
                 .font(.system(size: 10, weight: .bold))
                 .tracking(1.0)
-                .foregroundColor(AppColor.tertiaryText)
+                .foregroundColor(tertiaryText)
 
             articleDescriptionParagraphs
         }
         .padding(16)
         .background(AppColor.surface.opacity(0.55), in: RoundedRectangle(cornerRadius: AppRadius.card))
-        .overlay(RoundedRectangle(cornerRadius: AppRadius.card).stroke(AppColor.borderSubtle, lineWidth: 1))
+        .overlay(RoundedRectangle(cornerRadius: AppRadius.card).stroke(borderColor(AppColor.borderSubtle), lineWidth: 1))
     }
 
     @ViewBuilder
@@ -389,7 +398,7 @@ struct ArticleDetailView: View {
             ForEach(Array(paragraphs.enumerated()), id: \.offset) { _, paragraph in
                 Text(paragraph)
                     .font(AppTypography.bodyFont(for: themeManager.articleTheme, scale: readerTextScale))
-                    .foregroundColor(AppColor.primaryText.opacity(0.9))
+                    .foregroundColor(readableText(0.9))
                     .lineSpacing(AppTypography.bodyLineSpacing(for: themeManager.articleTheme))
                     .textSelection(.enabled)
             }
@@ -423,6 +432,7 @@ struct ArticleDetailView: View {
                 .foregroundStyle(AppColor.primaryText)
                 .padding(.top, AppSpacing.md)
                 .accessibilityAddTraits(.isHeader)
+                .accessibilityHeading(block.kind == .heading ? .h2 : .h3)
                 .textSelection(.enabled)
         case .quote:
             HStack(alignment: .top, spacing: AppSpacing.md) {
@@ -503,7 +513,7 @@ struct ArticleDetailView: View {
                     .padding(.vertical, 8)
                     .background(AppColor.surface.opacity(0.85))
                     .clipShape(Capsule())
-                    .overlay(Capsule().stroke(Color.primary.opacity(0.08), lineWidth: 0.5))
+                    .overlay(Capsule().stroke(borderColor(Color.primary.opacity(0.08)), lineWidth: 0.5))
                 }
                 .buttonStyle(.plain)
                 .help("Open Web View (W)")
@@ -522,7 +532,7 @@ struct ArticleDetailView: View {
                         .padding(.vertical, 8)
                         .background(AppColor.surface.opacity(0.6))
                         .clipShape(Capsule())
-                        .overlay(Capsule().stroke(Color.primary.opacity(0.06), lineWidth: 0.5))
+                        .overlay(Capsule().stroke(borderColor(Color.primary.opacity(0.06)), lineWidth: 0.5))
                     }
                     .buttonStyle(.plain)
                     .help("Open in default web browser (O)")
@@ -763,6 +773,19 @@ struct ArticleDetailView: View {
         return .ignored
     }
 
+    private var tertiaryText: Color {
+        contrast == .increased ? AppColor.secondaryText : AppColor.tertiaryText
+    }
+
+    /// Increase Contrast restores full-strength text that is otherwise slightly softened.
+    private func readableText(_ opacity: Double) -> Color {
+        contrast == .increased ? AppColor.primaryText : AppColor.primaryText.opacity(opacity)
+    }
+
+    private func borderColor(_ standard: Color) -> Color {
+        contrast == .increased ? AppColor.primaryText.opacity(0.3) : standard
+    }
+
     private var displaySource: String {
         (currentArticle.source.components(separatedBy: "\n").first ?? currentArticle.source)
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -810,7 +833,7 @@ struct ArticleDetailView: View {
 
                 Text(analysis.summary)
                     .font(.system(size: 14, weight: .regular))
-                    .foregroundColor(AppColor.primaryText.opacity(0.92))
+                    .foregroundColor(readableText(0.92))
                     .lineSpacing(AppTypography.bodyLineSpacing(for: themeManager.articleTheme))
 
                 // Key Takeaways
@@ -829,7 +852,7 @@ struct ArticleDetailView: View {
                                     .padding(.top, 6)
                                 Text(point)
                                     .font(.system(size: 13))
-                                    .foregroundColor(AppColor.primaryText.opacity(0.88))
+                                    .foregroundColor(readableText(0.88))
                             }
                         }
                     }
@@ -880,7 +903,7 @@ struct ArticleDetailView: View {
 
                 Text(ai)
                     .font(.system(size: 14, weight: .regular))
-                    .foregroundColor(AppColor.primaryText.opacity(0.92))
+                    .foregroundColor(readableText(0.92))
                     .lineSpacing(AppTypography.bodyLineSpacing(for: themeManager.articleTheme))
             }
             .padding(14)
@@ -891,7 +914,8 @@ struct ArticleDetailView: View {
     // MARK: - Independent Extraction & Analysis
 
     private func ensureContentExtracted(forceRefresh: Bool = false) async {
-        if !forceRefresh, currentArticle.readerDocument.map({ (1...ReaderDocument.currentVersion).contains($0.version) }) == true,
+        // A stored document stands in for extraction only with publisher text; feed media alone does not.
+        if !forceRefresh, currentArticle.readerDocument.map({ (1...ReaderDocument.currentVersion).contains($0.version) && $0.hasPublisherText }) == true,
            let existing = currentArticle.fullContent, !ArticleContentRedactor.redactAndSplit(existing).isEmpty {
             contentState = .ready
             return

@@ -5905,6 +5905,8 @@ struct NewsTests {
         assertEqual(mediaArticle.imageUrl, base + "/scene.jpg", "Audio enclosures are not image candidates")
         assertEqual(mediaArticle.readerDocument?.images?.first?.width, 1200, "Feed dimensions retained")
         assertEqual(mediaArticle.readerDocument?.images?.first?.credit, "Publisher photographer", "Feed image credit retained")
+        assertFalse(mediaArticle.readerDocument?.hasPublisherText ?? true, "Feed media alone is not a reader document")
+        assertTrue(documents[0].hasPublisherText && bodyOnly.readerDocument?.hasPublisherText == true, "Publisher text makes a reader document")
         let db = DatabaseEngine(path: ":memory:")
         try await db.open()
         try await db.upsertArticles([rssArticle])
@@ -5921,6 +5923,33 @@ struct NewsTests {
         assertTrue(try await db.searchArticles(query: "Document").allSatisfy { $0.imageUrl == nil }, "Search uses the same media curation")
         assertTrue(try await db.repeatedImageURLs(source: "Other publisher").isEmpty, "Recurrence never leaks between publishers")
         assertTrue(documents[10].curated(feedImage: nil, title: "Report", excluding: Set([figure.imageURL!])).blocks.allSatisfy { $0.kind != .figure }, "Repeated publisher furniture is removed during curation")
+
+        // #115: a summary-only feed with media (the mediaRSS shape) refreshes an article the reader already extracted.
+        let mediaOnly = FeedArticle(title: "Refreshed report", link: base + "/refreshed", guid: "refreshed-report", description: "Preview",
+            pubDate: Date(), source: "Refresh publisher", imageUrl: base + "/scene.jpg",
+            readerDocument: ReaderDocument(blocks: [], images: [ReaderImageCandidate(url: base + "/scene.jpg", origin: .feed)]))
+        try await db.upsertArticles([mediaOnly])
+        var movedMedia = mediaOnly
+        movedMedia.readerDocument = ReaderDocument(blocks: [], images: [ReaderImageCandidate(url: base + "/replacement.jpg", origin: .feed)])
+        try await db.upsertArticles([movedMedia])
+        assertEqual(try await db.fetchArticles(limit: 1, id: mediaOnly.id).first?.readerDocument?.images?.first?.url, base + "/replacement.jpg", "Feed media still refreshes a media-only document")
+        let extracted = documents[1]
+        try await db.updateEnrichment(articleId: mediaOnly.id, update: .init(content: first + "\n\n" + second, readerDocument: extracted))
+        var teaser = mediaOnly
+        teaser.fullContent = "Feed teaser"
+        for refresh in [mediaOnly, teaser] {
+            try await db.upsertArticles([refresh])
+            let stored = try await db.fetchArticles(limit: 1, id: mediaOnly.id).first
+            assertEqual(stored?.readerDocument?.blocks, extracted.blocks, "A refresh without publisher text keeps the extracted headings and paragraphs")
+            assertTrue(stored?.fullContent?.contains(second) == true, "A refresh without publisher text keeps the extracted body")
+        }
+        var fullFeed = mediaOnly
+        fullFeed.fullContent = second
+        fullFeed.readerDocument = ReaderDocument(blocks: [ReaderBlock(kind: .paragraph, text: second)])
+        try await db.upsertArticles([fullFeed])
+        let replaced = try await db.fetchArticles(limit: 1, id: mediaOnly.id).first
+        assertEqual(replaced?.readerDocument?.blocks, fullFeed.readerDocument?.blocks, "Feed publisher text still replaces the stored document")
+        assertEqual(replaced?.fullContent, second, "Feed publisher text still replaces the stored body")
         await db.close()
     }
 

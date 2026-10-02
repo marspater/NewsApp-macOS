@@ -850,6 +850,12 @@ actor DatabaseEngine {
             if sqlite3_get_autocommit(db) == 0 { try? rollbackTransaction() }
         }
         
+        // A refresh whose item brings no publisher text (?17 = 0), such as a document holding only feed media,
+        // keeps a stored document that has text, and its content (ReaderDocument.hasPublisherText).
+        let storedHasPublisherText = """
+        EXISTS (SELECT 1 FROM json_each(CASE WHEN json_valid(articles.reader_document)
+            THEN articles.reader_document ELSE '{}' END, '$.blocks') WHERE json_extract(value, '$.kind') <> 'figure')
+        """
         let articleSql = """
         INSERT INTO articles (
             id, guid, canonical_url, title, description, content,
@@ -864,9 +870,11 @@ actor DatabaseEngine {
             title = excluded.title,
             source = excluded.source,
             description = excluded.description,
-            content = CASE WHEN articles.reader_document IS NOT NULL AND excluded.reader_document IS NULL
+            content = CASE WHEN articles.reader_document IS NOT NULL AND (excluded.reader_document IS NULL
+                    OR (?17 = 0 AND \(storedHasPublisherText)))
                 THEN articles.content ELSE coalesce(excluded.content, articles.content) END,
-            reader_document = coalesce(excluded.reader_document, articles.reader_document),
+            reader_document = CASE WHEN ?17 = 0 AND \(storedHasPublisherText)
+                THEN articles.reader_document ELSE coalesce(excluded.reader_document, articles.reader_document) END,
             image_url = coalesce(excluded.image_url, articles.image_url),
             category = coalesce(excluded.category, articles.category),
             feed_url = coalesce(articles.feed_url, excluded.feed_url),
@@ -961,6 +969,7 @@ actor DatabaseEngine {
 
             sqlite3_bind_int(artStmt, 15, validLink ? 1 : 0)
             sqlite3_bind_double(artStmt, 16, DateParser.unknownDate.timeIntervalSince1970)
+            sqlite3_bind_int(artStmt, 17, article.readerDocument?.hasPublisherText == true ? 1 : 0)
 
             if sqlite3_step(artStmt) != SQLITE_DONE {
                 try rollbackTransaction()

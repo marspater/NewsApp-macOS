@@ -95,6 +95,12 @@ public struct ReaderDocument: Codable, Hashable, Sendable {
     func selectedImage(fallback: String?) -> String? {
         version >= 4 ? leadImageURL : fallback
     }
+
+    /// Feed media alone is not a reader document: only publisher text lets a stored document stand in for
+    /// extraction or survive a refresh that brings none. `DatabaseEngine.upsertArticles` applies the same rule in SQL.
+    var hasPublisherText: Bool {
+        blocks.contains { $0.kind != .figure }
+    }
 }
 
 struct ArticleFilterQuery: Equatable, Sendable {
