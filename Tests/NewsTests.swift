@@ -369,6 +369,7 @@ struct NewsTests {
         try await testSocketNetworkBoundary()
         await testRefreshCoordinatorSingleFlightCoalescing()
         try await testFeedRemovalAndShutdown()
+        try await testSleepAndWakeRefresh()
         await testSignpostHelperExecution()
         await testAppSettingsIsolationAndURLNormalization()
         await testFixedTaxonomyAndCaseInsensitivity()
@@ -4395,6 +4396,76 @@ struct NewsTests {
         cancelled.cancel()
         assertTrue(await cancelled.value, "Cancelled database ingestion propagates cancellation")
         assertTrue(try await db.fetchArticles().isEmpty, "Cancelled ingestion rolls back its transaction")
+        await db.close()
+    }
+
+    actor RefreshCalls {
+        private(set) var count = 0
+        func next() -> Int { count += 1; return count }
+    }
+
+    @MainActor
+    static func testSleepAndWakeRefresh() async throws {
+        print("  - Testing sleep and wake: interrupted refreshes store nothing, stale feeds refresh after wake...")
+        let suite = "test.sleep-wake.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = AppSettings(defaults: defaults)
+        settings.feedURLs = ["https://example.com/feed"]
+        settings.aiEnabled = false
+        settings.notificationsEnabled = false
+        settings.fetchIntervalMinutes = 30
+        let db = DatabaseEngine(path: ":memory:")
+        let store = ArticleStore(database: db)
+        await store.initialize()
+        let article = FeedArticle(title: "Overnight report", link: "https://example.com/overnight", guid: "overnight",
+                                  description: "Report", pubDate: Date(), source: "Test")
+        let center = NotificationCenter()
+        let calls = RefreshCalls()
+        let gate = FeedDeliveryGate()
+        var clock = Date(timeIntervalSince1970: 1_800_000_000)
+        let manager = FeedManager(settings: settings, store: store, schedulesRefresh: false,
+            fetchBatch: { urls, _ in
+                guard let url = urls.first else { return [] }
+                if await calls.next() == 1 { await gate.wait() }
+                return [(url, [article], nil, nil)]
+            },
+            powerEvents: center, wakeRefreshDelay: .milliseconds(10), now: { clock })
+        func sleepAndWake() async {
+            center.post(name: NSWorkspace.willSleepNotification, object: nil)
+            center.post(name: NSWorkspace.didWakeNotification, object: nil)
+            await manager.waitForWakeRefresh()
+        }
+
+        let interrupted = Task { await manager.fetchFeedsAsync() }
+        while !(await gate.started) { await Task.yield() }
+        center.post(name: NSWorkspace.willSleepNotification, object: nil)
+        await gate.deliver()
+        await interrupted.value
+        assertTrue(try await db.fetchArticles().isEmpty, "A refresh cut off by sleep stores nothing")
+
+        center.post(name: NSWorkspace.didWakeNotification, object: nil)
+        center.post(name: NSWorkspace.willSleepNotification, object: nil)
+        await manager.waitForWakeRefresh()
+        assertEqual(await calls.count, 1, "Sleeping again before the wake delay ends refreshes nothing")
+
+        center.post(name: NSWorkspace.didWakeNotification, object: nil)
+        await manager.waitForWakeRefresh()
+        assertEqual(await calls.count, 2, "An interrupted refresh is repeated after wake")
+        assertEqual(try await db.fetchArticles().map(\.title), ["Overnight report"], "The wake refresh stores the feed")
+        assertFalse(manager.isAnyFeedLoading, "The wake refresh ends the loading state")
+
+        clock = clock.addingTimeInterval(5 * 60)
+        await sleepAndWake()
+        assertEqual(await calls.count, 2, "A refresh newer than the interval is not repeated after wake")
+        clock = clock.addingTimeInterval(31 * 60)
+        await sleepAndWake()
+        assertEqual(await calls.count, 3, "A feed older than the interval refreshes after wake")
+
+        manager.stopBackgroundWork()
+        clock = clock.addingTimeInterval(60 * 60)
+        await sleepAndWake()
+        assertEqual(await calls.count, 3, "A stopped manager ignores wake")
         await db.close()
     }
 
