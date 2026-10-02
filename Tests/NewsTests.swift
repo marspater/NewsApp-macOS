@@ -282,6 +282,7 @@ struct NewsTests {
             try await testEventOverviewReaderMode(fixtureHost: fixtureHost)
             try await testOverviewTimeline(fixtureHost: fixtureHost)
             try await testEventTimelineWithSourcedItems(fixtureHost: fixtureHost)
+            try await testAttributedPerspectivesOfParticipantsAndPublishers(fixtureHost: fixtureHost)
             try await testHistoricalReconciliation(fixtureRoot: fixtureRoot)
             try await testEventDataModel(fixtureRoot: fixtureRoot)
             try await testEventCandidateGeneration(fixtureRoot: fixtureRoot)
@@ -360,6 +361,7 @@ struct NewsTests {
         try await testEventOverviewReaderMode(fixtureHost: fixtureHost)
         try await testOverviewTimeline(fixtureHost: fixtureHost)
         try await testEventTimelineWithSourcedItems(fixtureHost: fixtureHost)
+        try await testAttributedPerspectivesOfParticipantsAndPublishers(fixtureHost: fixtureHost)
         try await testHistoricalReconciliation(fixtureRoot: fixtureRoot)
         try await testEventDataModel(fixtureRoot: fixtureRoot)
         try await testEventCandidateGeneration(fixtureRoot: fixtureRoot)
@@ -8176,6 +8178,204 @@ struct NewsTests {
             let lastItem = timelineItems.last!
             assertTrue(lastItem.isFuturePlan, "Future plans are positioned at the end of the timeline")
         }
+    }
+
+    static func testAttributedPerspectivesOfParticipantsAndPublishers(fixtureHost: String = "example.com") async throws {
+        print("=== Testing Attributed Perspectives of Participants and Publishers (Issue #144) ===")
+
+        let pubDate1 = Date(timeIntervalSince1970: 1776240000)
+        let pubDate2 = Date(timeIntervalSince1970: 1776243600)
+        let pubDate3 = Date(timeIntervalSince1970: 1776247200)
+
+        // Passage 1: Explicit participant statement
+        let passage1 = EvidencePassage(
+            id: "pass_persp_1",
+            articleID: "art_persp_1",
+            text: "\"The evacuation routes are fully operational and emergency services have responded rapidly,\" announced Mayor Elena Rostova.",
+            ordinal: 1
+        )
+        // Passage 2: Wire reprint in second article with identical quote and wire credit
+        let passage2 = EvidencePassage(
+            id: "pass_persp_2",
+            articleID: "art_persp_2",
+            text: "(Reuters) - \"The evacuation routes are fully operational and emergency services have responded rapidly,\" announced Mayor Elena Rostova.",
+            ordinal: 1
+        )
+        // Passage 3: Another distinct participant with explicit stance
+        let passage3 = EvidencePassage(
+            id: "pass_persp_3",
+            articleID: "art_persp_3",
+            text: "Dr. Sarah Jensen, Lead Volcanologist, stated that seismic sensors recorded increased tremor activity throughout the caldera.",
+            ordinal: 1
+        )
+        // Passage 4: Purely descriptive factual text with no participant attribution
+        let passageDescriptive = EvidencePassage(
+            id: "pass_desc_4",
+            articleID: "art_persp_1",
+            text: "The caldera is situated 45 kilometers north of the regional capital and has an elevation of 2100 meters.",
+            ordinal: 2
+        )
+
+        let article1 = FeedArticle(
+            storedID: "art_persp_1",
+            title: "City Prepares For Volcanic Activity",
+            link: "https://\(fixtureHost)/news-1",
+            guid: "guid-p1",
+            description: passage1.text,
+            pubDate: pubDate1,
+            source: "Coastal Herald",
+            fullContent: "\(passage1.text) \(passageDescriptive.text)"
+        )
+        let article2 = FeedArticle(
+            storedID: "art_persp_2",
+            title: "Evacuation Routes Open Amid Volcanic Tremors",
+            link: "https://\(fixtureHost)/news-2",
+            guid: "guid-p2",
+            description: passage2.text,
+            pubDate: pubDate2,
+            source: "Metro Daily",
+            fullContent: passage2.text
+        )
+        let article3 = FeedArticle(
+            storedID: "art_persp_3",
+            title: "Seismologists Monitor Caldera Activity",
+            link: "https://\(fixtureHost)/news-3",
+            guid: "guid-p3",
+            description: passage3.text,
+            pubDate: pubDate3,
+            source: "Science Bulletin",
+            fullContent: passage3.text
+        )
+
+        let citations: [String: OverviewCitation] = [
+            "c_1": OverviewCitation(
+                id: "c_1",
+                articleID: "art_persp_1",
+                passageID: "pass_persp_1",
+                passageFingerprint: passage1.fingerprint,
+                quote: "The evacuation routes are fully operational and emergency services have responded rapidly"
+            ),
+            "c_2": OverviewCitation(
+                id: "c_2",
+                articleID: "art_persp_2",
+                passageID: "pass_persp_2",
+                passageFingerprint: passage2.fingerprint,
+                quote: "The evacuation routes are fully operational and emergency services have responded rapidly"
+            ),
+            "c_3": OverviewCitation(
+                id: "c_3",
+                articleID: "art_persp_3",
+                passageID: "pass_persp_3",
+                passageFingerprint: passage3.fingerprint,
+                quote: "seismic sensors recorded increased tremor activity throughout the caldera"
+            )
+        ]
+
+        // 1. Extraction: extractPerspectives correctly extracts attributed positions
+        let perspectives = OverviewPerspectivesExtractor.extractPerspectives(
+            passages: [passage1, passage2, passage3],
+            articles: [article1, article2, article3],
+            existingCitations: citations
+        )
+
+        assertTrue(!perspectives.isEmpty, "Perspectives extractor extracts verified attributed perspectives")
+
+        // 2. Rule 1: Only explicitly attributed positions
+        for perspective in perspectives {
+            assertTrue(!perspective.participant.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, "Rule 1: Participant is non-empty")
+            assertFalse(OverviewPerspectivesValidator.isVagueParticipant(perspective.participant), "Rule 1: Participant is not a vague anonymous generality")
+            assertTrue(!perspective.position.isEmpty, "Rule 1: Position is non-empty")
+        }
+
+        // Validator rejects vague anonymous participants
+        let vaguePerspective1 = OverviewPerspective(
+            id: "p_vague_1",
+            participant: "Critics say",
+            position: "The response was inadequate.",
+            citationIDs: ["c_1"]
+        )
+        let valVague1 = OverviewPerspectivesValidator.validatePerspective(vaguePerspective1, against: citations)
+        assertFalse(valVague1.isValid, "Rule 1: Vague participant 'Critics say' is rejected")
+
+        let vaguePerspective2 = OverviewPerspective(
+            id: "p_vague_2",
+            participant: "Observers",
+            position: "Events developed rapidly.",
+            citationIDs: ["c_1"]
+        )
+        let valVague2 = OverviewPerspectivesValidator.validatePerspective(vaguePerspective2, against: citations)
+        assertFalse(valVague2.isValid, "Rule 1: Vague participant 'Observers' is rejected")
+
+        let vaguePerspective3 = OverviewPerspective(
+            id: "p_vague_3",
+            participant: "Some people",
+            position: "Conditions are difficult.",
+            citationIDs: ["c_1"]
+        )
+        let valVague3 = OverviewPerspectivesValidator.validatePerspective(vaguePerspective3, against: citations)
+        assertFalse(valVague3.isValid, "Rule 1: Vague participant 'Some people' is rejected")
+
+        // 3. Rule 2: Never invent an "other side"
+        // When only one side has spoken, extraction preserves that single perspective without fabricating an opposing stance
+        let singleSidePerspectives = OverviewPerspectivesExtractor.extractPerspectives(
+            passages: [passage3],
+            articles: [article3],
+            existingCitations: ["c_3": citations["c_3"]!]
+        )
+        assertEqual(singleSidePerspectives.count, 1, "Rule 2: Single-side event retains exactly 1 perspective, never manufactures a synthetic other side")
+        assertEqual(singleSidePerspectives.first?.participant, "Dr. Sarah Jensen, Lead Volcanologist", "Preserves genuine speaker without forced balance")
+
+        // Validator rejects synthetic/hallucinated position not grounded in cited passage
+        let syntheticCounterPerspective = OverviewPerspective(
+            id: "p_synthetic",
+            participant: "Opposition Spokesperson",
+            position: "The official seismic numbers are entirely fabricated and danger is imminent.",
+            citationIDs: ["c_3"]
+        )
+        let valSynthetic = OverviewPerspectivesValidator.validatePerspective(
+            syntheticCounterPerspective,
+            against: citations,
+            passages: [passage3]
+        )
+        assertFalse(valSynthetic.isValid, "Rule 2: Synthetic position not grounded in passage text is rejected")
+
+        // 4. Rule 3: Reprints are not presented as independent voices
+        // Articles 1 and 2 carried the same quote from Mayor Elena Rostova (one via Reuters wire)
+        // They must be collapsed into a single perspective, not two separate voices!
+        let mayorPerspectives = perspectives.filter { $0.participant.contains("Elena Rostova") }
+        assertEqual(mayorPerspectives.count, 1, "Rule 3: Syndicated reprints are collapsed into a single voice")
+        if let mayorPerspective = mayorPerspectives.first {
+            assertEqual(mayorPerspective.originalWireSource, "Reuters", "Rule 3: Identified original wire service (Reuters)")
+            assertTrue(mayorPerspective.citationIDs.contains("c_1") && mayorPerspective.citationIDs.contains("c_2"), "Rule 3: Combined citations from all reprint instances")
+        }
+
+        // 5. Rule 4: Sourced items
+        let sourcelessPerspective = OverviewPerspective(
+            id: "p_no_source",
+            participant: "Mayor Elena Rostova",
+            position: "Evacuation routes are open.",
+            citationIDs: []
+        )
+        let valSourceless = OverviewPerspectivesValidator.validatePerspective(sourcelessPerspective, against: citations)
+        assertFalse(valSourceless.isValid, "Rule 4: Perspective with no citation IDs is rejected")
+
+        let nonExistentCitationPerspective = OverviewPerspective(
+            id: "p_bad_source",
+            participant: "Mayor Elena Rostova",
+            position: "Evacuation routes are open.",
+            citationIDs: ["c_missing_999"]
+        )
+        let valBadSource = OverviewPerspectivesValidator.validatePerspective(nonExistentCitationPerspective, against: citations)
+        assertFalse(valBadSource.isValid, "Rule 4: Perspective citing non-existent citation ID is rejected")
+
+        // 6. Absent sections rule
+        // Purely descriptive passages with no attributed statements yield empty perspectives array
+        let emptyPerspectives = OverviewPerspectivesExtractor.extractPerspectives(
+            passages: [passageDescriptive],
+            articles: [article1],
+            existingCitations: ["c_1": citations["c_1"]!]
+        )
+        assertTrue(emptyPerspectives.isEmpty, "Absent section rule: Section omitted when no verified attributed perspective exists")
     }
 }
 

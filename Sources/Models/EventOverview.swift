@@ -176,17 +176,23 @@ public struct OverviewPerspective: Codable, Hashable, Sendable, Identifiable {
     public let participant: String
     public let position: String
     public let citationIDs: [String]
+    public let sourcePublisher: String?
+    public let originalWireSource: String?
 
     public init(
         id: String = UUID().uuidString,
         participant: String,
         position: String,
-        citationIDs: [String] = []
+        citationIDs: [String] = [],
+        sourcePublisher: String? = nil,
+        originalWireSource: String? = nil
     ) {
         self.id = id
         self.participant = participant
         self.position = position
         self.citationIDs = citationIDs
+        self.sourcePublisher = sourcePublisher
+        self.originalWireSource = originalWireSource
     }
 }
 

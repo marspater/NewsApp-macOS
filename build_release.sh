@@ -51,6 +51,7 @@ SWIFT_SOURCES=(
     Sources/Intelligence/OverviewQualityAuditor.swift
     Sources/Intelligence/OverviewClaimVerifier.swift
     Sources/Intelligence/OverviewTimelineExtractor.swift
+    Sources/Intelligence/OverviewPerspectivesExtractor.swift
     Sources/Intelligence/EventCandidates.swift
     Sources/Intelligence/EventMatcher.swift
     Sources/Intelligence/EventClustering.swift
