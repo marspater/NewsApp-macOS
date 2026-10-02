@@ -181,12 +181,61 @@ public struct OverviewComposer: Sendable {
         // Build one or two paragraph introduction
         let introduction = formatIntroduction(eventTitle: eventTitle, facts: selectedFacts)
 
+        // Additional evidence sections: chronological timeline & attributed perspectives
+        var allCitations = citations
+        var citationsByPassageID: [String: OverviewCitation] = [:]
+        for cit in citations {
+            citationsByPassageID[cit.passageID] = cit
+        }
+
+        for passage in passages where citationsByPassageID[passage.id] == nil {
+            let citID = "cite_\(passage.id)"
+            let article = articlesByID[passage.articleID]
+            let meta: OverviewSourceMetadata? = article.map {
+                OverviewSourceMetadata(title: $0.title, name: $0.source, url: $0.link, publishedAt: $0.pubDate)
+            }
+            let cit = OverviewCitation(
+                id: citID,
+                articleID: passage.articleID,
+                passageID: passage.id,
+                passageFingerprint: passage.fingerprint,
+                quote: String(passage.text.prefix(200)),
+                source: meta
+            )
+            allCitations.append(cit)
+            citationsByPassageID[passage.id] = cit
+        }
+
+        let citationsMap = Dictionary(uniqueKeysWithValues: allCitations.map { ($0.id, $0) })
+        let timelineItems = OverviewTimelineExtractor.extractTimeline(
+            passages: passages,
+            articles: articles,
+            existingCitations: citationsMap
+        )
+        let perspectives = OverviewPerspectivesExtractor.extractPerspectives(
+            passages: passages,
+            articles: articles,
+            existingCitations: citationsMap
+        )
+
+        let evidenceSections: OverviewEvidenceSections?
+        if !timelineItems.isEmpty || !perspectives.isEmpty {
+            evidenceSections = OverviewEvidenceSections(
+                timeline: timelineItems,
+                perspectives: perspectives,
+                thematicAngle: nil
+            )
+        } else {
+            evidenceSections = nil
+        }
+
         let content = OverviewContent(
             title: eventTitle,
             summary: introduction,
             facts: overviewFacts,
-            citations: citations,
-            leadImage: leadImage
+            citations: allCitations,
+            leadImage: leadImage,
+            evidenceSections: evidenceSections
         )
 
         let provenance = OverviewProvenance(

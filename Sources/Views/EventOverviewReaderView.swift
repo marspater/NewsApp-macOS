@@ -497,9 +497,21 @@ struct EventOverviewReaderView: View {
             VStack(alignment: .leading, spacing: 12) {
                 ForEach(overview.perspectives) { perspective in
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(perspective.participant)
-                            .font(.system(size: 13, weight: .bold))
-                            .foregroundColor(AppColor.primaryText)
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            Text(perspective.participant)
+                                .font(.system(size: 13, weight: .bold))
+                                .foregroundColor(AppColor.primaryText)
+
+                            if let wire = perspective.originalWireSource, !wire.isEmpty {
+                                Text("via \(wire) syndicate")
+                                    .font(.system(size: 11, weight: .medium))
+                                    .foregroundColor(AppColor.tertiaryText)
+                            } else if let publisher = perspective.sourcePublisher, !publisher.isEmpty {
+                                Text("via \(publisher)")
+                                    .font(.system(size: 11, weight: .medium))
+                                    .foregroundColor(AppColor.tertiaryText)
+                            }
+                        }
 
                         Text(perspective.position)
                             .font(.system(size: 14, weight: .regular))
