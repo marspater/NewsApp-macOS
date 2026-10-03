@@ -35,7 +35,9 @@ actor FeedFetcher {
 
             let sniffer = String(data: data.prefix(30), encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             if sniffer.hasPrefix("{") || sniffer.hasPrefix("[") {
-                if let parsed = JSONFeedParser.parse(data: data, feedURL: urlString) {
+                let parsed = JSONFeedParser.parse(data: data, feedURL: urlString)
+                try Task.checkCancellation()
+                if let parsed {
                     return (urlString, parsed, nil, fresh)
                 } else {
                     return (urlString, nil, .parseFailed("Malformed JSON Feed"), nil)
@@ -43,6 +45,7 @@ actor FeedFetcher {
             } else {
                 let xmlParser = FeedXMLParser(data: data, feedURL: urlString)
                 let parsed = xmlParser.parse()
+                try Task.checkCancellation() // an aborted parse is not a malformed feed
                 if let error = xmlParser.parseError {
                     return (urlString, nil, .parseFailed(error), nil)
                 }
