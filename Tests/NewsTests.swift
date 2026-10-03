@@ -1032,6 +1032,22 @@ struct NewsTests {
         assertEqual(article?.link, "https://example.com/report", "Atom self links cannot replace article links")
         assertEqual(article?.fullContent, "First important paragraph.\n\nSecond paragraph.", "Atom XHTML preserves paragraph boundaries")
         assertEqual(article?.pubDate, DateParser.parse("2026-09-20T10:00:00Z"), "Published and updated dates are not concatenated")
+        // #115: Ekonomichna Pravda sends plain text in content:encoded, paragraphs separated by blank lines.
+        let plainEncoded = """
+        <rss xmlns:content="http://purl.org/rss/1.0/modules/content/"><channel><title>Daily</title><item><title>Report</title>
+        <link>https://example.com/plain</link><content:encoded> \(prose)
+
+
+        Officials said the agreement &amp; its annexes would be published in full after the parliamentary review next week.
+
+
+        \(second)</content:encoded></item></channel></rss>
+        """
+        let plainArticle = FeedXMLParser(data: Data(plainEncoded.utf8)).parse().first
+        assertEqual(plainArticle.map { ArticleContentRedactor.redactAndSplit($0.fullContent ?? "") },
+                    [prose, "Officials said the agreement & its annexes would be published in full after the parliamentary review next week.", second],
+                    "Plain-text content:encoded keeps its paragraph breaks")
+        assertTrue(plainArticle?.readerDocument == nil, "Plain feed text is no reader document, so the reader fetches the page's structure")
         let rss = "<rss><channel><title>News</title><image><title>News logo</title></image><item><title>Story</title><link>https://example.com/story</link></item></channel></rss>"
         assertEqual(FeedXMLParser(data: Data(rss.utf8)).parse().first?.source, "News", "Feed image title cannot contaminate publisher name")
         let broken = FeedXMLParser(data: Data("<rss><channel><item>".utf8))

@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- Feeds that put plain text with blank-line paragraphs in `content:encoded` (for example Економічна правда) no longer show the article as one paragraph; the reader now opens the publisher page with its structure (#115).
 - Cancelling a refresh now stops feed parsing at the next element or item instead of extracting the rest of the feed, and an aborted parse is no longer reported as a malformed feed (#153).
 
 - Avoid full-text content scans when joining search/event candidates or updating/deleting indexed articles. Schema v15 rebuilds the derived index with durable integer keys while preserving article IDs, saved/read history and event membership.

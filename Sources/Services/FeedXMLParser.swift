@@ -236,8 +236,12 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
 
             var fullContent: String? = nil
             let trimmedContent = itemContentEncoded.trimmingCharacters(in: .whitespacesAndNewlines)
+            // Some publishers put plain text in content:encoded, with line breaks between paragraphs; read as HTML,
+            // those breaks would collapse the article into one paragraph.
+            let plainText = itemContentIsPlainText
+                || (!itemContentIsXHTML && !trimmedContent.contains("<") && trimmedContent.contains("\n"))
             if !trimmedContent.isEmpty {
-                let cleaned = itemContentIsPlainText ? trimmedContent : stripHTMLSimple(trimmedContent)
+                let cleaned = plainText ? trimmedContent : stripHTMLSimple(trimmedContent)
                 fullContent = cleaned.isEmpty ? nil : cleaned
             }
 
@@ -280,7 +284,7 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
                 guard let first = first, !first.isEmpty else { return nil }
                 return first
             }()
-            let extracted = itemContentIsPlainText ? nil : ContentExtractionPipeline.shared.extractFromHTML(trimmedContent, baseUrl: resolvedURL(articleLink))
+            let extracted = plainText ? nil : ContentExtractionPipeline.shared.extractFromHTML(trimmedContent, baseUrl: resolvedURL(articleLink))
             var document: ReaderDocument?
             if case .success(_, _, let extractedDocument) = extracted { document = extractedDocument }
             if !itemImageCandidates.isEmpty {
