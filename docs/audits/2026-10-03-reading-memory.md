@@ -14,7 +14,7 @@ Before advancing, each story waits until a publisher document is stored (from th
 
 ## Results
 
-[Raw evidence](../benchmarks/2026-10-03-reading-memory.json): three complete runs, 98 images per pass, all decoded. Openings took 0.7–4.7 seconds including the waits.
+[Raw evidence](../benchmarks/2026-10-03-reading-memory.json): three complete runs, 49 images per pass (98 in a two-pass run, 245 in the five-pass run), all decoded. Openings took 0.7–4.7 seconds including the waits.
 
 | Measure | Run 1 (2 passes) | Run 2 (2 passes) | Run 3 (5 passes) |
 | --- | ---: | ---: | ---: |
