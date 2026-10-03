@@ -17,7 +17,7 @@ struct EventCardView: View {
     let separate: (FeedArticle) -> Void
 
     @EnvironmentObject private var articleStore: ArticleStore
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.effectiveReduceMotion) private var reduceMotion
     @State private var members: [FeedArticle] = []
     @State private var loadFailed = false
 
@@ -83,6 +83,7 @@ struct EventCardView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .buttonBorderShape(.roundedRectangle(radius: AppRadius.control))
         .help(isExpanded ? "Hide the sources covering this event (E)" : "Show every source covering this event (E)")
         .accessibilityLabel(coverageDescription)
         .accessibilityValue(isExpanded ? "Expanded" : "Collapsed")
@@ -181,6 +182,7 @@ private struct EventSourceRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .buttonBorderShape(.roundedRectangle(radius: AppRadius.card))
         .contextMenu {
             Button { readManager.toggleRead(article.id) } label: {
                 Label(isRead ? "Mark as Unread" : "Mark as Read", systemImage: isRead ? "circle" : "checkmark.circle.fill")

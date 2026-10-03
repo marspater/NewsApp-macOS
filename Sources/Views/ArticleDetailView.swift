@@ -27,8 +27,8 @@ struct ArticleDetailView: View {
     @EnvironmentObject private var savedStories: SavedStoriesManager
     @EnvironmentObject private var readManager: ReadManager
     @EnvironmentObject private var themeManager: ThemeManager
-    @Environment(\.colorSchemeContrast) private var contrast
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.effectiveContrast) private var contrast
+    @Environment(\.effectiveReduceMotion) private var reduceMotion
 
     @State private var viewMode: DetailViewMode = .reader
     @State private var isWebLoading: Bool = false
@@ -66,6 +66,7 @@ struct ArticleDetailView: View {
         self.allArticles = allArticles
         self._path = path
         self._currentOverview = State(initialValue: overview)
+        self._readerTextScale = State(initialValue: SystemSettingsOverrides.from().textScale ?? 1.0)
         if let mode = initialExperienceMode {
             self._experienceMode = State(initialValue: mode)
         } else if overview != nil {
@@ -237,6 +238,7 @@ struct ArticleDetailView: View {
                                     .foregroundColor(AppColor.secondaryText)
                             }
                             .buttonStyle(.plain)
+                            .buttonBorderShape(.circle)
                             .help("Dismiss citation highlight")
                             .accessibilityLabel("Dismiss citation highlight")
                         }

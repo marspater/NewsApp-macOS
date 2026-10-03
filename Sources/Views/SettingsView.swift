@@ -7,7 +7,7 @@ struct SettingsView: View {
     @EnvironmentObject var feedManager: FeedManager
     @EnvironmentObject var themeManager: ThemeManager
     @EnvironmentObject var readManager: ReadManager
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.effectiveReduceMotion) private var reduceMotion
     @Environment(\.openWindow) private var openWindow
     
     @State private var newFeedURL: String = ""
