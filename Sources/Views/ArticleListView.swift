@@ -19,7 +19,8 @@ struct ArticleListView: View {
     
     @AppStorage("articleGridLayout") private var gridLayout = false
     @AppStorage("groupsEventCoverage") private var groupsEvents = true
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.effectiveReduceMotion) private var reduceMotion
+    @Environment(\.effectiveContrast) private var contrast
     @State private var focusedArticleID: String? = nil
     @State private var isShortcutsHelpPresented: Bool = false
     
@@ -74,31 +75,46 @@ struct ArticleListView: View {
         !appliesNextUpdate && (!articlePath.isEmpty || isScrolledAway || isPointerInList || focusedArticleID != nil)
     }
 
+    private var queuedUpdateCount: Int {
+        buffer.newEntryCount(groupingMode)
+    }
+
+    private func handleQueuedUpdatesChange(previous: Int, count: Int) {
+        if count > previous {
+            announceUpdates(count)
+        }
+    }
+
+    @ViewBuilder
+    private func listContent(proxy: ScrollViewProxy) -> some View {
+        if filteredArticles.isEmpty && isLoadingPage {
+            ProgressView("Loading articles…").padding(AppSpacing.xl)
+        } else if filteredArticles.isEmpty && queryError != nil {
+            ContentUnavailableView("Couldn’t Load Articles", systemImage: "exclamationmark.triangle")
+        } else if filteredArticles.isEmpty {
+            emptyStateView
+        } else {
+            articleGrid(proxy: proxy)
+            if isBriefing { briefingCompletion }
+            if hasMoreResults {
+                Button("Load more articles") { pageRequest += 1 }
+                    .disabled(isLoadingPage)
+                    .padding(.bottom, AppSpacing.lg)
+            }
+        }
+        if let queryError {
+            VStack(spacing: AppSpacing.sm) {
+                Text(queryError).foregroundStyle(AppColor.secondaryText)
+                Button("Retry") { pageRequest += 1 }
+            }.padding()
+        }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             ScrollViewReader { proxy in
                 ScrollView {
-                    if filteredArticles.isEmpty && isLoadingPage {
-                        ProgressView("Loading articles…").padding(AppSpacing.xl)
-                    } else if filteredArticles.isEmpty && queryError != nil {
-                        ContentUnavailableView("Couldn’t Load Articles", systemImage: "exclamationmark.triangle")
-                    } else if filteredArticles.isEmpty {
-                        emptyStateView
-                    } else {
-                        articleGrid(proxy: proxy)
-                        if isBriefing { briefingCompletion }
-                        if hasMoreResults {
-                            Button("Load more articles") { pageRequest += 1 }
-                                .disabled(isLoadingPage)
-                                .padding(.bottom, AppSpacing.lg)
-                        }
-                    }
-                    if let queryError {
-                        VStack(spacing: AppSpacing.sm) {
-                            Text(queryError).foregroundStyle(AppColor.secondaryText)
-                            Button("Retry") { pageRequest += 1 }
-                        }.padding()
-                    }
+                    listContent(proxy: proxy)
                 }
                 .safeAreaInset(edge: .top, spacing: 0) {
                     VStack(spacing: 0) {
@@ -112,9 +128,7 @@ struct ArticleListView: View {
                     isScrolledAway = scrolled
                 }
                 .onHover { isPointerInList = $0 }
-                .onChange(of: buffer.newEntryCount(groupingMode)) { previous, count in
-                    if count > previous { announceUpdates(count) }
-                }
+                .onChange(of: queuedUpdateCount, handleQueuedUpdatesChange)
                 .softScrollEdge()
                 .focusable()
                 .focusEffectDisabled()
@@ -314,9 +328,14 @@ struct ArticleListView: View {
                 .foregroundStyle(AppColor.accent)
                 .padding(.horizontal, AppSpacing.sm)
                 .padding(.vertical, 6)
-                .background(Capsule().fill(AppColor.accent.opacity(0.14)))
+                .background(
+                    Capsule()
+                        .fill(AppColor.accent.opacity(contrast == .increased ? 0.22 : 0.14))
+                        .overlay(Capsule().stroke(AppColor.accent.opacity(contrast == .increased ? 0.60 : 0.0), lineWidth: 1))
+                )
         }
         .buttonStyle(.plain)
+        .buttonBorderShape(.capsule)
         .padding(.bottom, AppSpacing.xs)
         .help("Show the latest stories (U). The list keeps its place until you do.")
         .accessibilityHint("Moves to the top of the updated list")

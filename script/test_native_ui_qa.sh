@@ -5,16 +5,8 @@ TARGET_MACOS="${TARGET_MACOS:-15.0}"
 export CLANG_MODULE_CACHE_PATH="${CLANG_MODULE_CACHE_PATH:-${TMPDIR:-/tmp}/news-module-cache}"
 export SWIFT_MODULECACHE_PATH="$CLANG_MODULE_CACHE_PATH"
 
-
-TEST_OPT_FLAGS=()
-for argument in "$@"; do
-    if [[ "$argument" == "--performance-baseline" || "$argument" == "--transport-cancellation" || "$argument" == "--publisher-cancellation" ]]; then TEST_OPT_FLAGS=(-O); fi
-done
-
-python3 script/evaluation/evaluate.py
-
-echo "Compiling tests for macOS ${TARGET_MACOS} ($(uname -m))..."
-swiftc "${TEST_OPT_FLAGS[@]}" -target $(uname -m)-apple-macos${TARGET_MACOS} \
+echo "Compiling Native UI QA Checks for macOS ${TARGET_MACOS} ($(uname -m))..."
+swiftc -swift-version 6 -O -parse-as-library -target $(uname -m)-apple-macos${TARGET_MACOS} \
     Sources/Services/DateParser.swift \
     Sources/Models/FeedError.swift \
     Sources/Models/FeedFetchState.swift \
@@ -62,20 +54,25 @@ swiftc "${TEST_OPT_FLAGS[@]}" -target $(uname -m)-apple-macos${TARGET_MACOS} \
     Sources/Storage/CacheManager.swift \
     Sources/Coordinators/FeedManager.swift \
     Sources/App/AppContainer.swift \
-    Sources/Storage/SavedStoriesManager.swift \
-    Sources/Services/OPMLManager.swift \
     Sources/Views/DesignSystem.swift \
     Sources/Views/GlassSystem.swift \
+    Sources/Views/SidebarView.swift \
+    Sources/Views/ArticleCardView.swift \
+    Sources/Views/EventCardView.swift \
+    Sources/Views/ArticleListView.swift \
+    Sources/Views/ArticleWebView.swift \
     Sources/Views/EventOverviewReaderView.swift \
+    Sources/Views/ArticleDetailView.swift \
+    Sources/Storage/SavedStoriesManager.swift \
+    Sources/Services/OPMLManager.swift \
     Sources/Coordinators/RefreshCoordinator.swift \
     Sources/App/NewsSignposts.swift \
     Sources/App/UpdateChecker.swift \
-    Tests/StoryCorpus.swift \
-    Tests/NewsTests.swift \
-    -o test_runner
+    Tests/NativeUIQAChecks.swift \
+    -o native_ui_qa_runner
 
-echo "Running unit tests..."
-./test_runner "$@"
+echo "Running Native UI QA Checks..."
+./native_ui_qa_runner "$@"
 
-# Clean up
-rm -f test_runner
+rm -f native_ui_qa_runner
+echo "Native UI QA Checks completed successfully."

@@ -15,9 +15,12 @@ Build on Apple silicon with Xcode 27 selected. The deployment target remains mac
 ./test.sh --story-regressions     # Focused offline identity, reader and persistence checks
 ./test.sh --performance-baseline --active-work-cancellation # Active clustering, ingestion and feed parsing cancellation; temporary stress fixtures
 ./script/native_performance_baseline.sh # Isolated MainView window, rendered-card samples and process memory
+./script/test_native_ui_qa.sh        # Automated Native UI QA checks with system settings overrides (#155, #123)
+./script/run_isolated.sh [OPTIONS]   # Launch isolated app with simulated Increase Contrast, Reduce Motion, VoiceOver
 ./script/launch_baseline.sh       # Production bundle under a separate identifier: launch to first card and memory, seeded library
 ./test.sh --performance-baseline  # Opt-in optimized synthetic core-service timings
 ./test.sh --transport-cancellation # Optimized refresh shutdown over controlled HTTP/SOCKS sockets
+./test.sh --publisher-cancellation # Opt-in, live: refresh and stop the twelve panel feeds over real HTTPS
 NEWS_EVENT_CORPUS=corpus.json ./test.sh --event-corpus # Event clustering precision/recall on a local labeled corpus (#102)
 NEWS_EMBEDDING_THRESHOLD=0.4 NEWS_EVENT_CORPUS=corpus.json ./test.sh --event-corpus --corpus-holdout # Holdout, embeddings at the cutoff chosen on tune (#127)
 ./test.sh --corpus-capture DIR    # Opt-in, live: capture catalog feed items into a private directory (#102)

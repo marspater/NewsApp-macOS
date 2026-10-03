@@ -1,0 +1,131 @@
+{
+  "command": "./test.sh --publisher-cancellation",
+  "date": "2026-10-03",
+  "hardware": {
+    "cpu": "Apple M5",
+    "memory_bytes": 25769803776,
+    "model": "Mac17,3"
+  },
+  "macos": "27.0.1 (26A434)",
+  "measurement": "ContinuousClock immediately before FeedManager.stopBackgroundWork to the end of fetchFeedsAsync; refresh_ms is an uncancelled refresh from an empty temporary library",
+  "runs": [
+    {
+      "client": "SecureHTTPClient.shared (production proxy, live TLS)",
+      "feeds": 12,
+      "samples": [
+        {
+          "articles": 429,
+          "feed_states": 12,
+          "label": "full-0",
+          "refresh_ms": 1452.128792
+        },
+        {
+          "articles": 429,
+          "feed_states": 12,
+          "label": "full-1",
+          "refresh_ms": 683.273875
+        },
+        {
+          "articles": 0,
+          "feed_states": 0,
+          "finished_before_cancel": false,
+          "label": "cancel-25ms",
+          "stop_ms": 1.11925
+        },
+        {
+          "articles": 0,
+          "feed_states": 0,
+          "finished_before_cancel": false,
+          "label": "cancel-75ms",
+          "stop_ms": 0.200791
+        },
+        {
+          "articles": 0,
+          "feed_states": 0,
+          "finished_before_cancel": false,
+          "label": "cancel-150ms",
+          "stop_ms": 2.243166
+        },
+        {
+          "articles": 0,
+          "feed_states": 0,
+          "finished_before_cancel": false,
+          "label": "cancel-300ms",
+          "stop_ms": 8.721417
+        },
+        {
+          "articles": 336,
+          "feed_states": 12,
+          "finished_before_cancel": false,
+          "label": "cancel-600ms",
+          "stop_ms": 0.348959
+        },
+        {
+          "articles": 429,
+          "feed_states": 12,
+          "finished_before_cancel": true,
+          "label": "cancel-1200ms"
+        }
+      ]
+    },
+    {
+      "client": "SecureHTTPClient.shared (production proxy, live TLS)",
+      "feeds": 12,
+      "samples": [
+        {
+          "articles": 429,
+          "feed_states": 12,
+          "label": "full-0",
+          "refresh_ms": 1421.975834
+        },
+        {
+          "articles": 429,
+          "feed_states": 12,
+          "label": "full-1",
+          "refresh_ms": 715.296667
+        },
+        {
+          "articles": 0,
+          "feed_states": 0,
+          "finished_before_cancel": false,
+          "label": "cancel-25ms",
+          "stop_ms": 0.901583
+        },
+        {
+          "articles": 0,
+          "feed_states": 0,
+          "finished_before_cancel": false,
+          "label": "cancel-75ms",
+          "stop_ms": 0.176959
+        },
+        {
+          "articles": 0,
+          "feed_states": 0,
+          "finished_before_cancel": false,
+          "label": "cancel-150ms",
+          "stop_ms": 2.204167
+        },
+        {
+          "articles": 0,
+          "feed_states": 0,
+          "finished_before_cancel": false,
+          "label": "cancel-300ms",
+          "stop_ms": 18.372792
+        },
+        {
+          "articles": 181,
+          "feed_states": 12,
+          "finished_before_cancel": false,
+          "label": "cancel-600ms",
+          "stop_ms": 0.2375
+        },
+        {
+          "articles": 429,
+          "feed_states": 12,
+          "finished_before_cancel": true,
+          "label": "cancel-1200ms"
+        }
+      ]
+    }
+  ]
+}
