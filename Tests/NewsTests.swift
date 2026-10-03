@@ -5705,7 +5705,10 @@ struct NewsTests {
             assertEqual(sqlite3_step(statement), SQLITE_ROW, "Count validators without articles")
             assertEqual(sqlite3_column_int(statement, 0), 0, "\(label): no feed keeps validators without its articles")
             sqlite3_finalize(statement)
-            assertEqual(sqlite3_exec(handle, "PRAGMA integrity_check;", nil, nil, nil), SQLITE_OK, "\(label): the library stays intact")
+            sqlite3_prepare_v2(handle, "PRAGMA integrity_check;", -1, &statement, nil)
+            assertEqual(sqlite3_step(statement), SQLITE_ROW, "Run the integrity check")
+            assertEqual(sqlite3_column_text(statement, 0).map { String(cString: $0) }, "ok", "\(label): the library stays intact")
+            sqlite3_finalize(statement)
             return result
         }
         func milliseconds(_ duration: Duration) -> Double {
@@ -5715,6 +5718,15 @@ struct NewsTests {
         for index in 0..<2 { samples.append(try await run("full-\(index)", cancelAfter: nil)) }
         for offset in [25, 75, 150, 300, 600, 1200] {
             samples.append(try await run("cancel-\(offset)ms", cancelAfter: .milliseconds(offset)))
+        }
+        // Ordinary completion within the deadline is not evidence: require stops that interrupted live work.
+        let full = samples.prefix(2).compactMap { $0["articles"] as? Int }.min() ?? 0
+        let active = samples.filter { $0["stop_ms"] != nil }
+        assertFalse(active.isEmpty, "At least one stop lands while the refresh is still running")
+        assertTrue(active.contains { ($0["articles"] as? Int) == 0 && ($0["feed_states"] as? Int) == 0 } && full > 0,
+                   "A stop during the network phase stores no articles and records no feed outcome")
+        for sample in active {
+            assertTrue((sample["stop_ms"] as? Double ?? .infinity) < 250, "\(sample["label"] ?? ""): the refresh stops promptly")
         }
         let report: [String: Any] = ["feeds": feeds.count, "samples": samples, "client": "SecureHTTPClient.shared (production proxy, live TLS)"]
         let data = try JSONSerialization.data(withJSONObject: report, options: [.sortedKeys])
