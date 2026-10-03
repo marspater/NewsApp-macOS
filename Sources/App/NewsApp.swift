@@ -132,6 +132,13 @@ struct NewsApp: App {
             }
         }
         
+        Window("News Tension", id: "tension") {
+            TensionIndexView()
+                .environmentObject(appSettings)
+                .environmentObject(articleStore)
+                .preferredColorScheme(themeManager.appearance.colorScheme)
+        }
+
         Settings {
             SettingsView()
                 .environmentObject(appSettings)

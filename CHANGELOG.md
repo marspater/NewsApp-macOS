@@ -31,6 +31,7 @@
 
 ### Added
 
+- News Tension window (experiment): a Swift Charts history of the panel's tension index by UTC day, with coverage, the largest event contributions and the methodology. Days without enough coverage are shown as gaps, never zero, and the history starts when panel collection began (#159).
 - A one-time `FirstCard` signpost and log line record when the first story card appears, with the time since process start, for launch profiling (#104).
 
 - Add an opt-in isolated native rendered-card benchmark and integrated service budgets; distinguish unchanged refreshes from dense clustering work without modifying the real library.

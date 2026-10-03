@@ -83,6 +83,7 @@ SWIFT_SOURCES=(
     Sources/Views/ArticleListView.swift
     Sources/Views/ArticleDetailView.swift
     Sources/Views/EventOverviewReaderView.swift
+    Sources/Views/TensionIndexView.swift
     Sources/Views/MainView.swift
     Sources/Views/SettingsView.swift
     Sources/Views/FeedCatalogView.swift
