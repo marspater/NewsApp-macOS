@@ -44,6 +44,24 @@ If the system has no English sentence embedding, the native checks are skipped w
 
 The authoring environment was a Linux container without a Swift toolchain; its network policy blocked swift.org. Nothing was compiled or run locally. A tree-sitter Swift parse of `Tests/NewsTests.swift` found no new syntax errors (the same six grammar-limitation errors as on `main`). Compilation, the regression suite and per-language support are left to macOS CI.
 
+## Language support on a real Mac — 3 October 2026
+
+Apple M5, macOS 27.0.1 (26A434). `NLEmbedding.sentenceEmbedding(for:)` and `supportedSentenceEmbeddingRevisions(for:)` per catalog language:
+
+| Language | Catalog feeds | Sentence embedding | Supported revisions |
+| --- | ---: | --- | --- |
+| en | 39 | 512-d, revision 1 | 1 |
+| de | 2 | 640-d, revision 1 | 1 |
+| fr | 1 | none installed | 1 |
+| it | 1 | none installed | 1 |
+| nl | 1 | none | none |
+| pl | 1 | none | none |
+| uk | 4 | none | none |
+
+Unlike the CI image (English only), this Mac also has German. French and Italian list a supported revision but returned no model, so availability depends on which assets a Mac has downloaded. Dutch, Polish and Ukrainian have no sentence embedding at all.
+
+Consequences for #127: embeddings can affect at most the English and, where installed, German feeds (41 of 49). Ukrainian, Polish and Dutch stay deterministic-only on every Mac, so adoption must never be the only path for any language, and the per-language report must say which languages were scored on the machine that produced it.
+
 ## Remaining for #127
 
 - Run the tune sweep and the holdout at the chosen cutoff once #102 has a labeled corpus with titles and descriptions.
