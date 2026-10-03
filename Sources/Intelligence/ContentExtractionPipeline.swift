@@ -346,13 +346,23 @@ final class DOMElementNode: Sendable {
         return min(1.0, Double(linkTextCount) / Double(allText.count))
     }
 
-    /// Share of text in links outside cited prose (prose-length blocks that are mostly not links): navigation and
-    /// teaser cards, not inline citations.
+    /// Share of text in links outside cited prose: navigation and teaser cards, not inline citations.
+    /// A prose-length paragraph, list item or quotation whose links are citations: under 80% of its text, and no single
+    /// link covering half of it, as a teaser card's headline would.
+    var isCitedProse: Bool {
+        guard ["p", "li", "blockquote"].contains(tag) else { return false }
+        let text = combinedText()
+        guard text.count >= 120 else { return false }
+        let total = text.filter { !$0.isWhitespace }.count
+        let links = findNodes(tag: "a").map { $0.combinedText().filter { !$0.isWhitespace }.count }
+        return links.reduce(0, +) * 5 < total * 4 && (links.max() ?? 0) * 2 < total
+    }
+
     func navigationLinkDensity() -> Double {
         let allText = combinedText().filter { !$0.isWhitespace }.count
         guard allText > 0 else { return 0.0 }
         func navigationLinkText(_ node: DOMElementNode) -> Int {
-            if ["p", "li", "blockquote"].contains(node.tag), node.combinedText().count >= 120, node.computeLinkDensity() < 0.8 { return 0 }
+            if node.isCitedProse { return 0 }
             if node.tag == "a" { return node.combinedText().filter { !$0.isWhitespace }.count }
             return node.children.reduce(0) { $0 + navigationLinkText($1) }
         }
@@ -742,7 +752,8 @@ final class ContentExtractionPipeline: Sendable {
         let isText: (ReaderBlock) -> Bool = { $0.kind == .paragraph || $0.kind == .quote || $0.kind == .listItem }
         let key: (ReaderBlock) -> String = { $0.text.lowercased().trimmingCharacters(in: .whitespacesAndNewlines) }
         let isProse: (ReaderBlock) -> Bool = { block in
-            block.text.count >= 120 || block.text.trimmingCharacters(in: .whitespaces).last.map { ".!?…\"”»".contains($0) } == true
+            block.text.count >= 120 || block.text.trimmingCharacters(in: CharacterSet(charactersIn: " )]}\"'’”»›"))
+                .last.map { ".!?…".contains($0) } == true
         }
         // Repeated labels (headlines, related links, buttons, bylines, video placeholders) are page furniture: every copy
         // goes before validation, so the repetition check only judges prose.

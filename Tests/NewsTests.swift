@@ -1033,6 +1033,9 @@ struct NewsTests {
         assertEqual(sectioned.content?.components(separatedBy: "\n\n").count, 13, "Heavily cited prose keeps every section of the article")
         let halfCited = pipeline.extractFromHTML("<article><section>" + (1...5).map { "<p>Paragraph \($0): \(prose)</p>" }.joined() + "</section>" + cited.components(separatedBy: "</p>").prefix(5).map { $0 + "</p>" }.joined() + "</article>")
         assertEqual(halfCited.content?.components(separatedBy: "\n\n").count, 10, "Citations never trigger the link-density penalty")
+        let cards = "<ul>" + (1...10).map { "<li><a href=\"/related/\($0)\">Related story number \($0): a long headline about another event in a different country entirely</a> Two hours ago, from our foreign desk.</li>" }.joined() + "</ul>"
+        let carded = pipeline.extractFromHTML("<div class=\"site\"><article><div class=\"body\">\(body)</div>\(cards)</article></div>")
+        assertFalse(carded.content?.contains("Related story") ?? true, "Teaser cards dominated by one headline link stay navigation")
         let citedList = "<ul>" + cited.replacingOccurrences(of: "<p>", with: "<li>").replacingOccurrences(of: "</p>", with: "</li>") + "</ul>"
         let listed = pipeline.extractFromHTML("<article><section>\(body)</section><section>\(citedList)</section><section><p>Closing: \(second)</p></section></article>")
         assertEqual(listed.content?.components(separatedBy: "\n\n").count, 13, "Cited list items count as prose, not navigation")
@@ -1041,6 +1044,9 @@ struct NewsTests {
         let furnished = pipeline.extractFromHTML("<article>\(placeholder)\(body)\(placeholder)\(pullQuote)\(placeholder)\(pullQuote)</article>")
         assertFalse(furnished.content?.contains("enable JavaScript") ?? true, "Repeated short furniture is removed instead of rejecting the page")
         assertEqual(furnished.content?.components(separatedBy: "pull quote").count, 2, "A repeated prose-length block keeps one occurrence")
+        let aside = "<p>(The report was updated on Tuesday.)</p>"
+        let asided = pipeline.extractFromHTML("<article>\(body)\(aside)\(aside)</article>")
+        assertEqual(asided.content?.components(separatedBy: "updated on Tuesday").count, 2, "Sentence punctuation before a closing parenthesis is prose")
         let shortQuote = "<p>“We will not back down,” the minister said.</p>"
         let quoted = pipeline.extractFromHTML("<article>\(body)\(shortQuote)<blockquote>\(shortQuote)</blockquote><p>Read more</p><p>Read more</p></article>")
         assertEqual(quoted.content?.components(separatedBy: "We will not back down").count, 2, "A short repeated sentence keeps one occurrence")

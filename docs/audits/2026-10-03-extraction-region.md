@@ -16,8 +16,8 @@ The region itself was too wide. Container scoring adds 30 points per block and a
 
 ## Change
 
-- Container link penalties use only navigation links: the existing fixed penalty and a new multiplier by the squared share of text outside navigation links. Links inside prose-length paragraphs, list items and quotations (120 characters or more, under 80% linked) are citations and do not count; fully linked teaser cards still do, so navigation-heavy wrappers lose to the body they contain while an article whose sections carry many inline citations keeps every section.
-- Repeated labels (under 120 characters and no closing sentence punctuation: headlines, related links, buttons, bylines, video placeholders) lose every copy before validation, so the repetition check judges only prose, even on pages where labels outnumber it. After validation, repeated prose that is not a loop, such as a sentence that is also a pull quote, keeps its first occurrence, and the page is validated again.
+- Container link penalties use only navigation links: the existing fixed penalty and a new multiplier by the squared share of text outside navigation links. Links inside prose-length paragraphs, list items and quotations (120 characters or more, under 80% linked, and no single link covering half the block) are citations and do not count; teaser cards, whose headline link dominates the block, still do, so navigation-heavy wrappers lose to the body they contain while an article whose sections carry many inline citations keeps every section.
+- Repeated labels (under 120 characters and no sentence punctuation, ignoring closing brackets and quotes: headlines, related links, buttons, bylines, video placeholders) lose every copy before validation, so the repetition check judges only prose, even on pages where labels outnumber it. After validation, repeated prose that is not a loop, such as a sentence that is also a pull quote, keeps its first occurrence, and the page is validated again.
 - The validator rejects repetition only when repeated blocks make up half or more of the text, a syndication loop, instead of whenever two blocks repeat.
 
 ## Evidence
