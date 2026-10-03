@@ -1018,6 +1018,19 @@ struct NewsTests {
         let html = "<SCRIPT>ignored()</SCRIPT><ARTICLE><P>\(prose)<P>\(second)</ARTICLE>"
         assertEqual(pipeline.extractFromHTML(html).content, "\(prose)\n\n\(second)", "Uppercase raw tags and optional paragraph endings preserve the body")
         assertTrue(pipeline.extractFromHTML("<article><div>\(prose)</div><div>\(second)</div></article>").isSuccess, "Div-only articles remain readable")
+        // #242: the region stops at the article body, and repeated page furniture no longer rejects the page.
+        let body = (1...6).map { "<p>Paragraph \($0): \(prose)</p>" }.joined()
+        let teasers = (1...12).map { "<div class=\"card\"><a href=\"/story/\($0)\"><h3>Other headline number \($0) about a different event entirely</h3></a></div>" }.joined()
+        let wrapped = pipeline.extractFromHTML("<div class=\"site\"><article><div class=\"article__text\">\(body)</div><h2>Most Popular</h2>\(teasers)</article></div>")
+        assertEqual(wrapped.content?.components(separatedBy: "\n\n").count, 6, "A link-heavy wrapper cannot outscore the article body")
+        assertFalse(wrapped.content?.contains("Other headline") ?? true, "Teaser links stay out of the reader")
+        let placeholder = "<p>To view this video please enable JavaScript, and consider upgrading to a web browser.</p>"
+        let pullQuote = "<p>“\(second) This is the line the editors chose to repeat as a pull quote in the middle of the story.”</p>"
+        let furnished = pipeline.extractFromHTML("<article>\(placeholder)\(body)\(placeholder)\(pullQuote)\(placeholder)\(pullQuote)</article>")
+        assertFalse(furnished.content?.contains("enable JavaScript") ?? true, "Repeated short furniture is removed instead of rejecting the page")
+        assertEqual(furnished.content?.components(separatedBy: "pull quote").count, 2, "A repeated prose-length block keeps one occurrence")
+        let loop = String(repeating: "<p>\(prose)</p>", count: 4)
+        assertFalse(pipeline.extractFromHTML("<article>\(loop)<p>\(second)</p></article>").isSuccess, "A page that is mostly one repeated paragraph is still a loop")
         let hiddenHTML = "<article><p>\(prose)</p><p>\(second)</p><div hidden><p>Hidden subscription announcement that should never appear in a reader.</p></div><div aria-hidden='true'>Another hidden panel with a substantial amount of text.</div><button>Follow this publisher for personalized updates and notifications.</button></article>"
         assertEqual(pipeline.extractFromHTML(hiddenHTML).content, "\(prose)\n\n\(second)", "Hidden panels and button labels cannot leak into publisher prose")
         let atom = """

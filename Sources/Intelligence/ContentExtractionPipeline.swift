@@ -99,7 +99,8 @@ public struct ContentQualityValidator: Sendable {
                 seen.insert(normalized)
             }
         }
-        if duplicates >= 2 || (paragraphs.count >= 3 && duplicates >= paragraphs.count / 2) {
+        // Mostly repeated text is a syndication loop; a few repeats are page furniture the pipeline removes.
+        if paragraphs.count >= 3 && duplicates * 2 >= paragraphs.count {
             return .rejected(reason: "Excessive repetitive text detected")
         }
 
@@ -725,7 +726,20 @@ final class ContentExtractionPipeline: Sendable {
         }
 
         // 4. Validate Content Quality
-        let validation = ContentQualityValidator.validate(paragraphs: candidateParagraphs.filter { $0.kind == .paragraph || $0.kind == .quote || $0.kind == .listItem }.map(\.text))
+        let isText: (ReaderBlock) -> Bool = { $0.kind == .paragraph || $0.kind == .quote || $0.kind == .listItem }
+        var validation = ContentQualityValidator.validate(paragraphs: candidateParagraphs.filter(isText).map(\.text))
+        if validation == .valid {
+            // Text repeated on one page is furniture (repeated headlines, related links, video placeholders); a repeated
+            // prose-length block, such as a pull quote, keeps its first occurrence.
+            let key: (ReaderBlock) -> String = { $0.text.lowercased().trimmingCharacters(in: .whitespacesAndNewlines) }
+            let counts = Dictionary(candidateParagraphs.filter(isText).map { (key($0), 1) }, uniquingKeysWith: +)
+            var kept = Set<String>()
+            candidateParagraphs.removeAll { block in
+                guard isText(block), counts[key(block), default: 0] > 1 else { return false }
+                return block.text.count < 120 || !kept.insert(key(block)).inserted
+            }
+            validation = ContentQualityValidator.validate(paragraphs: candidateParagraphs.filter(isText).map(\.text))
+        }
         switch validation {
         case .valid:
             let joined = candidateParagraphs.filter { $0.kind != .figure }.map(\.text).joined(separator: "\n\n")
@@ -849,6 +863,8 @@ final class ContentExtractionPipeline: Sendable {
         } else if linkDensity > 0.20 {
             score -= 100.0
         }
+        // Scale by the share of text outside links, so a page wrapper cannot outscore the article on its navigation.
+        if score > 0 { score *= (1 - linkDensity) * (1 - linkDensity) }
 
         return (score, substantiveParagraphs)
     }
