@@ -236,12 +236,12 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
 
             var fullContent: String? = nil
             let trimmedContent = itemContentEncoded.trimmingCharacters(in: .whitespacesAndNewlines)
-            // Some publishers put plain text in content:encoded, with line breaks between paragraphs; read as HTML,
-            // those breaks would collapse the article into one paragraph.
+            // Some publishers put plain text in content:encoded, with line breaks between paragraphs. HTML extraction would
+            // collapse it into one paragraph; the simple cleanup keeps the breaks and still decodes entities.
             let plainText = itemContentIsPlainText
                 || (!itemContentIsXHTML && !trimmedContent.contains("<") && trimmedContent.contains("\n"))
             if !trimmedContent.isEmpty {
-                let cleaned = plainText ? trimmedContent : stripHTMLSimple(trimmedContent)
+                let cleaned = itemContentIsPlainText ? trimmedContent : stripHTMLSimple(trimmedContent)
                 fullContent = cleaned.isEmpty ? nil : cleaned
             }
 

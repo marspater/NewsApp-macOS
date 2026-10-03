@@ -1035,18 +1035,18 @@ struct NewsTests {
         // #115: Ekonomichna Pravda sends plain text in content:encoded, paragraphs separated by blank lines.
         let plainEncoded = """
         <rss xmlns:content="http://purl.org/rss/1.0/modules/content/"><channel><title>Daily</title><item><title>Report</title>
-        <link>https://example.com/plain</link><content:encoded> \(prose)
+        <link>https://example.com/plain</link><content:encoded><![CDATA[ \(prose)
 
 
-        Officials said the agreement &amp; its annexes would be published in full after the parliamentary review next week.
+        Officials said the agreement &amp; its annexes wouldn&#8217;t be published&nbsp;before the parliamentary review next week.
 
 
-        \(second)</content:encoded></item></channel></rss>
+        \(second)]]></content:encoded></item></channel></rss>
         """
         let plainArticle = FeedXMLParser(data: Data(plainEncoded.utf8)).parse().first
         assertEqual(plainArticle.map { ArticleContentRedactor.redactAndSplit($0.fullContent ?? "") },
-                    [prose, "Officials said the agreement & its annexes would be published in full after the parliamentary review next week.", second],
-                    "Plain-text content:encoded keeps its paragraph breaks")
+                    [prose, "Officials said the agreement & its annexes wouldn\u{2019}t be published before the parliamentary review next week.", second],
+                    "Plain-text content:encoded keeps its paragraph breaks and decodes entities")
         assertTrue(plainArticle?.readerDocument == nil, "Plain feed text is no reader document, so the reader fetches the page's structure")
         let rss = "<rss><channel><title>News</title><image><title>News logo</title></image><item><title>Story</title><link>https://example.com/story</link></item></channel></rss>"
         assertEqual(FeedXMLParser(data: Data(rss.utf8)).parse().first?.source, "News", "Feed image title cannot contaminate publisher name")
