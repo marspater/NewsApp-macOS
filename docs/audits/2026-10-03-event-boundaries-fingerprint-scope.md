@@ -27,7 +27,7 @@ Points for the independent reviewer:
 
 `--corpus-capture` ran once more through the production protected networking, with the catalog plus 41 sibling feeds of 14 catalog publishers: 90 feeds, 2 failures, 2,926 items. The sample favoured sibling feeds that share a feed title (BBC, DW, Dawn, CBC, Ukrainska Pravda) or carry long text (Guardian, NOS, Dawn, Ars Technica, Politico, Ukrainska Pravda). The captures stay in `~/Documents/NewsFingerprintCapture` (directory 0700, files 0600). The 40 feeds that responded are frozen in [`fingerprint-feeds.json`](../../Tests/Fixtures/story-corpus/fingerprint-feeds.json).
 
-Together with the earlier capture the private directory holds 3,021 unique observations: 1,713 tuning and 1,308 holdout. Of these, 1,089 are fingerprint-eligible: 164 tuning and 925 holdout.
+Together with the earlier capture the private directory holds 3,021 unique observations: 1,713 tuning and 1,308 holdout. Of these, 1,089 are fingerprint-eligible: 164 tuning and 925 holdout. They cover 152 and about 740 distinct canonical URLs.
 
 - **Native tuning review:** 0 different-URL candidates. None of the 13 eligible same-URL copies shared a fingerprint, because sibling feeds of Times of India, France 24 and Politico carry different feed titles.
 - **Structural check, both splits:** no two observations share host, feed title, title and timestamp under different raw links, even without the 400-character text threshold. A candidate needs all four, so none can exist in either split. Holdout hosts were counted only; no fingerprints, review sheets or labels were produced for them.
@@ -35,9 +35,9 @@ Together with the earlier capture the private directory holds 3,021 unique obser
 
 ### Decision
 
-The gate no longer waits for 100 real different-URL matches. A signal that never fires has no measurable precision, so the old gate could neither pass nor fail. The sample is now every fingerprint-eligible holdout observation, which is every document a fingerprint could wrongly merge:
+The gate no longer waits for 100 real different-URL matches. A signal that never fires has no measurable precision, so the old gate could neither pass nor fail. The sample is now every fingerprint-eligible holdout document, which is every document a fingerprint could wrongly merge:
 
-- `releaseGatePassed` requires the holdout split, every candidate adjudicated, and falsely merged observations at most 1% of eligible observations at the Wilson 95% upper bound. With no false merge, that takes at least 381 eligible observations.
+- `releaseGatePassed` requires the holdout split, every candidate adjudicated, and falsely merged documents at most 1% of eligible documents at the Wilson 95% upper bound. Repeated observations of one canonical URL count once, as candidates do. With no false merge, that takes at least 381 eligible documents.
 - Precision ≥99% is still required once there are at least 100 candidates, so the earlier rule applies whenever it can be measured.
 - Acceptance uses a new private directory of captures taken from 4 October on, with the catalog and `fingerprint-feeds.json`, reviewed once with `--corpus-holdout`. The 3 October captures were inspected for support counts on both splits and are not acceptance evidence.
 
@@ -45,8 +45,8 @@ This shows that text fingerprints are unlikely to merge distinct documents. It d
 
 ## Validation
 
-- `StoryCorpus.captureGatePassed` takes the eligible count. `testCapturedFingerprintReview` covers the 381/380 boundary, a false merge needing more support, the precision rule at 100 candidates, unreviewed candidates and the tuning split. The report adds `falseMergeUpperBound95`.
+- `StoryCorpus.captureGatePassed` takes the eligible count. `testCapturedFingerprintReview` covers one count per canonical URL, the 381/380 boundary, a false merge needing more support, the precision rule at 100 candidates, unreviewed candidates and the tuning split. The report adds `fingerprintEligibleDocuments` and `falseMergeUpperBound95`.
 - Full `./test.sh` regressions passed locally (arm64, macOS 15 target), including the v1 and v2 validators.
-- `./test.sh --corpus-review` on the private directory (tuning only) produced the counts above; its report now prints `falseMergeUpperBound95` (0.023 on tuning, where the gate never passes). No holdout review was run, no app was built and no hosted CI result is claimed here.
+- `./test.sh --corpus-review` on the private directory (tuning only) produced the counts above; its report now prints `falseMergeUpperBound95` (0.025 over 152 tuning documents, where the gate never passes). No holdout review was run, no app was built and no hosted CI result is claimed here.
 
 #102 remains open. Next: independent adjudication of v2 (dates, singletons, the rules above), more varied positive events, real quarterly-report hard negatives, the tune-then-holdout event replay, and one fresh-capture fingerprint holdout review.
