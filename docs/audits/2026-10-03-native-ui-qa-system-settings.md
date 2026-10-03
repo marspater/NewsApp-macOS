@@ -89,3 +89,11 @@ In `Sources/App/AppSettings.swift`, added:
 ./test.sh
 ./build.sh
 ```
+
+---
+
+## 5. Limitations & Live Release Verification
+
+- **VoiceOver Speech Output**: The automated test suite (`Tests/NativeUIQAChecks.swift`) and override flags verify semantic accessibility traits, heading hierarchy (H1/H2/H3), rotor actions, spoken label formatting (without punctuation artifacts), and announcement notification payloads. They do not exercise live macOS VoiceOver speech synthesis or audio cursor navigation.
+- **Recommended Pre-Release Check**: Perform a brief manual VoiceOver pass (`Cmd+F5`) on a running isolated build (`./script/run_isolated.sh --seed`) before final release tagging to verify auditory pacing, pronunciation, and live cursor movement.
+
