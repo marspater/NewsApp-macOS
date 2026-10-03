@@ -55,9 +55,9 @@ In `Sources/App/AppSettings.swift`, added:
 |---|---|---|
 | Keyboard-only use & shortcuts | J, K, E, G, U, W, M, S, O, Esc, Return, Space | `NativeUIQAChecks.testKeyboardShortcutsAndKeyHandling` |
 | Focus rings under `focusEffectDisabled` | Reader root disables ring; descendants re-enable `.focusEffectDisabled(false)` with explicit `.buttonBorderShape` | Verified across pills, circles, and cards |
-| VoiceOver structure & headings | H1 (headline/overview), H2 (overview sections), H3 (subheadings) | `NativeUIQAChecks.testVoiceOverStructureAndAnnouncements` |
-| VoiceOver clean spoken labels | Grouped source line, lead image, citation pills, source rows | Verified without punctuation/dot noise |
-| VoiceOver update announcement | `.announcementRequested` notification with medium priority | Verified in `ArticleListView` |
+| VoiceOver spoken label formatting | Grouped source line, overview metadata, lead image, citation quotes, rotor context | `NativeUIQAChecks.testVoiceOverStructureAndAnnouncements` (helper assertions) |
+| Image alt-text fallbacks | Explicit alt preserved, nil/whitespace falls back to "Article image" | `NativeUIQAChecks.testVoiceOverStructureAndAnnouncements` (`effectiveImageAlt`) |
+| VoiceOver structure, traits & announcements | Heading levels (H1/H2/H3), rotor actions, live `.announcementRequested` posting | Code-level modifiers (`ArticleDetailView`, `ArticleListView`); not asserted by unit tests |
 | Several window widths | 380px (narrow split), 800px (standard), 1200px (wide) | `NativeUIQAChecks.testWindowWidthsAndLayoutMetrics` |
 | Text scaling adaptation | 1.0x to 1.5x text scaling; reading column capped at 1.3x | `NativeUIQAChecks.testTextScalingAdaptation` |
 | Increase Contrast | Dividers (0.20/0.15 -> 0.60), pill strokes (0.0 -> 0.60), quotes (0.50 -> 1.0) | `NativeUIQAChecks.testIncreaseContrastScalers` |
@@ -89,3 +89,17 @@ In `Sources/App/AppSettings.swift`, added:
 ./test.sh
 ./build.sh
 ```
+
+---
+
+## 5. Limitations & Live Release Verification
+
+- **Automated VoiceOver Scope**: The automated test suite (`Tests/NativeUIQAChecks.swift`) asserts accessibility label formatting helper output (source line grouping, header metadata, citation quotes, action context) and image alt-text fallbacks. It does not render views, inspect the live macOS accessibility tree (`NSAccessibility` hierarchy), verify heading traits (`.accessibilityHeading`) or rotor actions, or observe posted announcement notifications.
+- **Live VoiceOver Verification Gap**: Real VoiceOver speech synthesis, auditory pacing, pronunciation, and keyboard cursor navigation are not exercised by headless unit tests or override flags.
+- **Recommended Pre-Release Check**: Perform a manual VoiceOver pass (`Cmd+F5`) on a running isolated build (`./script/run_isolated.sh --seed`) before final release tagging to verify:
+  - Live cursor navigation order and rotor headings/actions.
+  - Headings are announced at their expected levels (H1/H2/H3).
+  - Queued updates trigger spoken announcement notifications when applied.
+  - Speech synthesis audio pronunciation and pacing across reader blocks and citations.
+
+

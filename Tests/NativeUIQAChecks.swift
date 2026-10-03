@@ -131,9 +131,9 @@ struct NativeUIQAChecks {
         }
     }
 
-    // MARK: - 3. VoiceOver Structure and Announcements
+    // MARK: - 3. VoiceOver Spoken Label Helpers and Alt Fallbacks
     static func testVoiceOverStructureAndAnnouncements() {
-        print("  - Testing VoiceOver Semantic Hierarchy, Labels, and Announcements...")
+        print("  - Testing VoiceOver Spoken Label Helpers and Image Alt Fallbacks...")
 
         // 1. Grouped source line (PR #212)
         let sourceLine = ArticleDetailView.sourceLineAccessibilityLabel(
