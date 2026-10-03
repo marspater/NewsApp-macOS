@@ -8,7 +8,7 @@ export SWIFT_MODULECACHE_PATH="$CLANG_MODULE_CACHE_PATH"
 
 TEST_OPT_FLAGS=()
 for argument in "$@"; do
-    if [[ "$argument" == "--performance-baseline" || "$argument" == "--transport-cancellation" ]]; then TEST_OPT_FLAGS=(-O); fi
+    if [[ "$argument" == "--performance-baseline" || "$argument" == "--transport-cancellation" || "$argument" == "--publisher-cancellation" ]]; then TEST_OPT_FLAGS=(-O); fi
 done
 
 python3 script/evaluation/evaluate.py
