@@ -37,6 +37,8 @@ private func mebibytes(_ bytes: UInt64) -> Double { (Double(bytes) / 1_048_576 *
 @MainActor
 private final class ReadingDelegate: NSObject, NSApplicationDelegate {
     private var window: NSWindow?
+    /// Reader image completions by URL, as `ArticleRemoteImage` reports them.
+    private var finishedImages: [String: Bool] = [:]
 
     func applicationDidFinishLaunching(_: Notification) {
         Task {
@@ -118,7 +120,7 @@ private final class ReadingDelegate: NSObject, NSApplicationDelegate {
                 .environmentObject(container.savedStories)
                 .defaultAppStorage(defaults)
         }
-        let view = NSHostingView(rootView: AnyView(reader(stories[0])))
+        let view = NSHostingView(rootView: AnyView(EmptyView()))
         let current = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1100, height: 800),
                                styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
         current.isReleasedWhenClosed = false
@@ -130,11 +132,18 @@ private final class ReadingDelegate: NSObject, NSApplicationDelegate {
 
         var samples: [[String: Any]] = []
         var imageFailures = 0
+        let observer = NotificationCenter.default.addObserver(forName: .readerImageFinished, object: nil, queue: .main) { note in
+            guard let url = (note.object as? URL)?.absoluteString else { return }
+            let success = note.userInfo?["success"] as? Bool ?? false
+            MainActor.assumeIsolated { self.finishedImages[url] = success }
+        }
+        defer { NotificationCenter.default.removeObserver(observer) }
         var afterPass: [Double] = []
         // Two passes over the same stories: growth that repeats on the second pass would be a leak, not a cache.
         for pass in 0..<2 {
-        for (index, story) in stories.enumerated() {
-            if pass > 0 || index > 0 { view.rootView = AnyView(reader(story)) }
+        for story in stories {
+            finishedImages.removeAll()
+            view.rootView = AnyView(reader(story))
             let start = ProcessInfo.processInfo.systemUptime
             // Ready once a publisher document is stored, from the feed or from extraction; failures time out to the fallback.
             var ready = false
@@ -142,29 +151,18 @@ private final class ReadingDelegate: NSObject, NSApplicationDelegate {
                 if store.articles.first(where: { $0.id == story.id })?.readerDocument?.hasPublisherText == true { ready = true; break }
                 try await Task.sleep(for: .milliseconds(100))
             }
-            // Wait until the story's images have been fetched over the same client before advancing, so a slow image is
-            // measured or reported instead of being cancelled unnoticed; then allow a moment to decode and draw.
+            // Wait until the reader itself reports each image decoded (or failed), so a slow image is measured or
+            // reported instead of being cancelled unnoticed when the next story replaces the view.
             let stored = store.articles.first { $0.id == story.id }
             let document = stored?.readerDocument
             let imageURLs = Set((document?.blocks.compactMap(\.imageURL) ?? []) + [document?.selectedImage(fallback: stored?.imageUrl) ?? (document == nil ? stored?.imageUrl : nil)].compactMap { $0 })
-            var loaded = 0
-            await withTaskGroup(of: Bool.self) { group in
-                for address in imageURLs {
-                    guard let url = URL(string: address) else { continue }
-                    group.addTask {
-                        await withTaskGroup(of: Bool.self) { race in
-                            race.addTask { (try? await SecureHTTPClient.shared.fetchImage(from: url)) != nil }
-                            race.addTask { try? await Task.sleep(for: .seconds(15)); return false }
-                            let first = await race.next() ?? false
-                            race.cancelAll()
-                            return first
-                        }
-                    }
-                }
-                for await ok in group where ok { loaded += 1 }
+            let imageStart = ProcessInfo.processInfo.systemUptime
+            while !imageURLs.isSubset(of: finishedImages.keys), ProcessInfo.processInfo.systemUptime - imageStart < 15 {
+                try await Task.sleep(for: .milliseconds(100))
             }
+            let loaded = imageURLs.filter { finishedImages[$0] == true }.count
             imageFailures += imageURLs.count - loaded
-            try await Task.sleep(for: .seconds(1))
+            try await Task.sleep(for: .milliseconds(500))
             samples.append(["pass": pass + 1, "source": story.source, "document_ready": ready,
                             "images": imageURLs.count, "images_loaded": loaded,
                             "blocks": document?.blocks.count ?? 0,

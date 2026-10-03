@@ -15,7 +15,7 @@ Build on Apple silicon with Xcode 27 selected. The deployment target remains mac
 ./test.sh --story-regressions     # Focused offline identity, reader and persistence checks
 ./test.sh --performance-baseline --active-work-cancellation # Active clustering, ingestion and feed parsing cancellation; temporary stress fixtures
 ./script/native_performance_baseline.sh # Isolated MainView window, rendered-card samples and process memory
-NEWS_NATIVE_HARNESS=Tests/NativeReadingMemory.swift ./script/native_performance_baseline.sh # Live: read 20 stories twice in the production reader, isolated; waits for every document and image
+NEWS_NATIVE_HARNESS=Tests/NativeReadingMemory.swift ./script/native_performance_baseline.sh # Live: read 20 stories twice in the production reader, isolated; waits until each image is decoded
 ./script/test_native_ui_qa.sh        # Automated Native UI QA checks with system settings overrides (#155, #123)
 ./script/run_isolated.sh [OPTIONS]   # Launch isolated app with simulated Increase Contrast, Reduce Motion, VoiceOver
 ./script/launch_baseline.sh       # Production bundle under a separate identifier: launch to first card and memory, seeded library

@@ -272,6 +272,12 @@ struct ArticleCardView: View {
     }
 }
 
+extension Notification.Name {
+    /// Posted with the image URL as object and `["success": Bool]` when a reader image finishes decoding or fails;
+    /// never on cancellation. Lets performance harnesses wait for what the reader actually rendered.
+    static let readerImageFinished = Notification.Name("readerImageFinished")
+}
+
 // Feed image URLs use the same bounded, validated network path as article content.
 struct ArticleRemoteImage<Content: View>: View {
     let url: URL
@@ -286,9 +292,11 @@ struct ArticleRemoteImage<Content: View>: View {
                     let image = try await SecureHTTPClient.shared.fetchReaderImage(from: url)
                     try Task.checkCancellation()
                     phase = .success(Image(image, scale: 1, label: Text("Article image")))
+                    NotificationCenter.default.post(name: .readerImageFinished, object: url, userInfo: ["success": true])
                 } catch {
                     guard !Task.isCancelled else { return }
                     phase = .failure(error)
+                    NotificationCenter.default.post(name: .readerImageFinished, object: url, userInfo: ["success": false])
                 }
             }
     }
