@@ -99,7 +99,8 @@ public struct ContentQualityValidator: Sendable {
                 seen.insert(normalized)
             }
         }
-        if duplicates >= 2 || (paragraphs.count >= 3 && duplicates >= paragraphs.count / 2) {
+        // Mostly repeated text is a syndication loop; a few repeats are page furniture the pipeline removes.
+        if paragraphs.count >= 3 && duplicates * 2 >= paragraphs.count {
             return .rejected(reason: "Excessive repetitive text detected")
         }
 
@@ -343,6 +344,29 @@ final class DOMElementNode: Sendable {
         }
 
         return min(1.0, Double(linkTextCount) / Double(allText.count))
+    }
+
+    /// Share of text in links outside cited prose: navigation and teaser cards, not inline citations.
+    /// A prose-length paragraph, list item or quotation whose links are citations: under 80% of its text, and no single
+    /// link covering half of it, as a teaser card's headline would.
+    var isCitedProse: Bool {
+        guard ["p", "li", "blockquote"].contains(tag) else { return false }
+        let text = combinedText()
+        guard text.count >= 120 else { return false }
+        let total = text.filter { !$0.isWhitespace }.count
+        let links = findNodes(tag: "a").map { $0.combinedText().filter { !$0.isWhitespace }.count }
+        return links.reduce(0, +) * 5 < total * 4 && (links.max() ?? 0) * 2 < total
+    }
+
+    func navigationLinkDensity() -> Double {
+        let allText = combinedText().filter { !$0.isWhitespace }.count
+        guard allText > 0 else { return 0.0 }
+        func navigationLinkText(_ node: DOMElementNode) -> Int {
+            if node.isCitedProse { return 0 }
+            if node.tag == "a" { return node.combinedText().filter { !$0.isWhitespace }.count }
+            return node.children.reduce(0) { $0 + navigationLinkText($1) }
+        }
+        return min(1.0, Double(navigationLinkText(self)) / Double(allText))
     }
 }
 
@@ -725,7 +749,23 @@ final class ContentExtractionPipeline: Sendable {
         }
 
         // 4. Validate Content Quality
-        let validation = ContentQualityValidator.validate(paragraphs: candidateParagraphs.filter { $0.kind == .paragraph || $0.kind == .quote || $0.kind == .listItem }.map(\.text))
+        let isText: (ReaderBlock) -> Bool = { $0.kind == .paragraph || $0.kind == .quote || $0.kind == .listItem }
+        let key: (ReaderBlock) -> String = { $0.text.lowercased().trimmingCharacters(in: .whitespacesAndNewlines) }
+        let isProse: (ReaderBlock) -> Bool = { block in
+            block.text.count >= 120 || block.text.trimmingCharacters(in: CharacterSet(charactersIn: " )]}\"'’”»›"))
+                .last.map { ".!?…".contains($0) } == true
+        }
+        // Repeated labels (headlines, related links, buttons, bylines, video placeholders) are page furniture: every copy
+        // goes before validation, so the repetition check only judges prose.
+        let counts = Dictionary(candidateParagraphs.filter(isText).map { (key($0), 1) }, uniquingKeysWith: +)
+        candidateParagraphs.removeAll { isText($0) && counts[key($0), default: 0] > 1 && !isProse($0) }
+        var validation = ContentQualityValidator.validate(paragraphs: candidateParagraphs.filter(isText).map(\.text))
+        if validation == .valid {
+            // Repeated prose that is not a loop, such as a sentence that is also a pull quote, keeps its first occurrence.
+            var kept = Set<String>()
+            candidateParagraphs.removeAll { isText($0) && counts[key($0), default: 0] > 1 && !kept.insert(key($0)).inserted }
+            validation = ContentQualityValidator.validate(paragraphs: candidateParagraphs.filter(isText).map(\.text))
+        }
         switch validation {
         case .valid:
             let joined = candidateParagraphs.filter { $0.kind != .figure }.map(\.text).joined(separator: "\n\n")
@@ -843,12 +883,15 @@ final class ContentExtractionPipeline: Sendable {
         }
 
         // Link Density Penalty
-        let linkDensity = container.computeLinkDensity()
-        if linkDensity > 0.35 {
+        // Only navigation links count: cited prose keeps the container that holds every section, while a page wrapper
+        // cannot outscore the article on its teasers.
+        let navigation = container.navigationLinkDensity()
+        if navigation > 0.35 {
             score -= 300.0
-        } else if linkDensity > 0.20 {
+        } else if navigation > 0.20 {
             score -= 100.0
         }
+        if score > 0 { score *= (1 - navigation) * (1 - navigation) }
 
         return (score, substantiveParagraphs)
     }
