@@ -12,6 +12,7 @@ for argument in "$@"; do
 done
 
 python3 script/evaluation/evaluate.py
+python3 script/evaluation/publisher_review.py
 
 echo "Compiling tests for macOS ${TARGET_MACOS} ($(uname -m))..."
 swiftc "${TEST_OPT_FLAGS[@]}" -target $(uname -m)-apple-macos${TARGET_MACOS} \

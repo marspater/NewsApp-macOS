@@ -84,3 +84,41 @@ mkdir -m 700 ~/NewsCorpusCapture
 - Once tuning decisions are fixed, run the review once with `--corpus-holdout`. `releaseGatePassed` requires the holdout, every candidate adjudicated, at least 100 candidates and precision ≥ 99%. With fewer than 100, one error cannot be resolved against the 1% budget.
 
 Limits: this measures the precision of different-URL fingerprint matches only, not recall or event clustering. Summary-only feeds rarely reach the 400-character text threshold, so support may stay low; the report then shows the gate unmet rather than passing. Language comes from the curated feed entry, not detection. The reviewer sees that each pair is a predicted match, so this verifies positives; it is not a blind three-way labeling.
+
+## Source-review batch v2 — 3 October 2026
+
+`publisher-review-v2.json` is a **provisional annotation proposal**, separate from the immutable W2E candidate. It records 400 proposed pairs from 183 live-captured observations: 6 observed same-URL copies, 199 proposed same-event pairs and 195 proposed negatives. The 100 proposed occurrence IDs include 40 with multiple observations and 60 singletons; they are not 100 independently adjudicated multi-source events. All seven catalog languages occur, but multilingual positive support remains uneven.
+
+The fixed family hash assigns 263 pairs to `tune` and 137 to `holdout`. Related actions stay in one family: the Spanish housing vote/rally, the failed execution/resignation and the two Kyiv bridge strikes. This is a fresh current-publisher sample, not a correction to v1's imported labels. No matcher or embedding predictions were viewed during proposal preparation, and no holdout predictions have been run. The Spanish housing rally contributes 36 of 74 proposed holdout event-positive pairs, so this batch must not be presented as broad event-accuracy evidence. Expand the positive-event diversity before using it as a release gate.
+
+The public manifest contains URLs, feed metadata, proposed assignments and reasons only. Captured titles, descriptions and bodies stay in Mars's private folder, `/Users/marspater/Documents/NewsHoldout-2026-10-03/`, with directory mode 0700 and file mode 0600. Feed timestamps are captured values; they have not been independently verified on publisher pages. Proposals and singleton boundaries still need independent adjudication. Real quarterly-report and identical-headline hard negatives remain missing.
+
+Validate the manifest and prepare a fresh private review directory:
+
+```sh
+python3 script/evaluation/publisher_review.py
+mkdir -m 700 /tmp/news-publisher-review
+python3 script/evaluation/publisher_review.py \
+  --capture /Users/marspater/Documents/NewsHoldout-2026-10-03/capture-1791053699105.json \
+  --output /tmp/news-publisher-review
+```
+
+`review.md` groups the publisher evidence by proposed occurrence; `pairs.csv` leaves `accepted_label` blank. Files are created exclusively and never overwritten. The frozen manifest checksum and capture checksum are checked, along with references, proposed-label consistency, split isolation and absence of publisher text in the public records.
+
+After independent review, a private JSON file has this shape (IDs abbreviated here):
+
+```json
+{
+  "reviewer": "reviewer name",
+  "reviewedAt": "ISO 8601 review date",
+  "allEventAssignmentsReviewed": true,
+  "verifiedTimestampIDs": ["doc-0000", "... every document ID ..."],
+  "labels": {"... every pair ID ...": "same_event"}
+}
+```
+
+Run the preparation command with `--labels /private/path/reviewed-labels.json` and a fresh output directory to export `reviewed-event-corpus.json` in the native evaluator format, including observed publisher URLs for real identity resolution. Export refuses missing decisions, unverified timestamps and unreviewed event assignments. A changed decision requires a reviewed new manifest version with corrected event assignments; it must not silently relabel this frozen batch. This exporter does not run predictions or claim either acceptance gate.
+
+Tune with `NEWS_EVENT_CORPUS=/private/path/reviewed-event-corpus.json ./test.sh --event-corpus`. Fix the embedding cutoff and deterministic settings on tune before the one holdout run. Record per-language/source support, false merges and recall; same-document copies and correlated pairs must not inflate the event gate.
+
+The live tuning fingerprint inventory had **zero** different-URL candidates among 91 eligible observations. The six same-URL copies in this proposal do not measure the fingerprint gate. Keep that gate open: it requires independently observed different-URL variants and at least 100 adjudicated holdout fingerprint matches.

@@ -4569,6 +4569,21 @@ struct NewsTests {
         assertEqual(holdout.falsePositives, 0, "The synthetic control set has no false merges")
         assertTrue(holdout.truePositives >= 3, "The synthetic earthquake reports are linked")
 
+        // Real corpus URLs must exercise identity resolution, including updated titles at one URL.
+        let identityItems: [[String: String]] = [
+            ["id": "url-original", "title": "Council authorises bridge reconstruction", "source": "Corpus",
+             "url": "https://corpus.example/document", "published": formatter.string(from: Date()),
+             "event": "document", "split": "tune"],
+            ["id": "url-variant", "title": "Revised transportation memorandum", "source": "Corpus",
+             "url": "https://corpus.example/document?utm_source=variant", "published": formatter.string(from: Date()),
+             "event": "document", "split": "tune"]
+        ]
+        let identityFile = directory.appendingPathComponent("identity.json")
+        try JSONSerialization.data(withJSONObject: ["articles": identityItems]).write(to: identityFile)
+        let identityMetrics = try await evaluateEventCorpus(path: identityFile.path)
+        assertEqual(identityMetrics["tune"]?.truePositives, 1, "Observed URLs resolve copies even when their titles differ")
+        assertEqual(identityMetrics["tune"]?.falsePositives, 0, "URL replay preserves document identity without false merges")
+
         print("  - Testing the native embedding comparison (#127)...")
         let now = Date()
         let controls = EventControlSet.articles(now: now, root: fixtureRoot)
@@ -4730,6 +4745,7 @@ struct NewsTests {
         struct Corpus: Decodable {
             struct Item: Decodable {
                 let id: String, title: String, description: String?, source: String, published: Date, event: String?, split: String?
+                let url: String?
             }
             let articles: [Item]
         }
@@ -4740,7 +4756,7 @@ struct NewsTests {
         for split in [selectedSplit] {
             let items = corpus.articles.filter { ($0.split ?? "tune") == split }.sorted { $0.published < $1.published }
             let articles = items.map { item in
-                FeedArticle(storedID: item.id, title: item.title, link: "https://corpus.invalid/\(item.id)", guid: item.id,
+                FeedArticle(storedID: item.id, title: item.title, link: item.url ?? "https://corpus.invalid/\(item.id)", guid: item.id,
                             description: item.description ?? "", pubDate: item.published, source: item.source)
             }
             let memberships = try await StoryCorpus.eventMemberships(articles: articles)
