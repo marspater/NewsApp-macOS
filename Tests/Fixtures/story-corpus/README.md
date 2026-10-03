@@ -140,3 +140,22 @@ Run the preparation command with `--labels /private/path/reviewed-labels.json` a
 Tune with `NEWS_EVENT_CORPUS=/private/path/reviewed-event-corpus.json ./test.sh --event-corpus`. Fix the embedding cutoff and deterministic settings on tune before the one holdout run. Record per-language/source support, false merges and recall; same-document copies and correlated pairs must not inflate the event gate.
 
 The six same-URL copies in this proposal do not measure the fingerprint gate. Neither the catalog nor the targeted sibling feeds produced a different-URL candidate, so that gate now bounds false merges over all eligible holdout documents (see the fingerprint section above) and stays open until a fresh holdout capture is reviewed.
+
+## Publisher date and URL evidence follow-up — 4 October 2026
+
+The frozen `publisher-timestamps-v2.json` sidecar records original publisher date fields and response hashes for all 183 v2 observations without rewriting their captured feed timestamps. It distinguishes publication, modification, video upload and unresolved contradictory metadata. Publication dates inform event boundaries; production replay must retain the dates the feed parser actually supplied. Source metadata extraction is not independent label adjudication.
+
+`publisher-review-supplement-v1.json` proposes 62 additional pairs, bringing the review pool to 462, and adds 52 document IDs. It includes nine new multi-source occurrence proposals, real quarterly/reporting-period and repeated-headline negatives, and six publisher-advertised same-origin URL pairs. Episode/edition and URL pairs have a separate document-only scope. One proposed singleton correction is explicit; existing document splits and v2 bytes remain unchanged. Only one fresh positive occurrence lands in holdout: this expansion does not solve holdout event diversity. The event-boundary rules above still apply, including a reviewer's final lead/occurrence decision for the counterstrike report.
+
+`publisher-url-investigation-v1.json` records unscored URL discovery, protected retrieval and normalized readability-text hashes, plus substantial feed-text coverage and the **tuning-only** October 3 two-capture report. Publisher-page probes are not second feed observations and cannot be counted toward the feed-capture fingerprint gate. This follow-up does not run holdout predictions. As #251 records, October 3 captures were inspected for support on both splits and are not fresh acceptance evidence.
+
+To repeat source-page evidence collection, use a new private directory and a JSON array of `{"id":"doc-0001","url":"https://publisher.example/article"}` requests (at most 500, unique ASCII letter/number/hyphen IDs). Requests use `SecureHTTPClient`, bounded responses, cancellation and HTTPS with one request per host, at most six hosts. The mode writes HTML and `pages.json` privately and never opens the app library. Offline extraction creates a separate private `page-texts.json` with the production readability output; it computes no fingerprints or event predictions:
+
+```sh
+./test.sh --corpus-pages /private/evidence --corpus-urls /private/requests.json
+./test.sh --corpus-page-texts /private/evidence
+python3 script/evaluation/publisher_dates.py --manifest Tests/Fixtures/story-corpus/publisher-review-v2.json \
+  --pages /private/evidence --output /private/timestamp-evidence.json
+```
+
+The Python date parser checks response hashes, scopes JSON-LD to the requested/publisher-canonical page, ignores nested recommendation dates and refuses dates without a timezone. Raw fields and unresolved cases stay visible. Frozen follow-up manifests are checked by `test.sh` for checksums, references, pending approvals, split isolation, declared corrections and absence of public publisher text. The two malformed Africanews records, video upload evidence and date-only primary releases require explicit reviewer treatment; never invent precise timestamps. The private supplemental review packet and blank approvals are in `/Users/marspater/Documents/NewsHoldout-2026-10-03/supplement-review-v2.md` and `supplement-pairs.csv`.
