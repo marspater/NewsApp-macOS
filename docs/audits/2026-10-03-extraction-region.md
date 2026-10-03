@@ -17,7 +17,7 @@ The region itself was too wide. Container scoring adds 30 points per block and a
 ## Change
 
 - Container scores are multiplied by the squared share of text outside navigation links, after the existing penalties. Links inside prose-length paragraphs (120 characters or more) are citations and do not count, so navigation-heavy wrappers lose to the body they contain while an article whose sections carry many inline citations keeps every section.
-- After validation, text repeated on a page is removed: every copy of a repeated block under 120 characters, and later copies of longer ones (a pull quote keeps one occurrence). The page is then validated again.
+- After validation, repeated text is removed. Every copy goes when the repeated block is a label rather than a sentence (under 120 characters and no closing sentence punctuation: headlines, related links, buttons, bylines). Repeated prose, such as a sentence that is also a pull quote, keeps its first occurrence. The page is then validated again.
 - The validator rejects repetition only when repeated blocks make up half or more of the text, a syndication loop, instead of whenever two blocks repeat.
 
 ## Evidence

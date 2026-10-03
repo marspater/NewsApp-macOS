@@ -1027,11 +1027,15 @@ struct NewsTests {
         let cited = (1...6).map { "<p>Section two, point \($0): officials cited <a href=\"/a/\($0)\">the published quarterly inflation report from the central bank</a> and <a href=\"/b/\($0)\">the independent employment survey released last week</a> today.</p>" }.joined()
         let sectioned = pipeline.extractFromHTML("<article><section>\(body)</section><section>\(cited)</section><section><p>Closing: \(second)</p></section></article>")
         assertEqual(sectioned.content?.components(separatedBy: "\n\n").count, 13, "Heavily cited prose keeps every section of the article")
-        let placeholder = "<p>To view this video please enable JavaScript, and consider upgrading to a web browser.</p>"
+        let placeholder = "<p>To view this video please enable JavaScript, and consider upgrading to a web browser that supports HTML5 video</p>"
         let pullQuote = "<p>“\(second) This is the line the editors chose to repeat as a pull quote in the middle of the story.”</p>"
         let furnished = pipeline.extractFromHTML("<article>\(placeholder)\(body)\(placeholder)\(pullQuote)\(placeholder)\(pullQuote)</article>")
         assertFalse(furnished.content?.contains("enable JavaScript") ?? true, "Repeated short furniture is removed instead of rejecting the page")
         assertEqual(furnished.content?.components(separatedBy: "pull quote").count, 2, "A repeated prose-length block keeps one occurrence")
+        let shortQuote = "<p>“We will not back down,” the minister said.</p>"
+        let quoted = pipeline.extractFromHTML("<article>\(body)\(shortQuote)<blockquote>\(shortQuote)</blockquote><p>Read more</p><p>Read more</p></article>")
+        assertEqual(quoted.content?.components(separatedBy: "We will not back down").count, 2, "A short repeated sentence keeps one occurrence")
+        assertFalse(quoted.content?.contains("Read more") ?? true, "Repeated labels are removed")
         let loop = String(repeating: "<p>\(prose)</p>", count: 4)
         assertFalse(pipeline.extractFromHTML("<article>\(loop)<p>\(second)</p></article>").isSuccess, "A page that is mostly one repeated paragraph is still a loop")
         let hiddenHTML = "<article><p>\(prose)</p><p>\(second)</p><div hidden><p>Hidden subscription announcement that should never appear in a reader.</p></div><div aria-hidden='true'>Another hidden panel with a substantial amount of text.</div><button>Follow this publisher for personalized updates and notifications.</button></article>"

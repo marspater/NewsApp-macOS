@@ -741,14 +741,17 @@ final class ContentExtractionPipeline: Sendable {
         let isText: (ReaderBlock) -> Bool = { $0.kind == .paragraph || $0.kind == .quote || $0.kind == .listItem }
         var validation = ContentQualityValidator.validate(paragraphs: candidateParagraphs.filter(isText).map(\.text))
         if validation == .valid {
-            // Text repeated on one page is furniture (repeated headlines, related links, video placeholders); a repeated
-            // prose-length block, such as a pull quote, keeps its first occurrence.
+            // Repeated labels (headlines, related links, buttons, bylines) are page furniture and every copy goes.
+            // Repeated prose, such as a sentence that is also a pull quote, keeps its first occurrence.
             let key: (ReaderBlock) -> String = { $0.text.lowercased().trimmingCharacters(in: .whitespacesAndNewlines) }
+            let isProse: (ReaderBlock) -> Bool = { block in
+                block.text.count >= 120 || block.text.trimmingCharacters(in: .whitespaces).last.map { ".!?…\"”»".contains($0) } == true
+            }
             let counts = Dictionary(candidateParagraphs.filter(isText).map { (key($0), 1) }, uniquingKeysWith: +)
             var kept = Set<String>()
             candidateParagraphs.removeAll { block in
                 guard isText(block), counts[key(block), default: 0] > 1 else { return false }
-                return block.text.count < 120 || !kept.insert(key(block)).inserted
+                return !isProse(block) || !kept.insert(key(block)).inserted
             }
             validation = ContentQualityValidator.validate(paragraphs: candidateParagraphs.filter(isText).map(\.text))
         }
