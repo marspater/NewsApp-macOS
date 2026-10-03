@@ -269,6 +269,10 @@ struct NewsTests {
             try await testTransportCancellation()
             return
         }
+        if CommandLine.arguments.contains("--publisher-cancellation") {
+            try await testPublisherCancellation()
+            return
+        }
         if CommandLine.arguments.contains("--reader-live-pages") {
             await testLiveReader(pagesOnly: true)
             print("✅ Live reader pages passed")
@@ -5636,6 +5640,85 @@ struct NewsTests {
                                      "response_bytes_sent": 4096, "response_bytes_declared": 1048576]
         let data = try JSONSerialization.data(withJSONObject: report, options: [.sortedKeys])
         print("TRANSPORT_CANCELLATION_REPORT " + String(decoding: data, as: UTF8.self))
+    }
+
+    /// Opt-in and live: refreshes the twelve panel feeds over the production client (real DNS, TLS and publishers),
+    /// then stops refreshes at staggered offsets so shutdowns land during handshakes, transfers, parsing or ingestion.
+    @MainActor
+    static func testPublisherCancellation() async throws {
+        let feeds = TensionMethodology.v1.panel.map(\.url)
+        print("  - Live: refreshing and cancelling \(feeds.count) publisher feeds over HTTPS...")
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("news-publisher-cancel-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        func run(_ label: String, cancelAfter offset: Duration?) async throws -> [String: Any] {
+            let path = directory.appendingPathComponent("\(label).sqlite3").path
+            let db = DatabaseEngine(path: path)
+            let store = ArticleStore(database: db)
+            await store.initialize()
+            let suite = "test.publisher-cancellation.\(UUID().uuidString)"
+            let defaults = UserDefaults(suiteName: suite)!
+            defer { defaults.removePersistentDomain(forName: suite) }
+            let settings = AppSettings(defaults: defaults)
+            settings.feedURLs = feeds
+            settings.aiEnabled = false
+            settings.notificationsEnabled = false
+            let fetcher = FeedFetcher()
+            let manager = FeedManager(settings: settings, store: store, schedulesRefresh: false,
+                fetchBatch: { urls, allowHTTP in await fetcher.fetchAllFeeds(urls: urls, allowHTTP: allowHTTP, state: db) },
+                notifyBatch: { _, _ in })
+            let done = SocketObservation()
+            let started = ContinuousClock.now
+            let refresh = Task {
+                await manager.fetchFeedsAsync()
+                let end = ContinuousClock.now
+                done.recordText("finished")
+                return end
+            }
+            var result: [String: Any] = ["label": label]
+            if let offset {
+                try await Task.sleep(for: offset)
+                let finishedFirst = done.count == 1
+                result["finished_before_cancel"] = finishedFirst
+                let cancelled = ContinuousClock.now
+                manager.stopBackgroundWork()
+                await eventually("Shutdown of a live refresh completes within its deadline", timeout: .seconds(2)) { done.count == 1 }
+                let end = await refresh.value
+                if !finishedFirst { result["stop_ms"] = milliseconds(cancelled.duration(to: end)) }
+                assertFalse(manager.isAnyFeedLoading, "Shutdown clears refresh loading")
+            } else {
+                result["refresh_ms"] = milliseconds(started.duration(to: await refresh.value))
+                manager.stopBackgroundWork()
+            }
+            result["articles"] = try await db.counts().total
+            result["feed_states"] = try await db.feedFetchStates().count
+            await db.close()
+            // Validators are only ever stored with the articles they describe, so a later 304 cannot hide unsaved items.
+            var handle: OpaquePointer?
+            assertEqual(sqlite3_open_v2(path, &handle, SQLITE_OPEN_READONLY, nil), SQLITE_OK, "Open the temporary library")
+            defer { sqlite3_close(handle) }
+            var statement: OpaquePointer?
+            sqlite3_prepare_v2(handle, """
+                SELECT COUNT(*) FROM feeds f WHERE (f.etag IS NOT NULL OR f.last_modified IS NOT NULL)
+                AND NOT EXISTS (SELECT 1 FROM article_feeds af WHERE af.feed_url = f.url);
+                """, -1, &statement, nil)
+            assertEqual(sqlite3_step(statement), SQLITE_ROW, "Count validators without articles")
+            assertEqual(sqlite3_column_int(statement, 0), 0, "\(label): no feed keeps validators without its articles")
+            sqlite3_finalize(statement)
+            assertEqual(sqlite3_exec(handle, "PRAGMA integrity_check;", nil, nil, nil), SQLITE_OK, "\(label): the library stays intact")
+            return result
+        }
+        func milliseconds(_ duration: Duration) -> Double {
+            Double(duration.components.seconds) * 1000 + Double(duration.components.attoseconds) / 1e15
+        }
+        var samples: [[String: Any]] = []
+        for index in 0..<2 { samples.append(try await run("full-\(index)", cancelAfter: nil)) }
+        for offset in [25, 75, 150, 300, 600, 1200] {
+            samples.append(try await run("cancel-\(offset)ms", cancelAfter: .milliseconds(offset)))
+        }
+        let report: [String: Any] = ["feeds": feeds.count, "samples": samples, "client": "SecureHTTPClient.shared (production proxy, live TLS)"]
+        let data = try JSONSerialization.data(withJSONObject: report, options: [.sortedKeys])
+        print("PUBLISHER_CANCELLATION_REPORT " + String(decoding: data, as: UTF8.self))
     }
 
     @MainActor
