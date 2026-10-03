@@ -13,7 +13,7 @@ struct SidebarView: View {
     @EnvironmentObject private var feedManager: FeedManager
     @EnvironmentObject private var savedStories: SavedStoriesManager
     @EnvironmentObject private var readManager: ReadManager
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.effectiveReduceMotion) private var reduceMotion
     
     @State private var isSubscribePopoverPresented = false
     @State private var newFeedURL: String = ""

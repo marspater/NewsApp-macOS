@@ -37,6 +37,7 @@ struct NewsApp: App {
                 .environmentObject(readManager)
                 .environmentObject(savedStories)
                 .preferredColorScheme(themeManager.appearance.colorScheme)
+                .modifier(SystemSettingsOverrideModifier())
         }
         .windowToolbarStyle(.unified)
         .commands {
@@ -137,6 +138,7 @@ struct NewsApp: App {
                 .environmentObject(appSettings)
                 .environmentObject(articleStore)
                 .preferredColorScheme(themeManager.appearance.colorScheme)
+                .modifier(SystemSettingsOverrideModifier())
         }
 
         Settings {
@@ -148,6 +150,7 @@ struct NewsApp: App {
                 .environmentObject(readManager)
                 .environmentObject(savedStories)
                 .preferredColorScheme(themeManager.appearance.colorScheme)
+                .modifier(SystemSettingsOverrideModifier())
         }
     }
 }

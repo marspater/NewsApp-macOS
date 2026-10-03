@@ -36,8 +36,8 @@ struct EventOverviewReaderView: View {
     }
 
     @Environment(\.colorScheme) private var colorScheme
-    @Environment(\.colorSchemeContrast) private var contrast
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.effectiveContrast) private var contrast
+    @Environment(\.effectiveReduceMotion) private var reduceMotion
 
     @State private var isSourcesExpanded: Bool = false
     @State private var activeCitationPreview: OverviewCitation? = nil

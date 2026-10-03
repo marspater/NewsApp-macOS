@@ -13,7 +13,7 @@ struct ArticleCardView: View {
     @EnvironmentObject private var readManager: ReadManager
     @EnvironmentObject private var savedStories: SavedStoriesManager
     @EnvironmentObject private var appSettings: AppSettings
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.effectiveReduceMotion) private var reduceMotion
     @State private var isHovered = false
     
     private var isRead: Bool {
@@ -146,6 +146,7 @@ struct ArticleCardView: View {
             }
         }
         .buttonStyle(.plain)
+        .buttonBorderShape(.roundedRectangle(radius: AppRadius.card))
         .contextMenu {
             Button {
                 readManager.toggleRead(article.id)
