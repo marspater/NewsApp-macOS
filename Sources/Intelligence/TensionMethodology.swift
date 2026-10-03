@@ -638,12 +638,17 @@ enum TensionHistory {
             assessments.append(assessment)
         }
         let scores = TensionCalibrator.scoreSeries(assessments: assessments, weights: weights)
-        return zip(assessments, scores).map { assessment, score in
-            let contributions = score.eventScores.filter { $0.rawScore > 0 }.sorted { $0.rawScore > $1.rawScore }.map { event in
-                let articleIDs = assessment.events.first { $0.key == event.key }?.articleIDs ?? []
-                return TensionContribution(score: event, title: articleIDs.lazy.compactMap { titles[$0] }.first ?? event.key)
+        var history: [TensionHistoryDay] = []
+        for (assessment, score) in zip(assessments, scores) {
+            var articleIDs: [String: [String]] = [:]
+            for event in assessment.events { articleIDs[event.key] = event.articleIDs }
+            var contributions: [TensionContribution] = []
+            for event in score.eventScores.sorted(by: { $0.rawScore > $1.rawScore }) where event.rawScore > 0 {
+                let title = articleIDs[event.key, default: []].lazy.compactMap { titles[$0] }.first ?? event.key
+                contributions.append(TensionContribution(score: event, title: title))
             }
-            return TensionHistoryDay(score: score, coverage: assessment.coverage, contributions: contributions)
+            history.append(TensionHistoryDay(score: score, coverage: assessment.coverage, contributions: contributions))
         }
+        return history
     }
 }
