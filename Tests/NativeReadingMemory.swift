@@ -98,6 +98,8 @@ private final class ReadingDelegate: NSObject, NSApplicationDelegate {
         let container = AppContainer(appSettings: settings, articleStore: store, feedManager: manager,
                                      themeManager: ThemeManager())
         defer { manager.stopBackgroundWork() }
+        // The manager clusters the newly stored stories on start; finish that first so only reading is measured.
+        await manager.waitForEventClustering()
 
         let before = footprint()
         var highest = before.current
@@ -139,8 +141,10 @@ private final class ReadingDelegate: NSObject, NSApplicationDelegate {
         }
         defer { NotificationCenter.default.removeObserver(observer) }
         var afterPass: [Double] = []
-        // Two passes over the same stories: growth that repeats on the second pass would be a leak, not a cache.
-        for pass in 0..<2 {
+        // Repeated passes over the same stories (two by default): growth that repeats on every pass would be a leak, not
+        // a cache that fills once.
+        let passes = max(2, Int(ProcessInfo.processInfo.environment["NEWS_READING_PASSES"] ?? "") ?? 2)
+        for pass in 0..<passes {
         for story in stories {
             finishedImages.removeAll()
             view.rootView = AnyView(reader(story))
