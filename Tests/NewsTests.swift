@@ -1027,6 +1027,8 @@ struct NewsTests {
         let cited = (1...6).map { "<p>Section two, point \($0): officials cited <a href=\"/a/\($0)\">the published quarterly inflation report from the central bank</a> and <a href=\"/b/\($0)\">the independent employment survey released last week</a> today.</p>" }.joined()
         let sectioned = pipeline.extractFromHTML("<article><section>\(body)</section><section>\(cited)</section><section><p>Closing: \(second)</p></section></article>")
         assertEqual(sectioned.content?.components(separatedBy: "\n\n").count, 13, "Heavily cited prose keeps every section of the article")
+        let halfCited = pipeline.extractFromHTML("<article><section>" + (1...5).map { "<p>Paragraph \($0): \(prose)</p>" }.joined() + "</section>" + cited.components(separatedBy: "</p>").prefix(5).map { $0 + "</p>" }.joined() + "</article>")
+        assertEqual(halfCited.content?.components(separatedBy: "\n\n").count, 10, "Citations never trigger the link-density penalty")
         let citedList = "<ul>" + cited.replacingOccurrences(of: "<p>", with: "<li>").replacingOccurrences(of: "</p>", with: "</li>") + "</ul>"
         let listed = pipeline.extractFromHTML("<article><section>\(body)</section><section>\(citedList)</section><section><p>Closing: \(second)</p></section></article>")
         assertEqual(listed.content?.components(separatedBy: "\n\n").count, 13, "Cited list items count as prose, not navigation")

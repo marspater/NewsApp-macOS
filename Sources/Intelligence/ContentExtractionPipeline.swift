@@ -346,12 +346,13 @@ final class DOMElementNode: Sendable {
         return min(1.0, Double(linkTextCount) / Double(allText.count))
     }
 
-    /// Share of text in links outside prose-length paragraphs: navigation and teasers, not inline citations.
+    /// Share of text in links outside cited prose (prose-length blocks that are mostly not links): navigation and
+    /// teaser cards, not inline citations.
     func navigationLinkDensity() -> Double {
         let allText = combinedText().filter { !$0.isWhitespace }.count
         guard allText > 0 else { return 0.0 }
         func navigationLinkText(_ node: DOMElementNode) -> Int {
-            if ["p", "li", "blockquote"].contains(node.tag), node.combinedText().count >= 120 { return 0 }
+            if ["p", "li", "blockquote"].contains(node.tag), node.combinedText().count >= 120, node.computeLinkDensity() < 0.8 { return 0 }
             if node.tag == "a" { return node.combinedText().filter { !$0.isWhitespace }.count }
             return node.children.reduce(0) { $0 + navigationLinkText($1) }
         }
@@ -871,15 +872,14 @@ final class ContentExtractionPipeline: Sendable {
         }
 
         // Link Density Penalty
-        let linkDensity = container.computeLinkDensity()
-        if linkDensity > 0.35 {
+        // Only navigation links count: cited prose keeps the container that holds every section, while a page wrapper
+        // cannot outscore the article on its teasers.
+        let navigation = container.navigationLinkDensity()
+        if navigation > 0.35 {
             score -= 300.0
-        } else if linkDensity > 0.20 {
+        } else if navigation > 0.20 {
             score -= 100.0
         }
-        // Scale by the share of text outside navigation links, so a page wrapper cannot outscore the article on its
-        // teasers, while cited prose keeps the container that holds every section.
-        let navigation = container.navigationLinkDensity()
         if score > 0 { score *= (1 - navigation) * (1 - navigation) }
 
         return (score, substantiveParagraphs)
