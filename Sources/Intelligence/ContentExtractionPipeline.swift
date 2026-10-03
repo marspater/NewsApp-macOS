@@ -351,7 +351,7 @@ final class DOMElementNode: Sendable {
         let allText = combinedText().filter { !$0.isWhitespace }.count
         guard allText > 0 else { return 0.0 }
         func navigationLinkText(_ node: DOMElementNode) -> Int {
-            if node.tag == "p", node.combinedText().count >= 120 { return 0 }
+            if ["p", "li", "blockquote"].contains(node.tag), node.combinedText().count >= 120 { return 0 }
             if node.tag == "a" { return node.combinedText().filter { !$0.isWhitespace }.count }
             return node.children.reduce(0) { $0 + navigationLinkText($1) }
         }
@@ -739,20 +739,19 @@ final class ContentExtractionPipeline: Sendable {
 
         // 4. Validate Content Quality
         let isText: (ReaderBlock) -> Bool = { $0.kind == .paragraph || $0.kind == .quote || $0.kind == .listItem }
+        let key: (ReaderBlock) -> String = { $0.text.lowercased().trimmingCharacters(in: .whitespacesAndNewlines) }
+        let isProse: (ReaderBlock) -> Bool = { block in
+            block.text.count >= 120 || block.text.trimmingCharacters(in: .whitespaces).last.map { ".!?…\"”»".contains($0) } == true
+        }
+        // Repeated labels (headlines, related links, buttons, bylines, video placeholders) are page furniture: every copy
+        // goes before validation, so the repetition check only judges prose.
+        let counts = Dictionary(candidateParagraphs.filter(isText).map { (key($0), 1) }, uniquingKeysWith: +)
+        candidateParagraphs.removeAll { isText($0) && counts[key($0), default: 0] > 1 && !isProse($0) }
         var validation = ContentQualityValidator.validate(paragraphs: candidateParagraphs.filter(isText).map(\.text))
         if validation == .valid {
-            // Repeated labels (headlines, related links, buttons, bylines) are page furniture and every copy goes.
-            // Repeated prose, such as a sentence that is also a pull quote, keeps its first occurrence.
-            let key: (ReaderBlock) -> String = { $0.text.lowercased().trimmingCharacters(in: .whitespacesAndNewlines) }
-            let isProse: (ReaderBlock) -> Bool = { block in
-                block.text.count >= 120 || block.text.trimmingCharacters(in: .whitespaces).last.map { ".!?…\"”»".contains($0) } == true
-            }
-            let counts = Dictionary(candidateParagraphs.filter(isText).map { (key($0), 1) }, uniquingKeysWith: +)
+            // Repeated prose that is not a loop, such as a sentence that is also a pull quote, keeps its first occurrence.
             var kept = Set<String>()
-            candidateParagraphs.removeAll { block in
-                guard isText(block), counts[key(block), default: 0] > 1 else { return false }
-                return !isProse(block) || !kept.insert(key(block)).inserted
-            }
+            candidateParagraphs.removeAll { isText($0) && counts[key($0), default: 0] > 1 && !kept.insert(key($0)).inserted }
             validation = ContentQualityValidator.validate(paragraphs: candidateParagraphs.filter(isText).map(\.text))
         }
         switch validation {
