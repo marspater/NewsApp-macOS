@@ -14,7 +14,9 @@ struct NativeReadingMemory {
         app.setActivationPolicy(.regular)
         app.delegate = delegate
         app.run()
-        withExtendedLifetime(delegate) {}
+        withExtendedLifetime(delegate) {
+            // Keeps the delegate alive for the whole run loop.
+        }
     }
 }
 
@@ -36,7 +38,7 @@ private func mebibytes(_ bytes: UInt64) -> Double { (Double(bytes) / 1_048_576 *
 private final class ReadingDelegate: NSObject, NSApplicationDelegate {
     private var window: NSWindow?
 
-    func applicationDidFinishLaunching(_ notification: Notification) {
+    func applicationDidFinishLaunching(_: Notification) {
         Task {
             do {
                 try await measure()
@@ -70,17 +72,26 @@ private final class ReadingDelegate: NSObject, NSApplicationDelegate {
         let store = ArticleStore(database: database)
         await store.initialize()
         guard store.isReady else { throw Failure.storage }
-        var stories: [FeedArticle] = []
+        // Exactly 20 distinct stories, four per feed where possible, so every run is the same workload.
+        var perFeed: [[FeedArticle]] = []
         for result in await FeedFetcher().fetchAllFeeds(urls: feeds) {
-            let fetched = (result.articles ?? []).prefix(4).map { article in
+            let fetched = (result.articles ?? []).map { article in
                 var article = article
                 article.identityFeedURL = result.urlString
                 return article
             }
-            _ = await store.batchUpsert(articles: Array(fetched), feedUrl: result.urlString, validators: result.validators)
-            stories += fetched
+            _ = await store.batchUpsert(articles: fetched, feedUrl: result.urlString, validators: result.validators)
+            perFeed.append(fetched)
         }
-        guard await store.refreshState(), stories.count >= 10 else { throw Failure.feeds }
+        var stories: [FeedArticle] = []
+        var round = 0
+        while stories.count < 20, perFeed.contains(where: { $0.count > round }) {
+            for items in perFeed where items.count > round && stories.count < 20 && !stories.contains(where: { $0.id == items[round].id }) {
+                stories.append(items[round])
+            }
+            round += 1
+        }
+        guard await store.refreshState(), stories.count == 20 else { throw Failure.feeds }
         let manager = FeedManager(settings: settings, store: store, schedulesRefresh: false, fetchBatch: { _, _ in [] })
         let container = AppContainer(appSettings: settings, articleStore: store, feedManager: manager,
                                      themeManager: ThemeManager())
@@ -118,6 +129,7 @@ private final class ReadingDelegate: NSObject, NSApplicationDelegate {
         current.orderFront(nil)
 
         var samples: [[String: Any]] = []
+        var imageFailures = 0
         var afterPass: [Double] = []
         // Two passes over the same stories: growth that repeats on the second pass would be a leak, not a cache.
         for pass in 0..<2 {
@@ -130,10 +142,31 @@ private final class ReadingDelegate: NSObject, NSApplicationDelegate {
                 if store.articles.first(where: { $0.id == story.id })?.readerDocument?.hasPublisherText == true { ready = true; break }
                 try await Task.sleep(for: .milliseconds(100))
             }
-            // Images load after the document; give them time before sampling.
-            try await Task.sleep(for: .seconds(2))
-            let document = store.articles.first { $0.id == story.id }?.readerDocument
+            // Wait until the story's images have been fetched over the same client before advancing, so a slow image is
+            // measured or reported instead of being cancelled unnoticed; then allow a moment to decode and draw.
+            let stored = store.articles.first { $0.id == story.id }
+            let document = stored?.readerDocument
+            let imageURLs = Set((document?.blocks.compactMap(\.imageURL) ?? []) + [document?.selectedImage(fallback: stored?.imageUrl) ?? (document == nil ? stored?.imageUrl : nil)].compactMap { $0 })
+            var loaded = 0
+            await withTaskGroup(of: Bool.self) { group in
+                for address in imageURLs {
+                    guard let url = URL(string: address) else { continue }
+                    group.addTask {
+                        await withTaskGroup(of: Bool.self) { race in
+                            race.addTask { (try? await SecureHTTPClient.shared.fetchImage(from: url)) != nil }
+                            race.addTask { try? await Task.sleep(for: .seconds(15)); return false }
+                            let first = await race.next() ?? false
+                            race.cancelAll()
+                            return first
+                        }
+                    }
+                }
+                for await ok in group where ok { loaded += 1 }
+            }
+            imageFailures += imageURLs.count - loaded
+            try await Task.sleep(for: .seconds(1))
             samples.append(["pass": pass + 1, "source": story.source, "document_ready": ready,
+                            "images": imageURLs.count, "images_loaded": loaded,
                             "blocks": document?.blocks.count ?? 0,
                             "figures": document?.blocks.filter { $0.kind == .figure }.count ?? 0,
                             "seconds": ((ProcessInfo.processInfo.systemUptime - start) * 10).rounded() / 10,
@@ -147,7 +180,9 @@ private final class ReadingDelegate: NSObject, NSApplicationDelegate {
         try await Task.sleep(for: .seconds(3))
         sampler.cancel()
         let after = footprint()
+        let complete = imageFailures == 0 && samples.allSatisfy { $0["document_ready"] as? Bool == true }
         let report: [String: Any] = [
+            "complete": complete, "image_failures": imageFailures,
             "stories": stories.count, "feeds": feeds, "window_width": 1100, "window_height": 800,
             "footprint_before_reading_mib": mebibytes(before.current),
             "footprint_highest_sampled_mib": mebibytes(highest),
@@ -162,7 +197,9 @@ private final class ReadingDelegate: NSObject, NSApplicationDelegate {
         try JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys])
             .write(to: output.appendingPathComponent("reading-memory.json"))
         await database.close()
+        // A run with missing documents or images is not the documented workload; keep its report but fail.
+        guard complete else { throw Failure.incomplete }
     }
 
-    private enum Failure: Error { case storage, feeds }
+    private enum Failure: Error { case storage, feeds, incomplete }
 }

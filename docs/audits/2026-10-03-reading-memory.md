@@ -8,24 +8,26 @@ Earlier slices measured launch and idle memory of the production bundle ([launch
 
 `NEWS_NATIVE_HARNESS=Tests/NativeReadingMemory.swift ./script/native_performance_baseline.sh [output-dir]`. The existing native script now accepts a harness file; the default remains the first-card baseline.
 
-The harness uses temporary storage and settings (AI and notifications off) and fetches the current items of five image-carrying panel feeds (BBC World, The Guardian World, Al Jazeera, DW English, CNA) through the app's own client, four stories each. It then shows the production `ArticleDetailView` for each story in turn in one 1100×800 window, with a new view identity per story as navigation creates. Each story waits until a publisher document is stored (from the feed or from page extraction; 15-second limit) plus two seconds for images, which load through `SecureHTTPClient`. A sampler reads the task's physical footprint (`TASK_VM_INFO`) every 50 ms; the lifetime peak comes from the same ledger. The second run reads the same 20 stories twice in one process, so retained growth can be told apart from a leak.
+The harness uses temporary storage and settings (AI and notifications off) and fetches the current items of five image-carrying panel feeds (BBC World, The Guardian World, Al Jazeera, DW English, CNA) through the app's own client. It takes exactly 20 distinct stories, four per feed where possible, and fails otherwise. It then shows the production `ArticleDetailView` for each story in turn in one 1100×800 window, with a new view identity per story as navigation creates, and reads all 20 twice in one process.
+
+Before advancing, each story waits until a publisher document is stored (from the feed or from page extraction; 15-second limit) and until each of its images (figures and lead image) has been fetched through `SecureHTTPClient` (15-second limit each), then one second to decode and draw. A missing document or image marks the report incomplete and fails the run. A sampler reads the task's physical footprint (`TASK_VM_INFO`) every 50 ms; the lifetime peak comes from the same ledger.
 
 ## Results
 
-[Raw evidence](../benchmarks/2026-10-03-reading-memory.json): two runs. Every story reached a stored publisher document, in 2.0–3.2 seconds including the image wait.
+[Raw evidence](../benchmarks/2026-10-03-reading-memory.json): two complete runs, 40 openings each, 100 image loads per run, none failed. Openings took 1.1–5.6 seconds including the waits.
 
-| Measure | Run 1 (one pass) | Run 2 (two passes) |
+| Measure | Run 1 | Run 2 |
 | --- | ---: | ---: |
-| Before reading (after setup and live fetch) | 17.0 MiB | 17.0 MiB |
-| Highest sampled while reading | 140.4 MiB | 128.1 MiB |
-| Lifetime peak | 141.5 MiB | 137.9 MiB |
-| After the first pass | — | 103.7 MiB |
-| After the second pass | — | 95.2 MiB |
-| 3 s after the window closed | 111.0 MiB | 95.2 MiB |
+| Before reading (after setup and live fetch) | 17.5 MiB | 17.3 MiB |
+| Highest sampled while reading | 149.9 MiB | 136.5 MiB |
+| Lifetime peak | 154.4 MiB | 141.1 MiB |
+| After the first pass | 116.0 MiB | 107.1 MiB |
+| After the second pass | 121.9 MiB | 112.8 MiB |
+| 3 s after the window closed | 116.7 MiB | 104.6 MiB |
 
-Investigation budget for reading 20 image-carrying stories: 177 MiB peak footprint, 25% above the highest observed peak, as in earlier slices.
+Investigation budget for reading 20 image-carrying stories: 193 MiB peak footprint, 25% above the highest observed peak, as in earlier slices.
 
-Footprint rises with stories that carry several large figures (BBC and Guardian pages with four or five) and falls between them. Reading the same stories a second time did not add memory: the second pass ended 8.5 MiB lower than the first. The memory held after closing is therefore reused caches and allocator pages, not a per-story leak.
+Footprint rises with stories that carry several large figures (four or five on BBC and Guardian pages) and falls between them. The second pass ended 5.9 and 5.7 MiB above the first, about 0.3 MiB per opening, while the first pass itself grew by about 90 MiB. Most retained memory is therefore caches and allocator pages filled once; a small growth per opening remains possible and would need a longer run (many passes) to confirm or rule out.
 
 ## Limits
 
