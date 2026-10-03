@@ -4685,6 +4685,7 @@ struct NewsTests {
         assertEqual(review.captureFiles, 2, "Every capture file is read")
         assertEqual(review.observations, 7, "Repeated observations count once and holdout hosts stay sealed")
         assertEqual(review.eligible, 5, "Short and undated items are not fingerprinted")
+        assertEqual(review.eligibleDocuments, 3, "Copies at one canonical URL count as one eligible document")
         assertEqual(review.sameURLShared, 1, "A stripped tracking parameter is the same URL")
         assertEqual(review.sameURLDisjoint, 2, "An edited body at the same URL no longer shares a fingerprint")
         assertEqual(review.total.candidates, 1, "One different-URL pair shares a fingerprint")
@@ -4706,18 +4707,23 @@ struct NewsTests {
         assertFalse(review.gatePassed, "Tuning never passes the release gate")
         review = try StoryCorpus.reviewCaptures(directory: directory.path, holdout: true)
         assertEqual([review.observations, review.total.candidates, review.total.sameDocument], [2, 1, 1], "The holdout is scored when unsealed")
-        assertFalse(review.gatePassed, "One candidate is too little support for the gate")
+        assertFalse(review.gatePassed, "Two eligible documents are too little support for the gate")
         try JSONSerialization.data(withJSONObject: [key: "maybe"]).write(to: labelsFile, options: .atomic)
         assertTrue((try? StoryCorpus.reviewCaptures(directory: directory.path, holdout: false)) == nil, "Unknown labels are rejected")
 
         func metrics(_ same: Int, _ different: Int, unlabeled: Int = 0) -> StoryCorpus.CaptureMetrics {
             StoryCorpus.CaptureMetrics(candidates: same + different + unlabeled, sameDocument: same, different: different)
         }
-        assertTrue(StoryCorpus.captureGatePassed(split: "holdout", metrics: metrics(99, 1)), "99% over 100 adjudicated candidates passes")
-        assertFalse(StoryCorpus.captureGatePassed(split: "holdout", metrics: metrics(98, 2)), "Two errors in 100 fail")
-        assertFalse(StoryCorpus.captureGatePassed(split: "holdout", metrics: metrics(99, 0)), "Fewer than 100 candidates cannot pass")
-        assertFalse(StoryCorpus.captureGatePassed(split: "holdout", metrics: metrics(150, 0, unlabeled: 1)), "Unreviewed candidates block the gate")
-        assertFalse(StoryCorpus.captureGatePassed(split: "tuning", metrics: metrics(200, 0)), "Tuning never passes the gate")
+        func passes(_ metrics: StoryCorpus.CaptureMetrics, documents: Int = 1_000, split: String = "holdout") -> Bool {
+            StoryCorpus.captureGatePassed(split: split, metrics: metrics, eligibleDocuments: documents)
+        }
+        assertTrue(passes(metrics(99, 1)), "99% over 100 adjudicated candidates passes")
+        assertFalse(passes(metrics(98, 2)), "Two errors in 100 fail")
+        assertTrue(passes(metrics(0, 0), documents: 381), "Without matches, 381 eligible documents bound false merges at 1%")
+        assertFalse(passes(metrics(0, 0), documents: 380), "Fewer eligible documents cannot bound false merges at 1%")
+        assertFalse(passes(metrics(5, 1), documents: 381), "One false merge needs more eligible support")
+        assertFalse(passes(metrics(150, 0, unlabeled: 1)), "Unreviewed candidates block the gate")
+        assertFalse(passes(metrics(200, 0), split: "tuning"), "Tuning never passes the gate")
         assertTrue(abs((metrics(100, 0).precisionLowerBound ?? 0) - 0.963) < 0.001, "The Wilson bound reports sampling uncertainty")
     }
 

@@ -221,13 +221,7 @@ enum StoryCorpus {
         var candidates = 0, sameDocument = 0, different = 0
         var unlabeled: Int { candidates - sameDocument - different }
         var precision: Double? { sameDocument + different == 0 ? nil : Double(sameDocument) / Double(sameDocument + different) }
-        /// Wilson 95% lower bound over adjudicated candidates, so small samples show their uncertainty.
-        var precisionLowerBound: Double? {
-            let n = Double(sameDocument + different)
-            guard n > 0 else { return nil }
-            let p = Double(sameDocument) / n, z = 1.959964
-            return (p + z * z / (2 * n) - z * ((p * (1 - p) + z * z / (4 * n)) / n).squareRoot()) / (1 + z * z / n)
-        }
+        var precisionLowerBound: Double? { StoryCorpus.wilson(sameDocument, of: sameDocument + different)?.lowerBound }
         mutating func add(_ label: String?) {
             candidates += 1
             if label == "same_document" { sameDocument += 1 } else if label == "different" { different += 1 }
@@ -242,6 +236,8 @@ enum StoryCorpus {
     struct CaptureReview {
         var split = "tuning", captureFiles = 0, observations = 0, eligible = 0, sameURLShared = 0, sameURLDisjoint = 0
         var eligibleByLanguage: [String: Int] = [:]
+        /// Distinct canonical URLs among eligible observations; candidates are counted per canonical pair too.
+        var eligibleDocuments = 0
         var total = CaptureMetrics()
         var byLanguage: [String: CaptureMetrics] = [:], bySource: [String: CaptureMetrics] = [:]
         var gatePassed = false
@@ -249,20 +245,41 @@ enum StoryCorpus {
         var report: [String: Any] {
             ["split": split, "captureFiles": captureFiles, "observations": observations,
              "fingerprintEligibleObservations": eligible, "eligibleObservationsByLanguage": eligibleByLanguage,
+             "fingerprintEligibleDocuments": eligibleDocuments,
              "sameURLPairsSharingFingerprint": sameURLShared, "sameURLPairsWithoutSharedFingerprint": sameURLDisjoint,
              "differentURLCandidates": total.json, "byLanguage": byLanguage.mapValues(\.json), "bySource": bySource.mapValues(\.json),
+             "falseMergeUpperBound95": StoryCorpus.wilson(total.different, of: eligibleDocuments).map { $0.upperBound as Any } ?? NSNull(),
              "releaseGatePassed": gatePassed,
-             "gate": "holdout split, every candidate adjudicated, at least \(StoryCorpus.captureGateMinimumCandidates) candidates, precision >= 0.99",
-             "limitation": "Precision of different-URL fingerprint matches in captured feeds only; recall and event accuracy are not measured"]
+             "gate": "holdout split, every candidate adjudicated, false merges at most 1% of eligible documents (Wilson 95% upper bound), "
+                + "and precision >= 0.99 once there are at least \(StoryCorpus.captureGateMinimumCandidates) candidates",
+             "limitation": "False merges and precision of different-URL fingerprint matches in captured feeds only; recall and event accuracy are not measured"]
         }
     }
 
     /// Below 100 adjudicated candidates a single error cannot be resolved against the 1% budget.
     static let captureGateMinimumCandidates = 100
 
-    static func captureGatePassed(split: String, metrics: CaptureMetrics) -> Bool {
-        split == "holdout" && metrics.unlabeled == 0 && metrics.candidates >= captureGateMinimumCandidates
-            && metrics.sameDocument * 100 >= 99 * (metrics.sameDocument + metrics.different)
+    /// Different-URL matches are too rare in captured feeds to estimate precision, so the gate bounds what readers
+    /// can lose instead: falsely merged documents among all eligible documents (distinct canonical URLs, so repeated
+    /// observations of one document count once). Each adjudicated different pair counts as one false merge, which
+    /// can only overstate. Precision still applies once it is measurable. Without a false merge, the bound needs at
+    /// least 381 eligible holdout documents.
+    static func captureGatePassed(split: String, metrics: CaptureMetrics, eligibleDocuments: Int) -> Bool {
+        guard split == "holdout", metrics.unlabeled == 0,
+              let bound = wilson(metrics.different, of: eligibleDocuments)?.upperBound, bound <= 0.01 else { return false }
+        return metrics.candidates < captureGateMinimumCandidates
+            || metrics.sameDocument * 100 >= 99 * (metrics.sameDocument + metrics.different)
+    }
+
+    /// Wilson 95% interval, so small samples show their uncertainty.
+    static func wilson(_ successes: Int, of trials: Int) -> ClosedRange<Double>? {
+        guard trials > 0, (0...trials).contains(successes) else { return nil }
+        let n = Double(trials)
+        let p = Double(successes) / n
+        let z = 1.959964
+        let center = p + z * z / (2 * n)
+        let margin = z * ((p * (1 - p) + z * z / (4 * n)) / n).squareRoot()
+        return (center - margin) / (1 + z * z / n)...(center + margin) / (1 + z * z / n)
     }
 
     /// Fingerprints include the host and canonical URLs never span hosts, so a host-level split keeps every
@@ -368,6 +385,7 @@ enum StoryCorpus {
             byURL[canonical[index], default: []].append(index)
             for fingerprint in fingerprints[index] { byFingerprint[fingerprint, default: []].append(index) }
         }
+        review.eligibleDocuments = byURL.count
         for members in byURL.values {
             for (offset, i) in members.enumerated() {
                 for j in members[(offset + 1)...] {
@@ -411,7 +429,7 @@ enum StoryCorpus {
             for source in Set([items[i].source, items[j].source]) { review.bySource[source, default: CaptureMetrics()].add(label) }
             sheet.append(["pair": key, "label": label.map { $0 as Any } ?? NSNull(), "left": side(i), "right": side(j)])
         }
-        review.gatePassed = captureGatePassed(split: review.split, metrics: review.total)
+        review.gatePassed = captureGatePassed(split: review.split, metrics: review.total, eligibleDocuments: review.eligibleDocuments)
         let data = try JSONSerialization.data(withJSONObject: sheet, options: [.prettyPrinted, .sortedKeys])
         try writePrivate(data, to: directory.appendingPathComponent("review-\(review.split).json"), replacing: true)
         return review

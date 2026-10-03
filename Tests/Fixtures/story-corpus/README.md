@@ -64,7 +64,7 @@ cmp Tests/Fixtures/story-corpus/corpus-v1.json "$CORPUS_REBUILD_DIRECTORY/corpus
 
 Original URLs are linked from the W2E README: `topics.zip` (article URLs), `events_grouped_by_topic_with_manually_constructed_queries.csv` and `topicGroups.txt` (merged groups). Event prose is used only to count events/dates and is omitted from the output.
 
-Before closing #102: independently adjudicate imported same-event/different labels, obtain real same-document variants and licensed/local text, verify languages and timestamps, record text-input provenance privately, and measure the frozen holdout. Require ≥99% real-publisher fingerprint precision with positive-support and coverage counts; authored positives alone cannot pass. Event-clustering predictions remain a separate evaluation. `releaseGatePassed` stays false in this candidate scorer to prevent a synthetic-only green report from being treated as acceptance. The fingerprint gate is measured with the private capture below, not with this URL corpus.
+Before closing #102: independently adjudicate imported same-event/different labels, obtain real same-document variants and licensed/local text, verify languages and timestamps, record text-input provenance privately, and measure the frozen holdout. Require the real-publisher fingerprint gate below (false merges at most 1% of eligible holdout documents, and ≥99% precision once there are 100 candidates) with support and coverage counts; authored positives alone cannot pass. Event-clustering predictions remain a separate evaluation. `releaseGatePassed` stays false in this candidate scorer to prevent a synthetic-only green report from being treated as acceptance. The fingerprint gate is measured with the private capture below, not with this URL corpus.
 
 ## Real-publisher capture for the fingerprint gate
 
@@ -72,24 +72,42 @@ This URL corpus cannot measure the fingerprint gate: it has no publisher text an
 
 ```sh
 mkdir -m 700 ~/NewsCorpusCapture
-./test.sh --corpus-capture ~/NewsCorpusCapture   # repeat on several days; variants appear over time
-./test.sh --corpus-capture ~/NewsCorpusCapture --corpus-feeds ~/NewsCorpusCapture/feeds.json   # optional own feeds
+./test.sh --corpus-capture ~/NewsCorpusCapture --corpus-feeds Tests/Fixtures/story-corpus/fingerprint-feeds.json   # repeat on several days
 ./test.sh --corpus-review ~/NewsCorpusCapture    # tuning sheet and report
 ```
 
-- The directory must exist, belong to you, be closed to other users (`chmod 700`) and lie outside the checkout. Captures are written `0600` and never overwritten. The capture fetches the starter catalog (and optionally `[{"url": "…", "language": "en"}]` from `--corpus-feeds`) through the app's protected networking and parsers. It never opens the app's library or settings.
+- The directory must exist, belong to you, be closed to other users (`chmod 700`) and lie outside the checkout. Captures are written `0600` and never overwritten. The capture fetches the starter catalog plus `[{"url": "…", "language": "en"}]` entries from `--corpus-feeds` through the app's protected networking and parsers. It never opens the app's library or settings.
+- `fingerprint-feeds.json` fixes the targeted sample: 40 sibling feeds of 14 catalog publishers, chosen because they share a feed title or carry long text, where one document is most likely to appear under two URLs.
 - The split is by publisher host: 30% holdout by a fixed hash. Fingerprints include the host, so every candidate family stays on one side and the holdout measures publishers not looked at during tuning.
 - `review-<split>.json` lists each pair of distinct canonical URLs that share a fingerprint, with URLs, titles, sources, languages and dates, never body text. Open both URLs and record `{"<pair>": "same_document"}` or `"different"` in `labels.json` in the same directory. Same-URL pairs are counted but excluded: the URL already decides them.
-- `CAPTURE_FINGERPRINT_REPORT` prints counts only: candidates, adjudications, abstentions, precision and its Wilson 95% lower bound, overall, per curated feed language and per source.
-- Once tuning decisions are fixed, run the review once with `--corpus-holdout`. `releaseGatePassed` requires the holdout, every candidate adjudicated, at least 100 candidates and precision ≥ 99%. With fewer than 100, one error cannot be resolved against the 1% budget.
+- `CAPTURE_FINGERPRINT_REPORT` prints counts only: candidates, adjudications, abstentions, precision and its Wilson 95% lower bound, and the Wilson 95% upper bound on falsely merged documents among all fingerprint-eligible documents (distinct canonical URLs), overall, per curated feed language and per source.
+- Once tuning decisions are fixed, run the review once with `--corpus-holdout` on a new private directory of captures taken from 4 October 2026 on. `releaseGatePassed` requires the holdout, every candidate adjudicated, falsely merged documents at most 1% of eligible documents at the Wilson 95% upper bound, counting repeated observations of one canonical URL once (with no false merge, at least 381 eligible documents), and precision ≥ 99% once there are at least 100 candidates.
 
-Limits: this measures the precision of different-URL fingerprint matches only, not recall or event clustering. Summary-only feeds rarely reach the 400-character text threshold, so support may stay low; the report then shows the gate unmet rather than passing. Language comes from the curated feed entry, not detection. The reviewer sees that each pair is a predicted match, so this verifies positives; it is not a blind three-way labeling.
+The gate bounds false merges instead of waiting for 100 matches because matches do not occur. A different-URL candidate needs the same host, feed title, title, timestamp and at least 400 characters of identical text. Two captures on 3 October, of the catalog and of the targeted feeds, held 3,021 unique observations (1,089 eligible) and no pair sharing host, feed title, title and timestamp under different links in either split, even before the text threshold. Precision of a signal that never fires can neither pass nor fail. Those captures were inspected for support counts on both splits, so they are not acceptance evidence.
+
+Limits: this measures false merges and the precision of different-URL fingerprint matches only, not recall or event clustering. A fingerprint that never fires passes the false-merge bound: the gate shows that text fingerprints are safe, not that they find copies. On 3 October none of the 13 eligible same-URL copies on tuning shared a fingerprint either, because sibling feeds carry different feed titles. Language comes from the curated feed entry, not detection. The reviewer sees that each pair is a predicted match, so this verifies positives; it is not a blind three-way labeling.
 
 ## Source-review batch v2 — 3 October 2026
 
 `publisher-review-v2.json` is a **provisional annotation proposal**, separate from the immutable W2E candidate. It records 400 proposed pairs from 183 live-captured observations: 6 observed same-URL copies, 199 proposed same-event pairs and 195 proposed negatives. The 100 proposed occurrence IDs include 40 with multiple observations and 60 singletons; they are not 100 independently adjudicated multi-source events. All seven catalog languages occur, but multilingual positive support remains uneven.
 
 The fixed family hash assigns 263 pairs to `tune` and 137 to `holdout`. Related actions stay in one family: the Spanish housing vote/rally, the failed execution/resignation and the two Kyiv bridge strikes. This is a fresh current-publisher sample, not a correction to v1's imported labels. No matcher or embedding predictions were viewed during proposal preparation, and no holdout predictions have been run. The Spanish housing rally contributes 36 of 74 proposed holdout event-positive pairs, so this batch must not be presented as broad event-accuracy evidence. Expand the positive-event diversity before using it as a release gate.
+
+### Event-boundary rules
+
+These rules apply to v2 and later batches. A reviewer who disagrees records the change in a new manifest version.
+
+1. An event is one concrete occurrence: who did what, where and when. A family groups related occurrences; a shared family never makes a pair `same_event`.
+2. Label each document by the occurrence its headline and lead report as news. Earlier or later developments mentioned as background do not change the label.
+3. An occurrence includes its direct consequences and state updates (casualties, injuries, a victim's condition, damage, closures at the scene), new facts about what happened (investigation findings, identities, video, eyewitness and first-person accounts), explainers and profiles pegged to it, and reactions that are only words (condemnation, praise, conditional threats, calls for action).
+4. A new act starts a new occurrence, even when the earlier one caused it: a vote, ruling or appointment; a resignation; an arrest, charge, court hearing or bail decision; a decided policy, rule or plan; a protest; a new attack.
+5. Repetition starts new occurrences: another protest day, another day's strikes, another quarter or reporting month. One attack wave (one attacker, one area, one night or day) is one occurrence for all its targets; one coordinated protest day is one occurrence for all its cities.
+6. For an ongoing process (an epidemic, a war, a housing crisis), the occurrence is the reported development, such as a toll milestone, a battle or a decision, never the process as a whole.
+7. Reports of the same publication (an official report, study, poll, leak or another outlet's investigation) are one occurrence.
+8. A roundup, live page or tally is a singleton when its headline joins several occurrences without a lead; otherwise it belongs to the occurrence its headline leads with.
+9. Label the captured version. If the publisher page has changed since (headline, slug or date), note it for the reviewer instead of relabeling silently.
+
+Under these rules the parliamentary housing vote and the Saturday rallies are different events, the failed execution and its medical aftermath are one event while the commissioner's resignation is another, and the Northern Bridge strike, the earlier Southern Bridge strikes and the new bridge traffic rules are three events. All 29 proposed assignments in those families follow the rules ([audit](../../../docs/audits/2026-10-03-event-boundaries-fingerprint-scope.md)); this was a second copilot pass, not independent adjudication.
 
 The public manifest contains URLs, feed metadata, proposed assignments and reasons only. Captured titles, descriptions and bodies stay in Mars's private folder, `/Users/marspater/Documents/NewsHoldout-2026-10-03/`, with directory mode 0700 and file mode 0600. Feed timestamps are captured values; they have not been independently verified on publisher pages. Proposals and singleton boundaries still need independent adjudication. Real quarterly-report and identical-headline hard negatives remain missing.
 
@@ -121,4 +139,4 @@ Run the preparation command with `--labels /private/path/reviewed-labels.json` a
 
 Tune with `NEWS_EVENT_CORPUS=/private/path/reviewed-event-corpus.json ./test.sh --event-corpus`. Fix the embedding cutoff and deterministic settings on tune before the one holdout run. Record per-language/source support, false merges and recall; same-document copies and correlated pairs must not inflate the event gate.
 
-The live tuning fingerprint inventory had **zero** different-URL candidates among 91 eligible observations. The six same-URL copies in this proposal do not measure the fingerprint gate. Keep that gate open: it requires independently observed different-URL variants and at least 100 adjudicated holdout fingerprint matches.
+The six same-URL copies in this proposal do not measure the fingerprint gate. Neither the catalog nor the targeted sibling feeds produced a different-URL candidate, so that gate now bounds false merges over all eligible holdout documents (see the fingerprint section above) and stays open until a fresh holdout capture is reviewed.
