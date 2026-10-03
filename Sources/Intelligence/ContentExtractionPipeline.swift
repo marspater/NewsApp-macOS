@@ -345,6 +345,18 @@ final class DOMElementNode: Sendable {
 
         return min(1.0, Double(linkTextCount) / Double(allText.count))
     }
+
+    /// Share of text in links outside prose-length paragraphs: navigation and teasers, not inline citations.
+    func navigationLinkDensity() -> Double {
+        let allText = combinedText().filter { !$0.isWhitespace }.count
+        guard allText > 0 else { return 0.0 }
+        func navigationLinkText(_ node: DOMElementNode) -> Int {
+            if node.tag == "p", node.combinedText().count >= 120 { return 0 }
+            if node.tag == "a" { return node.combinedText().filter { !$0.isWhitespace }.count }
+            return node.children.reduce(0) { $0 + navigationLinkText($1) }
+        }
+        return min(1.0, Double(navigationLinkText(self)) / Double(allText))
+    }
 }
 
 // MARK: - HTML DOM Tree Builder
@@ -863,8 +875,10 @@ final class ContentExtractionPipeline: Sendable {
         } else if linkDensity > 0.20 {
             score -= 100.0
         }
-        // Scale by the share of text outside links, so a page wrapper cannot outscore the article on its navigation.
-        if score > 0 { score *= (1 - linkDensity) * (1 - linkDensity) }
+        // Scale by the share of text outside navigation links, so a page wrapper cannot outscore the article on its
+        // teasers, while cited prose keeps the container that holds every section.
+        let navigation = container.navigationLinkDensity()
+        if score > 0 { score *= (1 - navigation) * (1 - navigation) }
 
         return (score, substantiveParagraphs)
     }

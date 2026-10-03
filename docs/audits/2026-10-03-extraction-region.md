@@ -16,7 +16,7 @@ The region itself was too wide. Container scoring adds 30 points per block and a
 
 ## Change
 
-- Container scores are multiplied by the squared share of text outside links, after the existing penalties, so navigation-heavy wrappers lose to the body they contain.
+- Container scores are multiplied by the squared share of text outside navigation links, after the existing penalties. Links inside prose-length paragraphs (120 characters or more) are citations and do not count, so navigation-heavy wrappers lose to the body they contain while an article whose sections carry many inline citations keeps every section.
 - After validation, text repeated on a page is removed: every copy of a repeated block under 120 characters, and later copies of longer ones (a pull quote keeps one occurrence). The page is then validated again.
 - The validator rejects repetition only when repeated blocks make up half or more of the text, a syndication loop, instead of whenever two blocks repeat.
 
@@ -30,7 +30,7 @@ The same 96 live stories were extracted with `main` and with this change, minute
 
 Page-extraction failures fell from 14 to 4. Every change removed blocks; none added any. Long blocks (≥120 characters) that disappeared were author bios (TechCrunch, Dawn), an affiliate notice (TechCrunch), a copyright line (The Hill), Dawn's editorial-teaser sidebar, DW's "Mehr zum Thema" teaser, and a repeated headline (Variety). One was publisher text: Euronews's standfirst sits outside the body container and is no longer included. Fixed pages now read as articles: The Hill 12 blocks instead of 28, Times of India 22 instead of 93.
 
-Regressions in `testReaderParsingRegressions`: a link-heavy wrapper around an article body (19 blocks before, 6 after), repeated short furniture and a repeated pull quote (rejected before), and a mostly repeated page that must still be rejected. Each new assertion fails on `main`.
+Regressions in `testReaderParsingRegressions`: a link-heavy wrapper around an article body (19 blocks before, 6 after), an article whose middle section is 60–70% citation links (all 13 paragraphs kept), repeated short furniture and a repeated pull quote (rejected before), and a mostly repeated page that must still be rejected. Each new assertion fails on `main`.
 
 ## Limits
 

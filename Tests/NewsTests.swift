@@ -1024,6 +1024,9 @@ struct NewsTests {
         let wrapped = pipeline.extractFromHTML("<div class=\"site\"><article><div class=\"article__text\">\(body)</div><h2>Most Popular</h2>\(teasers)</article></div>")
         assertEqual(wrapped.content?.components(separatedBy: "\n\n").count, 6, "A link-heavy wrapper cannot outscore the article body")
         assertFalse(wrapped.content?.contains("Other headline") ?? true, "Teaser links stay out of the reader")
+        let cited = (1...6).map { "<p>Section two, point \($0): officials cited <a href=\"/a/\($0)\">the published quarterly inflation report from the central bank</a> and <a href=\"/b/\($0)\">the independent employment survey released last week</a> today.</p>" }.joined()
+        let sectioned = pipeline.extractFromHTML("<article><section>\(body)</section><section>\(cited)</section><section><p>Closing: \(second)</p></section></article>")
+        assertEqual(sectioned.content?.components(separatedBy: "\n\n").count, 13, "Heavily cited prose keeps every section of the article")
         let placeholder = "<p>To view this video please enable JavaScript, and consider upgrading to a web browser.</p>"
         let pullQuote = "<p>“\(second) This is the line the editors chose to repeat as a pull quote in the middle of the story.”</p>"
         let furnished = pipeline.extractFromHTML("<article>\(placeholder)\(body)\(placeholder)\(pullQuote)\(placeholder)\(pullQuote)</article>")
