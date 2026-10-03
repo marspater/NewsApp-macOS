@@ -242,9 +242,9 @@ struct ArticleDetailView: View {
                         }
                         .padding(12)
                         .background(AppColor.accent.opacity(0.1))
-                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        .clipShape(RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous))
                         .overlay(
-                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous)
                                 .stroke(AppColor.accent.opacity(contrast == .increased ? 1 : 0.3), lineWidth: 1)
                         )
                     }
