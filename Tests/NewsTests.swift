@@ -5666,7 +5666,7 @@ struct NewsTests {
             let fetcher = FeedFetcher()
             let manager = FeedManager(settings: settings, store: store, schedulesRefresh: false,
                 fetchBatch: { urls, allowHTTP in await fetcher.fetchAllFeeds(urls: urls, allowHTTP: allowHTTP, state: db) },
-                notifyBatch: { _, _ in })
+                notifyBatch: { _, _ in /* notifications are off and out of scope for this measurement */ })
             let done = SocketObservation()
             let started = ContinuousClock.now
             let refresh = Task {
