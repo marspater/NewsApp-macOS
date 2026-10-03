@@ -15,6 +15,7 @@ Build on Apple silicon with Xcode 27 selected. The deployment target remains mac
 ./test.sh --story-regressions     # Focused offline identity, reader and persistence checks
 ./test.sh --performance-baseline --active-work-cancellation # Active clustering, ingestion and feed parsing cancellation; temporary stress fixtures
 ./script/native_performance_baseline.sh # Isolated MainView window, rendered-card samples and process memory
+./script/launch_baseline.sh       # Production bundle under a separate identifier: launch to first card and memory, seeded library
 ./test.sh --performance-baseline  # Opt-in optimized synthetic core-service timings
 ./test.sh --transport-cancellation # Optimized refresh shutdown over controlled HTTP/SOCKS sockets
 NEWS_EVENT_CORPUS=corpus.json ./test.sh --event-corpus # Event clustering precision/recall on a local labeled corpus (#102)
@@ -34,6 +35,8 @@ Add deterministic regressions for changed parsing, classification, persistence, 
 For app changes, build in an isolated staging directory: `build.sh` replaces `News.app` in its working directory. A successful build is not evidence of installation, launch or live network behavior; report those checks separately. Validate `build_release.sh` and affected packaging scripts for distribution changes, without invoking notarization in development. Documentation-only edits require link/path and consistency checks, not an unrelated app rebuild.
 
 The native performance script requires an active Mac desktop. It compiles the production views with a separate test entry point, uses temporary SQLite/defaults and mocked feeds, and writes JSON plus a first-card PNG to the printed directory (or the directory supplied as its first argument). Its sampled bitmap timing is an upper bound on rendering readiness, not cold app launch; process memory includes fixture setup and the on-device Vision probe. It neither installs a bundle nor runs the production app delegate.
+
+`script/launch_baseline.sh` also needs an active desktop. It builds the production bundle under the identifier `com.marspater.news.launchcheck`, so its sandbox container is separate from the installed app, seeds that container with 10,000 stories and opens the app several times. Its feed points at a reserved `.invalid` host. The first-card time comes from a one-time `FirstCard` signpost and log line in the app.
 
 Before publication, fetch `origin/main`, review the diff and run checks affected by the change. Never report a check as passing unless it completed successfully. Record noteworthy behavior changes in [CHANGELOG.md](CHANGELOG.md); dated evidence belongs in `docs/audits/`.
 

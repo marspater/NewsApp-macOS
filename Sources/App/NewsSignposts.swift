@@ -12,6 +12,25 @@ enum NewsSignposts {
     static let database = OSSignposter(subsystem: subsystem, category: "Database")
     static let enrichment = OSSignposter(subsystem: subsystem, category: "Enrichment")
     static let intelligence = OSSignposter(subsystem: subsystem, category: "Intelligence")
+    static let launch = OSSignposter(subsystem: subsystem, category: "Launch")
+
+    @MainActor private static var firstCardReported = false
+
+    /// Records, once per process, when the first story card appears: an Instruments event plus a log line
+    /// with the time since the process started, so launch can be measured on the shipping app.
+    @MainActor
+    static func firstCardAppeared() {
+        guard !firstCardReported else { return }
+        firstCardReported = true
+        launch.emitEvent("FirstCard")
+        var info = kinfo_proc()
+        var size = MemoryLayout<kinfo_proc>.stride
+        var mib = [CTL_KERN, KERN_PROC, KERN_PROC_PID, getpid()]
+        guard sysctl(&mib, 4, &info, &size, nil, 0) == 0 else { return }
+        let start = info.kp_proc.p_un.__p_starttime
+        let elapsed = Date().timeIntervalSince1970 - (Double(start.tv_sec) + Double(start.tv_usec) / 1_000_000)
+        Logger(subsystem: subsystem, category: "Launch").notice("First card visible ms_since_process_start=\(elapsed * 1000, format: .fixed(precision: 3), privacy: .public)")
+    }
 
     /// Begins a signpost interval and returns the state token.
     @inline(__always)
