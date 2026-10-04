@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 
 /// Evaluation-only adapter. Calls the production fingerprint function; never opens a user database.
 enum StoryCorpus {
@@ -350,6 +351,96 @@ enum StoryCorpus {
         let file = try writeCapture(Capture(version: 1, capturedAt: Date().timeIntervalSince1970, items: items), in: directory)
         let summary: [String: Any] = ["file": file.lastPathComponent, "feeds": languages.count, "failedFeeds": failed, "items": items.count]
         print("CORPUS_CAPTURE " + String(decoding: try JSONSerialization.data(withJSONObject: summary, options: [.sortedKeys]), as: UTF8.self))
+    }
+
+    struct PageRequest: Codable, Sendable { let id: String; let url: String }
+    struct PageEvidence: Codable, Sendable {
+        let id: String; let url: String; let fetchedAt: Double
+        var finalURL: String?; var file: String?; var sha256: String?; var error: String?
+    }
+
+    static func validPageRequests(_ requests: [PageRequest]) -> Bool {
+        !requests.isEmpty && requests.count <= 500 && Set(requests.map(\.id)).count == requests.count && requests.allSatisfy {
+            !$0.id.isEmpty && $0.id.utf8.count <= 80 && $0.id.utf8.allSatisfy { (48...57).contains($0) || (65...90).contains($0) || (97...122).contains($0) || $0 == 45 }
+        }
+    }
+
+    struct PageText: Codable {
+        let id: String; let url: String; let canonicalURL: String
+        let title: String; let content: String?; let contentSHA256: String?
+    }
+
+    /// Offline readability evidence for human URL review; never computes fingerprints or event predictions.
+    static func pageTexts(directory path: String) throws {
+        let directory = try privateDirectory(path)
+        let records = try JSONDecoder().decode([PageEvidence].self, from: Data(contentsOf: directory.appendingPathComponent("pages.json")))
+        var texts: [PageText] = []
+        for record in records {
+            guard let file = record.file, let finalURL = record.finalURL else { continue }
+            guard URL(fileURLWithPath: file).lastPathComponent == file else { throw Failure.invalid("Invalid page evidence path") }
+            let data = try Data(contentsOf: directory.appendingPathComponent(file))
+            guard data.count <= SecureHTTPClient.defaultArticleLimit,
+                  SHA256.hash(data: data).map({ String(format: "%02x", $0) }).joined() == record.sha256 else { throw Failure.invalid("Publisher page checksum mismatch") }
+            let pipeline = ContentExtractionPipeline.shared
+            let html = pipeline.decodeHTML(data: data)
+            let title = HTMLDOMBuilder.parse(html: html).findNodes(tag: "title").map { $0.combinedText() }.joined()
+            let content = pipeline.extractFromHTML(html, baseUrl: finalURL).content
+            let normalized = content?.precomposedStringWithCanonicalMapping.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
+            texts.append(PageText(id: record.id, url: record.url, canonicalURL: ArticleIdentity.canonicalizeURL(record.url), title: title,
+                                  content: content, contentSHA256: normalized.map(ArticleIdentity.sha256Hex)))
+        }
+        let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
+        try writePrivate(try encoder.encode(texts), to: directory.appendingPathComponent("page-texts.json"), replacing: false)
+        print("PUBLISHER_TEXTS pages=\(texts.count) extracted=\(texts.filter { $0.content != nil }.count); no predictions")
+    }
+
+    /// Private publisher-page evidence through the same bounded, pinned client as the reader.
+    /// One request per host at a time, at most six hosts; no database, scoring or page scripts.
+    static func capturePages(directory path: String, requestsPath: String) async throws {
+        let directory = try privateDirectory(path)
+        let requests = try JSONDecoder().decode([PageRequest].self, from: Data(contentsOf: URL(fileURLWithPath: requestsPath)))
+        guard validPageRequests(requests) else {
+            throw Failure.invalid("Use at most 500 uniquely identified pages; IDs must be ASCII letters, numbers or hyphens")
+        }
+        let groups = Dictionary(grouping: requests) { URL(string: $0.url)?.host?.lowercased() ?? "" }.sorted { $0.key < $1.key }.map(\.value)
+        var evidence: [PageEvidence] = []
+        for start in stride(from: 0, to: groups.count, by: 6) {
+            try Task.checkCancellation()
+            let batch = try await withThrowingTaskGroup(of: [PageEvidence].self) { group in
+                for requests in groups[start..<min(start + 6, groups.count)] {
+                    group.addTask {
+                        var records: [PageEvidence] = []
+                        for request in requests {
+                            try Task.checkCancellation()
+                            var record = PageEvidence(id: request.id, url: request.url, fetchedAt: Date().timeIntervalSince1970)
+                            do {
+                                guard let url = URL(string: request.url) else { throw Failure.invalid("Invalid page URL") }
+                                let (data, response) = try await SecureHTTPClient.shared.fetchArticleHTML(from: url)
+                                try Task.checkCancellation()
+                                let file = request.id + ".html"
+                                try writePrivate(data, to: directory.appendingPathComponent(file), replacing: false)
+                                record.finalURL = response.url?.absoluteString
+                                record.file = file
+                                record.sha256 = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+                            } catch {
+                                if error is CancellationError || Task.isCancelled { throw CancellationError() }
+                                if error is CocoaError { throw error } // Never overwrite or silently lose local evidence.
+                                record.error = String(describing: error)
+                            }
+                            records.append(record)
+                        }
+                        return records
+                    }
+                }
+                var records: [PageEvidence] = []
+                for try await result in group { records += result }
+                return records
+            }
+            evidence += batch
+            print("PUBLISHER_PAGES completed=\(evidence.count) succeeded=\(evidence.filter { $0.file != nil }.count)")
+        }
+        let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys, .prettyPrinted]
+        try writePrivate(try encoder.encode(evidence.sorted { $0.id < $1.id }), to: directory.appendingPathComponent("pages.json"), replacing: false)
     }
 
     /// Lists different-URL fingerprint matches of one split for review and scores them against `labels.json`

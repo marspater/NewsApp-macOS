@@ -218,6 +218,18 @@ struct NewsTests {
             try StoryCorpus.auditCache(path: CommandLine.arguments[index + 1])
             return
         }
+        if let index = CommandLine.arguments.firstIndex(of: "--corpus-page-texts") {
+            guard CommandLine.arguments.indices.contains(index + 1) else { throw StoryCorpus.Failure.invalid("Missing private page directory") }
+            try StoryCorpus.pageTexts(directory: CommandLine.arguments[index + 1])
+            return
+        }
+        if let index = CommandLine.arguments.firstIndex(of: "--corpus-pages") {
+            guard CommandLine.arguments.indices.contains(index + 1),
+                  let urls = CommandLine.arguments.firstIndex(of: "--corpus-urls"),
+                  CommandLine.arguments.indices.contains(urls + 1) else { throw StoryCorpus.Failure.invalid("Supply private directory and --corpus-urls JSON") }
+            try await StoryCorpus.capturePages(directory: CommandLine.arguments[index + 1], requestsPath: CommandLine.arguments[urls + 1])
+            return
+        }
         if let index = CommandLine.arguments.firstIndex(of: "--corpus-capture") {
             guard CommandLine.arguments.indices.contains(index + 1) else { throw StoryCorpus.Failure.invalid("Missing private capture directory") }
             try await StoryCorpus.capture(directory: CommandLine.arguments[index + 1])
@@ -4629,6 +4641,12 @@ struct NewsTests {
 
     static func testCapturedFingerprintReview() throws {
         print("  - Testing the private captured-feed fingerprint review (#102)...")
+        let request = StoryCorpus.PageRequest(id: "doc-0001", url: "https://example.com/article")
+        assertTrue(StoryCorpus.validPageRequests([request]), "A bounded uniquely identified page is accepted")
+        assertFalse(StoryCorpus.validPageRequests([]), "An empty evidence request is rejected")
+        assertFalse(StoryCorpus.validPageRequests([request, request]), "Repeated IDs cannot overwrite publisher evidence")
+        assertFalse(StoryCorpus.validPageRequests([.init(id: "../outside", url: request.url)]), "Evidence IDs cannot escape the private directory")
+        assertFalse(StoryCorpus.validPageRequests((0...500).map { .init(id: "doc-\($0)", url: request.url) }), "Evidence collection stays bounded")
         let fileManager = FileManager.default
         let directory = fileManager.temporaryDirectory.appendingPathComponent("news-capture-\(UUID().uuidString)")
         try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
