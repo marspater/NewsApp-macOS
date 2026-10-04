@@ -899,9 +899,9 @@ struct EventOverviewReaderView: View {
             .padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(AppColor.cardBackground)
-            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous)
                     .stroke(currentBorderStrokeColor, lineWidth: 1)
             )
         }
