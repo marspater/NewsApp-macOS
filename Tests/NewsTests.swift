@@ -4671,7 +4671,9 @@ struct NewsTests {
             withUnsafeCurrentTask { $0?.cancel() }
             try await migrated.open()
         }
-        do { try await cancelled.value; assertTrue(false, "Cancelled provenance migration must throw") } catch is CancellationError { }
+        do { try await cancelled.value; assertTrue(false, "Cancelled provenance migration must throw") } catch is CancellationError {
+            // Expected: the cancelled migration rolls back and the next open retries it.
+        }
         try await migrated.open()
         assertEqual(try await migrated.publisherContentRevisions(for: changed.id).first?.kind, .snapshot, "Migration records a baseline, not a fabricated update")
         assertEqual(await migrated.fetchArticleAnalysis(for: changed.id), nil, "Unversioned legacy analysis must regenerate")
@@ -4680,7 +4682,8 @@ struct NewsTests {
         assertTrue(try await migrated.isSaved(articleId: changed.id), "Migration preserves saved state")
         await migrated.close()
         func value(_ file: URL, _ sql: String) -> String? {
-            var connection: OpaquePointer?, statement: OpaquePointer?
+            var connection: OpaquePointer?
+            var statement: OpaquePointer?
             assertEqual(sqlite3_open(file.path, &connection), SQLITE_OK, "Inspect only the owned provenance fixture")
             defer { sqlite3_close(connection) }
             assertEqual(sqlite3_prepare_v2(connection, sql, -1, &statement, nil), SQLITE_OK, "Prepare provenance inspection")
