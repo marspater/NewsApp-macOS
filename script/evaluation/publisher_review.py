@@ -61,7 +61,16 @@ def private_directory(path):
 
 
 def write_private(path, text):
-    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    require('..' not in path.parts, 'Output path cannot traverse parent directories')
+    directory = private_directory(path.parent)
+    # Anchor creation to the checked directory; never follow a replacement symlink.
+    directory_fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        status = os.fstat(directory_fd)
+        require(status.st_uid == os.getuid() and status.st_mode & 0o077 == 0, 'Output directory permissions changed')
+        descriptor = os.open(os.path.basename(path), os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=directory_fd)
+    finally:
+        os.close(directory_fd)
     with os.fdopen(descriptor, 'w') as output:
         output.write(text)
 
@@ -144,6 +153,28 @@ def self_check(manifest):
         else:
             raise AssertionError('Existing reviewer data overwritten')
         assert file.read_text() == 'original' and file.stat().st_mode & 0o077 == 0
+        public = directory / 'public'
+        public.mkdir(mode=0o755)
+        checkout = directory / 'checkout'
+        checkout.mkdir(mode=0o700)
+        (checkout / '.git').mkdir()
+        for unsafe in (public / 'evidence.json', checkout / 'evidence.json', public / '..' / 'escape.json'):
+            try:
+                write_private(unsafe, 'private evidence')
+            except ValueError:
+                pass
+            else:
+                raise AssertionError('Unsafe evidence destination accepted')
+            assert not unsafe.exists()
+        link = directory / 'existing-link.json'
+        link.symlink_to(file)
+        try:
+            write_private(link, 'replacement')
+        except FileExistsError:
+            pass
+        else:
+            raise AssertionError('Existing symlink followed')
+        assert link.is_symlink() and file.read_text() == 'original'
 
     # A label file cannot turn an undated captured input into a replay timestamp.
     with tempfile.TemporaryDirectory(prefix='news-undated-check-') as path:
