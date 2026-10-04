@@ -31,6 +31,7 @@ actor OverviewGenerationCoordinator {
         let task: Task<EventOverviewDocument?, Never>
         let membershipVersion: Int
         let inputTextHash: String
+        let articleInputs: [String: String]
     }
 
     private var memoryCache: [String: EventOverviewDocument] = [:]
@@ -63,6 +64,9 @@ actor OverviewGenerationCoordinator {
         priority: OverviewRequestPriority = .onDemand,
         store: ArticleStore? = nil
     ) async -> EventOverviewDocument? {
+        // Storage rejects the result if any article's publisher input changed while it was generated.
+        let expectedArticleInputs = Dictionary(articles.map { ($0.id, $0.publisherInputHash) }, uniquingKeysWith: { first, _ in first })
+
         // Step A: Token-budgeted representative passage selection
         let selection = OverviewPassageSelector().selectPassages(
             from: articles,
@@ -72,14 +76,6 @@ actor OverviewGenerationCoordinator {
         let inputTextHash = ArticleIdentity.sha256Hex(sortedFingerprints.isEmpty ? eventTitle : sortedFingerprints)
         latestRequestedInputs[eventID] = (membershipVersion, inputTextHash)
 
-        // 1. Check memory cache first
-        if let cached = memoryCache[eventID],
-           !cached.isStale(currentMembershipVersion: membershipVersion, currentInputTextHash: inputTextHash) {
-            logger.debug("Memory cache hit for event \(eventID) v\(membershipVersion)")
-            return cached
-        }
-
-        // 2. Check persistent store cache
         let targetStore: ArticleStore
         if let store {
             targetStore = store
@@ -89,16 +85,22 @@ actor OverviewGenerationCoordinator {
             targetStore = await ArticleStore.shared
         }
 
+        // Persistent storage is authoritative: publisher-input changes atomically remove old overviews.
         if let stored = try? await targetStore.fetchEventOverview(eventID: eventID),
            !stored.isStale(currentMembershipVersion: membershipVersion, currentInputTextHash: inputTextHash) {
             logger.debug("Store cache hit for event \(eventID) v\(membershipVersion)")
+            if let cached = memoryCache[eventID], cached.id == stored.id,
+               !cached.isStale(currentMembershipVersion: membershipVersion, currentInputTextHash: inputTextHash) {
+                return cached
+            }
             memoryCache[eventID] = stored
             return stored
         }
 
         // 3. Join a running generation only if it was started from the same inputs; otherwise it is superseded
         if let running = inFlightTasks[eventID] {
-            if running.membershipVersion == membershipVersion && running.inputTextHash == inputTextHash {
+            if running.membershipVersion == membershipVersion && running.inputTextHash == inputTextHash
+                && running.articleInputs == expectedArticleInputs {
                 return await running.task.value
             }
             running.task.cancel()
@@ -146,12 +148,14 @@ actor OverviewGenerationCoordinator {
                 eventID: eventID,
                 membershipVersion: membershipVersion,
                 inputTextHash: inputTextHash,
-                targetStore: targetStore
+                targetStore: targetStore,
+                expectedArticleInputs: expectedArticleInputs
             )
             return isCurrent ? generated : nil
         }
 
-        inFlightTasks[eventID] = InFlightGeneration(task: task, membershipVersion: membershipVersion, inputTextHash: inputTextHash)
+        inFlightTasks[eventID] = InFlightGeneration(task: task, membershipVersion: membershipVersion, inputTextHash: inputTextHash,
+                                                   articleInputs: expectedArticleInputs)
         let result = await task.value
         // A newer request may have replaced this entry while it ran.
         if inFlightTasks[eventID]?.task == task {
@@ -160,13 +164,14 @@ actor OverviewGenerationCoordinator {
         return result
     }
 
-    /// Returns false when the result was built from superseded inputs and must not reach the caller.
+    /// Returns false when the result was built from superseded inputs, or storage rejected it, and must not reach the caller.
     private func commitGeneratedOverview(
         _ document: EventOverviewDocument,
         eventID: String,
         membershipVersion: Int,
         inputTextHash: String,
-        targetStore: ArticleStore
+        targetStore: ArticleStore,
+        expectedArticleInputs: [String: String]
     ) async -> Bool {
         // A result from inputs that are no longer the latest requested is stale, even at the same membership version
         if let latest = latestRequestedInputs[eventID],
@@ -182,12 +187,12 @@ actor OverviewGenerationCoordinator {
         }
 
         // DatabaseEngine also atomically prevents an older result from overwriting newer
-        let saved = (try? await targetStore.recordEventOverview(document)) ?? false
+        let saved = (try? await targetStore.recordEventOverview(document, expectedArticleInputs: expectedArticleInputs)) ?? false
         if saved {
             memoryCache[eventID] = document
             logger.debug("Committed overview for event \(eventID) v\(membershipVersion)")
         }
-        return true
+        return saved
     }
 
     // MARK: - Visible Event Management & Automatic Cancellation
