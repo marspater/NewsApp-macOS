@@ -148,7 +148,7 @@ def check_frozen_evidence(root):
     base_raw = (root / 'publisher-review-v2.json').read_bytes()
     base = json.loads(base_raw)
     originals = {d['id']: d for d in base['documents']}
-    for name in ('publisher-timestamps-v2', 'publisher-review-supplement-v1', 'publisher-url-investigation-v1', 'publisher-diversity-v1', 'publisher-date-resolutions-v1'):
+    for name in ('publisher-timestamps-v2', 'publisher-review-supplement-v1', 'publisher-url-investigation-v1', 'publisher-diversity-v1', 'publisher-diversity-v2', 'publisher-date-resolutions-v1'):
         file = root / (name + '.json')
         raw = file.read_bytes()
         require(hashlib.sha256(raw).hexdigest() == file.with_suffix('.sha256').read_text().split()[0], 'Frozen evidence changed; version corrections')
@@ -201,7 +201,7 @@ def check_frozen_evidence(root):
                 require((left['event'] == right['event']) == (pair['proposedLabel'] != 'different'), 'Label contradicts occurrence proposal')
                 require(pair['proposedLabel'] != 'same_event' or pair['scope'] == 'event', 'Roundups/editions cannot become event positives')
             require(300 <= len(base['pairs']) + len(report['pairs']) <= 500, 'Review batch outside issue pair budget')
-        elif name == 'publisher-diversity-v1':
+        elif name in ('publisher-diversity-v1', 'publisher-diversity-v2'):
             require(report['baseSHA256'] == hashlib.sha256(base_raw).hexdigest(), 'Wrong diversity base')
             supplement_raw = (root / 'publisher-review-supplement-v1.json').read_bytes()
             require(report['supplementSHA256'] == hashlib.sha256(supplement_raw).hexdigest(), 'Wrong diversity supplement')
@@ -221,6 +221,18 @@ def check_frozen_evidence(root):
             for pair in report['pairs']:
                 require(tuple(sorted((pair['left'], pair['right']))) not in edges, 'Prior review pair duplicated')
             require(300 <= len(base['pairs']) + len(supplement['pairs']) + len(report['pairs']) <= 500, 'Combined pair budget exceeded')
+            if name == 'publisher-diversity-v2':
+                original_raw = (root / 'publisher-diversity-v1.json').read_bytes()
+                expected = json.loads(original_raw)
+                expected['supersedesSHA256'] = hashlib.sha256(original_raw).hexdigest()
+                expected['assignmentCorrections'] = [dict(pair='diversity-024', document='doc-0931', previousEvent='trump-diesel-ban-reversal', event='g7-reserve-release', label='same_event', basis='Independent reviewer clarification after submitted pair sheet; broader fuel-policy grouping is a scoped exception to the separate-action rule.')]
+                next(d for d in expected['documents'] if d['id'] == 'doc-0931')['event'] = 'g7-reserve-release'
+                expected['events'] = [e for e in expected['events'] if e['id'] != 'trump-diesel-ban-reversal']
+                next(e for e in expected['events'] if e['id'] == 'g7-reserve-release')['reason'] = 'Reviewer groups the G7 reserve release and Trump export-ban reversal as one fuel-policy event for clustering; possible timeline context. This scoped exception does not redefine other event boundaries.'
+                pair = next(p for p in expected['pairs'] if p['id'] == 'diversity-024')
+                pair['proposedLabel'] = 'same_event'
+                pair['reason'] = 'Independent reviewer groups both decisions as one event for clustering, with possible timeline context.'
+                require(report == expected, 'Undeclared changes in reviewer correction')
         elif name == 'publisher-date-resolutions-v1':
             dates_raw = (root / 'publisher-timestamps-v2.json').read_bytes()
             require(report['timestampSHA256'] == hashlib.sha256(dates_raw).hexdigest(), 'Wrong timestamp evidence base')
