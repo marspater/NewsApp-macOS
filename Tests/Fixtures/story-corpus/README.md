@@ -155,7 +155,7 @@ To repeat source-page evidence collection, use a new private directory and a JSO
 ./test.sh --corpus-pages /private/evidence --corpus-urls /private/requests.json
 ./test.sh --corpus-page-texts /private/evidence
 python3 script/evaluation/publisher_dates.py --manifest Tests/Fixtures/story-corpus/publisher-review-v2.json \
-  --pages /private/evidence --output /private/timestamp-evidence.json
+  --pages /private/evidence --output /private/evidence/timestamp-evidence.json
 ```
 
 The Python date parser checks response hashes, scopes JSON-LD to the requested/publisher-canonical page, ignores nested recommendation dates and refuses dates without a timezone. Raw fields and unresolved cases stay visible. Frozen follow-up manifests are checked by `test.sh` for checksums, references, pending approvals, split isolation, declared corrections and absence of public publisher text. The two malformed Africanews records, video upload evidence and date-only primary releases require explicit reviewer treatment; never invent precise timestamps. The private supplemental review packet and blank approvals are in `/Users/marspater/Documents/NewsHoldout-2026-10-03/supplement-review-v2.md` and `supplement-pairs.csv`.
