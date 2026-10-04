@@ -278,18 +278,33 @@ extension Notification.Name {
     static let readerImageFinished = Notification.Name("readerImageFinished")
 }
 
+// The default loader retains the protected network path; native harnesses can supply an offline image.
+private struct ReaderImageLoaderKey: EnvironmentKey {
+    static let defaultValue: @Sendable (URL) async throws -> CGImage = {
+        try await SecureHTTPClient.shared.fetchReaderImage(from: $0)
+    }
+}
+
+extension EnvironmentValues {
+    var readerImageLoader: @Sendable (URL) async throws -> CGImage {
+        get { self[ReaderImageLoaderKey.self] }
+        set { self[ReaderImageLoaderKey.self] = newValue }
+    }
+}
+
 // Feed image URLs use the same bounded, validated network path as article content.
 struct ArticleRemoteImage<Content: View>: View {
     let url: URL
     @ViewBuilder var content: (AsyncImagePhase) -> Content
     @State private var phase: AsyncImagePhase = .empty
+    @Environment(\.readerImageLoader) private var loadImage
 
     var body: some View {
         content(phase)
             .task(id: url) {
                 phase = .empty
                 do {
-                    let image = try await SecureHTTPClient.shared.fetchReaderImage(from: url)
+                    let image = try await loadImage(url)
                     try Task.checkCancellation()
                     phase = .success(Image(image, scale: 1, label: Text("Article image")))
                     NotificationCenter.default.post(name: .readerImageFinished, object: url, userInfo: ["success": true])
