@@ -500,12 +500,11 @@ enum HTMLDOMBuilder {
             }
             let matches = Self.attrRegex.matches(in: attrString, range: NSRange(attrString.startIndex..., in: attrString))
             for match in matches {
-                    if let keyRange = Range(match.range(at: 1), in: attrString),
-                       let valRange = (2...4).compactMap({ Range(match.range(at: $0), in: attrString) }).first {
-                        let key = String(attrString[keyRange]).lowercased()
-                        let val = ContentExtractionPipeline.shared.decodeHTMLEntities(String(attrString[valRange]))
-                        attributes[key] = val
-                    }
+                if let keyRange = Range(match.range(at: 1), in: attrString),
+                   let valRange = (2...4).compactMap({ Range(match.range(at: $0), in: attrString) }).first {
+                    let key = String(attrString[keyRange]).lowercased()
+                    let val = ContentExtractionPipeline.shared.decodeHTMLEntities(String(attrString[valRange]))
+                    attributes[key] = val
                 }
             }
         }
