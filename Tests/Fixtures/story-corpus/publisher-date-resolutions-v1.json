@@ -1,0 +1,70 @@
+{
+  "version": 1,
+  "releaseEligible": false,
+  "reviewStatus": "pending",
+  "timestampSHA256": "4363eacbc3ce277c2f0a6880d3dd2d43483f5d02ab7879f96d957530e0ee4ff7",
+  "documents": [
+    {
+      "id": "doc-0658",
+      "url": "http://www.africanews.com/2026/10/02/at-least-5700-killed-wounded-in-haiti-gang-crisis-this-year-un/",
+      "pageSHA256": "d3ac7db5e591ae9b046af89d83e4943dd4bb545a15f30af84b9bac77ff0600cb",
+      "feedPublished": 1790967259,
+      "publisherCMS": [
+        {
+          "field": "cms:createdAt",
+          "epoch": 1790958799
+        },
+        {
+          "field": "cms:publishedAt",
+          "epoch": 1790967075
+        },
+        {
+          "field": "cms:firstPublishedAt",
+          "epoch": 1790967075
+        },
+        {
+          "field": "cms:lastPublishedAt",
+          "epoch": 1790967075
+        },
+        {
+          "field": "cms:updatedAt",
+          "epoch": 1790967259
+        }
+      ],
+      "proposedPublicationTime": "2026-10-02T18:51:15Z",
+      "reviewStatus": "pending",
+      "interpretation": "Page-scoped CMS firstPublishedAt/publishedAt/lastPublishedAt agree. JSON-LD datePublished equals CMS createdAt; the feed equals CMS updatedAt. The malformed OpenGraph publication field agrees with CMS publication after replacing the literal CEST separator with T. Keep the raw conflict evidence and the captured feed timestamp; this interpretation still needs independent reviewer approval."
+    },
+    {
+      "id": "doc-0684",
+      "url": "http://www.africanews.com/2026/10/01/algeria-adopts-law-imposing-death-penalty-on-forest-arsonists/",
+      "pageSHA256": "243269a8643411d21ff7c7251c4c76e56ea97b49e59f6a312509ff582cb61cd6",
+      "feedPublished": 1790874756,
+      "publisherCMS": [
+        {
+          "field": "cms:createdAt",
+          "epoch": 1790861705
+        },
+        {
+          "field": "cms:publishedAt",
+          "epoch": 1790869247
+        },
+        {
+          "field": "cms:firstPublishedAt",
+          "epoch": 1790869247
+        },
+        {
+          "field": "cms:lastPublishedAt",
+          "epoch": 1790869247
+        },
+        {
+          "field": "cms:updatedAt",
+          "epoch": 1790874756
+        }
+      ],
+      "proposedPublicationTime": "2026-10-01T15:40:47Z",
+      "reviewStatus": "pending",
+      "interpretation": "Page-scoped CMS firstPublishedAt/publishedAt/lastPublishedAt agree. JSON-LD datePublished equals CMS createdAt; the feed equals CMS updatedAt. The malformed OpenGraph publication field agrees with CMS publication after replacing the literal CEST separator with T. Keep the raw conflict evidence and the captured feed timestamp; this interpretation still needs independent reviewer approval."
+    }
+  ]
+}

@@ -10,7 +10,7 @@ from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import urljoin, urlsplit, urlunsplit, parse_qsl, urlencode
 
-from publisher_review import require, write_private
+from publisher_review import require, write_private, validate as validate_review
 
 
 def document_key(url):
@@ -36,6 +36,7 @@ class Page(HTMLParser):
         super().__init__(convert_charrefs=True)
         self.url, self.dates, self.links, self.scripts = url, [], [], []
         self.script = None
+        self.cms = []
         self.feed(text)
         self.close()
         identities = {document_key(url)} | {document_key(link['url']) for link in self.links if link['rel'] == 'canonical' and document_key(link['url']) is not None and urlsplit(link['url']).netloc == urlsplit(url).netloc}
@@ -77,6 +78,17 @@ class Page(HTMLParser):
 
     def handle_starttag(self, tag, attributes):
         a = dict(attributes)
+        if tag == 'div' and a.get('id') == 'jsMainMediaArticle' and urlsplit(self.url).hostname in ('africanews.com', 'www.africanews.com'):
+            raw = a.get('data-content') or ''
+            try:
+                data = json.loads(raw) if len(raw) <= 1_000_000 else None
+            except ValueError:
+                data = None
+            if isinstance(data, dict) and isinstance(data.get('canonical'), str) and document_key(data['canonical']) == document_key(self.url):
+                for field in ('createdAt', 'publishedAt', 'firstPublishedAt', 'lastPublishedAt', 'updatedAt'):
+                    value = data.get(field)
+                    if type(value) is int and 0 <= value <= 4_102_444_800:
+                        self.cms.append(dict(field='cms:' + field, epoch=value))
         if tag == 'meta':
             key = (a.get('property') or a.get('name') or a.get('itemprop') or '').lower()
             if key in ('article:published_time', 'og:article:published_time', 'datepublished'):
@@ -116,6 +128,8 @@ def verify(document, record, directory):
     require(hashlib.sha256(raw).hexdigest() == record['sha256'], 'Publisher response checksum mismatch')
     page = Page(raw.decode('utf-8', errors='replace'), record['finalURL'])
     result.update(pageSHA256=record['sha256'], fetchedAt=record['fetchedAt'], finalURL=record['finalURL'], dateEvidence=page.dates, observedLinks=page.links)
+    if page.cms:
+        result['publisherCMS'] = page.cms
     published = {d['epoch'] for d in page.dates if d['kind'] == 'datePublished' and d['epoch'] is not None}
     modified = {d['epoch'] for d in page.dates if d['kind'] == 'dateModified' and d['epoch'] is not None}
     result['status'] = 'no-zoned-publication-time' if not published else 'conflicting-publication-times'
@@ -134,7 +148,7 @@ def check_frozen_evidence(root):
     base_raw = (root / 'publisher-review-v2.json').read_bytes()
     base = json.loads(base_raw)
     originals = {d['id']: d for d in base['documents']}
-    for name in ('publisher-timestamps-v2', 'publisher-review-supplement-v1', 'publisher-url-investigation-v1'):
+    for name in ('publisher-timestamps-v2', 'publisher-review-supplement-v1', 'publisher-url-investigation-v1', 'publisher-diversity-v1', 'publisher-date-resolutions-v1'):
         file = root / (name + '.json')
         raw = file.read_bytes()
         require(hashlib.sha256(raw).hexdigest() == file.with_suffix('.sha256').read_text().split()[0], 'Frozen evidence changed; version corrections')
@@ -187,6 +201,38 @@ def check_frozen_evidence(root):
                 require((left['event'] == right['event']) == (pair['proposedLabel'] != 'different'), 'Label contradicts occurrence proposal')
                 require(pair['proposedLabel'] != 'same_event' or pair['scope'] == 'event', 'Roundups/editions cannot become event positives')
             require(300 <= len(base['pairs']) + len(report['pairs']) <= 500, 'Review batch outside issue pair budget')
+        elif name == 'publisher-diversity-v1':
+            require(report['baseSHA256'] == hashlib.sha256(base_raw).hexdigest(), 'Wrong diversity base')
+            supplement_raw = (root / 'publisher-review-supplement-v1.json').read_bytes()
+            require(report['supplementSHA256'] == hashlib.sha256(supplement_raw).hexdigest(), 'Wrong diversity supplement')
+            supplement = json.loads(supplement_raw)
+            prior_docs = originals | {d['id']: d for d in supplement['documents']}
+            prior_events = {e['id']: e for e in base['events'] + supplement['events']}
+            docs, events = validate_review(report)
+            urls = {d['url']: prior_events[d['event']]['split'] for d in prior_docs.values()}
+            edges = {tuple(sorted((p['left'], p['right']))) for p in base['pairs'] + supplement['pairs']}
+            for d in docs.values():
+                split = events[d['event']]['split']
+                require(urls.setdefault(d['url'], split) == split, 'URL crosses prior splits')
+                if d['id'] in prior_docs:
+                    old = prior_docs[d['id']]
+                    require(all(d.get(k) == old.get(k) for k in ('url', 'feed', 'source', 'language', 'published', 'captureIndex', 'event')), 'Prior evidence changed')
+                    require(events[d['event']]['family'] == prior_events[d['event']]['family'], 'Prior family changed')
+            for pair in report['pairs']:
+                require(tuple(sorted((pair['left'], pair['right']))) not in edges, 'Prior review pair duplicated')
+            require(300 <= len(base['pairs']) + len(supplement['pairs']) + len(report['pairs']) <= 500, 'Combined pair budget exceeded')
+        elif name == 'publisher-date-resolutions-v1':
+            dates_raw = (root / 'publisher-timestamps-v2.json').read_bytes()
+            require(report['timestampSHA256'] == hashlib.sha256(dates_raw).hexdigest(), 'Wrong timestamp evidence base')
+            require(report['reviewStatus'] == 'pending' and {d['id'] for d in report['documents']} == {'doc-0658', 'doc-0684'} and len(report['documents']) == 2, 'Date proposals are not approvals')
+            for d in report['documents']:
+                old = next(x for x in json.loads(dates_raw)['documents'] if x['id'] == d['id'])
+                require(d['pageSHA256'] == old['pageSHA256'] and d['url'] == old['url'] and d['feedPublished'] == old['feedPublished'], 'Date evidence rewritten')
+                cms = {x['field']: x['epoch'] for x in d['publisherCMS']}
+                require(cms['cms:publishedAt'] == cms['cms:firstPublishedAt'] == cms['cms:lastPublishedAt'] == instant(d['proposedPublicationTime']), 'Ambiguous CMS publication')
+                require(cms['cms:updatedAt'] == d['feedPublished'], 'Feed does not match CMS update')
+                require(any(x['kind'] == 'datePublished' and 'CEST' in x['raw'] and instant(x['raw'].replace('CEST', 'T', 1)) == cms['cms:firstPublishedAt'] for x in old['dateEvidence']), 'OpenGraph/CMS publication interpretation unsupported')
+                require(any(x['epoch'] == cms['cms:createdAt'] and x['field'].startswith('jsonld:') for x in old['dateEvidence']), 'JSON-LD creation interpretation unsupported')
         else:
             require(report['summary'] == dict(Counter(v['status'] for v in report['variants'])), 'URL inventory mismatch')
             require(report['tuning']['precision'] is None and report['tuning']['releaseGatePassed'] is False, 'Empty candidate pool cannot pass')
@@ -202,6 +248,17 @@ def self_check():
     for malformed in ({'@graph': None}, {'@type': None}, {'@type': 'NewsArticle', 'url': 'https://[bad', 'datePublished': '2026-10-02T10:00:00Z'}):
         bad = '<script type="application/ld+json">' + json.dumps(malformed) + '</script>'
         assert Page(bad, 'https://example.com/a').dates == []
+    cms = dict(canonical='https://www.africanews.com/article/', createdAt=100, publishedAt=200, firstPublishedAt=200, lastPublishedAt=200, updatedAt=300)
+    from html import escape
+    def cms_html(data, identifier='jsMainMediaArticle'):
+        return '<div id="' + identifier + '" data-content="' + escape(json.dumps(data), quote=True) + '"></div>'
+    assert len(Page(cms_html(cms), cms['canonical']).cms) == 5
+    assert not Page(cms_html(cms), 'https://www.africanews.com/other/').cms
+    assert not Page(cms_html(cms), 'https://example.com/article/').cms
+    assert not Page(cms_html(cms, 'related'), cms['canonical']).cms
+    assert not Page('<div id="jsMainMediaArticle" data-content>', cms['canonical']).cms
+    assert not Page('<div id="jsMainMediaArticle" data-content="{bad">', cms['canonical']).cms
+    assert not Page(cms_html(dict(cms, publishedAt=True, createdAt=-1, updatedAt=9_999_999_999, firstPublishedAt=None, lastPublishedAt='200')), cms['canonical']).cms
     with tempfile.TemporaryDirectory() as path:
         directory = Path(path)
         raw = html.encode()
