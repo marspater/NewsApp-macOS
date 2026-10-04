@@ -1054,6 +1054,17 @@ struct NewsTests {
         let citedList = "<ul>" + cited.replacingOccurrences(of: "<p>", with: "<li>").replacingOccurrences(of: "</p>", with: "</li>") + "</ul>"
         let listed = pipeline.extractFromHTML("<article><section>\(body)</section><section>\(citedList)</section><section><p>Closing: \(second)</p></section></article>")
         assertEqual(listed.content?.components(separatedBy: "\n\n").count, 13, "Cited list items count as prose, not navigation")
+        // #246: widgets inside an article must not make its final sections lose to the first section.
+        let widget = "<div class=\"related-stories\">" + teasers + "</div>"
+        let interrupted = pipeline.extractFromHTML("<article><section>\(body)</section>\(widget)<section><p>Ending one: \(prose)</p><p>Ending two: \(second)</p></section></article>")
+        assertEqual(interrupted.content?.components(separatedBy: "\n\n").count, 8, "An inline related widget keeps both surrounding article sections")
+        let splitCards = (1...10).map { "<li class=\"story-card\"><a href=\"/category/\($0)\">World news and politics</a> <a href=\"/other/\($0)\">Other headline number \($0) about another country</a> <a href=\"/publisher/\($0)\">The international reporting desk</a> Published this morning with the latest updates and background.</li>" }.joined()
+        let splitCarded = pipeline.extractFromHTML("<article><section>\(body)</section><ul>\(splitCards)</ul></article>")
+        assertEqual(splitCarded.content?.components(separatedBy: "\n\n").count, 6, "Split-link teaser cards cannot masquerade as cited prose")
+        assertFalse(splitCarded.content?.contains("Other headline") ?? true, "Card markup excludes multi-anchor teaser text")
+        assertEqual(HTMLDOMBuilder.parse(html: "<a class=\"card\" href=\"/story\">Linked card headline</a>").combinedText(), "Linked card headline", "A link styled as a card is traversed without recursive self-inspection")
+        let editorialCard = pipeline.extractFromHTML("<article><div class=\"card\"><p>\(prose) See <a href=\"/report\">the report</a>.</p><p>\(second) See <a href=\"/survey\">the survey</a>.</p></div></article>")
+        assertTrue(editorialCard.isSuccess, "Presentation cards containing mostly publisher prose retain inline citations")
         let placeholder = "<p>To view this video please enable JavaScript, and consider upgrading to a web browser that supports HTML5 video</p>"
         let pullQuote = "<p>“\(second) This is the line the editors chose to repeat as a pull quote in the middle of the story.”</p>"
         let furnished = pipeline.extractFromHTML("<article>\(placeholder)\(body)\(placeholder)\(pullQuote)\(placeholder)\(pullQuote)</article>")
