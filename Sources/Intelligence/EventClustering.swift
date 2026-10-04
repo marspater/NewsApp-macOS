@@ -9,8 +9,9 @@ struct EventClusteringReport: Equatable, Sendable {
     var changedEvents: Set<String> = []
 }
 
-/// Incremental, deterministic event clustering. Each pass handles only articles that are new or
-/// whose title or description changed since they were last matched, within the active lifetime.
+/// Incremental, deterministic event clustering. Each pass handles only articles that are new, whose
+/// title or description changed since they were last matched, or that an older matcher version
+/// processed, within the active lifetime.
 /// It never compares the archive with itself and makes no model call per pair.
 enum EventClusterer {
     static let batchSize = 100
@@ -49,11 +50,13 @@ enum EventClusterer {
                 let article = features(row)
                 let excluded = try await database.eventExclusions(of: row.id)
 
-                // A changed member stays only while it still fits the rest of its event.
+                // A changed member stays only while it still fits the rest of its event. An unchanged
+                // member pending only for a newer matcher keeps its event: the whole-event check now
+                // covers members that joined after it and would detach the earliest ones.
                 if let current = row.eventID, let event = try await database.eventMatchMembers(eventID: current) {
                     let others = event.members.filter { $0.id != row.id }
                     if !others.isEmpty {
-                        let fits = EventMatcher.eventScore(
+                        let fits = row.previouslyMatched || EventMatcher.eventScore(
                             for: article, members: others.map(features),
                             excluded: others.contains { excluded.contains($0.id) }, policy: matchPolicy) != nil
                         if fits {

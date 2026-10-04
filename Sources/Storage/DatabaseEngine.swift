@@ -2994,25 +2994,28 @@ actor DatabaseEngine {
     // MARK: - Event Matching
 
     private static let eventMatchColumns = """
-    SELECT a.id, a.title, coalesce(a.description, ''), a.source, \(DatabaseEngine.articleDateOrder), m.event_id
+    SELECT a.id, a.title, coalesce(a.description, ''), a.source, \(DatabaseEngine.articleDateOrder), m.event_id,
+        ms.article_id IS NOT NULL
     FROM articles a
     LEFT JOIN event_members m ON m.article_id = a.id
+    LEFT JOIN event_match_state ms ON ms.article_id = a.id
     """
 
     private func eventMatchRows(_ sql: String, _ values: [EventValue]) throws -> [EventMatchRow] {
         try eventRows(sql, values).compactMap { row in
             guard let id = row[0], let title = row[1] else { return nil }
             return EventMatchRow(id: id, title: title, description: row[2] ?? "", source: row[3] ?? "",
-                                 date: Date(timeIntervalSince1970: row[4].flatMap { Double($0) } ?? 0), eventID: row[5])
+                                 date: Date(timeIntervalSince1970: row[4].flatMap { Double($0) } ?? 0), eventID: row[5],
+                                 previouslyMatched: row[6] == "1")
         }
     }
 
     /// Visible articles dated after `activeSince` that the current matcher has not processed, oldest
-    /// first. Older articles are never matched again, so the archive is not recomputed.
+    /// first. Older articles are never matched again, so the archive is not recomputed. Rows pending
+    /// only because an older matcher processed them report `previouslyMatched`.
     func pendingEventMatchRows(activeSince: Date, matcherVersion: Int, limit: Int) throws -> [EventMatchRow] {
         try eventMatchRows("""
         \(Self.eventMatchColumns)
-        LEFT JOIN event_match_state ms ON ms.article_id = a.id
         WHERE (ms.article_id IS NULL OR ms.matcher_version < ?)
             AND \(Self.articleDateOrder) >= ? AND \(Self.visibleArticle)
         ORDER BY \(Self.articleDateOrder), a.id
