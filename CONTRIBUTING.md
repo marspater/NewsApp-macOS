@@ -16,6 +16,10 @@ Build on Apple silicon with Xcode 27 selected. The deployment target remains mac
 ./test.sh --performance-baseline --active-work-cancellation # Active clustering, ingestion and feed parsing cancellation; temporary stress fixtures
 ./script/native_performance_baseline.sh # Isolated MainView window, rendered-card samples and process memory
 NEWS_NATIVE_HARNESS=Tests/NativeReadingMemory.swift ./script/native_performance_baseline.sh # Live: read 20 stories twice in the production reader, isolated; waits until each image is decoded
+./script/test_voiceover_live_qa.sh --self-test # Bounded command-protocol regressions, no AX permission required
+./script/test_voiceover_live_qa.sh --smoke     # Isolated production views and offline image/render evidence
+./script/test_voiceover_live_qa.sh --live      # Rendered AX tree, actions/persistence and production update notifications
+./script/test_voiceover_live_qa.sh --manual    # Interactive isolated fixture for spoken VoiceOver/rotor traversal
 ./script/test_native_ui_qa.sh        # Automated Native UI QA checks with system settings overrides (#155, #123)
 ./script/run_isolated.sh [OPTIONS]   # Launch isolated app with simulated Increase Contrast, Reduce Motion, VoiceOver
 ./script/launch_baseline.sh       # Production bundle under a separate identifier: launch to first card and memory, seeded library
@@ -45,6 +49,10 @@ The native performance script requires an active Mac desktop. It compiles the pr
 `script/launch_baseline.sh` also needs an active desktop. It builds the production bundle under the identifier `com.marspater.news.launchcheck`, so its sandbox container is separate from the installed app, seeds that container with 10,000 stories and opens the app several times. Its feed points at a reserved `.invalid` host. The first-card time comes from a one-time `FirstCard` signpost and log line in the app.
 
 Before publication, fetch `origin/main`, review the diff and run checks affected by the change. Never report a check as passing unless it completed successfully. Record noteworthy behavior changes in [CHANGELOG.md](CHANGELOG.md); dated evidence belongs in `docs/audits/`.
+
+The VoiceOver harness builds a separate `com.marspater.news.voiceoverqa` bundle and uses temporary SQLite and preferences. Its view environment supplies an in-memory image; the installed app and its protected image loader remain unchanged. Output goes to the printed temporary directory or `NEWS_VOICEOVER_OUTPUT`. Compilation has a 300-second deadline and automated runs a 120-second process-group deadline; commands and AX inspection have shorter internal deadlines. Missing Accessibility access or unsupported announcement observation is a reported prerequisite failure, not a crash or passing check.
+
+`--live` checks rendered AX nodes while scrolling, invokes card actions and verifies SQLite state, opens/dismisses a real citation and observes the production feed-buffer notification after inserting three fixture stories. Missing numeric heading metadata is reported as unverified and requires the manual rotor pass. AX tree order and observed notifications do not establish VoiceOver cursor order, rotor traversal, pronunciation or speech. Use `--manual`, enable VoiceOver yourself, and record that separate pass before closing #155. The Fixtures menu switches between Feed, Source Reader and Event Overview. On Feed, Queue New Stories holds the list through its production navigation command and inserts three stories. Close the fixture window to clean up. The harness does not change system accessibility settings.
 
 ## Story experience tracking
 
