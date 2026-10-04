@@ -25,3 +25,9 @@ Baseline: main `5d78d7f`, 323 open findings. The security gate had already been 
 ## Validation
 
 Run `./test.sh` and an isolated `./build.sh` against the final source. Verify the resulting executable is arm64 and the ad-hoc bundle passes strict signature verification. Fresh hosted analysis, rather than this document, determines the final open count and quality gate.
+
+## Evidence output follow-up — 4 October 2026
+
+Current main `9b63393` failed the security-rating condition. The shared Python evidence writer now enforces the private-directory rules for every caller, including direct date-evidence output. It rejects parent traversal and Git/non-private destinations, checks the opened directory's ownership/permissions, and creates only a basename relative to that descriptor with exclusive/no-follow flags and mode 0600. Existing files and symlinks remain untouched. No analyzer rule or gate is suppressed.
+
+The existing reviewer self-check now covers rejected public/Git/traversal destinations, existing destination symlinks, successful private creation and overwrite refusal. Frozen base/diversity and publisher-date self-checks passed without export or predictions. Full regressions and hosted analysis are recorded with the follow-up PR.

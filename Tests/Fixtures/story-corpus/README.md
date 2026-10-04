@@ -155,7 +155,7 @@ To repeat source-page evidence collection, use a new private directory and a JSO
 ./test.sh --corpus-pages /private/evidence --corpus-urls /private/requests.json
 ./test.sh --corpus-page-texts /private/evidence
 python3 script/evaluation/publisher_dates.py --manifest Tests/Fixtures/story-corpus/publisher-review-v2.json \
-  --pages /private/evidence --output /private/timestamp-evidence.json
+  --pages /private/evidence --output /private/evidence/timestamp-evidence.json
 ```
 
 The Python date parser checks response hashes, scopes JSON-LD to the requested/publisher-canonical page, ignores nested recommendation dates and refuses dates without a timezone. Raw fields and unresolved cases stay visible. Frozen follow-up manifests are checked by `test.sh` for checksums, references, pending approvals, split isolation, declared corrections and absence of public publisher text. The two malformed Africanews records, video upload evidence and date-only primary releases require explicit reviewer treatment; never invent precise timestamps. The private supplemental review packet and blank approvals are in `/Users/marspater/Documents/NewsHoldout-2026-10-03/supplement-review-v2.md` and `supplement-pairs.csv`.
@@ -176,7 +176,7 @@ python3 script/evaluation/publisher_review.py \
   --capture /private/path/capture-1791053699105.json --output /private/new-review-directory
 ```
 
-The output directory must already exist, be owned by the user with mode 0700, and remain outside Git. The tool leaves decisions blank and rejects undated replay inputs even if a reviewer file claims verification. This command prepares only this batch, not a combined acceptance corpus. All batch labels and event assignments need independent review; the supplements' explicit corrections and document-only comparisons must be reconciled before a combined export. The new private packet is at `/Users/marspater/Documents/NewsHoldout-2026-10-03/diversity-review/`: `review.md`, `pairs.csv`, and `publisher-context.md` (captured input separated from later page text). No fingerprint or event holdout predictions were run.
+Every private evidence writer requires an existing output directory owned by the user with mode 0700 outside Git, including the date tool's `--output` parent. Parent traversal is rejected; files are created exclusively with mode 0600 relative to a checked directory descriptor, without following a destination symlink. The tool leaves decisions blank and rejects undated replay inputs even if a reviewer file claims verification. This command prepares only this batch, not a combined acceptance corpus. All batch labels and event assignments need independent review; the supplements' explicit corrections and document-only comparisons must be reconciled before a combined export. The new private packet is at `/Users/marspater/Documents/NewsHoldout-2026-10-03/diversity-review/`: `review.md`, `pairs.csv`, and `publisher-context.md` (captured input separated from later page text). No fingerprint or event holdout predictions were run.
 
 ## Independent diversity pair adjudication — 4 October 2026
 
