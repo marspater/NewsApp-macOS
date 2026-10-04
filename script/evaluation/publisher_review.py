@@ -5,6 +5,7 @@ import csv
 import hashlib
 import io
 import json
+import math
 import os
 import pathlib
 import tempfile
@@ -87,6 +88,7 @@ def prepare(manifest, capture_path, output, labels_path=None):
         require(set(review.get('verifiedTimestampIDs', [])) == set(documents), 'Verify all publisher timestamps before replay')
         # The native clusterer scores all pairs, including links outside the review sample.
         require(review.get('allEventAssignmentsReviewed') is True, 'Review every event assignment, including singleton boundaries')
+        require(all(type(d.get('published')) in (int, float) and math.isfinite(d['published']) for d in documents.values()), 'Undated captured inputs require a reviewed exclusion before replay; never invent timestamps')
         articles = [dict(id=d['id'], url=d['url'], title=items[d['id']]['title'], description=items[d['id']]['description'], source=d['source'],
                          published=datetime.fromtimestamp(d['published'], timezone.utc).isoformat().replace('+00:00', 'Z'),
                          event=d['event'], split=events[d['event']]['split']) for d in documents.values()]
@@ -103,7 +105,7 @@ def prepare(manifest, capture_path, output, labels_path=None):
                 continue
             item = items[document['id']]
             lines += [f"### {document['id']}: {item['title']}", '', f"Source: {document['source']} / {document['language']}",
-                      f"URL: {document['url']}", f"Feed timestamp: {datetime.fromtimestamp(document['published'], timezone.utc).isoformat()}", '',
+                      f"URL: {document['url']}", f"Feed timestamp: {datetime.fromtimestamp(document['published'], timezone.utc).isoformat() if document.get('published') is not None else 'Unknown (feed supplied no date)'}", '',
                       item['description'], '']
     table = io.StringIO()
     writer = csv.writer(table)
@@ -143,15 +145,42 @@ def self_check(manifest):
             raise AssertionError('Existing reviewer data overwritten')
         assert file.read_text() == 'original' and file.stat().st_mode & 0o077 == 0
 
+    # A label file cannot turn an undated captured input into a replay timestamp.
+    with tempfile.TemporaryDirectory(prefix='news-undated-check-') as path:
+        directory = pathlib.Path(path)
+        event = dict(manifest['events'][0])
+        items = [dict(link='https://example.test/' + name, feed='https://example.test/feed', source='Control', language='en', published=date, title='Synthetic control', description='Synthetic control') for name, date in (('a', None), ('b', 1))]
+        raw = json.dumps(dict(version=1, items=items))
+        capture = directory / 'capture.json'
+        write_private(capture, raw)
+        documents = [dict(id=name, captureIndex=i, event=event['id'], url=item['link'], **{k: item[k] for k in ('feed', 'source', 'language', 'published')}) for i, (name, item) in enumerate(zip(('a', 'b'), items))]
+        proposal = dict(version=2, releaseEligible=False, captureSHA256=hashlib.sha256(raw.encode()).hexdigest(), events=[event], documents=documents, pairs=[dict(id='control', left='a', right='b', split=event['split'], proposedLabel='same_event', reviewStatus='pending', reason='Synthetic control')])
+        labels = directory / 'labels.json'
+        write_private(labels, json.dumps(dict(reviewer='Synthetic self-check', reviewedAt='2026-10-04', labels={'control': 'same_event'}, verifiedTimestampIDs=['a', 'b'], allEventAssignmentsReviewed=True)))
+        packet = directory / 'packet'
+        packet.mkdir(mode=0o700)
+        from contextlib import redirect_stdout
+        with redirect_stdout(io.StringIO()):
+            prepare(proposal, capture, packet)
+        assert 'Unknown (feed supplied no date)' in (packet / 'review.md').read_text()
+        try:
+            prepare(proposal, capture, packet, labels)
+        except ValueError as error:
+            assert 'Undated captured inputs' in str(error)
+        else:
+            raise AssertionError('Undated evidence exported')
+        assert not (packet / 'reviewed-event-corpus.json').exists()
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--manifest', type=pathlib.Path, default=DEFAULT)
     parser.add_argument('--capture', type=pathlib.Path)
     parser.add_argument('--output', type=pathlib.Path)
     parser.add_argument('--labels', type=pathlib.Path)
     args = parser.parse_args()
-    raw = DEFAULT.read_bytes()
-    require(hashlib.sha256(raw).hexdigest() == DEFAULT.with_suffix('.sha256').read_text().split()[0], 'Frozen proposal changed; version corrections')
+    raw = args.manifest.read_bytes()
+    require(hashlib.sha256(raw).hexdigest() == args.manifest.with_suffix('.sha256').read_text().split()[0], 'Frozen proposal changed; version corrections')
     manifest = json.loads(raw)
     self_check(manifest)
     require(bool(args.capture) == bool(args.output), 'Supply both --capture and --output')

@@ -159,3 +159,21 @@ python3 script/evaluation/publisher_dates.py --manifest Tests/Fixtures/story-cor
 ```
 
 The Python date parser checks response hashes, scopes JSON-LD to the requested/publisher-canonical page, ignores nested recommendation dates and refuses dates without a timezone. Raw fields and unresolved cases stay visible. Frozen follow-up manifests are checked by `test.sh` for checksums, references, pending approvals, split isolation, declared corrections and absence of public publisher text. The two malformed Africanews records, video upload evidence and date-only primary releases require explicit reviewer treatment; never invent precise timestamps. The private supplemental review packet and blank approvals are in `/Users/marspater/Documents/NewsHoldout-2026-10-03/supplement-review-v2.md` and `supplement-pairs.csv`.
+
+## Additional event diversity — 4 October 2026
+
+`publisher-diversity-v1.json` adds 26 proposals (14 same-event, 12 different), using 26 new captured observations and 11 references to earlier observations. The combined review pool has 261 distinct observation IDs and 488 pairs. Twelve subject/action groups were selected before inspecting their fixed family split. Existing related families, observed URLs, feed dates, v2 and the earlier supplement are unchanged. The new sheet has 16 tuning and ten holdout pairs; four new occurrences contribute positive holdout pairs: the Renee Good family lawsuits, France/Italy football draw, Ethiopia/Eritrea diplomatic severance and Cornell consent-law pledge. These remain proposals, not accepted labels.
+
+The France/Italy pair shares one publisher; French UK/EU poll coverage cites the Guardian, and trial coverage can share AP reporting. Treat these as correlated reports, not independent corroboration. The pool still concentrates 36 of 79 proposed positive holdout pairs in the Spanish housing rally (about 46%); four added occurrences reduce that concentration but do not establish broad release support. The DW diesel-reversal observation supplied no feed date, so it is excluded from replay proposals, recorded in `excludedCandidates`, and retained privately as context. Publisher metadata must not invent an input the app never received.
+
+`publisher-date-resolutions-v1.json` records a pending interpretation of the two Africanews conflicts from the same preserved response bytes. Only the page's `jsMainMediaArticle` CMS data with a canonical URL matching the requested document is read. CMS first/publication/last-publication fields agree; JSON-LD's `datePublished` equals CMS creation, while the feed equals CMS update. The malformed OpenGraph publication fields also agree with CMS publication after replacing their literal `CEST` separator with `T`. The original timestamp artifact remains immutable; publication interpretations and independent approvals stay separate from captured replay dates.
+
+The existing preparation tool now accepts an explicit frozen manifest:
+
+```sh
+python3 script/evaluation/publisher_review.py \
+  --manifest Tests/Fixtures/story-corpus/publisher-diversity-v1.json \
+  --capture /private/path/capture-1791053699105.json --output /private/new-review-directory
+```
+
+The output directory must already exist, be owned by the user with mode 0700, and remain outside Git. The tool leaves decisions blank and rejects undated replay inputs even if a reviewer file claims verification. This command prepares only this batch, not a combined acceptance corpus. All batch labels and event assignments need independent review; the supplements' explicit corrections and document-only comparisons must be reconciled before a combined export. The new private packet is at `/Users/marspater/Documents/NewsHoldout-2026-10-03/diversity-review/`: `review.md`, `pairs.csv`, and `publisher-context.md` (captured input separated from later page text). No fingerprint or event holdout predictions were run.
