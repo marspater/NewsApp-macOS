@@ -1,0 +1,870 @@
+{
+  "base": "03a0a8e",
+  "sameResponseComparison": true,
+  "pages": [
+    {
+      "url": "https://www.theguardian.com/media/2026/oct/03/russell-t-davies-interview-doctor-who-fierce-fandom-love-grief",
+      "responseSHA256": "fc384b4729ed96713ac6b652b576dacc840683ec8a72c8114e01ec60c012f8d4",
+      "beforeBlocks": 26,
+      "afterBlocks": 26,
+      "unchanged": true,
+      "beforeError": null,
+      "afterError": null
+    },
+    {
+      "url": "https://www.franceinfo.fr/societe/education/blocage-des-lycees/direct-blocage-des-lycees-les-lyceens-ont-evidemment-le-droit-de-manifester-et-nous-avons-au-gouvernement-le-devoir-de-les-entendre-assure-le-ministre-de-l-action-et-des-comptes-publics-david-amiel_8220925.html#xtor=RSS-3-%5Blestitres%5D",
+      "responseSHA256": "ee43ede5cd366bfcc2a58b1f3bed289540e9721c57716d7bc59bddfb4ab8348e",
+      "beforeBlocks": 41,
+      "afterBlocks": 41,
+      "unchanged": true,
+      "beforeError": null,
+      "afterError": null
+    },
+    {
+      "url": "https://science.nasa.gov/image-article/apod-2026-october-3-selfie-at-vera-rubin-ridge/",
+      "responseSHA256": "458dccdede4a29da25abfc6f4f4d5cf6616718479a820f822382324c2dcfe08b",
+      "beforeBlocks": 9,
+      "afterBlocks": 9,
+      "unchanged": true,
+      "beforeError": null,
+      "afterError": null
+    },
+    {
+      "url": "https://www.sciencenews.org/article/hypernovas-real-elements-space",
+      "responseSHA256": "93a42be557c6f60e939b4a7e0d89caaea633d256df2c10bf2f305d59cf720776",
+      "beforeBlocks": 10,
+      "afterBlocks": 10,
+      "unchanged": true,
+      "beforeError": null,
+      "afterError": null
+    },
+    {
+      "url": "https://www.fastcompany.com/91616813/the-secret-message-of-john-wilsons-debut-feature-documentary-the-history-of-concrete",
+      "responseSHA256": "5d6896a97b0344abef0607b7b3e7a281acffcfdb04fba9b9eac301ab98c9654b",
+      "beforeBlocks": 8,
+      "afterBlocks": 8,
+      "unchanged": true,
+      "beforeError": null,
+      "afterError": null
+    },
+    {
+      "url": "https://variety.com/2026/music/news/zach-bryan-palestine-shirt-robert-kraft-gillette-stadium-1236898152/",
+      "responseSHA256": "85340c31d24661403abe8c6e2ec188b23f0f01b21d86b0fb50f095c1575fd23d",
+      "beforeBlocks": 28,
+      "afterBlocks": 28,
+      "unchanged": true,
+      "beforeError": null,
+      "afterError": null
+    },
+    {
+      "url": "https://www.eater.com/maps/best-mexico-city-restaurants-38",
+      "responseSHA256": "ef792d39dd9b153925fd5b95f4da66e5ae2c81a9b096a8e5be7f5d248b74f001",
+      "beforeBlocks": 156,
+      "afterBlocks": 156,
+      "unchanged": true,
+      "beforeError": null,
+      "afterError": null
+    },
+    {
+      "url": "https://www.theguardian.com/politics/live/2026/oct/03/green-party-conference-zack-polanski-uk-politics-latest-news-updates-labour-conservatives-reform",
+      "responseSHA256": "7e2c93cb7e5c3b340c6924a1528a1cdc5b2ae2786e5fdf62cf5ccd0a65922728",
+      "beforeBlocks": 81,
+      "afterBlocks": 81,
+      "unchanged": true,
+      "beforeError": null,
+      "afterError": null
+    },
+    {
+      "url": "https://www.franceinfo.fr/monde/usa/le-directeur-de-l-administration-penitentiaire-du-tennessee-demissionne-apres-l-echec-de-l-execution-de-la-condamnee-a-mort-christa-pike-annonce-le-gouverneur-d-etat_8221396.html#xtor=RSS-3-%5Blestitres%5D",
+      "responseSHA256": "3446cf38550161e94473eaa8b6409f9dd1e4290b703b99d6a46b63054849db56",
+      "beforeBlocks": 11,
+      "afterBlocks": 11,
+      "unchanged": true,
+      "beforeError": null,
+      "afterError": null
+    },
+    {
+      "url": "https://lifehacker.com/entertainment/the-top-10-streaming-series-september-2026?utm_medium=RSS",
+      "responseSHA256": "394ebcb3155d39334fe2aa8919f0f1b8110a4c4e4e62649ee22de6fbbc20056d",
+      "beforeBlocks": 32,
+      "afterBlocks": 32,
+      "unchanged": true,
+      "beforeError": null,
+      "afterError": null
+    },
+    {
+      "url": "https://www.dw.com/de/gegen-den-krieg-f%C3%BCr-den-dialog-ein-orthodoxer-bischof-in-europa/a-79518391?maca=de-rss-de-all-1119-rdf",
+      "responseSHA256": "c6a0338085805761d0d61eae9144ae6391e94fa032faa1ef18c4e6f8bdfc16d9",
+      "beforeBlocks": 18,
+      "afterBlocks": 18,
+      "unchanged": true,
+      "beforeError": null,
+      "afterError": null
+    },
+    {
+      "url": "https://arstechnica.com/security/2026/10/apple-changes-full-disk-access-permissions-to-curb-abuse-from-ai-agents/",
+      "responseSHA256": "80c6ef137916f6964df5c2f1ee646f49ab4bc7964ab22fa7ac6588223c709c10",
+      "beforeBlocks": 16,
+      "afterBlocks": 16,
+      "unchanged": true,
+      "beforeError": null,
+      "afterError": null
+    },
+    {
+      "url": "https://variety.com/2026/film/box-office/box-office-digger-verity-resident-evil-primetime-1236895074/",
+      "responseSHA256": "dd73c148d1ddb2cadd65fd035e9cc9f0846cbcc1165bf5044784708ddcf2631e",
+      "beforeBlocks": 9,
+      "afterBlocks": 9,
+      "unchanged": true,
+      "beforeError": null,
+      "afterError": null
+    },
+    {
+      "url": "https://www.politico.com/newsletters/new-york-playbook-pm/2026/10/02/hochul-eyes-changes-to-states-rape-law-amid-cornell-crisis-01105127",
+      "responseSHA256": "beebb996809bf8cd41d0b365c6b56d57efb2404bad97d66715e5bdaf622831b3",
+      "beforeBlocks": 0,
+      "afterBlocks": 0,
+      "unchanged": true,
+      "beforeError": "Content too short (70 characters, minimum 150 required)",
+      "afterError": "Content too short (70 characters, minimum 150 required)"
+    },
+    {
+      "url": "https://www.theguardian.com/food/2026/oct/03/vegetarian-endive-au-gratin-recipe-henry-harris",
+      "responseSHA256": "b9152efad74e0aa4ddec12edd2054a922dc493d6f488c821fd7d91702c556a8c",
+      "beforeBlocks": 19,
+      "afterBlocks": 19,
+      "unchanged": true,
+      "beforeError": null,
+      "afterError": null
+    },
+    {
+      "url": "https://www.nasa.gov/news-release/nasa-astronaut-christina-koch-to-join-nfl-fans-in-philadelphia/",
+      "responseSHA256": "63013a35fc1263a4f7c1ef1242cce98036d3b651e6048e0fc5b2dc3ac2859a81",
+      "beforeBlocks": 16,
+      "afterBlocks": 16,
+      "unchanged": true,
+      "beforeError": null,
+      "afterError": null
+    },
+    {
+      "url": "https://www.bbc.co.uk/news/articles/cmn8e887716vo?at_medium=RSS&at_campaign=rss",
+      "responseSHA256": "308f20c3afa6b966dd0ff63c1ca218df7d4fed1b27eeeadef4321926a241ad82",
+      "beforeBlocks": 19,
+      "afterBlocks": 19,
+      "unchanged": true,
+      "beforeError": null,
+      "afterError": null
+    },
+    {
+      "url": "https://kffhealthnews.org/health-industry/insurance-issue-delayed-copd-prescription-breathing-problems-suicide-texas/",
+      "responseSHA256": "56a5437554d45f8980900e90b44ecd0fa7f92bfa57f763004b87c4ebde3cbb90",
+      "beforeBlocks": 47,
+      "afterBlocks": 47,
+      "unchanged": true,
+      "beforeError": null,
+      "afterError": null
+    },
+    {
+      "url": "https://www.theguardian.com/world/2026/oct/03/libyan-unity-talks-warlord-son-linked-drone-attack-khalifa-haftar",
+      "responseSHA256": "4051085fd898b00bb92fea1cb6b74629c321c75f9e43be5feb2f8702ab8deb36",
+      "beforeBlocks": 20,
+      "afterBlocks": 20,
+      "unchanged": true,
+      "beforeError": null,
+      "afterError": null
+    },
+    {
+      "url": "https://www.engadget.com/2276577/former-openai-employee-says-ai-should-be-regulated-like-nuclear-power-plants/",
+      "responseSHA256": "0812a3247c8bc7495fad668ba3b3b4933b486875727046d26df7049dc4d20a36",
+      "beforeBlocks": 8,
+      "afterBlocks": 8,
+      "unchanged": true,
+      "beforeError": null,
+      "afterError": null
+    },
+    {
+      "url": "https://www.france24.com/en/europe/20261003-italy-ustica-enigma-can-french-files-solve-mystery-crash-blamed-on-stray-missile-gaddafi",
+      "responseSHA256": "c15fecb5a355582c79b1a3132a82acd0331699a03b6d10ee8d5d9001d2e47872",
+      "beforeBlocks": 39,
+      "afterBlocks": 39,
+      "unchanged": true,
+      "beforeError": null,
+      "afterError": null
+    },
+    {
+      "url": "https://www.euronews.com/video/2026/10/03/latest-news-bulletin-october-3rd-2026-evening",
+      "responseSHA256": "5be02944163b16221932891c2b3396cf25dd8e4583c8980b1e5c67164c499081",
+      "beforeBlocks": 35,
+      "afterBlocks": 35,
+      "unchanged": true,
+      "beforeError": null,
+      "afterError": null
+    },
+    {
+      "url": "https://www.theguardian.com/music/2026/oct/03/my-hips-cant-help-but-move-readers-on-the-songs-that-always-get-them-dancing",
+      "responseSHA256": "c23212aed22cb318571c92f60a8a3e9e3888cc0d5a088da376e39685d48632e7",
+      "beforeBlocks": 49,
+      "afterBlocks": 49,
+      "unchanged": true,
+      "beforeError": null,
+      "afterError": null
+    },
+    {
+      "url": "https://techcrunch.com/2026/10/03/openai-safety-employee-resigns-claiming-the-companys-culture-is-broken/",
+      "responseSHA256": "6be969cef700e2ee2f57cbd2f473d9a073bb20023a641f793609c182873f08b9",
+      "beforeBlocks": 14,
+      "afterBlocks": 14,
+      "unchanged": true,
+      "beforeError": null,
+      "afterError": null
+    },
+    {
+      "url": "https://www.tagesschau.de/wirtschaft/konjunktur/ostdeutschland-wirtschaftsstandort-beschaeftigung-100.html",
+      "responseSHA256": "c6b3caa213071d0cad867be9652ad96fe9841844b3118d2c6163ff28b5d35917",
+      "beforeBlocks": 47,
+      "afterBlocks": 47,
+      "unchanged": true,
+      "beforeError": null,
+      "afterError": null
+    },
+    {
+      "url": "https://event.on24.com/wcc/r/5510255/64A1C3695631E727E756BFCA0490437A?utm_source=IEEE",
+      "responseSHA256": "a3d50cb5f43ff044673de283554cab89601ac6422e34d912d6fe08ad52e34487",
+      "beforeBlocks": 0,
+      "afterBlocks": 0,
+      "unchanged": true,
+      "beforeError": "Content too short (112 characters, minimum 150 required)",
+      "afterError": "Content too short (112 characters, minimum 150 required)"
+    },
+    {
+      "url": "https://www.tagesschau.de/inland/gesellschaft/einheitsfeier-steinmeier-100.html",
+      "responseSHA256": "7a2c7d29aa47fae1a83b4c3221513708d83002db773a8ab493952064f5297bc9",
+      "beforeBlocks": 31,
+      "afterBlocks": 31,
+      "unchanged": true,
+      "beforeError": null,
+      "afterError": null
+    },
+    {
+      "url": "https://www.engadget.com/2273351/how-to-customize-iphone-camera-control/",
+      "responseSHA256": "29b6aeb8bd7cf89fe6f116a5a01b0df672373ed7f6b2aaaff410a71c700339ad",
+      "beforeBlocks": 32,
+      "afterBlocks": 32,
+      "unchanged": true,
+      "beforeError": null,
+      "afterError": null
+    },
+    {
+      "url": "https://hackaday.com/2026/10/03/fixing-a-power-grid-that-loses-over-half-its-power-to-inefficiency-and-theft/",
+      "responseSHA256": "be85f7778a75e6bef2e3266ebf8b65265df2c11dd03c2c0e5677f6140ede75e7",
+      "beforeBlocks": 6,
+      "afterBlocks": 6,
+      "unchanged": true,
+      "beforeError": null,
+      "afterError": null
+    },
+    {
+      "url": "https://www.cnbc.com/2026/10/03/tesla-cybercab-pressure-to-expand-after-rocky-first-month-in-austin.html",
+      "responseSHA256": "ac533ab3ac47763d5e6b5c7c46252183d3214c50f7f40b71ff7eb872e3f1e10c",
+      "beforeBlocks": 39,
+      "afterBlocks": 39,
+      "unchanged": true,
+      "beforeError": null,
+      "afterError": null
+    },
+    {
+      "url": "https://hackaday.com/2026/10/03/own-the-osd-chip-in-your-cheap-composite-monitor/",
+      "responseSHA256": "66d43b78c774284f40bb9a737fba708343e9eb98f24aa294d7f3d28542316e15",
+      "beforeBlocks": 3,
+      "afterBlocks": 3,
+      "unchanged": true,
+      "beforeError": null,
+      "afterError": null
+    },
+    {
+      "url": "https://techcrunch.com/2026/10/03/jack-dorseys-bitchat-disappears-from-app-stores-in-india-after-government-order/",
+      "responseSHA256": "e56e0b983df70d58f7dd35d5c0e7fbc651d02b78e31824ba1c4ea047d2ac1300",
+      "beforeBlocks": 12,
+      "afterBlocks": 12,
+      "unchanged": true,
+      "beforeError": null,
+      "afterError": null
+    },
+    {
+      "url": "https://www.politico.com/news/2026/10/03/paxton-texas-senate-trump-gop-money-woes-01105707",
+      "responseSHA256": "a17ff0550fb47338527269bc46a1563ab30248495386d1aa86228cd5141868e4",
+      "beforeBlocks": 7,
+      "afterBlocks": 7,
+      "unchanged": true,
+      "beforeError": null,
+      "afterError": null
+    },
+    {
+      "url": "https://www.fastcompany.com/91617320/this-checklist-can-protect-you-against-the-latest-ai-enhanced-scams",
+      "responseSHA256": "1f48e50ad776439199e52fd02d43f43fecc8aa4802786d0748544bf65f874d5e",
+      "beforeBlocks": 8,
+      "afterBlocks": 8,
+      "unchanged": true,
+      "beforeError": null,
+      "afterError": null
+    },
+    {
+      "url": "https://spectrum.ieee.org/electricity-theft",
+      "responseSHA256": "619b77d96407569d9c38bed5a2fc7dc473ae8a8998539a3d36d3990616cfd694",
+      "beforeBlocks": 31,
+      "afterBlocks": 31,
+      "unchanged": true,
+      "beforeError": null,
+      "afterError": null
+    },
+    {
+      "url": "https://www.theguardian.com/food/2026/oct/02/have-your-cake-and-drink-it-cocktail-recipe-pale-hall-bala",
+      "responseSHA256": "bba37100b59f490d8e85320b6ee683c1e42e93888e71ac6bcc47d0fbf02f2480",
+      "beforeBlocks": 14,
+      "afterBlocks": 14,
+      "unchanged": true,
+      "beforeError": null,
+      "afterError": null
+    },
+    {
+      "url": "https://www.sciencenews.org/article/yosemite-toads-fungus-chytrid-winter",
+      "responseSHA256": "fd01292eeacc0b901b494276216e393d48ea04c58e23a559149ea0cac10c556f",
+      "beforeBlocks": 10,
+      "afterBlocks": 10,
+      "unchanged": true,
+      "beforeError": null,
+      "afterError": null
+    },
+    {
+      "url": "https://www.eater.com/23943616/best-advent-calendars-to-buy-now-2026-chocolate-tea-jam",
+      "responseSHA256": "7e4b638b002ebfe73a0e3a727b6a44f9592e9349140cf9f6df408808943b8e5a",
+      "beforeBlocks": 58,
+      "afterBlocks": 58,
+      "unchanged": true,
+      "beforeError": null,
+      "afterError": null
+    },
+    {
+      "url": "https://www.radiosvoboda.org/a/news-drony-rakety-v-moldovi/33869757.html",
+      "responseSHA256": "b3316e33b7554044d6a6e289eaf1ecb765ed72fa5a84a787d157d79b20a74ff2",
+      "beforeBlocks": 12,
+      "afterBlocks": 12,
+      "unchanged": true,
+      "beforeError": null,
+      "afterError": null
+    },
+    {
+      "url": "https://timesofindia.indiatimes.com/india/congress-resets-team-uttar-pradesh-5-clear-messages-for-bjp-and-akhilesh-yadav/articleshow/134656164.cms",
+      "responseSHA256": "25a724206c4b08b901a50f05437244c45faf2bf700ba86c7b6284d18ffb836d4",
+      "beforeBlocks": 22,
+      "afterBlocks": 22,
+      "unchanged": true,
+      "beforeError": null,
+      "afterError": null
+    },
+    {
+      "url": "https://www.cnbc.com/2026/10/03/david-ellison-ynon-kreiz-skydance.html",
+      "responseSHA256": "9855114dcb2366721b1396c78bf895ab7dfd4c1732191fce549362f029c21b6b",
+      "beforeBlocks": 54,
+      "afterBlocks": 54,
+      "unchanged": true,
+      "beforeError": null,
+      "afterError": null
+    },
+    {
+      "url": "https://www.quantamagazine.org/sea-monkeys-show-scientists-how-to-rewrite-a-rule-of-turbulence-20261002/",
+      "responseSHA256": "26e0ca2a94c22a3f29befd050582e7f31c61228322f136b312de03474b8b6844",
+      "beforeBlocks": 46,
+      "afterBlocks": 40,
+      "unchanged": false,
+      "beforeError": null,
+      "afterError": null
+    },
+    {
+      "url": "https://www.quantamagazine.org/what-does-the-fourth-dimension-actually-look-like-20261001/",
+      "responseSHA256": "e703cbb0bdf8ea0df8d3f9ca24c45a9293e89ca9836dee2ab6c829d01ebfdf76",
+      "beforeBlocks": 218,
+      "afterBlocks": 212,
+      "unchanged": false,
+      "beforeError": null,
+      "afterError": null
+    },
+    {
+      "url": "https://kyivindependent.com/pontoon-crossings-coming-to-kyiv-following-russian-strikes-on-key-bridges-media-reports/",
+      "responseSHA256": "5413e52f7e618474b539ab88775e03b71480bcd7680f8d4d806ea01857689fc2",
+      "beforeBlocks": 47,
+      "afterBlocks": 47,
+      "unchanged": true,
+      "beforeError": null,
+      "afterError": null
+    },
+    {
+      "url": "https://thehill.com/policy/healthcare/6127566-pennsylvania-measles-cases-approach-1000/",
+      "responseSHA256": "3c117d4c5468f7782e6dedd316222add6f33d09678c9ac4e097551e56168f869",
+      "beforeBlocks": 12,
+      "afterBlocks": 12,
+      "unchanged": true,
+      "beforeError": null,
+      "afterError": null
+    },
+    {
+      "url": "https://www.dawn.com/news/2034465/second-round-of-talks-between-govt-opposition-underway-ahead-of-ptis-islamabad-march",
+      "responseSHA256": "19caee180f713cae70813b2b0305e83265e19b122d691f178b7d9db2443270d5",
+      "beforeBlocks": 67,
+      "afterBlocks": 67,
+      "unchanged": true,
+      "beforeError": null,
+      "afterError": null
+    },
+    {
+      "url": "https://www.cbc.ca/news/world/flydubai-captain-attacked-cockpit-crash-axe-9.7368120?cmp=rss",
+      "responseSHA256": "2b8cdbd091d3fc30f5f55fecc46dba2f5b808ee5b9ae04f511a0a3c7bc33dfc2",
+      "beforeBlocks": 43,
+      "afterBlocks": 43,
+      "unchanged": true,
+      "beforeError": null,
+      "afterError": null
+    },
+    {
+      "url": "https://www.theguardian.com/global-development/2026/oct/02/row-erupts-over-cairo-mural-depicting-tutankhamun-and-nefertiti-with-dark-skin",
+      "responseSHA256": "fc8ded8f77e26a523d90752126403eee8533ad8aaddd4f951a385ec7b81060b9",
+      "beforeBlocks": 27,
+      "afterBlocks": 27,
+      "unchanged": true,
+      "beforeError": null,
+      "afterError": null
+    },
+    {
+      "url": "https://arstechnica.com/science/2026/10/the-dawn-of-the-age-of-the-exoskeleton/",
+      "responseSHA256": "bcf182f9360453144e6f67a52b1fd46e7073e7bfc9ce480fc61c279a6257d39b",
+      "beforeBlocks": 32,
+      "afterBlocks": 32,
+      "unchanged": true,
+      "beforeError": null,
+      "afterError": null
+    },
+    {
+      "url": "https://www.theguardian.com/business/2026/oct/03/bt-customers-broadband-digital-landline-switch-internet",
+      "responseSHA256": "3131f37cdc20d139d95ca6b99ecfd21f4e1b62f9b3a2bff99aed7bcf6f7d1e07",
+      "beforeBlocks": 23,
+      "afterBlocks": 23,
+      "unchanged": true,
+      "beforeError": null,
+      "afterError": null
+    },
+    {
+      "url": "https://www.aljazeera.com/news/2026/10/3/somalia-wont-accept-israeli-presence-under-any-circumstances-president?traffic_source=rss",
+      "responseSHA256": "d4173ac1a28ef1fb22e576383b461b5478ddf1db9bbd5a265d919426dba6f4bf",
+      "beforeBlocks": 25,
+      "afterBlocks": 25,
+      "unchanged": true,
+      "beforeError": null,
+      "afterError": null
+    },
+    {
+      "url": "https://www.thehindu.com/news/international/ethiopias-tigray-rebels-abandon-regional-capital-as-government-advances/article71541559.ece",
+      "responseSHA256": "d104949eba9707919ef72f8fb88492f61c7c500f1b1dceaf6f4ae0b3f69def63",
+      "beforeBlocks": 32,
+      "afterBlocks": 32,
+      "unchanged": true,
+      "beforeError": null,
+      "afterError": null
+    },
+    {
+      "url": "https://www.france24.com/en/middle-east/20261003-houthis-blame-saudi-air-strikes-loud-blasts-rock-yemen-capital-sanaa",
+      "responseSHA256": "7a9b5fc945b9cffd8ded79f51a33334cf70ab0f12956c7fbb7e884c181719141",
+      "beforeBlocks": 31,
+      "afterBlocks": 31,
+      "unchanged": true,
+      "beforeError": null,
+      "afterError": null
+    },
+    {
+      "url": "https://www.dawn.com/news/2034492/bilawal-says-centre-was-ready-to-impose-emergency-in-kp-but-ppp-sought-political-solution",
+      "responseSHA256": "1785e0af526c7311084473f3dc057156e7ff0cd7a1b222f56a9b6c954d63af9b",
+      "beforeBlocks": 30,
+      "afterBlocks": 30,
+      "unchanged": true,
+      "beforeError": null,
+      "afterError": null
+    },
+    {
+      "url": "https://wiadomosci.onet.pl/kraj/nawrocki-przegral-z-tuskiem-kosiniak-potajemnie-spotkal-sie-z-trumpem-zurek-zawyl-na/pyp4x1t",
+      "responseSHA256": "868f289936f2798b9ed0bba149f4cbd7d7b3bf23ff94105f6a9d06f1dafd9a78",
+      "beforeBlocks": 11,
+      "afterBlocks": 9,
+      "unchanged": false,
+      "beforeError": null,
+      "afterError": null
+    },
+    {
+      "url": "https://www.thehindu.com/news/international/us-russia-talks-on-ukraine-involve-multi-billion-dollar-oil-deal-report/article71541486.ece",
+      "responseSHA256": "610ca7153c0e5d046b55b4ec0f36d3a87eba4524556dc03efc5962a16c63a687",
+      "beforeBlocks": 8,
+      "afterBlocks": 8,
+      "unchanged": true,
+      "beforeError": null,
+      "afterError": null
+    },
+    {
+      "url": "https://www.channelnewsasia.com/world/protests-over-housing-flare-in-spain-after-relief-measures-rejected-6429581",
+      "responseSHA256": "d1ed8c149dd012b061cb0ac330cbd93cf4190098e77c8154a210540cdbd1a5ab",
+      "beforeBlocks": 41,
+      "afterBlocks": 41,
+      "unchanged": true,
+      "beforeError": null,
+      "afterError": null
+    },
+    {
+      "url": "https://www.pravda.com.ua/eng/news/2026/10/03/8056319/",
+      "responseSHA256": "9ed824409faba6d3a1a62405eb96747ee541acfae384313916c4e2e7d037a1b1",
+      "beforeBlocks": 7,
+      "afterBlocks": 7,
+      "unchanged": true,
+      "beforeError": null,
+      "afterError": null
+    },
+    {
+      "url": "https://www.euronews.com/2026/10/03/iea-says-325-million-barrels-of-emergency-oil-released-with-75-million-still-to-come",
+      "responseSHA256": "fe90d5ea96fb60d95faca9400fdab306ddadd9964a5b2abf8081e259d34dc014",
+      "beforeBlocks": 10,
+      "afterBlocks": 10,
+      "unchanged": true,
+      "beforeError": null,
+      "afterError": null
+    },
+    {
+      "url": "https://www.theguardian.com/football/2026/oct/03/united-arab-emirates-uae-uk-investments-manchester-city-guilty-verdict",
+      "responseSHA256": "4c848b009805fac12d8f4d2fc5a0ffb82cb4ae7585e25692b7bf027db532cf95",
+      "beforeBlocks": 20,
+      "afterBlocks": 20,
+      "unchanged": true,
+      "beforeError": null,
+      "afterError": null
+    },
+    {
+      "url": "https://www.pravda.com.ua/news/2026/10/03/8056324/",
+      "responseSHA256": "e0d6da7b8b4208b2e2cad56c787dd2d99e72607608fda3b868bccf2801ab4738",
+      "beforeBlocks": 11,
+      "afterBlocks": 11,
+      "unchanged": true,
+      "beforeError": null,
+      "afterError": null
+    },
+    {
+      "url": "https://www.pravda.com.ua/news/2026/10/03/8056322/",
+      "responseSHA256": "c287730df39dcff36c211f727f8d639c291bf6c533c63eac2ff69b0585a1831c",
+      "beforeBlocks": 11,
+      "afterBlocks": 11,
+      "unchanged": true,
+      "beforeError": null,
+      "afterError": null
+    },
+    {
+      "url": "https://www.dw.com/en/spain-massive-protests-after-housing-bills-voted-down/a-79532124?maca=en-rss-en-top-1022-xml-mrss",
+      "responseSHA256": "402b77a1829929c7be18913aa20c946b9084b892229fb96f321641c4797e1fcc",
+      "beforeBlocks": 18,
+      "afterBlocks": 18,
+      "unchanged": true,
+      "beforeError": null,
+      "afterError": null
+    },
+    {
+      "url": "https://www.cbc.ca/news/world/world-dairy-expo-trade-war-us-canada-9.7366939?cmp=rss",
+      "responseSHA256": "b59f29cfa03a689dbfe8b4e5c9ffd345b04a0e5135ef6da7d947a323d31f0d0c",
+      "beforeBlocks": 58,
+      "afterBlocks": 58,
+      "unchanged": true,
+      "beforeError": null,
+      "afterError": null
+    },
+    {
+      "url": "https://www.channelnewsasia.com/world/two-iranians-appear-in-uk-court-over-alleged-plot-target-jews-6429186",
+      "responseSHA256": "caf194851fc9086e354fdfba8fcc9ff4e913f649416044bf0016eeedd94f804b",
+      "beforeBlocks": 28,
+      "afterBlocks": 28,
+      "unchanged": true,
+      "beforeError": null,
+      "afterError": null
+    },
+    {
+      "url": "https://nos.nl/l/2633545",
+      "responseSHA256": "de0ad84ae1b41bc46543437218d24a35197f916a2270d72e4d4d039650820a14",
+      "beforeBlocks": 11,
+      "afterBlocks": 11,
+      "unchanged": true,
+      "beforeError": null,
+      "afterError": null
+    },
+    {
+      "url": "https://www.radiosvoboda.org/a/news-kyiv-rezervni-perepravy-cherez-dnipro-ministr/33869748.html",
+      "responseSHA256": "8c511a569ba56a956b4d32d9a2c5c512ecc91a5026f8ab43bddae36308e13bec",
+      "beforeBlocks": 12,
+      "afterBlocks": 12,
+      "unchanged": true,
+      "beforeError": null,
+      "afterError": null
+    },
+    {
+      "url": "https://www.arabnews.com/offbeat/a-famed-hawaii-sea-arch-collapses-prompting-nps-warnings-of-unstable-cliffs-3004426",
+      "responseSHA256": "e41b5a3e920eb274866b1bbd3a3c66b19e2199ee4e654776ddf7e2e2fb909234",
+      "beforeBlocks": 12,
+      "afterBlocks": 12,
+      "unchanged": true,
+      "beforeError": null,
+      "afterError": null
+    },
+    {
+      "url": "https://nos.nl/l/2633543",
+      "responseSHA256": "9bbf4a00bb4be1f445bb7f5829844da22ee072a52c35bc533b6c7cd64ffc615c",
+      "beforeBlocks": 9,
+      "afterBlocks": 9,
+      "unchanged": true,
+      "beforeError": null,
+      "afterError": null
+    },
+    {
+      "url": "https://wiadomosci.onet.pl/swiat/korea-polnocna-wystrzelila-pocisk-zintegrowany-z-ai-pokonal-ponad-700-km/yp2lg07",
+      "responseSHA256": "86c36cee1d1c12eed58eb7361775569c5ef018f203c79df770d4274a1b1b98a3",
+      "beforeBlocks": 17,
+      "afterBlocks": 17,
+      "unchanged": true,
+      "beforeError": null,
+      "afterError": null
+    },
+    {
+      "url": "https://www.bbc.co.uk/news/articles/c693z5w5eypdo?at_medium=RSS&at_campaign=rss",
+      "responseSHA256": "acffc26ae641e28b35d2e5ce03077a4e8f6aa6762e19251efdf71ff8ee00dd07",
+      "beforeBlocks": 21,
+      "afterBlocks": 21,
+      "unchanged": true,
+      "beforeError": null,
+      "afterError": null
+    },
+    {
+      "url": "https://www.bbc.co.uk/news/articles/ck87zg8jnwngo?at_medium=RSS&at_campaign=rss",
+      "responseSHA256": "451067207b1eee15e0791929e36842822d8b81173e5884066c3f6d041cf0d12f",
+      "beforeBlocks": 31,
+      "afterBlocks": 31,
+      "unchanged": true,
+      "beforeError": null,
+      "afterError": null
+    },
+    {
+      "url": "https://thehill.com/homenews/administration/6127587-trump-posts-tom-cotton-phone-number/",
+      "responseSHA256": "f7dad025201151cfdda5856f8361810d9e91799e4b6efd0e6a4b4543e8226dfa",
+      "beforeBlocks": 14,
+      "afterBlocks": 14,
+      "unchanged": true,
+      "beforeError": null,
+      "afterError": null
+    },
+    {
+      "url": "https://www.theguardian.com/politics/2026/oct/03/conservatives-extend-cuts-andrew-griffith-leaked-comments",
+      "responseSHA256": "00a52de2008520cc6d47b2dda97ddfc09a16dde680ce1c8b8a005587568c0299",
+      "beforeBlocks": 26,
+      "afterBlocks": 26,
+      "unchanged": true,
+      "beforeError": null,
+      "afterError": null
+    },
+    {
+      "url": "https://www.ukrinform.ua/rubric-world/4170750-u-portugalii-rozsliduut-vikoristanna-statami-aviabazi-lazes-dla-vijni-z-iranom.html",
+      "responseSHA256": "ee29823fc4a2526714cd01c85ba74ea4e670c3808a6e5318eef6494092b3f686",
+      "beforeBlocks": 17,
+      "afterBlocks": 17,
+      "unchanged": true,
+      "beforeError": null,
+      "afterError": null
+    },
+    {
+      "url": "https://kyivindependent.com/series-of-drone-attacks-disrupt-power-supply-near-zaporizhzhia-nuclear-plant-iaea-says/",
+      "responseSHA256": "c7acd143a70774cd393fe534aa30b5b41d97af9e7565786f0e51ebdde5fe990d",
+      "beforeBlocks": 49,
+      "afterBlocks": 49,
+      "unchanged": true,
+      "beforeError": null,
+      "afterError": null
+    },
+    {
+      "url": "https://kffhealthnews.org/on-air/on-air-october-3-2026-kff-ap-rural-voter-poll-glp1-rfk-maha-summit-claude/",
+      "responseSHA256": "cb4786b0bc9c0ae2e3b4051cbb782fb8a654a3ebf80fd60b5db7997e746bde43",
+      "beforeBlocks": 6,
+      "afterBlocks": 6,
+      "unchanged": true,
+      "beforeError": null,
+      "afterError": null
+    },
+    {
+      "url": "https://www.bleepingcomputer.com/news/security/frontline-education-data-breach-impacts-school-district-employees/",
+      "responseSHA256": null,
+      "beforeBlocks": 0,
+      "afterBlocks": 0,
+      "unchanged": true,
+      "beforeError": "Error Domain=No saved response Code=1 \"(null)\"",
+      "afterError": "Error Domain=No saved response Code=1 \"(null)\""
+    },
+    {
+      "url": "https://www.bbc.co.uk/news/articles/cq0ld88kzxw8o?at_medium=RSS&at_campaign=rss",
+      "responseSHA256": "c69b7af2faceb212911f565b4455b427b8da4755ec67f9f893385f6a9e2ce52a",
+      "beforeBlocks": 23,
+      "afterBlocks": 23,
+      "unchanged": true,
+      "beforeError": null,
+      "afterError": null
+    },
+    {
+      "url": "https://www.bleepingcomputer.com/news/security/danish-university-dtu-breach-exposes-data-of-up-to-200-000-people/",
+      "responseSHA256": null,
+      "beforeBlocks": 0,
+      "afterBlocks": 0,
+      "unchanged": true,
+      "beforeError": "Error Domain=No saved response Code=1 \"(null)\"",
+      "afterError": "Error Domain=No saved response Code=1 \"(null)\""
+    },
+    {
+      "url": "https://www.bbc.co.uk/news/articles/c8zxl62yzxzxo?at_medium=RSS&at_campaign=rss",
+      "responseSHA256": "b58a18e9ed4b39c4a9d50d8b0e442d8f3841b75863f2dff21cfaf77c19488278",
+      "beforeBlocks": 19,
+      "afterBlocks": 19,
+      "unchanged": true,
+      "beforeError": null,
+      "afterError": null
+    },
+    {
+      "url": "https://www.bbc.co.uk/news/articles/c61wv7lgex13o?at_medium=RSS&at_campaign=rss",
+      "responseSHA256": "5aa2e1dfb254809193cff50553744365c979b041b3f344bd30cd9e544c09b4a6",
+      "beforeBlocks": 34,
+      "afterBlocks": 34,
+      "unchanged": true,
+      "beforeError": null,
+      "afterError": null
+    },
+    {
+      "url": "https://www.bbc.co.uk/weather/articles/cwgkvyyg8115o?at_medium=RSS&at_campaign=rss",
+      "responseSHA256": "4cb57a34d349410f2140c4c22d7b9f1b4d4020db120464552fefe5c9ba8baccc",
+      "beforeBlocks": 24,
+      "afterBlocks": 24,
+      "unchanged": true,
+      "beforeError": null,
+      "afterError": null
+    },
+    {
+      "url": "https://www.bbc.co.uk/news/articles/crd6dy4xepgyo?at_medium=RSS&at_campaign=rss",
+      "responseSHA256": "4579822f2b261ef5495bd128befbb56f2f9f23f5bc105406bcc2037316fc67e0",
+      "beforeBlocks": 12,
+      "afterBlocks": 12,
+      "unchanged": true,
+      "beforeError": null,
+      "afterError": null
+    },
+    {
+      "url": "https://www.dw.com/en/uk-remands-2-iranians-over-alleged-antisemitic-terror-plot/a-79532184?maca=en-rss-en-top-1022-xml-mrss",
+      "responseSHA256": "9b777650664fbad9b1d1ab14dfa0e5c0381fc7a8ae34245fdc19fdf298499fd0",
+      "beforeBlocks": 28,
+      "afterBlocks": 28,
+      "unchanged": true,
+      "beforeError": null,
+      "afterError": null
+    },
+    {
+      "url": "https://www.aljazeera.com/video/newsfeed/2026/10/3/jerusalem-daily-uae-says-flydubai-co-pilot-attempted-terrorist-attack?traffic_source=rss",
+      "responseSHA256": "3e79698ebd96f3feac104f9fdad1b6e5624f9f3227140151d23aadbcd6297b80",
+      "beforeBlocks": 2,
+      "afterBlocks": 2,
+      "unchanged": true,
+      "beforeError": null,
+      "afterError": null
+    },
+    {
+      "url": "https://www.pravda.com.ua/eng/news/2026/10/03/8056320/",
+      "responseSHA256": "f3165838cc1e629f281734c7757bc03c6d49673bf950a66a142008addcdbc46d",
+      "beforeBlocks": 6,
+      "afterBlocks": 6,
+      "unchanged": true,
+      "beforeError": null,
+      "afterError": null
+    },
+    {
+      "url": "https://www.ukrinform.ua/rubric-regions/4170749-rosiani-za-den-ponad-40-raziv-obstrilali-dnipropetrovsinu-troe-poranenih.html",
+      "responseSHA256": "e9d937bd29b14446fb3e574bf8af81efe800627dd5ae23347f2c28eebe6abd35",
+      "beforeBlocks": 11,
+      "afterBlocks": 11,
+      "unchanged": true,
+      "beforeError": null,
+      "afterError": null
+    },
+    {
+      "url": "https://www.arabnews.com/football/brazil-shine-on-selecaos-first-visit-to-india-3004428",
+      "responseSHA256": "86eda2ca8d5cece30ba48e0703ca1961eb6c22205fa6f3eec41d1f1a86d9fbd2",
+      "beforeBlocks": 19,
+      "afterBlocks": 19,
+      "unchanged": true,
+      "beforeError": null,
+      "afterError": null
+    },
+    {
+      "url": "https://www.dw.com/de/steinmeier-zum-tag-der-deutschen-einheit/a-79518484?maca=de-rss-de-all-1119-rdf",
+      "responseSHA256": "80a79178fe7770c9802ede7566aed24d106b89a197896e568dcde7cd6db814f4",
+      "beforeBlocks": 30,
+      "afterBlocks": 30,
+      "unchanged": true,
+      "beforeError": null,
+      "afterError": null
+    },
+    {
+      "url": "http://www.africanews.com/2026/10/03/fuel-shortage-in-sudan-drives-up-prices-burdening-ordinary-people/",
+      "responseSHA256": null,
+      "beforeBlocks": 0,
+      "afterBlocks": 0,
+      "unchanged": true,
+      "beforeError": "Error Domain=No saved response Code=1 \"(null)\"",
+      "afterError": "Error Domain=No saved response Code=1 \"(null)\""
+    },
+    {
+      "url": "http://www.africanews.com/2026/10/03/loud-explosions-heard-yemeni-capital-amid-reports-of-saudi-strikes/",
+      "responseSHA256": null,
+      "beforeBlocks": 0,
+      "afterBlocks": 0,
+      "unchanged": true,
+      "beforeError": "Error Domain=No saved response Code=1 \"(null)\"",
+      "afterError": "Error Domain=No saved response Code=1 \"(null)\""
+    },
+    {
+      "url": "https://www.ansa.it/canale_viaggi/regione/toscana/2026/10/03/otto-secoli-di-san-francesco-in-mostra-ad-arezzo-con-opere-da-tutto-il-mondo_8d7bcaba-8867-4aa4-92a2-cc7c51ff65e1.html",
+      "responseSHA256": "9a6c0270599adb6e1c010353c1d8f090f471ce96d25e84669c73211ea1d710e6",
+      "beforeBlocks": 14,
+      "afterBlocks": 14,
+      "unchanged": true,
+      "beforeError": null,
+      "afterError": null
+    },
+    {
+      "url": "https://www.ansa.it/canale_viaggi/notizie/itinerari/2026/10/03/in-umbria-nei-luoghi-di-san-francesco-a-800-anni-dalla-morte_f4b927c6-47cf-4d74-be51-e6bddbfe2223.html",
+      "responseSHA256": "4264ce2e0ae04feccfa06b5fcff5e7f1797e989f0b9e025d60c947b30ed2ba33",
+      "beforeBlocks": 14,
+      "afterBlocks": 14,
+      "unchanged": true,
+      "beforeError": null,
+      "afterError": null
+    },
+    {
+      "url": "https://lifehacker.com/tech/best-tech-deals-this-week?utm_medium=RSS",
+      "responseSHA256": "c424c7154fefe7447141307b80433bd8de409bd9871e1462216f6567c17b7e41",
+      "beforeBlocks": 56,
+      "afterBlocks": 56,
+      "unchanged": true,
+      "beforeError": null,
+      "afterError": null
+    },
+    {
+      "url": "https://timesofindia.indiatimes.com/world/pakistan/india-slams-pakistan-at-un-says-so-called-civilian-governments-serve-at-armys-mercy/articleshow/134661713.cms",
+      "responseSHA256": "6538532276606afd6608453edd556e58ed9354f1cea83dcefad6c95b1646e441",
+      "beforeBlocks": 5,
+      "afterBlocks": 5,
+      "unchanged": true,
+      "beforeError": null,
+      "afterError": null
+    }
+  ]
+}
