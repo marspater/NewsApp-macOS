@@ -148,7 +148,7 @@ def check_frozen_evidence(root):
     base_raw = (root / 'publisher-review-v2.json').read_bytes()
     base = json.loads(base_raw)
     originals = {d['id']: d for d in base['documents']}
-    for name in ('publisher-review-v3', 'publisher-timestamps-v2', 'publisher-review-supplement-v1', 'publisher-url-investigation-v1', 'publisher-diversity-v1', 'publisher-diversity-v2', 'publisher-date-resolutions-v1'):
+    for name in ('publisher-review-v3', 'publisher-timestamps-v2', 'publisher-review-supplement-v1', 'publisher-review-supplement-v2', 'publisher-url-investigation-v1', 'publisher-diversity-v1', 'publisher-diversity-v2', 'publisher-date-resolutions-v1'):
         file = root / (name + '.json')
         raw = file.read_bytes()
         require(hashlib.sha256(raw).hexdigest() == file.with_suffix('.sha256').read_text().split()[0], 'Frozen evidence changed; version corrections')
@@ -181,7 +181,7 @@ def check_frozen_evidence(root):
                 if 'publisherPublished' in d:
                     epoch = instant(d['publisherPublished'])
                     require(epoch is not None and abs(epoch - d['feedPublished'] - d['deltaSeconds']) < 0.001, 'Date comparison mismatch')
-        elif name == 'publisher-review-supplement-v1':
+        elif name in ('publisher-review-supplement-v1', 'publisher-review-supplement-v2'):
             require(report['baseSHA256'] == hashlib.sha256(base_raw).hexdigest(), 'Wrong supplement base')
             docs = {d['id']: d for d in report['documents']}
             events = {e['id']: e for e in report['events']}
@@ -210,6 +210,18 @@ def check_frozen_evidence(root):
                 require((left['event'] == right['event']) == (pair['proposedLabel'] != 'different'), 'Label contradicts occurrence proposal')
                 require(pair['proposedLabel'] != 'same_event' or pair['scope'] == 'event', 'Roundups/editions cannot become event positives')
             require(300 <= len(base['pairs']) + len(report['pairs']) <= 500, 'Review batch outside issue pair budget')
+            if name == 'publisher-review-supplement-v2':
+                original_raw = (root / 'publisher-review-supplement-v1.json').read_bytes()
+                expected = json.loads(original_raw)
+                expected['supersedesSHA256'] = hashlib.sha256(original_raw).hexdigest()
+                expected['assignmentCorrections'] = [{'pair': 'extra-044', 'document': 'doc-1207', 'previousEvent': 'irkutsk-information-removal', 'event': 'irkutsk-lab-death', 'label': 'same_event', 'basis': 'User-accepted supplemental review groups the same suspected plague death and quarantine with subsequent information-removal reporting.'}]
+                next(d for d in expected['documents'] if d['id'] == 'doc-1207')['event'] = 'irkutsk-lab-death'
+                expected['events'] = [e for e in expected['events'] if e['id'] != 'irkutsk-information-removal']
+                next(e for e in expected['events'] if e['id'] == 'irkutsk-lab-death')['reason'] = 'Same suspected plague death of the laboratory worker and quarantine; the reviewed label treats subsequent information-removal reporting as occurrence context.'
+                pair = next(p for p in expected['pairs'] if p['id'] == 'extra-044')
+                pair['proposedLabel'] = 'same_event'
+                pair['reason'] = 'Reviewed reports describe the same suspected plague death and quarantine, with information removal treated as reaction context.'
+                require(report == expected, 'Undeclared changes in supplemental correction')
         elif name in ('publisher-diversity-v1', 'publisher-diversity-v2'):
             require(report['baseSHA256'] == hashlib.sha256(base_raw).hexdigest(), 'Wrong diversity base')
             supplement_raw = (root / 'publisher-review-supplement-v1.json').read_bytes()

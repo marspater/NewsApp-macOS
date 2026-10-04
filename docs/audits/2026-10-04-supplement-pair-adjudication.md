@@ -1,0 +1,15 @@
+# Supplemental pair adjudication — 4 October 2026
+
+Refs #102, #127. Based on main `9b63393`. No production matcher, thresholds, catalog, app state or installation changes.
+
+All 62 submitted decisions have explicit acceptance and match the frozen supplement's IDs, sides, scopes, splits, proposals and reasons. One accepted label differs: `extra-044` becomes same-event. The new frozen supplement v2 joins `doc-1207` to the Irkutsk laboratory-death/quarantine occurrence and removes the empty information-removal singleton. The exact correction and predecessor checksum are checked; no captured date, URL or other label is changed. Approval of the earlier pontoon-plan assignment is recorded separately, with the original pending proposal retained.
+
+Supplement labels are 31 same-event, 25 different, six same-document; 55 tune and seven holdout. Combined accepted sampled support is 488 pairs: 245 same-event, 231 different, 12 same-document; 334 tune and 154 holdout. Fourteen supplement pairs are document-only. Financial-period, repeated-edition/headline and separate-strike negatives are labeled; older financial/meeting examples remain auxiliary support outside the native window.
+
+A private readiness packet reconciles corrected base v3, supplement v2 and diversity v2 without rewriting observations. It validates 261 document IDs, 488 unique edges, captured metadata and unchanged splits, applies all declared assignments and leaves timestamp/membership confirmations blank. It includes captured context grouped by occurrence, event-assignments.csv and timestamp-review.csv, plus proposed native exclusions. This is metadata/reviewer context, not the native evaluator format or an acceptance replay.
+
+The draft has 237 dated captured event inputs, 17 document-only records, six event-scope publisher-page references and one undated event input. The undated DW input needs exclusion confirmation rather than an invented date. Publisher-page dates and day precision remain explicit; derived URL copies are not fingerprint feed observations. The two CMS publication interpretations, other timestamp evidence and final memberships/singletons still require confirmation. Pair acceptance does not attest those steps.
+
+Original CSV/README bytes, approval wording, declared review authorship and receipt provenance are kept privately. The ANSA page extract is a consent screen; captured headline/description and the preserved Radio Svoboda reporting support the accepted occurrence without claiming ANSA article-body extraction. The receipt distinguishes copilot review plus user acceptance from blind independent annotation.
+
+Validation: exact row metadata/decisions; capture checksums and reconstruction; normalized source-text hashes; private exclusive copies/receipts/permissions; frozen predecessor preservation; exact corrected-manifest check and rejection of an undeclared timestamp change with a recomputed hash; combined identity/edge/membership/split consistency. Full regressions and hosted checks are recorded with publication. No corpus export, threshold tuning or real-publisher holdout predictions ran; #102/#127 remain incomplete.
