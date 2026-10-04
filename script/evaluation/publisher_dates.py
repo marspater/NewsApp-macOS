@@ -148,7 +148,7 @@ def check_frozen_evidence(root):
     base_raw = (root / 'publisher-review-v2.json').read_bytes()
     base = json.loads(base_raw)
     originals = {d['id']: d for d in base['documents']}
-    for name in ('publisher-timestamps-v2', 'publisher-review-supplement-v1', 'publisher-url-investigation-v1', 'publisher-diversity-v1', 'publisher-diversity-v2', 'publisher-date-resolutions-v1'):
+    for name in ('publisher-review-v3', 'publisher-timestamps-v2', 'publisher-review-supplement-v1', 'publisher-url-investigation-v1', 'publisher-diversity-v1', 'publisher-diversity-v2', 'publisher-date-resolutions-v1'):
         file = root / (name + '.json')
         raw = file.read_bytes()
         require(hashlib.sha256(raw).hexdigest() == file.with_suffix('.sha256').read_text().split()[0], 'Frozen evidence changed; version corrections')
@@ -163,7 +163,16 @@ def check_frozen_evidence(root):
                 for item in value:
                     no_text(item)
         no_text(report)
-        if name == 'publisher-timestamps-v2':
+        if name == 'publisher-review-v3':
+            expected = json.loads(base_raw)
+            expected['supersedesSHA256'] = hashlib.sha256(base_raw).hexdigest()
+            expected['assignmentCorrections'] = [dict(document='doc-0305', previousEvent='occurrence-0305', event='occurrence-0091', basis='User-accepted pair review identifies the same terror-charge occurrence in two singleton reports; existing sampled pair labels are unchanged.')]
+            next(d for d in expected['documents'] if d['id'] == 'doc-0305')['event'] = 'occurrence-0091'
+            expected['events'] = [e for e in expected['events'] if e['id'] != 'occurrence-0305']
+            next(e for e in expected['events'] if e['id'] == 'occurrence-0091')['reason'] = 'Both selected reports cover the same October 2 charge for preparing terrorist acts against Nigel Farage; later reactions remain context for this occurrence.'
+            require(report == expected, 'Undeclared changes in base assignment correction')
+            validate_review(report)
+        elif name == 'publisher-timestamps-v2':
             require(report['manifestSHA256'] == hashlib.sha256(base_raw).hexdigest(), 'Wrong date evidence base')
             require({d['id'] for d in report['documents']} == set(originals) and len(report['documents']) == len(originals), 'Missing or duplicate timestamp observations')
             require(report['summary'] == dict(Counter(d['status'] for d in report['documents'])), 'Date summary mismatch')
