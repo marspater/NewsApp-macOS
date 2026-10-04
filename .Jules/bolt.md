@@ -4,6 +4,12 @@
 
 **Action:** UI state managers that provide lookup capabilities (like `isSaved` or `isRead`) should maintain internal `Set<String>` collections of identifiers to allow O(1) lookups, especially if the legacy comparison logic involved expensive operations. Future Bolt runs should prefer introducing parallel `Set` tracking for `@Published` arrays if elements are frequently checked for containment during view rendering.
 
+## 2024-10-26 - Statically compile NSRegularExpression for HTML parsing
+
+**Learning:** Compiling `NSRegularExpression` dynamically inside hot loops such as `parseTagContent` and `decodeHTMLEntities` causes significant CPU overhead during feed processing.
+
+**Action:** Future Bolt runs should avoid dynamic `NSRegularExpression` instantiations in content extraction pipelines. Always use statically compiled `NSRegularExpression` via `static let` for methods that execute per-tag or per-attribute.
+
 ## 2024-10-25 - Statically compile NSRegularExpression for HTML image extraction
 
 **Learning:** Compiling `NSRegularExpression` is computationally expensive. In `FeedXMLParser.swift`, the `extractImageFromHTML` method was repeatedly compiling a regular expression for image extraction up to twice per parsed article. When a feed has many items, this caused hundreds of unnecessary regex compilation cycles during background feed refresh.
