@@ -373,6 +373,7 @@ final class DOMElementNode: Sendable {
 // MARK: - HTML DOM Tree Builder
 
 enum HTMLDOMBuilder {
+    private static let attrRegex = try! NSRegularExpression(pattern: #"([a-zA-Z0-9_-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))"#)
     private static let voidTags: Set<String> = [
         "area", "base", "br", "col", "embed", "hr", "img", "input",
         "link", "meta", "param", "source", "track", "wbr"
@@ -497,16 +498,13 @@ enum HTMLDOMBuilder {
             if attrString.range(of: "(?:^|\\s)hidden(?:\\s|=|$)", options: [.regularExpression, .caseInsensitive]) != nil {
                 attributes["hidden"] = ""
             }
-            let attrPattern = #"([a-zA-Z0-9_-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))"#
-            if let regex = try? NSRegularExpression(pattern: attrPattern) {
-                let matches = regex.matches(in: attrString, range: NSRange(attrString.startIndex..., in: attrString))
-                for match in matches {
-                    if let keyRange = Range(match.range(at: 1), in: attrString),
-                       let valRange = (2...4).compactMap({ Range(match.range(at: $0), in: attrString) }).first {
-                        let key = String(attrString[keyRange]).lowercased()
-                        let val = ContentExtractionPipeline.shared.decodeHTMLEntities(String(attrString[valRange]))
-                        attributes[key] = val
-                    }
+            let matches = Self.attrRegex.matches(in: attrString, range: NSRange(attrString.startIndex..., in: attrString))
+            for match in matches {
+                if let keyRange = Range(match.range(at: 1), in: attrString),
+                   let valRange = (2...4).compactMap({ Range(match.range(at: $0), in: attrString) }).first {
+                    let key = String(attrString[keyRange]).lowercased()
+                    let val = ContentExtractionPipeline.shared.decodeHTMLEntities(String(attrString[valRange]))
+                    attributes[key] = val
                 }
             }
         }
@@ -1012,6 +1010,9 @@ final class ContentExtractionPipeline: Sendable {
 
     // MARK: - HTML Entity Decoding
 
+    private static let decEntityRegex = try! NSRegularExpression(pattern: "&#([0-9]{2,7});")
+    private static let hexEntityRegex = try! NSRegularExpression(pattern: "&#x([0-9a-fA-F]{2,6});")
+
     func decodeHTMLEntities(_ text: String) -> String {
         var result = text
 
@@ -1052,27 +1053,23 @@ final class ContentExtractionPipeline: Sendable {
             result = result.replacingOccurrences(of: entity, with: char)
         }
 
-        if let decRegex = try? NSRegularExpression(pattern: "&#([0-9]{2,7});") {
-            let matches = decRegex.matches(in: result, range: NSRange(result.startIndex..., in: result))
-            for match in matches.reversed() {
-                if let fullRange = Range(match.range, in: result),
-                   let numRange = Range(match.range(at: 1), in: result),
-                   let code = UInt32(result[numRange]),
-                   let scalar = UnicodeScalar(code) {
-                    result.replaceSubrange(fullRange, with: String(Character(scalar)))
-                }
+        let decMatches = Self.decEntityRegex.matches(in: result, range: NSRange(result.startIndex..., in: result))
+        for match in decMatches.reversed() {
+            if let fullRange = Range(match.range, in: result),
+               let numRange = Range(match.range(at: 1), in: result),
+               let code = UInt32(result[numRange]),
+               let scalar = UnicodeScalar(code) {
+                result.replaceSubrange(fullRange, with: String(Character(scalar)))
             }
         }
 
-        if let hexRegex = try? NSRegularExpression(pattern: "&#x([0-9a-fA-F]{2,6});") {
-            let matches = hexRegex.matches(in: result, range: NSRange(result.startIndex..., in: result))
-            for match in matches.reversed() {
-                if let fullRange = Range(match.range, in: result),
-                   let numRange = Range(match.range(at: 1), in: result),
-                   let code = UInt32(result[numRange], radix: 16),
-                   let scalar = UnicodeScalar(code) {
-                    result.replaceSubrange(fullRange, with: String(Character(scalar)))
-                }
+        let hexMatches = Self.hexEntityRegex.matches(in: result, range: NSRange(result.startIndex..., in: result))
+        for match in hexMatches.reversed() {
+            if let fullRange = Range(match.range, in: result),
+               let numRange = Range(match.range(at: 1), in: result),
+               let code = UInt32(result[numRange], radix: 16),
+               let scalar = UnicodeScalar(code) {
+                result.replaceSubrange(fullRange, with: String(Character(scalar)))
             }
         }
 
