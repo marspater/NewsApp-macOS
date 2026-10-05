@@ -81,6 +81,7 @@ extension EventFeatures {
         let whole = text.startIndex..<text.endIndex
         let titleEnd = text.index(text.startIndex, offsetBy: title.count)
 
+        let lexicon = language.flatMap { EventLexicon.byLanguage[$0] }
         let tagger = NLTagger(tagSchemes: [.nameType, .lexicalClass, .lemma])
         tagger.string = text
         if let language { tagger.setLanguage(NLLanguage(rawValue: language), range: whole) }
@@ -118,6 +119,7 @@ extension EventFeatures {
             guard let range = Range(match.range(at: 1), in: lowered) else { continue }
             periods.insert(["first", "1st"].contains(String(lowered[range])) ? "h1" : "h2")
         }
+        if let lexicon { periods.formUnion(lexicon.quarters(in: text)) }
 
         let titleWords = title.split(whereSeparator: { !$0.isLetter }).filter { $0.count >= 3 }
         let titleCase = !titleWords.isEmpty
@@ -126,6 +128,8 @@ extension EventFeatures {
 
         let wordOptions: NLTagger.Options = [.omitWhitespace, .omitPunctuation]
         var lemmas: [String.Index: String] = [:]
+        var sawWordClass = false
+        var plainTerms = Set<String>()
         tagger.enumerateTags(in: whole, unit: .word, scheme: .lemma, options: wordOptions) { tag, range in
             if let tag { lemmas[range.lowerBound] = Self.normalized(tag.rawValue) }
             return true
@@ -150,8 +154,8 @@ extension EventFeatures {
                 }
                 return true
             }
-            if Self.weekdayNames.contains(word) {
-                weekdays.insert(word)
+            if let day = Self.weekdayNames.contains(word) ? word : lexicon?.weekdays[word] {
+                weekdays.insert(day)
                 return true
             }
             if inTitle, let number = Self.numberWords[word] {
@@ -159,7 +163,8 @@ extension EventFeatures {
                 return true
             }
             guard word.count >= 3, word.contains(where: \.isLetter), !Self.stopwords.contains(word),
-                  !Self.monthNames.contains(word), !Self.numberWords.keys.contains(word) else { return true }
+                  !Self.monthNames.contains(word), !Self.numberWords.keys.contains(word),
+                  !(lexicon?.isBoilerplate(word) ?? false) else { return true }
 
             // A capitalized word inside a sentence is most likely a name the tagger did not type.
             if usesCapitalization, token.first?.isUppercase == true, !(inTitle && titleCase),
@@ -168,16 +173,21 @@ extension EventFeatures {
                 return true
             }
             guard !nameTokens.contains(word) else { return true }
-            if let tag {
+            if let tag, tag != .otherWord {
+                sawWordClass = true
                 guard [.noun, .verb, .adjective].contains(tag) else { return true }
                 let keyword = lemmas[range.lowerBound].flatMap { $0.isEmpty ? nil : $0 } ?? word
-                if keyword.count >= 3, !Self.stopwords.contains(keyword) { keywords.insert(keyword) }
+                if keyword.count >= 3, !Self.stopwords.contains(keyword), !(lexicon?.isBoilerplate(keyword) ?? false) {
+                    keywords.insert(keyword)
+                }
             } else if word.count >= 4 {
-                // No lexical model for this language: keep longer words as plain terms.
-                keywords.insert(word)
+                if tag == nil { keywords.insert(word) } else { plainTerms.insert(word) }
             }
             return true
         }
+        // Without a word-class model the tagger calls every word `otherWord`. Plain words then stand in
+        // for action terms, but only where the boilerplate is listed; a name opening a sentence counts once.
+        if !sawWordClass, lexicon?.allowsPlainTerms == true { keywords.formUnion(plainTerms.subtracting(names)) }
 
         self.init(language: language, people: people, organizations: organizations, places: places, names: names,
                   keywords: keywords, date: date, titleNumbers: titleNumbers, periods: periods, years: years, weekdays: weekdays)
@@ -306,4 +316,280 @@ enum EventMatcher {
         guard left > 0, right > 0 else { return 0 }
         return Double(shared) / Double(min(left, right))
     }
+}
+
+/// Boilerplate, dates and financial quarters for catalog languages other than English, so plain terms
+/// carry what happened rather than who said it, and weekdays and quarters still rule pairs out.
+struct EventLexicon: Sendable {
+    let stopwords: Set<String>
+    let months: Set<String>
+    /// Inflected weekday forms mapped to the English name, so the weekday conflict compares days.
+    let weekdays: [String: String]
+    private let quarterStems: [String: String]
+    private let quarterPattern: NSRegularExpression
+
+    /// Plain terms without a boilerplate list would make reporting verbs and titles look like evidence.
+    var allowsPlainTerms: Bool { !stopwords.isEmpty }
+
+    init(stopwords: [String] = [], months: [String], weekdays: [String: [String]], quarters: [String: [String]],
+         quarterWords: [String]) {
+        self.stopwords = Set(stopwords.map(EventFeatures.normalized))
+        self.months = Set(months.map(EventFeatures.normalized))
+        var days: [String: String] = [:]
+        for (day, forms) in weekdays {
+            for form in forms { for variant in [form, form.replacingOccurrences(of: "'", with: "’")] { days[EventFeatures.normalized(variant)] = day } }
+        }
+        self.weekdays = days
+        var stems: [String: String] = [:]
+        for (quarter, list) in quarters { for stem in list { stems[stem.lowercased()] = quarter } }
+        quarterStems = stems
+        let ordinals = stems.keys.sorted { $0.count > $1.count }.map(NSRegularExpression.escapedPattern(for:)).joined(separator: "|")
+        let nouns = quarterWords.map(NSRegularExpression.escapedPattern(for:)).joined(separator: "|")
+        // An ordinal word, an upper-case Roman numeral (Latin or Cyrillic І) or a digit, then the quarter noun.
+        quarterPattern = try! NSRegularExpression(
+            pattern: #"(?<![\p{L}\p{N}])(?:("# + ordinals + #")\p{L}*|(IV|III|II|I|ІV|ІІІ|ІІ|І)|([1-4])(?:-\p{L}+)?)[\s-]+(?:"#
+                + nouns + #")"#, options: [.caseInsensitive])
+    }
+
+    func isBoilerplate(_ word: String) -> Bool { stopwords.contains(word) || months.contains(word) }
+
+    func quarters(in text: String) -> Set<String> {
+        var found = Set<String>()
+        for match in quarterPattern.matches(in: text, range: NSRange(text.startIndex..., in: text)) {
+            if let range = Range(match.range(at: 1), in: text), let quarter = quarterStems[text[range].lowercased()] {
+                found.insert(quarter)
+            } else if let range = Range(match.range(at: 2), in: text), text[range] == text[range].uppercased() {
+                // Case-insensitive matching would read the Italian article "i" as a numeral.
+                let roman = text[range].replacingOccurrences(of: "І", with: "I")
+                if let quarter = ["I": "q1", "II": "q2", "III": "q3", "IV": "q4"][roman] { found.insert(quarter) }
+            } else if let range = Range(match.range(at: 3), in: text) {
+                found.insert("q" + text[range])
+            }
+        }
+        return found
+    }
+
+    static let byLanguage: [String: EventLexicon] = [
+        "uk": EventLexicon(
+            stopwords: words("""
+                через після перед проти щодо понад серед біля поблизу навколо внаслідок згідно завдяки протягом
+                впродовж межах сфері боку разом також тому коли якщо хоча адже однак проте водночас тобто навіть лише
+                тільки саме дуже більше менше зокрема наприклад нібито знову вперше майже близько приблизно щонайменше
+                принаймні можливо ймовірно офіційно тимчасово одразу який якого якої якому якій яким якими яких якою
+                його вона вони своє свої свою свого своєї своїх їхні їхній цього цієї цьому того такий така таке такі
+                таких такого всіх всього всій усіх інші інших іншого новий нова нове нові нових нового бути буде
+                будуть було була були може можуть можна мають мали треба потрібно немає стане стало хоче хочуть планує
+                планують вдалося стався сталася сталося відбувся відбулася відбулося відбудеться зазнав зазнала
+                зазнали провів провела провели провести заявив заявила заявили заявило заявляє заява заяви заяву
+                сказав сказала сказали каже кажуть повідомив повідомила повідомили повідомило повідомляє
+                повідомляється повідомлення розповів розповіла розповіли зазначив зазначила зазначили зазначається
+                наголосив наголосила наголосили додав додала додали пояснив пояснила пояснили підкреслив уточнили
+                оголосив оголосила оголосили написав написала пише передає йдеться відповів відповіла відповідь
+                відповіддю відреагував відреагувала відреагували підтвердив підтвердила підтвердили вважає словами
+                даними джерела джерел інформацією посиланням відомо президент президента президенту президентом
+                президентка прем'єр прем'єра прем'єрка віце міністр міністра міністром міністри міністрів міністерка
+                голова голови головою глава глави очільник очільника очільниця керівник керівника речник речника
+                речниця мера мером губернатор губернатора канцлер канцлера канцлером канцлерка посол посла послом
+                депутат депутата депутати депутатів нардеп нардепи генерал генерала командувач командувача заступник
+                заступника заступниця секретар секретаря спікер спікера лідер лідера представник представника
+                представники представників посадовці посадовців чиновники влада влади владі пана пані король короля
+                папа директор директора люди людей людина людини новини новина новин відео фото онлайн наживо
+                трансляція оновлено оновлення деталі подробиці читайте дивіться терміново головне сьогодні вчора учора
+                завтра ранку вранці зранку вечора ввечері увечері вночі уночі ночі день днів днями тиждень тижня тижні
+                тижнів місяць місяця місяці місяців року році роки років годину години годин доба добу доби часу
+                вихідні вихідних минулого минулої минулий наступного наступної наступний поточного нещодавно
+                напередодні наприкінці початку останні останніх наразі зараз нині тепер досі поки раніше згодом
+                незабаром один одна одного одному одній двох двоє троє трьох кілька кількох декілька десятки десятків
+                сотні тисяча тисячі тисяч мільйон мільйона мільйонів мільярд мільярда мільярдів млрд відсотків
+                відсотка більшість разів рази область області району районі районах районів місто міста місті села
+                селі вулиці столиці столицю країни країні країн
+                """),
+            months: words("""
+                січень січня січні січнем січню лютий лютого лютому лютим березень березня березні березнем березню
+                квітень квітня квітні квітнем квітню травень травня травні травнем травню червень червня червні
+                червнем червню липень липня липні липнем липню серпень серпня серпні серпнем серпню вересень вересня
+                вересні вереснем вересню жовтень жовтня жовтні жовтнем жовтню листопад листопада листопаді листопадом
+                листопаду грудень грудня грудні груднем грудню
+                """),
+            weekdays: [
+                "monday": ["понеділок", "понеділка", "понеділку", "понеділком"],
+                "tuesday": ["вівторок", "вівторка", "вівторку", "вівторком"],
+                "wednesday": ["середа", "середу", "середи", "середі", "середою"],
+                "thursday": ["четвер", "четверга", "четвергу", "четвергом"],
+                "friday": ["п'ятниця", "п'ятницю", "п'ятниці", "п'ятницею"],
+                "saturday": ["субота", "суботу", "суботи", "суботі", "суботою"],
+                "sunday": ["неділя", "неділю", "неділі", "неділею"]
+            ],
+            quarters: ["q1": ["перш"], "q2": ["друг"], "q3": ["треті", "треть", "третя", "третю"], "q4": ["четверт"]],
+            quarterWords: ["квартал"]),
+        "pl": EventLexicon(
+            stopwords: words("""
+                przez przed podczas według wobec wśród około ponad między przeciwko dzięki mimo zamiast poza obok
+                wewnątrz wraz przy jako związku sprawie temat ciągu trakcie dotyczy zdaniem oraz albo lecz jednak
+                ponieważ więc czyli żeby jeśli kiedy gdzie dlaczego dlatego natomiast także również który która które
+                którego której których którzy tego temu tych taki takie jakie czego jego niego niej nich sobie siebie
+                swoje swojej swojego swoich wszystko wszyscy wszystkie wszystkich każdy inne innych samej cały cała
+                całe kolejny kolejne kolejnych różne jest będzie będą była było byli były został została zostało
+                zostali zostały zostanie może mogą można musi trzeba powinien chce chcą mają miał miała jeszcze nadal
+                wciąż teraz obecnie właśnie bardzo nawet tylko znów ponownie wkrótce niedawno ostatnio ostatnich
+                ostatnie wcześniej później następnie potem wtedy prawie niemal zbyt więcej mniej jeden jedna jednego
+                jednym dwie dwóch trzy trzech cztery pięć kilka kilku kilkanaście kilkadziesiąt wiele wielu większość
+                większości tysiące tysięcy milion miliona milionów miliard miliardy miliardów procent proc mówi mówią
+                powiedział powiedziała stwierdził stwierdziła oświadczył oświadczyła ogłosił ogłosiła zapowiedział
+                zapowiedziała zapowiada poinformował poinformowała poinformowali informuje przekazał przekazała dodał
+                dodała dodaje zaznaczył zaznaczyła podkreślił podkreśliła podkreśla wyjaśnił wyjaśnia tłumaczy
+                zauważył ocenił ocenia uważa twierdzi przekonuje pisze napisał podaje podał wskazuje zapewnia przyznał
+                przyznaje przypomina opowiada prezydent prezydenta prezydentem premier premiera premierem minister
+                ministra ministrem ministerstwo ministerstwa wiceminister wicepremier szef szefa szefowa rzecznik
+                rzecznika rzeczniczka burmistrz wojewoda marszałek marszałka poseł posła posłanka posłowie senator
+                ambasador generał gubernator kanclerz król króla królowa papież papieża prezes prezesa dyrektor
+                przewodniczący sekretarz pani pana profesor prof władze władz ludzie ludzi osoby osób wiadomości
+                informacje informacji wideo nagranie zdjęcia foto relacja żywo aktualizacja czytaj zobacz pilne
+                najnowsze najważniejsze szczegóły transmisja transmisję zapraszamy zaprasza dzisiaj dziś wczoraj jutro
+                rano wieczorem nocy dzień dnia dniu dniach doby tydzień tygodnia tygodniu tygodni miesiąc miesiąca
+                miesiącu miesięcy roku lata latach godzina godziny godzin godz czas czasie chwili weekend
+                """),
+            months: words("""
+                styczeń stycznia styczniu styczniem luty lutego lutym marzec marca marcu marcem kwiecień kwietnia
+                kwietniu kwietniem maj maja maju majem czerwiec czerwca czerwcu czerwcem lipiec lipca lipcu lipcem
+                sierpień sierpnia sierpniu sierpniem wrzesień września wrześniu wrześniem październik października
+                październiku październikiem listopad listopada listopadzie listopadem grudzień grudnia grudniu
+                grudniem
+                """),
+            weekdays: [
+                "monday": ["poniedziałek", "poniedziałku", "poniedziałkiem"],
+                "tuesday": ["wtorek", "wtorku", "wtorkiem"],
+                "wednesday": ["środa", "środę", "środy", "środzie", "środą"],
+                "thursday": ["czwartek", "czwartku", "czwartkiem"],
+                "friday": ["piątek", "piątku", "piątkiem"],
+                "saturday": ["sobota", "sobotę", "soboty", "sobocie", "sobotą"],
+                "sunday": ["niedziela", "niedzielę", "niedzieli", "niedzielą"]
+            ],
+            quarters: ["q1": ["pierwsz"], "q2": ["drugi"], "q3": ["trzeci"], "q4": ["czwart"]],
+            quarterWords: ["kwartał", "kwartal"]),
+        "fr": EventLexicon(
+            stopwords: words("""
+                dans avec pour sans sous vers chez entre contre depuis pendant avant après selon lors auprès près face
+                travers jusqu'à jusqu'au mais donc comme quand lorsque ainsi alors afin parce dont pourquoi comment
+                laquelle elle elles nous vous leur leurs celui celle ceux cela cette tout tous toute toutes chaque
+                autre autres même certains certaines plusieurs quelques quelle c'est d'un d'une qu'il qu'ils qu'elle
+                n'est s'est s'agit d'être d'avoir d'autres d'après être avoir sont était sera serait soit avait aurait
+                ayant peut pourra pourrait doit devrait faut fait faire veut vont voir aussi déjà encore toujours
+                maintenant très plus moins bien également notamment désormais puis environ deux trois milliers million
+                millions milliard milliards déclaré déclaration affirmé annoncé estimé assuré expliqué précisé ajouté
+                souligné indiqué rapporté confirmé évoqué président présidente ministre ministres premier première
+                maire chef porte parole gouverneur chancelier député députée députés sénateur ambassadeur général
+                secrétaire directeur dirigeant dirigeants responsable responsables officiel officiels autorités
+                adjoint vice patron monsieur madame pape personne personnes gens actualité info infos informations
+                direct vidéo vidéos photo photos lire suite détails dernier dernière nouveau nouvelle nouvelles
+                prochain aujourd'hui hier demain matin soir nuit jour jours journée semaine semaines mois année années
+                l'année heure heures temps fois moment récemment actuellement week weekend début raison côté nombre
+                """),
+            months: words("""
+                janvier février mars avril d'avril mai juin juillet août d'août septembre octobre d'octobre novembre
+                décembre
+                """),
+            weekdays: [
+                "monday": ["lundi", "lundis"],
+                "tuesday": ["mardi", "mardis"],
+                "wednesday": ["mercredi", "mercredis"],
+                "thursday": ["jeudi", "jeudis"],
+                "friday": ["vendredi", "vendredis"],
+                "saturday": ["samedi", "samedis"],
+                "sunday": ["dimanche", "dimanches"]
+            ],
+            quarters: ["q1": ["premi", "1er", "1re"], "q2": ["deuxième", "second", "2e"], "q3": ["troisième", "3e"], "q4": ["quatrième", "4e"]],
+            quarterWords: ["trimestre"]),
+        "it": EventLexicon(
+            stopwords: words("""
+                della delle dello degli dalla dalle dallo dagli alla alle allo agli nella nelle nello negli sulla
+                sulle sullo sugli dopo prima verso contro oltre senza fuori presso durante mentre tramite secondo
+                circa entro fino insieme nonostante rispetto anche ancora pure oppure quindi dunque però perché poiché
+                infatti inoltre invece tuttavia comunque allora quando quanto come dove così cosa sempre forse subito
+                ormai intanto quasi almeno appena solo proprio molto poco tanto ecco finora questo questa questi
+                queste quello quella quelli quelle tutto tutta tutti tutte altro altra altri altre molti molte alcuni
+                alcune ogni loro stesso stessa qualche quale quali sono stato stata stati state essere sarà saranno
+                sarebbe siano fosse erano aver avere hanno abbiamo aveva avrebbe avuto possono potrebbe potrebbero
+                potrà deve devono dovrebbe dovrà vuole viene vengono fatto fare fanno farà faranno dice dicono detto
+                dire dichiara dichiarato dichiarazione dichiarazioni annuncia annunciato afferma spiega spiegato
+                aggiunge aggiunto sottolinea sottolineato riferisce riferito riportato conferma confermato precisa
+                racconta ribadisce ribadito scrive parla ricorda ricordato stando fonti fonte comunicato nota
+                presidente presidenti premier primo ministro ministra ministri ministero sindaco sindaca governatore
+                cancelliere capo vice vicepremier vicepresidente portavoce deputato deputata deputati senatore
+                parlamentare parlamentari ambasciatore generale comandante segretario leader assessore consigliere
+                direttore esponente uscente papa pontefice signor signora amministratore delegato notizia notizie news
+                video foto immagini diretta live aggiornamento aggiornamenti ultim'ora ultime ultimi ultimo ultima
+                breaking leggi guarda dettagli articolo intervista stampa continua oggi ieri domani stamattina stasera
+                stanotte mattina pomeriggio sera serata notte giorno giorni giornata settimana settimane mese mesi
+                anno anni quest'anno tempo minuti scorso scorsa scorsi prossimo prossima prossimi recentemente
+                attualmente momento volta volte inizio fine metà mila mille migliaia milione milioni miliardo miliardi
+                cento decine centinaia diversi diverse numerosi quattro cinque sette otto dieci persone persona gente
+                parte modo perche' pero' cosi' piu' gia' sara' potra' fara' meta' puo'
+                """),
+            months: words("""
+                gennaio febbraio marzo aprile maggio giugno luglio agosto settembre ottobre novembre dicembre
+                """),
+            weekdays: [
+                "monday": ["lunedì", "lunedi'"],
+                "tuesday": ["martedì", "martedi'"],
+                "wednesday": ["mercoledì", "mercoledi'"],
+                "thursday": ["giovedì", "giovedi'"],
+                "friday": ["venerdì", "venerdi'"],
+                "saturday": ["sabato", "sabati"],
+                "sunday": ["domenica", "domeniche"]
+            ],
+            quarters: ["q1": ["prim"], "q2": ["second"], "q3": ["terz"], "q4": ["quart"]],
+            quarterWords: ["trimestr"]),
+        "nl": EventLexicon(
+            stopwords: words("""
+                zijn door heeft voor naar niet over worden wordt werd werden hebben hadden tegen maar zich vanwege
+                weer geen daar hier waar tussen onder meer sinds eerst moet moeten moest kunnen zullen zouden willen
+                wilde gaan gaat ging waren geweest omdat doordat toen terwijl zoals zonder naast vanaf rond richting
+                volgens tijdens binnen deze verder zelf zelfs alleen vooral echter toch opnieuw steeds inmiddels
+                daarna elkaar niemand alles alle enkele sommige andere veel weinig aantal ongeveer zo'n bijna zeker
+                ruim vaak heel haar mogelijk waarschijnlijk duidelijk bekend laat liet twee drie vier vijf zeven acht
+                negen tien twintig honderd honderden tientallen duizend duizenden miljoen miljoenen miljard miljarden
+                procent eerste tweede derde zegt zeggen gezegd zeiden vertelt vertelde meldt melden meldde gemeld
+                bericht berichten berichtte schrijft schreef verklaarde kondigt kondigde aangekondigd bevestigt
+                bevestigde bevestigd benadrukte voegde weten aldus president premier minister ministers ministerie
+                staatssecretaris burgemeester wethouder gouverneur kanselier koning koningin paus kamerlid ambassadeur
+                generaal voorzitter leider hoofd chef topman directeur woordvoerder woordvoerster plaatsvervangende
+                autoriteiten functionarissen nieuws liveblog live update video foto foto's beelden interview overzicht
+                goedemorgen wekdienst persbureau omroep media bronnen correspondent laatste vandaag gisteren morgen
+                vanochtend vanmorgen vanmiddag vanavond vannacht gisteravond ochtend middag avond nacht dagen week
+                weken weekend maand maanden jaar jaren jarige tijd momenteel onlangs eerder later afgelopen vorige
+                volgende komende mensen verschillende terug
+                """),
+            months: words("""
+                januari februari maart april mei juni juli augustus september oktober november december
+                """),
+            weekdays: [
+                "monday": ["maandag", "maandagen", "maandags", "maandagochtend", "maandagmorgen", "maandagmiddag", "maandagavond", "maandagnacht"],
+                "tuesday": ["dinsdag", "dinsdagen", "dinsdags", "dinsdagochtend", "dinsdagmorgen", "dinsdagmiddag", "dinsdagavond", "dinsdagnacht"],
+                "wednesday": ["woensdag", "woensdagen", "woensdags", "woensdagochtend", "woensdagmorgen", "woensdagmiddag", "woensdagavond", "woensdagnacht"],
+                "thursday": ["donderdag", "donderdagen", "donderdags", "donderdagochtend", "donderdagmorgen", "donderdagmiddag", "donderdagavond", "donderdagnacht"],
+                "friday": ["vrijdag", "vrijdagen", "vrijdags", "vrijdagochtend", "vrijdagmorgen", "vrijdagmiddag", "vrijdagavond", "vrijdagnacht"],
+                "saturday": ["zaterdag", "zaterdagen", "zaterdags", "zaterdagochtend", "zaterdagmorgen", "zaterdagmiddag", "zaterdagavond", "zaterdagnacht"],
+                "sunday": ["zondag", "zondagen", "zondags", "zondagochtend", "zondagmorgen", "zondagmiddag", "zondagavond", "zondagnacht"]
+            ],
+            quarters: ["q1": ["eerste"], "q2": ["tweede"], "q3": ["derde"], "q4": ["vierde"]],
+            quarterWords: ["kwartaal", "kwartalen"]),
+        "de": EventLexicon(
+            months: words("""
+                januar jänner februar märz april mai juni juli august september oktober november dezember
+                """),
+            weekdays: [
+                "monday": ["montag", "montagabend", "montagmorgen", "montagnachmittag", "montagnacht", "montags"],
+                "tuesday": ["dienstag", "dienstagabend", "dienstagmorgen", "dienstagnachmittag", "dienstagnacht", "dienstags"],
+                "wednesday": ["mittwoch", "mittwochabend", "mittwochmorgen", "mittwochnachmittag", "mittwochnacht", "mittwochs"],
+                "thursday": ["donnerstag", "donnerstagabend", "donnerstagmorgen", "donnerstagnachmittag", "donnerstagnacht", "donnerstags"],
+                "friday": ["freitag", "freitagabend", "freitagmorgen", "freitagnachmittag", "freitagnacht", "freitags"],
+                "saturday": ["samstag", "samstagabend", "samstagmorgen", "samstagnachmittag", "samstagnacht", "samstags", "sonnabend"],
+                "sunday": ["sonntag", "sonntagabend", "sonntagmorgen", "sonntagnachmittag", "sonntagnacht", "sonntags"]
+            ],
+            quarters: ["q1": ["erst"], "q2": ["zweit"], "q3": ["dritt"], "q4": ["viert"]],
+            quarterWords: ["quartal"]),
+    ]
+
+    private static func words(_ list: String) -> [String] { list.split(whereSeparator: \.isWhitespace).map(String.init) }
 }

@@ -4067,6 +4067,34 @@ struct NewsTests {
         let toll = EventFeatures(title: "Drone strike kills three in Kharkiv", description: "", date: now)
         assertEqual(toll.titleNumbers, ["3"], "Spelled headline figures are compared as numbers")
         assertTrue(toll.anchors.contains("kharkiv"), "Places in a headline are anchors")
+
+        // No word-class model for Ukrainian on macOS: listed plain words stand in for action terms.
+        let bridge = EventFeatures(title: "У Києві закрили Північний міст після удару",
+                                   description: "Мер Кличко повідомив, що Північний міст закрито для руху після нічного удару.", date: now)
+        let bridgeLater = EventFeatures(title: "Північний міст у Києві закрито після нічного удару",
+                                        description: "Кличко пояснив, що рух мостом обмежено. За словами мера Кличко, перевірка триває.",
+                                        date: now.addingTimeInterval(3600))
+        assertTrue(EventMatcher.assess(bridge, bridgeLater).isMatch, "Two Ukrainian reports of one event match")
+        assertFalse(bridge.keywords.contains(EventFeatures.normalized("після")), "Ukrainian function words are not action terms")
+        assertFalse(bridgeLater.keywords.contains(EventFeatures.normalized("Кличко")), "A name opening a sentence is not also an action term")
+        func ukrainian(_ title: String, hours: Double = 0) -> EventFeatures {
+            EventFeatures(title: title, description: "", date: now.addingTimeInterval(hours * 3600))
+        }
+        assertFalse(EventMatcher.assess(ukrainian("Президент Зеленський заявив, що Україна отримає нові системи Patriot"),
+                                        ukrainian("Президент Зеленський заявив, що Україна готова до переговорів", hours: 2)).isMatch,
+                    "Two statements by one person are not one event")
+        assertEqual(EventMatcher.assess(ukrainian("Росія атакувала Харків дронами у понеділок, є поранені"),
+                                         ukrainian("Росія атакувала Харків дронами у вівторок, є поранені", hours: 20)).conflict,
+                    .weekday, "Ukrainian weekdays rule out strikes on different days")
+        assertEqual(EventMatcher.assess(ukrainian("Нафтогаз отримав рекордний прибуток у третьому кварталі"),
+                                         ukrainian("Нафтогаз отримав рекордний прибуток у четвертому кварталі", hours: 2)).conflict,
+                    .period, "Ukrainian quarters rule out reports for different periods")
+        assertEqual(EventFeatures(title: "Orlen: zysk w III kwartale wzrósł", description: "", date: now).periods, ["q3"],
+                    "Roman-numeral quarters are periods")
+        assertTrue(EventFeatures(title: "Conti pubblici, i trimestri successivi", description: "", date: now).periods.isEmpty,
+                   "The Italian article i is not a quarter numeral")
+        assertTrue(EventFeatures(title: "Beschluss am Mittwochabend", description: "", date: now).weekdays == ["wednesday"],
+                   "German weekday compounds are weekdays")
     }
 
     static func testActiveWorkCancellation() async throws {
