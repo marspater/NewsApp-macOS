@@ -122,6 +122,7 @@ final class DOMElementNode: Sendable {
     let children: [DOMElementNode]
     let text: String
     let isSelfClosing: Bool
+    private let isNavigationCard: Bool
 
     init(
         tag: String,
@@ -135,6 +136,17 @@ final class DOMElementNode: Sendable {
         self.children = children
         self.text = text
         self.isSelfClosing = isSelfClosing
+        // Classify once: immutable DOM nodes are revisited while scoring ancestor containers.
+        let cardTokens = (attributes["class"] ?? "").lowercased().split(whereSeparator: { !$0.isLetter && !$0.isNumber })
+        if self.tag != "a" && (cardTokens.contains("card") || cardTokens.contains("teaser")) {
+            let links = children.flatMap { $0.findNodes(tag: "a") }
+            let destinations = Set(links.compactMap { $0.attributes["href"] })
+            let visibleText = (text + children.map { $0.combinedText() }.joined()).filter { !$0.isWhitespace }.count
+            let linkedText = links.reduce(0) { $0 + $1.combinedText().filter { !$0.isWhitespace }.count }
+            isNavigationCard = destinations.count >= 2 && linkedText * 2 > visibleText
+        } else {
+            isNavigationCard = false
+        }
     }
 
     var className: String {
@@ -183,7 +195,7 @@ final class DOMElementNode: Sendable {
     }
 
     var isReaderExcluded: Bool {
-        if isHidden { return true }
+        if isHidden || isNavigationCard { return true }
         // BBC renders this listening CTA as ordinary prose; require its exact media links.
         if tag == "p" {
             let links = findNodes(tag: "a").compactMap { $0.attributes["href"] }
@@ -364,7 +376,22 @@ final class DOMElementNode: Sendable {
         func navigationLinkText(_ node: DOMElementNode) -> Int {
             if node.isCitedProse { return 0 }
             if node.tag == "a" { return node.combinedText().filter { !$0.isWhitespace }.count }
-            return node.children.reduce(0) { $0 + navigationLinkText($1) }
+            // An excluded widget between prose sections is inside the article, not evidence of a page wrapper.
+            // Keep counting excluded menus at the edges: those still distinguish wrappers from their article body.
+            guard node.children.count >= 3,
+                  node.children.dropFirst().dropLast().contains(where: { $0.isReaderExcluded }) else {
+                return node.children.reduce(0) { $0 + navigationLinkText($1) }
+            }
+            let proseIndices = node.children.indices.filter { index in
+                let child = node.children[index]
+                return !child.isReaderExcluded && child.readingBlocks().contains(where: { $0.isCitedProse })
+            }
+            return node.children.enumerated().reduce(0) { total, entry in
+                let (index, child) = entry
+                if child.isReaderExcluded, let first = proseIndices.first, let last = proseIndices.last,
+                   first < index && index < last { return total }
+                return total + navigationLinkText(child)
+            }
         }
         return min(1.0, Double(navigationLinkText(self)) / Double(allText))
     }

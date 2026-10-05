@@ -4,7 +4,9 @@
 
 ### Fixed
 
-- A new event-matcher version no longer detaches unchanged event members, usually the earliest report of a large event, by checking them against members that joined later; only members whose title or description changed are checked against their event again.
+- A new event-matcher version no longer detaches unchanged event members, usually the earliest report of a large event, by checking them against members that joined later; only members whose title or description changed are checked against their event again (#262).
+- Preserve article sections around inline related widgets and exclude teaser cards whose text is split across several links (#246).
+
 - The reader no longer rejects articles because of repeated page furniture, and stops at the article body instead of including related links and trending lists; on a live sample, page-extraction failures fell from 14 to 4 of 96 stories (#242).
 - Feeds that put plain text with blank-line paragraphs in `content:encoded` (for example Економічна правда) no longer show the article as one paragraph; the reader now opens the publisher page with its structure (#115).
 - Cancelling a refresh now stops feed parsing at the next element or item instead of extracting the rest of the feed, and an aborted parse is no longer reported as a malformed feed (#153).
