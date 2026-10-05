@@ -59,6 +59,8 @@ The VoiceOver harness is parked (#268) and is not part of release verification; 
 
 Use the [News · Story experience project](https://github.com/users/marspater/projects/2) and [program issue #90](https://github.com/marspater/NewsApp-macOS/issues/90) for this work. Before starting a slice, read its task acceptance criteria and dependencies. Update the relevant issue checklists and log implementation scope, completed checks, remaining gaps, and commit/PR state after each coherent slice.
 
+Private fingerprint capture and review use `FeedCatalog.supportedLanguages`, including optional extra feed lists and historical captures. Keep existing capture files intact; parked-language observations do not enter the current release denominator. Tuning is the default; `--corpus-holdout` explicitly unseals the fingerprint acceptance split.
+
 Keep uncommitted implementation In progress, linked PR work In review, and reserve Done for merged implementation or completed non-code deliverables with recorded evidence. Use `Refs #N` for partial coverage and `Fixes #N` only when the PR completes that issue. Keep the image HTTP-cache task (#161) separate from identity and reader/media work. Do not mark a phase complete from a partial implementation or a focused test pass.
 
 ## Security checks

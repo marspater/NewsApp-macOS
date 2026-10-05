@@ -244,7 +244,8 @@ enum StoryCorpus {
         var gatePassed = false
 
         var report: [String: Any] {
-            ["split": split, "captureFiles": captureFiles, "observations": observations,
+            ["split": split, "supportedLanguages": FeedCatalog.supportedLanguages.sorted(),
+             "captureFiles": captureFiles, "observations": observations,
              "fingerprintEligibleObservations": eligible, "eligibleObservationsByLanguage": eligibleByLanguage,
              "fingerprintEligibleDocuments": eligibleDocuments,
              "sameURLPairsSharingFingerprint": sameURLShared, "sameURLPairsWithoutSharedFingerprint": sameURLDisjoint,
@@ -340,7 +341,9 @@ enum StoryCorpus {
             feeds += try JSONDecoder().decode([CaptureFeed].self, from: Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[index + 1])))
         }
         var languages: [String: String] = [:]
-        for feed in feeds where languages[feed.url] == nil { languages[feed.url] = feed.language }
+        for feed in feeds where FeedCatalog.supportedLanguages.contains(feed.language) && languages[feed.url] == nil {
+            languages[feed.url] = feed.language
+        }
         let results = await FeedFetcher().fetchAllFeeds(urls: languages.keys.sorted())
         var items: [CapturedItem] = []
         var failed = 0
@@ -464,7 +467,9 @@ enum StoryCorpus {
             (item.link, item.feed, item.guid ?? "", item.title, item.published ?? -1, item.description)
         }
         let split = review.split
-        let items = unique.filter { captureSplit(host: host($0)) == split }.sorted { order($0) < order($1) }
+        let items = unique.filter {
+            FeedCatalog.supportedLanguages.contains($0.language) && captureSplit(host: host($0)) == split
+        }.sorted { order($0) < order($1) }
         review.observations = items.count
         let canonical = items.map(\.article.normalizedLink)
         let fingerprints = items.map { Set(ArticleIdentity.publisherTextFingerprints($0.article)) }

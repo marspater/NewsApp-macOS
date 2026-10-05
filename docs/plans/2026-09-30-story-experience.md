@@ -9,7 +9,22 @@
 - Каталог пропонує тільки англомовні канали (`FeedCatalog.supportedLanguages`). Канали українською, німецькою, французькою, італійською, нідерландською й польською лишаються в коді як відкладені, а попередні підписки на них знімаються під час запуску (#269). Причина: macOS не має моделі частин мови для цих мов, тож їхні матеріали не утворюють подій; словниковий fallback не пройшов перевірку точності на живих даних (#264, відкладено).
 - Живу перевірку VoiceOver (мовлення, ротор, рівні заголовків) відкладено (#268); #155 закрито. Нативна доступність у коді лишається.
 - Задачі з міткою `parked` не входять у реліз; братися за них лише після рішення Mars.
-- Holdout подій виміряно один раз: точність 0.958 (23/24) проти цілі ≥97%, повнота 0.291; рішення щодо прийняття — у #102 ([аудит](../audits/2026-10-05-event-corpus-holdout.md)). Embeddings не впроваджено (#127).
+- Holdout подій виміряно один раз: точність 0.958 (23/24) проти цілі ≥97%, повнота 0.291; Mars прийняв результат 5 жовтня 2026 — у #102 ([аудит](../audits/2026-10-05-event-corpus-holdout.md)). Embeddings не впроваджено (#127).
+
+## Current release status — 5 October 2026
+
+| Work | Current state | Remaining acceptance |
+| --- | --- | --- |
+| Performance #104/#153 | Done; PR #271 merged at `617c934` | Documented workload limits remain; no new performance task |
+| Phase C #93 | Done; extraction #246/#261 and native QA #123/#155 complete | Spoken VoiceOver is parked in #268 |
+| Phase E #95 | Done for deterministic overviews; integration, provenance and shared QA complete | No new model path or model audit in this release |
+| Phase A/B #91/#92 | In progress | #102 real-publisher fingerprint gate |
+| Final verification/program #98/#90 | In progress | Fingerprint acceptance and final evidence consolidation |
+| Optional #99/#235 and #244 | Backlog, outside core release | No new work in this completion queue |
+
+#102's event holdout is accepted by Mars (23/24, recall 0.291); do not replay it or change the matcher. Fingerprint captures continue through the already-approved schedule until 8 October. The current verification slice limits capture/review to the existing English-only supported-language policy, including historical files and private extra feed lists; stored captures are preserved. The correction remains In review until merged. [Tuning-only evidence](../audits/2026-10-05-fingerprint-release-scope.md): 174 distinct eligible English tuning documents and zero different-URL candidates; the fingerprint holdout stays sealed. Tuning summaries may be inspected; the fingerprint holdout stays sealed until the final acceptance run. Non-English matching #264 and live VoiceOver #268 remain parked and outside release gates.
+
+The earlier progress table below is a dated snapshot, superseded by this reconciliation.
 
 ## Поточний прогрес — 3 жовтня 2026 (вечір)
 
@@ -219,4 +234,4 @@ Cmd-R/Refresh запускає збір нових матеріалів одра
 
 ## Performance verification — 5 October 2026
 
-#104/#153: the cold launch after purge plus rebuild is recorded in [the launch audit](../audits/2026-10-05-cold-launch.md). The existing reading harness now measures the isolated production cache, reader, deterministic overview persistence/rendering and protected publisher Web view together; [results and scoped budgets](../audits/2026-10-05-full-app-workload.md). The evidence is complete for this bounded workload; the implementation remains In review until its PR is merged. Memory pressure and WebKit auxiliary-process totals remain unverified, without restoring parked #264/#268 to release gates.
+#104/#153: the cold launch after purge plus rebuild is recorded in [the launch audit](../audits/2026-10-05-cold-launch.md). The existing reading harness now measures the isolated production cache, reader, deterministic overview persistence/rendering and protected publisher Web view together; [results and scoped budgets](../audits/2026-10-05-full-app-workload.md). The evidence is complete for this bounded workload; the implementation is merged in PR #271 (`617c934`); #104/#153 are closed and Done. Memory pressure and WebKit auxiliary-process totals remain unverified, without restoring parked #264/#268 to release gates.
