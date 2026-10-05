@@ -15,3 +15,9 @@
 **Learning:** Compiling `NSRegularExpression` is computationally expensive. In `FeedXMLParser.swift`, the `extractImageFromHTML` method was repeatedly compiling a regular expression for image extraction up to twice per parsed article. When a feed has many items, this caused hundreds of unnecessary regex compilation cycles during background feed refresh.
 
 **Action:** Future Bolt runs should statically compile and store `NSRegularExpression` instances using `static let` (or statically initialized arrays for multiple patterns) when they are used inside loops or frequently called methods like XML element parsers or UI render passes, instead of instantiating them on demand.
+
+## 2024-10-27 - Statically compile NSRegularExpression arrays for multiple extraction patterns
+
+**Learning:** Compiling `NSRegularExpression` is computationally expensive. In `ContentExtractionPipeline.swift`, `extractLeadImage` was dynamically compiling multiple regex patterns for Open Graph image tags inside a loop for every parsed article, causing unnecessary CPU overhead.
+
+**Action:** Future Bolt runs should statically compile and store arrays of `NSRegularExpression` instances using `static let` (e.g., `.compactMap { try? NSRegularExpression(...) }`) when multiple patterns are evaluated per article, avoiding repeated compilation inside loops or frequent method calls.
