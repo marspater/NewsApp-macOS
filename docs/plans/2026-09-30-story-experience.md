@@ -18,11 +18,11 @@
 | Performance #104/#153 | Done; PR #271 merged at `617c934` | Documented workload limits remain; no new performance task |
 | Phase C #93 | Done; extraction #246/#261 and native QA #123/#155 complete | Spoken VoiceOver is parked in #268 |
 | Phase E #95 | Done for deterministic overviews; integration, provenance and shared QA complete | No new model path or model audit in this release |
-| Phase A/B #91/#92 | In progress | #102 real-publisher fingerprint gate |
-| Final verification/program #98/#90 | In progress | Fingerprint acceptance and final evidence consolidation |
+| Phase A/B #91/#92 | Acceptance complete; closure pending final evidence PR merge | #102 fingerprint holdout passed |
+| Final verification/program #98/#90 | In review with final evidence consolidation | Merge the final evidence PR |
 | Optional #99/#235 and #244 | Backlog, outside core release | No new work in this completion queue |
 
-#102's event holdout is accepted by Mars (23/24, recall 0.291); do not replay it or change the matcher. Fingerprint captures continue through the already-approved schedule until 8 October. The current verification slice limits capture/review to the existing English-only supported-language policy, including historical files and private extra feed lists; stored captures are preserved. The correction remains In review until merged. [Tuning-only evidence](../audits/2026-10-05-fingerprint-release-scope.md): 174 distinct eligible English tuning documents and zero different-URL candidates; the fingerprint holdout stays sealed. Tuning summaries may be inspected; the fingerprint holdout stays sealed until the final acceptance run. Non-English matching #264 and live VoiceOver #268 remain parked and outside release gates.
+#102's event holdout is accepted by Mars (23/24, recall 0.291); it was not replayed and the matcher is unchanged. PR #272 is merged at `7ffc3e3`, limiting capture/review to the English-only policy while preserving historical files. Count-only readiness established 841 distinct eligible held-out English documents without comparing pairs, reading labels or writing review files. The final fingerprint acceptance then ran once: zero different-URL matches, undefined precision, Wilson 95% false-merge upper bound **0.455%**, and `releaseGatePassed=true`. [Final holdout and core evidence reconciliation](../audits/2026-10-05-core-release-acceptance.md). The core phases are ready to close when this final evidence PR merges. Non-English matching #264 and live VoiceOver #268 remain parked; optional #99/#235/#244 remain outside the release. Existing capture scheduling was not changed or duplicated; further samples are not required for this gate.
 
 The earlier progress table below is a dated snapshot, superseded by this reconciliation.
 

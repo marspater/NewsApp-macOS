@@ -242,9 +242,19 @@ enum StoryCorpus {
         var total = CaptureMetrics()
         var byLanguage: [String: CaptureMetrics] = [:], bySource: [String: CaptureMetrics] = [:]
         var gatePassed = false
+        var readinessOnly = false
 
         var report: [String: Any] {
-            ["split": split, "supportedLanguages": FeedCatalog.supportedLanguages.sorted(),
+            if readinessOnly {
+                return ["split": split, "supportedLanguages": FeedCatalog.supportedLanguages.sorted(),
+                        "captureFiles": captureFiles, "observations": observations,
+                        "fingerprintEligibleObservations": eligible, "eligibleObservationsByLanguage": eligibleByLanguage,
+                        "fingerprintEligibleDocuments": eligibleDocuments, "scoringPerformed": false,
+                        "supportSufficientIfZeroFalseMerges": StoryCorpus.captureGatePassed(
+                            split: "holdout", metrics: CaptureMetrics(), eligibleDocuments: eligibleDocuments),
+                        "releaseGatePassed": false]
+            }
+            return ["split": split, "supportedLanguages": FeedCatalog.supportedLanguages.sorted(),
              "captureFiles": captureFiles, "observations": observations,
              "fingerprintEligibleObservations": eligible, "eligibleObservationsByLanguage": eligibleByLanguage,
              "fingerprintEligibleDocuments": eligibleDocuments,
@@ -448,10 +458,11 @@ enum StoryCorpus {
 
     /// Lists different-URL fingerprint matches of one split for review and scores them against `labels.json`
     /// (`{"<pair>": "same_document" | "different"}`). The review sheet carries URLs and titles, never body text.
-    static func reviewCaptures(directory path: String, holdout: Bool) throws -> CaptureReview {
+    static func reviewCaptures(directory path: String, holdout: Bool, readinessOnly: Bool = false) throws -> CaptureReview {
         let directory = try privateDirectory(path)
         var review = CaptureReview()
         review.split = holdout ? "holdout" : "tuning"
+        review.readinessOnly = readinessOnly
         let files = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
             .filter { $0.lastPathComponent.hasPrefix("capture-") && $0.pathExtension == "json" }
             .sorted { $0.lastPathComponent < $1.lastPathComponent }
@@ -482,6 +493,8 @@ enum StoryCorpus {
             for fingerprint in fingerprints[index] { byFingerprint[fingerprint, default: []].append(index) }
         }
         review.eligibleDocuments = byURL.count
+        // Count support before comparing pairs, reading labels or writing a review sheet.
+        if readinessOnly { return review }
         for members in byURL.values {
             for (offset, i) in members.enumerated() {
                 for j in members[(offset + 1)...] {
