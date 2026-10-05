@@ -4343,6 +4343,37 @@ struct NewsTests {
         }
         do { _ = try await cancelled.value; assertTrue(false, "A cancelled pass throws") } catch is CancellationError { }
         assertEqual(try await EventClusterer.run(in: db, now: now).processed, 3, "Cancelled and bounded work waits for the next pass")
+
+        // A matcher version bump keeps unchanged members, even an earliest member that the whole-event
+        // check would now reject; a member whose text changed is still checked again.
+        try await db.upsertArticles([
+            article("upgrade-1", "Wildfire forces evacuations near Valencia in eastern Spain", "Firefighters battled the blaze overnight.", hoursAgo: 6, source: "Upgrade One"),
+            article("upgrade-2", "Valencia wildfire forces thousands to evacuate in Spain", "Residents left their homes as the fire spread.", hoursAgo: 5, source: "Upgrade Two"),
+            article("upgrade-3", "Chip maker reports record third-quarter revenue", "Sales of data-centre processors doubled.", hoursAgo: 4, source: "Upgrade Three")
+        ])
+        let seeded = try await db.applyEventMatch("upgrade-1", .create(with: ["upgrade-2", "upgrade-3"]),
+                                                  matcherVersion: EventMatcher.version - 1, at: now)
+        guard case .created(let upgradeEvent) = seeded else { return assertTrue(false, "Seed an event matched by an older matcher") }
+        let seededVersion = try await db.fetchEvent(id: upgradeEvent)?.membershipVersion
+        let upgradePending = try await db.pendingEventMatchRows(activeSince: now.addingTimeInterval(-72 * 3600),
+                                                                matcherVersion: EventMatcher.version, limit: 10)
+        assertEqual(upgradePending.map(\.id), ["upgrade-1", "upgrade-2", "upgrade-3"], "An older matcher version leaves members pending, earliest first")
+        assertTrue(upgradePending.allSatisfy(\.previouslyMatched), "Members pending only for the matcher version are reported as matched before")
+        func upgradeFeatures(_ row: EventMatchRow) -> EventFeatures { EventFeatures(title: row.title, description: row.description, date: row.date) }
+        assertTrue(EventMatcher.eventScore(for: upgradeFeatures(upgradePending[0]), members: upgradePending.dropFirst().map(upgradeFeatures)) == nil,
+                   "The earliest member fails the whole-event check against later members")
+        let upgraded = try await EventClusterer.run(in: db, now: now)
+        assertEqual(upgraded.processed, 3, "A matcher version bump matches the members again")
+        assertEqual(upgraded.detached, 0, "Unchanged members are not detached after a matcher version bump")
+        assertEqual(try await db.fetchEvent(id: upgradeEvent)?.memberArticleIDs.sorted(), ["upgrade-1", "upgrade-2", "upgrade-3"], "Unchanged members keep their event")
+        assertEqual(try await db.fetchEvent(id: upgradeEvent)?.membershipVersion, seededVersion, "Keeping members does not bump the event version")
+        assertTrue(try await db.pendingEventMatchRows(activeSince: now.addingTimeInterval(-72 * 3600),
+            matcherVersion: EventMatcher.version, limit: 1).isEmpty, "Kept members are processed under the current matcher")
+        execute("UPDATE articles SET description='Firefighters battled the blaze near Valencia overnight.' WHERE id='upgrade-1';")
+        let edited = try await EventClusterer.run(in: db, now: now)
+        assertEqual(edited.processed, 1, "Only the edited member is matched again")
+        assertEqual(edited.detached, 1, "An edited member is checked against its event again")
+        assertEqual(try await db.fetchEvent(id: upgradeEvent)?.memberArticleIDs.sorted(), ["upgrade-2", "upgrade-3"], "An edited member that no longer fits leaves its event")
         await db.close()
         var handle: OpaquePointer?, statement: OpaquePointer?
         assertEqual(sqlite3_open(path, &handle), SQLITE_OK, "Inspect cluster library")

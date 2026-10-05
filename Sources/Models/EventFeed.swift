@@ -11,6 +11,8 @@ struct EventMatchRow: Hashable, Sendable {
     /// Publication date, or ingestion time for undated articles.
     let date: Date
     let eventID: String?
+    /// A matcher version processed the article since its title and description last changed.
+    var previouslyMatched = false
 }
 
 /// A matcher decision, applied by the database only if the state it was made against still holds.
