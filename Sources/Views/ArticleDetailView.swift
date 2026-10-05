@@ -741,10 +741,12 @@ struct ArticleDetailView: View {
                     Label("Browser back", systemImage: "arrow.left")
                 }
                 .disabled(!webCanGoBack)
+                .help("Browser back")
                 Button { webAction = .goForward } label: {
                     Label("Browser forward", systemImage: "arrow.right")
                 }
                 .disabled(!webCanGoForward)
+                .help("Browser forward")
             }
             Button(action: toggleSave) {
                 Label(isSaved ? "Remove from Saved Stories" : "Save Story",
@@ -756,6 +758,7 @@ struct ArticleDetailView: View {
                 ShareLink(item: url, subject: Text(currentArticle.title)) {
                     Label("Share story", systemImage: "square.and.arrow.up")
                 }
+                .help("Share story")
             }
             Menu {
                 Picker("Text size", selection: $readerTextScale) {
