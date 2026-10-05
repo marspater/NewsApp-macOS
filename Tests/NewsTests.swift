@@ -4864,8 +4864,8 @@ struct NewsTests {
         }
         let body = (1...60).map { "Captured report sentence \($0) adds one verifiable detail." }.joined(separator: " ")
         func item(_ host: String, _ path: String, guid: String, text: String? = nil,
-                  published: Double? = 1_800_000_000) -> StoryCorpus.CapturedItem {
-            StoryCorpus.CapturedItem(feed: "https://\(host)/feed.xml", language: "en", source: "Publisher", link: "https://\(host)/\(path)",
+                  published: Double? = 1_800_000_000, language: String = "en") -> StoryCorpus.CapturedItem {
+            StoryCorpus.CapturedItem(feed: "https://\(host)/feed.xml", language: language, source: "Publisher", link: "https://\(host)/\(path)",
                                      guid: guid, title: "Council approves budget", description: "Short teaser.",
                                      content: text ?? body, published: published)
         }
@@ -4886,7 +4886,9 @@ struct NewsTests {
         assertTrue(StoryCorpus.CapturedItem(feed: "f", language: "en", article: undated.article).published == nil, "Unknown dates stay unknown")
 
         let first = try StoryCorpus.writeCapture(StoryCorpus.Capture(version: 1, capturedAt: 1_800_000_100,
-            items: [original, amp, tracked, edited, other, short] + holdoutPair), in: directory)
+            items: [original, amp, tracked, edited, other, short,
+                    item(tuningHost, "parked", guid: "parked", language: "de"),
+                    item(holdoutHost, "parked", guid: "parked", language: "de")] + holdoutPair), in: directory)
         let permissions = try fileManager.attributesOfItem(atPath: first.path)[.posixPermissions] as? NSNumber
         assertEqual(permissions?.intValue, 0o600, "Captured publisher text is readable only by its owner")
         assertTrue((try? StoryCorpus.writeCapture(StoryCorpus.Capture(version: 1, capturedAt: 1_800_000_100, items: []), in: directory)) == nil,
@@ -4895,9 +4897,10 @@ struct NewsTests {
 
         var review = try StoryCorpus.reviewCaptures(directory: directory.path, holdout: false)
         assertEqual(review.captureFiles, 2, "Every capture file is read")
-        assertEqual(review.observations, 7, "Repeated observations count once and holdout hosts stay sealed")
+        assertEqual(review.observations, 7, "Repeated observations count once, parked languages are excluded and holdout hosts stay sealed")
         assertEqual(review.eligible, 5, "Short and undated items are not fingerprinted")
         assertEqual(review.eligibleDocuments, 3, "Copies at one canonical URL count as one eligible document")
+        assertEqual(review.eligibleByLanguage["de"], nil, "Parked captures cannot inflate the release denominator")
         assertEqual(review.sameURLShared, 1, "A stripped tracking parameter is the same URL")
         assertEqual(review.sameURLDisjoint, 2, "An edited body at the same URL no longer shares a fingerprint")
         assertEqual(review.total.candidates, 1, "One different-URL pair shares a fingerprint")
@@ -10004,6 +10007,5 @@ struct NewsTests {
         assertFalse(sentimentEvidence.isEmpty, "OverviewEvidenceSections with sentiment is not empty")
     }
 }
-
 
 
