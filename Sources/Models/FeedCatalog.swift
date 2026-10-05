@@ -41,6 +41,9 @@ enum CatalogSet: String, CaseIterable, Identifiable, Sendable {
 
     var id: String { rawValue }
 
+    /// Sets with at least one feed in a supported language; parked sets are not shown.
+    static var offered: [CatalogSet] { allCases.filter { !FeedCatalog.feeds(in: $0).isEmpty } }
+
     var title: String {
         switch self {
         case .world: return "World news"
@@ -63,7 +66,7 @@ enum CatalogSet: String, CaseIterable, Identifiable, Sendable {
         case .technology: return "Technology, computing and security reporting."
         case .scienceHealth: return "Science, space and health reporting."
         case .cultureLifestyle: return "Film, television, arts, food and everyday life."
-        case .ukraine: return "Ukrainian and English-language outlets covering Ukraine."
+        case .ukraine: return "English-language outlets covering Ukraine."
         case .europe: return "National news in German, French, Italian, Dutch and Polish."
         case .regional: return "English-language news from Asia, the Middle East and Africa."
         }
@@ -74,11 +77,20 @@ enum FeedCatalog {
     /// Date the entries below were last fetched and checked for freshness, parseability and access.
     static let verifiedOn = "2026-10-01"
 
+    /// Languages offered in production. Event matching does not work without a word-class model, which macOS lacks for
+    /// the other catalog languages (#264), so their entries stay below but are parked until it does.
+    static let supportedLanguages: Set<String> = ["en"]
+
     static func feeds(in set: CatalogSet) -> [CatalogFeed] {
         feeds.filter { $0.set == set }
     }
 
-    static let feeds: [CatalogFeed] = [
+    /// The feeds the app offers.
+    static let feeds = allFeeds.filter { supportedLanguages.contains($0.language) }
+    /// Entries kept for later; earlier subscriptions to them end at launch (`AppSettings`).
+    static let parkedFeeds = allFeeds.filter { !supportedLanguages.contains($0.language) }
+
+    static let allFeeds: [CatalogFeed] = [
         CatalogFeed(id: "bbc-world", title: "BBC News · World", publisher: "BBC News",
                     url: "https://feeds.bbci.co.uk/news/world/rss.xml",
                     language: "en", region: "GB", topic: .general, set: .world,

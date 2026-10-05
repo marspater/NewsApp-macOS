@@ -74,7 +74,11 @@ final class AppSettings: ObservableObject {
         self.defaults = defaults
 
         if let savedUrls = defaults.stringArray(forKey: Self.feedURLsKey) {
-            self.feedURLs = savedUrls
+            // Catalog feeds in languages that are not supported yet are parked; earlier subscriptions to them end.
+            let parked = Set(FeedCatalog.parkedFeeds.map(\.url))
+            let kept = savedUrls.filter { !parked.contains($0) }
+            if kept.count != savedUrls.count { defaults.set(kept, forKey: Self.feedURLsKey) }
+            self.feedURLs = kept
         } else {
             self.feedURLs = Self.defaultFeeds
         }

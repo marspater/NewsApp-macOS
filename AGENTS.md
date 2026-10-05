@@ -21,6 +21,7 @@ These instructions govern agent workflow, not the project specification.
 ## Scope and communication
 
 - Follow the user's current scope and preserve real settings, saved stories, read history and logs during verification.
+- The current release is English-only. Issues labelled `parked` (non-English feeds and matching #264, live VoiceOver QA #268) are out of scope: do not work on them or add them back to release gates unless Mars reopens them, and keep their parked code intact.
 - Default development verification remains arm64 and ad-hoc signed; do not invoke dormant distribution/notarization workflows unless explicitly requested.
 - Do not merge stale PRs wholesale. Review against current code, incorporate useful changes selectively and explain duplicate or superseded proposals.
 - Keep output concise and evidence-led. Ask only for missing decisions that block safe progress; complete independent authorized work while waiting.
