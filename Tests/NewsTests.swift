@@ -235,6 +235,14 @@ struct NewsTests {
             try await StoryCorpus.capture(directory: CommandLine.arguments[index + 1])
             return
         }
+        if let index = CommandLine.arguments.firstIndex(of: "--corpus-readiness") {
+            guard CommandLine.arguments.indices.contains(index + 1) else { throw StoryCorpus.Failure.invalid("Missing private capture directory") }
+            let review = try StoryCorpus.reviewCaptures(directory: CommandLine.arguments[index + 1],
+                holdout: CommandLine.arguments.contains("--corpus-holdout"), readinessOnly: true)
+            let data = try JSONSerialization.data(withJSONObject: review.report, options: [.sortedKeys])
+            print("CAPTURE_READINESS_REPORT " + String(decoding: data, as: UTF8.self))
+            return
+        }
         if let index = CommandLine.arguments.firstIndex(of: "--corpus-review") {
             guard CommandLine.arguments.indices.contains(index + 1) else { throw StoryCorpus.Failure.invalid("Missing private capture directory") }
             let review = try StoryCorpus.reviewCaptures(directory: CommandLine.arguments[index + 1],
@@ -4912,6 +4920,14 @@ struct NewsTests {
         assertFalse(String(decoding: sheet, as: UTF8.self).contains("Captured report sentence"), "The review sheet carries no body text")
         assertFalse(fileManager.fileExists(atPath: directory.appendingPathComponent("review-holdout.json").path), "The holdout stays sealed")
 
+        let readiness = try StoryCorpus.reviewCaptures(directory: directory.path, holdout: true, readinessOnly: true)
+        assertEqual(readiness.eligibleDocuments, 2, "Readiness counts distinct eligible holdout documents")
+        assertEqual(readiness.report["scoringPerformed"] as? Bool, false, "Readiness never scores")
+        assertTrue(readiness.report["differentURLCandidates"] == nil && readiness.report["falseMergeUpperBound95"] == nil,
+                   "Readiness exposes no pair outcomes or observed error bound")
+        assertFalse(readiness.gatePassed, "Sample counts alone cannot pass acceptance")
+        assertFalse(fileManager.fileExists(atPath: directory.appendingPathComponent("review-holdout.json").path), "Readiness leaves the holdout sealed")
+
         let holdoutKey = StoryCorpus.capturePairKey(holdoutPair[0].article.normalizedLink, holdoutPair[1].article.normalizedLink)
         let labelsFile = directory.appendingPathComponent("labels.json")
         try JSONSerialization.data(withJSONObject: [key: "same_document", holdoutKey: "same_document"]).write(to: labelsFile)
@@ -4924,6 +4940,8 @@ struct NewsTests {
         assertEqual([review.observations, review.total.candidates, review.total.sameDocument], [2, 1, 1], "The holdout is scored when unsealed")
         assertFalse(review.gatePassed, "Two eligible documents are too little support for the gate")
         try JSONSerialization.data(withJSONObject: [key: "maybe"]).write(to: labelsFile, options: .atomic)
+        assertEqual(try StoryCorpus.reviewCaptures(directory: directory.path, holdout: true, readinessOnly: true).eligibleDocuments,
+                    2, "Readiness does not read adjudication labels")
         assertTrue((try? StoryCorpus.reviewCaptures(directory: directory.path, holdout: false)) == nil, "Unknown labels are rejected")
 
         func metrics(_ same: Int, _ different: Int, unlabeled: Int = 0) -> StoryCorpus.CaptureMetrics {

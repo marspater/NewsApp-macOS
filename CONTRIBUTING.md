@@ -31,6 +31,7 @@ NEWS_EVENT_CORPUS=corpus.json ./test.sh --event-corpus # Event clustering precis
 NEWS_EMBEDDING_THRESHOLD=0.4 NEWS_EVENT_CORPUS=corpus.json ./test.sh --event-corpus --corpus-holdout # Holdout, embeddings at the cutoff chosen on tune (#127)
 ./test.sh --corpus-capture DIR    # Opt-in, live: capture catalog feed items into a private directory (#102)
 ./test.sh --corpus-review DIR     # Fingerprint match review sheet and precision against private labels (#102)
+./test.sh --corpus-readiness DIR --corpus-holdout # Eligible held-out document counts only; no scores, labels or review-file writes
 ./test.sh --corpus-pages DIR --corpus-urls requests.json # Opt-in protected publisher-page evidence; [{"id":"doc-1","url":"https://…"}]
 ./test.sh --corpus-page-texts DIR # Offline private readability evidence; no matching predictions
 ./build.sh                        # arm64 app with ad-hoc verification signing
@@ -59,7 +60,7 @@ The VoiceOver harness is parked (#268) and is not part of release verification; 
 
 Use the [News · Story experience project](https://github.com/users/marspater/projects/2) and [program issue #90](https://github.com/marspater/NewsApp-macOS/issues/90) for this work. Before starting a slice, read its task acceptance criteria and dependencies. Update the relevant issue checklists and log implementation scope, completed checks, remaining gaps, and commit/PR state after each coherent slice.
 
-Private fingerprint capture and review use `FeedCatalog.supportedLanguages`, including optional extra feed lists and historical captures. Keep existing capture files intact; parked-language observations do not enter the current release denominator. Tuning is the default; `--corpus-holdout` explicitly unseals the fingerprint acceptance split.
+Private fingerprint capture and review use `FeedCatalog.supportedLanguages`, including optional extra feed lists and historical captures. Keep existing capture files intact; parked-language observations do not enter the current release denominator. Tuning is the default; `--corpus-review --corpus-holdout` explicitly unseals the fingerprint acceptance split. Use `--corpus-readiness DIR --corpus-holdout` to count support while leaving outcomes sealed. Its zero-false-merge sufficiency flag is conditional, not observed acceptance.
 
 Keep uncommitted implementation In progress, linked PR work In review, and reserve Done for merged implementation or completed non-code deliverables with recorded evidence. Use `Refs #N` for partial coverage and `Fixes #N` only when the PR completes that issue. Keep the image HTTP-cache task (#161) separate from identity and reader/media work. Do not mark a phase complete from a partial implementation or a focused test pass.
 
