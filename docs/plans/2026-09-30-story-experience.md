@@ -216,3 +216,7 @@ Cmd-R/Refresh запускає збір нових матеріалів одра
 - [Apple: мови та локалі](https://developer.apple.com/documentation/foundationmodels/supporting-languages-and-locales-with-foundation-models), [SystemLanguageModel](https://developer.apple.com/documentation/foundationmodels/systemlanguagemodel): доступність і мовна підтримка визначають fallback.
 
 Цей документ — оцінка та план. Benchmark багатоджерельного синтезу на локальній моделі та вимірювання точності кластерів і відбитків на holdout ще не виконані; стан реалізації — у розділі «Поточний прогрес».
+
+## Performance verification — 5 October 2026
+
+#104/#153: the cold launch after purge plus rebuild is recorded in [the launch audit](../audits/2026-10-05-cold-launch.md). The existing reading harness now measures the isolated production cache, reader, deterministic overview persistence/rendering and protected publisher Web view together; [results and scoped budgets](../audits/2026-10-05-full-app-workload.md). The evidence is complete for this bounded workload; the implementation remains In review until its PR is merged. Memory pressure and WebKit auxiliary-process totals remain unverified, without restoring parked #264/#268 to release gates.

@@ -37,10 +37,13 @@ private func mebibytes(_ bytes: UInt64) -> Double { (Double(bytes) / 1_048_576 *
 @MainActor
 private final class ReadingDelegate: NSObject, NSApplicationDelegate {
     private var window: NSWindow?
+    private var finishedWebLoads = 0
+    private let fullApp = ProcessInfo.processInfo.environment["NEWS_READING_FULL_APP"] == "1"
     /// Reader image completions by URL, as `ArticleRemoteImage` reports them.
     private var finishedImages: [String: Bool] = [:]
 
     func applicationDidFinishLaunching(_: Notification) {
+        if fullApp { CacheManager.shared.configureOfflineCache() }
         Task {
             do {
                 try await measure()
@@ -53,7 +56,7 @@ private final class ReadingDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func measure() async throws {
-        let output = URL(fileURLWithPath: CommandLine.arguments[1], isDirectory: true)
+        let output = fullApp ? FileManager.default.temporaryDirectory : URL(fileURLWithPath: CommandLine.arguments[1], isDirectory: true)
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("news-reading-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let suite = "test.native.reading.\(UUID().uuidString)"
@@ -101,7 +104,13 @@ private final class ReadingDelegate: NSObject, NSApplicationDelegate {
         // The manager clusters the newly stored stories on start; finish that first so only reading is measured.
         await manager.waitForEventClustering()
 
+        let libraryRows = try await database.counts().total
         let before = footprint()
+        let initialCacheUsage = URLCache.shared.currentMemoryUsage
+        var webSamples: [[String: Any]] = []
+        var overviewSamples: [[String: Any]] = []
+        var webLoading = true
+        var webError: String?
         var highest = before.current
         let sampler = Task {
             while !Task.isCancelled {
@@ -176,16 +185,82 @@ private final class ReadingDelegate: NSObject, NSApplicationDelegate {
         }
             afterPass.append(mebibytes(footprint().current))
         }
+        if fullApp {
+            guard URLCache.shared.memoryCapacity == 64 * 1024 * 1024,
+                  URLCache.shared.diskCapacity == 512 * 1024 * 1024 else { throw Failure.incomplete }
+            // These are controlled timing inputs, not claims that unrelated live stories form one event.
+            let coordinator = OverviewGenerationCoordinator(store: store, queue: EnrichmentQueue(store: store))
+            let members = Array(store.articles.filter { $0.readerDocument?.hasPublisherText == true }.prefix(3))
+            guard members.count == 3 else { throw Failure.incomplete }
+            for index in 0..<10 {
+                let start = ProcessInfo.processInfo.systemUptime
+                guard let overview = await coordinator.requestOverview(
+                    eventID: "workload-\(index)", eventTitle: members[0].title,
+                    membershipVersion: 1, articles: members, priority: .visibleEvent),
+                    !overview.citations.isEmpty,
+                    try await store.fetchEventOverview(eventID: overview.eventID)?.id == overview.id
+                else { throw Failure.incomplete }
+                let generated = ProcessInfo.processInfo.systemUptime
+                view.rootView = AnyView(EventOverviewReaderView(overview: overview, memberArticles: members,
+                    onSelectArticle: { _ in }, onSelectCitation: { _, _ in }).id(overview.id))
+                view.layoutSubtreeIfNeeded()
+                guard let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { throw Failure.incomplete }
+                view.cacheDisplay(in: view.bounds, to: bitmap)
+                if index == 0, let png = bitmap.representation(using: .png, properties: [:]) {
+                    try png.write(to: output.appendingPathComponent("overview.png"))
+                }
+                overviewSamples.append(["sample": index + 1,
+                    "generation_and_persistence_ms": (generated - start) * 1000,
+                    "view_capture_ms": (ProcessInfo.processInfo.systemUptime - generated) * 1000,
+                    "citations": overview.citations.count, "footprint_mib": mebibytes(footprint().current)])
+                try await Task.sleep(for: .milliseconds(500))
+            }
+            let webObserver = NotificationCenter.default.addObserver(forName: Notification.Name("workloadWebFinished"), object: nil, queue: .main) { _ in
+                MainActor.assumeIsolated { self.finishedWebLoads += 1 }
+            }
+            defer { NotificationCenter.default.removeObserver(webObserver) }
+            // Exercise the publisher pages for the same live reading selection, through the protected Web view.
+            for (index, story) in stories.prefix(5).enumerated() {
+                guard let url = URL(string: story.link), url.scheme == "https" else { throw Failure.incomplete }
+                finishedWebLoads = 0
+                webLoading = true
+                webError = nil
+                let start = ProcessInfo.processInfo.systemUptime
+                view.rootView = AnyView(ArticleWebView(url: url,
+                    isLoading: Binding(get: { webLoading }, set: { webLoading = $0 }),
+                    canGoBack: .constant(false), canGoForward: .constant(false),
+                    loadError: Binding(get: { webError }, set: { webError = $0 })).id(index))
+                while webLoading, ProcessInfo.processInfo.systemUptime - start < 30 {
+                    try await Task.sleep(for: .milliseconds(50))
+                }
+                let seconds = ProcessInfo.processInfo.systemUptime - start
+                let loaded = !webLoading && webError == nil && finishedWebLoads > 0
+                view.layoutSubtreeIfNeeded()
+                webSamples.append(["sample": index + 1, "source": story.source, "loaded": loaded, "seconds": seconds,
+                    "footprint_mib": mebibytes(footprint().current)])
+                try await Task.sleep(for: .milliseconds(500))
+            }
+        }
         let whileReading = footprint()
+        if fullApp {
+            view.rootView = AnyView(EmptyView())
+            view.layoutSubtreeIfNeeded()
+        }
         current.close()
         window = nil
         try await Task.sleep(for: .seconds(3))
         sampler.cancel()
         let after = footprint()
         let complete = imageFailures == 0 && samples.allSatisfy { $0["document_ready"] as? Bool == true }
+            && (!fullApp || (webSamples.count == 5 && webSamples.allSatisfy { $0["loaded"] as? Bool == true } && overviewSamples.count == 10))
         let report: [String: Any] = [
-            "complete": complete, "image_failures": imageFailures,
-            "stories": stories.count, "feeds": feeds, "window_width": 1100, "window_height": 800,
+            "complete": complete, "full_app_components": fullApp,
+            "web": webSamples, "overviews": overviewSamples,
+            "url_cache_memory_capacity_bytes": URLCache.shared.memoryCapacity,
+            "url_cache_memory_usage_bytes": URLCache.shared.currentMemoryUsage,
+            "url_cache_memory_usage_before_reading_bytes": initialCacheUsage,
+            "url_cache_disk_capacity_bytes": URLCache.shared.diskCapacity, "image_failures": imageFailures,
+            "stories": stories.count, "library_rows": libraryRows, "feeds": feeds, "window_width": 1100, "window_height": 800,
             "footprint_before_reading_mib": mebibytes(before.current),
             "footprint_highest_sampled_mib": mebibytes(highest),
             "footprint_lifetime_peak_mib": mebibytes(max(whileReading.peak, after.peak)),
@@ -194,10 +269,14 @@ private final class ReadingDelegate: NSObject, NSApplicationDelegate {
             "per_story": samples,
             "os": ProcessInfo.processInfo.operatingSystemVersionString,
             "physical_memory_bytes": ProcessInfo.processInfo.physicalMemory,
-            "scope": "Production ArticleDetailView reading live panel stories one after another in one window, twice, with real extraction and image loading through the app's network client; isolated temporary storage and settings, AI off. Footprint includes the harness and live fetch setup. Not the shipping app delegate, the web view, or event overviews."
+            "scope": "Production ArticleDetailView reading live panel stories one after another in one window, twice, with real extraction and image loading through the app's network client; isolated temporary storage and settings, AI off. Footprint includes the harness and live fetch setup. " + (fullApp ? "Combined sandboxed bundle uses production CacheManager configuration, ten controlled deterministic overview generation/persistence/view captures and five protected public HTTPS Web view loads. Excludes notification authorization, NewsApp scenes, memory pressure and WebKit auxiliary-process footprint." : "Not the shipping app delegate, the web view, or event overviews.")
         ]
-        try JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys])
-            .write(to: output.appendingPathComponent("reading-memory.json"))
+        let data = try JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys])
+        try data.write(to: output.appendingPathComponent("reading-memory.json"))
+        if fullApp {
+            print("WORKLOAD_REPORT=" + data.base64EncodedString())
+            print("WORKLOAD_IMAGE=" + output.appendingPathComponent("overview.png").path)
+        }
         await database.close()
         // A run with missing documents or images is not the documented workload; keep its report but fail.
         guard complete else { throw Failure.incomplete }

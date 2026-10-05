@@ -25,4 +25,4 @@ Warm launches match the 2 October baseline (median 656.8 ms) and stay inside eve
 
 - One cold sample. A reboot is colder than `purge`, because a reboot also clears the dyld shared cache.
 - `onAppear` of the first card marks SwiftUI creation, not pixels on screen.
-- No real network refresh, model work, reader, web view or event overview was part of launch. The full-app workload sign-off is still open in #104/#153.
+- No real network refresh, model work, reader, web view or event overview was part of launch. The additional component workload is now recorded in the [combined cache/reader/Web/overview audit](2026-10-05-full-app-workload.md); its scoped memory limits remain explicit.
