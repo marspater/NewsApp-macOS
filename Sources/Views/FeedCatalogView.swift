@@ -24,7 +24,7 @@ struct FeedCatalogView: View {
             Divider()
 
             List {
-                ForEach(CatalogSet.allCases) { set in
+                ForEach(CatalogSet.offered) { set in
                     Section {
                         ForEach(FeedCatalog.feeds(in: set)) { feed in
                             row(feed)

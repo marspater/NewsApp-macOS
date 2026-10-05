@@ -2093,10 +2093,11 @@ struct NewsTests {
     static func testFeedCatalog() async throws {
         print("  - Testing the curated feed catalog, opt-in subscription and custom feeds...")
         let feeds = FeedCatalog.feeds
+        let all = FeedCatalog.allFeeds
         assertTrue((30...60).contains(feeds.count), "The starter catalog stays in the planned 30-60 range (\(feeds.count))")
-        assertEqual(Set(feeds.map(\.id)).count, feeds.count, "Catalog ids are unique")
-        assertEqual(Set(feeds.map(\.url)).count, feeds.count, "Catalog URLs are unique")
-        for feed in feeds {
+        assertEqual(Set(all.map(\.id)).count, all.count, "Catalog ids are unique")
+        assertEqual(Set(all.map(\.url)).count, all.count, "Catalog URLs are unique")
+        for feed in all {
             assertEqual(AppSettings.normalizeFeedURL(feed.url), feed.url, "\(feed.id) is stored in subscription form, so it is fetched exactly as verified")
             let url = URL(string: feed.url)
             assertEqual(url?.scheme, "https", "\(feed.id) uses HTTPS")
@@ -2106,11 +2107,23 @@ struct NewsTests {
             assertFalse(feed.title.isEmpty || feed.publisher.isEmpty, "\(feed.id) is labeled")
         }
         assertTrue(ISO8601DateFormatter().date(from: FeedCatalog.verifiedOn + "T00:00:00Z") != nil, "Verification date is a calendar date")
-        for set in CatalogSet.allCases {
-            assertTrue(FeedCatalog.feeds(in: set).count >= 3, "\(set.title) is a real set")
+        for set in CatalogSet.offered {
+            assertTrue(FeedCatalog.feeds(in: set).count >= 2, "\(set.title) is a real set")
             assertFalse(set.summary.isEmpty, "\(set.title) is described")
         }
-        assertTrue(Set(feeds.map(\.language)).isSuperset(of: ["en", "uk", "de", "fr", "it", "nl", "pl"]), "The catalog spans the planned languages")
+        assertEqual(Set(feeds.map(\.language)), ["en"], "Only English feeds are offered")
+        assertTrue(Set(FeedCatalog.parkedFeeds.map(\.language)).isSuperset(of: ["uk", "de", "fr", "it", "nl", "pl"]),
+                   "Other languages stay in the catalog, parked")
+        assertFalse(CatalogSet.offered.contains(.europe), "A set with only parked feeds is not shown")
+
+        // Earlier subscriptions to parked catalog feeds end at launch; custom and English feeds stay.
+        let parkedSuite = "test.catalog.parked.\(UUID().uuidString)"
+        let parkedDefaults = UserDefaults(suiteName: parkedSuite)!
+        defer { parkedDefaults.removePersistentDomain(forName: parkedSuite) }
+        let kept = ["https://example.com/custom.xml", feeds[0].url]
+        parkedDefaults.set([kept[0], FeedCatalog.parkedFeeds[0].url, kept[1]], forKey: AppSettings.feedURLsKey)
+        assertEqual(AppSettings(defaults: parkedDefaults).feedURLs, kept, "Parked catalog subscriptions are removed in order")
+        assertEqual(parkedDefaults.stringArray(forKey: AppSettings.feedURLsKey), kept, "The removal persists")
 
         // Opt-in: a fresh install subscribes to nothing from the catalog beyond its own defaults.
         let suite = "test.catalog.\(UUID().uuidString)"
