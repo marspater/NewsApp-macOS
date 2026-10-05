@@ -1015,16 +1015,16 @@ final class ContentExtractionPipeline: Sendable {
 
     // MARK: - Lead Image Extraction
 
+    private static let ogImageRegexes: [NSRegularExpression] = [
+        "<meta[^>]+property=[\"']og:image[\"'][^>]+content=[\"']([^\"']+)[\"']",
+        "<meta[^>]+content=[\"']([^\"']+)[\"'][^>]+property=[\"']og:image[\"']",
+        "<meta[^>]+name=[\"']twitter:image[\"'][^>]+content=[\"']([^\"']+)[\"']",
+        "<meta[^>]+content=[\"']([^\"']+)[\"'][^>]+name=[\"']twitter:image[\"']"
+    ].compactMap { try? NSRegularExpression(pattern: $0, options: .caseInsensitive) }
+
     func extractLeadImage(from html: String) -> String? {
-        let ogPatterns = [
-            "<meta[^>]+property=[\"']og:image[\"'][^>]+content=[\"']([^\"']+)[\"']",
-            "<meta[^>]+content=[\"']([^\"']+)[\"'][^>]+property=[\"']og:image[\"']",
-            "<meta[^>]+name=[\"']twitter:image[\"'][^>]+content=[\"']([^\"']+)[\"']",
-            "<meta[^>]+content=[\"']([^\"']+)[\"'][^>]+name=[\"']twitter:image[\"']"
-        ]
-        for pattern in ogPatterns {
-            if let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive),
-               let match = regex.firstMatch(in: html, range: NSRange(html.startIndex..., in: html)),
+        for regex in Self.ogImageRegexes {
+            if let match = regex.firstMatch(in: html, range: NSRange(html.startIndex..., in: html)),
                let range = Range(match.range(at: 1), in: html) {
                 let candidate = String(html[range]).trimmingCharacters(in: .whitespacesAndNewlines)
                 if !candidate.isEmpty {
