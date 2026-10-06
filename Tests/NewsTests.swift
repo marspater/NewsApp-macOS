@@ -985,9 +985,9 @@ struct NewsTests {
 
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [MockURLProtocol.self]
-        let session = URLSession(configuration: config)
-        defer { session.invalidateAndCancel(); MockURLProtocol.requestHandler = nil }
-        let checker = UpdateChecker(session: session)
+        let testClient = SecureHTTPClient(configuration: config)
+        defer { MockURLProtocol.requestHandler = nil }
+        let checker = UpdateChecker(httpClient: testClient)
         checker.updateAvailable = true
         checker.verifiedReleaseURL = URL(string: "https://github.com/marspater/NewsApp-macOS/releases/latest")
         MockURLProtocol.requestHandler = { _ in throw URLError(.notConnectedToInternet) }

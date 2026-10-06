@@ -87,9 +87,9 @@ final class UpdateChecker: ObservableObject {
     @Published var lastCheckDate: Date? = nil
     @Published var statusMessage: String? = nil
 
-    private let session: URLSession?
+    private let httpClient: SecureHTTPClient
 
-    init(session: URLSession? = nil) { self.session = session }
+    init(httpClient: SecureHTTPClient = .shared) { self.httpClient = httpClient }
 
     private let logger = Logger(subsystem: "com.marspater.news", category: "UpdateChecker")
     private let minimumCheckInterval: TimeInterval = 6 * 3600 // 6 hours
@@ -121,20 +121,18 @@ final class UpdateChecker: ObservableObject {
             return
         }
 
-        var request = URLRequest(url: url)
-        request.httpMethod = "GET"
-        request.timeoutInterval = 10.0
-        request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
-        request.setValue("NewsApp/\(currentAppVersion)", forHTTPHeaderField: "User-Agent")
-
         do {
             let data: Data
             let response: URLResponse
-            if let session {
-                (data, response) = try await session.data(for: request)
-            } else {
-                (data, response) = try await SecureHTTPClient.shared.fetchData(from: url, maxBytes: 1024 * 1024, timeout: 10)
-            }
+            (data, response) = try await httpClient.fetchData(
+                from: url,
+                maxBytes: 1024 * 1024,
+                timeout: 10,
+                customHeaders: [
+                    "Accept": "application/vnd.github+json",
+                    "User-Agent": "NewsApp/\(currentAppVersion)"
+                ]
+            )
             guard let httpResponse = response as? HTTPURLResponse else {
                 statusMessage = "Invalid server response"
                 return
