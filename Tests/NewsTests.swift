@@ -1744,6 +1744,24 @@ struct NewsTests {
         saves.save(emptyLink)
         assertFalse(saves.isSaved(otherEmptyLink), "Missing URLs do not alias unrelated stories")
         await saves.waitForPendingChanges()
+        for (index, link) in ["https://example.com/", "https://example.com/?utm_source=rss", "javascript:publisher"].enumerated() {
+            let first = FeedArticle(title: "First homepage story", link: link, guid: "home-first-\(index)",
+                description: "First report", pubDate: Date(timeIntervalSince1970: 100), source: "Publisher")
+            let second = FeedArticle(title: "Second homepage story", link: link, guid: "home-second-\(index)",
+                description: "Second report", pubDate: Date(timeIntervalSince1970: 200), source: "Publisher")
+            saves.save(first)
+            assertFalse(saves.isSaved(second), "Generic or invalid links do not alias separate bookmarks")
+            saves.save(second)
+            await saves.waitForPendingChanges()
+            assertTrue(try await db.isSaved(articleId: first.id), "First bookmark persists independently")
+            assertTrue(try await db.isSaved(articleId: second.id), "Second bookmark persists independently")
+            let restoredSaves = SavedStoriesManager(articleStore: store)
+            restoredSaves.remove(first)
+            await restoredSaves.waitForPendingChanges()
+            assertFalse(try await db.isSaved(articleId: first.id), "Selected bookmark is removed")
+            assertTrue(restoredSaves.isSaved(second), "Removing one homepage story keeps the other saved in the restored UI")
+            assertTrue(try await db.isSaved(articleId: second.id), "Removing one homepage story keeps the other saved in SQLite")
+        }
         await db.close()
         do {
             _ = try await store.fetchArticles()
