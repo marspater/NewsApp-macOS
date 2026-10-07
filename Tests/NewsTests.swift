@@ -999,6 +999,58 @@ struct NewsTests {
         }
         await checker.checkForUpdates(userInitiated: true)
         assertEqual(checker.statusMessage, "No published release is available to compare.", "Missing releases are not reported as up to date")
+
+        let expectedUserAgent = "NewsApp/\(checker.currentAppVersion)"
+        MockURLProtocol.requestHandler = { request in
+            assertEqual(request.url?.host, "api.github.com", "Updates use the GitHub API")
+            assertEqual(request.value(forHTTPHeaderField: "Accept"), "application/vnd.github+json", "Protected update requests preserve JSON negotiation")
+            assertEqual(request.value(forHTTPHeaderField: "User-Agent"), expectedUserAgent, "Protected update requests preserve the app user agent")
+            assertEqual(request.cachePolicy, .reloadIgnoringLocalCacheData, "Updates do not replay cached responses")
+            assertEqual(request.timeoutInterval, 10, "Update requests retain their timeout")
+            let payload = GitHubReleasePayload(tagName: "v999.0.0", name: nil,
+                htmlUrl: "https://github.com/marspater/NewsApp-macOS/releases/tag/v999.0.0",
+                body: "Release notes", publishedAt: nil)
+            return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"])!, try JSONEncoder().encode(payload))
+        }
+        await checker.checkForUpdates(userInitiated: true)
+        assertTrue(checker.updateAvailable, "A valid newer release is offered through the protected client")
+        assertEqual(checker.latestVersionString, "v999.0.0", "New release version is retained")
+        assertEqual(checker.releaseNotes, "Release notes", "New release notes are retained")
+        assertTrue(checker.verifiedReleaseURL != nil, "A trusted release link is retained")
+        MockURLProtocol.requestHandler = { _ in
+            assertTrue(false, "Automatic checks within six hours must not make another request")
+            throw URLError(.cancelled)
+        }
+        await checker.checkForUpdates()
+        assertTrue(checker.updateAvailable, "Throttling preserves the last successful result")
+
+        MockURLProtocol.requestHandler = { request in
+            (HTTPURLResponse(url: request.url!, statusCode: 503, httpVersion: nil, headerFields: nil)!, Data())
+        }
+        await checker.checkForUpdates(userInitiated: true)
+        assertEqual(checker.statusMessage, "Update check failed (HTTP 503)", "Protected client HTTP failures retain their status")
+        assertFalse(checker.updateAvailable, "HTTP failures clear stale availability")
+        assertTrue(checker.verifiedReleaseURL == nil, "HTTP failures clear stale release links")
+
+        MockURLProtocol.requestHandler = { request in
+            (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil,
+                headerFields: ["Content-Type": "application/json", "Content-Length": "1048577"])!, Data())
+        }
+        await checker.checkForUpdates(userInitiated: true)
+        assertEqual(checker.statusMessage, "Unable to check for updates", "Oversized update responses are rejected")
+        assertFalse(checker.updateAvailable, "Oversized responses cannot offer an update")
+
+        MockURLProtocol.requestHandler = { request in
+            let payload = GitHubReleasePayload(tagName: "v999.0.0", name: nil,
+                htmlUrl: "https://example.com/releases/tag/v999.0.0", body: nil, publishedAt: nil)
+            return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"])!, try JSONEncoder().encode(payload))
+        }
+        await checker.checkForUpdates(userInitiated: true)
+        assertEqual(checker.statusMessage, "Received untrusted release URL", "Untrusted release links are rejected")
+        assertFalse(checker.updateAvailable, "Untrusted release links cannot offer an update")
+        assertTrue(checker.verifiedReleaseURL == nil, "Untrusted release links are never retained")
     }
 
     static func testLiveReader(pagesOnly: Bool = false) async {

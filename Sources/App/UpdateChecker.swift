@@ -122,9 +122,7 @@ final class UpdateChecker: ObservableObject {
         }
 
         do {
-            let data: Data
-            let response: URLResponse
-            (data, response) = try await httpClient.fetchData(
+            let (data, httpResponse) = try await httpClient.fetchData(
                 from: url,
                 maxBytes: 1024 * 1024,
                 timeout: 10,
@@ -133,18 +131,6 @@ final class UpdateChecker: ObservableObject {
                     "User-Agent": "NewsApp/\(currentAppVersion)"
                 ]
             )
-            guard let httpResponse = response as? HTTPURLResponse else {
-                statusMessage = "Invalid server response"
-                return
-            }
-
-            if httpResponse.statusCode == 404 {
-                statusMessage = "No published release is available to compare."
-                updateAvailable = false
-                lastCheckDate = Date()
-                return
-            }
-
             guard httpResponse.statusCode == 200 else {
                 statusMessage = "Update check failed (HTTP \(httpResponse.statusCode))"
                 return
@@ -197,6 +183,8 @@ final class UpdateChecker: ObservableObject {
         } catch FeedError.httpStatus(404) {
             statusMessage = "No published release is available to compare."
             lastCheckDate = Date()
+        } catch FeedError.httpStatus(let status) {
+            statusMessage = "Update check failed (HTTP \(status))"
         } catch {
             logger.error("Update check failed: \(error.localizedDescription)")
             statusMessage = "Unable to check for updates"
