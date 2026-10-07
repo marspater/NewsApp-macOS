@@ -8,6 +8,8 @@
 
 ### Fixed
 
+- Update checks send GitHub API headers through the protected HTTP client and preserve HTTP failure status messages (#274).
+
 - A new event-matcher version no longer detaches unchanged event members, usually the earliest report of a large event, by checking them against members that joined later; only members whose title or description changed are checked against their event again (#262).
 - Preserve article sections around inline related widgets and exclude teaser cards whose text is split across several links (#246).
 
