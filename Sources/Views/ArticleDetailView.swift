@@ -593,6 +593,7 @@ struct ArticleDetailView: View {
                 .buttonStyle(.plain)
                 .buttonBorderShape(.capsule)
                 .help("Open Web View (W)")
+                .accessibilityLabel("Open Web View")
 
                 if URL(string: currentArticle.link) != nil {
                     Button {
@@ -614,6 +615,7 @@ struct ArticleDetailView: View {
                     .buttonStyle(.plain)
                     .buttonBorderShape(.capsule)
                     .help("Open in default web browser (O)")
+                    .accessibilityLabel("Open in default web browser")
                 }
             }
         }
@@ -759,6 +761,7 @@ struct ArticleDetailView: View {
                     Label("Share story", systemImage: "square.and.arrow.up")
                 }
                 .help("Share story")
+                .accessibilityLabel("Share story")
             }
             Menu {
                 Picker("Text size", selection: $readerTextScale) {
@@ -787,6 +790,7 @@ struct ArticleDetailView: View {
                 Label("Reading options", systemImage: "textformat.size")
             }
             .help("Reading style and article actions")
+            .accessibilityLabel("Reading style and article actions")
         }
     }
 
