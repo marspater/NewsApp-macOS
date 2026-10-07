@@ -203,6 +203,17 @@ enum EventControlSet {
 
 @main
 struct NewsTests {
+    static func mockHTTPClient(configuration: URLSessionConfiguration) -> SecureHTTPClient {
+        // URLProtocol supplies bytes; fixture DNS must also stay independent of the network.
+        SecureHTTPClient(configuration: configuration, resolver: { host in
+            IPAddressValidator.validateHost(host, resolver: { fixtureHost in
+                ["example.com", "example.org", "api.github.com", "reader.invalid", "8.8.8.8", "8.8.4.4"].contains(fixtureHost)
+                    ? .allowed(ips: ["8.8.8.8"])
+                    : .unresolvable(reason: "No configured mock DNS address")
+            })
+        })
+    }
+
     static func main() async {
         do {
             try await runTests()
@@ -985,7 +996,7 @@ struct NewsTests {
 
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [MockURLProtocol.self]
-        let testClient = SecureHTTPClient(configuration: config)
+        let testClient = mockHTTPClient(configuration: config)
         defer { MockURLProtocol.requestHandler = nil }
         let checker = UpdateChecker(httpClient: testClient)
         checker.updateAvailable = true
@@ -1356,6 +1367,14 @@ struct NewsTests {
     static func testIPAddressValidatorDeep() async {
         print("  - Testing IPAddressValidator (IPv4, IPv6, mapped IPv6, DNS)...")
 
+        for host in ["localhost", "printer.local", "127.0.0.1", "169.254.169.254", "[::1]"] {
+            let result = IPAddressValidator.validateHost(host, resolver: { _ in
+                assertTrue(false, "Blocked destinations never reach an injected resolver")
+                return .allowed(ips: ["8.8.8.8"])
+            })
+            assertTrue({ if case .blocked = result { return true }; return false }(), "Injected DNS cannot bypass hostname/literal guards")
+        }
+
         // 1. Literal IPv4 Loopback & Private
         assertTrue(IPAddressValidator.checkLiteralIP("127.0.0.1") != nil, "127.0.0.1 must be blocked")
         assertTrue(IPAddressValidator.checkLiteralIP("127.255.255.255") != nil, "127.255.255.255 must be blocked")
@@ -1470,9 +1489,9 @@ struct NewsTests {
         // Setup custom configuration with MockURLProtocol
         let config = URLSessionConfiguration.default
         config.protocolClasses = [MockURLProtocol.self]
-        let client = SecureHTTPClient(configuration: config)
+        let client = mockHTTPClient(configuration: config)
 
-        let targetURL = URL(string: "https://example.com/test-image.jpg")!
+        let targetURL = URL(string: "https://reader.invalid/test-image.jpg")!
 
         // Test 1: Successful image fetch
         let mockData = Data(repeating: 0xAA, count: 1024)
@@ -1794,7 +1813,7 @@ struct NewsTests {
         print("  - Testing conditional feed requests, 304 handling and atomic validator persistence...")
         let config = URLSessionConfiguration.default
         config.protocolClasses = [MockURLProtocol.self]
-        let client = SecureHTTPClient(configuration: config)
+        let client = mockHTTPClient(configuration: config)
         defer { MockURLProtocol.requestHandler = nil }
         let feedURL = fixtureRoot.appendingPathComponent("conditional.xml")
         let modified = "Wed, 21 Oct 2026 07:28:00 GMT"
@@ -1960,7 +1979,7 @@ struct NewsTests {
         // Fetcher: Retry-After, manual refresh inside the wait, and recovery.
         let mockConfig = URLSessionConfiguration.default
         mockConfig.protocolClasses = [MockURLProtocol.self]
-        let mockClient = SecureHTTPClient(configuration: mockConfig)
+        let mockClient = mockHTTPClient(configuration: mockConfig)
         defer { MockURLProtocol.requestHandler = nil }
         let clock = TestClock(t0)
         let fetcher = FeedFetcher(client: mockClient, now: { clock.now })
@@ -2022,7 +2041,7 @@ struct NewsTests {
         // Host limits with held requests: two per host, many hosts in parallel.
         let gatedConfig = URLSessionConfiguration.default
         gatedConfig.protocolClasses = [GatedURLProtocol.self]
-        let gatedClient = SecureHTTPClient(configuration: gatedConfig)
+        let gatedClient = mockHTTPClient(configuration: gatedConfig)
         func answerAll(_ expectedCount: Int) async {
             var answered = 0
             while answered < expectedCount {
@@ -2581,7 +2600,7 @@ struct NewsTests {
         settings.feedURLs = [live]
         settings.aiEnabled = false
         settings.notificationsEnabled = false
-        let fetcher = FeedFetcher(client: SecureHTTPClient(configuration: mockConfig))
+        let fetcher = FeedFetcher(client: mockHTTPClient(configuration: mockConfig))
         let manager = FeedManager(settings: settings, store: store, schedulesRefresh: false,
             fetchBatch: { urls, allowHTTP in await fetcher.fetchAllFeeds(urls: urls, allowHTTP: allowHTTP, state: db) },
             notifyBatch: { _, _ in })
@@ -3294,7 +3313,7 @@ struct NewsTests {
 
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [MockURLProtocol.self]
-        let pipeline = ContentExtractionPipeline(client: SecureHTTPClient(configuration: configuration))
+        let pipeline = ContentExtractionPipeline(client: mockHTTPClient(configuration: configuration))
         defer { MockURLProtocol.requestHandler = nil }
         let desktop = fixtureRoot.appendingPathComponent("baseline/desktop/story")
         let prose = (1...65).map { "Baseline fact \($0) provides distinctive publisher evidence for the same document." }.joined(separator: " ")
@@ -3347,7 +3366,7 @@ struct NewsTests {
         print("  - Testing protected canonical and redirect identity evidence...")
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [MockURLProtocol.self]
-        let pipeline = ContentExtractionPipeline(client: SecureHTTPClient(configuration: configuration))
+        let pipeline = ContentExtractionPipeline(client: mockHTTPClient(configuration: configuration))
         defer { MockURLProtocol.requestHandler = nil }
         let requested = fixtureRoot.appendingPathComponent("short/story")
         let final = fixtureRoot.appendingPathComponent("articles/story")

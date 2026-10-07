@@ -12,7 +12,11 @@ struct IPAddressValidator: Sendable {
     }
 
     /// Comprehensive pre-flight check for a given hostname or IP string.
-    static func validateHost(_ rawHost: String) -> ValidationResult {
+    /// Injected DNS results still follow the hostname and literal-address guards.
+    static func validateHost(
+        _ rawHost: String,
+        resolver: (String) -> ValidationResult = resolveAndValidateHost
+    ) -> ValidationResult {
         var host = rawHost.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         if host.hasSuffix(".") { host.removeLast() }
         
@@ -34,7 +38,7 @@ struct IPAddressValidator: Sendable {
         }
 
         // 3. DNS Resolution check (resolves host and validates all resolved IP addresses)
-        return resolveAndValidateHost(host)
+        return resolver(host)
     }
 
     /// Checks whether an individual literal IP string (IPv4 or IPv6) is forbidden.
