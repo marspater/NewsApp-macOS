@@ -8,6 +8,8 @@
 
 ### Fixed
 
+- Cancelled reader tasks no longer replace the active reader’s event overview or apply lookup results after navigating to another article (#279).
+
 - Update checks send GitHub API headers through the protected HTTP client and preserve HTTP failure status messages (#274).
 
 - A new event-matcher version no longer detaches unchanged event members, usually the earliest report of a large event, by checking them against members that joined later; only members whose title or description changed are checked against their event again (#262).

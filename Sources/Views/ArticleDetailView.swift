@@ -1206,7 +1206,12 @@ struct ArticleDetailView: View {
     }
 
     private func loadEventOverviewForActiveArticle() async {
-        let summaries = (try? await articleStore.eventFeedSummaries(for: [activeArticle.id])) ?? []
+        let articleID = activeArticle.id
+        let inputHash = currentArticle.publisherInputHash
+        guard !Task.isCancelled else { return }
+        let summaries = (try? await articleStore.eventFeedSummaries(for: [articleID])) ?? []
+        guard !Task.isCancelled, activeArticle.id == articleID,
+              currentArticle.publisherInputHash == inputHash else { return }
         guard let summary = summaries.first, summary.isConfirmed, summary.sources.count >= 2 else {
             isOverviewLoading = false
             currentOverview = nil
@@ -1224,11 +1229,15 @@ struct ArticleDetailView: View {
            !existing.isStale(currentMembershipVersion: membershipVersion) {
             isOverviewLoading = false
             let members = (try? await articleStore.eventMemberArticles(eventID: eventID)) ?? []
+            guard !Task.isCancelled, activeArticle.id == articleID,
+                  currentArticle.publisherInputHash == inputHash else { return }
             eventMemberArticles = members.isEmpty ? [activeArticle] : members
             return
         }
 
         let members = (try? await articleStore.eventMemberArticles(eventID: eventID)) ?? []
+        guard !Task.isCancelled, activeArticle.id == articleID,
+              currentArticle.publisherInputHash == inputHash else { return }
         let resolvedMembers = members.isEmpty ? [activeArticle] : members
         let eventTitle = resolvedMembers.first?.title ?? summary.members.first?.title ?? activeArticle.title
 
@@ -1250,7 +1259,8 @@ struct ArticleDetailView: View {
             owner: overviewOwner
         )
 
-        guard !Task.isCancelled else { return }
+        guard !Task.isCancelled, activeArticle.id == articleID,
+              currentArticle.publisherInputHash == inputHash else { return }
 
         isOverviewLoading = false
         if let doc = doc {
