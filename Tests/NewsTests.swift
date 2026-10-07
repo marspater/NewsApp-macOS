@@ -1038,6 +1038,19 @@ struct NewsTests {
         let topic = await ArticleClassifier.shared.classify(title: "NASA launches space telescope", description: "Astronomy mission", allowFoundationModels: false)
         assertEqual(topic.category, "Science", "Cheap ingestion classification works without generative inference")
         let pipeline = ContentExtractionPipeline.shared
+        assertEqual(HTMLDOMBuilder.parse(html: "<p>Before<!-- hidden\ncomment --> after.</p>").combinedText(),
+            "Before after.", "Cached comment regex removes multiline comments")
+        let encodedHTML = "<p>Publisher caf\u{00e9}</p>"
+        let latin1Data = encodedHTML.data(using: .isoLatin1)!
+        let latin1Response = HTTPURLResponse(url: URL(string: "https://example.com/article")!,
+            statusCode: 200, httpVersion: nil, headerFields: ["Content-Type": "text/html; CHARSET='ISO-8859-1'"])!
+        assertEqual(pipeline.decodeHTML(data: latin1Data, response: latin1Response), encodedHTML,
+            "Cached header regex preserves case-insensitive quoted charset decoding")
+        for meta in ["<meta charset='iso-8859-1'>", "<meta content='text/html;charset=iso-8859-1'>"] {
+            let document = meta + encodedHTML
+            assertEqual(pipeline.decodeHTML(data: document.data(using: .isoLatin1)!), document,
+                "Cached meta regexes preserve both charset declarations")
+        }
         let inline = "<p>The <strong>central bank</strong> raised <a href='/rate'>rates</a> today.</p>"
         assertEqual(HTMLDOMBuilder.parse(html: inline).combinedText(), "The central bank raised rates today.", "Inline text retains publisher order and punctuation")
         let prose = "The central bank published its quarterly report with detailed forecasts for inflation and employment across the economy."
