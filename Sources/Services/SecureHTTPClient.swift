@@ -16,15 +16,19 @@ actor SecureHTTPClient {
 
     private var session: URLSession?
     private let delegateCoordinator: SecureSessionDelegateCoordinator
+    private let resolver: NetworkBoundaryProxy.Resolver
 
     private init() {
         let coordinator = SecureSessionDelegateCoordinator()
         self.delegateCoordinator = coordinator
+        self.resolver = { IPAddressValidator.validateHost($0) }
     }
 
-    internal init(configuration: URLSessionConfiguration) {
-        let coordinator = SecureSessionDelegateCoordinator()
+    internal init(configuration: URLSessionConfiguration,
+                  resolver: @escaping NetworkBoundaryProxy.Resolver = { IPAddressValidator.validateHost($0) }) {
+        let coordinator = SecureSessionDelegateCoordinator(resolver: resolver)
         self.delegateCoordinator = coordinator
+        self.resolver = resolver
         self.session = URLSession(configuration: configuration, delegate: coordinator, delegateQueue: nil)
     }
 
@@ -104,7 +108,7 @@ actor SecureHTTPClient {
             throw FeedError.malformedURL(url.absoluteString)
         }
 
-        switch IPAddressValidator.validateHost(host) {
+        switch resolver(host) {
         case .allowed:
             break
         case .blocked(let reason):
@@ -190,6 +194,12 @@ actor SecureHTTPClient {
 // MARK: - Delegate Coordinator for Redirects and DNS Rebinding Detection
 
 final class SecureSessionDelegateCoordinator: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+    private let resolver: NetworkBoundaryProxy.Resolver
+
+    init(resolver: @escaping NetworkBoundaryProxy.Resolver = { IPAddressValidator.validateHost($0) }) {
+        self.resolver = resolver
+        super.init()
+    }
     private struct TaskSecurityState {
         var redirectCount: Int = 0
         var initialScheme: String
@@ -239,7 +249,7 @@ final class SecureSessionDelegateCoordinator: NSObject, URLSessionTaskDelegate, 
         }
 
         // 4. Validate redirect target host and IP resolution
-        switch IPAddressValidator.validateHost(targetHost) {
+        switch resolver(targetHost) {
         case .allowed:
             completionHandler(request)
         case .blocked, .unresolvable:
