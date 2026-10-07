@@ -411,11 +411,13 @@ enum HTMLDOMBuilder {
         "header", "form", "aside", "dialog", "time", "button"
     ]
 
+    private static let commentRegex = try? NSRegularExpression(pattern: "<!--.*?-->", options: .dotMatchesLineSeparators)
+
     /// Parses clean HTML into a DOM tree while filtering non-content containers.
     static func parse(html: String) -> DOMElementNode {
         var cleanHTML = html
         // Remove HTML comments
-        if let commentRegex = try? NSRegularExpression(pattern: "<!--.*?-->", options: .dotMatchesLineSeparators) {
+        if let commentRegex = Self.commentRegex {
             cleanHTML = commentRegex.stringByReplacingMatches(in: cleanHTML, range: NSRange(cleanHTML.startIndex..., in: cleanHTML), withTemplate: "")
         }
 
@@ -975,22 +977,23 @@ final class ContentExtractionPipeline: Sendable {
         return String(decoding: data, as: UTF8.self)
     }
 
+    private static let headerCharsetRegex = try? NSRegularExpression(pattern: "charset=[\"']?([a-zA-Z0-9_-]+)", options: .caseInsensitive)
+
     private func extractCharset(from header: String) -> String? {
-        let pattern = "charset=[\"']?([a-zA-Z0-9_-]+)"
-        guard let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive),
+        guard let regex = Self.headerCharsetRegex,
               let match = regex.firstMatch(in: header, range: NSRange(header.startIndex..., in: header)),
               let range = Range(match.range(at: 1), in: header) else { return nil }
         return String(header[range]).lowercased()
     }
 
+    private static let metaCharsetRegexes = [
+        "<meta[^>]+charset=[\"']?([a-zA-Z0-9_-]+)",
+        "<meta[^>]+content=[\"'][^\"']*charset=([a-zA-Z0-9_-]+)"
+    ].compactMap { try? NSRegularExpression(pattern: $0, options: .caseInsensitive) }
+
     private func extractCharsetFromMeta(_ htmlSnippet: String) -> String? {
-        let patterns = [
-            "<meta[^>]+charset=[\"']?([a-zA-Z0-9_-]+)",
-            "<meta[^>]+content=[\"'][^\"']*charset=([a-zA-Z0-9_-]+)"
-        ]
-        for p in patterns {
-            if let regex = try? NSRegularExpression(pattern: p, options: .caseInsensitive),
-               let match = regex.firstMatch(in: htmlSnippet, range: NSRange(htmlSnippet.startIndex..., in: htmlSnippet)),
+        for regex in Self.metaCharsetRegexes {
+            if let match = regex.firstMatch(in: htmlSnippet, range: NSRange(htmlSnippet.startIndex..., in: htmlSnippet)),
                let range = Range(match.range(at: 1), in: htmlSnippet) {
                 return String(htmlSnippet[range]).lowercased()
             }

@@ -21,3 +21,9 @@
 **Learning:** Compiling `NSRegularExpression` is computationally expensive. In `ContentExtractionPipeline.swift`, `extractLeadImage` was dynamically compiling multiple regex patterns for Open Graph image tags inside a loop for every parsed article, causing unnecessary CPU overhead.
 
 **Action:** Future Bolt runs should statically compile and store arrays of `NSRegularExpression` instances using `static let` (e.g., `.compactMap { try? NSRegularExpression(...) }`) when multiple patterns are evaluated per article, avoiding repeated compilation inside loops or frequent method calls.
+
+## 2024-10-28 - Statically compile NSRegularExpression for content extraction
+
+**Learning:** `NSRegularExpression` is computationally expensive to compile dynamically. In `ContentExtractionPipeline.swift`, regexes for parsing HTML comments and extracting character sets were being dynamically instantiated repeatedly during the `parse(html:)` and `extractCharset(from:)` methods, causing redundant overhead during web extraction.
+
+**Action:** Future Bolt runs should continue moving repeated `NSRegularExpression` compilations out of hot loops and frequently called parsing methods into `static let` constants to ensure they are compiled exactly once.
