@@ -8,6 +8,8 @@
 
 ### Fixed
 
+- Stories linked to a publisher homepage keep independent bookmarks; removing one no longer unsaves other stories with the same generic link (#281).
+
 - Cancelled reader tasks no longer replace the active reader’s event overview or apply lookup results after navigating to another article (#279).
 
 - Update checks send GitHub API headers through the protected HTTP client and preserve HTTP failure status messages (#274).

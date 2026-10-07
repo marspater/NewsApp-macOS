@@ -20,7 +20,7 @@ final class SavedStoriesManager: ObservableObject {
         self.articleStore = store
         self.savedArticles = store.savedArticles
         self.savedArticleIDs = Set(store.savedArticles.map { $0.id })
-        self.savedArticleLinks = Set(store.savedArticles.map { $0.normalizedLink }.filter { !$0.isEmpty })
+        self.savedArticleLinks = Set(store.savedArticles.map { $0.normalizedLink }.filter(DatabaseEngine.isDocumentURL))
         
         // Keep savedArticles in sync with ArticleStore changes
         store.$savedArticles
@@ -29,7 +29,7 @@ final class SavedStoriesManager: ObservableObject {
                 guard let self, self.pendingMutations == 0 else { return }
                 self.savedArticles = updated
                 self.savedArticleIDs = Set(updated.map { $0.id })
-                self.savedArticleLinks = Set(updated.map { $0.normalizedLink }.filter { !$0.isEmpty })
+                self.savedArticleLinks = Set(updated.map { $0.normalizedLink }.filter(DatabaseEngine.isDocumentURL))
             }
             .store(in: &cancellables)
     }
@@ -38,25 +38,26 @@ final class SavedStoriesManager: ObservableObject {
         guard !isSaved(article) else { return }
         savedArticles.insert(article, at: 0)
         savedArticleIDs.insert(article.id)
-        if !article.normalizedLink.isEmpty { savedArticleLinks.insert(article.normalizedLink) }
+        if DatabaseEngine.isDocumentURL(article.normalizedLink) { savedArticleLinks.insert(article.normalizedLink) }
         persistSaved([article], isSaved: true)
     }
 
     func remove(_ article: FeedArticle) {
         guard isSaved(article) else { return }
-        // URL equivalence is a UI convenience; persist against the actual saved IDs.
+        // Only document URLs can alias bookmarks; homepage/malformed links stay keyed by article ID.
+        // Persist against the actual saved IDs.
         let matching = savedArticles.filter {
-            $0.id == article.id || (!article.normalizedLink.isEmpty && $0.normalizedLink == article.normalizedLink)
+            $0.id == article.id || (DatabaseEngine.isDocumentURL(article.normalizedLink) && $0.normalizedLink == article.normalizedLink)
         }
         let matchingIDs = Set(matching.map { $0.id })
         savedArticles.removeAll { matchingIDs.contains($0.id) }
         savedArticleIDs = Set(savedArticles.map { $0.id })
-        savedArticleLinks = Set(savedArticles.map { $0.normalizedLink }.filter { !$0.isEmpty })
+        savedArticleLinks = Set(savedArticles.map { $0.normalizedLink }.filter(DatabaseEngine.isDocumentURL))
         persistSaved(matching, isSaved: false)
     }
 
     func isSaved(_ article: FeedArticle) -> Bool {
-        savedArticleIDs.contains(article.id) || (!article.normalizedLink.isEmpty && savedArticleLinks.contains(article.normalizedLink))
+        savedArticleIDs.contains(article.id) || (DatabaseEngine.isDocumentURL(article.normalizedLink) && savedArticleLinks.contains(article.normalizedLink))
     }
     private func persistSaved(_ articles: [FeedArticle], isSaved: Bool) {
         let previous = mutationTask
@@ -70,7 +71,7 @@ final class SavedStoriesManager: ObservableObject {
             if pendingMutations == 0 {
                 savedArticles = articleStore.savedArticles
                 savedArticleIDs = Set(savedArticles.map { $0.id })
-                savedArticleLinks = Set(savedArticles.map { $0.normalizedLink }.filter { !$0.isEmpty })
+                savedArticleLinks = Set(savedArticles.map { $0.normalizedLink }.filter(DatabaseEngine.isDocumentURL))
                 mutationTask = nil
             }
         }

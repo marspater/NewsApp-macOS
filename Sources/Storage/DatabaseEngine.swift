@@ -840,7 +840,7 @@ actor DatabaseEngine {
     // MARK: - Article Ingestion & Upsert
     
     // Root URLs are not document identifiers: feeds can link every item to a homepage.
-    private static func isDocumentURL(_ value: String) -> Bool {
+    static func isDocumentURL(_ value: String) -> Bool {
         let components = URLComponents(string: value)
         return components?.host?.isEmpty == false
             && components?.user == nil && components?.password == nil
