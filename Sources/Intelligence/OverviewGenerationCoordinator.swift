@@ -64,6 +64,7 @@ actor OverviewGenerationCoordinator {
         priority: OverviewRequestPriority = .onDemand,
         store: ArticleStore? = nil
     ) async -> EventOverviewDocument? {
+        guard !Task.isCancelled else { return nil }
         // Storage rejects the result if any article's publisher input changed while it was generated.
         let expectedArticleInputs = Dictionary(articles.map { ($0.id, $0.publisherInputHash) }, uniquingKeysWith: { first, _ in first })
 
@@ -88,6 +89,7 @@ actor OverviewGenerationCoordinator {
         // Persistent storage is authoritative: publisher-input changes atomically remove old overviews.
         if let stored = try? await targetStore.fetchEventOverview(eventID: eventID),
            !stored.isStale(currentMembershipVersion: membershipVersion, currentInputTextHash: inputTextHash) {
+            guard !Task.isCancelled else { return nil }
             logger.debug("Store cache hit for event \(eventID) v\(membershipVersion)")
             if let cached = memoryCache[eventID], cached.id == stored.id,
                !cached.isStale(currentMembershipVersion: membershipVersion, currentInputTextHash: inputTextHash) {
@@ -97,11 +99,14 @@ actor OverviewGenerationCoordinator {
             return stored
         }
 
+        guard !Task.isCancelled else { return nil }
+
         // 3. Join a running generation only if it was started from the same inputs; otherwise it is superseded
         if let running = inFlightTasks[eventID] {
             if running.membershipVersion == membershipVersion && running.inputTextHash == inputTextHash
                 && running.articleInputs == expectedArticleInputs {
-                return await running.task.value
+                let result = await running.task.value
+                return Task.isCancelled ? nil : result
             }
             running.task.cancel()
             inFlightTasks.removeValue(forKey: eventID)
@@ -161,7 +166,7 @@ actor OverviewGenerationCoordinator {
         if inFlightTasks[eventID]?.task == task {
             inFlightTasks.removeValue(forKey: eventID)
         }
-        return result
+        return Task.isCancelled ? nil : result
     }
 
     /// Returns false when the result was built from superseded inputs, or storage rejected it, and must not reach the caller.
@@ -208,6 +213,7 @@ actor OverviewGenerationCoordinator {
         store: ArticleStore? = nil,
         owner: UUID? = nil
     ) async -> EventOverviewDocument? {
+        guard !Task.isCancelled else { return nil }
         let previous = currentVisibleEventID
         currentVisibleEventID = eventID
         currentVisibleOwner = eventID == nil ? nil : owner
@@ -216,6 +222,10 @@ actor OverviewGenerationCoordinator {
         if let oldID = previous, oldID != eventID {
             await cancel(eventID: oldID, reason: .user)
         }
+
+        // Cancellation above suspends this actor; a newer reader may now own the visible event.
+        guard !Task.isCancelled, currentVisibleEventID == eventID,
+              currentVisibleOwner == (eventID == nil ? nil : owner) else { return nil }
 
         // If new event is visible and data provided, trigger generation with visibleEvent priority
         if let newID = eventID, let title = eventTitle, let version = membershipVersion, let arts = articles {

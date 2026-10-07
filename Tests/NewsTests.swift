@@ -8662,6 +8662,18 @@ struct NewsTests {
                 articles: editedArticles, store: store, owner: nextReader)
         }
         await eventually("The next reader makes the event visible") { await coordinator.visibleEventOwner() == nextReader }
+        // A cancelled reader can resume from storage after the next reader becomes visible.
+        let abandonedGate = OpenGate()
+        let abandoned = Task {
+            await abandonedGate.wait()
+            return await coordinator.setVisibleEvent(eventID: "event-abandoned", owner: closingReader)
+        }
+        abandoned.cancel()
+        await abandonedGate.open()
+        _ = await abandoned.value
+        assertEqual(await coordinator.visibleEventOwner(), nextReader, "A cancelled reader never replaces the current visible owner")
+        assertTrue(await coordinator.inFlightInputHash(for: "event-reopened") != nil, "A cancelled reader never cancels the current overview")
+
         await coordinator.clearVisibleEvent(owner: closingReader)
         assertEqual(await coordinator.visibleEventOwner(), nextReader, "A closing reader does not clear another reader's visible event")
         assertTrue(await coordinator.inFlightInputHash(for: "event-reopened") != nil, "A closing reader does not cancel another reader's overview")
@@ -8687,6 +8699,15 @@ struct NewsTests {
         let afterCancel = await coordinator.requestOverview(eventID: "event-reopened", eventTitle: "Harbour bridge closed",
             membershipVersion: 1, articles: editedArticles)
         assertTrue(afterCancel != nil, "A request made right after cancelling the same event still completes")
+        let cancelledRequestGate = OpenGate()
+        let cancelledRequest = Task {
+            await cancelledRequestGate.wait()
+            return await coordinator.requestOverview(eventID: "event-reopened", eventTitle: "Harbour bridge closed",
+                membershipVersion: 1, articles: editedArticles)
+        }
+        cancelledRequest.cancel()
+        await cancelledRequestGate.open()
+        assertTrue(await cancelledRequest.value == nil, "A cancelled request never returns a cached overview")
         await db.close()
     }
 
