@@ -1,0 +1,68 @@
+workflows:
+  news-arm64-verification:
+    name: News macOS arm64 verification
+    instance_type: mac_mini_m2
+    max_build_duration: 60
+    environment:
+      xcode: "27.0"
+      vars:
+        TARGET_MACOS: "15.0"
+    triggering:
+      events:
+        - push
+        - pull_request
+      branch_patterns:
+        - pattern: main
+          include: true
+          source: false
+      cancel_previous_builds: true
+    scripts:
+      - name: Verify Apple Silicon and toolchain
+        script: |
+          #!/usr/bin/env bash
+          set -euo pipefail
+          mkdir -p build/ci
+          {
+            test "$(uname -m)" = arm64
+            xcodebuild -version > build/ci/xcode-version.log
+            grep -q '^Xcode 27\.0$' build/ci/xcode-version.log
+            sw_vers
+            cat build/ci/xcode-version.log
+            swift --version
+          } 2>&1 | tee build/ci/environment.log
+      - name: Run full offline regressions
+        script: |
+          #!/usr/bin/env bash
+          set -euo pipefail
+          ./test.sh 2>&1 | tee build/ci/tests.log
+      - name: Verify SwiftPM app target
+        script: |
+          #!/usr/bin/env bash
+          set -euo pipefail
+          swift build --force-resolved-versions --target News 2>&1 | tee build/ci/swiftpm.log
+      - name: Build ad-hoc arm64 app
+        script: |
+          #!/usr/bin/env bash
+          set -euo pipefail
+          ./build_release.sh 2>&1 | tee build/ci/build.log
+      - name: Verify and archive app
+        script: |
+          #!/usr/bin/env bash
+          set -euo pipefail
+          {
+            test -x News.app/Contents/MacOS/News
+            plutil -lint News.app/Contents/Info.plist
+            test "$(lipo -archs News.app/Contents/MacOS/News)" = arm64
+            codesign --verify --deep --strict --verbose=2 News.app
+            codesign -dvv News.app 2> build/ci/signature.log
+            grep -q 'flags=.*runtime' build/ci/signature.log
+            codesign -d --entitlements - --xml News.app > build/ci/entitlements.plist
+            test "$(/usr/libexec/PlistBuddy -c 'Print :com.apple.security.app-sandbox' build/ci/entitlements.plist)" = true
+            ditto -c -k --sequesterRsrc --keepParent News.app build/News-arm64-verification.zip
+            (cd build && shasum -a 256 News-arm64-verification.zip > News-arm64-verification.zip.sha256)
+          } 2>&1 | tee build/ci/verification.log
+    artifacts:
+      - build/News-arm64-verification.zip
+      - build/News-arm64-verification.zip.sha256
+      - build/ci/*.log
+      - build/ci/entitlements.plist

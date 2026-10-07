@@ -69,3 +69,13 @@ Keep uncommitted implementation In progress, linked PR work In review, and reser
 ## Security checks
 
 [The Security workflow](.github/workflows/security.yml) is the canonical advanced CodeQL configuration for Swift and GitHub Actions. Default CodeQL setup must remain disabled because GitHub rejects advanced uploads while it is enabled. Swift analysis builds the complete SwiftPM app target without optimization on the macOS 26 Apple Silicon runner with Xcode 26.3. Compiler subprocess sandboxing is disabled only for extraction; app sandbox entitlements are unchanged. Normal CI tests and verifies arm64 bundles on Xcode 27. Secret scanning and deterministic security regressions remain separate jobs.
+
+## Codemagic macOS runner
+
+[`codemagic.yaml`](codemagic.yaml) defines `news-arm64-verification`: Apple Silicon M2, pinned Xcode 27.0 and macOS 15 deployment target. It runs the existing full offline regressions, verifies the SwiftPM `News` target, builds with `build_release.sh`, checks arm64, signature, Hardened Runtime and App Sandbox, then retains the app ZIP, SHA-256 checksum and diagnostic logs. No signing credentials are required for this ad-hoc verification artifact.
+
+Connect `marspater/NewsApp-macOS` using the Codemagic GitHub App, select YAML configuration and enable the repository webhook. Start `news-arm64-verification` manually on the configuration branch for the first run. Thereafter, pushes to `main` and pull requests targeting `main` trigger the workflow; superseded builds are cancelled. GitHub Checks reporting depends on the GitHub App integration. Enable a required Codemagic check only after its first successful hosted run.
+
+Codemagic is an additional build runner; the existing GitHub Security workflow remains responsible for CodeQL, dependency review and secret scanning. The artifact is ad-hoc signed, not notarized or automatically published to testers or GitHub Releases. Live publisher/corpus collection and parked VoiceOver checks are not run. Configuration validation and local script execution do not establish a successful Codemagic-hosted run.
+
+References: [Codemagic YAML](https://docs.codemagic.io/yaml-basic-configuration/yaml-getting-started/), [Xcode 27.0 runner](https://docs.codemagic.io/specs-macos/xcode-27-0/), [GitHub Checks integration](https://docs.codemagic.io/yaml-notification/github-checks/).
