@@ -441,6 +441,7 @@ struct ArticleDetailView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
+                .accessibilityLabel("Open Web View")
             }
 
             Text(reason)

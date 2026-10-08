@@ -16,3 +16,9 @@
 **Learning:** In macOS toolbars, interactive controls that use `Label` (which visually collapse to icon-only) provide their text to VoiceOver, but do not automatically generate hover tooltips for sighted users.
 
 **Action:** Always attach explicit `.help(...)` modifiers to icon-only toolbar controls (like `Button` or `ShareLink`) to ensure consistent interaction feedback.
+
+## 2025-05-18 - Accessibility Labels for Buttons with Keyboard Shortcuts in Visual Text
+
+**Learning:** In macOS SwiftUI, when a button's visual text includes a keyboard shortcut (e.g., `Text("Open Web View (W)")`), VoiceOver will read the shortcut suffix literally (e.g., "Open Web View W"), creating a noisy experience.
+
+**Action:** Always provide an explicit `.accessibilityLabel` (e.g., `"Open Web View"`) for such buttons to override the default read-out and ensure VoiceOver reads a clean action name without the keyboard shortcut suffix.
