@@ -20,6 +20,8 @@
 
 ### Fixed
 
+- Event grouping recognises far more coverage of one story. Places are compared as countries ("American", "U.S." and "United States" agree; Madrid and Spain do not contradict), rising casualty tolls no longer split one attack, one dissenting member no longer keeps a matching report out of a larger event, and events of one story that formed separately are merged. Where the rules leave a pair open, the on-device model decides (when on-device AI is enabled), including paraphrased headlines found with on-device sentence embeddings. On the labelled tune split, English recall rose from 0.27 to 0.71 at precision 0.96; replaying the last 72 hours of a real library put 9 of 9 Nobel-prize reports, and every report of the Kramatorsk bus strike, into one event each.
+
 - List cards keep their image inside its column; a wide image no longer runs under the headline, and headlines get their second line before the summary does.
 
 - Stories from catalog publishers show the publisher's name ("The Guardian", "Al Jazeera") instead of a feed title such as "World news" or a slogan; stored source names are unchanged.

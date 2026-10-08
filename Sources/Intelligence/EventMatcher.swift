@@ -17,12 +17,70 @@ struct EventFeatures: Hashable, Sendable {
     var keywords: Set<String> = []
     // When, plus explicit facts that tell two similar reports apart
     var date: Date
+    /// Headline figures that tell incidents apart (a magnitude, a count of things). Casualty tolls are kept apart in
+    /// `tollNumbers`: they change as reports update, so they never distinguish two reports of one incident.
     var titleNumbers: Set<String> = []
+    var tollNumbers: Set<String> = []
     var periods: Set<String> = []
     var years: Set<String> = []
     var weekdays: Set<String> = []
 
     var anchors: Set<String> { people.union(organizations).union(places).union(names) }
+    /// Places that name a country, canonicalized to a region code (`@US`).
+    var countries: Set<String> { places.filter { $0.hasPrefix("@") } }
+    /// Cities, regions and other places below country level.
+    var localPlaces: Set<String> { places.filter { !$0.hasPrefix("@") } }
+    /// Names that point at one occurrence: people, organizations, local places and untyped names, not countries.
+    var specificAnchors: Set<String> { anchors.subtracting(countries) }
+}
+
+/// Place names compared as places. Aliases and nationality adjectives resolve to one region code, and country names
+/// come from the system's region list, so "U.S.", "American" and "United States" agree and "Spanish" means Spain.
+enum EventPlaces {
+    private static let aliases: [String: String] = [
+        "us": "US", "u.s": "US", "usa": "US", "u.s.a": "US", "america": "US", "united states of america": "US",
+        "uk": "GB", "u.k": "GB", "britain": "GB", "great britain": "GB", "england": "GB", "scotland": "GB", "wales": "GB",
+        "uae": "AE", "emirates": "AE", "korea": "KR", "south korea": "KR", "north korea": "KP", "russia": "RU",
+        "czech republic": "CZ", "holland": "NL", "ivory coast": "CI", "burma": "MM", "turkey": "TR", "palestine": "PS",
+        "vatican": "VA", "taiwan": "TW", "syria": "SY", "iran": "IR", "laos": "LA", "vietnam": "VN", "congo": "CD"
+    ]
+    private static let demonyms: [String: String] = [
+        "american": "US", "british": "GB", "english": "GB", "scottish": "GB", "welsh": "GB", "canadian": "CA",
+        "mexican": "MX", "brazilian": "BR", "argentine": "AR", "argentinian": "AR", "chilean": "CL", "colombian": "CO",
+        "venezuelan": "VE", "cuban": "CU", "peruvian": "PE", "haitian": "HT", "french": "FR", "german": "DE",
+        "italian": "IT", "spanish": "ES", "portuguese": "PT", "dutch": "NL", "belgian": "BE", "swiss": "CH",
+        "austrian": "AT", "swedish": "SE", "norwegian": "NO", "danish": "DK", "finnish": "FI", "irish": "IE",
+        "polish": "PL", "czech": "CZ", "slovak": "SK", "hungarian": "HU", "romanian": "RO", "bulgarian": "BG",
+        "greek": "GR", "turkish": "TR", "serbian": "RS", "croatian": "HR", "russian": "RU", "ukrainian": "UA",
+        "belarusian": "BY", "georgian": "GE", "armenian": "AM", "azerbaijani": "AZ", "kazakh": "KZ", "chinese": "CN",
+        "japanese": "JP", "south korean": "KR", "north korean": "KP", "taiwanese": "TW", "indian": "IN",
+        "pakistani": "PK", "bangladeshi": "BD", "sri lankan": "LK", "nepali": "NP", "nepalese": "NP", "afghan": "AF",
+        "iranian": "IR", "iraqi": "IQ", "syrian": "SY", "lebanese": "LB", "israeli": "IL", "palestinian": "PS",
+        "jordanian": "JO", "saudi": "SA", "yemeni": "YE", "emirati": "AE", "qatari": "QA", "kuwaiti": "KW",
+        "omani": "OM", "bahraini": "BH", "egyptian": "EG", "libyan": "LY", "tunisian": "TN", "algerian": "DZ",
+        "moroccan": "MA", "sudanese": "SD", "ethiopian": "ET", "eritrean": "ER", "somali": "SO", "kenyan": "KE",
+        "ugandan": "UG", "tanzanian": "TZ", "rwandan": "RW", "congolese": "CD", "nigerian": "NG", "ghanaian": "GH",
+        "senegalese": "SN", "malian": "ML", "south african": "ZA", "zimbabwean": "ZW", "zambian": "ZM",
+        "australian": "AU", "indonesian": "ID", "malaysian": "MY", "singaporean": "SG", "filipino": "PH",
+        "philippine": "PH", "vietnamese": "VN", "thai": "TH", "burmese": "MM", "cambodian": "KH"
+    ]
+    /// English names of every ISO country, from the system's region list.
+    private static let countryNames: [String: String] = {
+        let english = Locale(identifier: "en_US")
+        var names: [String: String] = [:]
+        for region in Locale.Region.isoRegions where region.identifier.count == 2 && region.identifier.allSatisfy(\.isLetter) {
+            guard let name = english.localizedString(forRegionCode: region.identifier) else { continue }
+            names[EventFeatures.normalized(name)] = region.identifier
+        }
+        return names
+    }()
+
+    /// `@` plus the region code for a country, its alias or demonym; any other place unchanged.
+    static func canonical(_ place: String) -> String {
+        let name = EventFeatures.normalized(place)
+        guard let code = aliases[name] ?? demonyms[name] ?? countryNames[name] else { return name }
+        return "@" + code
+    }
 }
 
 extension EventFeatures {
@@ -95,7 +153,7 @@ extension EventFeatures {
                 people.insert(name)
                 // Later references often use the surname alone.
                 if let surname = name.split(separator: " ").last, surname.count >= 3, String(surname) != name { people.insert(String(surname)) }
-            case .placeName: places.insert(name)
+            case .placeName: places.insert(EventPlaces.canonical(name))
             case .organizationName: organizations.insert(name)
             default: return true
             }
@@ -179,8 +237,36 @@ extension EventFeatures {
             return true
         }
 
+        // Nationality adjectives the tagger leaves untyped ("Canadian writer") are places too.
+        for name in names {
+            let place = EventPlaces.canonical(name)
+            if place.hasPrefix("@") { names.remove(name); places.insert(place) }
+        }
+        let tollNumbers = Self.tolls(in: title.lowercased()).intersection(titleNumbers)
         self.init(language: language, people: people, organizations: organizations, places: places, names: names,
-                  keywords: keywords, date: date, titleNumbers: titleNumbers, periods: periods, years: years, weekdays: weekdays)
+                  keywords: keywords, date: date, titleNumbers: titleNumbers.subtracting(tollNumbers), tollNumbers: tollNumbers,
+                  periods: periods, years: years, weekdays: weekdays)
+    }
+
+    private static let casualtyWords = "killed|kills?|killing|dead|deaths?|die[sd]?|dying|injured|injures?|wounded|wounds|hurt|casualties|missing|lives|victims"
+    private static let tollAfterPattern = try! NSRegularExpression(
+        pattern: #"\b(\d[\d,.]*|"# + numberWordPattern + #")\s+(?:[a-z-]+\s+){0,2}(?:"# + casualtyWords + #")\b"#)
+    private static let tollBeforePattern = try! NSRegularExpression(
+        pattern: #"\b(?:"# + casualtyWords + #"|toll\s+(?:rises|climbs|reaches)\s+to)\s+(?:at\s+least\s+|more\s+than\s+|over\s+|nearly\s+|about\s+|some\s+|up\s+to\s+)?(\d[\d,.]*|"# + numberWordPattern + #")\b"#)
+    private static let numberWordPattern = "one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|dozen|twenty|hundred"
+
+    /// Numbers that count casualties in a headline: "kills at least 30", "30 people killed", "toll rises to 33".
+    static func tolls(in title: String) -> Set<String> {
+        var result = Set<String>()
+        let range = NSRange(title.startIndex..., in: title)
+        for pattern in [tollAfterPattern, tollBeforePattern] {
+            for match in pattern.matches(in: title, range: range) {
+                guard let figure = Range(match.range(at: 1), in: title).map({ String(title[$0]) }) else { continue }
+                let digits = figure.filter { $0.isNumber || $0 == "." }.trimmingCharacters(in: CharacterSet(charactersIn: "."))
+                result.insert(digits.isEmpty ? (numberWords[figure] ?? figure) : digits)
+            }
+        }
+        return result
     }
 
     private static func startsSentence(_ index: String.Index, in text: String) -> Bool {
@@ -209,8 +295,13 @@ struct EventMatchPolicy: Sendable, Equatable {
     var strictWhat = 0.35
     var minimumSharedTerms = 3
     var matchScore = 0.55
-    /// Every member of an event must reach this against a newcomer.
+    /// A member counts as compatible with a newcomer at this score.
     var compatibilityScore = 0.35
+    /// Share of an event's members a newcomer must be compatible with. One dissenting member of a larger event no
+    /// longer keeps a matching report out; in a two-member event both must still agree.
+    var compatibleShare = 2.0 / 3.0
+    /// Pairs at or above this score that share a name and a word may be settled by the on-device judge.
+    var borderlineScore = 0.3
     /// The newcomer's mean score across the whole event.
     var eventScore = 0.45
     /// Events at this size stop growing; a later report starts a new event instead.
@@ -226,6 +317,13 @@ enum EventConflict: String, Sendable, Equatable {
 
 struct EventPairAssessment: Sendable, Equatable {
     var conflict: EventConflict?
+    /// The conflict rests on facts that do not decide alone (different local places, different headline figures) while
+    /// the reports share specific names: an on-device judge may settle it.
+    var softConflict = false
+    /// Open: not a match, but close enough that a judge's "same event" should make it one.
+    var isBorderline = false
+    /// A match on thin evidence (few shared words, or only a shared country): a judge's "different events" undoes it.
+    var needsConfirmation = false
     var score: Double
     var what: Double
     var entity: Double
@@ -240,7 +338,7 @@ struct EventPairAssessment: Sendable, Equatable {
 enum EventMatcher {
     /// Bump when matching changes; recent articles are then matched again. Event members whose
     /// title and description are unchanged keep their events.
-    static let version = 1
+    static let version = 2
 
     /// Who, what, where and when for one pair. Headline similarity alone never passes: a match needs
     /// a shared name or place, shared action terms, closeness in time and no contradicting facts.
@@ -255,47 +353,95 @@ enum EventMatcher {
         let score = 0.4 * what + 0.4 * entity + 0.2 * time
 
         var conflict: EventConflict?
+        var softConflict = false
+        let sharedSpecific = a.specificAnchors.intersection(b.specificAnchors).count
+        // Equal casualty tolls are evidence of one incident.
+        let sharedEvidence = sharedKeywords + (a.tollNumbers.isDisjoint(with: b.tollNumbers) ? 0 : 1)
         func disjoint(_ lhs: Set<String>, _ rhs: Set<String>) -> Bool { !lhs.isEmpty && !rhs.isEmpty && lhs.isDisjoint(with: rhs) }
         if let left = a.language, let right = b.language, left != right { conflict = .language }
         else if gap > policy.maximumTimeGap { conflict = .timeGap }
         else if disjoint(a.periods, b.periods) { conflict = .period }
         else if disjoint(a.years, b.years) { conflict = .year }
         else if disjoint(a.weekdays, b.weekdays) { conflict = .weekday }
-        // Headline figures (a toll, a magnitude, a count) differ between separate incidents. Updated
-        // tolls of one incident are missed as a result; that is the conservative trade.
-        else if disjoint(a.titleNumbers, b.titleNumbers) { conflict = .titleNumbers }
-        else if disjoint(a.places, b.places) { conflict = .places }
+        // Headline figures (a magnitude, a count) differ between separate incidents. Casualty tolls are not compared:
+        // they rise as one incident is reported. With shared specific names the difference is left to the judge.
+        else if disjoint(a.titleNumbers, b.titleNumbers) {
+            conflict = .titleNumbers
+            softConflict = sharedSpecific >= 1 && sharedKeywords >= 2
+        }
+        // Different countries are different events. Places below country level ("Madrid" against "Spain", one city
+        // against another) only conflict when no place is shared, and a judge may settle that when names are shared.
+        else if a.places.isDisjoint(with: b.places) {
+            if disjoint(a.countries, b.countries) {
+                // Angles of one story can name different countries; strongly shared wording leaves it to the judge.
+                conflict = .places
+                softConflict = sharedKeywords >= 3 && what >= policy.minimumWhat
+            } else if disjoint(a.localPlaces, b.localPlaces) {
+                conflict = .places
+                softConflict = sharedSpecific >= 1 && sharedKeywords >= 2
+            }
+        }
 
+        // A shared country alone is weak evidence: a match also needs a specific name, two shared places, or strongly
+        // shared wording.
+        let strongWording = sharedEvidence >= 4 && what >= policy.strictWhat
         let isMatch = conflict == nil
-            && sharedAnchors >= 1 && sharedKeywords >= 2
-            && sharedAnchors + sharedKeywords >= policy.minimumSharedTerms
+            && (sharedSpecific >= 1 || sharedAnchors >= 2 || (sharedAnchors >= 1 && strongWording)) && sharedEvidence >= 2
+            && sharedAnchors + sharedEvidence >= policy.minimumSharedTerms
             && what >= policy.minimumWhat && score >= policy.matchScore
             && (gap <= policy.strictTimeGap || (what >= policy.strictWhat && sharedKeywords >= 3))
         let isCompatible = conflict == nil
             && (sharedAnchors >= 1 || sharedKeywords >= 2) && score >= policy.compatibilityScore
-        return EventPairAssessment(conflict: conflict, score: score, what: what, entity: entity,
+        let isBorderline = !isMatch && (conflict == nil || softConflict)
+            && ((sharedAnchors >= 1 && sharedEvidence >= 1 && score >= policy.borderlineScore)
+                || (sharedEvidence >= 3 && what >= policy.minimumWhat))
+        let needsConfirmation = isMatch && (sharedSpecific == 0 || what < policy.strictWhat)
+        return EventPairAssessment(conflict: conflict, softConflict: softConflict, isBorderline: isBorderline,
+                                   needsConfirmation: needsConfirmation,
+                                   score: score, what: what, entity: entity,
                                    sharedAnchors: sharedAnchors, sharedKeywords: sharedKeywords,
                                    isMatch: isMatch, isCompatible: isCompatible)
     }
 
-    /// Whole-event check: the newcomer must strongly match at least one member and be compatible
-    /// with every member, so a chain A≈B≈C cannot pull unrelated A and C together. Returns the mean
-    /// score when the newcomer may join, nil otherwise.
+    /// A pair the on-device judge called one event counts as a match.
+    /// A thin match the on-device judge called separate events stays compatible but no longer links the pair.
+    static func rejected(_ pair: EventPairAssessment) -> EventPairAssessment {
+        var pair = pair
+        pair.isMatch = false
+        pair.needsConfirmation = false
+        pair.isBorderline = false
+        return pair
+    }
+
+    static func confirmed(_ pair: EventPairAssessment, policy: EventMatchPolicy = .standard) -> EventPairAssessment {
+        var pair = pair
+        pair.conflict = nil
+        pair.softConflict = false
+        pair.isBorderline = false
+        pair.needsConfirmation = false
+        pair.isMatch = true
+        pair.isCompatible = true
+        pair.score = max(pair.score, policy.matchScore)
+        return pair
+    }
+
+    /// Whole-event check without a judge. Returns the mean score when the newcomer may join, nil otherwise.
     static func eventScore(
         for article: EventFeatures, members: [EventFeatures], excluded: Bool = false,
         policy: EventMatchPolicy = .standard
     ) -> Double? {
-        guard !excluded, !members.isEmpty, members.count < policy.maximumEventSize else { return nil }
-        var total = 0.0
-        var matched = false
-        for member in members {
-            let pair = assess(article, member, policy: policy)
-            guard pair.isCompatible else { return nil }
-            matched = matched || pair.isMatch
-            total += pair.score
-        }
-        let mean = total / Double(members.count)
-        return matched && mean >= policy.eventScore ? mean : nil
+        guard !excluded else { return nil }
+        return eventScore(pairs: members.map { assess(article, $0, policy: policy) }, policy: policy)
+    }
+
+    /// The newcomer must strongly match one member and be compatible with at least `compatibleShare` of them (all of
+    /// them in a two-member event), so a chain A≈B≈C cannot pull a contradicting C into a small event.
+    static func eventScore(pairs: [EventPairAssessment], policy: EventMatchPolicy = .standard) -> Double? {
+        guard !pairs.isEmpty, pairs.count < policy.maximumEventSize, pairs.contains(where: \.isMatch) else { return nil }
+        let required = Int((Double(pairs.count) * policy.compatibleShare).rounded(.up))
+        guard pairs.filter(\.isCompatible).count >= required else { return nil }
+        let mean = pairs.map(\.score).reduce(0, +) / Double(pairs.count)
+        return mean >= policy.eventScore ? mean : nil
     }
 
     private static func cosine(_ shared: Int, _ left: Int, _ right: Int) -> Double {

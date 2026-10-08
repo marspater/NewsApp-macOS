@@ -2859,11 +2859,16 @@ actor DatabaseEngine {
     /// Moves every member of `absorbedID` into `survivorID`. The absorbed ID forwards to the survivor,
     /// so stored links keep resolving; article rows and their read/save state are untouched.
     @discardableResult
-    func mergeEvents(_ absorbedID: String, into survivorID: String, at date: Date = Date()) throws -> StoryEvent {
+    /// With `expectedVersions`, the merge is refused if either event changed since the caller read it.
+    func mergeEvents(_ absorbedID: String, into survivorID: String, expectedVersions: (absorbed: Int, survivor: Int)? = nil,
+                     at date: Date = Date()) throws -> StoryEvent {
         let id = try inEventTransaction { () throws -> String in
             let survivor = try liveEvent(survivorID)
             let absorbed = try liveEvent(absorbedID)
             guard absorbed.id != survivor.id else { return survivor.id }
+            if let expectedVersions, expectedVersions.absorbed != absorbed.version || expectedVersions.survivor != survivor.version {
+                throw Self.eventError("An event changed before it could be merged")
+            }
             let now = date.timeIntervalSince1970
             try eventRows("UPDATE event_members SET event_id = ?, joined_version = ? WHERE event_id = ?;",
                           [.text(survivor.id), .integer(survivor.version + 1), .text(absorbed.id)])
@@ -3038,6 +3043,23 @@ actor DatabaseEngine {
         guard let live = try? liveEvent(eventID) else { return nil }
         let members = try eventMatchRows("\(Self.eventMatchColumns) WHERE m.event_id = ?;", [.text(live.id)])
         return (live.id, live.version, members)
+    }
+
+    /// Every live event updated since `activeSince`, with its members, for merging fragments of one story.
+    func activeEventMembers(since activeSince: Date) throws -> [(id: String, version: Int, members: [EventMatchRow])] {
+        let since = activeSince.timeIntervalSince1970
+        let versions = try eventRows("SELECT id, membership_version FROM events WHERE merged_into IS NULL AND updated_at >= ? ORDER BY id;",
+                                     [.real(since)])
+        let rows = try eventMatchRows("""
+        \(Self.eventMatchColumns)
+        JOIN events e ON e.id = m.event_id
+        WHERE e.merged_into IS NULL AND e.updated_at >= ?;
+        """, [.real(since)])
+        let byEvent = Dictionary(grouping: rows) { $0.eventID ?? "" }
+        return versions.compactMap { row in
+            guard let id = row[0], let members = byEvent[id], !members.isEmpty else { return nil }
+            return (id, row[1].flatMap { Int($0) } ?? 1, members.sorted { $0.id < $1.id })
+        }
     }
 
     /// Articles the user marked as a different event from `articleID`.

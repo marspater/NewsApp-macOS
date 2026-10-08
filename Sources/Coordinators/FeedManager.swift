@@ -472,8 +472,10 @@ class FeedManager: NSObject, ObservableObject {
         clusteringTask = Task { [weak self] in
             repeat {
                 self?.needsClusteringPass = false
+                // The on-device judge follows the AI setting and, like classification, waits out Low Power Mode and heat.
+                let judge: EventJudge = self.map { $0.appSettings.aiEnabled && $0.allowsBackgroundWork() } == true ? .onDevice : .unavailable
                 let work = Task.detached(priority: .utility) {
-                    try await EventClusterer.run(in: database)
+                    try await EventClusterer.run(in: database, judge: judge)
                 }
                 let result = await withTaskCancellationHandler {
                     await work.result
