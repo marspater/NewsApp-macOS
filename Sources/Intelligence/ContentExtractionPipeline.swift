@@ -584,9 +584,15 @@ final class ContentExtractionPipeline: Sendable {
 
     func extractArticleWithIdentity(from link: String, allowHTTP: Bool = false) async
         -> (outcome: ExtractionOutcome, evidence: DocumentIdentityEvidence?) {
-        guard let url = URL(string: link) else {
+        guard var url = URL(string: link) else {
             logger.error("[Extraction] Malformed article URL")
             return (.contentParsingFailed(reason: "Malformed URL: \(link)"), nil)
+        }
+        // Some feeds (Africanews) still link http:// pages their servers also serve over TLS. Without the insecure
+        // setting the page is requested over https instead of being refused.
+        if !allowHTTP, url.scheme?.lowercased() == "http", var components = URLComponents(url: url, resolvingAgainstBaseURL: false) {
+            components.scheme = "https"
+            url = components.url ?? url
         }
 
         let host = url.host ?? "unknown"

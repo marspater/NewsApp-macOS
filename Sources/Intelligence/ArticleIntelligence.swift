@@ -983,6 +983,11 @@ public enum ArticleContentRedactor {
         if rawLower.hasPrefix("photo by ") || rawLower.hasPrefix("image credit:") || rawLower.hasPrefix("photo credit:") {
             return true
         }
+        // Consent and player notices that stand in for embedded video (France 24).
+        if rawLower.hasPrefix("to display this content from") && rawLower.contains("you must enable")
+            || rawLower.hasPrefix("one of your browser extensions seems to be blocking") {
+            return true
+        }
         // Tag strips, whose links run together as "Topics:ReformGiorgia MeloniItaly".
         if rawLower.count < 200, ["topics:", "tags:", "related topics:"].contains(where: rawLower.hasPrefix) {
             return true

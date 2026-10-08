@@ -304,6 +304,10 @@ struct NewsTests {
             try await testPublisherCancellation()
             return
         }
+        if CommandLine.arguments.contains("--catalog-reader-access") {
+            await testCatalogReaderAccess()
+            return
+        }
         if CommandLine.arguments.contains("--reader-live-pages") {
             await testLiveReader(pagesOnly: true)
             print("✅ Live reader pages passed")
@@ -2222,7 +2226,7 @@ struct NewsTests {
             assertFalse(set.summary.isEmpty, "\(set.title) is described")
         }
         assertEqual(Set(feeds.map(\.language)), ["en"], "Only English feeds are offered")
-        assertTrue(Set(FeedCatalog.parkedFeeds.map(\.language)).isSuperset(of: ["uk", "de", "fr", "it", "nl", "pl"]),
+        assertTrue(Set(FeedCatalog.parkedFeeds.map(\.language)).isSuperset(of: ["uk", "de", "fr", "it", "nl"]),
                    "Other languages stay in the catalog, parked")
         assertFalse(CatalogSet.offered.contains(.europe), "A set with only parked feeds is not shown")
 
@@ -2244,13 +2248,19 @@ struct NewsTests {
         assertEqual(story("https://example.com/story", "Example Daily\n  Example Daily").publisherName, "Example Daily", "Other sites keep the feed title's first line")
         assertEqual(story("https://notaljazeera.com/story", "Other").publisherName, "Other", "Only the same host or its subdomains match")
 
-        // A retired default subscription ends once; subscribing again later is kept.
-        let nyt = AppSettings.retiredDefaultFeeds.first!
+        // A retired subscription ends once per retirement version; subscribing again later is kept.
+        let nyt = AppSettings.retiredFeeds[0].url, onet = AppSettings.retiredFeeds[1].url
         assertFalse(AppSettings.defaultFeeds.contains(nyt), "Retired feeds are not fresh-install defaults")
-        parkedDefaults.set([kept[0], nyt], forKey: AppSettings.feedURLsKey)
-        assertEqual(AppSettings(defaults: parkedDefaults).feedURLs, [kept[0], nyt], "Settings that already retired it keep a manual subscription")
-        parkedDefaults.removeObject(forKey: AppSettings.retiredDefaultFeedsKey)
-        assertEqual(AppSettings(defaults: parkedDefaults).feedURLs, [kept[0]], "The retired default subscription ends")
+        assertFalse(FeedCatalog.allFeeds.contains { $0.url == onet }, "Retired feeds leave the catalog")
+        parkedDefaults.set([kept[0], nyt, onet], forKey: AppSettings.feedURLsKey)
+        assertEqual(AppSettings(defaults: parkedDefaults).feedURLs, [kept[0], nyt, onet], "Settings that already retired every version keep manual subscriptions")
+        parkedDefaults.removeObject(forKey: AppSettings.retiredFeedsVersionKey)
+        parkedDefaults.set(true, forKey: "retired_default_feeds_v1")
+        assertEqual(AppSettings(defaults: parkedDefaults).feedURLs, [kept[0], nyt], "The first retirement's flag counts as version 1; later ones still apply")
+        parkedDefaults.removeObject(forKey: AppSettings.retiredFeedsVersionKey)
+        parkedDefaults.removeObject(forKey: "retired_default_feeds_v1")
+        parkedDefaults.set([kept[0], nyt, onet], forKey: AppSettings.feedURLsKey)
+        assertEqual(AppSettings(defaults: parkedDefaults).feedURLs, [kept[0]], "Every retired subscription ends")
         let resubscribed = AppSettings(defaults: parkedDefaults)
         _ = resubscribed.addFeed(url: nyt)
         assertEqual(AppSettings(defaults: parkedDefaults).feedURLs, [kept[0], nyt], "A later manual subscription stays")
@@ -2308,6 +2318,40 @@ struct NewsTests {
         }
         failures.forEach { print("    ✗ \($0)") }
         assertTrue(failures.isEmpty, "Every catalog feed fetches and parses (\(failures.count) of \(FeedCatalog.feeds.count) failed)")
+    }
+
+    /// Opt-in, live: opens the newest stories of every catalog feed in the app's own reader extraction. Free, open
+    /// feeds only: a feed whose articles refuse the reader (HTTP 403, paywall teaser) does not belong in the catalog.
+    static func testCatalogReaderAccess() async {
+        let only = Set((ProcessInfo.processInfo.environment["NEWS_CATALOG_FEEDS"] ?? "").split(separator: ",").map(String.init))
+        let sample = Int(ProcessInfo.processInfo.environment["NEWS_CATALOG_SAMPLE"] ?? "") ?? 3
+        let feeds = FeedCatalog.allFeeds.filter { only.isEmpty || only.contains($0.id) }
+        print("  - Catalog reader access: \(feeds.count) feeds, up to \(sample) stories each...")
+        let results = await FeedFetcher().fetchAllFeeds(urls: feeds.map(\.url))
+        await withTaskGroup(of: String.self) { group in
+            for feed in feeds {
+                let links = (results.first { $0.urlString == feed.url }?.articles ?? [])
+                    .map(\.link).filter { !$0.isEmpty }.prefix(sample)
+                group.addTask {
+                    guard !links.isEmpty else { return "\(feed.id)\tno stories in feed" }
+                    var readable = 0, words: [Int] = [], failures: [String] = []
+                    for link in links {
+                        let outcome = await ContentExtractionPipeline.shared.extractArticleWithIdentity(from: link).outcome
+                        if case .success(let content, _, _) = outcome {
+                            readable += 1
+                            words.append(content.split(whereSeparator: \.isWhitespace).count)
+                        } else {
+                            failures.append("\(outcome)".prefix(60).description)
+                        }
+                    }
+                    let median = words.sorted().dropFirst(words.count / 2).first ?? 0
+                    return "\(feed.id)\t\(feed.language)\treadable \(readable)/\(links.count)\tmedian words \(median)\t\(failures.joined(separator: "; "))"
+                }
+            }
+            var lines: [String] = []
+            for await line in group { lines.append(line) }
+            lines.sorted().forEach { print("    \($0)") }
+        }
     }
 
     @MainActor
@@ -3355,6 +3399,13 @@ struct NewsTests {
         defer { MockURLProtocol.requestHandler = nil }
         let desktop = fixtureRoot.appendingPathComponent("baseline/desktop/story")
         let prose = (1...65).map { "Baseline fact \($0) provides distinctive publisher evidence for the same document." }.joined(separator: " ")
+        MockURLProtocol.requestHandler = { request in
+            let html = "<html><body><article><p>\(prose)</p></article></body></html>"
+            return (HTTPURLResponse(url: request.url!, statusCode: request.url?.scheme == "https" ? 200 : 404, httpVersion: nil, headerFields: nil)!, Data(html.utf8))
+        }
+        var insecureStory = URLComponents(url: desktop, resolvingAgainstBaseURL: false)!
+        insecureStory.scheme = "http"
+        assertTrue(await pipeline.extractArticleWithIdentity(from: insecureStory.url!.absoluteString).outcome.isSuccess, "An http:// story link is read over https")
         for path in ["baseline/mobile/story", "baseline/amp/story"] {
             let db = DatabaseEngine(path: ":memory:")
             try await db.open()
@@ -7137,6 +7188,8 @@ struct NewsTests {
                     base + "/ace/standard/240/b.jpg", "Other hosts keep their image URL")
         assertTrue(ArticleContentRedactor.isBoilerplateLine("Topics:ReformGiorgia MeloniItaly"), "Tag strips are boilerplate")
         assertFalse(ArticleContentRedactor.isBoilerplateLine("Topics discussed at the summit included trade and security policy."), "Prose that mentions topics stays")
+        assertTrue(ArticleContentRedactor.isBoilerplateLine("To display this content from YouTube, you must enable advertisement tracking and audience measurement."), "Embedded-video consent notices are boilerplate")
+        assertTrue(ArticleContentRedactor.isBoilerplateLine("One of your browser extensions seems to be blocking the video player from loading."), "Video player notices are boilerplate")
         assertTrue(documents[0].hasPublisherText && bodyOnly.readerDocument?.hasPublisherText == true, "Publisher text makes a reader document")
         let db = DatabaseEngine(path: ":memory:")
         try await db.open()
