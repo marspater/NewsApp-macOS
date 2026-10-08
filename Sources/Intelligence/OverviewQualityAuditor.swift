@@ -632,7 +632,7 @@ public struct OverviewQualityAuditor: Sendable {
         var attributionErrorCount = 0
         var summaries: [ClaimAuditSummary] = []
 
-        for fact in overview.facts {
+        for fact in overview.allClaims {
             let result = auditClaim(fact, citations: overview.citations, passages: passages)
             let statusKind: String
             var detail: String? = nil
@@ -675,7 +675,7 @@ public struct OverviewQualityAuditor: Sendable {
             overviewID: overview.id,
             eventID: overview.eventID,
             metrics: QualityClaimMetrics(
-                totalClaims: overview.facts.count,
+                totalClaims: overview.allClaims.count,
                 supportedClaims: supportedCount,
                 unsupportedClaims: unsupportedCount
             ),

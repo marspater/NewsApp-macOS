@@ -228,6 +228,10 @@ struct NewsTests {
             try await measureLiveCuration(path: CommandLine.arguments[index + 1], output: CommandLine.arguments[index + 2])
             return
         }
+        if let index = CommandLine.arguments.firstIndex(of: "--overviews-live"), CommandLine.arguments.count > index + 2 {
+            try await measureLiveOverviews(path: CommandLine.arguments[index + 1], output: CommandLine.arguments[index + 2])
+            return
+        }
         if let index = CommandLine.arguments.firstIndex(of: "--images-live"), CommandLine.arguments.count > index + 2 {
             try await measureLiveImages(path: CommandLine.arguments[index + 1], output: CommandLine.arguments[index + 2])
             return
@@ -337,6 +341,7 @@ struct NewsTests {
             try await testFoundationModelsProbeGoNoGo(fixtureHost: fixtureHost)
             try await testPassageAnchoredFactExtraction()
             try await testOverviewCompositionFromVerifiedFacts(fixtureHost: fixtureHost)
+            try await testPlainTextGeneration(fixtureHost: fixtureHost)
             try await testOverviewQualityAuditAndReleaseGate(fixtureHost: fixtureHost)
             try await testOnDemandOverviewGenerationAndCaching(fixtureHost: fixtureHost)
             try await testOverviewGenerationCancellationAndSupersession(fixtureHost: fixtureHost)
@@ -426,6 +431,7 @@ struct NewsTests {
         try await testFoundationModelsProbeGoNoGo(fixtureHost: fixtureHost)
         try await testPassageAnchoredFactExtraction()
         try await testOverviewCompositionFromVerifiedFacts(fixtureHost: fixtureHost)
+        try await testPlainTextGeneration(fixtureHost: fixtureHost)
         try await testOverviewQualityAuditAndReleaseGate(fixtureHost: fixtureHost)
         try await testOnDemandOverviewGenerationAndCaching(fixtureHost: fixtureHost)
         try await testOverviewGenerationCancellationAndSupersession(fixtureHost: fixtureHost)
@@ -862,7 +868,7 @@ struct NewsTests {
         // Overview generation & cached lookup (#104, #153)
         let eventArticles = Array(archive.prefix(3))
         let queue = EnrichmentQueue(store: store)
-        let coordinator = OverviewGenerationCoordinator(store: store, queue: queue)
+        let coordinator = OverviewGenerationCoordinator(store: store, queue: queue, textModel: .unavailable)
         for i in 0..<10 {
             let start = ProcessInfo.processInfo.systemUptime
             let doc = await coordinator.requestOverview(
@@ -4491,6 +4497,72 @@ struct NewsTests {
         await db.close()
     }
 
+    /// On-device generation and labeled controls; private text stays in the temporary audit directory.
+    @MainActor
+    static func measureLiveOverviews(path: String, output: String) async throws {
+        let url = URL(fileURLWithPath: path).resolvingSymlinksInPath()
+        guard (url.path.hasPrefix("/private/tmp/") || url.path.hasPrefix("/tmp/")), output.hasPrefix("/private/tmp/") else {
+            throw NSError(domain: "LiveOverviews", code: 1)
+        }
+        let db = DatabaseEngine(path: url.path)
+        try await db.open()
+        let directory = URL(fileURLWithPath: output)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let active = try await db.fetchArticles(limit: nil, publicationWindow: Date().addingTimeInterval(-72 * 3600)...Date(), hidingWaitingStories: true)
+        let events = try await db.eventFeedSummaries(forArticles: active.map(\.id)).filter { $0.sources.count > 1 }.sorted { $0.sources.count > $1.sources.count }.prefix(8)
+        var report = ["liveEvents": 0, "liveGenerated": 0, "liveClaims": 0, "liveUnsupported": 0, "liveCritical": 0,
+                      "controls": 0, "controlsGenerated": 0, "controlClaims": 0, "controlUnsupported": 0, "controlCritical": 0]
+        let measuredModel = NewsTextModel { prompt, tokens in
+                let answer = try await NewsTextModel.onDevice.respond(prompt, tokens)
+                let data = try JSONSerialization.data(withJSONObject: ["prompt": prompt, "answer": answer], options: [.prettyPrinted, .sortedKeys])
+                try data.write(to: directory.appendingPathComponent("model-private-\(UUID().uuidString).json"))
+                return answer
+            }
+        func measure(id: String, title: String, passages: [EvidencePassage], articles: [FeedArticle], live: Bool, membership: Int = 1) async throws {
+            let fallback = OverviewComposer.composeOverview(eventID: id, eventTitle: title,
+                verifiedFacts: PassageFactExtractor.deterministicExtract(passages: passages), passages: passages, articles: articles, membershipVersion: membership)
+            let start = Date()
+            let document: EventOverviewDocument
+            do { document = try await OverviewComposer.composeWithModel(fallback: fallback, passages: passages, articles: articles, model: measuredModel) }
+            catch is CancellationError { throw CancellationError() }
+            catch { document = fallback }
+            let audit = OverviewQualityAuditor.auditOverview(document, passages: passages, duration: Date().timeIntervalSince(start))
+            report[live ? "liveEvents" : "controls", default: 0] += 1
+            report[live ? "liveGenerated" : "controlsGenerated", default: 0] += document.content.evidenceSections?.introduction == nil ? 0 : 1
+            report[live ? "liveClaims" : "controlClaims", default: 0] += audit.totalClaims
+            report[live ? "liveUnsupported" : "controlUnsupported", default: 0] += audit.unsupportedClaims
+            report[live ? "liveCritical" : "controlCritical", default: 0] += audit.totalCriticalErrors
+            let privateJSON: [String: Any] = ["document": try JSONSerialization.jsonObject(with: encoder.encode(document)),
+                "passages": try JSONSerialization.jsonObject(with: encoder.encode(passages)),
+                "audit": try JSONSerialization.jsonObject(with: encoder.encode(audit))]
+            try JSONSerialization.data(withJSONObject: privateJSON, options: [.prettyPrinted, .sortedKeys]).write(to: directory.appendingPathComponent("overview-private-\(live ? "live" : "control")-\(report[live ? "liveEvents" : "controls"]!).json"))
+            if live { _ = try await db.recordEventOverview(document) }
+            print("OVERVIEW_AUDIT \(live ? "live" : "control") generated=\(document.content.evidenceSections?.introduction != nil) claims=\(audit.totalClaims) critical=\(audit.totalCriticalErrors)")
+            fflush(stdout)
+        }
+        for sample in OverviewControlSample.standardBenchmark() {
+            try await measure(id: sample.eventID, title: sample.title, passages: sample.passages, articles: sample.articles, live: false)
+        }
+        for event in events {
+            let members = try await db.fetchArticles(limit: nil, eventID: event.eventID)
+            guard let first = members.first else { continue }
+            try await measure(id: event.eventID, title: first.title, passages: OverviewPassageSelector().selectPassages(from: members, budget: OverviewTokenBudget()).passages,
+                              articles: members, live: true, membership: event.membershipVersion)
+        }
+        if let harsh = active.first(where: { ($0.title + $0.description).lowercased().contains("killed") }) {
+            let classification = await ArticleClassifier(textModel: measuredModel).classify(title: harsh.title, description: harsh.description)
+            let analysis = try await ArticleAnalyzer(textModel: measuredModel).analyze(title: harsh.title, content: harsh.fullContent ?? harsh.description)
+            report["sensitiveClassificationUsedModel"] = classification.evidence.contains("foundation_model") ? 1 : 0
+            report["sensitiveAnalysisUsedModel"] = analysis.modelIdentifier == "apple.foundation-model" ? 1 : 0
+            try encoder.encode(analysis).write(to: directory.appendingPathComponent("analysis-private.json"))
+        }
+        try encoder.encode(report).write(to: directory.appendingPathComponent("overviews.json"))
+        print("OVERVIEW_REPORT \(String(decoding: try encoder.encode(report), as: UTF8.self))")
+        await db.close()
+    }
+
     @MainActor
     static func testStoryVisibility(fixtureRoot: URL) async throws {
         print("  - Testing story importance, waiting stories, expiry and expired-story memory...")
@@ -7171,6 +7243,91 @@ struct NewsTests {
         assertTrue(accuracy >= 0.80, "Benchmark accuracy must meet or exceed 80% on ground-truth dataset")
     }
 
+    @MainActor
+    static func testPlainTextGeneration(fixtureHost: String) async throws {
+        print("  - Testing Plain Text Generation, Support Gates and Refusal Fallbacks...")
+        assertTrue(ArticleTextAnswer.classification("World|0.91") != nil, "Fixed category text parses")
+        for bad in ["World|NaN", "World|1.1", "Unknown|0.9", "World|0.9|extra", "I refuse"] {
+            assertEqual(ArticleTextAnswer.classification(bad)?.category, nil, "Malformed classification is rejected")
+        }
+        let model = NewsTextModel { _, _ in "World|0.91" }
+        let classified = await ArticleClassifier(textModel: model).classify(title: "A developing report", description: "Reported developments")
+        assertEqual(classified.evidence, ["foundation_model"], "Classifier uses the plain-text model answer")
+        let text = "The bridge reopened after engineers completed repairs. Traffic resumed during the morning. The council approved the repairs."
+        let analysisModel = NewsTextModel { _, _ in "SUMMARY|The bridge reopened after repairs.\nPOINT|Traffic resumed.\nPOINT|Engineers completed repairs.\nPOINT|The council approved repairs." }
+        let analysis = try await ArticleAnalyzer(textModel: analysisModel).analyze(title: "Bridge reopened", content: text)
+        assertEqual(analysis.modelIdentifier, "apple.foundation-model", "Analysis uses plain text")
+        let shortAnalysis = try await ArticleAnalyzer(textModel: NewsTextModel { _, _ in "SUMMARY|The bridge reopened.\nPOINT|Repairs were completed.\nPOINT|Traffic resumed." }).analyze(title: "Bridge reopened", content: text)
+        assertEqual(shortAnalysis.modelIdentifier, "apple.foundation-model", "Two supported points do not force a short article to invent a third")
+        let fallbackAnalysis = try await ArticleAnalyzer(textModel: .unavailable).analyze(title: "Bridge reopened", content: text)
+        assertEqual(fallbackAnalysis.modelIdentifier, "apple.natural-language.fallback", "A refusal keeps source-based extraction")
+        assertEqual(ArticleTextAnswer.analysis("SUMMARY|x\nSUMMARY|y\nPOINT|a\nPOINT|b\nPOINT|c")?.summary, nil, "Duplicate summary is rejected")
+        let article1 = FeedArticle(storedID: "plain-a", title: "Bridge repairs", link: "https://\(fixtureHost)/a", guid: "plain-a", description: text, pubDate: Date(), source: "Publisher A")
+        let other = "Engineers inspected the bridge before traffic resumed. The council funded the repairs. Residents welcomed the reopening."
+        let article2 = FeedArticle(storedID: "plain-b", title: "Bridge reopening", link: "https://\(fixtureHost)/b", guid: "plain-b", description: other, pubDate: Date(), source: "Publisher B")
+        let passages = [EvidencePassage(id: "p1", articleID: article1.id, text: text), EvidencePassage(id: "p2", articleID: article2.id, text: other)]
+        let fallback = OverviewComposer.composeOverview(eventID: "plain", eventTitle: "Bridge reopening",
+            verifiedFacts: PassageFactExtractor.deterministicExtract(passages: passages), passages: passages, articles: [article1, article2])
+        let answer = """
+        INTRO|P1|The bridge reopened after engineers completed repairs.
+        INTRO|P2|Engineers inspected the bridge before traffic resumed&#046;
+        FACT|P1|Traffic resumed during the morning.
+        FACT|P1|The council approved the repairs.
+        FACT|P2|The council funded the repairs.
+        FACT|P2|Engineers destroyed the bridge.
+        """
+        let overviewModel = NewsTextModel { prompt, _ in
+            if prompt.contains("Return plain text only:") { return answer }
+            return prompt.contains("Engineers destroyed the bridge.") ? "NO" : "YES"
+        }
+        let generated = try await OverviewComposer.composeWithModel(fallback: fallback, passages: passages, articles: [article1, article2], model: overviewModel)
+        assertEqual(generated.facts.count, 3, "Semantic rejection drops a related but unsupported claim")
+        assertEqual(generated.content.evidenceSections?.introduction?.count, 2, "Introduction sentences carry citations")
+        assertEqual(generated.allClaims.count, 5, "Introduction is included in verification")
+        assertFalse(generated.summary.contains("&#"), "Synthesized prose decodes HTML entities from older feed text")
+        let audited = OverviewQualityAuditor.auditOverview(generated, passages: passages)
+        assertEqual(audited.totalClaims, 5, "Audit denominator includes the introduction")
+        assertEqual(audited.supportedClaims, 5, "Audit numerator and denominator have the same grain")
+        assertTrue(OverviewClaimVerifier.verifyOverview(generated, passages: passages, articles: [article1, article2]).isFullyVerified, "Retained claims preserve passage lineage")
+        let refused = try await OverviewComposer.composeWithModel(fallback: fallback, passages: passages, articles: [article1, article2], model: NewsTextModel { _, _ in "I refuse" })
+        assertEqual(refused.id, fallback.id, "Malformed draft retains the current overview")
+        let rejected = try await OverviewComposer.composeWithModel(fallback: fallback, passages: passages, articles: [article1, article2], model: NewsTextModel { prompt, _ in prompt.contains("Return plain text only:") ? answer : "NO" })
+        assertEqual(rejected.id, fallback.id, "Too many rejected sentences retain the current overview")
+        let staleCitation = OverviewCitation(id: "stale", articleID: article1.id, passageID: "p1", passageFingerprint: "old", quote: text)
+        let stale = EventOverviewDocument(eventID: "plain", version: fallback.version,
+            content: OverviewContent(title: "Bridge", summary: "", facts: [OverviewFact(id: "stale", text: text, citationIDs: ["stale"])], citations: [staleCitation]))
+        assertFalse(OverviewClaimVerifier.verifyOverview(stale, passages: passages, articles: [article1, article2]).isFullyVerified,
+                    "Citation fingerprint must match the current publisher passage")
+        let selected = OverviewPassageSelector().selectPassages(from: [article1, article2], budget: OverviewTokenBudget()).passages
+        let firstID = "P\(selected.firstIndex(where: { $0.articleID == article1.id })! + 1)"
+        let secondID = "P\(selected.firstIndex(where: { $0.articleID == article2.id })! + 1)"
+        let selectedAnswer = answer.replacingOccurrences(of: "|P1|", with: "|first|").replacingOccurrences(of: "|P2|", with: "|\(secondID)|").replacingOccurrences(of: "|first|", with: "|\(firstID)|")
+        let requests = TestCounter()
+        let coordinatedModel = NewsTextModel { prompt, _ in
+            await requests.increment()
+            if prompt.contains("Return plain text only:") { return selectedAnswer }
+            return prompt.contains("Engineers destroyed the bridge.") ? "NO" : "YES"
+        }
+        let database = DatabaseEngine(path: ":memory:")
+        try await database.open()
+        _ = try await database.upsertArticles([article1, article2])
+        let store = ArticleStore(database: database)
+        let coordinator = OverviewGenerationCoordinator(store: store, queue: EnrichmentQueue(store: store), textModel: coordinatedModel, allowsModel: { true })
+        let coordinated = await coordinator.requestOverview(eventID: "plain", eventTitle: "Bridge reopening", membershipVersion: 1, articles: [article1, article2])
+        assertEqual(coordinated?.content.evidenceSections?.introduction?.count, 2, "Reader request reaches the model composer")
+        assertEqual(try await database.fetchEventOverview(eventID: "plain")?.allClaims.count, 5, "SQLite retains introductory citations")
+        let before = await requests.value
+        let blocked = OverviewGenerationCoordinator(store: store, queue: EnrichmentQueue(store: store), textModel: coordinatedModel, allowsModel: { false })
+        _ = await blocked.requestOverview(eventID: "blocked", eventTitle: "Bridge", membershipVersion: 1, articles: [article1, article2])
+        assertEqual(await requests.value, before, "AI/energy policy prevents all model requests")
+        await database.close()
+        let roundTrip = try JSONDecoder().decode(EventOverviewDocument.self, from: JSONEncoder().encode(generated))
+        assertEqual(roundTrip.allClaims, generated.allClaims, "Introduction citations survive persistence")
+        let cancelled = Task { try await OverviewComposer.composeWithModel(fallback: fallback, passages: passages, articles: [article1, article2], model: NewsTextModel { _, _ in try Task.checkCancellation(); return answer }) }
+        cancelled.cancel()
+        do { _ = try await cancelled.value; assertTrue(false, "Cancelled generation throws") } catch is CancellationError { }
+    }
+
     static func testArticleAnalyzerStructuredOutputAndFallbacks() async throws {
         print("  - Testing ArticleAnalyzer Structured Output (Summary, Key Points, Entities, Sentiment)...")
 
@@ -7202,7 +7359,7 @@ struct NewsTests {
 
         // 5. Model identifier and versioning
         assertTrue(!analysis.modelIdentifier.isEmpty, "Model identifier should identify engine")
-        assertEqual(analysis.analysisVersion, 2, "Analysis version invalidates summaries from the old extraction pipeline")
+        assertEqual(analysis.analysisVersion, 3, "Analysis version invalidates summaries from the old extraction pipeline")
     }
 
     static func testInteractiveAnalysisCancellation() async {
@@ -9000,7 +9157,7 @@ struct NewsTests {
         _ = try await db.upsertArticles(articles)
         let store = ArticleStore(database: db)
         let queue = EnrichmentQueue(store: store)
-        let coordinator = OverviewGenerationCoordinator(store: store, queue: queue)
+        let coordinator = OverviewGenerationCoordinator(store: store, queue: queue, textModel: .unavailable)
 
         // 1. Generate on request for the visible event
         let overviewV1 = await coordinator.requestOverview(
@@ -9098,7 +9255,7 @@ struct NewsTests {
         _ = try await db.upsertArticles(articles)
         let store = ArticleStore(database: db)
         let queue = EnrichmentQueue(store: store)
-        let coordinator = OverviewGenerationCoordinator(store: store, queue: queue)
+        let coordinator = OverviewGenerationCoordinator(store: store, queue: queue, textModel: .unavailable)
 
         // Fill the bounded queue so requests stay in flight until the gate opens.
         let hold = OpenGate()
@@ -9381,7 +9538,7 @@ struct NewsTests {
             id: "cite-unanchored",
             articleID: "art-alpha",
             passageID: "pass-alpha",
-            passageFingerprint: "fp1",
+            passageFingerprint: passage1.fingerprint,
             quote: "aliens made contact with ground stations in Kourou"
         )
         let unanchoredFact = OverviewFact(id: "f-unanchored", text: "Aliens contacted Earth", citationIDs: ["cite-unanchored"])
@@ -9901,7 +10058,7 @@ struct NewsTests {
 
         let store = ArticleStore(database: db)
         let queue = EnrichmentQueue(store: store)
-        let coordinator = OverviewGenerationCoordinator(store: store, queue: queue)
+        let coordinator = OverviewGenerationCoordinator(store: store, queue: queue, textModel: .unavailable)
 
         // 1. Initially, no event exists and no overview exists for art1
         let initialSummaries = try await store.eventFeedSummaries(for: [art1.id])

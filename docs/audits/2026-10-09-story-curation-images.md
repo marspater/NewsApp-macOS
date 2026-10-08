@@ -23,6 +23,6 @@ All 128 retained page-derived image URLs then downloaded and decoded through `Se
 - Visibility: focused story regressions, full suite and mandatory commit hook passed. Isolated arm64 ad-hoc bundle built; strict signature and plist checks passed.
 - Visibility UI harnesses: native UI 73/73, reader 26/26, overview 49/49. These are automated harness checks, not a spoken VoiceOver pass (parked #268).
 - Image focused regressions passed, including mocked protected HTTP prefix limits, legacy encoding, schema.org, rejected-logo fallback, storage hydration and member-size selection.
-- Image staged arm64 build and strict signature passed; native UI harness 73/73. The mandatory full hook and remaining harnesses run before publication.
+- Image staged arm64 build and strict signature passed; native UI 73/73, reader 26/26 and overview 49/49 harnesses passed. The mandatory full commit hook passed.
 
 The live core harness and staged bundle are distinct evidence. No installation, distribution, hosted CI success or merge is claimed by these local checks.

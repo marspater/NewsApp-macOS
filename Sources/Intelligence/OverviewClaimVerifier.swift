@@ -67,7 +67,7 @@ public struct OverviewClaimVerifier: Sendable {
         var verifiedFacts: [OverviewFact] = []
         var unverifiedFacts: [OverviewFact] = []
 
-        for fact in overview.facts {
+        for fact in overview.allClaims {
             let result = verifySingleFact(fact, in: overview, passagesByID: passagesByID)
             claimResults.append(result)
             if result.isValid {
@@ -119,6 +119,11 @@ public struct OverviewClaimVerifier: Sendable {
             }
 
             guard let passage = passagesByID[citation.passageID] else {
+                failures.append(.missingPassage(passageID: citation.passageID))
+                continue
+            }
+
+            guard citation.articleID == passage.articleID, citation.passageFingerprint == passage.fingerprint else {
                 failures.append(.missingPassage(passageID: citation.passageID))
                 continue
             }

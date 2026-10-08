@@ -45,6 +45,7 @@ class FeedManager: NSObject, ObservableObject {
     private var refreshTask: Task<[FeedArticle], Never>?
     private var refreshRunID: UUID?
     private var enrichmentTask: Task<Void, Never>?
+    private var overviewWarmupTask: Task<Void, Never>?
     /// Event clustering after collection; one pass at a time, never part of the refresh itself.
     private var clusteringTask: Task<Void, Never>?
     private var clusteringRunID: UUID?
@@ -354,6 +355,8 @@ class FeedManager: NSObject, ObservableObject {
         cancelRefresh()
         enrichmentTask?.cancel()
         enrichmentTask = nil
+        overviewWarmupTask?.cancel()
+        overviewWarmupTask = nil
         clusteringTask?.cancel()
         clusteringTask = nil
         clusteringRunID = nil
@@ -509,6 +512,14 @@ class FeedManager: NSObject, ObservableObject {
             guard let self, self.clusteringRunID == runID else { return }
             self.clusteringTask = nil
             self.clusteringRunID = nil
+            self.overviewWarmupTask?.cancel()
+            if self.appSettings.aiEnabled, self.allowsBackgroundWork() {
+                let store = self.articleStore
+                let muting = self.appSettings.muteRules
+                self.overviewWarmupTask = Task {
+                    await OverviewGenerationCoordinator.shared.warmVisibleOverviews(store: store, muting: muting)
+                }
+            }
         }
     }
 

@@ -392,13 +392,29 @@ struct EventOverviewReaderView: View {
             .filter { !$0.isEmpty }
 
         return VStack(alignment: .leading, spacing: 14) {
-            ForEach(Array(paragraphs.enumerated()), id: \.offset) { _, para in
-                Text(para)
+            if let introduction = overview.content.evidenceSections?.introduction, !introduction.isEmpty {
+                ForEach(introduction) { fact in
+                    Text(fact.text)
+                        .font(.system(size: 16 * textScale))
+                        .lineSpacing(6 * textScale)
+                        .foregroundColor(AppColor.primaryText)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                    HStack(spacing: 6) {
+                        ForEach(fact.citationIDs, id: \.self) { id in
+                            if let citation = overview.citations[id] { citationPill(citation) }
+                        }
+                    }
+                }
+            } else {
+                ForEach(Array(paragraphs.enumerated()), id: \.offset) { _, para in
+                    Text(para)
                     .font(.system(size: 16 * textScale, weight: .regular))
                     .lineSpacing(6 * textScale)
                     .foregroundColor(AppColor.primaryText)
                     .fixedSize(horizontal: false, vertical: true)
                     .textSelection(.enabled)
+                }
             }
         }
     }

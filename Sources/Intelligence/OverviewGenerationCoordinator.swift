@@ -45,10 +45,20 @@ actor OverviewGenerationCoordinator {
 
     private let store: ArticleStore?
     private let queue: EnrichmentQueue
+    private let textModel: NewsTextModel
+    private let allowsModel: @Sendable () async -> Bool
 
-    init(store: ArticleStore? = nil, queue: EnrichmentQueue = .shared) {
+    init(store: ArticleStore? = nil, queue: EnrichmentQueue = .shared,
+         textModel: NewsTextModel = .onDevice,
+         allowsModel: @escaping @Sendable () async -> Bool = {
+             let enabled = AppSettings.shared.aiEnabled
+             let info = ProcessInfo.processInfo
+             return enabled && !info.isLowPowerModeEnabled && info.thermalState.rawValue < ProcessInfo.ThermalState.serious.rawValue
+         }) {
         self.store = store
         self.queue = queue
+        self.textModel = textModel
+        self.allowsModel = allowsModel
     }
 
     // MARK: - On-Demand & Visible Event Requests
@@ -64,6 +74,9 @@ actor OverviewGenerationCoordinator {
         priority: OverviewRequestPriority = .onDemand,
         store: ArticleStore? = nil
     ) async -> EventOverviewDocument? {
+        guard !Task.isCancelled else { return nil }
+        let modelAllowed = await allowsModel()
+        let model = textModel
         guard !Task.isCancelled else { return nil }
         // Storage rejects the result if any article's publisher input changed while it was generated.
         let expectedArticleInputs = Dictionary(articles.map { ($0.id, $0.publisherInputHash) }, uniquingKeysWith: { first, _ in first })
@@ -124,8 +137,6 @@ actor OverviewGenerationCoordinator {
             ) {
                 if Task.isCancelled { return nil }
 
-                if Task.isCancelled { return nil }
-
                 // Step B: Passage-anchored fact extraction
                 let verifiedFacts = PassageFactExtractor.deterministicExtract(passages: passages)
 
@@ -142,7 +153,14 @@ actor OverviewGenerationCoordinator {
                     membershipVersion: membershipVersion
                 )
 
-                return overview
+                guard modelAllowed, Set(articles.map { $0.source.lowercased() }).count > 1 else { return overview }
+                do {
+                    return try await OverviewComposer.composeWithModel(fallback: overview, passages: passages, articles: articles, model: model)
+                } catch is CancellationError {
+                    return nil
+                } catch {
+                    return Task.isCancelled ? nil : overview
+                }
             }
 
             guard let generated = document, !Task.isCancelled else { return nil }
@@ -161,7 +179,11 @@ actor OverviewGenerationCoordinator {
 
         inFlightTasks[eventID] = InFlightGeneration(task: task, membershipVersion: membershipVersion, inputTextHash: inputTextHash,
                                                    articleInputs: expectedArticleInputs)
-        let result = await task.value
+        let result = await withTaskCancellationHandler {
+            await task.value
+        } onCancel: {
+            task.cancel()
+        }
         // A newer request may have replaced this entry while it ran.
         if inFlightTasks[eventID]?.task == task {
             inFlightTasks.removeValue(forKey: eventID)
@@ -201,6 +223,25 @@ actor OverviewGenerationCoordinator {
     }
 
     // MARK: - Visible Event Management & Automatic Cancellation
+
+    /// Warm only three covered events from the current visible feed, under the same model/energy policy.
+    func warmVisibleOverviews(store: ArticleStore, muting: MuteRules) async {
+        guard await allowsModel(), !Task.isCancelled else { return }
+        guard let articles = try? await store.database.fetchArticles(limit: 100,
+            publicationWindow: Date().addingTimeInterval(-72 * 3600)...Date(), muting: muting, hidingWaitingStories: true),
+              let events = try? await store.eventFeedSummaries(for: articles.map(\.id)) else { return }
+        let top = events.filter { $0.sources.count > 1 }.sorted {
+            if $0.sources.count != $1.sources.count { return $0.sources.count > $1.sources.count }
+            return ($0.latestDate ?? .distantPast) > ($1.latestDate ?? .distantPast)
+        }.prefix(3)
+        for event in top {
+            guard !Task.isCancelled, await allowsModel(),
+                  let members = try? await store.database.fetchArticles(limit: nil, eventID: event.eventID, muting: muting),
+                  let first = members.first else { return }
+            _ = await requestOverview(eventID: event.eventID, eventTitle: first.title,
+                membershipVersion: event.membershipVersion, articles: members, priority: .background, store: store)
+        }
+    }
 
     /// Updates the currently visible event.
     /// Automatically cancels generation for the previous event if it changed.

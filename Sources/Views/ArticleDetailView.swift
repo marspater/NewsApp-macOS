@@ -1165,7 +1165,7 @@ struct ArticleDetailView: View {
         isAnalyzing = false
 
         // Preserve persisted model identity and analysis version.
-        if let cached = await articleStore.fetchArticleAnalysis(for: activeArticle.id), cached.analysisVersion >= 2 {
+        if let cached = await articleStore.fetchArticleAnalysis(for: activeArticle.id), cached.analysisVersion >= 3 {
             guard !Task.isCancelled, activeArticle.id == targetID,
                   currentArticle.publisherInputHash == targetArticle.publisherInputHash else { return }
             self.analysis = cached
