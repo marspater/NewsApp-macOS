@@ -4,6 +4,8 @@
 
 ### Changed
 
+- Stories are rated major, notable or minor on device. Minor stories wait out of Today, Unread, sections and the Briefing until four publishers cover them (the list says how many wait and can show them); unread ones that are still waiting a day later are removed and are not re-added by later refreshes. Without on-device AI nothing is hidden.
+
 - The app supports English-language feeds only for now. The catalog no longer offers its Ukrainian, German, French, Italian, Dutch and Polish feeds, and existing subscriptions to those catalog feeds are removed at launch; custom feeds are kept. The entries stay in the code for a later release (#264).
 
 - Only free, open sources: every catalog feed was opened in the app's own reader on 8 October 2026 (`./test.sh --catalog-reader-access`); none is paywalled or blocked. Onet is removed from the catalog, and existing Onet subscriptions end once at launch. Politico, The Hill, Fast Company, Dawn and Ukrainska Pravda are now marked readable; France 24 stays preview-only because most of its feed items are videos.

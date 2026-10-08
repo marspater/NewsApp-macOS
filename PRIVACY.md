@@ -43,6 +43,7 @@ NewsApp provides three distinct notification privacy modes with clear network an
 ## 4. On-Device Intelligence & Natural Language Processing
 
 * **Local Machine Learning**: All article intelligence operations—topic categorization, sentiment scoring, named entity extraction, and content summarization—are executed locally on-device using Apple's `NaturalLanguage` and, when available, `FoundationModels` frameworks.
+* **Story Importance**: Whether a story is major, notable or minor is rated by the on-device model from its headline and feed summary, only while on-device AI is enabled. Minor stories wait for wider coverage; unread ones expire from the local library after a day.
 * **Event Grouping**: Deciding whether two stories report one event can use the on-device model and Apple's on-device sentence embeddings. Only headlines and feed summaries are compared, on your Mac, and only while on-device AI is enabled.
 * **Zero Cloud AI Egress**: Article content, summaries, and extracted metadata are never transmitted to third-party AI or cloud LLM APIs.
 

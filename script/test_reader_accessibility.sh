@@ -37,6 +37,7 @@ swiftc -swift-version 6 -O -parse-as-library -target $(uname -m)-apple-macos${TA
     Sources/Intelligence/EventMatcher.swift \
     Sources/Intelligence/EventClustering.swift \
     Sources/Intelligence/EventJudge.swift \
+    Sources/Intelligence/StoryImportance.swift \
     Sources/Intelligence/ContentExtractionPipeline.swift \
     Sources/Intelligence/EnrichmentQueue.swift \
     Sources/Intelligence/OverviewGenerationCoordinator.swift \
