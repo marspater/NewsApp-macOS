@@ -983,6 +983,10 @@ public enum ArticleContentRedactor {
         if rawLower.hasPrefix("photo by ") || rawLower.hasPrefix("image credit:") || rawLower.hasPrefix("photo credit:") {
             return true
         }
+        // Tag strips, whose links run together as "Topics:ReformGiorgia MeloniItaly".
+        if rawLower.count < 200, ["topics:", "tags:", "related topics:"].contains(where: rawLower.hasPrefix) {
+            return true
+        }
         return false
     }
 

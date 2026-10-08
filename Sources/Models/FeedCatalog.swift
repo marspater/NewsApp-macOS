@@ -85,6 +85,28 @@ enum FeedCatalog {
         feeds.filter { $0.set == set }
     }
 
+    /// Publisher names by site host without `www.`, `rss.` or `feeds.`; offered feeds name a shared host first.
+    private static let publishersByHost: [String: String] = Dictionary((feeds + parkedFeeds).compactMap { feed in
+        URL(string: feed.url)?.host.map { (siteHost($0), feed.publisher) }
+    }, uniquingKeysWith: { first, _ in first })
+
+    private static func siteHost(_ host: String) -> String {
+        let lowered = host.lowercased()
+        for prefix in ["www.", "rss.", "feeds."] where lowered.hasPrefix(prefix) { return String(lowered.dropFirst(prefix.count)) }
+        return lowered
+    }
+
+    /// The catalog publisher for a story link on that publisher's site or one of its subdomains.
+    static func publisher(forLink link: String) -> String? {
+        guard let host = URL(string: link)?.host else { return nil }
+        var candidate = siteHost(host)
+        while candidate.contains(".") {
+            if let name = publishersByHost[candidate] { return name }
+            candidate = String(candidate.drop { $0 != "." }.dropFirst())
+        }
+        return nil
+    }
+
     /// The feeds the app offers.
     static let feeds = allFeeds.filter { supportedLanguages.contains($0.language) }
     /// Entries kept for later; earlier subscriptions to them end at launch (`AppSettings`).

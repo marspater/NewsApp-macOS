@@ -63,8 +63,9 @@ actor SecureHTTPClient {
         try await fetchData(from: url, maxBytes: Self.defaultImageLimit, timeout: Self.defaultTimeout, allowHTTP: allowHTTP, cachePolicy: .useProtocolCachePolicy)
     }
 
-    /// Decode bounded thumbnails on the networking actor, away from SwiftUI's main actor.
-    func fetchReaderImage(from url: URL) async throws -> CGImage {
+    /// Decodes bounded thumbnails concurrently, away from SwiftUI's main actor and from this actor, so one large image
+    /// never holds up other cards or feed requests.
+    @concurrent nonisolated func fetchReaderImage(from url: URL) async throws -> CGImage {
         let (data, _) = try await fetchImage(from: url)
         try Task.checkCancellation()
         return try Self.decodeReaderImage(data)

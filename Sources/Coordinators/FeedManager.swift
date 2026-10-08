@@ -53,7 +53,8 @@ class FeedManager: NSObject, ObservableObject {
     private var powerObservers: [AnyCancellable] = []
     private var wakeTask: Task<Void, Never>?
     private var refreshInterruptedBySleep = false
-    private var lastRefreshCompletedAt: Date?
+    /// When the latest refresh published its stories; shown in the list header.
+    @Published private(set) var lastRefreshCompletedAt: Date?
     private let wakeRefreshDelay: Duration
     private let now: () -> Date
 

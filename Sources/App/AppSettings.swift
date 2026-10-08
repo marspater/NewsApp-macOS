@@ -18,6 +18,7 @@ final class AppSettings: ObservableObject {
     static let mutedSourcesKey = "muted_sources"
     static let mutedTopicsKey = "muted_topics"
     static let tensionCollectionOptInKey = "tension_collection_opt_in"
+    static let retiredDefaultFeedsKey = "retired_default_feeds_v1"
 
     enum NotificationMode: String, CaseIterable, Identifiable, Sendable {
         case full = "full"         // Headlines + snippets + images
@@ -50,9 +51,12 @@ final class AppSettings: ObservableObject {
 
     static let defaultFeeds = [
         "https://feeds.arstechnica.com/arstechnica/index",
-        "https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml",
         "https://feeds.bbci.co.uk/news/rss.xml"
     ]
+
+    /// Former defaults whose article pages refuse automated readers (The New York Times answers HTTP 403), so their
+    /// stories never open in the reader. Subscriptions to them end once; a later manual subscription stays.
+    static let retiredDefaultFeeds: Set<String> = ["https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml"]
 
     // MARK: - Published Properties
 
@@ -76,12 +80,14 @@ final class AppSettings: ObservableObject {
         if let savedUrls = defaults.stringArray(forKey: Self.feedURLsKey) {
             // Catalog feeds in languages that are not supported yet are parked; earlier subscriptions to them end.
             let parked = Set(FeedCatalog.parkedFeeds.map(\.url))
-            let kept = savedUrls.filter { !parked.contains($0) }
+            let retired = defaults.bool(forKey: Self.retiredDefaultFeedsKey) ? [] : Self.retiredDefaultFeeds
+            let kept = savedUrls.filter { !parked.contains($0) && !retired.contains($0) }
             if kept.count != savedUrls.count { defaults.set(kept, forKey: Self.feedURLsKey) }
             self.feedURLs = kept
         } else {
             self.feedURLs = Self.defaultFeeds
         }
+        defaults.set(true, forKey: Self.retiredDefaultFeedsKey)
 
         if let savedSections = defaults.stringArray(forKey: Self.userSectionsKey) {
             self.userSections = savedSections

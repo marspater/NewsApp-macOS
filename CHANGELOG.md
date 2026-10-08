@@ -6,7 +6,29 @@
 
 - The app supports English-language feeds only for now. The catalog no longer offers its Ukrainian, German, French, Italian, Dutch and Polish feeds, and existing subscriptions to those catalog feeds are removed at launch; custom feeds are kept. The entries stay in the code for a later release (#264).
 
+- The New York Times home page feed is no longer a default subscription, and the earlier default subscription ends once at launch: nytimes.com answers automated article requests with HTTP 403, so its stories could only be read in Web view. Subscribing to it again by hand is kept.
+
+- Search uses the system sidebar search field (Liquid Glass on macOS 26). Filter operators (`is:unread`, `is:read`, `is:saved`, `source:`, `category:`) are offered as suggestions while typing, and a search without results says so instead of suggesting a feed refresh.
+
+- Refreshing from the toolbar, ⌘R or R shows the new stories when the refresh ends instead of queueing them behind the update button; the refresh icon spins while feeds load. The list header shows how many events are grouped and when feeds last refreshed, and the grouping button is filled while coverage is grouped.
+
+- Reader: a page's own headline is no longer repeated as the first paragraph, the first paragraph after it takes the lead style, and tag strips such as "Topics: …" are dropped, including from stories stored earlier.
+
 ### Fixed
+
+- List cards keep their image inside its column; a wide image no longer runs under the headline, and headlines get their second line before the summary does.
+
+- Stories from catalog publishers show the publisher's name ("The Guardian", "Al Jazeera") instead of a feed title such as "World news" or a slogan; stored source names are unchanged.
+
+- Feed summaries decode every HTML entity, including zero-padded ones such as `&#039;`.
+
+- Section banners (image paths naming a banner) are no longer used as story images or reader figures.
+
+- Card images: images already shown appear at once when scrolled back into view instead of loading again, decoding no longer queues behind feed requests, The Guardian's feed images are recognised (the widest rendition is used), BBC images use a sharper rendition, and an event card without its own image shows one from other listed coverage.
+
+- Search matches every typed word anywhere in a story, as it already did when a `source:`, `category:` or `is:` filter was present; previously a plain multi-word search only found the words adjacent and in order.
+
+- Development builds report version 2.0.0, so Check for Updates can compare them with a published release.
 
 - Stories linked to a publisher homepage keep independent bookmarks; removing one no longer unsaves other stories with the same generic link (#281).
 

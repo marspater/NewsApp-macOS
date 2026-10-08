@@ -2235,6 +2235,26 @@ struct NewsTests {
         assertEqual(AppSettings(defaults: parkedDefaults).feedURLs, kept, "Parked catalog subscriptions are removed in order")
         assertEqual(parkedDefaults.stringArray(forKey: AppSettings.feedURLsKey), kept, "The removal persists")
 
+        // Stories show the catalog publisher for their site, not a feed title such as "World news".
+        func story(_ link: String, _ source: String) -> FeedArticle {
+            FeedArticle(title: "Story", link: link, guid: link, description: "", pubDate: Date(), source: source)
+        }
+        assertEqual(story("https://www.theguardian.com/world/2026/oct/08/story", "World news").publisherName, "The Guardian", "Site host names the publisher")
+        assertEqual(story("https://www.dw.com/en/story/a-1", "Deutsche Welle: DW.com").publisherName, "Deutsche Welle", "A feed subdomain matches the site")
+        assertEqual(story("https://example.com/story", "Example Daily\n  Example Daily").publisherName, "Example Daily", "Other sites keep the feed title's first line")
+        assertEqual(story("https://notaljazeera.com/story", "Other").publisherName, "Other", "Only the same host or its subdomains match")
+
+        // A retired default subscription ends once; subscribing again later is kept.
+        let nyt = AppSettings.retiredDefaultFeeds.first!
+        assertFalse(AppSettings.defaultFeeds.contains(nyt), "Retired feeds are not fresh-install defaults")
+        parkedDefaults.set([kept[0], nyt], forKey: AppSettings.feedURLsKey)
+        assertEqual(AppSettings(defaults: parkedDefaults).feedURLs, [kept[0], nyt], "Settings that already retired it keep a manual subscription")
+        parkedDefaults.removeObject(forKey: AppSettings.retiredDefaultFeedsKey)
+        assertEqual(AppSettings(defaults: parkedDefaults).feedURLs, [kept[0]], "The retired default subscription ends")
+        let resubscribed = AppSettings(defaults: parkedDefaults)
+        _ = resubscribed.addFeed(url: nyt)
+        assertEqual(AppSettings(defaults: parkedDefaults).feedURLs, [kept[0], nyt], "A later manual subscription stays")
+
         // Opt-in: a fresh install subscribes to nothing from the catalog beyond its own defaults.
         let suite = "test.catalog.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
@@ -3884,7 +3904,12 @@ struct NewsTests {
             let search2 = try await db.searchArticles(query: "shares")
             assertEqual(search2.count, 1, "Should find market article matching 'shares'")
             assertEqual(search2[0].id, artB.id, "Matched article ID must match")
-            
+
+            // Words match independently, with or without operators
+            assertEqual(try await db.searchArticles(query: "qubit quantum").map(\.id), [artA.id], "Non-adjacent words match without operators")
+            assertEqual(try await db.searchArticles(query: "qubit quantum is:unread").map(\.id), [artA.id], "Same words match with an operator")
+            assertTrue(try await db.searchArticles(query: "qubit shares").isEmpty, "Every word must match")
+
             // Operator searches
             let searchSource = try await db.searchArticles(query: "source:Nature")
             assertEqual(searchSource.count, 1, "Should match source operator")
@@ -7058,6 +7083,8 @@ struct NewsTests {
         assertFalse(ReaderImageCandidate.usable(url: base + "/advertisement/banner.jpg"), "Ad image paths excluded")
         assertFalse(ReaderImageCandidate.usable(url: base + "/pixel.gif", width: 1, height: 1), "Tracking pixel excluded")
         assertFalse(ReaderImageCandidate.usable(url: "javascript:alert(1)"), "Executable media URL excluded")
+        assertFalse(ReaderImageCandidate.usable(url: base + "/media/import/term-banners/tag-war-desktop.jpg"), "Section banners are page furniture")
+        assertTrue(ReaderImageCandidate.usable(url: base + "/media/bannerman-portrait.jpg"), "Only whole path words name a banner")
         let invalid = ContentExtractionPipeline.shared.extractFromHTML("<article><p>\(first) <a href='javascript:alert(1)'>unsafe link</a></p><p>\(second)</p><figure><img src='/logo.png'></figure></article>", baseUrl: base)
         guard case .success(_, _, let safe) = invalid else { fatalError("Invalid URL fixture must remain readable") }
         assertFalse(safe?.blocks.contains { $0.kind == .figure } == true, "Logo figure filtered")
@@ -7096,6 +7123,20 @@ struct NewsTests {
         assertEqual(mediaArticle.readerDocument?.images?.first?.width, 1200, "Feed dimensions retained")
         assertEqual(mediaArticle.readerDocument?.images?.first?.credit, "Publisher photographer", "Feed image credit retained")
         assertFalse(mediaArticle.readerDocument?.hasPublisherText ?? true, "Feed media alone is not a reader document")
+        // The Guardian lists sized renditions with neither type nor medium; the widest one leads.
+        let sizedRSS = "<rss xmlns:media='http://search.yahoo.com/mrss/'><channel><title>Publisher</title><item><title>Sized report</title><link>\(base)</link><media:content width='140' url='\(base)/small.jpg'/><media:content width='460' url='\(base)/large.jpg'/><media:content url='\(base)/clip.mp4' medium='video'/></item></channel></rss>"
+        let sizedArticle = FeedXMLParser(data: Data(sizedRSS.utf8), feedURL: base).parse().first!
+        assertEqual(sizedArticle.imageUrl, base + "/large.jpg", "Untyped sized media:content is an image, widest first")
+        assertEqual(sizedArticle.readerDocument?.leadImageURL, base + "/large.jpg", "The lead prefers the larger rendition on equal evidence")
+        assertEqual(sizedArticle.readerDocument?.images?.count, 2, "Video media:content is not an image")
+        let entityRSS = "<rss><channel><title>Publisher</title><item><title>Entity report</title><link>\(base)/entity</link><description><![CDATA[Infantino in March&#039;s vote &#x2014; &hellip;]]></description></item></channel></rss>"
+        assertEqual(FeedXMLParser(data: Data(entityRSS.utf8), feedURL: base).parse().first?.description, "Infantino in March's vote — …", "Feed summaries decode numeric and named entities")
+        assertEqual(ReaderImageCandidate.preferredRendition(of: URL(string: "https://ichef.bbci.co.uk/ace/standard/240/cpsprodpb/a/live/b.jpg")!).absoluteString,
+                    "https://ichef.bbci.co.uk/ace/standard/976/cpsprodpb/a/live/b.jpg", "BBC thumbnails request a sharper rendition")
+        assertEqual(ReaderImageCandidate.preferredRendition(of: URL(string: base + "/ace/standard/240/b.jpg")!).absoluteString,
+                    base + "/ace/standard/240/b.jpg", "Other hosts keep their image URL")
+        assertTrue(ArticleContentRedactor.isBoilerplateLine("Topics:ReformGiorgia MeloniItaly"), "Tag strips are boilerplate")
+        assertFalse(ArticleContentRedactor.isBoilerplateLine("Topics discussed at the summit included trade and security policy."), "Prose that mentions topics stays")
         assertTrue(documents[0].hasPublisherText && bodyOnly.readerDocument?.hasPublisherText == true, "Publisher text makes a reader document")
         let db = DatabaseEngine(path: ":memory:")
         try await db.open()

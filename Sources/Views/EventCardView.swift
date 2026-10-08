@@ -9,6 +9,8 @@ import AppKit
 struct EventCardView: View {
     let representative: FeedArticle
     let summary: EventFeedSummary
+    /// Members listed on this page, used for the card image when the representative has none.
+    var visibleMembers: [FeedArticle] = []
     var isSelected = false
     var compact = false
     @Binding var isExpanded: Bool
@@ -23,7 +25,8 @@ struct EventCardView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: AppSpacing.xs) {
-            ArticleCardView(article: representative, isSelected: isSelected, compact: compact, action: openRepresentative)
+            ArticleCardView(article: representative, isSelected: isSelected, compact: compact,
+                            imageFallbacks: visibleMembers.filter { $0.id != representative.id }, action: openRepresentative)
             coverageToggle
             if isExpanded {
                 sourceList
@@ -147,7 +150,7 @@ private struct EventSourceRow: View {
 
     private var isRead: Bool { readManager.isRead(article.id) }
     private var isSaved: Bool { savedStories.isSaved(article) }
-    private var source: String { EventFeedSummary.displaySource(article.source) }
+    private var source: String { article.publisherName }
 
     var body: some View {
         Button(action: open) {

@@ -122,7 +122,7 @@ cat > "${CONTENTS_DIR}/Info.plist" <<EOF
     <key>CFBundleIconName</key>
     <string>AppIcon</string>
     <key>CFBundleShortVersionString</key>
-    <string>2.0</string>
+    <string>2.0.0</string>
     <key>CFBundleVersion</key>
     <string>3</string>
     <key>LSMinimumSystemVersion</key>

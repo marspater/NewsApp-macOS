@@ -7,7 +7,6 @@ import UniformTypeIdentifiers
 
 struct SidebarView: View {
     @Binding var selectedTopic: String?
-    @Binding var searchText: String
     
     @EnvironmentObject private var appSettings: AppSettings
     @EnvironmentObject private var feedManager: FeedManager
@@ -19,8 +18,6 @@ struct SidebarView: View {
     @State private var newFeedURL: String = ""
     @State private var isDropTargeted = false
     @State private var dropConfirmationMessage: String? = nil
-    @State private var isSearchSyntaxHelpPresented = false
-    @FocusState private var isSearchFocused: Bool
     
     private let suggestedTopics: [(String, String)] = [
         ("Entertainment", "tv"), ("Science", "atom"),
@@ -37,11 +34,8 @@ struct SidebarView: View {
                 if let newTopic = newTopic {
                     selectedTopic = newTopic
                 }
-                isSearchFocused = false
             }
         )) {
-            searchFieldRow
-            
             if let confirmation = dropConfirmationMessage {
                 dropConfirmationBanner(confirmation)
             }
@@ -80,87 +74,6 @@ struct SidebarView: View {
         )
     }
     
-    // MARK: - Search Field
-    
-    private var searchFieldRow: some View {
-        HStack(spacing: AppSpacing.xs) {
-            Image(systemName: "magnifyingglass")
-                .foregroundColor(AppColor.secondaryText)
-                .font(.system(size: 13))
-            
-            TextField("Search", text: $searchText)
-                .textFieldStyle(.plain)
-                .font(AppTypography.bodySmall)
-                .focused($isSearchFocused)
-                .onSubmit { isSearchFocused = false }
-                .accessibilityLabel("Search articles")
-            
-            if !searchText.isEmpty {
-                Button {
-                    searchText = ""
-                    isSearchFocused = false
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .foregroundColor(AppColor.tertiaryText)
-                        .font(.system(size: 12))
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Clear search text")
-            }
-            
-            Button {
-                isSearchSyntaxHelpPresented.toggle()
-            } label: {
-                Image(systemName: "questionmark.circle")
-                    .font(.system(size: 12))
-                    .foregroundColor(AppColor.tertiaryText)
-            }
-            .buttonStyle(.plain)
-            .help("Search Syntax & Filter Operators")
-            .accessibilityLabel("Search Syntax Help")
-            .popover(isPresented: $isSearchSyntaxHelpPresented) {
-                searchSyntaxHelpView
-            }
-        }
-        .padding(.horizontal, AppSpacing.xs)
-        .padding(.vertical, 6)
-        .nativeLiquidGlass(in: RoundedRectangle(cornerRadius: AppRadius.control), interactive: true)
-        .padding(.bottom, 6)
-        .onExitCommand { isSearchFocused = false }
-        .listRowBackground(Color.clear)
-        .listRowSeparator(.hidden)
-    }
-    
-    private var searchSyntaxHelpView: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Search Filters")
-                .font(AppTypography.headline)
-                .foregroundColor(AppColor.primaryText)
-                .padding(.bottom, 2)
-            
-            Group {
-                syntaxHelpRow("is:unread", "Show unread articles only")
-                syntaxHelpRow("is:read", "Show read articles only")
-                syntaxHelpRow("is:saved", "Show bookmarked articles")
-                syntaxHelpRow("source:<name>", "Filter by feed source name")
-                syntaxHelpRow("category:<topic>", "Filter by article category")
-            }
-        }
-        .padding(12)
-        .frame(width: 250)
-    }
-    
-    private func syntaxHelpRow(_ syntax: String, _ desc: String) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(syntax)
-                .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                .foregroundColor(AppColor.accent)
-            Text(desc)
-                .font(AppTypography.caption)
-                .foregroundColor(AppColor.secondaryText)
-        }
-    }
-    
     // MARK: - Drop Confirmation Banner
     
     private func dropConfirmationBanner(_ text: String) -> some View {
@@ -184,7 +97,6 @@ struct SidebarView: View {
     private func topicRow(title: String, icon: String, badge: Int? = nil, isLoading: Bool = false, accessibility: String? = nil) -> some View {
         Button {
             selectedTopic = title
-            isSearchFocused = false
         } label: {
             HStack {
                 Label(title, systemImage: icon)

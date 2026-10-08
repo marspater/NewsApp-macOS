@@ -34,7 +34,7 @@ struct MainView: View {
     
     var body: some View {
         NavigationSplitView(columnVisibility: $columnVisibility) {
-            SidebarView(selectedTopic: $selectedTopic, searchText: $searchText)
+            SidebarView(selectedTopic: $selectedTopic)
                 .environmentObject(appSettings)
                 .environmentObject(feedManager)
                 .environmentObject(savedStories)
@@ -82,6 +82,9 @@ struct MainView: View {
             Text(articleStore.operationError ?? "Please try again.")
         }
         .navigationSplitViewStyle(.balanced)
+        // The system sidebar field: Liquid Glass on macOS 26, the standard search field on macOS 15.
+        .searchable(text: $searchText, placement: .sidebar, prompt: "Search")
+        .searchSuggestions { searchOperatorSuggestions }
         .softScrollEdge()
         .frame(minWidth: 900, minHeight: 600)
         .onAppear {
@@ -131,6 +134,32 @@ struct MainView: View {
         }
     }
     
+    // MARK: - Search Operators
+
+    private static let searchOperators: [(token: String, summary: String)] = [
+        ("is:unread", "Unread stories"),
+        ("is:read", "Stories you have read"),
+        ("is:saved", "Saved stories"),
+        ("source:", "Publisher, e.g. source:bbc"),
+        ("category:", "Category, e.g. category:science")
+    ]
+
+    /// Filter operators, offered while the word being typed is empty or starts one; a choice completes onto the
+    /// words already typed.
+    @ViewBuilder
+    private var searchOperatorSuggestions: some View {
+        let word = searchText.last?.isWhitespace == false ? String(searchText.split(whereSeparator: \.isWhitespace).last ?? "") : ""
+        let typed = String(searchText.dropLast(word.count))
+        let lowered = word.lowercased()
+        ForEach(Self.searchOperators.filter { lowered.isEmpty || ($0.token.hasPrefix(lowered) && $0.token != lowered) }, id: \.token) { option in
+            HStack(spacing: AppSpacing.sm) {
+                Text(option.token).font(.system(.body, design: .monospaced))
+                Text(option.summary).foregroundStyle(AppColor.secondaryText)
+            }
+            .searchCompletion(typed + option.token)
+        }
+    }
+
     // MARK: - Window-Level OPML Drop
     
     private func handleWindowOPMLDrop(providers: [NSItemProvider]) -> Bool {
