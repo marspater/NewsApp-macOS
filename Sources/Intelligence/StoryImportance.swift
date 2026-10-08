@@ -107,8 +107,10 @@ enum StoryCurator {
             for row in try await database.pendingImportanceRows(activeSince: now.addingTimeInterval(-activeLifetime), limit: budget) {
                 try Task.checkCancellation()
                 guard let level = await judge.rate(EventClusterer.report(row)) else { continue }
-                try await database.recordImportance(row.id, level, at: now)
-                report.rated += 1
+                try Task.checkCancellation()
+                if try await database.recordImportance(row.id, level, at: now, expectedTitle: row.title, expectedDescription: row.description) {
+                    report.rated += 1
+                }
             }
         }
         report.expired = try await database.expireWaitingStories(now: now)

@@ -224,6 +224,10 @@ struct NewsTests {
     }
 
     static func runTests(fixtureHost: String = "example.com") async throws {
+        if let index = CommandLine.arguments.firstIndex(of: "--curation-live"), CommandLine.arguments.count > index + 2 {
+            try await measureLiveCuration(path: CommandLine.arguments[index + 1], output: CommandLine.arguments[index + 2])
+            return
+        }
         if let index = CommandLine.arguments.firstIndex(of: "--corpus-cache-audit") {
             guard CommandLine.arguments.indices.contains(index + 1) else { throw StoryCorpus.Failure.invalid("Missing private cache path") }
             try StoryCorpus.auditCache(path: CommandLine.arguments[index + 1])
@@ -4375,6 +4379,58 @@ struct NewsTests {
                    "Report text cannot break out of its data frame")
     }
 
+    /// Opt-in live measurement on a SQLite backup under the temporary directory, never the installed library.
+    static func measureLiveCuration(path: String, output: String) async throws {
+        let url = URL(fileURLWithPath: path).resolvingSymlinksInPath()
+        guard (url.path.hasPrefix("/private/tmp/") || url.path.hasPrefix("/tmp/")), output.hasPrefix("/private/tmp/") else {
+            throw NSError(domain: "LiveCuration", code: 1, userInfo: [NSLocalizedDescriptionKey: "Use a library backup and output under /private/tmp"])
+        }
+        let db = DatabaseEngine(path: url.path)
+        try await db.open()
+        let clock = Date()
+        let activeSince = clock.addingTimeInterval(-EventCandidatePolicy.standard.activeEventLifetime)
+        let all = try await db.fetchArticles(limit: nil)
+        let active = all.filter { $0.pubDate >= activeSince }
+        var ratings: [[String: String]] = []
+        let judge = StoryImportanceJudge { report in
+            await OnDeviceImportanceJudge.shared.rate(report)
+        }
+        for pass in 1...100 {
+            let before = ratings.count
+            let pending = try await db.pendingImportanceRows(activeSince: activeSince, limit: 60)
+            if pending.isEmpty { break }
+            for row in pending {
+                try Task.checkCancellation()
+                guard let importance = await judge.rate(EventClusterer.report(row)) else { continue }
+                if try await db.recordImportance(row.id, importance, at: clock, expectedTitle: row.title, expectedDescription: row.description) {
+                    ratings.append(["id": row.id, "title": row.title, "summary": row.description,
+                                    "importance": String(describing: importance)])
+                }
+            }
+            print("CURATION_PASS \(pass) rated=\(ratings.count)")
+            fflush(stdout)
+            if ratings.count == before { break }
+        }
+        let visible = Set(try await db.fetchArticles(limit: nil, hidingWaitingStories: true).map(\.id))
+        let hiddenMajor = ratings.filter { $0["importance"] == "major" && !visible.contains($0["id"] ?? "") }.count
+        assertEqual(hiddenMajor, 0, "No rated major story is hidden")
+        let report: [String: Int] = ["library": all.count, "active": active.count, "rated": ratings.count,
+                                   "major": ratings.filter { $0["importance"] == "major" }.count,
+                                   "notable": ratings.filter { $0["importance"] == "notable" }.count,
+                                   "minor": ratings.filter { $0["importance"] == "minor" }.count,
+                                   "waiting": try await db.waitingStoryCount(), "hiddenMajor": hiddenMajor,
+                                   "unrated": try await db.pendingImportanceRows(activeSince: activeSince, limit: 10000).count]
+        let directory = URL(fileURLWithPath: output)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        try encoder.encode(ratings).write(to: directory.appendingPathComponent("ratings-private.json"))
+        try encoder.encode(report).write(to: directory.appendingPathComponent("curation.json"))
+        print("CURATION_REPORT \(String(decoding: try encoder.encode(report), as: UTF8.self))")
+        await db.close()
+    }
+
+    @MainActor
     static func testStoryVisibility(fixtureRoot: URL) async throws {
         print("  - Testing story importance, waiting stories, expiry and expired-story memory...")
         let db = DatabaseEngine(path: ":memory:")
@@ -4428,7 +4484,40 @@ struct NewsTests {
         assertEqual(first.rated, 2, "Rating stays within its budget")
         assertEqual(try await StoryCurator.run(in: curated, judge: rater, budget: 2, now: now).rated, 1, "A later pass rates the rest")
         assertEqual(try await curated.fetchArticles(limit: nil, hidingWaitingStories: true).map(\.id), ["c1"], "Only the important story shows")
+        assertEqual(try await curated.notificationStoryIDs(["c1", "c2", "c3", "missing"]), ["c1"], "Waiting and deleted stories never notify")
+        let changed = FeedArticle(storedID: "c2", title: "Updated national emergency", link: story("c2", "Two").link,
+                                  guid: "c2", description: "A significant update", pubDate: now, source: "Two")
+        try await curated.upsertArticles([changed])
+        assertFalse(try await curated.recordImportance("c2", .minor, expectedTitle: "Story c2", expectedDescription: "Summary."),
+                    "A rating begun before a publisher edit cannot hide the updated story")
+        assertTrue(try await curated.notificationStoryIDs(["c2"]).contains("c2"), "The changed, now unrated headline shows")
         await curated.close()
+
+        let suite = "test.importance-notifications.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = AppSettings(defaults: defaults)
+        settings.feedURLs = [fixtureRoot.appendingPathComponent("feed.xml").absoluteString]
+        settings.aiEnabled = true
+        settings.notificationsEnabled = true
+        let store = ArticleStore(database: DatabaseEngine(path: ":memory:"))
+        await store.initialize()
+        let reports = [
+            FeedArticle(title: "National emergency declared", link: fixtureRoot.appendingPathComponent("emergency").absoluteString,
+                        guid: "emergency", description: "A major disaster affects millions.", pubDate: now, source: "News"),
+            FeedArticle(title: "Village football score", link: fixtureRoot.appendingPathComponent("football").absoluteString,
+                        guid: "football", description: "A local team wins a friendly match.", pubDate: now, source: "Sport")
+        ]
+        var notified: [String] = []
+        let manager = FeedManager(settings: settings, store: store, schedulesRefresh: false,
+            fetchBatch: { urls, _ in urls.map { ($0, reports, nil, nil) } },
+            notifyBatch: { articles, _ in notified += articles.map(\.title) },
+            importanceJudge: StoryImportanceJudge { $0.title == reports[0].title ? .major : .minor },
+            allowsBackgroundWork: { true })
+        await manager.fetchFeedsAsync()
+        assertEqual(notified, [reports[0].title], "Refresh rates stories before dispatching notifications")
+        manager.stopBackgroundWork()
+        await store.database.close()
         assertEqual(OnDeviceImportanceJudge.level("Major."), .major, "MAJOR is major")
         assertEqual(OnDeviceImportanceJudge.level("notable"), .notable, "NOTABLE is notable")
         assertTrue(OnDeviceImportanceJudge.level("It depends") == nil, "Anything else is no rating")
@@ -10408,5 +10497,3 @@ struct NewsTests {
         assertFalse(sentimentEvidence.isEmpty, "OverviewEvidenceSections with sentiment is not empty")
     }
 }
-
-

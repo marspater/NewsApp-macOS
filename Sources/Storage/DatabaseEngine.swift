@@ -2315,11 +2315,32 @@ actor DatabaseEngine {
         """, [.real(activeSince.timeIntervalSince1970), .integer(limit)])
     }
 
-    func recordImportance(_ articleID: String, _ importance: StoryImportance, at date: Date = Date()) throws {
+    @discardableResult
+    func recordImportance(_ articleID: String, _ importance: StoryImportance, at date: Date = Date(),
+                          expectedTitle: String? = nil, expectedDescription: String? = nil) throws -> Bool {
+        let title: EventValue = .text(expectedTitle ?? "")
+        let description: EventValue = .text(expectedDescription ?? "")
         try eventRows("""
-        INSERT INTO story_importance(article_id, level, judged_at) VALUES (?, ?, ?)
+        INSERT INTO story_importance(article_id, level, judged_at)
+        SELECT id, ?, ? FROM articles WHERE id = ?
+            AND (? = 0 OR title IS ?) AND (? = 0 OR coalesce(description, '') IS ?)
         ON CONFLICT(article_id) DO UPDATE SET level = excluded.level, judged_at = excluded.judged_at;
-        """, [.text(articleID), .integer(importance.rawValue), .real(date.timeIntervalSince1970)])
+        """, [.integer(importance.rawValue), .real(date.timeIntervalSince1970), .text(articleID),
+              .integer(expectedTitle == nil ? 0 : 1), title, .integer(expectedDescription == nil ? 0 : 1), description])
+        return sqlite3_changes(db) > 0
+    }
+
+    /// Committed stories eligible for notification after curation; expired or waiting stories are excluded.
+    func notificationStoryIDs(_ articleIDs: [String]) throws -> Set<String> {
+        var eligible = Set<String>()
+        for start in stride(from: 0, to: articleIDs.count, by: 500) {
+            let ids = Array(articleIDs[start..<min(start + 500, articleIDs.count)])
+            let placeholders = Array(repeating: "?", count: ids.count).joined(separator: ",")
+            let rows = try eventRows("SELECT a.id FROM articles a WHERE a.id IN (\(placeholders)) AND \(Self.visibleArticle) AND NOT \(Self.waitingStory);",
+                                    ids.map { .text($0) })
+            eligible.formUnion(rows.compactMap { $0[0] })
+        }
+        return eligible
     }
 
     /// Deletes stories that waited longer than `minorStoryLifetime` (counted from the first report of their event) and
