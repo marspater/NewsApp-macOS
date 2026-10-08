@@ -4,6 +4,8 @@
 
 ### Changed
 
+- Stories whose feeds carry no image (DW, Al Jazeera, Euronews) get the lead image their publisher declares on the article page, looked up in the background for at most 30 shown stories per refresh; a group needs only one.
+
 - Stories are rated major, notable or minor on device. Minor stories wait out of Today, Unread, sections and the Briefing until four publishers cover them (the list says how many wait and can show them); unread ones that are still waiting a day later are removed and are not re-added by later refreshes. Without on-device AI nothing is hidden.
 
 - The app supports English-language feeds only for now. The catalog no longer offers its Ukrainian, German, French, Italian, Dutch and Polish feeds, and existing subscriptions to those catalog feeds are removed at launch; custom feeds are kept. The entries stay in the code for a later release (#264).

@@ -87,18 +87,22 @@ actor OnDeviceImportanceJudge {
     }
 }
 
-/// After clustering: rates stories that have no rating yet, then expires stories that waited too long.
+/// After clustering: rates stories that have no rating yet, expires stories that waited too long, then looks up lead
+/// images for shown stories whose events have none.
 enum StoryCurator {
     struct Report: Equatable, Sendable {
         var rated = 0
         var expired = 0
-        var changed: Bool { rated > 0 || expired > 0 }
+        var imagesFound = 0
+        var changed: Bool { rated > 0 || expired > 0 || imagesFound > 0 }
     }
 
     static func run(
         in database: DatabaseEngine,
         judge: StoryImportanceJudge,
+        imageFinder: StoryImageFinder = .unavailable,
         budget: Int = 60,
+        imageBudget: Int = 30,
         activeLifetime: TimeInterval = EventCandidatePolicy.standard.activeEventLifetime,
         now: Date = Date()
     ) async throws -> Report {
@@ -112,6 +116,59 @@ enum StoryCurator {
             }
         }
         report.expired = try await database.expireWaitingStories(now: now)
+        if imageFinder.isAvailable, imageBudget > 0 {
+            // ponytail: rows read once per pass; one lookup per event, the rest of an event waits for the next pass.
+            var lookedUp = Set<String>()
+            for row in try await database.imagelessStoryRows(activeSince: now.addingTimeInterval(-activeLifetime), limit: imageBudget * 3)
+            where lookedUp.count < imageBudget {
+                try Task.checkCancellation()
+                if let event = row.eventID, lookedUp.contains(event) { continue }
+                lookedUp.insert(row.eventID ?? row.id)
+                switch await imageFinder.find(row.link) {
+                case .found(let url):
+                    if try await database.recordStoryImage(row.id, imageURL: url, at: now) { report.imagesFound += 1 }
+                case .none:
+                    try await database.recordStoryImage(row.id, imageURL: nil, at: now)
+                case .unreachable:
+                    continue
+                }
+            }
+        }
         return report
+    }
+}
+
+/// Result of looking for a story's lead image on its publisher page.
+enum StoryImageLookup: Equatable, Sendable {
+    case found(String)
+    /// The page was read and declares no usable image.
+    case none
+    /// The page could not be read (offline, refused); try again on a later pass.
+    case unreachable
+}
+
+/// Finds the lead image a publisher declares for a story (`og:image`, `twitter:image`) when its feed carries none.
+struct StoryImageFinder: Sendable {
+    var isAvailable = true
+    let find: @Sendable (_ link: String) async -> StoryImageLookup
+
+    static let unavailable = StoryImageFinder(isAvailable: false) { _ in .unreachable }
+    /// The article page through the protected client; http links are requested over https.
+    static let publisherPages = StoryImageFinder { link in
+        guard var components = URLComponents(string: link) else { return .none }
+        if components.scheme?.lowercased() == "http" { components.scheme = "https" }
+        guard let url = components.url,
+              let (data, response) = try? await SecureHTTPClient.shared.fetchArticleHTML(from: url),
+              response.statusCode < 400 else { return .unreachable }
+        return leadImage(in: String(decoding: data, as: UTF8.self), pageURL: response.url?.absoluteString ?? url.absoluteString)
+    }
+
+    /// The page's declared lead image, resolved against the page and filtered like any reader image.
+    static func leadImage(in html: String, pageURL: String) -> StoryImageLookup {
+        let pipeline = ContentExtractionPipeline.shared
+        guard let declared = pipeline.extractLeadImage(from: html),
+              let url = ContentExtractionPipeline.readerImageURL(pipeline.decodeHTMLEntities(declared), baseURL: pageURL),
+              ReaderImageCandidate.usable(url: url) else { return .none }
+        return .found(url)
     }
 }

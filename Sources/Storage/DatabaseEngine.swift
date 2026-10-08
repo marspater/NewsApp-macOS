@@ -691,6 +691,25 @@ actor DatabaseEngine {
                 throw error
             }
         }
+        if version < 18 {
+            try beginTransaction()
+            do {
+                try Task.checkCancellation()
+                // Lead images found on publisher pages for stories whose feeds carry none; NULL records a page without one.
+                try executeSimple("""
+                CREATE TABLE IF NOT EXISTS story_images (
+                    article_id TEXT PRIMARY KEY REFERENCES articles(id) ON DELETE CASCADE,
+                    image_url TEXT,
+                    checked_at REAL NOT NULL
+                );
+                """)
+                try setUserVersion(18)
+                try commitTransaction()
+            } catch {
+                try? rollbackTransaction()
+                throw error
+            }
+        }
     }
     
     /// Muting predicates for list queries (`MuteRules`); both are pure functions of their arguments.
@@ -2355,6 +2374,63 @@ actor DatabaseEngine {
         return removed
     }
 
+    // MARK: - Story Images
+
+    /// Shown, recent stories without any image in their event and not looked up yet: clustered stories first, then the
+    /// newest. Each row carries its event so a pass looks up one report per event.
+    func imagelessStoryRows(activeSince: Date, limit: Int) throws -> [(id: String, link: String, eventID: String?)] {
+        let noImage = """
+        x.image_url IS NULL
+            AND NOT EXISTS (SELECT 1 FROM json_each(CASE WHEN json_valid(x.reader_document) THEN x.reader_document ELSE '{}' END, '$.images'))
+            AND NOT EXISTS (SELECT 1 FROM story_images si WHERE si.article_id = x.id AND si.image_url IS NOT NULL)
+        """
+        return try eventRows("""
+        SELECT a.id, a.canonical_url, m.event_id FROM articles a
+        LEFT JOIN event_members m ON m.article_id = a.id
+        WHERE \(Self.articleDateOrder) >= ? AND \(Self.visibleArticle) AND NOT \(Self.waitingStory)
+            AND NOT EXISTS (SELECT 1 FROM story_images si WHERE si.article_id = a.id)
+            AND EXISTS (SELECT 1 FROM articles x WHERE x.id = a.id AND \(noImage))
+            AND NOT EXISTS (SELECT 1 FROM event_members peer JOIN articles x ON x.id = peer.article_id
+                WHERE peer.event_id = m.event_id AND NOT (\(noImage)))
+        ORDER BY (SELECT count(*) FROM event_members peer WHERE peer.event_id = m.event_id) DESC, \(Self.articleDateOrder) DESC, a.id
+        LIMIT ?;
+        """, [.real(activeSince.timeIntervalSince1970), .integer(limit)]).compactMap { row in
+            guard let id = row[0], let link = row[1] else { return nil }
+            return (id, link, row[2])
+        }
+    }
+
+    /// Records a looked-up page: its lead image, or nil when it has none. An image another story already declared is a
+    /// site default (a brand card), not a lead: it is cleared for both. Returns whether an image was stored.
+    @discardableResult
+    func recordStoryImage(_ articleID: String, imageURL: String?, at date: Date = Date()) throws -> Bool {
+        try inEventTransaction { () throws -> Bool in
+            var image = imageURL
+            if let url = imageURL, !(try eventRows("SELECT 1 FROM story_images WHERE image_url = ? AND article_id != ? LIMIT 1;",
+                                                     [.text(url), .text(articleID)])).isEmpty {
+                try eventRows("UPDATE story_images SET image_url = NULL WHERE image_url = ?;", [.text(url)])
+                image = nil
+            }
+            try eventRows("INSERT OR REPLACE INTO story_images(article_id, image_url, checked_at) VALUES (?, ?, ?);",
+                          [.text(articleID), image.map { .text($0) } ?? .null, .real(date.timeIntervalSince1970)])
+            return image != nil
+        }
+    }
+
+    /// Found lead images by article ID.
+    func storyImages(for articleIDs: [String]) throws -> [String: String] {
+        guard !articleIDs.isEmpty else { return [:] }
+        var images: [String: String] = [:]
+        for chunk in stride(from: 0, to: articleIDs.count, by: 500).map({ Array(articleIDs[$0..<min($0 + 500, articleIDs.count)]) }) {
+            let placeholders = Array(repeating: "?", count: chunk.count).joined(separator: ",")
+            for row in try eventRows("SELECT article_id, image_url FROM story_images WHERE image_url IS NOT NULL AND article_id IN (\(placeholders));",
+                                     chunk.map { .text($0) }) {
+                if let id = row[0], let url = row[1] { images[id] = url }
+            }
+        }
+        return images
+    }
+
     /// Stored stories each muting rule covers, for the muting settings. One pass over the library.
     func mutedRuleCounts(_ rules: MuteRules) throws -> MuteRuleCounts {
         guard let db = db else { throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Database not open"]) }
@@ -2866,7 +2942,7 @@ actor DatabaseEngine {
     // MARK: - Events
 
     private enum EventValue {
-        case text(String), integer(Int), real(Double)
+        case text(String), integer(Int), real(Double), null
     }
 
     private static func eventError(_ message: String) -> NSError {
@@ -2888,6 +2964,7 @@ actor DatabaseEngine {
             case .text(let text): sqlite3_bind_text(statement, position, text, -1, Self.sqliteTransient)
             case .integer(let number): sqlite3_bind_int64(statement, position, Int64(number))
             case .real(let number): sqlite3_bind_double(statement, position, number)
+            case .null: sqlite3_bind_null(statement, position)
             }
         }
         var rows: [[String?]] = []

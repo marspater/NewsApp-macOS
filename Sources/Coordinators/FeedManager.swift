@@ -473,11 +473,13 @@ class FeedManager: NSObject, ObservableObject {
             repeat {
                 self?.needsClusteringPass = false
                 // The on-device judge follows the AI setting and, like classification, waits out Low Power Mode and heat.
-                let modelAllowed = self.map { $0.appSettings.aiEnabled && $0.allowsBackgroundWork() } == true
+                let backgroundAllowed = self.map { $0.allowsBackgroundWork() } == true
+                let modelAllowed = backgroundAllowed && self?.appSettings.aiEnabled == true
                 let work = Task.detached(priority: .utility) { () throws -> Bool in
                     let clustering = try await EventClusterer.run(in: database, judge: modelAllowed ? .onDevice : .unavailable)
                     // Importance is rated once clusters are known; waiting stories expire after their lifetime.
-                    let curation = try await StoryCurator.run(in: database, judge: modelAllowed ? .onDevice : .unavailable)
+                    let curation = try await StoryCurator.run(in: database, judge: modelAllowed ? .onDevice : .unavailable,
+                                                              imageFinder: backgroundAllowed ? .publisherPages : .unavailable)
                     return !clustering.changedEvents.isEmpty || curation.changed
                 }
                 let result = await withTaskCancellationHandler {

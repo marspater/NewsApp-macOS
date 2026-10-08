@@ -224,7 +224,9 @@ struct ArticleCardView: View {
     // MARK: - Subviews & Helpers
     
     private static func cardImageURL(_ article: FeedArticle) -> URL? {
-        guard let imageUrl = article.readerDocument?.selectedImage(fallback: article.imageUrl) ?? (article.readerDocument == nil ? article.imageUrl : nil),
+        // Storage curation already clears `imageUrl` when a document leaves out its lead on purpose; what remains is a
+        // feed image or one found on the publisher page.
+        guard let imageUrl = article.readerDocument?.selectedImage(fallback: article.imageUrl) ?? article.imageUrl,
               ReaderImageCandidate.usable(url: imageUrl) else { return nil }
         return URL(string: imageUrl)
     }
