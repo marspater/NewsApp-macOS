@@ -1816,7 +1816,7 @@ actor DatabaseEngine {
 
     private func curateImages(in articles: [FeedArticle]) throws -> [FeedArticle] {
         var repeatedBySource = [String: Set<String>]()
-        return try articles.map { original in
+        let curated = try articles.map { original in
             try Task.checkCancellation()
             var article = original
             guard article.imageUrl != nil || article.readerDocument?.images?.isEmpty == false else { return article }
@@ -1832,6 +1832,12 @@ actor DatabaseEngine {
             } else if let url = article.imageUrl, repeated.contains(url) || !ReaderImageCandidate.usable(url: url) {
                 article.imageUrl = nil
             }
+            return article
+        }
+        let found = try storyImages(for: curated.filter { $0.imageUrl == nil }.map(\.id))
+        return curated.map { original in
+            var article = original
+            if article.imageUrl == nil { article.imageUrl = found[article.id] }
             return article
         }
     }
@@ -2334,11 +2340,32 @@ actor DatabaseEngine {
         """, [.real(activeSince.timeIntervalSince1970), .integer(limit)])
     }
 
-    func recordImportance(_ articleID: String, _ importance: StoryImportance, at date: Date = Date()) throws {
+    @discardableResult
+    func recordImportance(_ articleID: String, _ importance: StoryImportance, at date: Date = Date(),
+                          expectedTitle: String? = nil, expectedDescription: String? = nil) throws -> Bool {
+        let title: EventValue = .text(expectedTitle ?? "")
+        let description: EventValue = .text(expectedDescription ?? "")
         try eventRows("""
-        INSERT INTO story_importance(article_id, level, judged_at) VALUES (?, ?, ?)
+        INSERT INTO story_importance(article_id, level, judged_at)
+        SELECT id, ?, ? FROM articles WHERE id = ?
+            AND (? = 0 OR title IS ?) AND (? = 0 OR coalesce(description, '') IS ?)
         ON CONFLICT(article_id) DO UPDATE SET level = excluded.level, judged_at = excluded.judged_at;
-        """, [.text(articleID), .integer(importance.rawValue), .real(date.timeIntervalSince1970)])
+        """, [.integer(importance.rawValue), .real(date.timeIntervalSince1970), .text(articleID),
+              .integer(expectedTitle == nil ? 0 : 1), title, .integer(expectedDescription == nil ? 0 : 1), description])
+        return sqlite3_changes(db) > 0
+    }
+
+    /// Committed stories eligible for notification after curation; expired or waiting stories are excluded.
+    func notificationStoryIDs(_ articleIDs: [String]) throws -> Set<String> {
+        var eligible = Set<String>()
+        for start in stride(from: 0, to: articleIDs.count, by: 500) {
+            let ids = Array(articleIDs[start..<min(start + 500, articleIDs.count)])
+            let placeholders = Array(repeating: "?", count: ids.count).joined(separator: ",")
+            let rows = try eventRows("SELECT a.id FROM articles a WHERE a.id IN (\(placeholders)) AND \(Self.visibleArticle) AND NOT \(Self.waitingStory);",
+                                    ids.map { .text($0) })
+            eligible.formUnion(rows.compactMap { $0[0] })
+        }
+        return eligible
     }
 
     /// Deletes stories that waited longer than `minorStoryLifetime` (counted from the first report of their event) and
@@ -2378,33 +2405,44 @@ actor DatabaseEngine {
 
     /// Shown, recent stories without any image in their event and not looked up yet: clustered stories first, then the
     /// newest. Each row carries its event so a pass looks up one report per event.
-    func imagelessStoryRows(activeSince: Date, limit: Int) throws -> [(id: String, link: String, eventID: String?)] {
-        let noImage = """
-        x.image_url IS NULL
-            AND NOT EXISTS (SELECT 1 FROM json_each(CASE WHEN json_valid(x.reader_document) THEN x.reader_document ELSE '{}' END, '$.images'))
-            AND NOT EXISTS (SELECT 1 FROM story_images si WHERE si.article_id = x.id AND si.image_url IS NOT NULL)
-        """
-        return try eventRows("""
+    func imagelessStoryRows(activeSince: Date, limit: Int, muting: MuteRules = MuteRules()) throws -> [(id: String, link: String, eventID: String?)] {
+        // ponytail: at most 2,000 recent candidates per pass, matching the clustering bound.
+        let rows = try eventRows("""
         SELECT a.id, a.canonical_url, m.event_id FROM articles a
         LEFT JOIN event_members m ON m.article_id = a.id
         WHERE \(Self.articleDateOrder) >= ? AND \(Self.visibleArticle) AND NOT \(Self.waitingStory)
+            AND NOT \(Self.mutedArticle)
             AND NOT EXISTS (SELECT 1 FROM story_images si WHERE si.article_id = a.id)
-            AND EXISTS (SELECT 1 FROM articles x WHERE x.id = a.id AND \(noImage))
-            AND NOT EXISTS (SELECT 1 FROM event_members peer JOIN articles x ON x.id = peer.article_id
-                WHERE peer.event_id = m.event_id AND NOT (\(noImage)))
         ORDER BY (SELECT count(*) FROM event_members peer WHERE peer.event_id = m.event_id) DESC, \(Self.articleDateOrder) DESC, a.id
-        LIMIT ?;
-        """, [.real(activeSince.timeIntervalSince1970), .integer(limit)]).compactMap { row in
-            guard let id = row[0], let link = row[1] else { return nil }
-            return (id, link, row[2])
+        LIMIT 2000;
+        """, [.real(activeSince.timeIntervalSince1970), .text(muting.sourceParameter), .text(muting.topicParameter)])
+        var results: [(id: String, link: String, eventID: String?)] = []
+        var picturedEvents: [String: Bool] = [:]
+        for row in rows {
+            try Task.checkCancellation()
+            guard results.count < limit else { break }
+            guard let id = row[0], let link = row[1] else { continue }
+            let key = row[2] ?? id
+            let pictured: Bool
+            if let cached = picturedEvents[key] { pictured = cached }
+            else {
+                let members = try fetchArticles(limit: nil, id: row[2] == nil ? id : nil, eventID: row[2])
+                pictured = FeedArticle.bestCardImage(in: members) != nil
+                picturedEvents[key] = pictured
+            }
+            if !pictured { results.append((id, link, row[2])) }
         }
+        return results
     }
 
     /// Records a looked-up page: its lead image, or nil when it has none. An image another story already declared is a
     /// site default (a brand card), not a lead: it is cleared for both. Returns whether an image was stored.
     @discardableResult
-    func recordStoryImage(_ articleID: String, imageURL: String?, at date: Date = Date()) throws -> Bool {
+    func recordStoryImage(_ articleID: String, imageURL: String?, at date: Date = Date(), expectedLink: String? = nil) throws -> Bool {
         try inEventTransaction { () throws -> Bool in
+            if let expectedLink, (try eventRows("SELECT canonical_url FROM articles WHERE id = ?;", [.text(articleID)])).first?[0] != expectedLink {
+                return false
+            }
             var image = imageURL
             if let url = imageURL, !(try eventRows("SELECT 1 FROM story_images WHERE image_url = ? AND article_id != ? LIMIT 1;",
                                                      [.text(url), .text(articleID)])).isEmpty {

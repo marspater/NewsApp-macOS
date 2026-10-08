@@ -224,6 +224,14 @@ struct NewsTests {
     }
 
     static func runTests(fixtureHost: String = "example.com") async throws {
+        if let index = CommandLine.arguments.firstIndex(of: "--curation-live"), CommandLine.arguments.count > index + 2 {
+            try await measureLiveCuration(path: CommandLine.arguments[index + 1], output: CommandLine.arguments[index + 2])
+            return
+        }
+        if let index = CommandLine.arguments.firstIndex(of: "--images-live"), CommandLine.arguments.count > index + 2 {
+            try await measureLiveImages(path: CommandLine.arguments[index + 1], output: CommandLine.arguments[index + 2])
+            return
+        }
         if let index = CommandLine.arguments.firstIndex(of: "--corpus-cache-audit") {
             guard CommandLine.arguments.indices.contains(index + 1) else { throw StoryCorpus.Failure.invalid("Missing private cache path") }
             try StoryCorpus.auditCache(path: CommandLine.arguments[index + 1])
@@ -4377,6 +4385,113 @@ struct NewsTests {
                    "Report text cannot break out of its data frame")
     }
 
+    /// Opt-in live measurement on a SQLite backup under the temporary directory, never the installed library.
+    static func measureLiveCuration(path: String, output: String) async throws {
+        let url = URL(fileURLWithPath: path).resolvingSymlinksInPath()
+        guard (url.path.hasPrefix("/private/tmp/") || url.path.hasPrefix("/tmp/")), output.hasPrefix("/private/tmp/") else {
+            throw NSError(domain: "LiveCuration", code: 1, userInfo: [NSLocalizedDescriptionKey: "Use a library backup and output under /private/tmp"])
+        }
+        let db = DatabaseEngine(path: url.path)
+        try await db.open()
+        let clock = Date()
+        let activeSince = clock.addingTimeInterval(-EventCandidatePolicy.standard.activeEventLifetime)
+        let all = try await db.fetchArticles(limit: nil)
+        let active = all.filter { $0.pubDate >= activeSince }
+        var ratings: [[String: String]] = []
+        let judge = StoryImportanceJudge { report in
+            await OnDeviceImportanceJudge.shared.rate(report)
+        }
+        for pass in 1...100 {
+            let before = ratings.count
+            let pending = try await db.pendingImportanceRows(activeSince: activeSince, limit: 60)
+            if pending.isEmpty { break }
+            for row in pending {
+                try Task.checkCancellation()
+                guard let importance = await judge.rate(EventClusterer.report(row)) else { continue }
+                if try await db.recordImportance(row.id, importance, at: clock, expectedTitle: row.title, expectedDescription: row.description) {
+                    ratings.append(["id": row.id, "title": row.title, "summary": row.description,
+                                    "importance": String(describing: importance)])
+                }
+            }
+            print("CURATION_PASS \(pass) rated=\(ratings.count)")
+            fflush(stdout)
+            if ratings.count == before { break }
+        }
+        let visible = Set(try await db.fetchArticles(limit: nil, hidingWaitingStories: true).map(\.id))
+        let hiddenMajor = ratings.filter { $0["importance"] == "major" && !visible.contains($0["id"] ?? "") }.count
+        assertEqual(hiddenMajor, 0, "No rated major story is hidden")
+        let report: [String: Int] = ["library": all.count, "active": active.count, "rated": ratings.count,
+                                   "major": ratings.filter { $0["importance"] == "major" }.count,
+                                   "notable": ratings.filter { $0["importance"] == "notable" }.count,
+                                   "minor": ratings.filter { $0["importance"] == "minor" }.count,
+                                   "waiting": try await db.waitingStoryCount(), "hiddenMajor": hiddenMajor,
+                                   "unrated": try await db.pendingImportanceRows(activeSince: activeSince, limit: 10000).count]
+        let directory = URL(fileURLWithPath: output)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        try encoder.encode(ratings).write(to: directory.appendingPathComponent("ratings-private.json"))
+        try encoder.encode(report).write(to: directory.appendingPathComponent("curation.json"))
+        print("CURATION_REPORT \(String(decoding: try encoder.encode(report), as: UTF8.self))")
+        await db.close()
+    }
+
+    /// Opt-in protected publisher requests on an already rated, temporary library backup.
+    static func measureLiveImages(path: String, output: String) async throws {
+        let url = URL(fileURLWithPath: path).resolvingSymlinksInPath()
+        guard (url.path.hasPrefix("/private/tmp/") || url.path.hasPrefix("/tmp/")), output.hasPrefix("/private/tmp/") else {
+            throw NSError(domain: "LiveImages", code: 1, userInfo: [NSLocalizedDescriptionKey: "Use a temporary library backup"])
+        }
+        let db = DatabaseEngine(path: url.path)
+        try await db.open()
+        let clock = Date()
+        func coverage() async throws -> (cards: Int, pictured: Int) {
+            let articles = try await db.fetchArticles(limit: nil, publicationWindow: clock.addingTimeInterval(-72 * 3600)...clock, hidingWaitingStories: true)
+            let summaries = try await db.eventFeedSummaries(forArticles: articles.map(\.id))
+            let entries = EventFeedGrouping.entries(for: articles, events: summaries, mode: .events)
+            var pictured = 0
+            for entry in entries {
+                let members: [FeedArticle]
+                switch entry {
+                case .article(let article): members = [article]
+                case .event(let summary, _, _): members = try await db.fetchArticles(limit: nil, eventID: summary.eventID)
+                }
+                if FeedArticle.bestCardImage(in: members) != nil { pictured += 1 }
+            }
+            return (entries.count, pictured)
+        }
+        let before = try await coverage()
+        var checks = 0
+        var found = 0
+        for pass in 1...10 {
+            let report = try await StoryCurator.run(in: db, judge: .unavailable, imageFinder: .publisherPages, now: clock)
+            checks += report.imagesChecked
+            found += report.imagesFound
+            print("IMAGE_PASS \(pass) checked=\(report.imagesChecked) found=\(report.imagesFound)")
+            fflush(stdout)
+            if report.imagesChecked == 0 { break }
+        }
+        let after = try await coverage()
+        let images = try await db.storyImages(for: try await db.fetchArticles(limit: nil).map(\.id))
+        var decoded = 0
+        var failed = 0
+        for link in Set(images.values) {
+            if let url = URL(string: link), (try? await SecureHTTPClient.shared.fetchReaderImage(from: url)) != nil { decoded += 1 }
+            else { failed += 1 }
+        }
+        let report = ["cardsBefore": before.cards, "picturedBefore": before.pictured,
+                      "cardsAfter": after.cards, "picturedAfter": after.pictured, "checks": checks, "imagesFound": found,
+                      "pageImagesDecoded": decoded, "pageImagesFailed": failed]
+        let directory = URL(fileURLWithPath: output)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        try encoder.encode(report).write(to: directory.appendingPathComponent("images.json"))
+        print("IMAGE_REPORT \(String(decoding: try encoder.encode(report), as: UTF8.self))")
+        await db.close()
+    }
+
+    @MainActor
     static func testStoryVisibility(fixtureRoot: URL) async throws {
         print("  - Testing story importance, waiting stories, expiry and expired-story memory...")
         let db = DatabaseEngine(path: ":memory:")
@@ -4430,7 +4545,40 @@ struct NewsTests {
         assertEqual(first.rated, 2, "Rating stays within its budget")
         assertEqual(try await StoryCurator.run(in: curated, judge: rater, budget: 2, now: now).rated, 1, "A later pass rates the rest")
         assertEqual(try await curated.fetchArticles(limit: nil, hidingWaitingStories: true).map(\.id), ["c1"], "Only the important story shows")
+        assertEqual(try await curated.notificationStoryIDs(["c1", "c2", "c3", "missing"]), ["c1"], "Waiting and deleted stories never notify")
+        let changed = FeedArticle(storedID: "c2", title: "Updated national emergency", link: story("c2", "Two").link,
+                                  guid: "c2", description: "A significant update", pubDate: now, source: "Two")
+        try await curated.upsertArticles([changed])
+        assertFalse(try await curated.recordImportance("c2", .minor, expectedTitle: "Story c2", expectedDescription: "Summary."),
+                    "A rating begun before a publisher edit cannot hide the updated story")
+        assertTrue(try await curated.notificationStoryIDs(["c2"]).contains("c2"), "The changed, now unrated headline shows")
         await curated.close()
+
+        let suite = "test.importance-notifications.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = AppSettings(defaults: defaults)
+        settings.feedURLs = [fixtureRoot.appendingPathComponent("feed.xml").absoluteString]
+        settings.aiEnabled = true
+        settings.notificationsEnabled = true
+        let store = ArticleStore(database: DatabaseEngine(path: ":memory:"))
+        await store.initialize()
+        let reports = [
+            FeedArticle(title: "National emergency declared", link: fixtureRoot.appendingPathComponent("emergency").absoluteString,
+                        guid: "emergency", description: "A major disaster affects millions.", pubDate: now, source: "News"),
+            FeedArticle(title: "Village football score", link: fixtureRoot.appendingPathComponent("football").absoluteString,
+                        guid: "football", description: "A local team wins a friendly match.", pubDate: now, source: "Sport")
+        ]
+        var notified: [String] = []
+        let manager = FeedManager(settings: settings, store: store, schedulesRefresh: false,
+            fetchBatch: { urls, _ in urls.map { ($0, reports, nil, nil) } },
+            notifyBatch: { articles, _ in notified += articles.map(\.title) },
+            importanceJudge: StoryImportanceJudge { $0.title == reports[0].title ? .major : .minor },
+            allowsBackgroundWork: { true })
+        await manager.fetchFeedsAsync()
+        assertEqual(notified, [reports[0].title], "Refresh rates stories before dispatching notifications")
+        manager.stopBackgroundWork()
+        await store.database.close()
         assertEqual(OnDeviceImportanceJudge.level("Major."), .major, "MAJOR is major")
         assertEqual(OnDeviceImportanceJudge.level("notable"), .notable, "NOTABLE is notable")
         assertTrue(OnDeviceImportanceJudge.level("It depends") == nil, "Anything else is no rating")
@@ -4446,6 +4594,33 @@ struct NewsTests {
         assertEqual(StoryImageFinder.leadImage(in: "<meta property=\"og:image\" content=\"https://news.example/logo.png\">", pageURL: page),
                     .none, "Logos are not lead images")
         assertEqual(StoryImageFinder.leadImage(in: "<p>No image</p>", pageURL: page), .none, "A page without a declared image has none")
+        let schema = #"<script type="application/ld+json">{"@graph":[{"@type":"Organization","image":"/logo.png"},{"@type":"NewsArticle","image":[{"url":"/photo.jpg"}]}]}</script>"#
+        assertEqual(StoryImageFinder.leadImage(in: schema, pageURL: page), .found("https://news.example/photo.jpg"),
+                    "schema.org article images are found; publisher organization logos are skipped")
+        assertEqual(StoryImageFinder.leadImage(in: "<meta property='og:image' content='/logo.png'><meta name='twitter:image' content='/photo.jpg'>", pageURL: page),
+                    .found("https://news.example/photo.jpg"), "A rejected og logo does not hide a usable Twitter image")
+
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [MockURLProtocol.self]
+        let client = mockHTTPClient(configuration: config)
+        defer { MockURLProtocol.requestHandler = nil }
+        let head = "<meta property='og:image' content='/caf\u{00e9}.jpg'>"
+        MockURLProtocol.requestHandler = { request in
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil,
+                                           headerFields: ["Content-Type": "text/html; charset=iso-8859-1", "Content-Length": "1048576"])!
+            return (response, head.data(using: .isoLatin1)! + Data(repeating: 32, count: 1024 * 1024))
+        }
+        let (prefix, _) = try await client.fetchArticleHead(from: URL(string: "https://example.com/story")!)
+        assertEqual(prefix.count, 256 * 1024, "Only a bounded page prefix is retained even for a large declared body")
+        assertEqual(await StoryImageFinder.publisherPages(using: client).find("https://example.com/story"),
+                    .found("https://example.com/caf%C3%A9.jpg"), "The protected finder respects the publisher's declared character encoding")
+        MockURLProtocol.requestHandler = nil
+
+        var small = FeedArticle(title: "Report", link: page, guid: "small", description: "", pubDate: Date(), source: "One")
+        small.readerDocument = ReaderDocument(blocks: [], images: [ReaderImageCandidate(url: "https://news.example/small.jpg", origin: .feed, width: 300, height: 200)], leadImageURL: "https://news.example/small.jpg")
+        var large = small
+        large.readerDocument = ReaderDocument(blocks: [], images: [ReaderImageCandidate(url: "https://news.example/large.jpg", origin: .body, width: 1200, height: 800)], leadImageURL: "https://news.example/large.jpg")
+        assertEqual(FeedArticle.bestCardImage(in: [small, large])?.absoluteString, "https://news.example/large.jpg", "Cards select the largest usable member lead")
 
         let db = DatabaseEngine(path: ":memory:")
         try await db.open()
@@ -4473,6 +4648,8 @@ struct NewsTests {
         let report = try await StoryCurator.run(in: db, judge: .unavailable, imageFinder: finder, now: now)
         assertEqual(report.imagesFound, 1, "One lookup per event finds its image")
         assertEqual(try await db.storyImages(for: ["e1", "e2", "plain"]).count, 1, "Found images are stored; misses are not images")
+        assertTrue(FeedArticle.bestCardImage(in: try await db.fetchArticles(limit: nil, eventID: try await db.eventID(forArticle: "e1"))) != nil,
+                   "Shared storage exposes fetched images to grouped cards and Briefing, without list-only decoration")
         let remaining = Set(try await db.imagelessStoryRows(activeSince: now.addingTimeInterval(-86_400), limit: 20).map(\.id))
         assertEqual(remaining, ["down"], "Pages without an image are not read again; unreachable pages are retried")
         assertFalse(try await db.recordStoryImage("down", imageURL: "https://cdn.example/found.jpg", at: now),
@@ -10455,5 +10632,3 @@ struct NewsTests {
         assertFalse(sentimentEvidence.isEmpty, "OverviewEvidenceSections with sentiment is not empty")
     }
 }
-
-

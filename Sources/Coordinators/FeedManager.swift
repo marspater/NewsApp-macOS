@@ -37,6 +37,7 @@ class FeedManager: NSObject, ObservableObject {
     private let notifyBatch: @MainActor ([FeedArticle], AppSettings.NotificationMode) async -> Void
     private let enrichmentQueue: EnrichmentQueue
     private let allowsBackgroundWork: @MainActor () -> Bool
+    private let importanceJudge: StoryImportanceJudge
     private var isStopped = false
     private var storeUpdates: AnyCancellable?
     private var terminationObserver: AnyCancellable?
@@ -71,6 +72,7 @@ class FeedManager: NSObject, ObservableObject {
              await NotificationService.shared.triageAndNotify(newArticles: articles, mode: mode)
          },
          enrichmentQueue: EnrichmentQueue? = nil,
+         importanceJudge: StoryImportanceJudge = .onDevice,
          allowsBackgroundWork: @escaping @MainActor () -> Bool = {
              let info = ProcessInfo.processInfo
              return !info.isLowPowerModeEnabled && info.thermalState.rawValue < ProcessInfo.ThermalState.serious.rawValue
@@ -87,6 +89,7 @@ class FeedManager: NSObject, ObservableObject {
         }
         self.notifyBatch = notifyBatch
         self.enrichmentQueue = enrichmentQueue ?? EnrichmentQueue(store: store)
+        self.importanceJudge = importanceJudge
         self.allowsBackgroundWork = allowsBackgroundWork
         self.wakeRefreshDelay = wakeRefreshDelay
         self.now = now
@@ -384,9 +387,13 @@ class FeedManager: NSObject, ObservableObject {
 
         guard !isStopped else { return }
         clusterEventsInBackground()
-        // Muted stories never notify; they stay countable in the lists.
+        // Rate before triage. Collection and its spinner have ended; another refresh can proceed.
+        await waitForEventClustering()
+        guard !Task.isCancelled, !isStopped else { return }
+        guard let eligible = try? await articleStore.database.notificationStoryIDs(newArticles.map(\.id)) else { return }
+        // Muted and waiting stories never notify, in any privacy mode.
         let muting = appSettings.muteRules
-        let notifiable = muting.isEmpty ? newArticles : newArticles.filter { !muting.mutes($0) }
+        let notifiable = newArticles.filter { eligible.contains($0.id) && !muting.mutes($0) }
         if appSettings.notificationsEnabled && !notifiable.isEmpty {
             await notifyBatch(notifiable, appSettings.notificationMode)
         }
@@ -475,11 +482,13 @@ class FeedManager: NSObject, ObservableObject {
                 // The on-device judge follows the AI setting and, like classification, waits out Low Power Mode and heat.
                 let backgroundAllowed = self.map { $0.allowsBackgroundWork() } == true
                 let modelAllowed = backgroundAllowed && self?.appSettings.aiEnabled == true
+                let importanceJudge = modelAllowed ? self?.importanceJudge ?? .unavailable : .unavailable
+                let muting = self?.appSettings.muteRules ?? MuteRules()
                 let work = Task.detached(priority: .utility) { () throws -> Bool in
                     let clustering = try await EventClusterer.run(in: database, judge: modelAllowed ? .onDevice : .unavailable)
                     // Importance is rated once clusters are known; waiting stories expire after their lifetime.
-                    let curation = try await StoryCurator.run(in: database, judge: modelAllowed ? .onDevice : .unavailable,
-                                                              imageFinder: backgroundAllowed ? .publisherPages : .unavailable)
+                    let curation = try await StoryCurator.run(in: database, judge: importanceJudge,
+                                                              imageFinder: backgroundAllowed ? .publisherPages : .unavailable, muting: muting)
                     return !clustering.changedEvents.isEmpty || curation.changed
                 }
                 let result = await withTaskCancellationHandler {

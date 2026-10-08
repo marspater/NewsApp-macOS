@@ -1032,16 +1032,46 @@ final class ContentExtractionPipeline: Sendable {
     ].compactMap { try? NSRegularExpression(pattern: $0, options: .caseInsensitive) }
 
     func extractLeadImage(from html: String) -> String? {
+        extractLeadImages(from: html).first
+    }
+
+    private static let schemaImageRegex = try? NSRegularExpression(
+        pattern: #"<script\b[^>]*type\s*=\s*["']application/ld\+json["'][^>]*>(.*?)</script\s*>"#,
+        options: [.caseInsensitive, .dotMatchesLineSeparators])
+
+    /// Declared article media only; Organization and WebSite images are usually logos.
+    func extractLeadImages(from html: String) -> [String] {
+        var images: [String] = []
         for regex in Self.ogImageRegexes {
-            if let match = regex.firstMatch(in: html, range: NSRange(html.startIndex..., in: html)),
-               let range = Range(match.range(at: 1), in: html) {
+            for match in regex.matches(in: html, range: NSRange(html.startIndex..., in: html)).prefix(20) {
+                guard let range = Range(match.range(at: 1), in: html) else { continue }
                 let candidate = String(html[range]).trimmingCharacters(in: .whitespacesAndNewlines)
-                if !candidate.isEmpty {
-                    return candidate
-                }
+                if !candidate.isEmpty { images.append(candidate) }
             }
         }
-        return nil
+        func imageURLs(_ value: Any, depth: Int = 0) -> [String] {
+            guard depth < 16 else { return [] }
+            if let url = value as? String { return [url] }
+            if let object = value as? [String: Any] { return [object["url"], object["contentUrl"]].compactMap { $0 as? String } }
+            if let array = value as? [Any] { return array.prefix(20).flatMap { imageURLs($0, depth: depth + 1) } }
+            return []
+        }
+        func articleImages(_ value: Any, depth: Int = 0) -> [String] {
+            guard depth < 16 else { return [] }
+            if let array = value as? [Any] { return array.prefix(50).flatMap { articleImages($0, depth: depth + 1) } }
+            guard let object = value as? [String: Any] else { return [] }
+            let types = (object["@type"] as? [String]) ?? [object["@type"] as? String ?? ""]
+            if types.contains(where: { ["Article", "NewsArticle", "ReportageNewsArticle", "AnalysisNewsArticle"].contains($0) }) {
+                return object["image"].map { imageURLs($0) } ?? []
+            }
+            return object["@graph"].map { articleImages($0, depth: depth + 1) } ?? []
+        }
+        for match in Self.schemaImageRegex?.matches(in: html, range: NSRange(html.startIndex..., in: html)).prefix(20) ?? [] {
+            guard let range = Range(match.range(at: 1), in: html),
+                  let json = try? JSONSerialization.jsonObject(with: Data(html[range].utf8)) else { continue }
+            images += articleImages(json)
+        }
+        return images
     }
 
     // MARK: - HTML Entity Decoding

@@ -49,6 +49,26 @@ struct FeedArticle: Identifiable, Codable, Hashable, Sendable {
     static func normalizeURL(_ urlString: String) -> String {
         ArticleIdentity.canonicalizeURL(urlString)
     }
+
+    /// Picks among curated member leads. Known area wins; tied or unknown sizes prefer publisher-hosted media.
+    static func bestCardImage(in articles: [FeedArticle]) -> URL? {
+        let candidates = articles.compactMap { article -> (url: URL, area: Int, own: Bool)? in
+            guard let image = article.readerDocument?.selectedImage(fallback: article.imageUrl) ?? article.imageUrl,
+                  let url = URL(string: image) else { return nil }
+            let metadata = article.readerDocument?.images?.first { $0.url == image }
+            guard ReaderImageCandidate.usable(url: image, width: metadata?.width, height: metadata?.height),
+                  metadata?.aspectRatio.map({ $0 <= 4 && $0 >= 0.25 }) ?? true else { return nil }
+            let host = URL(string: article.link)?.host?.lowercased().replacingOccurrences(of: "www.", with: "") ?? ""
+            let imageHost = url.host?.lowercased() ?? ""
+            return (url, (metadata?.width ?? 0) * (metadata?.height ?? 0),
+                    !host.isEmpty && (imageHost == host || imageHost.hasSuffix("." + host)))
+        }
+        return candidates.enumerated().max { lhs, rhs in
+            if lhs.element.area != rhs.element.area { return lhs.element.area < rhs.element.area }
+            if lhs.element.own != rhs.element.own { return !lhs.element.own }
+            return lhs.offset > rhs.offset
+        }?.element.url
+    }
 }
 
 /// Navigation wrapper that pairs an active article with its contextual collection

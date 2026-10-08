@@ -234,7 +234,7 @@ struct ArticleListView: View {
                     mutedCount = hidden
                     waitingCount = waiting
                 }
-                let page = try await withStoryImages(Array(fetched.prefix(200)))
+                let page = Array(fetched.prefix(200))
                 let listed = isPaging ? buffer.displayed.articles + page : page
                 let events = try await articleStore.eventFeedSummaries(for: listed.map(\.id))
                 try Task.checkCancellation()
@@ -296,19 +296,6 @@ struct ArticleListView: View {
         return try await articleStore.database.fetchArticles(
             section: filters.topic, isRead: filters.read, isSaved: filters.saved,
             limit: 201, after: pageCursor, muting: muting, hidingWaitingStories: hidesWaitingStories)
-    }
-
-    /// Lead images found on publisher pages (`StoryCurator`) fill in for stories whose feeds carry none.
-    private func withStoryImages(_ page: [FeedArticle]) async throws -> [FeedArticle] {
-        let missing = page.filter { $0.imageUrl == nil && $0.readerDocument?.leadImageURL == nil }.map(\.id)
-        guard !missing.isEmpty else { return page }
-        let found = try await articleStore.database.storyImages(for: missing)
-        return page.map { article in
-            guard let url = found[article.id] else { return article }
-            var article = article
-            article.imageUrl = url
-            return article
-        }
     }
 
     private func countWaiting(muting: MuteRules) async throws -> Int {

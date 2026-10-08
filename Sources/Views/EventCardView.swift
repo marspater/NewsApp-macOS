@@ -26,15 +26,14 @@ struct EventCardView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: AppSpacing.xs) {
             ArticleCardView(article: representative, isSelected: isSelected, compact: compact,
-                            imageFallbacks: visibleMembers.filter { $0.id != representative.id }, action: openRepresentative)
+                            imageFallbacks: (members.isEmpty ? visibleMembers : members).filter { $0.id != representative.id }, action: openRepresentative)
             coverageToggle
             if isExpanded {
                 sourceList
                     .transition(reduceMotion ? .identity : .opacity)
             }
         }
-        .task(id: isExpanded ? "\(summary.eventID):\(summary.membershipVersion)" : nil) {
-            guard isExpanded else { return }
+        .task(id: "\(summary.eventID):\(summary.membershipVersion):\(isExpanded)") {
             do {
                 let loaded = try await articleStore.eventMemberArticles(eventID: summary.eventID)
                 try Task.checkCancellation()

@@ -4,7 +4,8 @@
 
 ### Changed
 
-- Stories whose feeds carry no image (DW, Al Jazeera, Euronews) get the lead image their publisher declares on the article page, looked up in the background for at most 30 shown stories per refresh; a group needs only one.
+- Waiting stories are filtered from notifications after importance rating. A rating computed before a publisher edits a headline is discarded.
+- Imageless, unmuted stories look up declared publisher images from a bounded page prefix, including schema.org metadata. Briefing and grouped cards reuse the results; event cards choose the best usable lead across all members. Publishers without a usable image retain the card placeholder.
 
 - Stories are rated major, notable or minor on device. Minor stories wait out of Today, Unread, sections and the Briefing until four publishers cover them (the list says how many wait and can show them); unread ones that are still waiting a day later are removed and are not re-added by later refreshes. Without on-device AI nothing is hidden.
 

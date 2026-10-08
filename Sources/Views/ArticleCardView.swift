@@ -223,17 +223,9 @@ struct ArticleCardView: View {
     
     // MARK: - Subviews & Helpers
     
-    private static func cardImageURL(_ article: FeedArticle) -> URL? {
-        // Storage curation already clears `imageUrl` when a document leaves out its lead on purpose; what remains is a
-        // feed image or one found on the publisher page.
-        guard let imageUrl = article.readerDocument?.selectedImage(fallback: article.imageUrl) ?? article.imageUrl,
-              ReaderImageCandidate.usable(url: imageUrl) else { return nil }
-        return URL(string: imageUrl)
-    }
-
     @ViewBuilder
     private var cardImageHeader: some View {
-        if let url = ([article] + imageFallbacks).lazy.compactMap(Self.cardImageURL).first {
+        if let url = FeedArticle.bestCardImage(in: [article] + imageFallbacks) {
             ArticleRemoteImage(url: url) { phase in
                 switch phase {
                 case .success(let image):
