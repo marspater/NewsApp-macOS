@@ -351,8 +351,15 @@ public struct OverviewClaimVerifier: Sendable {
 
     // MARK: - Text Extraction Helpers
 
+    private static let numbersRegex = try! NSRegularExpression(pattern: #"\b\d+([.,]\d+)?\b"#)
+    private static let unitsRegex = try! NSRegularExpression(
+        pattern: #"\b(km/h|mph|km|miles|kg|lbs|GB|MB|TB|percent|відсотків|відсотки|відсотка)\b|%"#,
+        options: .caseInsensitive
+    )
+    private static let datesYearRegex = try! NSRegularExpression(pattern: #"\b(19\d\d|20\d\d)\b"#)
+
     private static func extractNumbers(from text: String) -> [String] {
-        guard let regex = try? NSRegularExpression(pattern: #"\b\d+([.,]\d+)?\b"#) else { return [] }
+        let regex = numbersRegex
         let nsString = text as NSString
         let matches = regex.matches(in: text, range: NSRange(location: 0, length: nsString.length))
         return matches.compactMap {
@@ -417,10 +424,7 @@ public struct OverviewClaimVerifier: Sendable {
     }
 
     private static func extractUnits(from text: String) -> [String] {
-        guard let regex = try? NSRegularExpression(
-            pattern: #"\b(km/h|mph|km|miles|kg|lbs|GB|MB|TB|percent|відсотків|відсотки|відсотка)\b|%"#,
-            options: .caseInsensitive
-        ) else { return [] }
+        let regex = unitsRegex
         let nsString = text as NSString
         let matches = regex.matches(in: text, range: NSRange(location: 0, length: nsString.length))
         return matches.map { nsString.substring(with: $0.range) }
@@ -444,12 +448,11 @@ public struct OverviewClaimVerifier: Sendable {
     private static func extractDates(from text: String) -> [String] {
         var results: [String] = []
         // Extract 4-digit years
-        if let yearRegex = try? NSRegularExpression(pattern: #"\b(19\d\d|20\d\d)\b"#) {
-            let nsString = text as NSString
-            let matches = yearRegex.matches(in: text, range: NSRange(location: 0, length: nsString.length))
-            for m in matches {
-                results.append(nsString.substring(with: m.range))
-            }
+        let yearRegex = datesYearRegex
+        let nsString = text as NSString
+        let matches = yearRegex.matches(in: text, range: NSRange(location: 0, length: nsString.length))
+        for m in matches {
+            results.append(nsString.substring(with: m.range))
         }
         return results
     }
