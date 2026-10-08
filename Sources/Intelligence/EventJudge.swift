@@ -82,7 +82,8 @@ actor OnDeviceEventJudge {
         Different events: separate occurrences, even if related, in the same place or in the same series. Examples: \
         another attack on another day or in another city, another vote, another quarter's results, a statement about \
         another matter, or a background feature that is not about this occurrence.
-        Answer with exactly one word: SAME or DIFFERENT. Answer SAME only when you are confident.
+        Reports from different publishers often describe the same event from different angles and in different words.
+        Answer with exactly one word: SAME or DIFFERENT.
 
         Report A:
         \(GenerationPromptDefense.frameArticleData(title: a.title, description: a.summary))
