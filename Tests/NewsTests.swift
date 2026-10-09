@@ -4700,11 +4700,11 @@ struct NewsTests {
         await db.close()
     }
 
-    /// On-device generation and labeled controls; private text stays in the temporary audit directory.
+    /// Opt-in #308/#313 measurement on a copied library: labeled controls, model overviews for covered events until
+    /// `NEWS_OVERVIEWS_TARGET` drafts (default 30) are accepted, and deterministic perspective coverage for every covered
+    /// event in the window. `NEWS_OVERVIEWS_EXCLUDE` names an earlier output directory whose live events are skipped for
+    /// generation. Private text stays in the temporary audit directory.
     @MainActor
-    /// Opt-in #308/#313 measurement on a copied library: model overviews for covered events until `NEWS_OVERVIEWS_TARGET`
-    /// drafts (default 30) are accepted, and deterministic perspective coverage for every covered event in the window.
-    /// `NEWS_OVERVIEWS_EXCLUDE` names an earlier output directory whose live events are skipped for generation.
     static func measureLiveOverviews(path: String, output: String) async throws {
         let url = URL(fileURLWithPath: path).resolvingSymlinksInPath()
         guard (url.path.hasPrefix("/private/tmp/") || url.path.hasPrefix("/tmp/")), output.hasPrefix("/private/tmp/") else {
