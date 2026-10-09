@@ -494,10 +494,11 @@ class FeedManager: NSObject, ObservableObject {
                 let modelAllowed = backgroundAllowed && self?.appSettings.aiEnabled == true
                 let importanceJudge = modelAllowed ? self?.importanceJudge ?? .unavailable : .unavailable
                 let muting = self?.appSettings.muteRules ?? MuteRules()
+                let retained = self?.appSettings.tensionRetainedFeedURLs ?? []
                 let work = Task.detached(priority: .utility) { () throws -> Bool in
                     let clustering = try await EventClusterer.run(in: database, judge: modelAllowed ? .onDevice : .unavailable)
                     // Importance is rated once clusters are known; waiting stories expire after their lifetime.
-                    let curation = try await StoryCurator.run(in: database, judge: importanceJudge, muting: muting)
+                    let curation = try await StoryCurator.run(in: database, judge: importanceJudge, muting: muting, keepingFeedURLs: retained)
                     return !clustering.changedEvents.isEmpty || curation.changed
                 }
                 let result = await withTaskCancellationHandler {
@@ -539,9 +540,11 @@ class FeedManager: NSObject, ObservableObject {
         let database = articleStore.database
         let finder = imageFinder
         let muting = appSettings.muteRules
+        let retained = appSettings.tensionRetainedFeedURLs
         imageLookupTask = Task { [weak self] in
             let work = Task.detached(priority: .utility) {
-                try await StoryCurator.run(in: database, judge: .unavailable, imageFinder: finder, muting: muting)
+                try await StoryCurator.run(in: database, judge: .unavailable, imageFinder: finder, muting: muting,
+                                           keepingFeedURLs: retained)
             }
             let result = await withTaskCancellationHandler {
                 await work.result
