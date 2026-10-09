@@ -56,7 +56,6 @@ swiftc "${TEST_OPT_FLAGS[@]}" -target $(uname -m)-apple-macos${TARGET_MACOS} \
     Sources/Services/SecureHTTPClient.swift \
     Sources/App/AppSettings.swift \
     Sources/Services/FeedXMLParser.swift \
-    Sources/Intelligence/WebContentExtractor.swift \
     Sources/Coordinators/NotificationService.swift \
     Sources/Services/FeedFetcher.swift \
     Sources/Services/JSONFeedParser.swift \

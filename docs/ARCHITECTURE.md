@@ -94,7 +94,7 @@ Native macOS, local-first RSS reader. This document defines the supported techno
 - `Sources/Services/OPMLManager.swift`: OPML portability.
 
 ### Content / intelligence (`Sources/Intelligence/`)
-- `Sources/Intelligence/ContentExtractionPipeline.swift`, `WebContentExtractor.swift`: article content extraction.
+- `Sources/Intelligence/ContentExtractionPipeline.swift`: article content extraction.
 - `Sources/Intelligence/ArticleIntelligence.swift`: article classification, sentiment, entities, summarization and content-cleaning capabilities.
 - `Sources/Intelligence/EnrichmentQueue.swift`: actor-isolated background enrichment scheduling.
 - `Sources/Intelligence/EventCandidates.swift`: bounded candidate generation for event matching.
