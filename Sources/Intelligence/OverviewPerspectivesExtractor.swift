@@ -3,13 +3,36 @@ import NaturalLanguage
 
 /// Result of deterministically validating an overview perspective against evidence passages and rules.
 struct OverviewPerspectiveValidationResult: Sendable, Equatable {
+    /// Stable rule name for aggregate reports; unlike `rejectionReason`, it never contains participant text.
+    enum Rule: String, Sendable, Codable {
+        case noCitation, unknownCitation, emptyQuote, shortParticipant, vagueParticipant, shortPosition, ungrounded
+    }
+
     let isValid: Bool
     let rejectionReason: String?
+    let rule: Rule?
 
-    init(isValid: Bool, rejectionReason: String? = nil) {
+    init(isValid: Bool, rejectionReason: String? = nil, rule: Rule? = nil) {
         self.isValid = isValid
         self.rejectionReason = rejectionReason
+        self.rule = rule
     }
+}
+
+/// Counts why an event's perspectives section is absent or thin (#313). Holds no passage or speaker text.
+struct OverviewPerspectivesDiagnosis: Sendable, Equatable, Codable {
+    var passages = 0
+    var uncitedPassages = 0
+    var passagesWithCandidates = 0
+    /// Passages without a candidate that still contain a quotation mark or a speech verb.
+    var passagesWithUnmatchedSpeech = 0
+    /// Passages using typographic quotation marks; the attribution patterns match straight quotes only.
+    var passagesWithTypographicQuotes = 0
+    var candidates = 0
+    var vagueCandidates = 0
+    var voices = 0
+    var rejections: [String: Int] = [:]
+    var perspectives = 0
 }
 
 /// Enforces the four core rules of overview perspectives:
@@ -60,7 +83,8 @@ struct OverviewPerspectivesValidator: Sendable {
         guard !perspective.citationIDs.isEmpty else {
             return OverviewPerspectiveValidationResult(
                 isValid: false,
-                rejectionReason: "Perspective has no source citation"
+                rejectionReason: "Perspective has no source citation",
+                rule: .noCitation
             )
         }
 
@@ -68,13 +92,15 @@ struct OverviewPerspectivesValidator: Sendable {
             guard let citation = citations[citID] else {
                 return OverviewPerspectiveValidationResult(
                     isValid: false,
-                    rejectionReason: "Citation ID '\(citID)' not found in overview citations"
+                    rejectionReason: "Citation ID '\(citID)' not found in overview citations",
+                    rule: .unknownCitation
                 )
             }
             guard !citation.quote.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                 return OverviewPerspectiveValidationResult(
                     isValid: false,
-                    rejectionReason: "Citation '\(citID)' has empty quote"
+                    rejectionReason: "Citation '\(citID)' has empty quote",
+                    rule: .emptyQuote
                 )
             }
         }
@@ -84,14 +110,16 @@ struct OverviewPerspectivesValidator: Sendable {
         guard participantCleaned.count >= 2 else {
             return OverviewPerspectiveValidationResult(
                 isValid: false,
-                rejectionReason: "Participant name is empty or too short"
+                rejectionReason: "Participant name is empty or too short",
+                rule: .shortParticipant
             )
         }
 
         if isVagueParticipant(participantCleaned) {
             return OverviewPerspectiveValidationResult(
                 isValid: false,
-                rejectionReason: "Participant '\(perspective.participant)' is an unattributed generality"
+                rejectionReason: "Participant '\(perspective.participant)' is an unattributed generality",
+                rule: .vagueParticipant
             )
         }
 
@@ -99,7 +127,8 @@ struct OverviewPerspectivesValidator: Sendable {
         guard positionCleaned.count >= 5 else {
             return OverviewPerspectiveValidationResult(
                 isValid: false,
-                rejectionReason: "Position statement is empty or too short"
+                rejectionReason: "Position statement is empty or too short",
+                rule: .shortPosition
             )
         }
 
@@ -122,7 +151,8 @@ struct OverviewPerspectivesValidator: Sendable {
                     if matchRatio < 0.35 {
                         return OverviewPerspectiveValidationResult(
                             isValid: false,
-                            rejectionReason: "Position statement is not grounded in cited passage text (synthetic or hallucinated claim)"
+                            rejectionReason: "Position statement is not grounded in cited passage text (synthetic or hallucinated claim)",
+                            rule: .ungrounded
                         )
                     }
                 }
@@ -172,6 +202,25 @@ struct OverviewPerspectivesExtractor: Sendable {
         articles: [FeedArticle],
         existingCitations: [String: OverviewCitation]
     ) -> [OverviewPerspective] {
+        evaluate(passages: passages, articles: articles, existingCitations: existingCitations).perspectives
+    }
+
+    /// Runs the same extraction and reports how many passages, candidates and voices each step kept (#313).
+    static func diagnosePerspectives(
+        passages: [EvidencePassage],
+        articles: [FeedArticle],
+        existingCitations: [String: OverviewCitation]
+    ) -> OverviewPerspectivesDiagnosis {
+        evaluate(passages: passages, articles: articles, existingCitations: existingCitations).diagnosis
+    }
+
+    private static func evaluate(
+        passages: [EvidencePassage],
+        articles: [FeedArticle],
+        existingCitations: [String: OverviewCitation]
+    ) -> (perspectives: [OverviewPerspective], diagnosis: OverviewPerspectivesDiagnosis) {
+        var diagnosis = OverviewPerspectivesDiagnosis()
+        diagnosis.passages = passages.count
         let articlesByID = Dictionary(uniqueKeysWithValues: articles.map { ($0.id, $0) })
 
         // Reverse-index passages to citation IDs
@@ -183,7 +232,11 @@ struct OverviewPerspectivesExtractor: Sendable {
         var candidates: [ExtractedCandidate] = []
 
         for passage in passages {
+            if passage.text.contains("\u{201C}") || passage.text.contains("\u{201D}") {
+                diagnosis.passagesWithTypographicQuotes += 1
+            }
             guard let citID = passageToCitationID[passage.id] else {
+                diagnosis.uncitedPassages += 1
                 continue
             }
             let article = articlesByID[passage.articleID]
@@ -198,8 +251,14 @@ struct OverviewPerspectivesExtractor: Sendable {
                 wireSource: wire,
                 publisher: publisher
             )
+            if !passageCandidates.isEmpty {
+                diagnosis.passagesWithCandidates += 1
+            } else if containsSpeechCue(passage.text) {
+                diagnosis.passagesWithUnmatchedSpeech += 1
+            }
             candidates.append(contentsOf: passageCandidates)
         }
+        diagnosis.candidates = candidates.count
 
         // Rule 3: Reprints are not presented as independent voices
         // Group and collapse duplicate statements from identical participants or syndicated wire stories
@@ -208,6 +267,7 @@ struct OverviewPerspectivesExtractor: Sendable {
         for cand in candidates {
             // Check for vague participants
             guard !OverviewPerspectivesValidator.isVagueParticipant(cand.participant) else {
+                diagnosis.vagueCandidates += 1
                 continue
             }
 
@@ -234,6 +294,7 @@ struct OverviewPerspectivesExtractor: Sendable {
         }
 
         // Validate each collapsed candidate
+        diagnosis.voices = collapsed.count
         var validatedPerspectives: [OverviewPerspective] = []
 
         for item in collapsed {
@@ -256,16 +317,27 @@ struct OverviewPerspectivesExtractor: Sendable {
             )
             if validation.isValid {
                 validatedPerspectives.append(perspective)
+            } else {
+                diagnosis.rejections[validation.rule?.rawValue ?? "unknown", default: 0] += 1
             }
         }
+        diagnosis.perspectives = validatedPerspectives.count
 
         // Absent sections rule: section is omitted if no verified attributed perspective exists
         guard !validatedPerspectives.isEmpty else {
-            return []
+            return ([], diagnosis)
         }
 
         // Sort deterministically by participant name
-        return validatedPerspectives.sorted { $0.participant < $1.participant }
+        return (validatedPerspectives.sorted { $0.participant < $1.participant }, diagnosis)
+    }
+
+    private static let speechVerbs = try? NSRegularExpression(pattern: #"\b(?:said|says|told|added|stated|announced|warned)\b"#, options: [.caseInsensitive])
+
+    /// A quotation mark or speech verb, so a passage without a candidate may hold a missed attribution.
+    private static func containsSpeechCue(_ text: String) -> Bool {
+        if text.contains("\"") || text.contains("\u{201C}") || text.contains("\u{201D}") { return true }
+        return speechVerbs?.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)) != nil
     }
 
     /// Evaluates whether two extracted candidates represent the same voice or syndicated reprint.
