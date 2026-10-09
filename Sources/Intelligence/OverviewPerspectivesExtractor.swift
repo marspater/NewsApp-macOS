@@ -3,20 +3,34 @@ import NaturalLanguage
 
 /// Result of deterministically validating an overview perspective against evidence passages and rules.
 struct OverviewPerspectiveValidationResult: Sendable, Equatable {
-    /// Stable rule name for aggregate reports; unlike `rejectionReason`, it never contains participant text.
     enum Rule: String, Sendable, Codable {
         case noCitation, unknownCitation, emptyQuote, shortParticipant, vagueParticipant, shortPosition, ungrounded
     }
 
     let isValid: Bool
     let rejectionReason: String?
-    let rule: Rule?
 
-    init(isValid: Bool, rejectionReason: String? = nil, rule: Rule? = nil) {
+    init(isValid: Bool, rejectionReason: String? = nil) {
         self.isValid = isValid
         self.rejectionReason = rejectionReason
-        self.rule = rule
     }
+
+    /// Stable rule name for aggregate reports; unlike `rejectionReason`, it never contains participant text.
+    var rule: Rule? {
+        guard let reason = rejectionReason else { return nil }
+        return Self.reasonEndings.first { reason.hasSuffix($0.ending) }?.rule
+    }
+
+    /// Each rejection reason in `OverviewPerspectivesValidator` ends with fixed text after any quoted value.
+    private static let reasonEndings: [(ending: String, rule: Rule)] = [
+        ("Perspective has no source citation", .noCitation),
+        ("not found in overview citations", .unknownCitation),
+        ("has empty quote", .emptyQuote),
+        ("Participant name is empty or too short", .shortParticipant),
+        ("is an unattributed generality", .vagueParticipant),
+        ("Position statement is empty or too short", .shortPosition),
+        ("is not grounded in cited passage text (synthetic or hallucinated claim)", .ungrounded)
+    ]
 }
 
 /// Counts why an event's perspectives section is absent or thin (#313). Holds no passage or speaker text.
@@ -83,8 +97,7 @@ struct OverviewPerspectivesValidator: Sendable {
         guard !perspective.citationIDs.isEmpty else {
             return OverviewPerspectiveValidationResult(
                 isValid: false,
-                rejectionReason: "Perspective has no source citation",
-                rule: .noCitation
+                rejectionReason: "Perspective has no source citation"
             )
         }
 
@@ -92,15 +105,13 @@ struct OverviewPerspectivesValidator: Sendable {
             guard let citation = citations[citID] else {
                 return OverviewPerspectiveValidationResult(
                     isValid: false,
-                    rejectionReason: "Citation ID '\(citID)' not found in overview citations",
-                    rule: .unknownCitation
+                    rejectionReason: "Citation ID '\(citID)' not found in overview citations"
                 )
             }
             guard !citation.quote.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                 return OverviewPerspectiveValidationResult(
                     isValid: false,
-                    rejectionReason: "Citation '\(citID)' has empty quote",
-                    rule: .emptyQuote
+                    rejectionReason: "Citation '\(citID)' has empty quote"
                 )
             }
         }
@@ -110,16 +121,14 @@ struct OverviewPerspectivesValidator: Sendable {
         guard participantCleaned.count >= 2 else {
             return OverviewPerspectiveValidationResult(
                 isValid: false,
-                rejectionReason: "Participant name is empty or too short",
-                rule: .shortParticipant
+                rejectionReason: "Participant name is empty or too short"
             )
         }
 
         if isVagueParticipant(participantCleaned) {
             return OverviewPerspectiveValidationResult(
                 isValid: false,
-                rejectionReason: "Participant '\(perspective.participant)' is an unattributed generality",
-                rule: .vagueParticipant
+                rejectionReason: "Participant '\(perspective.participant)' is an unattributed generality"
             )
         }
 
@@ -127,8 +136,7 @@ struct OverviewPerspectivesValidator: Sendable {
         guard positionCleaned.count >= 5 else {
             return OverviewPerspectiveValidationResult(
                 isValid: false,
-                rejectionReason: "Position statement is empty or too short",
-                rule: .shortPosition
+                rejectionReason: "Position statement is empty or too short"
             )
         }
 
@@ -151,8 +159,7 @@ struct OverviewPerspectivesValidator: Sendable {
                     if matchRatio < 0.35 {
                         return OverviewPerspectiveValidationResult(
                             isValid: false,
-                            rejectionReason: "Position statement is not grounded in cited passage text (synthetic or hallucinated claim)",
-                            rule: .ungrounded
+                            rejectionReason: "Position statement is not grounded in cited passage text (synthetic or hallucinated claim)"
                         )
                     }
                 }
@@ -214,6 +221,9 @@ struct OverviewPerspectivesExtractor: Sendable {
         evaluate(passages: passages, articles: articles, existingCitations: existingCitations).diagnosis
     }
 
+    /// One voice: its first statement and every citation of a reprint or repeat.
+    private typealias Voice = (primary: ExtractedCandidate, citationIDs: Set<String>)
+
     private static func evaluate(
         passages: [EvidencePassage],
         articles: [FeedArticle],
@@ -221,16 +231,29 @@ struct OverviewPerspectivesExtractor: Sendable {
     ) -> (perspectives: [OverviewPerspective], diagnosis: OverviewPerspectivesDiagnosis) {
         var diagnosis = OverviewPerspectivesDiagnosis()
         diagnosis.passages = passages.count
+        let candidates = attributedCandidates(passages: passages, articles: articles, existingCitations: existingCitations, diagnosis: &diagnosis)
+        diagnosis.candidates = candidates.count
+        let voices = collapseVoices(candidates, diagnosis: &diagnosis)
+        diagnosis.voices = voices.count
+        let perspectives = validatedPerspectives(voices, existingCitations: existingCitations, passages: passages, diagnosis: &diagnosis)
+        diagnosis.perspectives = perspectives.count
+        // Sorted deterministically by participant name; no verified perspective leaves the section absent.
+        return (perspectives.sorted { $0.participant < $1.participant }, diagnosis)
+    }
+
+    /// Attributed statements in cited passages, counting passages that yield none.
+    private static func attributedCandidates(
+        passages: [EvidencePassage],
+        articles: [FeedArticle],
+        existingCitations: [String: OverviewCitation],
+        diagnosis: inout OverviewPerspectivesDiagnosis
+    ) -> [ExtractedCandidate] {
         let articlesByID = Dictionary(uniqueKeysWithValues: articles.map { ($0.id, $0) })
 
         // Reverse-index passages to citation IDs
-        var passageToCitationID: [String: String] = [:]
-        for (citID, citation) in existingCitations {
-            passageToCitationID[citation.passageID] = citID
-        }
+        let passageToCitationID = Dictionary(existingCitations.map { ($0.value.passageID, $0.key) }, uniquingKeysWith: { _, last in last })
 
         var candidates: [ExtractedCandidate] = []
-
         for passage in passages {
             if passage.text.contains("\u{201C}") || passage.text.contains("\u{201D}") {
                 diagnosis.passagesWithTypographicQuotes += 1
@@ -239,17 +262,14 @@ struct OverviewPerspectivesExtractor: Sendable {
                 diagnosis.uncitedPassages += 1
                 continue
             }
-            let article = articlesByID[passage.articleID]
-            let wire = detectWireSource(in: passage.text, articleSource: article?.source)
-            let publisher = article?.source
-
+            let source = articlesByID[passage.articleID]?.source
             let passageCandidates = extractAttributedQuotes(
                 text: passage.text,
                 citationID: citID,
                 passageID: passage.id,
                 articleID: passage.articleID,
-                wireSource: wire,
-                publisher: publisher
+                wireSource: detectWireSource(in: passage.text, articleSource: source),
+                publisher: source
             )
             if !passageCandidates.isEmpty {
                 diagnosis.passagesWithCandidates += 1
@@ -258,78 +278,68 @@ struct OverviewPerspectivesExtractor: Sendable {
             }
             candidates.append(contentsOf: passageCandidates)
         }
-        diagnosis.candidates = candidates.count
+        return candidates
+    }
 
-        // Rule 3: Reprints are not presented as independent voices
-        // Group and collapse duplicate statements from identical participants or syndicated wire stories
-        var collapsed: [(primary: ExtractedCandidate, citationIDs: Set<String>)] = []
-
+    /// Rule 3: reprints are not presented as independent voices. Vague speakers are dropped; statements from the same
+    /// participant or a syndicated wire story collapse into one voice that keeps every citation.
+    private static func collapseVoices(_ candidates: [ExtractedCandidate], diagnosis: inout OverviewPerspectivesDiagnosis) -> [Voice] {
+        var collapsed: [Voice] = []
         for cand in candidates {
-            // Check for vague participants
             guard !OverviewPerspectivesValidator.isVagueParticipant(cand.participant) else {
                 diagnosis.vagueCandidates += 1
                 continue
             }
-
             if let index = collapsed.firstIndex(where: { isSameVoice(existing: $0.primary, candidate: cand) }) {
                 collapsed[index].citationIDs.insert(cand.citationID)
-                let existingPrimary = collapsed[index].primary
-                let wire = existingPrimary.originalWireSource ?? cand.originalWireSource
-                let publisher = existingPrimary.sourcePublisher ?? cand.sourcePublisher
-                let bestParticipant = existingPrimary.participant.count >= cand.participant.count ? existingPrimary.participant : cand.participant
-
-                collapsed[index].primary = ExtractedCandidate(
-                    participant: bestParticipant,
-                    position: existingPrimary.position,
-                    quote: existingPrimary.quote,
-                    citationID: existingPrimary.citationID,
-                    passageID: existingPrimary.passageID,
-                    articleID: existingPrimary.articleID,
-                    originalWireSource: wire,
-                    sourcePublisher: publisher
-                )
+                collapsed[index].primary = merged(collapsed[index].primary, with: cand)
             } else {
                 collapsed.append((primary: cand, citationIDs: [cand.citationID]))
             }
         }
+        return collapsed
+    }
 
-        // Validate each collapsed candidate
-        diagnosis.voices = collapsed.count
-        var validatedPerspectives: [OverviewPerspective] = []
+    /// The voice's first statement, with the longer participant name and any wire or publisher credit.
+    private static func merged(_ existing: ExtractedCandidate, with cand: ExtractedCandidate) -> ExtractedCandidate {
+        ExtractedCandidate(
+            participant: existing.participant.count >= cand.participant.count ? existing.participant : cand.participant,
+            position: existing.position,
+            quote: existing.quote,
+            citationID: existing.citationID,
+            passageID: existing.passageID,
+            articleID: existing.articleID,
+            originalWireSource: existing.originalWireSource ?? cand.originalWireSource,
+            sourcePublisher: existing.sourcePublisher ?? cand.sourcePublisher
+        )
+    }
 
-        for item in collapsed {
+    /// Validates each voice against its cited passages, counting rejections by rule.
+    private static func validatedPerspectives(
+        _ voices: [Voice],
+        existingCitations: [String: OverviewCitation],
+        passages: [EvidencePassage],
+        diagnosis: inout OverviewPerspectivesDiagnosis
+    ) -> [OverviewPerspective] {
+        var validated: [OverviewPerspective] = []
+        for item in voices {
             let primary = item.primary
-            let sortedCitationIDs = Array(item.citationIDs).sorted()
-
             let perspective = OverviewPerspective(
                 id: "persp_\(primary.passageID)_\(abs(primary.participant.hashValue % 10000))",
                 participant: primary.participant,
                 position: primary.position,
-                citationIDs: sortedCitationIDs,
+                citationIDs: Array(item.citationIDs).sorted(),
                 sourcePublisher: primary.sourcePublisher,
                 originalWireSource: primary.originalWireSource
             )
-
-            let validation = OverviewPerspectivesValidator.validatePerspective(
-                perspective,
-                against: existingCitations,
-                passages: passages
-            )
+            let validation = OverviewPerspectivesValidator.validatePerspective(perspective, against: existingCitations, passages: passages)
             if validation.isValid {
-                validatedPerspectives.append(perspective)
+                validated.append(perspective)
             } else {
                 diagnosis.rejections[validation.rule?.rawValue ?? "unknown", default: 0] += 1
             }
         }
-        diagnosis.perspectives = validatedPerspectives.count
-
-        // Absent sections rule: section is omitted if no verified attributed perspective exists
-        guard !validatedPerspectives.isEmpty else {
-            return ([], diagnosis)
-        }
-
-        // Sort deterministically by participant name
-        return (validatedPerspectives.sorted { $0.participant < $1.participant }, diagnosis)
+        return validated
     }
 
     private static let speechVerbs = try? NSRegularExpression(pattern: #"\b(?:said|says|told|added|stated|announced|warned)\b"#, options: [.caseInsensitive])

@@ -22,6 +22,8 @@ SHEET = 'claims-review-private.csv'
 REPORT = 'overview-evaluation.json'
 COLUMNS = ['claim', 'overview', 'section', 'publisher', 'text', 'passage', 'label', 'note']
 FAILURES = ('unavailable', 'refusal', 'contextWindow', 'error')
+LINE_FIELDS = {'lines': 'lines', 'malformed': 'malformedLines',
+               'deterministicRejections': 'deterministicRejections', 'modelRejections': 'modelRejections'}
 DEFAULT_TARGET = 30
 # #308 asks for refusal, format and weak-draft causes. A prose answer without protocol lines ("unstructured") is usually
 # a refusal written as text, so it counts there; the raw causes stay in `fallbackCauses`.
@@ -149,150 +151,200 @@ def read_labels(path):
     return labels
 
 
+def accepted_records(records):
+    return [(index, record) for index, record in records if cause(record) == 'accepted']
+
+
+def quantiles(samples):
+    return {'p50': percentile(samples, 50), 'p95': percentile(samples, 95)}
+
+
+def total(counts, names):
+    return sum(counts.get(name, 0) for name in names)
+
+
+def line_counts(records):
+    lines = dict.fromkeys(LINE_FIELDS, 0)
+    for _, record in records:
+        outcome = record.get('outcome') or {}
+        for key, field in LINE_FIELDS.items():
+            lines[key] += outcome.get(field, 0)
+    return lines
+
+
+def overview_metrics(records):
+    """Acceptance, fallback causes, model line counts and latency over every attempted live event."""
+    causes = {}
+    for _, record in records:
+        causes[cause(record)] = causes.get(cause(record), 0) + 1
+    durations = [record.get('durationSeconds', 0.0) for _, record in records]
+    accepted = [record.get('durationSeconds', 0.0) for _, record in accepted_records(records)]
+    overviews = {'attempted': len(records), 'accepted': rate(causes.get('accepted', 0), len(records)),
+                 'fallbackCauses': dict(sorted(causes.items())),
+                 'fallbackGroups': {group: total(causes, names) for group, names in FALLBACK_GROUPS.items()},
+                 'modelFailures': total(causes, FAILURES), 'lineCounts': line_counts(records)}
+    return overviews, {'all': quantiles(durations), 'accepted': quantiles(accepted)}
+
+
+def claim_rows(records, labels):
+    """Per retained claim: reviewer label, longest copied run, claim length and, for introductions, best fact Jaccard."""
+    for index, record in accepted_records(records):
+        facts = [fact['text'] for fact in record['document']['facts']]
+        for section, fact, _, passage in claims(record):
+            run, length = longest_shared_run(fact['text'], passage)
+            similarity = max((jaccard(fact['text'], other) for other in facts), default=0.0) if section == 'introduction' else None
+            yield labels.get(f"{index}:{fact['id']}"), run, length, similarity
+
+
+def label_metrics(rows, audits):
+    counts = {label: sum(row[0] == label for row in rows) for label in LABELS}
+    retained, labelled = len(rows), sum(counts.values())
+    return {'retained': retained, 'labelled': labelled, 'unlabelled': retained - labelled,
+            **{label: rate(counts[label], labelled) for label in LABELS},
+            'criticalUpperBound95': (wilson(counts['critical'], labelled) or [None, None])[1],
+            'auditorHeuristic': {'unsupported': sum(a.get('unsupportedClaims', 0) for a in audits),
+                                 'critical': sum(a.get('totalCriticalErrors', 0) for a in audits)}}
+
+
+def verbatim_metrics(rows):
+    copied = [row[1] for row in rows]
+    whole = sum(row[2] > 0 and row[1] == row[2] for row in rows)
+    return {'medianLongestCopiedRun': percentile(copied, 50),
+            'claimsCopyingAtLeast8Words': rate(sum(run >= 8 for run in copied), len(rows)),
+            'claimsCopiedWhole': rate(whole, len(rows))}
+
+
+def repetition_metrics(rows):
+    intro = [row[3] for row in rows if row[3] is not None]
+    return {'sentences': len(intro), 'repeatingAFact': rate(sum(value >= 0.6 for value in intro), len(intro)),
+            'medianBestFactJaccard': percentile(intro, 50), 'threshold': 0.6}
+
+
+def claim_metrics(records, labels):
+    """Labelled claim rates, verbatim overlap and introduction repetition for accepted overviews."""
+    rows = list(claim_rows(records, labels))
+    audits = [record['audit'] for _, record in accepted_records(records)]
+    return label_metrics(rows, audits), verbatim_metrics(rows), repetition_metrics(rows)
+
+
+def run_json(directory, name):
+    path = directory / name
+    return json.loads(path.read_text()) if path.exists() else None
+
+
 def report(directory):
     directory = private_run(directory)
     records = runs(directory)
     sheet_path = directory / SHEET
     labels = read_labels(sheet_path) if sheet_path.exists() else {}
-    causes, durations, accepted_durations = {}, [], []
-    lines = {'lines': 0, 'malformed': 0, 'deterministicRejections': 0, 'modelRejections': 0}
-    counts = {label: 0 for label in LABELS}
-    retained = unlabelled = full_copies = long_copies = 0
-    runs_copied, intro_sentences, repeated_intro, intro_similarity = [], 0, 0, []
-    auditor = {'unsupported': 0, 'critical': 0}
-    for index, record in records:
-        kind = cause(record)
-        causes[kind] = causes.get(kind, 0) + 1
-        durations.append(record.get('durationSeconds', 0.0))
-        for key, field in (('lines', 'lines'), ('malformed', 'malformedLines'),
-                           ('deterministicRejections', 'deterministicRejections'), ('modelRejections', 'modelRejections')):
-            lines[key] += (record.get('outcome') or {}).get(field, 0)
-        if kind != 'accepted':
-            continue
-        accepted_durations.append(record.get('durationSeconds', 0.0))
-        auditor['unsupported'] += record['audit'].get('unsupportedClaims', 0)
-        auditor['critical'] += record['audit'].get('totalCriticalErrors', 0)
-        facts = [fact['text'] for fact in record['document']['facts']]
-        for section, fact, _, passage in claims(record):
-            retained += 1
-            label = labels.get(f"{index}:{fact['id']}")
-            if label:
-                counts[label] += 1
-            else:
-                unlabelled += 1
-            run, length = longest_shared_run(fact['text'], passage)
-            runs_copied.append(run)
-            long_copies += run >= 8
-            full_copies += length > 0 and run == length
-            if section == 'introduction':
-                intro_sentences += 1
-                best = max((jaccard(fact['text'], other) for other in facts), default=0.0)
-                intro_similarity.append(best)
-                repeated_intro += best >= 0.6
-    attempted, labelled = len(records), sum(counts.values())
-    summary = directory / 'overviews.json'
-    target = json.loads(summary.read_text()).get('target', DEFAULT_TARGET) if summary.exists() else DEFAULT_TARGET
+    overviews, latency = overview_metrics(records)
+    claims_report, verbatim, repetition = claim_metrics(records, labels)
+    target = (run_json(directory, 'overviews.json') or {}).get('target', DEFAULT_TARGET)
     result = {
-        'overviews': {'attempted': attempted, 'accepted': rate(causes.get('accepted', 0), attempted),
-                      'fallbackCauses': dict(sorted(causes.items())),
-                      'fallbackGroups': {group: sum(causes.get(name, 0) for name in names) for group, names in FALLBACK_GROUPS.items()},
-                      'modelFailures': sum(causes.get(name, 0) for name in FAILURES), 'lineCounts': lines},
-        'latencySeconds': {'all': {'p50': percentile(durations, 50), 'p95': percentile(durations, 95)},
-                           'accepted': {'p50': percentile(accepted_durations, 50), 'p95': percentile(accepted_durations, 95)}},
-        'claims': {'retained': retained, 'labelled': labelled, 'unlabelled': unlabelled,
-                   'supported': rate(counts['supported'], labelled), 'unsupported': rate(counts['unsupported'], labelled),
-                   'critical': rate(counts['critical'], labelled),
-                   'criticalUpperBound95': (wilson(counts['critical'], labelled) or [None, None])[1],
-                   'auditorHeuristic': auditor},
-        'verbatim': {'medianLongestCopiedRun': percentile(runs_copied, 50),
-                     'claimsCopyingAtLeast8Words': rate(long_copies, retained),
-                     'claimsCopiedWhole': rate(full_copies, retained)},
-        'introductionRepetition': {'sentences': intro_sentences, 'repeatingAFact': rate(repeated_intro, intro_sentences),
-                                   'medianBestFactJaccard': percentile(intro_similarity, 50), 'threshold': 0.6},
-        'decisionInputs': {'labellingComplete': retained > 0 and unlabelled == 0,
-                           'criticalErrorObserved': counts['critical'] > 0,
-                           'acceptedTarget': target, 'acceptedTargetMet': causes.get('accepted', 0) >= target},
+        'overviews': overviews, 'latencySeconds': latency, 'claims': claims_report,
+        'verbatim': verbatim, 'introductionRepetition': repetition,
+        'decisionInputs': {'labellingComplete': claims_report['retained'] > 0 and claims_report['unlabelled'] == 0,
+                           'criticalErrorObserved': claims_report['critical']['count'] > 0,
+                           'acceptedTarget': target, 'acceptedTargetMet': overviews['accepted']['count'] >= target},
         'limitations': 'Labels come from the reviewer sheet; the auditor heuristic is not a label. Verbatim runs and '
                        'Jaccard repetition are lexical measures. Latency includes per-sentence verification calls.',
     }
-    perspectives = directory / 'perspectives.json'
-    if perspectives.exists():
-        coverage = json.loads(perspectives.read_text())
+    coverage = run_json(directory, 'perspectives.json')
+    if coverage is not None:
         result['perspectiveCoverage'] = {**coverage, 'twoOrMoreRate': rate(coverage.get('twoOrMore', 0), coverage.get('events', 0))}
-    text = json.dumps(result, indent=2, sort_keys=True)
-    (directory / REPORT).write_text(text + '\n')
+    (directory / REPORT).write_text(json.dumps(result, indent=2, sort_keys=True) + '\n')
     return result
 
 
-def self_check():
+def fixture_record(result, seconds, failure=None):
+    """A synthetic live record: one passage, two introduction sentences and three facts citing it."""
+    passage = {'id': 'pass-1', 'articleID': 'a1', 'text': 'Officials said the bridge reopened on Monday after repairs costing $4m.', 'fingerprint': 'f'}
+    citation = {'id': 'c1', 'articleID': 'a1', 'passageID': 'pass-1', 'passageFingerprint': 'f', 'quote': passage['text'], 'sourceName': 'Publisher A'}
+
+    def fact(i, text):
+        return {'id': f'model_claim_{i}', 'text': text, 'citationIDs': ['c1']}
+    document = {'eventID': f'e-{seconds}', 'citations': {'c1': citation},
+                'facts': [fact(2, 'The bridge reopened on Monday after repairs costing $4m.'), fact(3, 'Repairs cost $4m.'), fact(4, 'Officials confirmed it.')],
+                'evidenceSections': {'introduction': [fact(0, 'The bridge reopened on Monday.'), fact(1, 'Officials gave the cost.')]}}
+    outcome = None if failure else {'result': result, 'lines': 6, 'malformedLines': 1, 'deterministicRejections': 0, 'modelRejections': 0}
+    return {'document': document, 'passages': [passage], 'audit': {'unsupportedClaims': 0, 'totalCriticalErrors': 0},
+            'durationSeconds': seconds, 'failure': failure, 'outcome': outcome, 'sources': 2}
+
+
+def expect_rejected(action, error, message):
+    try:
+        action()
+    except error:
+        return
+    raise AssertionError(message)
+
+
+def check_measures():
     require(wilson(0, 0) is None, 'Wilson interval needs trials')
     low, high = wilson(0, 30)
-    require(math.isclose(low, 0.0, abs_tol=1e-12) and math.isclose(high, 0.1135, abs_tol=1e-3), 'Wilson bounds')
-    require(math.isclose(percentile([4.0, 1.0, 3.0, 2.0], 50), 2.5) and math.isclose(percentile([1.0, 2.0, 3.0, 4.0], 95), 3.85), 'Percentiles interpolate like the Swift tracker')
+    require(math.isclose(low, 0.0, abs_tol=1e-12), 'Wilson lower bound')
+    require(math.isclose(high, 0.1135, abs_tol=1e-3), 'Wilson upper bound')
+    require(math.isclose(percentile([4.0, 1.0, 3.0, 2.0], 50), 2.5), 'Median interpolates like the Swift tracker')
+    require(math.isclose(percentile([1.0, 2.0, 3.0, 4.0], 95), 3.85), 'p95 interpolates like the Swift tracker')
     require(longest_shared_run('The council approved the repairs.', 'Yesterday the council approved the repairs at noon.') == (5, 5), 'Longest copied word run')
     require(math.isclose(jaccard('The bridge reopened on Monday.', 'The bridge reopened Monday after repairs.'), 0.6), 'Content-word Jaccard')
 
-    def record(result, seconds, failure=None):
-        passage = {'id': 'pass-1', 'articleID': 'a1', 'text': 'Officials said the bridge reopened on Monday after repairs costing $4m.', 'fingerprint': 'f'}
-        citation = {'id': 'c1', 'articleID': 'a1', 'passageID': 'pass-1', 'passageFingerprint': 'f', 'quote': passage['text'], 'sourceName': 'Publisher A'}
-        def fact(i, text):
-            return {'id': f'model_claim_{i}', 'text': text, 'citationIDs': ['c1']}
-        document = {'eventID': f'e-{seconds}', 'citations': {'c1': citation},
-                    'facts': [fact(2, 'The bridge reopened on Monday after repairs costing $4m.'), fact(3, 'Repairs cost $4m.'), fact(4, 'Officials confirmed it.')],
-                    'evidenceSections': {'introduction': [fact(0, 'The bridge reopened on Monday.'), fact(1, 'Officials gave the cost.')]}}
-        outcome = None if failure else {'result': result, 'lines': 6, 'malformedLines': 1, 'deterministicRejections': 0, 'modelRejections': 0}
-        return {'document': document, 'passages': [passage], 'audit': {'unsupportedClaims': 0, 'totalCriticalErrors': 0},
-                'durationSeconds': seconds, 'failure': failure, 'outcome': outcome, 'sources': 2}
 
+def check_sheet(directory):
+    for index, item in enumerate([fixture_record('accepted', 4.0), fixture_record('weakDraft', 6.0), fixture_record(None, 1.0, 'refusal')], 1):
+        (directory / f'overview-private-live-{index}.json').write_text(json.dumps(item))
+    (directory / 'perspectives.json').write_text(json.dumps({'events': 4, 'twoOrMore': 1, 'one': 1, 'none': 2}))
+    require(sheet(directory) == 5, 'Sheet lists the five retained claims of the accepted overview')
+    expect_rejected(lambda: sheet(directory), FileExistsError, 'A labelled sheet was replaced')
+    with (directory / SHEET).open(newline='') as sheet_file:
+        rows = list(csv.DictReader(sheet_file))
+    require([row['claim'] for row in rows][:2] == ['1:model_claim_0', '1:model_claim_1'], 'Sheet lists the introduction first')
+    require(rows[0]['section'] == 'introduction', 'Introduction rows are marked')
+    unlabelled = report(directory)
+    require(unlabelled['claims']['unlabelled'] == 5, 'Unlabelled claims are counted')
+    require(not unlabelled['decisionInputs']['labellingComplete'], 'Unlabelled claims leave labelling incomplete')
+    for row, label in zip(rows, ['supported', 'supported', 'supported', 'unsupported', 'critical']):
+        row['label'] = label
+    with (directory / SHEET).open('w', newline='') as output:
+        writer = csv.DictWriter(output, COLUMNS, lineterminator='\n')
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def check_report(directory):
+    result = report(directory)
+    overviews, claims_report = result['overviews'], result['claims']
+    require((overviews['attempted'], overviews['accepted']['count'], overviews['modelFailures']) == (3, 1, 1), 'Attempted, accepted and failed counts')
+    require(overviews['fallbackCauses'] == {'accepted': 1, 'refusal': 1, 'weakDraft': 1}, 'Raw fallback causes')
+    require(overviews['lineCounts']['malformed'] == 2, 'Malformed lines')
+    groups = overviews['fallbackGroups']
+    require((groups['refusal'], groups['format'], groups['weakDraft']) == (1, 0, 1), 'Fallback groups')
+    latency = result['latencySeconds']
+    expected = {'all': {'p50': 4.0, 'p95': 5.8}, 'accepted': {'p50': 4.0, 'p95': 4.0}}
+    require(all(math.isclose(latency[group][key], value) for group in expected for key, value in expected[group].items()), 'Latency percentiles')
+    require((claims_report['retained'], claims_report['labelled'], claims_report['critical']['count']) == (5, 5, 1), 'Labelled claim counts')
+    require(math.isclose(claims_report['criticalUpperBound95'], wilson(1, 5)[1]), 'Critical-error Wilson upper bound')
+    verbatim = result['verbatim']
+    require((verbatim['claimsCopiedWhole']['count'], verbatim['claimsCopyingAtLeast8Words']['count']) == (2, 1), 'Verbatim copy counts')
+    require(result['introductionRepetition']['repeatingAFact']['count'] == 0, 'Introduction repetition')
+    decision = result['decisionInputs']
+    require(decision['labellingComplete'] and decision['criticalErrorObserved'], 'Decision inputs')
+    require(decision['acceptedTarget'] == DEFAULT_TARGET, 'Default target without a run summary')
+    require(math.isclose(result['perspectiveCoverage']['twoOrMoreRate']['rate'], 0.25), 'Perspective coverage rate')
+    (directory / 'overviews.json').write_text(json.dumps({'target': 1}))
+    require(report(directory)['decisionInputs']['acceptedTargetMet'], 'The run summary sets the target')
+    public = (directory / REPORT).read_text()
+    require('bridge' not in public.lower() and 'Publisher A' not in public, 'Report must not carry publisher or model text')
+    (directory / SHEET).write_text('claim,label\n1:model_claim_0,maybe\n')
+    expect_rejected(lambda: report(directory), ValueError, 'Unknown label accepted')
+
+
+def self_check():
+    check_measures()
     with tempfile.TemporaryDirectory() as temporary:
         directory = pathlib.Path(temporary)
-        for index, item in enumerate([record('accepted', 4.0), record('weakDraft', 6.0), record(None, 1.0, 'refusal')], 1):
-            (directory / f'overview-private-live-{index}.json').write_text(json.dumps(item))
-        (directory / 'perspectives.json').write_text(json.dumps({'events': 4, 'twoOrMore': 1, 'one': 1, 'none': 2}))
-        require(sheet(directory) == 5, 'Sheet lists the five retained claims of the accepted overview')
-        try:
-            sheet(directory)
-        except FileExistsError:
-            pass
-        else:
-            raise AssertionError('A labelled sheet was replaced')
-        with (directory / SHEET).open(newline='') as sheet_file:
-            rows = list(csv.DictReader(sheet_file))
-        require([row['claim'] for row in rows][:2] == ['1:model_claim_0', '1:model_claim_1'] and rows[0]['section'] == 'introduction', 'Sheet lists the introduction first')
-        unlabelled = report(directory)
-        require(unlabelled['claims']['unlabelled'] == 5 and not unlabelled['decisionInputs']['labellingComplete'], 'Unlabelled claims are reported as incomplete')
-        for row, label in zip(rows, ['supported', 'supported', 'supported', 'unsupported', 'critical']):
-            row['label'] = label
-        with (directory / SHEET).open('w', newline='') as output:
-            writer = csv.DictWriter(output, COLUMNS, lineterminator='\n')
-            writer.writeheader()
-            writer.writerows(rows)
-        result = report(directory)
-        require(result['overviews']['attempted'] == 3 and result['overviews']['accepted']['count'] == 1, 'Attempted and accepted counts')
-        require(result['overviews']['fallbackCauses'] == {'accepted': 1, 'refusal': 1, 'weakDraft': 1}, 'Raw fallback causes')
-        require(result['overviews']['modelFailures'] == 1 and result['overviews']['lineCounts']['malformed'] == 2, 'Model failures and malformed lines')
-        require(math.isclose(result['latencySeconds']['all']['p50'], 4.0) and math.isclose(result['latencySeconds']['accepted']['p95'], 4.0), 'Latency percentiles')
-        claims_report = result['claims']
-        require((claims_report['retained'], claims_report['labelled'], claims_report['critical']['count']) == (5, 5, 1), 'Labelled claim counts')
-        require(math.isclose(claims_report['criticalUpperBound95'], wilson(1, 5)[1]), 'Critical-error Wilson upper bound')
-        require(result['verbatim']['claimsCopiedWhole']['count'] == 2 and result['verbatim']['claimsCopyingAtLeast8Words']['count'] == 1, 'Verbatim copy counts')
-        require(result['introductionRepetition']['repeatingAFact']['count'] == 0, 'Introduction repetition')
-        require(result['decisionInputs']['labellingComplete'] and result['decisionInputs']['criticalErrorObserved'], 'Decision inputs')
-        require(math.isclose(result['perspectiveCoverage']['twoOrMoreRate']['rate'], 0.25), 'Perspective coverage rate')
-        groups = result['overviews']['fallbackGroups']
-        require((groups['refusal'], groups['format'], groups['weakDraft']) == (1, 0, 1), 'Fallback groups')
-        require(result['decisionInputs']['acceptedTarget'] == DEFAULT_TARGET, 'Default target without a run summary')
-        (directory / 'overviews.json').write_text(json.dumps({'target': 1}))
-        require(report(directory)['decisionInputs']['acceptedTargetMet'], 'The run summary sets the target')
-        public = (directory / REPORT).read_text()
-        require('bridge' not in public.lower() and 'Publisher A' not in public, 'Report must not carry publisher or model text')
-        (directory / SHEET).write_text('claim,label\n1:model_claim_0,maybe\n')
-        try:
-            report(directory)
-        except ValueError:
-            pass
-        else:
-            raise AssertionError('Unknown label accepted')
+        check_sheet(directory)
+        check_report(directory)
     print('Overview review self-check passed')
 
 
