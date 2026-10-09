@@ -107,6 +107,8 @@ struct SidebarView: View {
     /// the badge, and row size follows the person's sidebar size setting.
     @ViewBuilder
     private func topicRow(title: String, icon: String, badge: Int? = nil, isLoading: Bool = false, accessibility: String? = nil) -> some View {
+        let count = badge ?? 0
+        let badgeValue = count > 0 ? String(count) : ""
         Group {
             if isLoading {
                 HStack {
@@ -122,7 +124,7 @@ struct SidebarView: View {
         }
         .tag(title)
         .accessibilityLabel(accessibility ?? title)
-        .accessibilityValue(isLoading ? "Refreshing" : (badge ?? 0) > 0 ? "\(badge ?? 0)" : "")
+        .accessibilityValue(isLoading ? "Refreshing" : badgeValue)
     }
 
     private var inboxSection: some View {
