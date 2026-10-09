@@ -127,13 +127,18 @@ final class UpdateChecker: ObservableObject {
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
         request.setValue("NewsApp/\(currentAppVersion)", forHTTPHeaderField: "User-Agent")
 
+        let customHeaders = [
+            "Accept": "application/vnd.github+json",
+            "User-Agent": "NewsApp/\(currentAppVersion)"
+        ]
+
         do {
             let data: Data
             let response: URLResponse
             if let session {
                 (data, response) = try await session.data(for: request)
             } else {
-                (data, response) = try await SecureHTTPClient.shared.fetchData(from: url, maxBytes: 1024 * 1024, timeout: 10)
+                (data, response) = try await SecureHTTPClient.shared.fetchData(from: url, maxBytes: 1024 * 1024, timeout: 10, customHeaders: customHeaders)
             }
             guard let httpResponse = response as? HTTPURLResponse else {
                 statusMessage = "Invalid server response"
