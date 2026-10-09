@@ -1,10 +1,10 @@
 # Contributing to NewsApp
 
-Start with [README.md](README.md), [architecture and technology constraints](docs/ARCHITECTURE.md), [PRIVACY.md](PRIVACY.md) and [SECURITY.md](SECURITY.md). These documents apply to every contributor. `AGENTS.md` and `JULES.md` contain instructions for coding agents only.
+Start with [README.md](README.md), [architecture and technology constraints](docs/ARCHITECTURE.md), [PRIVACY.md](PRIVACY.md) and [SECURITY.md](SECURITY.md); for UI work, also the [design language](docs/DESIGN.md). These documents apply to every contributor. `AGENTS.md` and `JULES.md` contain instructions for coding agents only.
 
 ## Development
 
-Use the existing native Swift/SwiftUI stack, keep changes focused, preserve user data and migrations, and treat feed/article input as untrusted. Maintain Swift 6 isolation and cancellation, deterministic taxonomy, accessibility and the shared design tokens. Do not add cloud AI, telemetry or third-party models.
+Use the existing native Swift/SwiftUI stack, keep changes focused, preserve user data and migrations, and treat feed/article input as untrusted. Maintain Swift 6 isolation and cancellation, deterministic taxonomy, accessibility, and the design language in [docs/DESIGN.md](docs/DESIGN.md): its tokens, components and Liquid Glass rules. Do not add cloud AI, telemetry or third-party models.
 
 Build on Apple silicon with Xcode 27 selected. The deployment target remains macOS 15; newer APIs require availability checks.
 

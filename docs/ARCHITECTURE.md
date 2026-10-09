@@ -8,7 +8,7 @@ Native macOS, local-first RSS reader. This document defines the supported techno
 - Native Apple frameworks: Foundation, Network, SQLite3, NaturalLanguage, conditional FoundationModels, OSLog/signposts and Swift Concurrency. Prefer existing services and native APIs; third-party dependencies need a concrete requirement without a reasonable native solution.
 - Local-first storage, no cloud backend, remote AI, custom AI models, telemetry or analytics SDKs. OSLog/signposts are local diagnostics. See [PRIVACY.md](../PRIVACY.md).
 - Current development and verification builds are Apple silicon (arm64), ad-hoc signed with App Sandbox and Hardened Runtime. Intel/universal builds and notarization are outside current development scope.
-- Native keyboard and trackpad interaction, accessibility, shared semantic design tokens and restrained Liquid Glass. Avoid fixed-display layout hacks and gratuitous animation.
+- Native keyboard and trackpad interaction, accessibility, shared semantic design tokens and restrained Liquid Glass. Avoid fixed-display layout hacks and gratuitous animation. [DESIGN.md](DESIGN.md) defines the design language, its tokens and components, and where Liquid Glass may be used.
 
 ## Implementation invariants
 
