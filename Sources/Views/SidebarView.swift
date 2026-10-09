@@ -47,7 +47,6 @@ struct SidebarView: View {
         }
         .listStyle(.sidebar)
         .scrollContentBackground(.visible)
-        .softScrollEdge()
         .navigationSplitViewColumnWidth(min: 220, ideal: 240, max: 300)
         .toolbar {
             ToolbarItem(placement: .primaryAction) {

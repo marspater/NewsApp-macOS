@@ -111,7 +111,10 @@ struct ArticleDetailView: View {
     var body: some View {
         contentLayer
             .background(AppColor.background)
+            .navigationTitle(displaySource)
+            .toolbar(removing: .title)
             .toolbar { readerToolbar }
+            .windowToolbarFullScreenVisibility(.onHover)
             .focusable()
             .focusEffectDisabled()
             .focused($isViewFocused)

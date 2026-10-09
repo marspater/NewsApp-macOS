@@ -1,8 +1,10 @@
 # Changelog
 
-## Unreleased — 9 October 2026
+## Unreleased — 10 October 2026
 
 ### Changed
+
+- macOS chooses automatic scroll edges for the sidebar and story list; the reader uses its publisher as the window title and reveals its toolbar on hover in full screen.
 
 - Design foundations (no visible change): the imitation frosted surface is removed, custom glass helpers use native Liquid Glass on macOS 26 and later with a regular-material fallback on macOS 15, and the design tokens named in docs/DESIGN.md exist. `./test.sh` first runs `script/design_lint.sh`, which fails when a view adds literal font sizes, colors, corner radii, materials, direct glass or `uppercased()` beyond the recorded baseline.
 - Reader: one segmented Overview / Story / Web control in the toolbar replaces the separate overview picker and Reader and Web toggles (Overview appears only for events with an overview). The reader toolbar no longer draws an opaque background or forces a soft scroll edge, so on macOS 26 and 27 it uses the system Liquid Glass and stories scroll beneath it. W still switches modes.

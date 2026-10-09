@@ -85,7 +85,6 @@ struct MainView: View {
         // The system sidebar field: Liquid Glass on macOS 26, the standard search field on macOS 15.
         .searchable(text: $searchText, placement: .sidebar, prompt: "Search")
         .searchSuggestions { searchOperatorSuggestions }
-        .softScrollEdge()
         .frame(minWidth: 900, minHeight: 600)
         .onAppear {
             if feedManager.articles.isEmpty {

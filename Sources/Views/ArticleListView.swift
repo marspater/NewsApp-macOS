@@ -137,7 +137,6 @@ struct ArticleListView: View {
                 }
                 .onHover { isPointerInList = $0 }
                 .onChange(of: queuedUpdateCount, handleQueuedUpdatesChange)
-                .softScrollEdge()
                 .focusable()
                 .focusEffectDisabled()
                 .onKeyPress { press in
