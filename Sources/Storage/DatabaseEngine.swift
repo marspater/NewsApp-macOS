@@ -1574,18 +1574,9 @@ actor DatabaseEngine {
     
     // MARK: - Full Text Search (FTS5)
     
-    func searchArticles(
-        query: String,
-        limit: Int = 100,
-        after: ArticleQueryCursor? = nil,
-        muting: MuteRules = MuteRules()
-    ) throws -> [FeedArticle] {
-        guard let db = db else { throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Database not open"]) }
-        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return [] }
-        
-        let parsed = ArticleFilterQuery.parse(trimmed)
+    private func buildSearchQuery(parsed: ArticleFilterQuery, muting: MuteRules, after: ArticleQueryCursor?, limit: Int) -> (sql: String, params: [QueryParameter]) {
         let cleanTerms = parsed.terms
+        let hasFTS = !cleanTerms.isEmpty
 
         var sql = """
         SELECT a.id, a.guid, a.canonical_url, a.title, a.description, a.content,
@@ -1598,9 +1589,7 @@ actor DatabaseEngine {
         LEFT JOIN article_enrichment ae ON ae.article_id = a.id
         """
 
-        
         sql = sql.replacingOccurrences(of: "a.reader_document\n", with: "a.reader_document, " + (cleanTerms.isEmpty ? Self.articleDateOrder : "fts.rank") + "\n")
-        let hasFTS = !cleanTerms.isEmpty
         let conditions = searchConditions(parsed)
         sql += conditions.join + " AND " + Self.visibleArticle + conditions.sql
         var params = conditions.params
@@ -1623,6 +1612,22 @@ actor DatabaseEngine {
             sql += " ORDER BY \(Self.articleDateOrder) DESC, a.id LIMIT ?"
         }
         params.append(("int", limit))
+
+        return (sql, params)
+    }
+
+    func searchArticles(
+        query: String,
+        limit: Int = 100,
+        after: ArticleQueryCursor? = nil,
+        muting: MuteRules = MuteRules()
+    ) throws -> [FeedArticle] {
+        guard let db = db else { throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Database not open"]) }
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return [] }
+
+        let parsed = ArticleFilterQuery.parse(trimmed)
+        let (sql, params) = buildSearchQuery(parsed: parsed, muting: muting, after: after, limit: limit)
         
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
