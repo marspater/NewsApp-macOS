@@ -1753,6 +1753,18 @@ actor DatabaseEngine {
         return next
     }
 
+    func setSaved(articleIds: [String], isSaved: Bool) throws {
+        guard let db = db else { throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Database not open"]) }
+        try beginTransaction()
+        var success = false
+        defer { if !success { try? rollbackTransaction() } }
+        for id in articleIds {
+            try setSaved(articleId: id, isSaved: isSaved)
+        }
+        try commitTransaction()
+        success = true
+    }
+
     func setSaved(articleId: String, isSaved: Bool) throws {
         let articleId = try resolvedArticleID(articleId)
         guard let db = db else { throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Database not open"]) }

@@ -209,17 +209,31 @@ final class ArticleStore: ObservableObject {
 
     @discardableResult
     func setSaved(article: FeedArticle, isSaved nextState: Bool) async -> Bool {
+        await setSaved(articles: [article], isSaved: nextState)
+    }
+
+    @discardableResult
+    func setSaved(articles: [FeedArticle], isSaved nextState: Bool) async -> Bool {
+        guard !articles.isEmpty else { return true }
         do {
-            _ = try await database.upsertArticles([article], preservingStoredContent: true)
-            let id = try await database.resolvedArticleID(for: article)
-            guard let storedArticle = try await database.fetchArticles(limit: 1, id: id).first else { return false }
-            try await database.setSaved(articleId: storedArticle.id, isSaved: nextState)
+            _ = try await database.upsertArticles(articles, preservingStoredContent: true)
+            var storedArticles = [FeedArticle]()
+            for article in articles {
+                let id = try await database.resolvedArticleID(for: article)
+                if let storedArticle = try await database.fetchArticles(limit: 1, id: id).first {
+                    storedArticles.append(storedArticle)
+                }
+            }
+            try await database.setSaved(articleIds: storedArticles.map { $0.id }, isSaved: nextState)
             if nextState {
-                if !savedArticles.contains(where: { $0.id == storedArticle.id }) {
-                    savedArticles.insert(storedArticle, at: 0)
+                for storedArticle in storedArticles {
+                    if !savedArticles.contains(where: { $0.id == storedArticle.id }) {
+                        savedArticles.insert(storedArticle, at: 0)
+                    }
                 }
             } else {
-                savedArticles.removeAll { $0.id == storedArticle.id }
+                let idsToRemove = Set(storedArticles.map { $0.id })
+                savedArticles.removeAll { idsToRemove.contains($0.id) }
             }
             let counts = try await database.counts()
             self.savedCount = counts.saved

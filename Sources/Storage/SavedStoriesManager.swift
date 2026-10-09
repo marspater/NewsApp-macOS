@@ -64,9 +64,7 @@ final class SavedStoriesManager: ObservableObject {
         pendingMutations += 1
         mutationTask = Task {
             await previous?.value
-            for article in articles {
-                await articleStore.setSaved(article: article, isSaved: isSaved)
-            }
+            await articleStore.setSaved(articles: articles, isSaved: isSaved)
             pendingMutations -= 1
             if pendingMutations == 0 {
                 savedArticles = articleStore.savedArticles
