@@ -165,9 +165,7 @@ struct ArticleListView: View {
                 .onReceive(NotificationCenter.default.publisher(for: .openInBrowserCommand)) { _ in
                     if articlePath.isEmpty, let id = focusedArticleID,
                        let art = filteredArticles.first(where: { $0.id == id }),
-                       let url = URL(string: art.link),
-                       let scheme = url.scheme?.lowercased(),
-                       scheme == "http" || scheme == "https" {
+                       let url = URL(string: art.link) {
                         NSWorkspace.shared.open(url)
                     }
                 }

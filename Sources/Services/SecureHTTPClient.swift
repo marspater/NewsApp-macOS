@@ -124,8 +124,7 @@ actor SecureHTTPClient {
         allowHTTP: Bool = false,
         cachePolicy: URLRequest.CachePolicy = .reloadIgnoringLocalCacheData,
         validators: FeedValidators? = nil,
-        reportsBackpressure: Bool = false,
-        customHeaders: [String: String]? = nil
+        reportsBackpressure: Bool = false
     ) async throws -> (Data, HTTPURLResponse) {
         try validateDestination(url, allowHTTP: allowHTTP)
 
@@ -138,13 +137,6 @@ actor SecureHTTPClient {
         request.setValue("navigate", forHTTPHeaderField: "Sec-Fetch-Mode")
         request.setValue("document", forHTTPHeaderField: "Sec-Fetch-Dest")
         request.setValue("?1", forHTTPHeaderField: "Sec-Fetch-User")
-
-        if let customHeaders {
-            for (key, value) in customHeaders {
-                request.setValue(value, forHTTPHeaderField: key)
-            }
-        }
-
         // Explicit validators with a reload policy: URLSession passes the 304 to us instead of replaying its cache.
         if let etag = validators?.etag { request.setValue(etag, forHTTPHeaderField: "If-None-Match") }
         if let modified = validators?.lastModified { request.setValue(modified, forHTTPHeaderField: "If-Modified-Since") }
