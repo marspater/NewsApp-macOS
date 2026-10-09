@@ -10,7 +10,7 @@ Merged follow-ups:
 
 | Work | Implementation and evidence | Remaining acceptance |
 | --- | --- | --- |
-| Event grouping (#286–#288) | Country aliases, casualty changes, whole-event compatibility, fragment merges and on-device judging; tune precision 0.957, recall 0.710 | Current matcher needs held-out English evaluation in #307; earlier precision 0.958 (23/24) was accepted for the frozen 5 October matcher |
+| Event grouping (#286–#288) | Country aliases, casualty changes, whole-event compatibility, fragment merges and on-device judging; tune precision 0.957, recall 0.710 | [Current English regression replay](../audits/2026-10-09-current-matcher-replay.md) fails the ≥0.97 precision target: judge-off 0.955 / 0.553 precision/recall; judge-on 0.545 / 0.947. Narrowing and a fresh release sample remain in #307; the 5 October acceptance applies to the earlier matcher |
 | Importance / waiting (#289; #292 closed) | 667 active publications rated; 64 waiting; zero rated-major publications hidden | Independent labels and stability in #309; the predicate measurement does not validate model ratings |
 | Publisher images (#290; #293 closed) | 466 / 473 active cards had usable images (98.5%); all 128 added URLs decoded | Seven placeholders remain; in-article figure fallback in #312 |
 | Plain-text overviews (#291; #294 closed) | Five of eight live drafts accepted, 40 retained claims reviewed with zero detected critical errors; the three labelled controls fell back | Independent accepted-draft controls, error bounds and latency in #308 |
@@ -24,8 +24,8 @@ Follow-up status as of this update:
 
 | Issue | Status / scope | Work |
 | --- | --- | --- |
-| #305 | In review · P1 · [PR #332](https://github.com/marspater/NewsApp-macOS/pull/332) | Isolated copied-library migration, preservation, regeneration and live UI checks passed; real-app notification delivery is tracked separately in #334 |
-| #307 | Ready · P1 | Freeze and evaluate the current event matcher; Mars approved one regression replay of the earlier holdout, followed by a fresh English release sample |
+| #305 | Done · P1 · [PR #332](https://github.com/marspater/NewsApp-macOS/pull/332) merged | Isolated copied-library migration, preservation, regeneration and live UI checks passed; real-app notification delivery is tracked separately in #334 |
+| #307 | In review · P1 · replay evidence | Frozen historical English replay completed once per judge mode; 30 judge-on false pairs in four mixed events. Narrowing, a fresh post-9-October release sample and Mars acceptance remain open |
 | #308 | Ready · P1 | Independent overview claim review, error bounds and latency |
 | #309 | Ready · P2 | Mars settled the three borderline importance cases; implement the rules, then measure independent labels and stability |
 | #311 | Done · P2 · [PR #328](https://github.com/marspater/NewsApp-macOS/pull/328) merged | Full suite leaves no new test plist; exact-run cleanup and narrow legacy instructions are merged |

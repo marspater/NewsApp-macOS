@@ -203,7 +203,16 @@ final class DOMElementNode: Sendable {
             if prose.hasPrefix("Listen to Newsbeat"),
                links.contains("/sounds/play/live:bbc_radio_one"),
                links.contains("/programmes/b006wkry/episodes/player") { return true }
+            // Newsletter signup prose (BBC, #330): it links to a newsletter page and asks the reader to sign up.
+            if links.contains(where: { URL(string: $0)?.path.hasPrefix("/newsletters/") == true }),
+               prose.range(of: "sign up", options: .caseInsensitive) != nil,
+               prose.range(of: "newsletter", options: .caseInsensitive) != nil { return true }
         }
+        // Promotional newsletter banners are images whose alt text describes the promotion; editorial figures stay.
+        if ["figure", "picture", "img"].contains(tag),
+           findNodes(tag: "img").contains(where: {
+               $0.attributes["alt"]?.range(of: #"(?i)\bbanner promoting\b[^.]*\bnewsletter\b"#, options: .regularExpression) != nil
+           }) { return true }
         let identifiers = [className, idValue, dataComponent, attributes["data-testid"] ?? "", attributes["data-block"] ?? "", attributes["role"] ?? ""]
         return identifiers.contains {
             Self.auxiliaryPattern.firstMatch(in: $0, range: NSRange($0.startIndex..., in: $0)) != nil

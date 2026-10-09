@@ -10,12 +10,17 @@
 
 - Waiting stories are filtered from notifications after importance rating. A rating computed before a publisher edits a headline is discarded.
 - Imageless, unmuted stories look up declared publisher images from a bounded page prefix, including schema.org metadata. Briefing and grouped cards reuse the results; event cards choose the best usable lead across all members. Publishers without a usable image retain the card placeholder. Lookups run after clustering, so slow or unreachable publisher pages never delay notifications.
+- When a publisher page declares no usable image, the card lookup takes the first qualifying figure from the article body in the same bounded page prefix. Logos, newsletter banners, tracking pixels, extreme aspect ratios and shared site images are still rejected (#312).
+- Shared publisher site images (brand cards) found on story pages are remembered, so no later story keeps one regardless of lookup order. Schema v21 adds this record; existing images and reading state are preserved (#338).
 
 - Stories are rated major, notable or minor on device. Minor stories wait out of Today, Unread, sections and the Briefing until four publishers cover them (the list says how many wait and can show them); unread ones that are still waiting a day later are removed and are not re-added by later refreshes. Without on-device AI nothing is hidden.
+- Importance ratings follow three borderline rules (#309): broadcaster or industry business news is minor unless it affects a whole sector or national policy; incidents at military sites count by consequence (trespass arrests minor; damage, sabotage, terrorism charges or a real breach notable); nationwide staple price changes are notable, single-company or regional ones minor.
 
 - The app supports English-language feeds only for now. The catalog no longer offers its Ukrainian, German, French, Italian, Dutch and Polish feeds, and existing subscriptions to those catalog feeds are removed at launch; custom feeds are kept. The entries stay in the code for a later release (#264).
 
 - Only free, open sources: every catalog feed was opened in the app's own reader on 8 October 2026 (`./test.sh --catalog-reader-access`); none is paywalled or blocked. Onet is removed from the catalog, and existing Onet subscriptions end once at launch. Politico, The Hill, Fast Company, Dawn and Ukrainska Pravda are now marked readable; France 24 stays preview-only because most of its feed items are videos.
+
+- The reader drops BBC newsletter promotions: banner images whose alt text describes a newsletter promotion, and signup paragraphs that link to a `/newsletters/` page. Editorial figures, captions and prose that merely mention a newsletter stay (#330).
 
 - Story links that a feed publishes over `http://` (Africanews) are read over https instead of being refused, and embedded-video consent notices (France 24) no longer appear as article text.
 
