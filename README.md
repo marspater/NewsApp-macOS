@@ -5,16 +5,16 @@
 
 A native, local-first RSS, Atom and JSON Feed reader built with SwiftUI, WebKit, SQLite and Apple's on-device intelligence frameworks. No cloud AI services or telemetry.
 
-## Latest changes — 30 September 2026
+## Story experience — 9 October 2026
 
-- Restore article loading for older databases and keep cached stories visible during refresh.
-- Protect network connections with public-address validation and numeric IP pinning; block local Web preview resources and disable publisher scripts.
-- Preserve reader headings, lists, quotations and code while excluding comments, newsletters and related-story furniture. Normalize and wrap summary tags.
-- Query the full persisted archive with stable pagination, preserve multi-feed article provenance, and make read/save/cache updates reliable.
-- Use native toolbar, Liquid Glass search and scroll-edge effects where supported.
-- Verify arm64-only, ad-hoc-signed builds locally and in CI. Notarization and Intel builds are outside the development scope.
+- Group reports of one event into a card with its coverage and an overview; read and saved state stay with each publication.
+- Rate story importance on device. Minor stories wait until four publishers cover them; eligible unread waiting stories expire after a day, preserving saved/read stories, cited evidence and collected tension-panel history. Unrated stories remain visible, and the list can reveal waiting stories.
+- Fill missing card images from declared publisher images through bounded, protected page requests. Grouped cards choose a usable image across their members; pages without one retain the placeholder.
+- Generate multi-source overview introductions and key facts on device, with passage citations, deterministic checks and a separate model support judgment. Weak or refused drafts keep the extractive overview. This judgment is heuristic; independent quality evaluation remains open in [#308](https://github.com/marspater/NewsApp-macOS/issues/308).
+- Regenerate provisional overviews and summaries when next requested, including after a macOS update changes the on-device model. AI and energy settings gate generation; native reading and deterministic fallbacks remain available.
+- Keep protected networking, local SQLite state and arm64 ad-hoc verification builds. English is the current release scope; non-English matching and spoken VoiceOver verification remain parked.
 
-See the [changelog](CHANGELOG.md), [current validation report](docs/audits/2026-09-30-production-readiness.md) and [privacy policy](PRIVACY.md).
+See the [9 October curation/image audit](docs/audits/2026-10-09-story-curation-images.md), [overview audit](docs/audits/2026-10-09-plain-text-overviews.md), [current plan status](docs/plans/2026-09-30-story-experience.md), [changelog](CHANGELOG.md) and [privacy policy](PRIVACY.md). The audits describe their measured samples; they do not establish current clustering quality or independent overview acceptance.
 
 ## Reading
 
@@ -79,4 +79,4 @@ Standard project, contribution, privacy and security documents stay at the root.
 - `Sources/Coordinators`: feed refresh and notifications.
 - `Tests/NewsTests.swift`: parsing, security, persistence, classification and state regression checks.
 
-See the [current validation report](docs/audits/2026-09-30-production-readiness.md), [earlier modernization report](docs/audits/2026-09-27-reader-modernization.md) and [security policy](SECURITY.md).
+See the [30 September readiness report](docs/audits/2026-09-30-production-readiness.md), [earlier modernization report](docs/audits/2026-09-27-reader-modernization.md) and [security policy](SECURITY.md).

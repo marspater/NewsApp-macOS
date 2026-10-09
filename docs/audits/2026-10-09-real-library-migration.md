@@ -1,6 +1,6 @@
 # Installed-library migration check — 9 October 2026
 
-The production bundle built from `main` commit `c5a8fe0ac767c6adae3c33c587688fa80e29780d` successfully migrated a read-only backup of the installed library from schema v16 to v20. This records the completed migration and runtime checks for [#305](https://github.com/marspater/NewsApp-macOS/issues/305). Live macOS notification delivery remains unverified.
+The production bundle built from `main` commit `c5a8fe0ac767c6adae3c33c587688fa80e29780d` successfully migrated a read-only backup of the installed library from schema v16 to v20. This records the completed migration and runtime checks for [#305](https://github.com/marspater/NewsApp-macOS/issues/305). Live macOS notification delivery remains unverified and, at Mars’s request, is deferred to real compiled-app validation in [#334](https://github.com/marspater/NewsApp-macOS/issues/334).
 
 ## Isolation and build
 
@@ -50,4 +50,18 @@ A diagnostic-only rebuild captured the existing AppDelegate authorization callba
 
 `./test.sh --story-regressions` passed, including `testStoryVisibility`: the production FeedManager dispatches its notification callback after importance rating while publisher-image lookups remain blocked on an explicit gate. That is deterministic dispatch-order proof, separate from macOS delivery. The full commit-hook regressions also passed when publishing this audit.
 
-No sealed holdout replay, parked-language or VoiceOver acceptance, distribution, notarization or installation was performed. The remaining live notification check keeps #305 open.
+The approved LaunchServices registration refresh completed and the existing app authorization callback returned the same rejection. The notification daemon could not find or validate the temporary client identity; the underlying cause remains undiagnosed. On 9 October Mars deferred delivery validation to the real compiled app. [#334](https://github.com/marspater/NewsApp-macOS/issues/334) tracks actual notification presentation, image-lookup timing and click-through on that build. No notification permission or registration approval is pending.
+
+No sealed holdout replay, parked-language or VoiceOver acceptance, distribution, notarization or installation was performed. The isolated migration scope in #305 is complete and remains In review through PR #332 until merge. Notification delivery was deferred, not passed.
+
+## Work log and remaining queue — 9 October 2026
+
+- Resolved the Jules PR queue against current code. Useful corrections are merged through PRs #325–#327; there are no open Jules PRs at this status check.
+- Test preference cleanup #311 is complete through merged PR #328 (`a4db2d4`). The runner removes only its own UUID preference after process exit; the verified run left no new plist and legacy preferences were preserved.
+- Current feature documentation #315 remains In review through PR #329. Its retargeted head is `19dacc8`; new hosted CI is running. Earlier-head checks do not establish completion of that run.
+- Isolated migration #305 remains In review through PR #332. The source tested was `c5a8fe0`; current main `a4db2d4` adds only the reviewed test-runner cleanup. Saved/read/history preservation, one-time provisional marking, regeneration, reopen behavior, live waiting controls and rendered images passed. Full local regressions passed; the app and real preferences were preserved.
+- Ready: current matcher evaluation #307 (P1), independent overview quality/latency #308 (P1), and importance instructions plus independent-label/stability measurements #309 (P2). The data choice for #307 and borderline importance rules for #309 are already decided; scoring and implementation remain unfinished.
+- Backlog: reader newsletter removal #330, inherited saved-state orphan #331 and card figure fallback #312 (P2). Real-app notification validation #334 is deferred in Backlog (P1) until the real compiled build is validated.
+- #313/#314 remain optional ideas; #264/#268 remain parked; the tension experiment/calibration and source discovery #99/#235/#244 remain outside core release work.
+
+PR #328 is merged. PR #329 should merge before the audit PR #332, which also reconciles the plan below. No new installation or real-app acceptance is claimed by this log.
