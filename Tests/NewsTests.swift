@@ -4676,6 +4676,8 @@ struct NewsTests {
         assertEqual(try await panel.tensionCorpus(day: panelDay, feedURLs: [panelFeed]).map(\.article.id), ["panel-minor"],
                     "The waiting panel story still counts in its tension day")
         assertTrue(try await panel.fetchArticles(limit: nil, hidingWaitingStories: true).isEmpty, "Kept panel stories still wait")
+        let collectionOff = try await StoryCurator.run(in: panel, judge: .unavailable, now: now.addingTimeInterval(26 * 3600))
+        assertEqual(collectionOff.expired, 1, "With collection off, the curator expires the kept panel story on its next pass")
         await panel.close()
 
         // The curator rates unrated stories within its budget; without a model nothing is rated and nothing hides.
