@@ -190,9 +190,10 @@ enum EventClusterer {
             return same
         }
         /// Exclusions and hard conflicts always win; the judge only joins fragments linked by a matching pair.
-        func compatibleFragments(_ first: [EventMatchRow], _ second: [EventMatchRow]) async throws -> Bool {
+        var fragmentExclusions: [String: Set<String>] = [:]
+        func compatibleFragments(_ first: [EventMatchRow], _ second: [EventMatchRow]) async -> Bool {
             for member in second {
-                let exclusions = try await database.eventExclusions(of: member.id)
+                let exclusions = fragmentExclusions[member.id] ?? []
                 if first.contains(where: { exclusions.contains($0.id) }) { return false }
             }
             var pairs: [EventPairAssessment] = []
@@ -212,12 +213,13 @@ enum EventClusterer {
             var merges = EventClusteringReport()
             var events = try await database.activeEventMembers(since: now.addingTimeInterval(-candidatePolicy.activeEventLifetime))
                 .sorted { $0.members.count != $1.members.count ? $0.members.count > $1.members.count : $0.id < $1.id }
+            fragmentExclusions = try await database.eventExclusions(for: events.flatMap { $0.members.map(\.id) })
             var index = 0
             while index < events.count {
                 try Task.checkCancellation()
                 var survivor = events[index]
                 // Names and action words together: a name the tagger types in one report can be a plain word in another.
-                let survivorTerms = survivor.members.reduce(into: Set<String>()) { $0.formUnion(features($1).specificAnchors.union(features($1).keywords)) }
+                var survivorTerms = survivor.members.reduce(into: Set<String>()) { $0.formUnion(features($1).specificAnchors.union(features($1).keywords)) }
                 var other = index + 1
                 while other < events.count {
                     let candidate = events[other]
@@ -226,7 +228,7 @@ enum EventClusterer {
                           survivorTerms.intersection(candidateTerms).count >= 2,
                           let gap = Self.closestGap(survivor.members, candidate.members), gap <= matchPolicy.maximumTimeGap
                     else { other += 1; continue }
-                    guard try await compatibleFragments(survivor.members, candidate.members) else { other += 1; continue }
+                    guard await compatibleFragments(survivor.members, candidate.members) else { other += 1; continue }
                     do {
                         let merged = try await database.mergeEvents(candidate.id, into: survivor.id,
                                                                     expectedVersions: (candidate.version, survivor.version), at: now)
@@ -234,6 +236,7 @@ enum EventClusterer {
                         merges.changedEvents.insert(survivor.id)
                         merges.changedEvents.insert(candidate.id)
                         survivor = (survivor.id, merged.membershipVersion, survivor.members + candidate.members)
+                        survivorTerms.formUnion(candidateTerms)
                         events[index] = survivor
                         events.remove(at: other)
                     } catch {

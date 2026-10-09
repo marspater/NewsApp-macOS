@@ -340,7 +340,7 @@ public struct OverviewProvenance: Codable, Hashable, Sendable {
 public struct EventOverviewDocument: Codable, Hashable, Sendable, Identifiable {
     public static let currentSchemaVersion = 1
     /// 3: verified plain-text synthesis, including introduction citations. Older overviews regenerate.
-    public static let currentAnalysisVersion = 3
+    public static let currentAnalysisVersion = 4
 
     public let id: String
     public let eventID: String

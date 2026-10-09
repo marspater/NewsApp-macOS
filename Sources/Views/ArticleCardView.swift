@@ -309,12 +309,14 @@ struct ArticleRemoteImage<Content: View>: View {
     let url: URL
     @ViewBuilder var content: (AsyncImagePhase) -> Content
     @State private var phase: AsyncImagePhase
+    @State private var phaseURL: URL
     @Environment(\.readerImageLoader) private var loadImage
 
     init(url: URL, @ViewBuilder content: @escaping (AsyncImagePhase) -> Content) {
         self.url = url
         self.content = content
         _phase = State(initialValue: DecodedImageCache.images.object(forKey: url as NSURL).map { .success(Self.image($0)) } ?? .empty)
+        _phaseURL = State(initialValue: url)
     }
 
     private static func image(_ image: CGImage) -> Image {
@@ -322,8 +324,13 @@ struct ArticleRemoteImage<Content: View>: View {
     }
 
     var body: some View {
-        content(phase)
+        content(phaseURL == url ? phase : .empty)
             .task(id: url) {
+                if phaseURL == url, phase.image != nil {
+                    NotificationCenter.default.post(name: .readerImageFinished, object: url, userInfo: ["success": true])
+                    return
+                }
+                phaseURL = url
                 if let cached = DecodedImageCache.images.object(forKey: url as NSURL) {
                     phase = .success(Self.image(cached))
                     NotificationCenter.default.post(name: .readerImageFinished, object: url, userInfo: ["success": true])
