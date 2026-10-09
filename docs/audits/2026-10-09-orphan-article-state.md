@@ -27,4 +27,4 @@ WHERE NOT EXISTS (SELECT 1 FROM articles a WHERE a.id = article_state.article_id
   AND NOT EXISTS (SELECT 1 FROM article_reconciliations WHERE duplicate_id = article_state.article_id);
 ```
 
-On a copy of the backup this deleted one row. Visible saved stories (2) and read stories (77) were unchanged, `foreign_key_check` became empty and `integrity_check` returned `ok`. No orphan was recoverable through an alias or a reconciliation. The repair has not been applied to the installed library; doing so is a production-data change that needs Mars's approval.
+On a copy of the backup this deleted one row. Visible saved stories (2) and read stories (77) were unchanged, `foreign_key_check` became empty and `integrity_check` returned `ok`. No orphan was recoverable through an alias or a reconciliation. On Mars's approval, the same statement was applied to the installed library (schema v16, app not running). A complete `.backup` copy was saved first next to it as `news-before-331-repair-2026-10-09.sqlite3`. One row was deleted, visible saved (2) and read (77) counts were unchanged, and `foreign_key_check` became empty; `integrity_check` returned `ok`.
