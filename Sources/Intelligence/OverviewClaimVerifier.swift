@@ -218,8 +218,8 @@ public struct OverviewClaimVerifier: Sendable {
         let claimTokens = tokenize(statement)
         let passageTokens = tokenize(passage.text)
 
-        let claimHasNegation = claimTokens.contains(where: { negationWords.contains($0) })
-        let passageHasNegation = passageTokens.contains(where: { negationWords.contains($0) })
+        let claimHasNegation = !negationWords.isDisjoint(with: claimTokens)
+        let passageHasNegation = !negationWords.isDisjoint(with: passageTokens)
 
         if claimHasNegation != passageHasNegation {
             return .negationFlipped(claimText: statement, passageID: passage.id)
