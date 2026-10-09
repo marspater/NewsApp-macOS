@@ -471,6 +471,7 @@ struct NewsTests {
         await testDistributionAndEntitlementsIntegrity()
         await testStrictSemVerAndReleaseSecurity()
         await testNotificationModeTriageAndGrammar()
+        try await testProxyStartupFailure()
         try await testSocketNetworkBoundary()
         try await testTransportCancellation()
         await testRefreshCoordinatorSingleFlightCoalescing()
@@ -6880,6 +6881,33 @@ struct NewsTests {
             response = Data("HTTP/1.1 200 OK\r\n\(cacheHeader)Content-Type: \(mime)\r\nContent-Length: \(body.utf8.count)\r\nConnection: close\r\n\r\n\(body)".utf8)
         } else { response = data ?? Data() }
         connection.send(content: response, isComplete: true, completion: .contentProcessed { _ in connection.cancel() })
+    }
+
+    static func testProxyStartupFailure() async throws {
+        print("  - Testing proxy startup failure state and catch block...")
+        let proxy = NetworkBoundaryProxy()
+        let t1 = Task { try await proxy.port() }
+        t1.cancel() // Immediately cancel to force throwing CancellationError inside the SOCKSListener setup.
+
+        do {
+            _ = try await t1.value
+            fatalError("Should have thrown CancellationError")
+        } catch is CancellationError {
+            // Expected
+        } catch {
+            fatalError("Unexpected error: \(error)")
+        }
+
+        // The first task was cancelled before it could finish setup, triggering the catch block in `port()`
+        // which sets `startup = nil`.
+        // A subsequent request should re-initialize and succeed.
+        let t2 = Task { try await proxy.port() }
+        do {
+            let port = try await t2.value
+            assertTrue(port > 0, "Proxy should have restarted and returned a valid port")
+        } catch {
+            fatalError("Second call should not throw: \(error)")
+        }
     }
 
     static func testSocketNetworkBoundary() async throws {
