@@ -1463,24 +1463,21 @@ actor DatabaseEngine {
         return (join, sql, params)
     }
 
-    // MARK: - Article Queries
-    
-    func fetchArticles(
-        section: String? = nil,
-        isRead: Bool? = nil,
-        isSaved: Bool? = nil,
-        limit: Int? = 500,
-        after: ArticleQueryCursor? = nil,
-        id: String? = nil,
-        canonicalURL: String? = nil,
-        eventID: String? = nil,
-        includingOriginals: Bool = false,
-        publicationWindow: ClosedRange<Date>? = nil,
-        muting: MuteRules = MuteRules(),
-        hidingWaitingStories: Bool = false
-    ) throws -> [FeedArticle] {
-        guard let db = db else { throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Database not open"]) }
-        
+    /// Builds the SQL query string and parameters for fetching articles based on criteria.
+    private func buildFetchArticlesQuery(
+        section: String?,
+        isRead: Bool?,
+        isSaved: Bool?,
+        limit: Int?,
+        after: ArticleQueryCursor?,
+        id: String?,
+        canonicalURL: String?,
+        eventID: String?,
+        includingOriginals: Bool,
+        publicationWindow: ClosedRange<Date>?,
+        muting: MuteRules,
+        hidingWaitingStories: Bool
+    ) throws -> (sql: String, params: [QueryParameter]) {
         var query = """
         SELECT a.id, a.guid, a.canonical_url, a.title, a.description, a.content,
                a.published_at, a.source, a.image_url, coalesce(ae.category, a.category),
@@ -1493,7 +1490,6 @@ actor DatabaseEngine {
         WHERE 1=1
         """
 
-        
         if !includingOriginals { query += " AND " + Self.visibleArticle }
         var params: [QueryParameter] = []
         
@@ -1545,6 +1541,42 @@ actor DatabaseEngine {
             query += " LIMIT ?"
             params.append(("int", lim))
         }
+
+        return (query, params)
+    }
+
+    // MARK: - Article Queries
+
+    func fetchArticles(
+        section: String? = nil,
+        isRead: Bool? = nil,
+        isSaved: Bool? = nil,
+        limit: Int? = 500,
+        after: ArticleQueryCursor? = nil,
+        id: String? = nil,
+        canonicalURL: String? = nil,
+        eventID: String? = nil,
+        includingOriginals: Bool = false,
+        publicationWindow: ClosedRange<Date>? = nil,
+        muting: MuteRules = MuteRules(),
+        hidingWaitingStories: Bool = false
+    ) throws -> [FeedArticle] {
+        guard let db = db else { throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Database not open"]) }
+
+        let (query, params) = try buildFetchArticlesQuery(
+            section: section,
+            isRead: isRead,
+            isSaved: isSaved,
+            limit: limit,
+            after: after,
+            id: id,
+            canonicalURL: canonicalURL,
+            eventID: eventID,
+            includingOriginals: includingOriginals,
+            publicationWindow: publicationWindow,
+            muting: muting,
+            hidingWaitingStories: hidingWaitingStories
+        )
         
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, query, -1, &stmt, nil) == SQLITE_OK else {
