@@ -10,6 +10,13 @@ enum DetailViewMode: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+/// The reader's toolbar modes: the event overview (events only), the extracted story, or the publisher's page.
+enum ReaderMode: Hashable {
+    case overview
+    case story
+    case web
+}
+
 enum ArticleContentState: Equatable {
     case loading
     case ready
@@ -104,9 +111,7 @@ struct ArticleDetailView: View {
     var body: some View {
         contentLayer
             .background(AppColor.background)
-            .softScrollEdge()
             .toolbar { readerToolbar }
-            .toolbarBackground(.visible, for: .windowToolbar)
             .focusable()
             .focusEffectDisabled()
             .focused($isViewFocused)
@@ -342,8 +347,6 @@ struct ArticleDetailView: View {
                 .frame(maxWidth: .infinity, alignment: .center)
             }
         }
-        .softScrollEdge()
-
     }
 
     @ViewBuilder
@@ -715,15 +718,23 @@ struct ArticleDetailView: View {
             .help("Next article (J)")
         }
         ToolbarItemGroup(placement: .principal) {
-            if currentOverview != nil {
-                Picker("Experience mode", selection: $experienceMode) {
-                    Text("Event overview").tag(ReaderExperienceMode.eventOverview)
-                    Text("Source publication").tag(ReaderExperienceMode.sourcePublication)
+            // One mode control; in the toolbar it takes the system Liquid Glass on macOS 26 and later.
+            Picker("Reading mode", selection: readerModeBinding) {
+                if currentOverview != nil {
+                    Text("Overview").tag(ReaderMode.overview)
                 }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .help("Switch between event overview and source publication")
-            } else if isOverviewLoading {
+                Text("Story").tag(ReaderMode.story)
+                Text("Web").tag(ReaderMode.web)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .fixedSize()
+            .help(currentOverview != nil
+                  ? "Show the event overview, the publisher's story or its page (W)"
+                  : "Show the publisher's story or its page (W)")
+            .accessibilityLabel("Reading mode")
+
+            if isOverviewLoading && currentOverview == nil {
                 HStack(spacing: 6) {
                     ProgressView()
                         .controlSize(.small)
@@ -735,22 +746,9 @@ struct ArticleDetailView: View {
                 .accessibilityElement(children: .combine)
                 .accessibilityLabel("Loading event overview")
             }
-
-            if currentOverview == nil || experienceMode == .sourcePublication {
-                Toggle(isOn: Binding(get: { viewMode == .reader }, set: { if $0 { viewMode = .reader } })) {
-                    Label("Reader", systemImage: "doc.richtext")
-                }
-                .toggleStyle(.button)
-                .help("Read extracted article (W)")
-                Toggle(isOn: Binding(get: { viewMode == .web }, set: { if $0 { viewMode = .web } })) {
-                    Label("Web", systemImage: "globe")
-                }
-                .toggleStyle(.button)
-                .help("View publisher website (W)")
-            }
         }
         ToolbarItemGroup(placement: .primaryAction) {
-            if viewMode == .web {
+            if readerModeBinding.wrappedValue == .web {
                 Button { webAction = .goBack } label: {
                     Label("Browser back", systemImage: "arrow.left")
                 }
@@ -804,6 +802,28 @@ struct ArticleDetailView: View {
             .help("Reading style and article actions")
             .accessibilityLabel("Reading style and article actions")
         }
+    }
+
+    /// The toolbar's single mode choice, mapped onto the overview and reader/web state it replaces.
+    private var readerModeBinding: Binding<ReaderMode> {
+        Binding(
+            get: {
+                if experienceMode == .eventOverview && currentOverview != nil { return .overview }
+                return viewMode == .web ? .web : .story
+            },
+            set: { mode in
+                switch mode {
+                case .overview:
+                    experienceMode = .eventOverview
+                case .story:
+                    experienceMode = .sourcePublication
+                    viewMode = .reader
+                case .web:
+                    experienceMode = .sourcePublication
+                    viewMode = .web
+                }
+            }
+        )
     }
 
     // MARK: - Navigation & Actions
