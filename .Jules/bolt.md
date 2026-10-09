@@ -27,3 +27,8 @@
 **Learning:** In `OverviewPerspectivesExtractor.swift`, the `extractAttributedQuotes` method dynamically compiled three `NSRegularExpression` patterns inside a function that is called frequently during article analysis. This repeated compilation of complex regular expressions adds unnecessary CPU overhead.
 
 **Action:** Future Bolt runs should statically compile and store `NSRegularExpression` instances along with any related configuration metadata (like capture group indices or minimum lengths) in a `static let` array of a small private struct, rather than compiling them dynamically within hot paths. Use `try?` with a failable initializer instead of `try!`, and avoid tuples with more than two members; Codacy's SwiftLint rules reject both.
+## 2024-10-28 - Optimize URL iteration with pre-allocated keys
+
+**Learning:** When iterating through directories using `FileManager.default.enumerator(at:includingPropertiesForKeys:)`, passing `[.fileSizeKey]` as an array literal to `resourceValues(forKeys:)` inside the loop causes Swift to allocate a new `Set` on every single iteration. Furthermore, `.fileSizeKey` isn't always bulk-prefetched effectively depending on the filesystem backend, whereas `.fileAllocatedSizeKey` often is.
+
+**Action:** By hoisting the `Set<URLResourceKey>` allocation outside the loop and switching from `.fileSizeKey` to `.fileAllocatedSizeKey` (while explicitly verifying `.isRegularFileKey`), you can halve the CPU overhead of the iteration while staying on the Apple-recommended `URL` enumerator API.
