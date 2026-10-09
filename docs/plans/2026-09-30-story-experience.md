@@ -2,7 +2,40 @@
 
 План від 30 вересня 2026. Статус: виконується; поточний стан наведено нижче та в [#90](https://github.com/marspater/NewsApp-macOS/issues/90). Основа: поточний код News на `codex/kite-practices`, дослідження Kite на коміті `08d15108f82fb8728832f55fc8c3799a2836bfd6` та чотири надані скриншоти. Незакомічені попередні зміни збережено.
 
-## Зміна обсягу — 5 жовтня 2026
+## Current release status — 9 October 2026
+
+Core phases A–H (#90–#98) are closed for the earlier accepted English-only scope. Later behavior changes need their own acceptance; the 5 October event result does not validate the current matcher. The dated scope and progress snapshots below are historical, superseded by this section.
+
+Merged follow-ups:
+
+| Work | Implementation and evidence | Remaining acceptance |
+| --- | --- | --- |
+| Event grouping (#286–#288) | Country aliases, casualty changes, whole-event compatibility, fragment merges and on-device judging; tune precision 0.957, recall 0.710 | Current matcher needs held-out English evaluation in #307; earlier precision 0.958 (23/24) was accepted for the frozen 5 October matcher |
+| Importance / waiting (#289; #292 closed) | 667 active publications rated; 64 waiting; zero rated-major publications hidden | Independent labels and stability in #309; the predicate measurement does not validate model ratings |
+| Publisher images (#290; #293 closed) | 466 / 473 active cards had usable images (98.5%); all 128 added URLs decoded | Seven placeholders remain; in-article figure fallback in #312 |
+| Plain-text overviews (#291; #294 closed) | Five of eight live drafts accepted, 40 retained claims reviewed with zero detected critical errors; the three labelled controls fell back | Independent accepted-draft controls, error bounds and latency in #308 |
+| Reliability (#296/#297) | Parser/card/clustering corrections, image-URL index, provisional overview/summary retry and schema v20 model-generation invalidation after macOS updates | Real-library v16 → v20 upgrade and isolated end-to-end verification in #305 |
+| Tension retention (#321; #310 closed) | Waiting-story expiry preserves panel history while collection is enabled | Real-panel calibration #235 remains outside the core release |
+| PR maintenance (#299–#303/#306, #325–#327) | Reviewed cleanup, bounded read/save alias resolution, synchronized completion-claim regression and reused cache size keys | No new release gate; this does not replace #305/#307/#308 |
+
+The [curation/image audit](../audits/2026-10-09-story-curation-images.md) and [overview audit](../audits/2026-10-09-plain-text-overviews.md) retain aggregate measurements and their limits; [Codacy corrections](../audits/2026-10-09-codacy-slices.md) and [Sonar corrections](../audits/2026-10-09-sonar-slices.md) record follow-up verification. Publisher passages and private evaluation data remain local. The installed app/library has not been upgraded by this documentation work.
+
+Open follow-ups as of this update:
+
+| Issue | Status / scope | Work |
+| --- | --- | --- |
+| #305 | Ready · P1 | Verify current main in an isolated bundle on a read-only backup of the installed library |
+| #307 | Ready · P1 | Freeze and evaluate the current event matcher; Mars approved one regression replay of the earlier holdout, followed by a fresh English release sample |
+| #308 | Ready · P1 | Independent overview claim review, error bounds and latency |
+| #309 | Backlog · P2 | Mars settled the three borderline importance cases; implement the rules, then measure independent labels and stability |
+| #311 | In review · P2 · [PR #328](https://github.com/marspater/NewsApp-macOS/pull/328) | Full suite leaves no new test plist; exact-run cleanup and narrow legacy instructions await merge |
+| #312 | Backlog · P2 | Figure fallback for card images, with furniture rejection and a coverage remeasurement |
+| #315 | In review · P2 · this update | Refresh README, plan status and Unreleased date; not Done until merged |
+| #313/#314 | Backlog · ideas | Perspective coverage and related-event timeline proposals; not release dependencies |
+| #264/#268 | Parked | Non-English event matching and spoken VoiceOver; resume only at Mars's request |
+| #99/#235/#244 | Optional / outside core release | Tension experiment/calibration and source discovery |
+
+## Historical scope decision — 5 October 2026
 
 Рішення Mars: перший реліз — **лише англійською**.
 
@@ -11,7 +44,7 @@
 - Задачі з міткою `parked` не входять у реліз; братися за них лише після рішення Mars.
 - Holdout подій виміряно один раз: точність 0.958 (23/24) проти цілі ≥97%, повнота 0.291; Mars прийняв результат 5 жовтня 2026 — у #102 ([аудит](../audits/2026-10-05-event-corpus-holdout.md)). Embeddings не впроваджено (#127).
 
-## Current release status — 5 October 2026
+## Historical release status — 5 October 2026
 
 | Work | Current state | Remaining acceptance |
 | --- | --- | --- |
@@ -26,7 +59,7 @@
 
 The earlier progress table below is a dated snapshot, superseded by this reconciliation.
 
-## Поточний прогрес — 3 жовтня 2026 (вечір)
+## Історичний прогрес — 3 жовтня 2026 (вечір)
 
 Злито в `main`: ідентичність і дедуплікацію (B), reader і зображення (C), кластеризацію подій і стабільну стрічку (D), детерміновані огляди з доказами (E), додаткові секції (F), каталог і refresh (G), а також інструменти оцінювання (A). Огляди доступні за запитом у reader; шлях генеративної моделі поки не має викликів. Реалізація не замінює відкриті перевірки якості та нативного інтерфейсу.
 
