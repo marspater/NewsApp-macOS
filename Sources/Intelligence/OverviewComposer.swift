@@ -386,8 +386,10 @@ public struct OverviewComposer: Sendable {
             outcome.result = lines.contains { isProtocolLine($0) } ? .lineCount : .unstructured
             return (fallback, outcome)
         }
-        let draft = try await verifiedDraft(lines, fallback: fallback, passagesByID: passagesByID, articles: articles,
-                                            model: model, outcome: &outcome)
+        let draft = try await verifiedDraft(lines, fallback: fallback, passagesByID: passagesByID, articles: articles, model: model)
+        outcome.malformedLines = draft.malformedLines
+        outcome.deterministicRejections = draft.deterministicRejections
+        outcome.modelRejections = draft.modelRejections
         outcome.keptIntroduction = draft.introduction.count
         outcome.keptFacts = draft.facts.count
         guard draft.isComplete(lineCount: lines.count) else {
@@ -416,11 +418,14 @@ public struct OverviewComposer: Sendable {
         """
     }
 
-    /// Verified model sentences in answer order.
+    /// Verified model sentences in answer order, with counts of the lines dropped.
     private struct ModelDraft {
         var introduction: [OverviewFact] = []
         var facts: [OverviewFact] = []
         var citations: [OverviewCitation] = []
+        var malformedLines = 0
+        var deterministicRejections = 0
+        var modelRejections = 0
 
         /// One to three introduction sentences, three to five facts, and at least two thirds of the lines kept.
         func isComplete(lineCount: Int) -> Bool {
@@ -442,14 +447,14 @@ public struct OverviewComposer: Sendable {
 
     /// Keeps each protocol line whose sentence passes the deterministic and model support checks, counting the rest.
     private static func verifiedDraft(_ lines: [Substring], fallback: EventOverviewDocument,
-                                      passagesByID: [String: EvidencePassage], articles: [FeedArticle], model: NewsTextModel,
-                                      outcome: inout OverviewModelOutcome) async throws -> ModelDraft {
+                                      passagesByID: [String: EvidencePassage], articles: [FeedArticle],
+                                      model: NewsTextModel) async throws -> ModelDraft {
         let articlesByID = Dictionary(uniqueKeysWithValues: articles.map { ($0.id, $0) })
         var draft = ModelDraft()
         for (index, line) in lines.enumerated() {
             try Task.checkCancellation()
             guard let parsed = parsedLine(line, passagesByID: passagesByID, articlesByID: articlesByID) else {
-                outcome.malformedLines += 1
+                draft.malformedLines += 1
                 continue
             }
             let (passage, article) = (parsed.passage, parsed.article)
@@ -462,8 +467,8 @@ public struct OverviewComposer: Sendable {
                 content: OverviewContent(title: fallback.title, summary: "", facts: [fact], citations: [citation]), provenance: fallback.provenance)
             switch try await verifyModelSentence(check, passage: passage, article: article, model: model) {
             case .supported: break
-            case .rejectedDeterministically: outcome.deterministicRejections += 1; continue
-            case .rejectedByModel: outcome.modelRejections += 1; continue
+            case .rejectedDeterministically: draft.deterministicRejections += 1; continue
+            case .rejectedByModel: draft.modelRejections += 1; continue
             }
             draft.citations.append(citation)
             if parsed.isIntroduction { draft.introduction.append(fact) } else { draft.facts.append(fact) }
@@ -471,14 +476,22 @@ public struct OverviewComposer: Sendable {
         return draft
     }
 
-    /// A `KIND|P1|sentence` line naming a known passage, with its sentence decoded, or nil.
-    private static func parsedLine(_ line: Substring, passagesByID: [String: EvidencePassage], articlesByID: [String: FeedArticle])
-        -> (isIntroduction: Bool, passage: EvidencePassage, article: FeedArticle, statement: String)? {
+    /// One `KIND|P1|sentence` line naming a known passage, with its sentence decoded.
+    private struct ParsedLine {
+        let isIntroduction: Bool
+        let passage: EvidencePassage
+        let article: FeedArticle
+        let statement: String
+    }
+
+    private static func parsedLine(_ line: Substring, passagesByID: [String: EvidencePassage],
+                                   articlesByID: [String: FeedArticle]) -> ParsedLine? {
         let fields = line.split(separator: "|", maxSplits: 2, omittingEmptySubsequences: false).map { $0.trimmingCharacters(in: .whitespaces) }
         guard fields.count == 3, isProtocolKind(fields[0]),
               let passage = passagesByID[fields[1]], let article = articlesByID[passage.articleID],
               !fields[2].isEmpty, fields[2].count <= 500 else { return nil }
-        return (fields[0] == "INTRO", passage, article, ContentExtractionPipeline.shared.decodeHTMLEntities(fields[2]))
+        return ParsedLine(isIntroduction: fields[0] == "INTRO", passage: passage, article: article,
+                          statement: ContentExtractionPipeline.shared.decodeHTMLEntities(fields[2]))
     }
 
     private static func isProtocolKind(_ kind: String?) -> Bool { kind == "INTRO" || kind == "FACT" }
