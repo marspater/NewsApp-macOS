@@ -511,6 +511,7 @@ final class TensionCalibrationTests {
         // When opted out: effectiveFeedURLs == feedURLs
         assert(settings.effectiveFeedURLs == originalSubscribed,
                "When opted out, effectiveFeedURLs must equal user-subscribed feedURLs")
+        assert(settings.tensionRetainedFeedURLs.isEmpty, "When opted out, no feed is kept through waiting-story expiry")
 
         // When opted in: effectiveFeedURLs expands to include all 12 panel feeds
         settings.setTensionCollectionOptIn(true)
@@ -520,6 +521,8 @@ final class TensionCalibrationTests {
         for pURL in panelURLs {
             assert(effective.contains(pURL), "effectiveFeedURLs must contain panel feed: \(pURL)")
         }
+
+        assert(settings.tensionRetainedFeedURLs == panelURLs, "When opted in, exactly the panel feeds outlive waiting-story expiry")
 
         // Verify no duplicate URLs
         let uniqueCount = Set(effective).count

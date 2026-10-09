@@ -73,6 +73,7 @@ Calibrated parameters (`TensionWeights.calibratedV1`):
 - Scale factor: $S = 25.0$ in $100 \times (1 - e^{-\text{raw}/S})$.
 - Smoothing: 7-day trailing EMA ($\alpha = 0.25$). Missing or insufficient days are never treated as zero and do not corrupt the series.
 - Opt-in collection ([#160](https://github.com/marspater/NewsApp-macOS/issues/160)): fetching the 12 panel feeds beyond user subscriptions requires an explicit toggle in Settings (`tensionCollectionOptIn`, default `false`). Unread notifications are strictly isolated to user-subscribed feeds.
+- Retention: history is rebuilt from stored articles, so while collection is on, stories delivered by panel feeds are exempt from the 24-hour expiry of waiting minor stories ([#310](https://github.com/marspater/NewsApp-macOS/issues/310)). They still wait out of the reading views. Saved/read rules and the other cleanup paths are unchanged.
 
 ## 7. Versioning
 
