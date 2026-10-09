@@ -60,6 +60,7 @@ struct NativeUIQAChecks {
         testFeedStabilityAndQueuedUpdatesBuffer()
         testEventOverviewGenerationAndCachingLifecycle()
         testCitationRoutingAndBanner()
+        testSettingsPanePersistenceAndSizing()
         await testRemoteImageReuse()
 
         print("Finished \(testsRun) Native UI QA checks with \(failures) failures.")
@@ -403,5 +404,20 @@ struct NativeUIQAChecks {
         let citName = OverviewCitation(id: "c3", articleID: "unknown", passageID: "p3", passageFingerprint: "fp3", quote: "AP report.", source: OverviewSourceMetadata(title: nil, name: "Associated Press", url: nil, publishedAt: nil))
         let matchName = EventOverviewReaderView.matchingArticle(for: citName, in: members)
         assertEqual(matchName?.id, "art_B", "Matches article by publisher name fallback")
+    }
+
+    static func testSettingsPanePersistenceAndSizing() {
+        print("  - Testing Settings Pane Persistence and Adaptive Sizing (#357)...")
+        assertEqual(SettingsPane.general.rawValue, "general", "General pane raw value")
+        assertEqual(SettingsPane.subscriptions.rawValue, "subscriptions", "Subscriptions pane raw value")
+        assertEqual(SettingsPane.muting.rawValue, "muting", "Muting pane raw value")
+        assertEqual(SettingsPane.appearance.rawValue, "appearance", "Appearance pane raw value")
+        assertEqual(SettingsPane.notifications.rawValue, "notifications", "Notifications pane raw value")
+        assertEqual(SettingsPane.intelligence.rawValue, "intelligence", "Intelligence pane raw value")
+        assertEqual(SettingsPane.privacy.rawValue, "privacy", "Privacy pane raw value")
+        assertEqual(SettingsPane.storage.rawValue, "storage", "Storage pane raw value")
+        assertEqual(SettingsPane.updates.rawValue, "updates", "Updates pane raw value")
+        assertEqual(SettingsView.lastPaneStorageKey, "lastSettingsPane", "Last pane storage key matches standard")
+        assertEqual(SettingsView.paneWidth, 500, "Settings pane width is 500pt")
     }
 }

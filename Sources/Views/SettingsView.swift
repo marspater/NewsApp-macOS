@@ -1,7 +1,24 @@
 import SwiftUI
 import AppKit
 
+enum SettingsPane: String, CaseIterable, Identifiable {
+    case general
+    case subscriptions
+    case muting
+    case appearance
+    case notifications
+    case intelligence
+    case privacy
+    case storage
+    case updates
+
+    var id: String { rawValue }
+}
+
 struct SettingsView: View {
+    static let lastPaneStorageKey = "lastSettingsPane"
+    static let paneWidth: CGFloat = 500
+
     @EnvironmentObject var appSettings: AppSettings
     @EnvironmentObject var articleStore: ArticleStore
     @EnvironmentObject var feedManager: FeedManager
@@ -10,8 +27,8 @@ struct SettingsView: View {
     @Environment(\.effectiveReduceMotion) private var reduceMotion
     @Environment(\.openWindow) private var openWindow
     
+    @AppStorage(SettingsView.lastPaneStorageKey) private var selectedPane: SettingsPane = .general
     @State private var newFeedURL: String = ""
-    @State private var selectedTab = 0
     @State private var webCacheSize: String = "Calculating..."
     @State private var databaseSize: String = "Calculating..."
     @State private var totalStorageSize: String = "Calculating..."
@@ -25,44 +42,43 @@ struct SettingsView: View {
     @ObservedObject private var updateChecker = UpdateChecker.shared
 
     var body: some View {
-        TabView(selection: $selectedTab) {
+        TabView(selection: $selectedPane) {
             generalTab
                 .tabItem { Label("General", systemImage: "gearshape") }
-                .tag(0)
+                .tag(SettingsPane.general)
 
             feedsTab
                 .tabItem { Label("Subscriptions", systemImage: "antenna.radiowaves.left.and.right") }
-                .tag(1)
+                .tag(SettingsPane.subscriptions)
 
             mutingTab
                 .tabItem { Label("Muting", systemImage: "speaker.slash") }
-                .tag(8)
+                .tag(SettingsPane.muting)
                 
             appearanceTab
                 .tabItem { Label("Appearance", systemImage: "paintbrush") }
-                .tag(2)
+                .tag(SettingsPane.appearance)
 
             notificationsTab
                 .tabItem { Label("Notifications", systemImage: "bell") }
-                .tag(3)
+                .tag(SettingsPane.notifications)
 
             intelligenceTab
                 .tabItem { Label("Intelligence", systemImage: "sparkles") }
-                .tag(4)
+                .tag(SettingsPane.intelligence)
 
             privacyTab
                 .tabItem { Label("Privacy", systemImage: "lock.shield") }
-                .tag(5)
+                .tag(SettingsPane.privacy)
 
             storageTab
                 .tabItem { Label("Storage", systemImage: "externaldrive") }
-                .tag(6)
+                .tag(SettingsPane.storage)
 
             updatesTab
                 .tabItem { Label("Updates", systemImage: "arrow.triangle.2.circlepath") }
-                .tag(7)
+                .tag(SettingsPane.updates)
         }
-        .frame(width: 680, height: 490)
         .onAppear { calculateStorageSizes() }
     }
 
@@ -95,7 +111,7 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .padding(AppLayout.pageInset)
+        .frame(width: Self.paneWidth)
     }
 
     // MARK: - 2. Subscriptions / Feeds Tab
@@ -237,6 +253,7 @@ struct SettingsView: View {
                 .padding(.horizontal, AppLayout.pageInset)
                 .padding(.vertical, 8)
         }
+        .frame(width: Self.paneWidth, height: 440)
         .task { await feedManager.reloadFeedHealth() }
         .sheet(isPresented: $showsCatalog) {
             FeedCatalogView()
@@ -293,7 +310,7 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .padding(AppLayout.pageInset)
+        .frame(width: Self.paneWidth)
         .task(id: appSettings.muteRules) {
             if let counts = try? await articleStore.database.mutedRuleCounts(appSettings.muteRules) {
                 muteCounts = counts
@@ -372,7 +389,7 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .padding(AppLayout.pageInset)
+        .frame(width: Self.paneWidth)
     }
 
     // MARK: - 4. Intelligence Tab
@@ -448,7 +465,7 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .padding(AppLayout.pageInset)
+        .frame(width: Self.paneWidth)
     }
 
     // MARK: - 5. Privacy & Security Tab
@@ -510,7 +527,7 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .padding(AppLayout.pageInset)
+        .frame(width: Self.paneWidth)
     }
     
     // MARK: - 6. Appearance Tab
@@ -553,7 +570,7 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .padding(AppLayout.pageInset)
+        .frame(width: Self.paneWidth)
     }
 
     // MARK: - 7. Storage Tab
@@ -711,9 +728,9 @@ struct SettingsView: View {
                 }
             }
             .padding(.horizontal, AppLayout.pageInset)
-
-            Spacer()
+            .padding(.bottom, AppSpacing.lg)
         }
+        .frame(width: Self.paneWidth)
     }
 
     // MARK: - 8. Updates Tab
@@ -766,8 +783,7 @@ struct SettingsView: View {
                 }
             }
             .padding(.top, 8)
-
-            Spacer()
+            .padding(.bottom, 16)
 
             VStack(spacing: 4) {
                 Text("Direct release channel via GitHub Releases.")
@@ -779,7 +795,7 @@ struct SettingsView: View {
             }
             .padding(.bottom, 16)
         }
-        .frame(maxWidth: .infinity)
+        .frame(width: Self.paneWidth)
     }
 
     // MARK: - Storage & Cache Calculation Helpers
