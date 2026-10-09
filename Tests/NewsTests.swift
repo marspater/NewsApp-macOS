@@ -4615,14 +4615,14 @@ struct NewsTests {
         let visible = Set(try await db.fetchArticles(limit: nil, hidingWaitingStories: true).map(\.id))
         let hiddenMajor = ratings.filter { $0["importance"] == "major" && !visible.contains($0["id"] ?? "") }.count
         assertEqual(hiddenMajor, 0, "No rated major story is hidden")
-        // #309: every minor-rated story in the window, whether it waits, and one fresh re-rate that bypasses the cache.
+        // #309: every minor-rated story in the window, whether it waits, and one sampled re-rate that bypasses the cache.
         // The review sheet built from this file hides the waiting flag and the re-rate from the labeller.
         let minorRows = try await db.ratedImportanceRows(level: .minor, activeSince: activeSince)
         let shownMinor = try await db.notificationStoryIDs(minorRows.map(\.id))
         var review: [[String: String]] = []
         for row in minorRows {
             try Task.checkCancellation()
-            let rerate = await OnDeviceImportanceJudge.modelRating(EventClusterer.report(row))
+            let rerate = await OnDeviceImportanceJudge.modelRating(EventClusterer.report(row), sampled: true)
             review.append(["id": row.id, "title": row.title, "summary": row.description, "source": row.source,
                            "waiting": shownMinor.contains(row.id) ? "no" : "yes",
                            "rerate": rerate.map { String(describing: $0) } ?? "none"])

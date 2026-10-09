@@ -4,8 +4,8 @@
 `sheet RUN` writes RUN/importance-review-private.csv: every minor-rated story of the run's 72-hour window, newest
 first, with headline, summary and publisher. The waiting flag and the re-rate stay out of the sheet, so the
 reviewer labels each story `important` or `minor` blind. `report RUN` writes RUN/importance-evaluation.json: how many
-stories the reviewer judged important while the app hides them, with Wilson 95% bounds, and the stability of one
-fresh re-rate. It contains no story text. With no arguments, the script checks itself on a synthetic run.
+stories the reviewer judged important while the app hides them, with Wilson 95% bounds, and how often one sampled
+re-rate agrees. It contains no story text. With no arguments, the script checks itself on a synthetic run.
 """
 import json
 import math
@@ -68,7 +68,7 @@ def hidden_important(rows, labels):
 
 
 def stability(rows):
-    """One fresh re-rate of each minor rating; `none` means the model gave no answer."""
+    """One sampled re-rate of each minor rating; `none` means the model gave no answer."""
     answers = [row.get('rerate', 'none') for _, row in rows]
     rerated = [answer for answer in answers if answer in LEVELS]
     return {'rerated': len(rerated), 'noAnswer': len(answers) - len(rerated),
@@ -89,8 +89,13 @@ def report(directory):
                            'hiddenImportantObserved': review['hiddenImportant']['count'] > 0,
                            'modelUpdateDecision': 'Ratings are kept across macOS model updates (#297); Mars decides '
                                                   'whether to re-rate still-waiting stories after an update.'},
-        'limitations': 'Labels judge the headline and summary the model saw. A label reflects one reviewer. The '
-                       're-rate measures the same model on the same text, not a model update.',
+        'limitations': 'Labels judge the headline and summary the model saw. A label reflects one reviewer. '
+                       'Unread waiting stories are deleted 24 hours after their event\'s first report, so the run '
+                       'sees only younger waiting stories (and read, saved or cited ones), while shown minor stories '
+                       'span the whole window: hiddenAmongWaiting is the comparable rate, and hiddenImportant mixes '
+                       'both and misses stories already expired. Production rates greedily, so the same text always '
+                       'gets the same level; the re-rate samples from the top 90% of the same model to show how close '
+                       'ratings sit to a boundary. It does not measure a model update.',
     }
     (directory / REPORT).write_text(json.dumps(result, indent=2, sort_keys=True) + '\n')
     return result
