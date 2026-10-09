@@ -115,7 +115,7 @@ struct ArticleCardView: View {
                         if article.aiSummary != nil {
                             TagView.intelligence()
                                 .help("AI summary available")
-                            .accessibilityLabel("AI summary available")
+                                .accessibilityLabel("AI summary available")
                         }
                     }
                 }
