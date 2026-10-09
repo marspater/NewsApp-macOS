@@ -23,7 +23,7 @@ Subsequent generative extraction (#135), clustering (#94) and reader mode UI (#1
   - `OverviewVersionContext`: binds membership version, input text hash, schema version, and analysis version.
   - `OverviewContent`: encapsulates narrative title, summary, facts, citations and lead image.
   - `OverviewProvenance`: tracks member article IDs, kind, and lifecycle timestamps.
-  - `EventOverviewDocument`: aggregate root with deterministic `computeInputTextHash(passages:)` and `isStale(...)` evaluation. Flat JSON encoding and decoding preserved.
+  - `EventOverviewDocument`: aggregate root with deterministic `isStale(...)` evaluation. Flat JSON encoding and decoding preserved.
 - **SQLite Storage Contract (`Sources/Storage/DatabaseEngine.swift`)**:
   - Incremented schema `user_version` to 8.
   - Added table `event_overviews` with unique `event_id`, versioning metadata, JSON projections, and index.

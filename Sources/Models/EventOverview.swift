@@ -462,16 +462,6 @@ public struct EventOverviewDocument: Codable, Hashable, Sendable, Identifiable {
             || analysisVersion != targetAnalysisVersion
     }
 
-    /// Computes deterministic input text hash across selected evidence passages.
-    public static func computeInputTextHash(passages: [EvidencePassage]) -> String {
-        let sorted = passages.sorted {
-            if $0.articleID != $1.articleID { return $0.articleID < $1.articleID }
-            if ($0.ordinal ?? 0) != ($1.ordinal ?? 0) { return ($0.ordinal ?? 0) < ($1.ordinal ?? 0) }
-            return $0.id < $1.id
-        }
-        let combined = sorted.map { "\($0.articleID):\($0.fingerprint)" }.joined(separator: "|")
-        return ArticleIdentity.sha256Hex(combined)
-    }
 }
 
 /// A real-world event and the stored articles that report it. Members are referenced by surviving
