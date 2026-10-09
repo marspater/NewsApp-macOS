@@ -99,14 +99,14 @@ struct SettingsView: View {
                 .pickerStyle(.menu)
                 
                 Text("Periodic feed updates occur in the background when NewsApp is running.")
-                    .font(.caption)
+                    .font(AppTypography.caption)
                     .foregroundColor(AppColor.secondaryText)
             }
             
             Section("Reading Behavior") {
                 Toggle("Auto-Hide Read Articles", isOn: $themeManager.autoHideRead)
                 Text("Articles will disappear from filtered views once marked as read.")
-                    .font(.caption)
+                    .font(AppTypography.caption)
                     .foregroundColor(AppColor.secondaryText)
             }
         }
@@ -122,7 +122,7 @@ struct SettingsView: View {
             HStack(spacing: 10) {
                 Image(systemName: "plus.circle.fill")
                     .foregroundColor(AppColor.accent)
-                    .font(.system(size: 18))
+                    .imageScale(.large)
                 TextField("Enter RSS / Atom / JSON Feed URL", text: $newFeedURL)
                     .textFieldStyle(.roundedBorder)
                 Button("Subscribe") {
@@ -176,13 +176,13 @@ struct SettingsView: View {
 
                 if let msg = opmlStatusMessage {
                     Text(msg)
-                        .font(.system(size: 11, weight: .medium))
+                        .font(AppTypography.caption)
                         .foregroundColor(AppColor.success)
                 }
 
                 Spacer()
                 Text("\(feedManager.feedURLs.count) feeds")
-                    .font(.caption)
+                    .font(AppTypography.caption)
                     .foregroundColor(AppColor.secondaryText)
             }
             .padding(.horizontal, AppLayout.pageInset)
@@ -200,12 +200,12 @@ struct SettingsView: View {
                             // No refresh this session yet: the health line below carries the stored state.
                             Image(systemName: "circle.dashed")
                                 .foregroundColor(AppColor.secondaryText)
-                                .font(.system(size: 13))
+                                .font(AppTypography.body)
                                 .accessibilityHidden(true)
                         case .idle?:
                             Image(systemName: "checkmark.circle.fill")
                                 .foregroundColor(AppColor.success)
-                                .font(.system(size: 13))
+                                .font(AppTypography.body)
                                 .help("Feed is active and up to date")
                                 .accessibilityLabel("Feed is active and up to date")
                         case .loading?:
@@ -218,13 +218,13 @@ struct SettingsView: View {
                         case .failed(let err)?:
                             Image(systemName: "exclamationmark.triangle.fill")
                                 .foregroundColor(AppColor.warning)
-                                .font(.system(size: 13))
+                                .font(AppTypography.body)
                                 .help(err.localizedDescription)
                                 .accessibilityLabel(err.localizedDescription)
                         }
                         VStack(alignment: .leading, spacing: 2) {
                             Text(urlString)
-                                .font(.system(size: 12, weight: .medium, design: .monospaced))
+                                .font(AppTypography.label.monospaced())
                                 .lineLimit(1)
                                 .foregroundColor(AppColor.primaryText)
                             FeedHealthLine(health: feedManager.feedHealth[urlString])
@@ -234,7 +234,7 @@ struct SettingsView: View {
                             feedManager.removeFeed(url: urlString)
                         } label: {
                             Image(systemName: "trash")
-                                .font(.system(size: 12))
+                                .font(AppTypography.label)
                                 .foregroundColor(AppColor.danger)
                         }
                         .buttonStyle(.plain)
@@ -266,7 +266,7 @@ struct SettingsView: View {
         Form {
             Section {
                 Text("Muted stories leave Today, Unread, your sections, search and notifications. Saved Stories and History still list everything, and each list shows how many stories muting hides.")
-                    .font(.caption)
+                    .font(AppTypography.caption)
                     .foregroundColor(AppColor.secondaryText)
             }
 
@@ -280,7 +280,7 @@ struct SettingsView: View {
                         .disabled(MuteRules.host(newMutedSource) == nil)
                 }
                 Text("Hides stories whose link is on this host or one of its subdomains.")
-                    .font(.caption)
+                    .font(AppTypography.caption)
                     .foregroundColor(AppColor.secondaryText)
                 ForEach(appSettings.muteRules.sources, id: \.self) { host in
                     mutingRow(host, count: muteCounts.sources[host] ?? 0) { appSettings.unmuteSource(host) }
@@ -297,7 +297,7 @@ struct SettingsView: View {
                         .disabled(MuteRules.phrase(newMutedTopic).isEmpty)
                 }
                 Text("Matches whole words in headlines and feed summaries, ignoring case: “art” hides “Art fair” but not “Artist”.")
-                    .font(.caption)
+                    .font(AppTypography.caption)
                     .foregroundColor(AppColor.secondaryText)
                 ForEach(appSettings.muteRules.topics, id: \.self) { topic in
                     mutingRow(topic, count: muteCounts.topics[topic] ?? 0) { appSettings.unmuteTopic(topic) }
@@ -330,7 +330,7 @@ struct SettingsView: View {
                 .foregroundColor(AppColor.primaryText)
             Spacer()
             Text(count == 1 ? "1 stored story" : "\(count) stored stories")
-                .font(.caption)
+                .font(AppTypography.caption)
                 .foregroundColor(AppColor.secondaryText)
             Button(action: unmute) {
                 Image(systemName: "xmark.circle.fill")
@@ -361,7 +361,7 @@ struct SettingsView: View {
                     set: { appSettings.setNotificationsEnabled($0) }
                 ))
                 Text("Receive native macOS notification alerts when high-importance news arrives.")
-                    .font(.caption)
+                    .font(AppTypography.caption)
                     .foregroundColor(AppColor.secondaryText)
             }
             
@@ -381,7 +381,7 @@ struct SettingsView: View {
                         Image(systemName: appSettings.notificationMode == .privacy ? "lock.fill" : "info.circle")
                             .foregroundColor(appSettings.notificationMode == .privacy ? AppColor.success : AppColor.accent)
                         Text(appSettings.notificationMode.detail)
-                            .font(.caption)
+                            .font(AppTypography.caption)
                             .foregroundColor(AppColor.secondaryText)
                     }
                     .padding(.top, 4)
@@ -402,7 +402,7 @@ struct SettingsView: View {
                     set: { appSettings.setAIEnabled($0) }
                 ))
                 Text("Generates executive summaries, key takeaways, entity tags, and sentiment analysis.")
-                    .font(.caption)
+                    .font(AppTypography.caption)
                     .foregroundColor(AppColor.secondaryText)
             }
 
@@ -417,7 +417,7 @@ struct SettingsView: View {
                                 .font(AppTypography.label)
                                 .foregroundColor(AppColor.primaryText)
                             Text("Powered exclusively by Apple NaturalLanguage and on-device FoundationModels when available.")
-                                .font(.caption)
+                                .font(AppTypography.caption)
                                 .foregroundColor(AppColor.secondaryText)
                         }
                     }
@@ -431,7 +431,7 @@ struct SettingsView: View {
                                 .font(AppTypography.label)
                                 .foregroundColor(AppColor.primaryText)
                             Text("Analysis runs lazily only when you open an article for reading, preserving battery, CPU, and Neural Engine resources.")
-                                .font(.caption)
+                                .font(AppTypography.caption)
                                 .foregroundColor(AppColor.secondaryText)
                         }
                     }
@@ -445,7 +445,7 @@ struct SettingsView: View {
                                 .font(AppTypography.label)
                                 .foregroundColor(AppColor.primaryText)
                             Text("No text, prompts, or embeddings are ever transmitted to third-party servers or external AI APIs.")
-                                .font(.caption)
+                                .font(AppTypography.caption)
                                 .foregroundColor(AppColor.secondaryText)
                         }
                     }
@@ -459,7 +459,7 @@ struct SettingsView: View {
                     set: { feedManager.setTensionCollectionOptIn($0) }
                 ))
                 Text("Fetches articles from the 12 international panel feeds to calculate the news tension indicator. These articles are stored locally for tension analysis and will not generate unread notifications unless you subscribe to the feeds directly.")
-                    .font(.caption)
+                    .font(AppTypography.caption)
                     .foregroundColor(AppColor.secondaryText)
                 Button("Show News Tension…") { openWindow(id: "tension") }
             }
@@ -483,12 +483,12 @@ struct SettingsView: View {
                         Image(systemName: "exclamationmark.triangle.fill")
                             .foregroundColor(AppColor.warning)
                         Text("Warning: Unencrypted HTTP feeds transmit data in plain text across your local network and internet providers.")
-                            .font(.caption)
+                            .font(AppTypography.caption)
                             .foregroundColor(AppColor.warning)
                     }
                 } else {
                     Text("Enforces strict HTTPS connections for all feed ingestion and remote media assets.")
-                        .font(.caption)
+                        .font(AppTypography.caption)
                         .foregroundColor(AppColor.secondaryText)
                 }
             }
@@ -504,7 +504,7 @@ struct SettingsView: View {
                                 .font(AppTypography.label)
                                 .foregroundColor(AppColor.primaryText)
                             Text("Restricts file system and process access to NewsApp's isolated container.")
-                                .font(.caption)
+                                .font(AppTypography.caption)
                                 .foregroundColor(AppColor.secondaryText)
                         }
                     }
@@ -518,7 +518,7 @@ struct SettingsView: View {
                                 .font(AppTypography.label)
                                 .foregroundColor(AppColor.primaryText)
                             Text("Fetches feeds directly from publishers without middleman cloud servers, proxy aggregators, or telemetry logging.")
-                                .font(.caption)
+                                .font(AppTypography.caption)
                                 .foregroundColor(AppColor.secondaryText)
                         }
                     }
@@ -543,7 +543,7 @@ struct SettingsView: View {
                 .pickerStyle(.segmented)
                 
                 Text("Select whether NewsApp follows your macOS system appearance or stays locked to light or dark mode.")
-                    .font(.caption)
+                    .font(AppTypography.caption)
                     .foregroundColor(AppColor.secondaryText)
             }
             
@@ -580,15 +580,15 @@ struct SettingsView: View {
             // Header stats
             HStack(spacing: 16) {
                 Image(systemName: "externaldrive.fill")
-                    .font(.system(size: 32))
+                    .font(AppTypography.masthead)
                     .foregroundColor(AppColor.secondaryText)
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Total Storage Usage")
-                        .font(.system(size: 13, weight: .medium))
+                        .font(AppTypography.callout)
                         .foregroundColor(AppColor.secondaryText)
                     Text(totalStorageSize)
-                        .font(.system(size: 22, weight: .bold, design: .rounded))
+                        .font(AppTypography.title.monospacedDigit())
                         .foregroundColor(AppColor.primaryText)
                 }
 
@@ -596,7 +596,7 @@ struct SettingsView: View {
 
                 if let message = cacheActionMessage {
                     Text(message)
-                        .font(.system(size: 12, weight: .medium))
+                        .font(AppTypography.label)
                         .foregroundColor(AppColor.success)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 4)
@@ -616,14 +616,14 @@ struct SettingsView: View {
                     VStack(alignment: .leading, spacing: 2) {
                         HStack(spacing: 6) {
                             Text("Web & Media Cache")
-                                .font(.system(size: 13, weight: .semibold))
+                                .font(AppTypography.headline)
                                 .foregroundColor(AppColor.primaryText)
                             Text(webCacheSize)
-                                .font(.system(size: 12, weight: .medium, design: .monospaced))
+                                .font(AppTypography.label.monospaced())
                                 .foregroundColor(AppColor.secondaryText)
                         }
                         Text("HTTP network responses, temporary web data, and cached images.")
-                            .font(.caption)
+                            .font(AppTypography.caption)
                             .foregroundColor(AppColor.secondaryText)
                     }
                     Spacer()
@@ -639,14 +639,14 @@ struct SettingsView: View {
                     VStack(alignment: .leading, spacing: 2) {
                         HStack(spacing: 6) {
                             Text("Article Content Cache")
-                                .font(.system(size: 13, weight: .semibold))
+                                .font(AppTypography.headline)
                                 .foregroundColor(AppColor.primaryText)
                             Text("\(articleStore.articles.count) articles")
-                                .font(.system(size: 12, weight: .medium, design: .monospaced))
+                                .font(AppTypography.label.monospacedDigit())
                                 .foregroundColor(AppColor.secondaryText)
                         }
                         Text("Cached full article bodies. Subscriptions and saved stories are kept.")
-                            .font(.caption)
+                            .font(AppTypography.caption)
                             .foregroundColor(AppColor.secondaryText)
                     }
                     Spacer()
@@ -662,15 +662,15 @@ struct SettingsView: View {
                     VStack(alignment: .leading, spacing: 2) {
                         HStack(spacing: 6) {
                             Text("AI Analysis Data")
-                                .font(.system(size: 13, weight: .semibold))
+                                .font(AppTypography.headline)
                                 .foregroundColor(AppColor.primaryText)
                             let aiCount = articleStore.articles.filter { $0.aiSummary != nil }.count
                             Text("\(aiCount) enriched")
-                                .font(.system(size: 12, weight: .medium, design: .monospaced))
+                                .font(AppTypography.label.monospacedDigit())
                                 .foregroundColor(AppColor.secondaryText)
                         }
                         Text("Generated summaries, key points, and entities. Subscriptions and articles remain.")
-                            .font(.caption)
+                            .font(AppTypography.caption)
                             .foregroundColor(AppColor.secondaryText)
                     }
                     Spacer()
@@ -686,19 +686,19 @@ struct SettingsView: View {
                     VStack(alignment: .leading, spacing: 2) {
                         HStack(spacing: 6) {
                             Text("Local SQLite & FTS5 Index")
-                                .font(.system(size: 13, weight: .semibold))
+                                .font(AppTypography.headline)
                                 .foregroundColor(AppColor.primaryText)
                             Text(databaseSize)
-                                .font(.system(size: 12, weight: .medium, design: .monospaced))
+                                .font(AppTypography.label.monospaced())
                                 .foregroundColor(AppColor.secondaryText)
                         }
                         Text("Persistent WAL database containing subscriptions, history, and search index.")
-                            .font(.caption)
+                            .font(AppTypography.caption)
                             .foregroundColor(AppColor.secondaryText)
                     }
                     Spacer()
                     Text("Active")
-                        .font(.caption.bold())
+                        .font(AppTypography.caption.bold())
                         .foregroundColor(AppColor.secondaryText)
                         .padding(.horizontal, 8)
                         .padding(.vertical, 3)
@@ -711,10 +711,10 @@ struct SettingsView: View {
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Purge All Caches")
-                            .font(.system(size: 13, weight: .semibold))
+                            .font(AppTypography.headline)
                             .foregroundColor(AppColor.danger)
                         Text("Purges web cache, article content, and AI analysis. Preserves subscriptions, saved stories, and read history.")
-                            .font(.caption)
+                            .font(AppTypography.caption)
                             .foregroundColor(AppColor.secondaryText)
                     }
                     Spacer()
@@ -738,22 +738,23 @@ struct SettingsView: View {
     private var updatesTab: some View {
         VStack(spacing: 16) {
             Image(systemName: "arrow.triangle.2.circlepath.circle.fill")
-                .font(.system(size: 44))
+                .font(AppTypography.masthead)
+                .imageScale(.large)
                 .foregroundColor(AppColor.accent)
                 .padding(.top, 24)
 
             VStack(spacing: 4) {
                 Text("NewsApp for macOS")
-                    .font(.system(size: 16, weight: .bold))
+                    .font(AppTypography.headline.bold())
                     .foregroundColor(AppColor.primaryText)
                 Text("Version \(updateChecker.currentAppVersion)")
-                    .font(.system(size: 13, weight: .medium))
+                    .font(AppTypography.callout)
                     .foregroundColor(AppColor.secondaryText)
             }
 
             if let status = updateChecker.statusMessage {
                 Text(status)
-                    .font(.system(size: 13, weight: .medium))
+                    .font(AppTypography.callout)
                     .foregroundColor(updateChecker.updateAvailable ? AppColor.accent : AppColor.secondaryText)
                     .padding(.horizontal, 16)
                     .padding(.vertical, 6)
@@ -765,7 +766,7 @@ struct SettingsView: View {
                     ProgressView()
                         .controlSize(.small)
                     Text("Checking for updates...")
-                        .font(.caption)
+                        .font(AppTypography.caption)
                         .foregroundColor(AppColor.secondaryText)
                 } else if updateChecker.updateAvailable {
                     Button("View Release on GitHub") {
@@ -787,10 +788,10 @@ struct SettingsView: View {
 
             VStack(spacing: 4) {
                 Text("Direct release channel via GitHub Releases.")
-                    .font(.caption2)
+                    .font(AppTypography.caption)
                     .foregroundColor(AppColor.secondaryText)
                 Text("Native, privacy-first RSS reader with zero telemetry.")
-                    .font(.caption2)
+                    .font(AppTypography.caption)
                     .foregroundColor(AppColor.tertiaryText)
             }
             .padding(.bottom, 16)
