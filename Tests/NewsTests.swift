@@ -4700,13 +4700,20 @@ struct NewsTests {
                         guid: "football", description: "A local team wins a friendly match.", pubDate: now, source: "Sport")
         ]
         var notified: [String] = []
+        // Publisher pages that never answer must not hold notifications back.
+        let pages = OpenGate()
         let manager = FeedManager(settings: settings, store: store, schedulesRefresh: false,
             fetchBatch: { urls, _ in urls.map { ($0, reports, nil, nil) } },
             notifyBatch: { articles, _ in notified += articles.map(\.title) },
             importanceJudge: StoryImportanceJudge { $0.title == reports[0].title ? .major : .minor },
+            imageFinder: StoryImageFinder { _ in await pages.wait(); return .none },
             allowsBackgroundWork: { true })
-        await manager.fetchFeedsAsync()
+        let refresh = Task { await manager.fetchFeedsAsync() }
+        await eventually("Notifications are dispatched while image lookups wait") { notified == [reports[0].title] }
         assertEqual(notified, [reports[0].title], "Refresh rates stories before dispatching notifications")
+        await eventually("Image lookups follow clustering") { await pages.arrivals > 0 }
+        await pages.open()
+        await refresh.value
         manager.stopBackgroundWork()
         await store.database.close()
         assertEqual(OnDeviceImportanceJudge.level("Major."), .major, "MAJOR is major")
