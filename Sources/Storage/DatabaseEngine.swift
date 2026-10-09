@@ -710,6 +710,18 @@ actor DatabaseEngine {
                 throw error
             }
         }
+        if version < 19 {
+            try beginTransaction()
+            do {
+                try Task.checkCancellation()
+                try executeSimple("CREATE INDEX IF NOT EXISTS idx_story_images_url ON story_images(image_url);")
+                try setUserVersion(19)
+                try commitTransaction()
+            } catch {
+                try? rollbackTransaction()
+                throw error
+            }
+        }
     }
     
     /// Muting predicates for list queries (`MuteRules`); both are pure functions of their arguments.
@@ -3309,10 +3321,28 @@ actor DatabaseEngine {
     /// Articles the user marked as a different event from `articleID`.
     func eventExclusions(of articleID: String) throws -> Set<String> {
         guard let member = try memberArticleID(articleID) else { return [] }
-        return Set(try eventRows("""
-        SELECT other_article_id FROM event_exclusions WHERE article_id = ?
-        UNION SELECT article_id FROM event_exclusions WHERE other_article_id = ?;
-        """, [.text(member), .text(member)]).compactMap { $0[0] })
+        return try eventExclusions(for: [member])[member] ?? []
+    }
+
+    /// A symmetric exclusion snapshot for stored member IDs, in bounded SQLite batches.
+    func eventExclusions(for articleIDs: [String]) throws -> [String: Set<String>] {
+        let ids = Set(articleIDs).sorted()
+        var exclusions: [String: Set<String>] = [:]
+        for start in stride(from: 0, to: ids.count, by: 400) {
+            try Task.checkCancellation()
+            let slice = Array(ids[start..<min(start + 400, ids.count)])
+            let placeholders = Array(repeating: "?", count: slice.count).joined(separator: ",")
+            let rows = try eventRows("""
+            SELECT article_id, other_article_id FROM event_exclusions
+            WHERE article_id IN (\(placeholders)) OR other_article_id IN (\(placeholders));
+            """, (slice + slice).map { .text($0) })
+            for row in rows {
+                guard let first = row[0], let second = row[1] else { continue }
+                exclusions[first, default: []].insert(second)
+                exclusions[second, default: []].insert(first)
+            }
+        }
+        return exclusions
     }
 
     func markEventMatchProcessed(_ articleIDs: [String], matcherVersion: Int, at date: Date = Date()) throws {

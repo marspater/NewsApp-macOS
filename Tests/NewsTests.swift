@@ -651,7 +651,7 @@ struct NewsTests {
         assertEqual(value(copy, "SELECT count(*) FROM sqlite_master WHERE name IN ('trg_articles_ai','trg_articles_ad','trg_articles_au');"), "3", "Failed rebuild restores the old triggers")
         execute(copy, "DROP VIEW article_fts_rows;")
         try await db.open()
-        assertEqual(value(copy, "PRAGMA user_version;"), "18", "Copied v14 library upgrades through v15 to the current schema")
+        assertEqual(value(copy, "PRAGMA user_version;"), "19", "Copied v14 library upgrades through v15 to the current schema")
         assertEqual(value(path, "PRAGMA user_version;"), "14", "Original library stays untouched")
         assertEqual(try await db.searchArticles(query: "Research").map(\.id), originalOrder, "Migration preserves ranks and ID tie order")
         assertEqual(value(copy, "SELECT read_at FROM article_state WHERE article_id='one';"), readAt, "Migration preserves read timestamps")
@@ -2263,7 +2263,8 @@ struct NewsTests {
         assertEqual(story("https://notaljazeera.com/story", "Other").publisherName, "Other", "Only the same host or its subdomains match")
 
         // A retired subscription ends once per retirement version; subscribing again later is kept.
-        let nyt = AppSettings.retiredFeeds[0].url, onet = AppSettings.retiredFeeds[1].url
+        let nyt = "https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml"
+        let onet = "https://wiadomosci.onet.pl/.feed"
         assertFalse(AppSettings.defaultFeeds.contains(nyt), "Retired feeds are not fresh-install defaults")
         assertFalse(FeedCatalog.allFeeds.contains { $0.url == onet }, "Retired feeds leave the catalog")
         parkedDefaults.set([kept[0], nyt, onet], forKey: AppSettings.feedURLsKey)
@@ -3162,7 +3163,7 @@ struct NewsTests {
         await cancelledDB.close()
         let db = DatabaseEngine(path: copyPath)
         try await db.open()
-        assertEqual(value(copyPath, "PRAGMA user_version;"), "18", "Copied v4 library upgrades to the current schema")
+        assertEqual(value(copyPath, "PRAGMA user_version;"), "19", "Copied v4 library upgrades to the current schema")
         assertEqual(value(originalPath, "PRAGMA user_version;"), "4", "Original fixture stays untouched")
         assertEqual(try await db.fetchArticles(limit: nil).count, 3, "Migration keeps historical rows")
         assertEqual(value(copyPath, "SELECT read_at FROM article_state WHERE article_id = 'alias-first';"), originalReadAt, "Migration preserves read history timestamp")
@@ -3333,7 +3334,7 @@ struct NewsTests {
         assertEqual(value(failure, "SELECT is_saved FROM article_state WHERE article_id='historical-a';"), "0", "Injected failure rolls back survivor state union")
         assertEqual(value(failure, "SELECT article_id FROM article_aliases WHERE value='observed-variant-b';"), "historical-b", "Injected failure preserves old aliases")
         try await migrated.open()
-        assertEqual(value(copy, "PRAGMA user_version;"), "18", "Copied library upgrades to the current schema")
+        assertEqual(value(copy, "PRAGMA user_version;"), "19", "Copied library upgrades to the current schema")
         assertEqual(value(path, "PRAGMA user_version;"), "8", "Original fixture remains untouched")
         assertEqual(try await migrated.fetchArticles(limit: nil).count, 6, "Only confident same-URL text copies are hidden")
         assertEqual(try await migrated.fetchArticles(limit: nil, includingOriginals: true).count, 8, "Every stored original remains reachable")
@@ -3586,6 +3587,24 @@ struct NewsTests {
             return await pipeline.extractArticleWithIdentity(from: requested.absoluteString)
         }
         assertTrue(await cancelled.value.evidence == nil, "Cancelled extraction returns no identity evidence")
+
+        let insecure = requested.absoluteString.replacingOccurrences(of: "https://", with: "http://")
+        for allowHTTP in [false, true] {
+            requests.removeAll()
+            MockURLProtocol.requestHandler = { request in
+                requests.append(request.url!)
+                return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                        Data("<article><p>\(prose)</p></article>".utf8))
+            }
+            let upgraded = await pipeline.extractArticleWithIdentity(from: insecure, allowHTTP: allowHTTP)
+            assertTrue(upgraded.outcome.isSuccess, "HTTP feed links remain readable under either transport setting")
+            assertEqual(requests.map(\.absoluteString), [allowHTTP ? insecure : requested.absoluteString],
+                        "Extraction upgrades HTTP unless the user explicitly allows it")
+        }
+        requests.removeAll()
+        let malformed = await pipeline.extractArticleWithIdentity(from: "http://[malformed")
+        assertFalse(malformed.outcome.isSuccess, "Malformed article links fail before fetching")
+        assertTrue(requests.isEmpty, "Malformed links never reach the network")
     }
 
     @MainActor
@@ -4075,7 +4094,7 @@ struct NewsTests {
 
         let db = DatabaseEngine(path: copy)
         try await db.open()
-        assertEqual(value(copy, "PRAGMA user_version;"), "18", "Copied v11 library upgrades to the current schema")
+        assertEqual(value(copy, "PRAGMA user_version;"), "19", "Copied v11 library upgrades to the current schema")
         assertEqual(value(path, "PRAGMA user_version;"), "11", "Original v11 fixture stays untouched")
         assertEqual(try await db.fetchArticles(limit: nil).count, 5, "Event migration keeps every article")
         assertTrue(try await db.isRead(articleId: "event-a"), "Event migration keeps read state")
@@ -4354,6 +4373,37 @@ struct NewsTests {
         assertEqual(try await EventClusterer.run(in: db, now: now).merged, 0, "A merged story is not merged again")
         await db.close()
 
+        // Newly merged members supply the terms needed to discover a third fragment.
+        let chain = DatabaseEngine(path: ":memory:")
+        try await chain.open()
+        let titles = ["Aurora Meridian growers harvest apples",
+                      "Aurora Meridian growers harvest apples with Cobalt Zenith harvest robots",
+                      "Cobalt Zenith engineers deploy harvest robots"]
+        var groups: [[FeedArticle]] = []
+        for (group, count) in [6, 4, 2].enumerated() {
+            let members = (0..<count).map { index in
+                article("chain-\(group)-\(index)", titles[group], "Scientists report that \(titles[group]).",
+                        hoursAgo: 1, source: "Publisher \(group)-\(index)")
+            }
+            groups.append(members)
+            try await chain.upsertArticles(members)
+            _ = try await chain.createEvent(memberArticleIDs: members.map(\.id), at: now)
+        }
+        func terms(_ story: FeedArticle) -> Set<String> {
+            let value = EventFeatures(title: story.title, description: story.description, date: now)
+            return value.specificAnchors.union(value.keywords)
+        }
+        assertTrue(terms(groups[0][0]).intersection(terms(groups[2][0])).count < 2, "The third fragment requires terms introduced by the second")
+        var chainPolicy = EventMatchPolicy.standard
+        chainPolicy.minimumSharedTerms = 2
+        chainPolicy.matchScore = 0.35
+        chainPolicy.compatibilityScore = 0
+        chainPolicy.compatibleShare = 0
+        let chainReport = try await EventClusterer.run(in: chain, matchPolicy: chainPolicy,
+                                                      judge: EventJudge { _, _ in true }, now: now, limit: 0)
+        assertEqual(chainReport.merged, 2, "A successful merge refreshes terms before considering the next fragment")
+        await chain.close()
+
         // A local exclusion between fragments always wins.
         let excluded = try await library()
         if let event = try await excluded.eventID(forArticle: "m3") {
@@ -4361,6 +4411,12 @@ struct NewsTests {
             try await excluded.separateArticle("m1", fromEvent: event, at: now)
         }
         _ = try await excluded.addArticles(["m1"], toEvent: try await excluded.eventID(forArticle: "m2") ?? "", at: now)
+        let exclusions = try await excluded.eventExclusions(for: quake.map(\.id) + (0..<450).map { "a-missing-\($0)" })
+        assertEqual(exclusions["m1"], Set(["m3", "m4"]), "Bulk exclusions span SQLite parameter batches")
+        assertEqual(exclusions["m3"], Set(["m1"]), "Bulk exclusions work from either endpoint")
+        assertEqual(exclusions["m4"], Set(["m1"]), "Repeated rows across batches do not duplicate exclusions")
+        assertEqual(exclusions.count, 3, "Unknown and unexcluded members create no exclusion entries")
+        assertTrue(try await excluded.eventExclusions(for: []).isEmpty, "An empty member set needs no exclusion query")
         assertEqual(try await EventClusterer.run(in: excluded, now: now).merged, 0, "Excluded members keep fragments apart")
         await excluded.close()
 
@@ -4639,6 +4695,8 @@ struct NewsTests {
         assertEqual(Set(rows.map(\.id)), ["plain", "e1", "e2", "down"],
                     "Shown stories without an image anywhere in their event are looked up; pictured events and waiting stories are not")
         assertTrue(rows.first.map { ["e1", "e2"].contains($0.id) } == true, "Clustered stories come first")
+        assertEqual(rows.first(where: { $0.id == "plain" })?.link, story("plain", "One").link,
+                    "A freshly ingested story has a usable URL before reader extraction")
 
         let finder = StoryImageFinder { link in
             if link.hasSuffix("/down") { return .unreachable }
@@ -4655,6 +4713,64 @@ struct NewsTests {
         assertFalse(try await db.recordStoryImage("down", imageURL: "https://cdn.example/found.jpg", at: now),
                     "An image another story already declared is a site default")
         assertTrue(try await db.storyImages(for: ["e1", "e2", "down"]).isEmpty, "A site default is cleared for every story")
+        await db.close()
+        try await testStoryImageIndexMigration(fixtureRoot: fixtureRoot)
+    }
+
+    static func testStoryImageIndexMigration(fixtureRoot: URL) async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("news-image-index-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let path = directory.appendingPathComponent("library.sqlite3").path
+        let db = DatabaseEngine(path: path)
+        try await db.open()
+        let article = FeedArticle(storedID: "index-story", title: "Publisher report", link: fixtureRoot.appendingPathComponent("index-story").absoluteString,
+                                  guid: "index-story", description: "Report.", pubDate: Date(), source: "Publisher")
+        try await db.upsertArticles([article])
+        try await db.markRead(articleId: article.id, isRead: true)
+        try await db.setSaved(articleId: article.id, isSaved: true)
+        _ = try await db.recordStoryImage(article.id, imageURL: "https://cdn.example/index.jpg")
+        let neighbors = (0..<64).map { index in
+            FeedArticle(storedID: "image-neighbor-\(index)", title: "Other report", link: fixtureRoot.appendingPathComponent("image-neighbor-\(index)").absoluteString,
+                        guid: "image-neighbor-\(index)", description: "Report.", pubDate: Date(), source: "Publisher")
+        }
+        try await db.upsertArticles(neighbors)
+        for neighbor in neighbors {
+            _ = try await db.recordStoryImage(neighbor.id, imageURL: "https://cdn.example/\(neighbor.id).jpg")
+        }
+        await db.close()
+        var handle: OpaquePointer?
+        assertEqual(sqlite3_open(path, &handle), SQLITE_OK, "Open the isolated image migration fixture")
+        defer { sqlite3_close(handle) }
+        func value(_ sql: String, column: Int32 = 0) -> String? {
+            var statement: OpaquePointer?
+            guard sqlite3_prepare_v2(handle, sql, -1, &statement, nil) == SQLITE_OK else { return nil }
+            defer { sqlite3_finalize(statement) }
+            guard sqlite3_step(statement) == SQLITE_ROW, let text = sqlite3_column_text(statement, column) else { return nil }
+            return String(cString: text)
+        }
+        assertEqual(sqlite3_exec(handle, "DROP INDEX idx_story_images_url; PRAGMA user_version = 18;", nil, nil, nil), SQLITE_OK,
+                    "Reconstruct an existing v18 image library")
+        let cancelled = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            try await db.open()
+        }
+        do { try await cancelled.value; assertTrue(false, "Cancelled migration must fail") }
+        catch { assertTrue(error is CancellationError, "Cancelled migration preserves cancellation") }
+        await db.close()
+        assertEqual(value("PRAGMA user_version;"), "18", "Cancellation keeps the previous schema version")
+        assertEqual(value("SELECT count(*) FROM sqlite_master WHERE name='idx_story_images_url';"), "0", "Cancellation leaves no partial index")
+        try await db.open()
+        assertEqual(value("PRAGMA user_version;"), "19", "Existing v18 libraries receive the image index migration")
+        assertEqual(sqlite3_exec(handle, "ANALYZE story_images;", nil, nil, nil), SQLITE_OK, "Use current fixture cardinality for the query planner")
+        assertTrue(value("EXPLAIN QUERY PLAN SELECT article_id FROM story_images WHERE image_url='https://cdn.example/index.jpg' AND article_id<>'other';", column: 3)?.contains("idx_story_images_url") == true,
+                   "Duplicate-image checks use the image URL index")
+        assertEqual(try await db.storyImages(for: [article.id])[article.id], "https://cdn.example/index.jpg", "Migration preserves cached images")
+        assertTrue(try await db.isRead(articleId: article.id), "Migration preserves read history")
+        assertTrue(try await db.isSaved(articleId: article.id), "Migration preserves saved stories")
+        await db.close()
+        try await db.open()
+        assertEqual(value("SELECT count(*) FROM sqlite_master WHERE name='idx_story_images_url';"), "1", "Reopening preserves one index")
         await db.close()
     }
 
@@ -5044,7 +5160,7 @@ struct NewsTests {
         assertEqual(value(copy, "SELECT count(*) FROM sqlite_master WHERE name IN ('event_match_state','event_exclusions','event_state');"), "0", "Cancelled v14 migration rolls back its tables")
         let migrated = DatabaseEngine(path: copy)
         try await migrated.open()
-        assertEqual(value(copy, "PRAGMA user_version;"), "18", "Copied v13 library upgrades to the current schema")
+        assertEqual(value(copy, "PRAGMA user_version;"), "19", "Copied v13 library upgrades to the current schema")
         assertEqual(value(path, "PRAGMA user_version;"), "13", "Original v13 fixture stays untouched")
         assertEqual(try await migrated.fetchEvent(id: event.id)?.memberArticleIDs.count, 5, "Migration keeps events and members")
         assertTrue(try await migrated.isSaved(articleId: "second"), "Migration keeps saved state")
@@ -5322,7 +5438,7 @@ struct NewsTests {
             guard sqlite3_step(statement) == SQLITE_ROW else { return nil }
             return sqlite3_column_text(statement, 0).map { String(cString: $0) }
         }
-        assertEqual(value(copy, "PRAGMA user_version;"), "18", "Provenance schema upgrades to the current schema")
+        assertEqual(value(copy, "PRAGMA user_version;"), "19", "Provenance schema upgrades to the current schema")
         assertEqual(value(original, "PRAGMA user_version;"), "15", "Original v15 fixture remains untouched")
         assertEqual(value(copy, "PRAGMA quick_check;"), "ok", "Upgraded provenance library passes quick_check")
         assertEqual(value(copy, "PRAGMA foreign_key_check;"), nil, "Provenance has no dangling article references")
