@@ -5453,7 +5453,8 @@ struct NewsTests {
         try await db.clearArticleCache()
         assertEqual(try await db.publisherContentRevisions(for: companion.id), beforePurge, "A local cache purge is not a publisher update")
         assertTrue(try await db.fetchArticles(id: article.id).first?.fullContent != nil, "Saved publisher bodies survive cache purging")
-        let coordinator = OverviewGenerationCoordinator(store: store, queue: EnrichmentQueue(store: store))
+        // Unit tests never reach the live on-device model.
+        let coordinator = OverviewGenerationCoordinator(store: store, queue: EnrichmentQueue(store: store), textModel: .unavailable)
         let cachedOverview = await coordinator.requestOverview(eventID: event.id, eventTitle: "Harbor bridge",
             membershipVersion: event.membershipVersion, articles: try await db.fetchArticles(limit: nil, eventID: event.id))
         assertTrue(cachedOverview != nil, "An overview can be generated from current stored inputs")
@@ -7452,12 +7453,45 @@ struct NewsTests {
         let blocked = OverviewGenerationCoordinator(store: store, queue: EnrichmentQueue(store: store), textModel: coordinatedModel, allowsModel: { false })
         _ = await blocked.requestOverview(eventID: "blocked", eventTitle: "Bridge", membershipVersion: 1, articles: [article1, article2])
         assertEqual(await requests.value, before, "AI/energy policy prevents all model requests")
+        assertEqual(try await database.fetchEventOverview(eventID: "blocked")?.isStale(currentMembershipVersion: 1), true,
+                    "An overview made while the model was skipped is stored as provisional")
+        let upgraded = await coordinator.requestOverview(eventID: "blocked", eventTitle: "Bridge", membershipVersion: 1, articles: [article1, article2])
+        assertEqual(upgraded?.content.evidenceSections?.introduction?.count, 2, "A provisional overview is regenerated once the model may run")
+        for (failure, retried) in [(NewsTextModel { _, _ in throw URLError(.timedOut) }, true), (NewsTextModel.unavailable, false)] {
+            let eventID = "failing-\(retried)"
+            let failing = OverviewGenerationCoordinator(store: store, queue: EnrichmentQueue(store: store), textModel: failure, allowsModel: { true })
+            let shown = await failing.requestOverview(eventID: eventID, eventTitle: "Bridge", membershipVersion: 1, articles: [article1, article2])
+            assertTrue(shown != nil, "A failed model still shows the deterministic overview")
+            assertEqual(try await database.fetchEventOverview(eventID: eventID)?.isStale(currentMembershipVersion: 1), retried,
+                        "A failed model is retried later; a Mac without one keeps the deterministic overview")
+        }
+        // A cancelled background request stops waiting, but a reader that joined its generation still gets the result.
+        let gate = OpenGate()
+        let gatedModel = NewsTextModel { prompt, tokens in
+            await gate.wait()
+            return try await coordinatedModel.respond(prompt, tokens)
+        }
+        let checks = TestCounter()
+        let shared = OverviewGenerationCoordinator(store: store, queue: EnrichmentQueue(store: store), textModel: gatedModel,
+                                                   allowsModel: { await checks.increment(); return true })
+        let warmup = Task { await shared.requestOverview(eventID: "joined", eventTitle: "Bridge", membershipVersion: 1,
+                                                         articles: [article1, article2], priority: .background) }
+        while await gate.arrivals == 0 { await Task.yield() }
+        let reader = Task { await shared.requestOverview(eventID: "joined", eventTitle: "Bridge", membershipVersion: 1, articles: [article1, article2]) }
+        while await checks.value < 2 { await Task.yield() }
+        warmup.cancel()
+        await gate.open()
+        assertEqual(await warmup.value, nil, "The cancelled background request returns nothing")
+        assertEqual(await reader.value?.content.evidenceSections?.introduction?.count, 2,
+                    "Cancelling the background request does not cancel a reader's joined generation")
         await database.close()
         let roundTrip = try JSONDecoder().decode(EventOverviewDocument.self, from: JSONEncoder().encode(generated))
         assertEqual(roundTrip.allClaims, generated.allClaims, "Introduction citations survive persistence")
         let cancelled = Task { try await OverviewComposer.composeWithModel(fallback: fallback, passages: passages, articles: [article1, article2], model: NewsTextModel { _, _ in try Task.checkCancellation(); return answer }) }
         cancelled.cancel()
-        do { _ = try await cancelled.value; assertTrue(false, "Cancelled generation throws") } catch is CancellationError { }
+        let cancellationThrew: Bool
+        do { _ = try await cancelled.value; cancellationThrew = false } catch is CancellationError { cancellationThrew = true }
+        assertTrue(cancellationThrew, "Cancelled generation throws")
     }
 
     static func testArticleAnalyzerStructuredOutputAndFallbacks() async throws {

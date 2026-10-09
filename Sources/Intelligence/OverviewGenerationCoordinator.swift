@@ -126,6 +126,7 @@ actor OverviewGenerationCoordinator {
         }
 
         let passages = selection.passages
+        let multiSource = Set(articles.map { $0.source.lowercased() }).count > 1
 
         // 4. Reuse EnrichmentQueue to schedule generation under bounded concurrency
         let task = Task<EventOverviewDocument?, Never> { [weak self] in
@@ -153,13 +154,18 @@ actor OverviewGenerationCoordinator {
                     membershipVersion: membershipVersion
                 )
 
-                guard modelAllowed, Set(articles.map { $0.source.lowercased() }).count > 1 else { return overview }
+                guard multiSource else { return overview }
+                guard modelAllowed else { return Self.provisional(overview) }
                 do {
                     return try await OverviewComposer.composeWithModel(fallback: overview, passages: passages, articles: articles, model: model)
                 } catch is CancellationError {
                     return nil
-                } catch {
+                } catch let error as URLError where error.code == .resourceUnavailable {
+                    // No on-device model on this Mac: the deterministic overview is final.
                     return Task.isCancelled ? nil : overview
+                } catch {
+                    // A refused, rate-limited or busy model: show the deterministic overview and retry on the next request.
+                    return Task.isCancelled ? nil : Self.provisional(overview)
                 }
             }
 
@@ -179,16 +185,23 @@ actor OverviewGenerationCoordinator {
 
         inFlightTasks[eventID] = InFlightGeneration(task: task, membershipVersion: membershipVersion, inputTextHash: inputTextHash,
                                                    articleInputs: expectedArticleInputs)
-        let result = await withTaskCancellationHandler {
-            await task.value
-        } onCancel: {
-            task.cancel()
-        }
+        // Another request may join this generation, so a cancelled caller stops waiting without cancelling it;
+        // `cancel(eventID:)` stops it for every caller.
+        let result = await task.value
         // A newer request may have replaced this entry while it ran.
         if inFlightTasks[eventID]?.task == task {
             inFlightTasks.removeValue(forKey: eventID)
         }
         return Task.isCancelled ? nil : result
+    }
+
+    /// Stored for its citations and input checks, but stale on the next request, so a model skipped for energy or
+    /// the AI setting, or one that failed, gets another chance instead of leaving the deterministic overview in place.
+    private static func provisional(_ overview: EventOverviewDocument) -> EventOverviewDocument {
+        EventOverviewDocument(id: overview.id, eventID: overview.eventID,
+            version: OverviewVersionContext(membershipVersion: overview.membershipVersion, inputTextHash: overview.inputTextHash,
+                                            schemaVersion: overview.schemaVersion, analysisVersion: 0),
+            content: overview.content, provenance: overview.provenance)
     }
 
     /// Returns false when the result was built from superseded inputs, or storage rejected it, and must not reach the caller.

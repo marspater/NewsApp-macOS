@@ -27,6 +27,8 @@
 
 ### Fixed
 
+- An overview made while the on-device model was skipped (AI setting, Low Power Mode, heat) or failed (refused, rate-limited) is kept only provisionally and regenerated on the next request, so a background warmup can no longer pin an event to its excerpt overview. Cancelling the background warmup no longer cancels an overview the reader joined.
+
 - Overview sentences preserve literal pipes and accept case/punctuation variants of a complete YES verdict; ambiguous answers still fall back. Earlier overviews regenerate with the corrected parser.
 
 - Cached card images no longer flash the previous story when a view changes URLs. Fragment merges reuse exclusion reads and refresh their discovery terms. Duplicate publisher-image checks use an indexed lookup, including libraries already on schema v18.

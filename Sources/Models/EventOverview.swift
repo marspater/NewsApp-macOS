@@ -339,7 +339,8 @@ public struct OverviewProvenance: Codable, Hashable, Sendable {
 /// Derived overview document model bound to membership version, input text hashes, schema version, and analysis version.
 public struct EventOverviewDocument: Codable, Hashable, Sendable, Identifiable {
     public static let currentSchemaVersion = 1
-    /// 3: verified plain-text synthesis, including introduction citations. Older overviews regenerate.
+    /// 4: verified plain-text synthesis with introduction citations and strict support parsing. Older overviews, and
+    /// provisional ones stored at 0 (`OverviewGenerationCoordinator`), regenerate.
     public static let currentAnalysisVersion = 4
 
     public let id: String
