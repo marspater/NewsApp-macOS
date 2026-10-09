@@ -577,6 +577,15 @@ final class ContentExtractionPipeline: Sendable {
 
     init(client: SecureHTTPClient = .shared) { self.client = client }
 
+    private static func articleURL(from link: String, allowHTTP: Bool) -> URL? {
+        guard let url = URL(string: link) else { return nil }
+        // Upgrade old feed links before the protected client validates their destination.
+        guard !allowHTTP, url.scheme?.lowercased() == "http",
+              var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return url }
+        components.scheme = "https"
+        return components.url ?? url
+    }
+
     /// Detailed extraction entry point returning structured outcome for diagnostics.
     func extractArticleDetailed(from link: String, allowHTTP: Bool = false) async -> ExtractionOutcome {
         await extractArticleWithIdentity(from: link, allowHTTP: allowHTTP).outcome
@@ -584,15 +593,9 @@ final class ContentExtractionPipeline: Sendable {
 
     func extractArticleWithIdentity(from link: String, allowHTTP: Bool = false) async
         -> (outcome: ExtractionOutcome, evidence: DocumentIdentityEvidence?) {
-        guard var url = URL(string: link) else {
+        guard let url = Self.articleURL(from: link, allowHTTP: allowHTTP) else {
             logger.error("[Extraction] Malformed article URL")
             return (.contentParsingFailed(reason: "Malformed URL: \(link)"), nil)
-        }
-        // Some feeds (Africanews) still link http:// pages their servers also serve over TLS. Without the insecure
-        // setting the page is requested over https instead of being refused.
-        if !allowHTTP, url.scheme?.lowercased() == "http", var components = URLComponents(url: url, resolvingAgainstBaseURL: false) {
-            components.scheme = "https"
-            url = components.url ?? url
         }
 
         let host = url.host ?? "unknown"
