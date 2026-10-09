@@ -25,6 +25,8 @@ After clearing the four remembered misses and repeating the lookups at the pinne
 
 The repeat run exposed a pre-existing order dependence in `recordStoryImage`. When a second story declares the same image, both rows are cleared to `NULL`, and the shared URL is no longer recorded. A third story declaring it is stored again. On 9 October one Hindu story kept `og-image.png` this way and was counted as pictured. In the repeat run a different Hindu story kept it. On this denominator, coverage with a relevant image is therefore **465 / 473**, with 8 placeholders. Fixing this needs the cleared URL to be remembered, which is a storage change outside this slice. It is tracked in #338.
 
+With the #338 fix (schema v21 remembers cleared site defaults), the same repeat on a fresh copy gives **465 / 473** with 8 placeholders: 5 The Hindu, 3 The New York Times. The Hindu default is recorded once, and no story keeps it.
+
 ## Verification
 
 - Mocked-HTTP regressions cover a figure-only page (the first qualifying figure is chosen, skipping a tracking pixel) and a furniture-only page (logo, newsletter banner, pixel and a 20:1 strip all yield none). The figure regression fails without the fallback.
