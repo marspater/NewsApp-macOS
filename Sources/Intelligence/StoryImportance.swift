@@ -46,7 +46,7 @@ actor OnDeviceImportanceJudge {
             // Like the event judge: news text needs the content-transformation guardrails and a plain-text answer.
             let session = LanguageModelSession(model: SystemLanguageModel(guardrails: .permissiveContentTransformations))
             let response = try await session.respond(
-                to: Self.prompt(report), options: GenerationOptions(samplingMode: .greedy, maximumResponseTokens: 8))
+                to: Self.prompt(report), options: GenerationOptions(sampling: .greedy, maximumResponseTokens: 8))
             guard let level = Self.level(response.content) else { return nil }
             if cache.count >= 5_000 { cache.removeAll() }
             cache[key] = level

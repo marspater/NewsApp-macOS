@@ -85,7 +85,8 @@ public struct NewsTextModel: Sendable {
         #if canImport(FoundationModels)
         if #available(macOS 26.0, *), case .available = SystemLanguageModel.default.availability {
             let session = LanguageModelSession(model: SystemLanguageModel(guardrails: .permissiveContentTransformations))
-            let response = try await session.respond(to: prompt, options: GenerationOptions(samplingMode: .greedy, maximumResponseTokens: tokens))
+            // The stable SDK used by CodeQL still requires `sampling:`; newer SDKs retain this initializer.
+            let response = try await session.respond(to: prompt, options: GenerationOptions(sampling: .greedy, maximumResponseTokens: tokens))
             try Task.checkCancellation()
             return response.content
         }
@@ -1017,4 +1018,3 @@ public enum TrackpadSwipeEvaluator {
         return deltaX > 0 ? .previous : .next
     }
 }
-
