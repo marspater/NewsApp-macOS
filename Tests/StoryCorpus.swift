@@ -91,7 +91,7 @@ enum StoryCorpus {
 
     /// Replays only the caller's selected split through real ingestion, candidate generation and clustering.
     /// Resolved single documents share a membership even when they have no multi-document event.
-    static func eventMemberships(articles: [FeedArticle]) async throws -> [String: String] {
+    static func eventMemberships(articles: [FeedArticle], onPass: ((EventClusteringReport) -> Void)? = nil) async throws -> [String: String] {
         let items = articles.sorted { ($0.pubDate, $0.id) < ($1.pubDate, $1.id) }
         guard var clock = items.first?.pubDate else { return [:] }
         let db = DatabaseEngine(path: ":memory:")
@@ -109,8 +109,9 @@ enum StoryCorpus {
                     try await db.upsertArticles(batch)
                     // NEWS_EVENT_JUDGE=1 replays with the on-device judge and no per-pass budget.
                     let judged = ProcessInfo.processInfo.environment["NEWS_EVENT_JUDGE"] == "1"
-                    _ = try await EventClusterer.run(in: db, judge: judged ? .onDevice : .unavailable,
-                                                     judgeBudget: judged ? .max : 0, now: clock, limit: .max)
+                    let report = try await EventClusterer.run(in: db, judge: judged ? .onDevice : .unavailable,
+                                                            judgeBudget: judged ? .max : 0, now: clock, limit: .max)
+                    onPass?(report)
                 }
                 clock = clock.addingTimeInterval(6 * 3600)
                 if index < items.count, items[index].pubDate > clock { clock = items[index].pubDate }
