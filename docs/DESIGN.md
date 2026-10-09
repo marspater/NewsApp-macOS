@@ -40,7 +40,7 @@ The single design language for News on macOS. It applies to every change that ad
 
 ### 3.3 Implementation rules
 
-- Use the helpers in `GlassSystem.swift` (`nativeLiquidGlass(in:interactive:)`, `inGlassContainer()`, and the button-style helper added by the plan). Do not call `glassEffect` or create a `GlassEffectContainer` directly in a feature view.
+- Use the helpers in `GlassSystem.swift` (`nativeLiquidGlass(in:interactive:)`, `inGlassContainer()`, `nativeGlassButtonStyle(prominent:)`). Do not call `glassEffect` or create a `GlassEffectContainer` directly in a feature view.
 - Buttons on glass use `.buttonStyle(.glass)` or `.buttonStyle(.glassProminent)` through the helper. Custom glass controls that respond to clicks are `interactive`.
 - Apply glass as the last modifier, after padding and frame, so the padding is part of the glass shape. Glass helpers never add padding of their own. Never nest glass.
 - Group adjacent glass elements in one `GlassEffectContainer` so they sample once and can morph. Morph only with `glassEffectID(_:in:)` inside a container and an animation gated by Reduce Motion.

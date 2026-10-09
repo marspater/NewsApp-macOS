@@ -502,7 +502,7 @@ struct NewsTests {
         await testContentQualityValidation()
         await testExtractionOutcomeDiagnostics()
         await testCanonicalClassificationDisambiguation()
-        await testAppContainerAndFrostedSurface()
+        await testAppContainerWiring()
         try await testReadManagerReconciliationCache()
         
         if ProcessInfo.processInfo.environment["NEWS_LIVE_READER_CHECK"] == "1" {
@@ -6569,8 +6569,13 @@ struct NewsTests {
         assertEqual(AppLayout.sidebarInset, 12.0, "AppLayout.sidebarInset should be 12.0")
         assertEqual(AppLayout.sectionGap, 24.0, "AppLayout.sectionGap should be 24.0")
         assertEqual(AppLayout.cardGap, 16.0, "AppLayout.cardGap should be 16.0")
-        assertEqual(AppLayout.toolbarHeight, 44.0, "AppLayout.toolbarHeight should be 44.0")
-        assertEqual(AppLayout.controlHeight, 28.0, "AppLayout.controlHeight should be 28.0")
+        assertEqual(AppLayout.readingMeasure, 720.0, "AppLayout.readingMeasure should be 720.0")
+        assertEqual(AppLayout.listMaxWidth, 1000.0, "AppLayout.listMaxWidth should be 1000.0")
+        assertEqual(AppLayout.gridColumnMinimum, 300.0, "AppLayout.gridColumnMinimum should be 300.0")
+        assertEqual(AppLayout.gridColumnMaximum, 420.0, "AppLayout.gridColumnMaximum should be 420.0")
+        assertEqual(AppSpacing.textStack, 2.0, "AppSpacing.textStack should be 2.0")
+        assertEqual(AppSpacing.eyebrowGap, 6.0, "AppSpacing.eyebrowGap should be 6.0")
+        assertEqual(AppTypography.eyebrowTracking, 0.5, "AppTypography.eyebrowTracking should be 0.5")
         
         // 4. Ghost Typography Theme tokens
         assertEqual(AppTypography.bodyLineSpacing(for: .casper), 10.0, "Casper theme line spacing should be 10")
@@ -8640,8 +8645,8 @@ struct NewsTests {
     }
 
     @MainActor
-    static func testAppContainerAndFrostedSurface() async {
-        print("  - Testing AppContainer & Frosted Surface tokens...")
+    static func testAppContainerWiring() async {
+        print("  - Testing AppContainer wiring...")
 
         let suite = "test.container.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
@@ -8656,13 +8661,6 @@ struct NewsTests {
         assertTrue(container.articleStore === store, "Injected store wired")
         assertTrue(container.readManager === reads, "Injected read manager wired")
         assertTrue(container.savedStories === saved, "Injected saved manager wired")
-
-        let controlElevation = FrostedElevation.control
-        assertEqual(controlElevation.surfaceBackingOpacity, 0.65, "Control backing is translucent (0.65)")
-        assertEqual(controlElevation.shadowRadius, 12.0, "Control shadow radius is 12")
-
-        let cardElevation = FrostedElevation.card
-        assertEqual(cardElevation.surfaceBackingOpacity, 0.38, "Card backing is 0.38")
     }
 
     @MainActor
