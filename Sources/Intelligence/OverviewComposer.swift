@@ -378,7 +378,28 @@ public struct OverviewComposer: Sendable {
             EvidencePassage(id: "P\(index + 1)", articleID: "source\(index + 1)", text: passage.text, fingerprint: passage.fingerprint)
         }
         let passagesByID = Dictionary(uniqueKeysWithValues: zip(promptPassages, passages).map { ($0.id, $1) })
-        let prompt = """
+        let answer = try await model.respond(draftPrompt(title: fallback.title, passages: promptPassages), 1000)
+        try Task.checkCancellation()
+        let lines = answer.split(whereSeparator: \.isNewline)
+        outcome.lines = lines.count
+        guard (5...8).contains(lines.count) else {
+            outcome.result = lines.contains { isProtocolLine($0) } ? .lineCount : .unstructured
+            return (fallback, outcome)
+        }
+        let draft = try await verifiedDraft(lines, fallback: fallback, passagesByID: passagesByID, articles: articles,
+                                            model: model, outcome: &outcome)
+        outcome.keptIntroduction = draft.introduction.count
+        outcome.keptFacts = draft.facts.count
+        guard draft.isComplete(lineCount: lines.count) else {
+            outcome.result = .weakDraft
+            return (fallback, outcome)
+        }
+        outcome.result = .accepted
+        return (draft.document(replacing: fallback), outcome)
+    }
+
+    private static func draftPrompt(title: String, passages: [EvidencePassage]) -> String {
+        """
         \(GenerationPromptDefense.untrustedDataSystemGuard)
         Summarize this news event using only the publisher passages below. Keep attribution,
         uncertainty, dates and numbers. Do not add background knowledge or fabricated quotations.
@@ -390,40 +411,53 @@ public struct OverviewComposer: Sendable {
         Use different publishers where evidence permits. No headings, markdown or other lines.
         Focus on the event topic below and exclude unrelated stories. The topic is navigation context,
         not evidence: every assertion still needs a publisher passage.
-        \(GenerationPromptDefense.frameArticleData(title: fallback.title))
-        \(GenerationPromptDefense.frameEvidencePassages(promptPassages))
+        \(GenerationPromptDefense.frameArticleData(title: title))
+        \(GenerationPromptDefense.frameEvidencePassages(passages))
         """
-        let answer = try await model.respond(prompt, 1000)
-        try Task.checkCancellation()
-        let lines = answer.split(whereSeparator: \.isNewline)
-        outcome.lines = lines.count
-        guard (5...8).contains(lines.count) else {
-            let structured = lines.contains { line in
-                let kind = line.split(separator: "|", maxSplits: 1).first?.trimmingCharacters(in: .whitespaces)
-                return kind == "INTRO" || kind == "FACT"
-            }
-            outcome.result = structured ? .lineCount : .unstructured
-            return (fallback, outcome)
-        }
-        let articlesByID = Dictionary(uniqueKeysWithValues: articles.map { ($0.id, $0) })
+    }
+
+    /// Verified model sentences in answer order.
+    private struct ModelDraft {
         var introduction: [OverviewFact] = []
         var facts: [OverviewFact] = []
         var citations: [OverviewCitation] = []
+
+        /// One to three introduction sentences, three to five facts, and at least two thirds of the lines kept.
+        func isComplete(lineCount: Int) -> Bool {
+            !introduction.isEmpty && introduction.count <= 3 && (3...5).contains(facts.count)
+                && (introduction.count + facts.count) * 3 >= lineCount * 2
+        }
+
+        /// The synthesized overview: model introduction and facts, the fallback's other sections and citations.
+        func document(replacing fallback: EventOverviewDocument) -> EventOverviewDocument {
+            let sections = OverviewEvidenceSections(timeline: fallback.timeline, perspectives: fallback.perspectives,
+                thematicAngle: fallback.thematicAngle, coverageSentiment: fallback.coverageSentiment, introduction: introduction)
+            let content = OverviewContent(title: fallback.title, summary: introduction.map(\.text).joined(separator: " "),
+                facts: facts, citations: Array(fallback.citations.values) + citations,
+                leadImage: fallback.leadImage, evidenceSections: sections)
+            return EventOverviewDocument(eventID: fallback.eventID, version: fallback.version, content: content,
+                provenance: OverviewProvenance(memberArticleIDs: fallback.provenance.memberArticleIDs, kind: .synthesized))
+        }
+    }
+
+    /// Keeps each protocol line whose sentence passes the deterministic and model support checks, counting the rest.
+    private static func verifiedDraft(_ lines: [Substring], fallback: EventOverviewDocument,
+                                      passagesByID: [String: EvidencePassage], articles: [FeedArticle], model: NewsTextModel,
+                                      outcome: inout OverviewModelOutcome) async throws -> ModelDraft {
+        let articlesByID = Dictionary(uniqueKeysWithValues: articles.map { ($0.id, $0) })
+        var draft = ModelDraft()
         for (index, line) in lines.enumerated() {
             try Task.checkCancellation()
-            let fields = line.split(separator: "|", maxSplits: 2, omittingEmptySubsequences: false).map { $0.trimmingCharacters(in: .whitespaces) }
-            guard fields.count == 3, fields[0] == "INTRO" || fields[0] == "FACT",
-                  let passage = passagesByID[fields[1]], let article = articlesByID[passage.articleID],
-                  !fields[2].isEmpty, fields[2].count <= 500 else {
+            guard let parsed = parsedLine(line, passagesByID: passagesByID, articlesByID: articlesByID) else {
                 outcome.malformedLines += 1
                 continue
             }
-            let statement = ContentExtractionPipeline.shared.decodeHTMLEntities(fields[2])
+            let (passage, article) = (parsed.passage, parsed.article)
             let citationID = "model_cite_\(index)"
             let citation = OverviewCitation(id: citationID, articleID: passage.articleID, passageID: passage.id,
                 passageFingerprint: passage.fingerprint, quote: passage.text,
                 source: OverviewSourceMetadata(title: article.title, name: article.source, url: article.link, publishedAt: article.pubDate))
-            let fact = OverviewFact(id: "model_claim_\(index)", text: statement, citationIDs: [citationID])
+            let fact = OverviewFact(id: "model_claim_\(index)", text: parsed.statement, citationIDs: [citationID])
             let check = EventOverviewDocument(eventID: fallback.eventID, version: fallback.version,
                 content: OverviewContent(title: fallback.title, summary: "", facts: [fact], citations: [citation]), provenance: fallback.provenance)
             switch try await verifyModelSentence(check, passage: passage, article: article, model: model) {
@@ -431,24 +465,27 @@ public struct OverviewComposer: Sendable {
             case .rejectedDeterministically: outcome.deterministicRejections += 1; continue
             case .rejectedByModel: outcome.modelRejections += 1; continue
             }
-            citations.append(citation)
-            if fields[0] == "INTRO" { introduction.append(fact) } else { facts.append(fact) }
+            draft.citations.append(citation)
+            if parsed.isIntroduction { draft.introduction.append(fact) } else { draft.facts.append(fact) }
         }
-        outcome.keptIntroduction = introduction.count
-        outcome.keptFacts = facts.count
-        guard !introduction.isEmpty, introduction.count <= 3, (3...5).contains(facts.count),
-              (introduction.count + facts.count) * 3 >= lines.count * 2 else {
-            outcome.result = .weakDraft
-            return (fallback, outcome)
-        }
-        outcome.result = .accepted
-        let sections = OverviewEvidenceSections(timeline: fallback.timeline, perspectives: fallback.perspectives,
-            thematicAngle: fallback.thematicAngle, coverageSentiment: fallback.coverageSentiment, introduction: introduction)
-        let content = OverviewContent(title: fallback.title, summary: introduction.map(\.text).joined(separator: " "),
-            facts: facts, citations: Array(fallback.citations.values) + citations,
-            leadImage: fallback.leadImage, evidenceSections: sections)
-        return (EventOverviewDocument(eventID: fallback.eventID, version: fallback.version, content: content,
-            provenance: OverviewProvenance(memberArticleIDs: fallback.provenance.memberArticleIDs, kind: .synthesized)), outcome)
+        return draft
+    }
+
+    /// A `KIND|P1|sentence` line naming a known passage, with its sentence decoded, or nil.
+    private static func parsedLine(_ line: Substring, passagesByID: [String: EvidencePassage], articlesByID: [String: FeedArticle])
+        -> (isIntroduction: Bool, passage: EvidencePassage, article: FeedArticle, statement: String)? {
+        let fields = line.split(separator: "|", maxSplits: 2, omittingEmptySubsequences: false).map { $0.trimmingCharacters(in: .whitespaces) }
+        guard fields.count == 3, isProtocolKind(fields[0]),
+              let passage = passagesByID[fields[1]], let article = articlesByID[passage.articleID],
+              !fields[2].isEmpty, fields[2].count <= 500 else { return nil }
+        return (fields[0] == "INTRO", passage, article, ContentExtractionPipeline.shared.decodeHTMLEntities(fields[2]))
+    }
+
+    private static func isProtocolKind(_ kind: String?) -> Bool { kind == "INTRO" || kind == "FACT" }
+
+    /// Whether a line opens with an INTRO or FACT field, however many fields follow.
+    private static func isProtocolLine(_ line: Substring) -> Bool {
+        isProtocolKind(line.split(separator: "|", maxSplits: 1).first?.trimmingCharacters(in: .whitespaces))
     }
 
     private enum SentenceCheck { case supported, rejectedDeterministically, rejectedByModel }
