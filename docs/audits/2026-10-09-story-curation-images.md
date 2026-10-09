@@ -26,3 +26,5 @@ All 128 retained page-derived image URLs then downloaded and decoded through `Se
 - Image staged arm64 build and strict signature passed; native UI 73/73, reader 26/26 and overview 49/49 harnesses passed. The mandatory full commit hook passed.
 
 The live core harness and staged bundle are distinct evidence. No installation, distribution, hosted CI success or merge is claimed by these local checks.
+
+The [Codacy follow-up](2026-10-09-codacy-slices.md) adds an upgrade-safe schema v19 image URL index, card-state and clustering corrections, and current regression evidence. The live image-coverage measurement above remains the original snapshot measurement.

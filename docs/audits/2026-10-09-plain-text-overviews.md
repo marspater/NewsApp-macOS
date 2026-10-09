@@ -2,7 +2,7 @@
 
 ## Implementation
 
-The production reader coordinator now calls the on-device composer. Drafts contain one sentence and one short local passage ID per line; code maps that ID to the original stored article, passage and fingerprint. This avoids the model confusing long article hashes with passage IDs. Introduction sentences have persisted citations and the same source-opening controls as key facts. Analysis version 3 invalidates older overviews and article analyses.
+The production reader coordinator now calls the on-device composer. Drafts contain one sentence and one short local passage ID per line; code maps that ID to the original stored article, passage and fingerprint. This avoids the model confusing long article hashes with passage IDs. Introduction sentences have persisted citations and the same source-opening controls as key facts. Overview analysis version 4 invalidates earlier parser results; article analysis remains at version 3. The [Codacy follow-up](2026-10-09-codacy-slices.md) records parser corrections and fresh verification.
 
 Each proposed sentence passes citation/quote lineage, numeric/date/unit/negation checks and the existing quality auditor, followed by a fresh one-token support judgment against its cited passage. Rejected sentences are removed. Fewer than three retained facts, a missing introduction, excessive rejection, malformed output or refusal keeps the current deterministic overview. Support inference is a model judgment, not a proof of semantic entailment. Existing publisher-attributed perspectives and sourced timelines remain available.
 
