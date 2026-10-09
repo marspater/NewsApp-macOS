@@ -965,6 +965,25 @@ actor DatabaseEngine {
         try aliasTarget(kind: "id", value: id) ?? id
     }
 
+    /// Resolves ID aliases in bounded queries, preserving input order and ambiguous/missing fallbacks.
+    func resolvedArticleIDs(_ ids: [String]) throws -> [String] {
+        // SQLite BINARY keys distinguish UTF-8 spellings that Swift String considers equal.
+        var seen = Set<Data>()
+        let uniqueIDs = ids.filter { seen.insert(Data($0.utf8)).inserted }
+        var targets: [Data: String] = [:]
+        for start in stride(from: 0, to: uniqueIDs.count, by: 400) {
+            try Task.checkCancellation()
+            let slice = Array(uniqueIDs[start..<min(start + 400, uniqueIDs.count)])
+            let placeholders = Array(repeating: "?", count: slice.count).joined(separator: ",")
+            let rows = try eventRows("SELECT value, article_id FROM article_aliases WHERE kind = 'id' AND value IN (\(placeholders));",
+                                     slice.map { .text($0) })
+            for row in rows {
+                if let alias = row[0], let target = row[1] { targets[Data(alias.utf8)] = target }
+            }
+        }
+        return ids.map { targets[Data($0.utf8)] ?? $0 }
+    }
+
     /// Keep observed identities across serial URL/GUID changes without rewriting keys.
     func resolvedArticleID(for article: FeedArticle, feedURL: String? = nil) throws -> String {
         let scoped = ArticleIdentity.scopedGUID(article.guid, feedURL: feedURL ?? article.identityFeedURL)
@@ -1671,8 +1690,8 @@ actor DatabaseEngine {
 
         try beginTransaction()
         do {
-            for articleId in articleIds {
-                let articleId = try resolvedArticleID(articleId)
+            let resolvedIds = try resolvedArticleIDs(articleIds)
+            for articleId in resolvedIds {
                 sqlite3_reset(stmt)
                 sqlite3_bind_text(stmt, 1, articleId, -1, Self.sqliteTransient)
                 sqlite3_bind_int(stmt, 2, readInt)
@@ -1714,8 +1733,8 @@ actor DatabaseEngine {
         let now = Date().timeIntervalSince1970
         try beginTransaction()
         do {
-            for articleId in articleIds {
-                let articleId = try resolvedArticleID(articleId)
+            let resolvedIDs = try resolvedArticleIDs(Array(articleIds))
+            for articleId in resolvedIDs {
                 sqlite3_reset(stmt)
                 sqlite3_bind_text(stmt, 1, articleId, -1, Self.sqliteTransient)
                 sqlite3_bind_double(stmt, 2, now)

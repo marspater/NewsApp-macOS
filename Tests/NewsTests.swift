@@ -330,6 +330,7 @@ struct NewsTests {
             try await testReaderFigures(fixtureRoot: fixtureRoot)
             try await testCanonicalArticleIngestion(fixtureRoot: fixtureRoot)
             try await testPersistentArticleAliases(fixtureRoot: fixtureRoot)
+            try await testBatchStateAliasResolution()
             try await testFeedScopedGUIDs(fixtureRoot: fixtureRoot)
             try await testValidatedDocumentIdentity(fixtureRoot: fixtureRoot)
             try await testIdentityBaselineScenarios(fixtureRoot: fixtureRoot)
@@ -420,6 +421,7 @@ struct NewsTests {
         await testDatabaseEnginePersistence()
         try await testCanonicalArticleIngestion(fixtureRoot: fixtureRoot)
         try await testPersistentArticleAliases(fixtureRoot: fixtureRoot)
+        try await testBatchStateAliasResolution()
         try await testFeedScopedGUIDs(fixtureRoot: fixtureRoot)
         try await testValidatedDocumentIdentity(fixtureRoot: fixtureRoot)
         try await testIdentityBaselineScenarios(fixtureRoot: fixtureRoot)
@@ -3104,6 +3106,73 @@ struct NewsTests {
         legacy.removeValue(forKey: "storedID")
         let legacyData = try JSONSerialization.data(withJSONObject: legacy)
         assertEqual(try JSONDecoder().decode(FeedArticle.self, from: legacyData).id, update.id, "Legacy JSON remains decodable without a stored ID")
+        await db.close()
+    }
+
+    static func testBatchStateAliasResolution() async throws {
+        print("  - Testing bounded batch aliases, state preservation and rollback...")
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("news-batch-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let path = directory.appendingPathComponent("library.sqlite3").path
+        let db = DatabaseEngine(path: path)
+        try await db.open()
+        let articles = ["batch-first", "batch-second"].map {
+            FeedArticle(title: $0, link: "", guid: $0, description: "", pubDate: Date(), source: "Fixture")
+        }
+        try await db.upsertArticles(articles)
+        func execute(_ sql: String) {
+            var handle: OpaquePointer?
+            assertEqual(sqlite3_open(path, &handle), SQLITE_OK, "Open isolated batch fixture")
+            defer { sqlite3_close(handle) }
+            assertEqual(sqlite3_exec(handle, sql, nil, nil, nil), SQLITE_OK, "Modify isolated batch fixture")
+        }
+        let aliases = (0..<405).map { "batch-alias-\($0)" }
+        execute(aliases.enumerated().map { index, alias in
+            "INSERT INTO article_aliases(kind, value, article_id) VALUES ('id', '\(alias)', '\(articles[index % 2].id)');"
+        }.joined() + "INSERT INTO article_aliases(kind, value, article_id) VALUES ('id', 'batch-ambiguous', NULL);")
+        let composed = "batch-caf\u{00E9}"
+        let decomposed = "batch-cafe\u{0301}"
+        assertTrue(composed == decomposed, "Swift considers the two Unicode spellings equal")
+        assertFalse(Data(composed.utf8) == Data(decomposed.utf8), "SQLite BINARY keys distinguish their bytes")
+        execute("INSERT INTO article_aliases VALUES ('id', '\(composed)', 'batch-first'); INSERT INTO article_aliases VALUES ('id', '\(decomposed)', 'batch-second');")
+        assertEqual(try await db.resolvedArticleID(composed), articles[0].id, "The single-ID lookup distinguishes the first spelling")
+        assertEqual(try await db.resolvedArticleID(decomposed), articles[1].id, "The single-ID lookup distinguishes the second spelling")
+        let input = Array(aliases.reversed()) + [aliases[0], "batch-missing", "batch-ambiguous", composed, decomposed, composed]
+        let expected = (0..<405).reversed().map { articles[$0 % 2].id } + [articles[0].id, "batch-missing", "batch-ambiguous", articles[0].id, articles[1].id, articles[0].id]
+        assertEqual(try await db.resolvedArticleIDs(input), expected, "Chunks preserve order, duplicates and absent/NULL fallbacks")
+        assertEqual(try await db.resolvedArticleIDs([]), [], "Empty resolution needs no query")
+        try await db.markReadBatch(articleIds: [], isRead: true)
+        try await db.batchMarkSaved([])
+        try await db.markReadBatch(articleIds: aliases, isRead: true)
+        try await db.batchMarkSaved(Set(aliases))
+        for article in articles {
+            assertTrue(try await db.isRead(articleId: article.id), "Batch reads reach the alias target")
+            assertTrue(try await db.isSaved(articleId: article.id), "Batch saves preserve read state")
+        }
+        execute("CREATE TRIGGER fail_batch BEFORE INSERT ON article_state WHEN NEW.article_id = 'batch-second' BEGIN SELECT RAISE(ABORT, 'fixture failure'); END;")
+        do {
+            try await db.markReadBatch(articleIds: [aliases[0], aliases[1]], isRead: false)
+            assertTrue(false, "A failed write must abort the read batch")
+        } catch {
+            assertTrue(try await db.isRead(articleId: articles[0].id), "An earlier read update rolls back")
+        }
+        execute("DROP TRIGGER fail_batch;")
+        for article in articles { try await db.setSaved(articleId: article.id, isSaved: false) }
+        execute("CREATE TRIGGER fail_batch BEFORE INSERT ON article_state WHEN NEW.article_id = 'batch-second' BEGIN SELECT RAISE(ABORT, 'fixture failure'); END;")
+        do {
+            try await db.batchMarkSaved(Set(aliases))
+            assertTrue(false, "A failed write must abort the saved batch")
+        } catch {
+            for article in articles { assertFalse(try await db.isSaved(articleId: article.id), "No failed batch save persists") }
+        }
+        execute("DROP TRIGGER fail_batch; DROP TABLE article_aliases;")
+        do {
+            _ = try await db.resolvedArticleIDs(aliases)
+            assertTrue(false, "Alias query errors must propagate")
+        } catch {
+            assertTrue(error.localizedDescription.contains("article_aliases"), "The alias lookup reports its database error")
+        }
         await db.close()
     }
 
