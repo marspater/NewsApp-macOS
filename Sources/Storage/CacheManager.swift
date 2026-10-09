@@ -68,11 +68,4 @@ public final class CacheManager: @unchecked Sendable {
         logger.info("Cleared article cache via CacheManager.")
     }
 
-    /// Clears replaceable network, body and analysis caches.
-    /// Preserves subscriptions, article headers, read history and saved bodies.
-    func clearEverything(database: DatabaseEngine = DatabaseEngine.shared) async throws {
-        clearWebCache()
-        try await database.clearAllDatabaseCache()
-        logger.info("Cleared all web and database caches via CacheManager.")
-    }
 }

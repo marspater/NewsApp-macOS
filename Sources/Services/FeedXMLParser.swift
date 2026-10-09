@@ -255,18 +255,9 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
                 sourceName = extractSourceFromURL(itemLink.trimmingCharacters(in: .whitespacesAndNewlines))
             }
 
-            if let dashRange = sourceName.range(of: " - ", options: .backwards) {
-                let before = sourceName[..<dashRange.lowerBound]
-                if before.count > 2 { sourceName = String(before) }
-            }
-            if let gtRange = sourceName.range(of: " > ") {
-                let before = sourceName[..<gtRange.lowerBound]
-                if before.count > 2 { sourceName = String(before) }
-            }
-            if let pipeRange = sourceName.range(of: " | ") {
-                let before = sourceName[..<pipeRange.lowerBound]
-                if before.count > 2 { sourceName = String(before) }
-            }
+            trimSourceName(&sourceName, separator: " - ", options: .backwards)
+            trimSourceName(&sourceName, separator: " > ")
+            trimSourceName(&sourceName, separator: " | ")
 
             if itemImageUrl.isEmpty {
                 itemImageUrl = extractImageFromHTML(itemDescription) ?? ""
@@ -358,6 +349,13 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
         text = text.replacingOccurrences(of: "\\n{3,}", with: "\n\n", options: .regularExpression)
 
         return ArticleContentRedactor.cleanText(text.trimmingCharacters(in: .whitespacesAndNewlines))
+    }
+
+    private func trimSourceName(_ sourceName: inout String, separator: String, options: String.CompareOptions = []) {
+        if let range = sourceName.range(of: separator, options: options) {
+            let before = sourceName[..<range.lowerBound]
+            if before.count > 2 { sourceName = String(before) }
+        }
     }
 
     private static let imageRegex: NSRegularExpression? = {

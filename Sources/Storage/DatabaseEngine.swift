@@ -2395,22 +2395,26 @@ actor DatabaseEngine {
 
     /// Deletes stories that waited longer than `minorStoryLifetime` (counted from the first report of their event) and
     /// remembers their IDs and document URLs, so feeds that still list them do not bring them back. Saved, read and cited
-    /// stories stay. Forgets expiries after `expiryMemory`. Returns the number of stories removed.
+    /// stories stay, and so do stories delivered by `keepingFeedURLs` (the tension panel while collection is on, whose
+    /// past days are rebuilt from stored articles). Forgets expiries after `expiryMemory`. Returns the number removed.
     @discardableResult
-    func expireWaitingStories(now: Date = Date()) throws -> Int {
+    func expireWaitingStories(now: Date = Date(), keepingFeedURLs: [String] = []) throws -> Int {
         let cutoff = now.timeIntervalSince1970 - StoryVisibilityPolicy.minorStoryLifetime
+        let kept = Array(repeating: "?", count: keepingFeedURLs.count).joined(separator: ", ")
         let expired = """
         SELECT a.id FROM articles a JOIN article_state s ON s.article_id = a.id
         WHERE s.is_read = 0 AND s.is_saved = 0 AND \(Self.visibleArticle) AND \(Self.waitingStory)
             AND coalesce((SELECT min(x.created_at) FROM event_members m JOIN event_members peer ON peer.event_id = m.event_id
                 JOIN articles x ON x.id = peer.article_id WHERE m.article_id = a.id), a.created_at) < ?
             AND NOT EXISTS (SELECT 1 FROM event_overview_citations c WHERE c.article_id = a.id)
+            AND NOT EXISTS (SELECT 1 FROM article_feeds af WHERE af.article_id = a.id AND af.feed_url IN (\(kept)))
         """
+        let expiredValues: [EventValue] = [.real(cutoff)] + keepingFeedURLs.map { .text($0) }
         let removed = try inEventTransaction { () throws -> Int in
             let rows = try eventRows("""
             SELECT id, canonical_url FROM articles WHERE id IN (\(expired)
                 UNION SELECT r.duplicate_id FROM article_reconciliations r WHERE r.survivor_id IN (\(expired)));
-            """, [.real(cutoff), .real(cutoff)])
+            """, expiredValues + expiredValues)
             for row in rows {
                 for key in [row[0], row[1].flatMap { Self.isDocumentURL($0) ? $0 : nil }].compactMap({ $0 }) {
                     try eventRows("INSERT OR REPLACE INTO expired_stories(key, expired_at) VALUES (?, ?);",
