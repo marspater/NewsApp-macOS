@@ -5624,6 +5624,11 @@ struct NewsTests {
         print("  - Testing the labeled event corpus harness on the synthetic control set...")
         assertTrue(EventCorpusMetrics().precision == nil, "No predicted positives cannot establish precision")
         assertTrue(EventCorpusMetrics().recall == nil, "No labeled positives cannot establish recall")
+        // The 9 October judge-off replay: 21 TP, 1 FP, 17 FN (#307).
+        let replay = EventCorpusMetrics(truePositives: 21, falsePositives: 1, falseNegatives: 17).line
+        assertTrue(replay.contains("precision 0.955 [95% 0.782–0.992]"), "Precision carries its Wilson 95% interval: \(replay)")
+        assertTrue(replay.contains("recall 0.553 [95% 0.397–0.699]"), "Recall carries its Wilson 95% interval: \(replay)")
+        assertEqual(EventCorpusMetrics().line, "precision n/a (TP 0, FP 0), recall n/a (FN 0)", "Undefined metrics carry no interval")
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("news-corpus-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         defer { try? FileManager.default.removeItem(at: directory) }
