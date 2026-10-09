@@ -1092,36 +1092,40 @@ actor DatabaseEngine {
         updated_at = excluded.updated_at;
     """
 
+    private struct ArticleUpsertValues {
+        let id: String
+        let canonical: String
+        let pubDate: Double
+        let identityFeedURL: String?
+        let validLink: Bool
+        let now: Double
+    }
+
     private func bindArticleUpsertStatement(
         _ artStmt: OpaquePointer?,
         article: FeedArticle,
-        id: String,
-        canonical: String,
-        pubDate: Double,
-        identityFeedURL: String?,
-        validLink: Bool,
-        now: Double
+        values: ArticleUpsertValues
     ) throws {
         sqlite3_reset(artStmt)
-        sqlite3_bind_text(artStmt, 1, id, -1, Self.sqliteTransient)
+        sqlite3_bind_text(artStmt, 1, values.id, -1, Self.sqliteTransient)
         if let g = article.guid { sqlite3_bind_text(artStmt, 2, g, -1, Self.sqliteTransient) } else { sqlite3_bind_null(artStmt, 2) }
-        sqlite3_bind_text(artStmt, 3, canonical, -1, Self.sqliteTransient)
+        sqlite3_bind_text(artStmt, 3, values.canonical, -1, Self.sqliteTransient)
         sqlite3_bind_text(artStmt, 4, article.title, -1, Self.sqliteTransient)
         sqlite3_bind_text(artStmt, 5, article.description, -1, Self.sqliteTransient)
         if let c = article.fullContent { sqlite3_bind_text(artStmt, 6, c, -1, Self.sqliteTransient) } else { sqlite3_bind_null(artStmt, 6) }
-        sqlite3_bind_double(artStmt, 7, pubDate)
+        sqlite3_bind_double(artStmt, 7, values.pubDate)
         sqlite3_bind_text(artStmt, 8, article.source, -1, Self.sqliteTransient)
         if let img = article.imageUrl { sqlite3_bind_text(artStmt, 9, img, -1, Self.sqliteTransient) } else { sqlite3_bind_null(artStmt, 9) }
         if let cat = article.category { sqlite3_bind_text(artStmt, 10, cat, -1, Self.sqliteTransient) } else { sqlite3_bind_null(artStmt, 10) }
-        if let f = identityFeedURL { sqlite3_bind_text(artStmt, 11, f, -1, Self.sqliteTransient) } else { sqlite3_bind_null(artStmt, 11) }
-        sqlite3_bind_double(artStmt, 12, now)
-        sqlite3_bind_double(artStmt, 13, now)
+        if let f = values.identityFeedURL { sqlite3_bind_text(artStmt, 11, f, -1, Self.sqliteTransient) } else { sqlite3_bind_null(artStmt, 11) }
+        sqlite3_bind_double(artStmt, 12, values.now)
+        sqlite3_bind_double(artStmt, 13, values.now)
         if let document = article.readerDocument {
             let encoded = String(decoding: try JSONEncoder().encode(document), as: UTF8.self)
             sqlite3_bind_text(artStmt, 14, encoded, -1, Self.sqliteTransient)
         } else { sqlite3_bind_null(artStmt, 14) }
 
-        sqlite3_bind_int(artStmt, 15, validLink ? 1 : 0)
+        sqlite3_bind_int(artStmt, 15, values.validLink ? 1 : 0)
         sqlite3_bind_double(artStmt, 16, DateParser.unknownDate.timeIntervalSince1970)
         sqlite3_bind_int(artStmt, 17, article.readerDocument?.hasPublisherText == true ? 1 : 0)
     }
@@ -1223,7 +1227,15 @@ actor DatabaseEngine {
             let preserveExisting = preservingStoredContent && existenceStatus == SQLITE_ROW
             // 1. Insert/Update Article
             if !preserveExisting {
-                try bindArticleUpsertStatement(artStmt, article: article, id: id, canonical: canonical, pubDate: pubDate, identityFeedURL: identityFeedURL, validLink: validLink, now: now)
+                let values = ArticleUpsertValues(
+                    id: id,
+                    canonical: canonical,
+                    pubDate: pubDate,
+                    identityFeedURL: identityFeedURL,
+                    validLink: validLink,
+                    now: now
+                )
+                try bindArticleUpsertStatement(artStmt, article: article, values: values)
                 if sqlite3_step(artStmt) != SQLITE_DONE {
                     try rollbackTransaction()
                     throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to step article insert"])
