@@ -18,6 +18,8 @@
 
 - Only free, open sources: every catalog feed was opened in the app's own reader on 8 October 2026 (`./test.sh --catalog-reader-access`); none is paywalled or blocked. Onet is removed from the catalog, and existing Onet subscriptions end once at launch. Politico, The Hill, Fast Company, Dawn and Ukrainska Pravda are now marked readable; France 24 stays preview-only because most of its feed items are videos.
 
+- The reader drops BBC newsletter promotions: banner images whose alt text describes a newsletter promotion, and signup paragraphs that link to a `/newsletters/` page. Editorial figures, captions and prose that merely mention a newsletter stay (#330).
+
 - Story links that a feed publishes over `http://` (Africanews) are read over https instead of being refused, and embedded-video consent notices (France 24) no longer appear as article text.
 
 - The New York Times home page feed is no longer a default subscription, and the earlier default subscription ends once at launch: nytimes.com answers automated article requests with HTTP 403, so its stories could only be read in Web view. Subscribing to it again by hand is kept.

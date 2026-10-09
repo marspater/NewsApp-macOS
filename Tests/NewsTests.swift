@@ -1274,6 +1274,38 @@ struct NewsTests {
         }
         assertTrue(content.contains("instruction discussed by the researcher"), "Editorial references to a programme remain eligible")
         assertTrue(content.contains("Editorial commentary"), "Comment filtering must not remove editorial commentary")
+
+        // #330: BBC's live layout wraps a newsletter banner and its signup prose in ordinary image and text blocks.
+        func bbcBlock(_ kind: String, _ inner: String) -> String {
+            "<div data-block=\"\(kind)\" class=\"ssrcss-vxwoax-ComponentWrapper\"><div class=\"ssrcss-126h8e-Spacer\">\(inner)</div></div>"
+        }
+        func bbcFigure(_ alt: String, _ caption: String) -> String {
+            bbcBlock("image", "<div data-testid=\"image\"><figure class=\"ssrcss-hc6arm-StyledFigure\"><div><span><picture>"
+                + "<img alt=\"\(alt)\" src=\"https://ichef.bbci.co.uk/ace/standard/976/cpsprodpb/\(caption.count)/live/photo.jpg\" width=\"976\" height=\"549\"/>"
+                + "</picture></span></div>\(caption.isEmpty ? "" : "<figcaption>\(caption)</figcaption>")</figure></div>")
+        }
+        let bbcText = { (inner: String) in bbcBlock("text", "<div data-testid=\"rich-text\"><div class=\"ssrcss-nqezkk-RichTextContainer\"><p>\(inner)</p></div></div>") }
+        let newsletterHTML = "<main><article>" + bbcText(first)
+            + bbcFigure("Officials outside the central bank in London", "The bank's headquarters in the City of London")
+            + bbcText(second)
+            + bbcText("A separate newsletter sent to investors last week warned that rates could rise again before the summer.")
+            + bbcFigure("A thin, grey banner promoting the US Politics Unspun newsletter. The banner reads: “The newsletter that cuts through the noise.”", "")
+            + bbcText("Follow the twists and turns with the US Politics Unspun newsletter. Readers in the UK can <a href=\"/newsletters/zgmn46f\">sign up here</a>. Those outside the UK can <a href=\"/news/articles/c2lkky9zngvo\">sign up here</a>.")
+            + bbcText("Sign up here to get the latest royal stories every week with our Royal Watch <a href=\"https://www.bbc.co.uk/newsletters/zkp3wsg\">newsletter</a>.")
+            + "</article></main>"
+        guard case .success(let newsletterContent, _, let newsletterDocument) = ContentExtractionPipeline.shared.extractFromHTML(newsletterHTML),
+              let newsletterDocument else {
+            assertTrue(false, "BBC newsletter fixture must extract successfully")
+            return
+        }
+        let figures = newsletterDocument.blocks.filter { $0.kind == .figure }
+        assertEqual(figures.map(\.imageAlt), ["Officials outside the central bank in London"], "Newsletter banners are removed; editorial figures stay")
+        assertEqual(figures.first?.text, "The bank's headquarters in the City of London", "Editorial captions stay")
+        for unwanted in ["Politics Unspun", "Royal Watch", "sign up"] {
+            assertFalse(newsletterContent.contains(unwanted), "Plain text excludes newsletter signup: \(unwanted)")
+            assertFalse(newsletterDocument.blocks.contains { $0.text.contains(unwanted) }, "Structured reader excludes newsletter signup: \(unwanted)")
+        }
+        assertTrue(newsletterContent.contains("separate newsletter sent to investors"), "Editorial mentions of newsletters stay")
         let extremeList = HTMLDOMBuilder.parse(html: "<ol start='\(Int.max)'><li>First</li><li>Second</li></ol>")
         assertEqual(extremeList.readingBlocks().count, 2, "Untrusted extreme list numbering must not overflow")
         let tags = EntityResult.readerTags(from: [
