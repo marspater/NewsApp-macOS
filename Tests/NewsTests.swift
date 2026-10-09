@@ -4361,6 +4361,37 @@ struct NewsTests {
         assertEqual(try await EventClusterer.run(in: db, now: now).merged, 0, "A merged story is not merged again")
         await db.close()
 
+        // Newly merged members supply the terms needed to discover a third fragment.
+        let chain = DatabaseEngine(path: ":memory:")
+        try await chain.open()
+        let titles = ["Aurora Meridian growers harvest apples",
+                      "Aurora Meridian growers harvest apples with Cobalt Zenith harvest robots",
+                      "Cobalt Zenith engineers deploy harvest robots"]
+        var groups: [[FeedArticle]] = []
+        for (group, count) in [6, 4, 2].enumerated() {
+            let members = (0..<count).map { index in
+                article("chain-\(group)-\(index)", titles[group], "Scientists report that \(titles[group]).",
+                        hoursAgo: 1, source: "Publisher \(group)-\(index)")
+            }
+            groups.append(members)
+            try await chain.upsertArticles(members)
+            _ = try await chain.createEvent(memberArticleIDs: members.map(\.id), at: now)
+        }
+        func terms(_ story: FeedArticle) -> Set<String> {
+            let value = EventFeatures(title: story.title, description: story.description, date: now)
+            return value.specificAnchors.union(value.keywords)
+        }
+        assertTrue(terms(groups[0][0]).intersection(terms(groups[2][0])).count < 2, "The third fragment requires terms introduced by the second")
+        var chainPolicy = EventMatchPolicy.standard
+        chainPolicy.minimumSharedTerms = 2
+        chainPolicy.matchScore = 0.35
+        chainPolicy.compatibilityScore = 0
+        chainPolicy.compatibleShare = 0
+        let chainReport = try await EventClusterer.run(in: chain, matchPolicy: chainPolicy,
+                                                      judge: EventJudge { _, _ in true }, now: now, limit: 0)
+        assertEqual(chainReport.merged, 2, "A successful merge refreshes terms before considering the next fragment")
+        await chain.close()
+
         // A local exclusion between fragments always wins.
         let excluded = try await library()
         if let event = try await excluded.eventID(forArticle: "m3") {
@@ -4368,6 +4399,12 @@ struct NewsTests {
             try await excluded.separateArticle("m1", fromEvent: event, at: now)
         }
         _ = try await excluded.addArticles(["m1"], toEvent: try await excluded.eventID(forArticle: "m2") ?? "", at: now)
+        let exclusions = try await excluded.eventExclusions(for: quake.map(\.id) + (0..<450).map { "a-missing-\($0)" })
+        assertEqual(exclusions["m1"], Set(["m3", "m4"]), "Bulk exclusions span SQLite parameter batches")
+        assertEqual(exclusions["m3"], Set(["m1"]), "Bulk exclusions work from either endpoint")
+        assertEqual(exclusions["m4"], Set(["m1"]), "Repeated rows across batches do not duplicate exclusions")
+        assertEqual(exclusions.count, 3, "Unknown and unexcluded members create no exclusion entries")
+        assertTrue(try await excluded.eventExclusions(for: []).isEmpty, "An empty member set needs no exclusion query")
         assertEqual(try await EventClusterer.run(in: excluded, now: now).merged, 0, "Excluded members keep fragments apart")
         await excluded.close()
 
@@ -10366,4 +10403,3 @@ struct NewsTests {
         assertFalse(sentimentEvidence.isEmpty, "OverviewEvidenceSections with sentiment is not empty")
     }
 }
-
