@@ -61,12 +61,65 @@ struct NativeUIQAChecks {
         testFeedStabilityAndQueuedUpdatesBuffer()
         testEventOverviewGenerationAndCachingLifecycle()
         testCitationRoutingAndBanner()
+        await testRemoteImageReuse()
 
         print("Finished \(testsRun) Native UI QA checks with \(failures) failures.")
         if failures > 0 {
             exit(1)
         } else {
             print("✅ ALL NATIVE UI QA CHECKS PASSED (#155, #123)")
+        }
+    }
+
+    static func testRemoteImageReuse() async {
+        print("  - Testing image cache hits and URL changes in a reused SwiftUI view...")
+        let first = URL(string: "https://images.example/\(UUID().uuidString)/first.jpg")!
+        let second = first.deletingLastPathComponent().appendingPathComponent("second.jpg")
+        let probe = RemoteImageProbe()
+        var rendered: [(url: URL, success: Bool)] = []
+        func fixture(_ url: URL) -> some View {
+            ArticleRemoteImage(url: url) { phase in
+                let _ = rendered.append((url, phase.image != nil))
+                Text(phase.image == nil ? "Waiting" : "Ready")
+            }.environment(\.readerImageLoader) { url in await probe.load(url) }
+        }
+        let host = NSHostingView(rootView: AnyView(fixture(first)))
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 200, height: 100),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = host
+        window.orderFront(nil)
+        defer { window.close() }
+        func waitUntil(_ condition: () -> Bool) async -> Bool {
+            let deadline = Date().addingTimeInterval(5)
+            while !condition(), Date() < deadline { await Task.yield() }
+            return condition()
+        }
+        assertTrue(await waitUntil { rendered.contains { $0.url == first && $0.success } }, "First image is rendered")
+        let cached = NSHostingView(rootView: AnyView(fixture(first)))
+        window.contentView = cached
+        assertTrue(await waitUntil { rendered.filter { $0.url == first && $0.success }.count >= 2 }, "A newly mounted card renders its cached image")
+        assertEqual(probe.requests.filter { $0 == first }.count, 1, "A cached mount performs no second load or decode")
+        rendered.removeAll()
+        window.contentView = host
+        host.rootView = AnyView(fixture(second))
+        assertTrue(await waitUntil { probe.pending != nil && rendered.contains { $0.url == second } }, "Reused card begins loading the new URL")
+        assertFalse(rendered.contains { $0.url == second && $0.success }, "The old image is never rendered for the new URL")
+        probe.pending?.resume(returning: probe.image)
+        probe.pending = nil
+        assertTrue(await waitUntil { rendered.contains { $0.url == second && $0.success } }, "New image appears after its own load completes")
+        assertEqual(probe.requests.count, 2, "Each distinct source loads once")
+    }
+
+    @MainActor private final class RemoteImageProbe {
+        var requests: [URL] = []
+        var pending: CheckedContinuation<CGImage, Never>?
+        let image = CGContext(data: nil, width: 2, height: 2, bitsPerComponent: 8, bytesPerRow: 8,
+                              space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!.makeImage()!
+        func load(_ url: URL) async -> CGImage {
+            requests.append(url)
+            if requests.count == 1 { return image }
+            return await withCheckedContinuation { pending = $0 }
         }
     }
 
