@@ -1711,17 +1711,29 @@ actor DatabaseEngine {
         }
         defer { sqlite3_finalize(stmt) }
 
+        var aliasStmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, "SELECT article_id FROM article_aliases WHERE kind = 'id' AND value = ?;", -1, &aliasStmt, nil) == SQLITE_OK else {
+            throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Cannot prepare alias lookup"])
+        }
+        defer { sqlite3_finalize(aliasStmt) }
+
         let now = Date().timeIntervalSince1970
         try beginTransaction()
         do {
-            for articleId in articleIds {
-                let articleId = try resolvedArticleID(articleId)
+            for id in articleIds {
+                var resolvedId = id
+                sqlite3_reset(aliasStmt)
+                sqlite3_bind_text(aliasStmt, 1, id, -1, Self.sqliteTransient)
+                if sqlite3_step(aliasStmt) == SQLITE_ROW, let cString = sqlite3_column_text(aliasStmt, 0) {
+                    resolvedId = String(cString: cString)
+                }
+
                 sqlite3_reset(stmt)
-                sqlite3_bind_text(stmt, 1, articleId, -1, Self.sqliteTransient)
+                sqlite3_bind_text(stmt, 1, resolvedId, -1, Self.sqliteTransient)
                 sqlite3_bind_double(stmt, 2, now)
 
                 if sqlite3_step(stmt) != SQLITE_DONE {
-                    throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to execute batchMarkSaved for \(articleId)"])
+                    throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to execute batchMarkSaved for \(resolvedId)"])
                 }
             }
             try commitTransaction()
