@@ -173,8 +173,7 @@ struct ArticleDetailView: View {
                 onPrevArticle: prevArticle,
                 onToggleRead: { readManager.toggleRead(currentArticle.id) },
                 onToggleSave: toggleSave,
-                onOpenInBrowser: openInBrowser,
-                onToggleViewMode: { readerModeBinding.wrappedValue = readerModeBinding.wrappedValue.toggledPublicationMode }
+                onOpenInBrowser: openInBrowser
             ))
             // Publisher-input changes invalidate the stored overview; request it again from current inputs.
             .task(id: "\(activeArticle.id):\(currentArticle.publisherInputHash)") {
@@ -1457,7 +1456,6 @@ private struct ArticleNavigationCommands: ViewModifier {
     let onToggleRead: () -> Void
     let onToggleSave: () -> Void
     let onOpenInBrowser: () -> Void
-    let onToggleViewMode: () -> Void
 
     func body(content: Content) -> some View {
         content
@@ -1466,7 +1464,6 @@ private struct ArticleNavigationCommands: ViewModifier {
             .onReceive(NotificationCenter.default.publisher(for: .toggleReadCommand)) { _ in onToggleRead() }
             .onReceive(NotificationCenter.default.publisher(for: .toggleSaveCommand)) { _ in onToggleSave() }
             .onReceive(NotificationCenter.default.publisher(for: .openInBrowserCommand)) { _ in onOpenInBrowser() }
-            .onReceive(NotificationCenter.default.publisher(for: .toggleViewModeCommand)) { _ in onToggleViewMode() }
     }
 }
 

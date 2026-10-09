@@ -13,7 +13,6 @@ extension Notification.Name {
     static let toggleReadCommand = Notification.Name("toggleReadCommand")
     static let toggleSaveCommand = Notification.Name("toggleSaveCommand")
     static let openInBrowserCommand = Notification.Name("openInBrowserCommand")
-    static let toggleViewModeCommand = Notification.Name("toggleViewModeCommand")
     static let showFeedUpdatesCommand = Notification.Name("showFeedUpdatesCommand")
 }
 

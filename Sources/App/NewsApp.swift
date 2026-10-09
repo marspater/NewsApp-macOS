@@ -11,7 +11,6 @@ extension Notification.Name {
     static let toggleReadCommand = Notification.Name("toggleReadCommand")
     static let toggleSaveCommand = Notification.Name("toggleSaveCommand")
     static let openInBrowserCommand = Notification.Name("openInBrowserCommand")
-    static let toggleViewModeCommand = Notification.Name("toggleViewModeCommand")
     static let showFeedUpdatesCommand = Notification.Name("showFeedUpdatesCommand")
 }
 
@@ -151,7 +150,9 @@ struct NewsApp: App {
 
                 // ⇧⌘W is Close Window in tabbed macOS apps, so Story / Web uses ⇧⌘R (design plan D5).
                 Button("Switch Between Story and Web") {
-                    NotificationCenter.default.post(name: .toggleViewModeCommand, object: nil)
+                    if let actions = readerActions {
+                        actions.mode.wrappedValue = actions.mode.wrappedValue.toggledPublicationMode
+                    }
                 }
                 .keyboardShortcut(ReaderMode.webShortcut, modifiers: ReaderMode.webShortcutModifiers)
                 .disabled(readerActions == nil)
