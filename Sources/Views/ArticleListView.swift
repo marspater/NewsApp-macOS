@@ -4,11 +4,24 @@
 import SwiftUI
 import AppKit
 
+struct ListCommandActions {
+    let canGroupStories: Bool
+    let newBriefing: (() -> Void)?
+}
+
+private struct ListCommandActionsKey: FocusedValueKey { typealias Value = ListCommandActions }
+
+extension FocusedValues {
+    var listActions: ListCommandActions? {
+        get { self[ListCommandActionsKey.self] }
+        set { self[ListCommandActionsKey.self] = newValue }
+    }
+}
+
 struct ArticleListView: View {
     @Binding var selectedTopic: String?
     @Binding var searchText: String
     @Binding var articlePath: NavigationPath
-    @Binding var columnVisibility: NavigationSplitViewVisibility
     
     @EnvironmentObject private var appSettings: AppSettings
     @EnvironmentObject private var articleStore: ArticleStore
@@ -19,10 +32,9 @@ struct ArticleListView: View {
     
     @AppStorage("articleGridLayout") private var gridLayout = false
     @AppStorage("groupsEventCoverage") private var groupsEvents = true
+    @Environment(\.appearsActive) private var appearsActive
     @Environment(\.effectiveReduceMotion) private var reduceMotion
-    @Environment(\.effectiveContrast) private var contrast
     @State private var focusedArticleID: String? = nil
-    @State private var isShortcutsHelpPresented: Bool = false
     
     @State private var briefing: FiniteBriefing?
     @State private var buffer = FeedUpdateBuffer()
@@ -118,17 +130,26 @@ struct ArticleListView: View {
         }
     }
 
+    private var selectedStory: FeedArticle? {
+        guard articlePath.isEmpty, let focusedArticleID else { return nil }
+        return filteredArticles.first { $0.id == focusedArticleID }
+    }
+
+    private var listCommandActions: ListCommandActions? {
+        guard articlePath.isEmpty else { return nil }
+        return ListCommandActions(canGroupStories: !isBriefing, newBriefing: isBriefing ? { startNewBriefing() } : nil)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             ScrollViewReader { proxy in
                 ScrollView {
+                    masthead
                     listContent(proxy: proxy)
                 }
-                .safeAreaInset(edge: .top, spacing: 0) {
-                    VStack(spacing: 0) {
-                        headerBar
-                        if buffer.pending != nil { updatesButton(proxy: proxy) }
-                    }
+                // Queued updates float over the list (DESIGN.md 8.4); the list keeps its place underneath.
+                .overlay(alignment: .top) {
+                    if buffer.pending != nil { updatesButton(proxy: proxy) }
                 }
                 .onScrollGeometryChange(for: Bool.self) { geometry in
                     geometry.contentOffset.y + geometry.contentInsets.top > 24
@@ -137,7 +158,6 @@ struct ArticleListView: View {
                 }
                 .onHover { isPointerInList = $0 }
                 .onChange(of: queuedUpdateCount, handleQueuedUpdatesChange)
-                .softScrollEdge()
                 .focusable()
                 .focusEffectDisabled()
                 .onKeyPress { press in
@@ -179,6 +199,12 @@ struct ArticleListView: View {
                 }
             }
         }
+        .focusedSceneValue(\.selectedStory, selectedStory)
+        .focusedSceneValue(\.listActions, listCommandActions)
+        .navigationTitle(locationTitle)
+        // The masthead shows the location, so the toolbar does not repeat it (DESIGN.md 5).
+        .toolbar(removing: .title)
+        .toolbar { listToolbar }
         .task(id: "\(queryIdentity):\(articleStore.revision):\(articleStore.eventRevision):\(pageRequest):\(refreshReloads)") {
             let identity = queryIdentity
             let runID = UUID()
@@ -349,18 +375,11 @@ struct ArticleListView: View {
         } label: {
             Label(count > 0 ? "\(count) new \(count == 1 ? "story" : "stories")" : "Show updates", systemImage: "arrow.up")
                 .font(AppTypography.label)
-                .foregroundStyle(AppColor.accent)
-                .padding(.horizontal, AppSpacing.sm)
-                .padding(.vertical, 6)
-                .background(
-                    Capsule()
-                        .fill(AppColor.accent.opacity(contrast == .increased ? 0.22 : 0.14))
-                        .overlay(Capsule().stroke(AppColor.accent.opacity(contrast == .increased ? 0.60 : 0.0), lineWidth: 1))
-                )
         }
-        .buttonStyle(.plain)
+        .nativeGlassButtonStyle()
         .buttonBorderShape(.capsule)
-        .padding(.bottom, AppSpacing.xs)
+        .opacity(appearsActive ? 1 : 0.5)
+        .padding(.top, AppSpacing.xs)
         .help("Show the latest stories (U). The list keeps its place until you do.")
         .accessibilityHint("Moves to the top of the updated list")
     }
@@ -388,74 +407,67 @@ struct ArticleListView: View {
         ])
     }
 
-    // MARK: - Header Bar
-    
-    private var headerBar: some View {
-        HStack(spacing: AppSpacing.sm) {
-            Button {
-                withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) {
-                    columnVisibility = (columnVisibility == .detailOnly ? .all : .detailOnly)
-                }
-            } label: {
-                Image(systemName: "sidebar.leading")
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundColor(AppColor.secondaryText)
-            }
-            .buttonStyle(.plain)
-            .help("Toggle Sidebar (⌃⌘S)")
-            .accessibilityLabel("Toggle Sidebar")
-            
-            VStack(alignment: .leading, spacing: AppSpacing.xxs) {
-                Text(searchText.isEmpty ? (selectedTopic ?? "Today") : "Search")
-                    .font(AppTypography.display)
-                    .foregroundStyle(AppColor.primaryText)
-                HStack(spacing: AppSpacing.xs) {
-                    Text(listSubtitle)
-                        .font(AppTypography.caption)
-                        .foregroundStyle(AppColor.secondaryText)
-                    if waitingCount > 0 && !isBriefing {
-                        Text("·")
-                            .font(AppTypography.caption)
-                            .foregroundStyle(AppColor.secondaryText)
-                            .accessibilityHidden(true)
-                        Button(showsWaiting ? "Hide \(waitingCount) waiting" : "\(waitingCount) waiting for more sources") {
-                            showsWaiting.toggle()
-                        }
-                        .buttonStyle(.plain)
-                        .font(AppTypography.caption)
-                        .foregroundStyle(AppColor.secondaryText)
-                        .help(showsWaiting
-                              ? "Hide minor stories until more publishers cover them"
-                              : "Minor stories appear once \(StoryVisibilityPolicy.minorStorySources + 1) publishers cover them; unread ones expire after a day")
-                    }
-                    if mutedCount > 0 && !listMuting.isEmpty {
-                        Text("·")
-                            .font(AppTypography.caption)
-                            .foregroundStyle(AppColor.secondaryText)
-                            .accessibilityHidden(true)
-                        mutingMenu
-                    }
-                }
-            }
-            
-            Spacer()
-            
-            if isBriefing {
-                Button("New Briefing", action: startNewBriefing)
-                    .help("Select a new briefing from the latest unread stories")
-            }
+    // MARK: - Masthead
 
+    private var locationTitle: String {
+        isSearching ? "Search" : (selectedTopic ?? "Today")
+    }
+
+    /// The location title and one status line, scrolling with the list under the toolbar (DESIGN.md 8.1).
+    private var masthead: some View {
+        VStack(alignment: .leading, spacing: AppSpacing.xxs) {
+            Text(locationTitle)
+                .font(AppTypography.masthead)
+                .foregroundStyle(AppColor.primaryText)
+                .accessibilityAddTraits(.isHeader)
+                .accessibilityHeading(.h1)
+            HStack(spacing: AppSpacing.xs) {
+                Text(listSubtitle)
+                    .font(AppTypography.caption)
+                    .foregroundStyle(AppColor.secondaryText)
+                    .monospacedDigit()
+                if waitingCount > 0 && !isBriefing {
+                    Text("·")
+                        .font(AppTypography.caption)
+                        .foregroundStyle(AppColor.secondaryText)
+                        .accessibilityHidden(true)
+                    Button(showsWaiting ? "Hide \(waitingCount) waiting" : "\(waitingCount) waiting for more sources") {
+                        showsWaiting.toggle()
+                    }
+                    .buttonStyle(.plain)
+                    .font(AppTypography.caption)
+                    .foregroundStyle(AppColor.secondaryText)
+                    .help(showsWaiting
+                          ? "Hide minor stories until more publishers cover them"
+                          : "Minor stories appear once \(StoryVisibilityPolicy.minorStorySources + 1) publishers cover them; unread ones expire after a day")
+                }
+                if mutedCount > 0 && !listMuting.isEmpty {
+                    Text("·")
+                        .font(AppTypography.caption)
+                        .foregroundStyle(AppColor.secondaryText)
+                        .accessibilityHidden(true)
+                    mutingMenu
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, AppLayout.pageInset)
+        .padding(.top, AppSpacing.md)
+        .padding(.bottom, AppLayout.cardGap)
+    }
+
+    // MARK: - Toolbar
+
+    @ToolbarContentBuilder
+    private var listToolbar: some ToolbarContent {
+        ToolbarItemGroup(placement: .primaryAction) {
             Toggle(isOn: $groupsEvents.animation(reduceMotion ? nil : AppMotion.state)) {
-                Image(systemName: groupsEvents ? "square.stack.3d.up.fill" : "square.stack.3d.up")
-                    .font(.system(size: 14, weight: .medium))
+                Label("Group Stories by Event", systemImage: groupsEvents ? "square.stack.3d.up.fill" : "square.stack.3d.up")
             }
             .toggleStyle(.button)
-            .buttonStyle(.plain)
-            .foregroundColor(groupsEvents ? AppColor.accent : AppColor.secondaryText)
             .help(groupsEvents ? "Showing one card per event. Show individual publications (G)" : "Showing individual publications. Group coverage of the same event (G)")
             .disabled(isBriefing)
             .accessibilityLabel("Group Coverage by Event")
-            .accessibilityValue(groupsEvents ? "On" : "Off")
 
             Picker("Article layout", selection: $gridLayout) {
                 Image(systemName: "list.bullet").tag(false)
@@ -466,46 +478,49 @@ struct ArticleListView: View {
             .pickerStyle(.segmented)
             .labelsHidden()
             .fixedSize()
-            .frame(width: 80)
             .help("Choose list or grid layout")
+        }
 
-            Button {
-                isShortcutsHelpPresented.toggle()
-            } label: {
-                Image(systemName: "keyboard")
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundColor(AppColor.secondaryText)
+        if #available(macOS 26.0, *) {
+            ToolbarSpacer(.fixed, placement: .primaryAction)
+        }
+
+        if #available(macOS 26.1, *) {
+            refreshToolbarItem.visibilityPriority(.high)
+        } else {
+            refreshToolbarItem
+        }
+        if isBriefing {
+            if #available(macOS 26, *) { ToolbarSpacer(.fixed, placement: .primaryAction) }
+            ToolbarItem(placement: .primaryAction) {
+                Button("New Briefing", action: startNewBriefing)
+                    .help("Select a new briefing from the latest unread stories")
             }
-            .buttonStyle(.plain)
-            .popover(isPresented: $isShortcutsHelpPresented) {
-                shortcutsHelpView
-            }
-            .help("Keyboard Shortcuts")
-            .accessibilityLabel("Keyboard Shortcuts")
-            
-            // Pressing again while a refresh runs joins it, so the button stays enabled and keeps its size.
+        }
+    }
+
+    // Repeated refreshes join the running request, so keep the control enabled and its size stable.
+    private var refreshToolbarItem: some ToolbarContent {
+        ToolbarItem(placement: .primaryAction) {
             Button {
                 refreshFeeds()
             } label: {
-                Image(systemName: "arrow.clockwise")
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundColor(feedManager.isAnyFeedLoading ? AppColor.accent : AppColor.secondaryText)
+                Label("Refresh Feeds", systemImage: "arrow.clockwise")
                     .symbolEffect(.rotate, options: .repeat(.continuous), isActive: feedManager.isAnyFeedLoading && !reduceMotion)
             }
-            .buttonStyle(.plain)
             .help(feedManager.isAnyFeedLoading ? "Refreshing feeds…" : "Refresh Feeds (R or ⌘R)")
             .accessibilityLabel("Refresh Feeds")
             .accessibilityValue(feedManager.isAnyFeedLoading ? "Refreshing" : "")
         }
-        .padding(.horizontal, AppLayout.pageInset)
-        .padding(.top, 24)
-        .padding(.bottom, AppLayout.cardGap)
     }
-    
+
     /// Story count, how many cards group an event's coverage, and when feeds last refreshed.
     private var listSubtitle: String {
         if isBriefing { return "Up to 10 unread stories · Last 24 hours" }
         var parts = ["\(entries.count) \(entries.count == 1 ? "story" : "stories")"]
+        if !isSearching && (selectedTopic ?? "Today") == "Today" {
+            parts.insert(Date().formatted(.dateTime.weekday(.wide).month(.wide).day()), at: 0)
+        }
         let events = entries.filter { if case .event = $0 { return true } else { return false } }.count
         if events > 0 { parts.append("\(events) grouped \(events == 1 ? "event" : "events")") }
         if !isSearching, let refreshed = feedManager.lastRefreshCompletedAt {
@@ -864,70 +879,50 @@ struct ArticleListView: View {
             refreshReloads += 1
         }
     }
-    
-    // MARK: - Shortcuts Help View
-    
-    private var shortcutsHelpView: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Keyboard Shortcuts")
-                .font(AppTypography.headline)
-                .foregroundColor(AppColor.primaryText)
-                .padding(.bottom, 2)
-            
-            VStack(alignment: .leading, spacing: 6) {
-                Text("NAVIGATION")
-                    .font(AppTypography.metadata)
-                    .foregroundColor(AppColor.tertiaryText)
-                    .tracking(AppTypography.sourceEyebrowTracking)
-                shortcutRow("J / ↓", "Next article")
-                shortcutRow("K / ↑", "Previous article")
-                shortcutRow("Space / ↵", "Open focused article")
-                shortcutRow("Esc / ←", "Back to list")
-            }
-            
-            Divider()
-            
-            VStack(alignment: .leading, spacing: 6) {
-                Text("ACTIONS")
-                    .font(AppTypography.metadata)
-                    .foregroundColor(AppColor.tertiaryText)
-                    .tracking(AppTypography.sourceEyebrowTracking)
-                shortcutRow("M", "Toggle read / unread")
-                shortcutRow("S", "Bookmark story")
-                shortcutRow("O", "Open in browser")
-                shortcutRow("E", "Show or hide event sources")
-                shortcutRow("G", "Group by event / publications")
-                shortcutRow("U", "Show queued updates")
-                shortcutRow("W", "Toggle Reader / Web view")
-            }
-            
-            Divider()
-            
-            VStack(alignment: .leading, spacing: 6) {
-                Text("GLOBAL")
-                    .font(AppTypography.metadata)
-                    .foregroundColor(AppColor.tertiaryText)
-                    .tracking(AppTypography.sourceEyebrowTracking)
-                shortcutRow("R / ⌘R", "Refresh all feeds")
-                shortcutRow("⌘1 - ⌘4", "Jump to section")
+}
+
+// MARK: - Keyboard Shortcuts Window
+
+/// Help → Keyboard Shortcuts. Lists the single-key shortcuts that menus cannot show.
+struct KeyboardShortcutsView: View {
+    private static let sections: [(title: String, rows: [(keys: String, action: String)])] = [
+        ("Navigation", [
+            ("J or ↓", "Next story"),
+            ("K or ↑", "Previous story"),
+            ("Space or ↵", "Open focused story"),
+            ("Esc or ←", "Back to list")
+        ]),
+        ("Story", [
+            ("M", "Mark as read or unread"),
+            ("S", "Save or remove from Saved Stories"),
+            ("O", "Open in browser"),
+            ("E", "Show or hide event coverage"),
+            ("W or ⇧⌘R", "Switch between Story and Web")
+        ]),
+        ("List", [
+            ("G", "Group coverage by event"),
+            ("U", "Show queued updates"),
+            ("R or ⌘R", "Refresh feeds"),
+            ("⌘1 – ⌘4", "Today, Unread, Saved Stories, History")
+        ])
+    ]
+
+    var body: some View {
+        Form {
+            ForEach(Self.sections, id: \.title) { section in
+                Section(section.title) {
+                    ForEach(section.rows, id: \.keys) { row in
+                        LabeledContent(row.action) {
+                            Text(row.keys)
+                                .monospaced()
+                                .foregroundStyle(AppColor.secondaryText)
+                        }
+                    }
+                }
             }
         }
-        .padding(14)
-        .frame(width: 270)
-    }
-    
-    private func shortcutRow(_ keys: String, _ desc: String) -> some View {
-        HStack {
-            Text(keys)
-                .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                .padding(.horizontal, 6)
-                .padding(.vertical, 3)
-                .background(AppColor.badgeBackground)
-                .clipShape(RoundedRectangle(cornerRadius: AppRadius.control))
-            Spacer()
-            Text(desc)
-                .font(AppTypography.caption)
-                .foregroundColor(AppColor.secondaryText)
-        }
+        .formStyle(.grouped)
+        .frame(width: 380)
+        .fixedSize(horizontal: false, vertical: true)
     }
 }

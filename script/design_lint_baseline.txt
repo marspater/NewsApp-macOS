@@ -2,7 +2,7 @@
 # Counts may only go down; see docs/DESIGN.md before adding an exception.
 literal-color Sources/Views/EventOverviewReaderView.swift 2
 literal-font-size Sources/Views/ArticleDetailView.swift 33
-literal-font-size Sources/Views/ArticleListView.swift 8
+literal-font-size Sources/Views/ArticleListView.swift 3
 literal-font-size Sources/Views/EventOverviewReaderView.swift 42
 literal-font-size Sources/Views/SettingsView.swift 24
 literal-font-size Sources/Views/SidebarView.swift 2
