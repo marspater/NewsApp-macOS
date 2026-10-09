@@ -2349,7 +2349,9 @@ struct NewsTests {
                     .map(\.link).filter { !$0.isEmpty }.prefix(sample)
                 group.addTask {
                     guard !links.isEmpty else { return "\(feed.id)\tno stories in feed" }
-                    var readable = 0, words: [Int] = [], failures: [String] = []
+                    var readable = 0
+                    var words: [Int] = []
+                    var failures: [String] = []
                     for link in links {
                         let outcome = await ContentExtractionPipeline.shared.extractArticleWithIdentity(from: link).outcome
                         if case .success(let content, _, _) = outcome {

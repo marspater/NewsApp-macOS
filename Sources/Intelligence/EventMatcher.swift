@@ -403,7 +403,6 @@ enum EventMatcher {
                                    isMatch: isMatch, isCompatible: isCompatible)
     }
 
-    /// A pair the on-device judge called one event counts as a match.
     /// A thin match the on-device judge called separate events stays compatible but no longer links the pair.
     static func rejected(_ pair: EventPairAssessment) -> EventPairAssessment {
         var pair = pair
@@ -413,6 +412,7 @@ enum EventMatcher {
         return pair
     }
 
+    /// A pair the on-device judge called one event counts as a match.
     static func confirmed(_ pair: EventPairAssessment, policy: EventMatchPolicy = .standard) -> EventPairAssessment {
         var pair = pair
         pair.conflict = nil

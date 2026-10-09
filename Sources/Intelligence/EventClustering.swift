@@ -57,7 +57,8 @@ enum EventClusterer {
         }
         /// The deterministic assessment, settled by the judge when it is open and budget remains.
         func resolved(_ a: EventMatchRow, _ b: EventMatchRow) async -> EventPairAssessment {
-            let first = features(a), second = features(b)
+            let first = features(a)
+            let second = features(b)
             var pair = EventMatcher.assess(first, second, policy: matchPolicy)
             if !pair.isMatch, !pair.isBorderline, pair.conflict == nil, pair.sharedKeywords < 2,
                !first.specificAnchors.isDisjoint(with: second.specificAnchors), judge.isAvailable, judgementsLeft > 0,
@@ -222,6 +223,8 @@ enum EventClusterer {
                 var survivorTerms = survivor.members.reduce(into: Set<String>()) { $0.formUnion(features($1).specificAnchors.union(features($1).keywords)) }
                 var other = index + 1
                 while other < events.count {
+                    // Each candidate can cost judge calls; a cancelled pass stops here, not after every pair.
+                    try Task.checkCancellation()
                     let candidate = events[other]
                     let candidateTerms = candidate.members.reduce(into: Set<String>()) { $0.formUnion(features($1).specificAnchors.union(features($1).keywords)) }
                     guard survivor.members.count + candidate.members.count <= matchPolicy.maximumEventSize,
