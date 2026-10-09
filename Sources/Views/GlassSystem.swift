@@ -39,16 +39,6 @@ public struct NativeLiquidGlassModifier<S: Shape>: ViewModifier {
 // MARK: - View Extensions
 
 public extension View {
-    @ViewBuilder
-    func softScrollEdge() -> some View {
-        if #available(macOS 26.0, *) {
-            self.scrollEdgeEffectStyle(.soft, for: .top)
-                .scrollEdgeEffectHidden(false, for: .top)
-        } else {
-            self
-        }
-    }
-
     /// Custom Liquid Glass for a floating control (DESIGN.md 3.2). Apply it last,
     /// after the control's content and padding. Never inside content or on another glass surface.
     func nativeLiquidGlass<S: Shape>(in shape: S, interactive: Bool = false) -> some View {

@@ -1,9 +1,13 @@
 # Changelog
 
-## Unreleased — 9 October 2026
+## Unreleased — 10 October 2026
 
 ### Changed
 
+- Complete the native window chrome: Refresh stays visible during toolbar overflow on macOS 26.1+, New Briefing has a separate toolbar group and menu command, and queued updates dim in inactive windows. The reader window title names its publisher. Story sharing, reading mode/options, browser navigation and Add Feed are available from menu commands bound to the active window. ⇧⌘R switches Story/Web even when an overview is open; single-key W keeps its existing overview behavior.
+
+- Menus: View gains as List, as Grid and Group Stories by Event. Actions on a story (read state, save, open in browser, Story or Web) move from Navigate to a new Story menu with the same shortcuts, except Switch Between Story and Web, which moves from ⇧⌘W (Close Window in tabbed apps) to ⇧⌘R. W still switches in the reader.
+- Story list chrome: Group by Event, List or Grid, Refresh and New Briefing move into the window toolbar, so on macOS 26 and 27 the list scrolls under the system Liquid Glass toolbar with the automatic scroll edge (the forced soft edge is gone everywhere). The location title (26 pt, Today with its date) and status line scroll with the list; the duplicate in-content sidebar toggle is removed in favour of the system one. Queued updates float over the list as a glass button (bordered on macOS 15). Keyboard Shortcuts moves from a list button to Help → Keyboard Shortcuts. In full screen the reader's toolbar appears on hover.
 - Design foundations (no visible change): the imitation frosted surface is removed, custom glass helpers use native Liquid Glass on macOS 26 and later with a regular-material fallback on macOS 15, and the design tokens named in docs/DESIGN.md exist. `./test.sh` first runs `script/design_lint.sh`, which fails when a view adds literal font sizes, colors, corner radii, materials, direct glass or `uppercased()` beyond the recorded baseline.
 - Reader: one segmented Overview / Story / Web control in the toolbar replaces the separate overview picker and Reader and Web toggles (Overview appears only for events with an overview). The reader toolbar no longer draws an opaque background or forces a soft scroll edge, so on macOS 26 and 27 it uses the system Liquid Glass and stories scroll beneath it. W still switches modes.
 

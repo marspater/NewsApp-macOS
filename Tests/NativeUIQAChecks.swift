@@ -13,7 +13,6 @@ extension Notification.Name {
     static let toggleReadCommand = Notification.Name("toggleReadCommand")
     static let toggleSaveCommand = Notification.Name("toggleSaveCommand")
     static let openInBrowserCommand = Notification.Name("openInBrowserCommand")
-    static let toggleViewModeCommand = Notification.Name("toggleViewModeCommand")
     static let showFeedUpdatesCommand = Notification.Name("showFeedUpdatesCommand")
 }
 
@@ -168,6 +167,12 @@ struct NativeUIQAChecks {
         assertTrue(ArticleDetailView.shouldPassThroughToSystem(modifiers: .control), "Control modifier passes through to system")
         assertTrue(ArticleDetailView.shouldPassThroughToSystem(modifiers: .option), "Option modifier passes through to system")
         assertFalse(ArticleDetailView.shouldPassThroughToSystem(modifiers: []), "Unmodified keys captured for app shortcuts")
+
+        assertEqual(ReaderMode.webShortcut, KeyEquivalent("r"), "Reader/Web uses R, leaving Shift-Command-W for Close")
+        assertEqual(ReaderMode.webShortcutModifiers, [.command, .shift], "Reader/Web uses Shift-Command-R")
+        assertEqual(ReaderMode.story.toggledPublicationMode, .web, "Story switches to Web")
+        assertEqual(ReaderMode.web.toggledPublicationMode, .story, "Web switches to Story")
+        assertEqual(ReaderMode.overview.toggledPublicationMode, .web, "Reader/Web command leaves the overview for the publisher page")
 
         // Key handler keys verification:
         // E key: expands/collapses event sources

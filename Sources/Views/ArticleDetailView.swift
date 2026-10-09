@@ -15,6 +15,36 @@ enum ReaderMode: Hashable {
     case overview
     case story
     case web
+
+    static let webShortcut: KeyEquivalent = "r"
+    static let webShortcutModifiers: EventModifiers = [.command, .shift]
+    var toggledPublicationMode: ReaderMode { self == .web ? .story : .web }
+}
+
+/// Window-scoped bindings and actions let menu commands operate on the same reader as its toolbar.
+struct ReaderCommandActions {
+    let mode: Binding<ReaderMode>
+    let textScale: Binding<CGFloat>
+    let hasOverview: Bool
+    let back: () -> Void
+    let reload: (() -> Void)?
+    let copyLink: () -> Void
+    let webBack: (() -> Void)?
+    let webForward: (() -> Void)?
+}
+
+private struct ReaderCommandActionsKey: FocusedValueKey { typealias Value = ReaderCommandActions }
+private struct SelectedStoryKey: FocusedValueKey { typealias Value = FeedArticle }
+
+extension FocusedValues {
+    var readerActions: ReaderCommandActions? {
+        get { self[ReaderCommandActionsKey.self] }
+        set { self[ReaderCommandActionsKey.self] = newValue }
+    }
+    var selectedStory: FeedArticle? {
+        get { self[SelectedStoryKey.self] }
+        set { self[SelectedStoryKey.self] = newValue }
+    }
 }
 
 enum ArticleContentState: Equatable {
@@ -108,10 +138,25 @@ struct ArticleDetailView: View {
         return idx + 1 < allArticles.count
     }
 
+    private var readerCommandActions: ReaderCommandActions {
+        ReaderCommandActions(
+            mode: readerModeBinding, textScale: $readerTextScale, hasOverview: currentOverview != nil,
+            back: { if !path.isEmpty { path.removeLast() } },
+            reload: contentState == .loading ? nil : { reloadReaderContent() },
+            copyLink: copyStoryLink,
+            webBack: readerModeBinding.wrappedValue == .web && webCanGoBack ? { webAction = .goBack } : nil,
+            webForward: readerModeBinding.wrappedValue == .web && webCanGoForward ? { webAction = .goForward } : nil
+        )
+    }
+
     var body: some View {
         contentLayer
             .background(AppColor.background)
+            .navigationTitle(displaySource)
+            .toolbar(removing: .title)
             .toolbar { readerToolbar }
+            .focusedSceneValue(\.selectedStory, currentArticle)
+            .focusedSceneValue(\.readerActions, readerCommandActions)
             .focusable()
             .focusEffectDisabled()
             .focused($isViewFocused)
@@ -128,8 +173,7 @@ struct ArticleDetailView: View {
                 onPrevArticle: prevArticle,
                 onToggleRead: { readManager.toggleRead(currentArticle.id) },
                 onToggleSave: toggleSave,
-                onOpenInBrowser: openInBrowser,
-                onToggleViewMode: toggleViewMode
+                onOpenInBrowser: openInBrowser
             ))
             // Publisher-input changes invalidate the stored overview; request it again from current inputs.
             .task(id: "\(activeArticle.id):\(currentArticle.publisherInputHash)") {
@@ -201,14 +245,6 @@ struct ArticleDetailView: View {
 
     private var activeArticleContentTaskID: String {
         "\(activeArticle.id):\(reloadGeneration)"
-    }
-
-    private func toggleViewMode() {
-        if currentOverview != nil {
-            experienceMode = (experienceMode == .eventOverview ? .sourcePublication : .eventOverview)
-        } else {
-            viewMode = (viewMode == .reader) ? .web : .reader
-        }
     }
 
     // MARK: - Reader View
@@ -786,14 +822,11 @@ struct ArticleDetailView: View {
                 }
                 Divider()
                 Button("Reload reader content", systemImage: "arrow.clockwise") {
-                    summaryExpanded = false
-                    analysis = nil
-                    reloadGeneration += 1
+                    reloadReaderContent()
                 }
                 .disabled(contentState == .loading)
                 Button("Copy link", systemImage: "link") {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(currentArticle.link, forType: .string)
+                    copyStoryLink()
                 }
                 Button("Open in browser", systemImage: "safari", action: openInBrowser)
             } label: {
@@ -846,6 +879,17 @@ struct ArticleDetailView: View {
         let prev = allArticles[idx - 1]
         activeArticle = prev
         readManager.markAsRead(prev.id)
+    }
+
+    private func reloadReaderContent() {
+        summaryExpanded = false
+        analysis = nil
+        reloadGeneration += 1
+    }
+
+    private func copyStoryLink() {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(currentArticle.link, forType: .string)
     }
 
     private func toggleSave() {
@@ -1412,7 +1456,6 @@ private struct ArticleNavigationCommands: ViewModifier {
     let onToggleRead: () -> Void
     let onToggleSave: () -> Void
     let onOpenInBrowser: () -> Void
-    let onToggleViewMode: () -> Void
 
     func body(content: Content) -> some View {
         content
@@ -1421,7 +1464,6 @@ private struct ArticleNavigationCommands: ViewModifier {
             .onReceive(NotificationCenter.default.publisher(for: .toggleReadCommand)) { _ in onToggleRead() }
             .onReceive(NotificationCenter.default.publisher(for: .toggleSaveCommand)) { _ in onToggleSave() }
             .onReceive(NotificationCenter.default.publisher(for: .openInBrowserCommand)) { _ in onOpenInBrowser() }
-            .onReceive(NotificationCenter.default.publisher(for: .toggleViewModeCommand)) { _ in onToggleViewMode() }
     }
 }
 
