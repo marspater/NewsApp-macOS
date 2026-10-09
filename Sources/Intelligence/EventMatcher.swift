@@ -249,9 +249,9 @@ extension EventFeatures {
     }
 
     private static let casualtyWords = "killed|kills?|killing|dead|deaths?|die[sd]?|dying|injured|injures?|wounded|wounds|hurt|casualties|missing|lives|victims"
-    private static let tollAfterPattern = try! NSRegularExpression(
+    private static let tollAfterPattern = try? NSRegularExpression(
         pattern: #"\b(\d[\d,.]*|"# + numberWordPattern + #")\s+(?:[a-z-]+\s+){0,2}(?:"# + casualtyWords + #")\b"#)
-    private static let tollBeforePattern = try! NSRegularExpression(
+    private static let tollBeforePattern = try? NSRegularExpression(
         pattern: #"\b(?:"# + casualtyWords + #"|toll\s+(?:rises|climbs|reaches)\s+to)\s+(?:at\s+least\s+|more\s+than\s+|over\s+|nearly\s+|about\s+|some\s+|up\s+to\s+)?(\d[\d,.]*|"# + numberWordPattern + #")\b"#)
     private static let numberWordPattern = "one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|dozen|twenty|hundred"
 
@@ -259,7 +259,7 @@ extension EventFeatures {
     static func tolls(in title: String) -> Set<String> {
         var result = Set<String>()
         let range = NSRange(title.startIndex..., in: title)
-        for pattern in [tollAfterPattern, tollBeforePattern] {
+        for pattern in [tollAfterPattern, tollBeforePattern].compactMap({ $0 }) {
             for match in pattern.matches(in: title, range: range) {
                 guard let figure = Range(match.range(at: 1), in: title).map({ String(title[$0]) }) else { continue }
                 let digits = figure.filter { $0.isNumber || $0 == "." }.trimmingCharacters(in: CharacterSet(charactersIn: "."))
