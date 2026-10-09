@@ -365,6 +365,7 @@ struct NewsTests {
             try await testStoryVisibility(fixtureRoot: fixtureRoot)
             try await testStoryImages(fixtureRoot: fixtureRoot)
             try await testEventReadingState(fixtureRoot: fixtureRoot)
+            testEventFeedSummaryUnit()
             await testEventFeedGroupingAndStability()
         try await testFiniteBriefing()
         try await testPublisherContentProvenance()
@@ -457,6 +458,7 @@ struct NewsTests {
         try await testStoryImages(fixtureRoot: fixtureRoot)
         try await testOrphanStateGuards()
         try await testEventReadingState(fixtureRoot: fixtureRoot)
+        testEventFeedSummaryUnit()
         await testEventFeedGroupingAndStability()
         try await testFiniteBriefing()
         try await testPublisherContentProvenance()
@@ -5611,6 +5613,55 @@ struct NewsTests {
         assertEqual(value(copy, "SELECT count(*) FROM pragma_table_info('event_exclusions') WHERE name IN ('title','description','content');"), "0", "Exclusions store no source text")
         assertEqual(value(copy, "PRAGMA quick_check;"), "ok", "Migrated library passes quick_check")
         await migrated.close()
+    }
+
+    static func testEventFeedSummaryUnit() {
+        print("  - Testing EventFeedSummary extraction, display source, title key, dates, and update detection...")
+        assertEqual(EventFeedSummary.displaySource(""), "", "Empty display source remains empty")
+        assertEqual(EventFeedSummary.displaySource("   BBC News   \n   Section  "), "BBC News", "Trims whitespace and extracts first line")
+        assertEqual(EventFeedSummary.displaySource("TechCrunch"), "TechCrunch", "Single line display source trimmed")
+
+        assertEqual(EventFeedSummary.titleKey(""), "", "Empty titleKey is empty")
+        assertEqual(EventFeedSummary.titleKey("Hello, World! 123..."), "hello world 123", "Strips punctuation/symbols and converts to lowercase")
+        assertEqual(EventFeedSummary.titleKey("   Breaking:   News-Flash!  "), "breaking news flash", "Handles spaces and special characters")
+
+        let now = Date()
+        let member1 = EventFeedMember(articleID: "a1", source: "  Wire One \n Secondary ", title: "First Story", date: now, joinedVersion: 1, isRead: false, isSaved: false)
+        let member2 = EventFeedMember(articleID: "a2", source: "WIRE ONE", title: "Second Story", date: now.addingTimeInterval(100), joinedVersion: 1, isRead: false, isSaved: false)
+        let member3 = EventFeedMember(articleID: "a3", source: "Daily Two", title: "Third Story", date: now.addingTimeInterval(-100), joinedVersion: 2, isRead: false, isSaved: false)
+
+        let summary1 = EventFeedSummary(eventID: "e1", membershipVersion: 1, seenVersion: nil, members: [member1])
+        assertFalse(summary1.isConfirmed, "Single member event is not confirmed")
+        assertEqual(summary1.sources, ["Wire One"], "Sources extracts formatted displaySource")
+
+        let summaryMulti = EventFeedSummary(eventID: "e2", membershipVersion: 2, seenVersion: nil, members: [member1, member2, member3])
+        assertTrue(summaryMulti.isConfirmed, "Multiple member event is confirmed")
+        assertEqual(summaryMulti.sources, ["Wire One", "Daily Two"], "Deduplicates sources case-insensitively in order")
+
+        assertEqual(EventFeedSummary(eventID: "e0", membershipVersion: 1, seenVersion: nil, members: []).latestDate, nil, "Empty members has nil latestDate")
+        assertEqual(summaryMulti.latestDate, now.addingTimeInterval(100), "latestDate picks maximum date among members")
+
+        assertEqual(EventFeedSummary(eventID: "e0", membershipVersion: 1, seenVersion: nil, members: []).coverageText, "0 articles from one source", "Empty members coverageText fallback")
+        assertEqual(summary1.coverageText, "1 article from Wire One", "Single article from single source formatting")
+        let summarySameSource = EventFeedSummary(eventID: "e3", membershipVersion: 1, seenVersion: nil, members: [member1, member2])
+        assertEqual(summarySameSource.coverageText, "2 articles from Wire One", "Multiple articles from single source formatting")
+        assertEqual(summaryMulti.coverageText, "2 sources", "Multiple sources coverageText formatting")
+
+        assertFalse(summaryMulti.hasSubstantiveUpdate, "Nil seenVersion returns false")
+
+        let summarySeenCurrent = EventFeedSummary(eventID: "e4", membershipVersion: 2, seenVersion: 2, members: [member1, member2, member3])
+        assertFalse(summarySeenCurrent.hasSubstantiveUpdate, "seenVersion equal to membershipVersion returns false")
+
+        let member3Read = EventFeedMember(articleID: "a3", source: "Daily Two", title: "Third Story", date: now, joinedVersion: 2, isRead: true, isSaved: false)
+        let summaryReadUpdate = EventFeedSummary(eventID: "e5", membershipVersion: 2, seenVersion: 1, members: [member1, member2, member3Read])
+        assertFalse(summaryReadUpdate.hasSubstantiveUpdate, "Read new member does not trigger substantive update")
+
+        let member3Reprint = EventFeedMember(articleID: "a3", source: "Daily Two", title: "First Story!", date: now, joinedVersion: 2, isRead: false, isSaved: false)
+        let summaryReprint = EventFeedSummary(eventID: "e6", membershipVersion: 2, seenVersion: 1, members: [member1, member2, member3Reprint])
+        assertFalse(summaryReprint.hasSubstantiveUpdate, "Unread new member repeating known title (reprint) returns false")
+
+        let summarySubstantive = EventFeedSummary(eventID: "e7", membershipVersion: 2, seenVersion: 1, members: [member1, member2, member3])
+        assertTrue(summarySubstantive.hasSubstantiveUpdate, "Unread new member with novel headline returns true")
     }
 
     static func testEventFeedGroupingAndStability() async {
