@@ -137,19 +137,20 @@ enum EventClusterer {
                 } else {
                     // Otherwise start an event with unclustered candidates that match strongly and
                     // stay compatible with each other.
-                    var scored: [(id: String, features: EventFeatures, score: Double)] = []
+                    var scored: [(row: EventMatchRow, score: Double)] = []
                     for candidate in candidates where candidate.eventID == nil && !excluded.contains(candidate.articleID) {
                         guard let candidateRow = rows[candidate.articleID] else { continue }
                         let pair = await resolved(row, candidateRow)
-                        if pair.isMatch { scored.append((candidate.articleID, features(candidateRow), pair.score)) }
+                        if pair.isMatch { scored.append((candidateRow, pair.score)) }
                     }
-                    scored.sort { $0.score != $1.score ? $0.score > $1.score : $0.id < $1.id }
+                    scored.sort { $0.score != $1.score ? $0.score > $1.score : $0.row.id < $1.row.id }
                     var group: [(id: String, features: EventFeatures)] = []
                     for candidate in scored where group.count + 1 < matchPolicy.maximumEventSize {
-                        guard group.allSatisfy({ EventMatcher.assess(candidate.features, $0.features, policy: matchPolicy).isCompatible }) else { continue }
-                        let partnerExclusions = try await database.eventExclusions(of: candidate.id)
+                        let candidateFeatures = features(candidate.row)
+                        guard group.allSatisfy({ EventMatcher.assess(candidateFeatures, $0.features, policy: matchPolicy).isCompatible }) else { continue }
+                        let partnerExclusions = try await database.eventExclusions(of: candidate.row.id)
                         guard !group.contains(where: { partnerExclusions.contains($0.id) }) else { continue }
-                        group.append((candidate.id, candidate.features))
+                        group.append((candidate.row.id, candidateFeatures))
                     }
                     if !group.isEmpty { decision = .create(with: group.map(\.id)) }
                 }
@@ -188,83 +189,67 @@ enum EventClusterer {
             judged += 1
             return same
         }
-        var merges = EventClusteringReport()
-        try await mergeFragments(in: database, activeSince: now.addingTimeInterval(-candidatePolicy.activeEventLifetime),
-                                 policy: matchPolicy, features: features, resolved: resolved, sameStory: sameStory,
-                                 now: now, report: &merges)
+        /// Exclusions and hard conflicts always win; the judge only joins fragments linked by a matching pair.
+        func compatibleFragments(_ first: [EventMatchRow], _ second: [EventMatchRow]) async throws -> Bool {
+            for member in second {
+                let exclusions = try await database.eventExclusions(of: member.id)
+                if first.contains(where: { exclusions.contains($0.id) }) { return false }
+            }
+            var pairs: [EventPairAssessment] = []
+            for a in first { for b in second { pairs.append(await resolved(a, b)) } }
+            let required = Int((Double(pairs.count) * matchPolicy.compatibleShare).rounded(.up))
+            let mean = pairs.isEmpty ? 0 : pairs.map(\.score).reduce(0, +) / Double(pairs.count)
+            let related = pairs.contains(where: \.isMatch)
+            if related, pairs.filter(\.isCompatible).count >= required, mean >= matchPolicy.compatibilityScore { return true }
+            // Half or more hard conflicts cannot be overruled; fewer can be angles naming different places or days.
+            let hardConflicts = pairs.filter { $0.conflict != nil && !$0.softConflict && $0.conflict != .timeGap }.count
+            guard related, Double(hardConflicts) < Double(pairs.count) / 2 else { return false }
+            return await sameStory(first, second)
+        }
+
+        /// The larger event survives (ties: the older ID), and the other forwards to it.
+        func mergeFragments() async throws -> EventClusteringReport {
+            var merges = EventClusteringReport()
+            var events = try await database.activeEventMembers(since: now.addingTimeInterval(-candidatePolicy.activeEventLifetime))
+                .sorted { $0.members.count != $1.members.count ? $0.members.count > $1.members.count : $0.id < $1.id }
+            var index = 0
+            while index < events.count {
+                try Task.checkCancellation()
+                var survivor = events[index]
+                // Names and action words together: a name the tagger types in one report can be a plain word in another.
+                let survivorTerms = survivor.members.reduce(into: Set<String>()) { $0.formUnion(features($1).specificAnchors.union(features($1).keywords)) }
+                var other = index + 1
+                while other < events.count {
+                    let candidate = events[other]
+                    let candidateTerms = candidate.members.reduce(into: Set<String>()) { $0.formUnion(features($1).specificAnchors.union(features($1).keywords)) }
+                    guard survivor.members.count + candidate.members.count <= matchPolicy.maximumEventSize,
+                          survivorTerms.intersection(candidateTerms).count >= 2,
+                          let gap = Self.closestGap(survivor.members, candidate.members), gap <= matchPolicy.maximumTimeGap
+                    else { other += 1; continue }
+                    guard try await compatibleFragments(survivor.members, candidate.members) else { other += 1; continue }
+                    do {
+                        let merged = try await database.mergeEvents(candidate.id, into: survivor.id,
+                                                                    expectedVersions: (candidate.version, survivor.version), at: now)
+                        merges.merged += 1
+                        merges.changedEvents.insert(survivor.id)
+                        merges.changedEvents.insert(candidate.id)
+                        survivor = (survivor.id, merged.membershipVersion, survivor.members + candidate.members)
+                        events[index] = survivor
+                        events.remove(at: other)
+                    } catch {
+                        // Membership changed underneath; the next pass decides again.
+                        other += 1
+                    }
+                }
+                index += 1
+            }
+            return merges
+        }
+        let merges = try await mergeFragments()
         report.merged = merges.merged
         report.changedEvents.formUnion(merges.changedEvents)
         report.judged = judged
         return report
-    }
-
-    /// Joins active events that report one story: they formed apart because their first members arrived before the
-    /// reports that link them. Two events merge when a member pair matches, at least `compatibleShare` of all member
-    /// pairs are compatible and the mean score reaches `compatibilityScore`; or, when member pairs do not decide, when the
-    /// judge finds both coverages report one event and no member pair has a hard conflict. Excluded member pairs and the
-    /// size bound always win. The larger event survives (ties: the older ID); the other forwards to it.
-    private static func mergeFragments(
-        in database: DatabaseEngine, activeSince: Date, policy: EventMatchPolicy,
-        features: (EventMatchRow) -> EventFeatures,
-        resolved: (EventMatchRow, EventMatchRow) async -> EventPairAssessment,
-        sameStory: ([EventMatchRow], [EventMatchRow]) async -> Bool,
-        now: Date, report: inout EventClusteringReport
-    ) async throws {
-        var events = try await database.activeEventMembers(since: activeSince)
-            .sorted { $0.members.count != $1.members.count ? $0.members.count > $1.members.count : $0.id < $1.id }
-        var index = 0
-        while index < events.count {
-            try Task.checkCancellation()
-            var survivor = events[index]
-            // Names and action words together: a name the tagger types in one report can be a plain word in another.
-            let survivorTerms = survivor.members.reduce(into: Set<String>()) { $0.formUnion(features($1).specificAnchors.union(features($1).keywords)) }
-            var other = index + 1
-            while other < events.count {
-                let candidate = events[other]
-                let candidateTerms = candidate.members.reduce(into: Set<String>()) { $0.formUnion(features($1).specificAnchors.union(features($1).keywords)) }
-                guard survivor.members.count + candidate.members.count <= policy.maximumEventSize,
-                      survivorTerms.intersection(candidateTerms).count >= 2,
-                      let gap = Self.closestGap(survivor.members, candidate.members), gap <= policy.maximumTimeGap
-                else { other += 1; continue }
-                var excluded = false
-                for member in candidate.members {
-                    let exclusions = try await database.eventExclusions(of: member.id)
-                    if survivor.members.contains(where: { exclusions.contains($0.id) }) { excluded = true; break }
-                }
-                var pairs: [EventPairAssessment] = []
-                if !excluded {
-                    for a in survivor.members { for b in candidate.members { pairs.append(await resolved(a, b)) } }
-                }
-                let required = Int((Double(pairs.count) * policy.compatibleShare).rounded(.up))
-                let mean = pairs.isEmpty ? 0 : pairs.map(\.score).reduce(0, +) / Double(pairs.count)
-                let decided = pairs.contains(where: \.isMatch) && pairs.filter(\.isCompatible).count >= required
-                    && mean >= policy.compatibilityScore
-                // Hard conflicts (different countries, periods, years, days) between half or more of the member pairs are
-                // never overruled; fewer are angles of one story that name different places or days.
-                let hardConflicts = pairs.filter { $0.conflict != nil && !$0.softConflict && $0.conflict != .timeGap }.count
-                let hardConflict = Double(hardConflicts) >= Double(pairs.count) / 2
-                // The whole-coverage question only joins fragments already linked by one matching member pair; related
-                // stories (an explainer, a later act in the same story) stay apart for the timeline.
-                let related = pairs.contains(where: \.isMatch)
-                var merges = decided
-                if !excluded, !decided, !hardConflict, related { merges = await sameStory(survivor.members, candidate.members) }
-                guard !excluded, merges else { other += 1; continue }
-                do {
-                    let merged = try await database.mergeEvents(candidate.id, into: survivor.id,
-                                                                expectedVersions: (candidate.version, survivor.version), at: now)
-                    report.merged += 1
-                    report.changedEvents.insert(survivor.id)
-                    report.changedEvents.insert(candidate.id)
-                    survivor = (survivor.id, merged.membershipVersion, survivor.members + candidate.members)
-                    events[index] = survivor
-                    events.remove(at: other)
-                } catch {
-                    // Membership changed underneath; the next pass decides again.
-                    other += 1
-                }
-            }
-            index += 1
-        }
     }
 
     private static func closestGap(_ lhs: [EventMatchRow], _ rhs: [EventMatchRow]) -> TimeInterval? {
