@@ -3131,8 +3131,15 @@ struct NewsTests {
         execute(aliases.enumerated().map { index, alias in
             "INSERT INTO article_aliases(kind, value, article_id) VALUES ('id', '\(alias)', '\(articles[index % 2].id)');"
         }.joined() + "INSERT INTO article_aliases(kind, value, article_id) VALUES ('id', 'batch-ambiguous', NULL);")
-        let input = Array(aliases.reversed()) + [aliases[0], "batch-missing", "batch-ambiguous"]
-        let expected = (0..<405).reversed().map { articles[$0 % 2].id } + [articles[0].id, "batch-missing", "batch-ambiguous"]
+        let composed = "batch-caf\u{00E9}"
+        let decomposed = "batch-cafe\u{0301}"
+        assertTrue(composed == decomposed, "Swift considers the two Unicode spellings equal")
+        assertFalse(Data(composed.utf8) == Data(decomposed.utf8), "SQLite BINARY keys distinguish their bytes")
+        execute("INSERT INTO article_aliases VALUES ('id', '\(composed)', 'batch-first'); INSERT INTO article_aliases VALUES ('id', '\(decomposed)', 'batch-second');")
+        assertEqual(try await db.resolvedArticleID(composed), articles[0].id, "The single-ID lookup distinguishes the first spelling")
+        assertEqual(try await db.resolvedArticleID(decomposed), articles[1].id, "The single-ID lookup distinguishes the second spelling")
+        let input = Array(aliases.reversed()) + [aliases[0], "batch-missing", "batch-ambiguous", composed, decomposed, composed]
+        let expected = (0..<405).reversed().map { articles[$0 % 2].id } + [articles[0].id, "batch-missing", "batch-ambiguous", articles[0].id, articles[1].id, articles[0].id]
         assertEqual(try await db.resolvedArticleIDs(input), expected, "Chunks preserve order, duplicates and absent/NULL fallbacks")
         assertEqual(try await db.resolvedArticleIDs([]), [], "Empty resolution needs no query")
         try await db.markReadBatch(articleIds: [], isRead: true)

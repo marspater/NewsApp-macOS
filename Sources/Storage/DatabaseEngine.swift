@@ -967,8 +967,10 @@ actor DatabaseEngine {
 
     /// Resolves ID aliases in bounded queries, preserving input order and ambiguous/missing fallbacks.
     func resolvedArticleIDs(_ ids: [String]) throws -> [String] {
-        let uniqueIDs = Set(ids).sorted()
-        var targets: [String: String] = [:]
+        // SQLite BINARY keys distinguish UTF-8 spellings that Swift String considers equal.
+        var seen = Set<Data>()
+        let uniqueIDs = ids.filter { seen.insert(Data($0.utf8)).inserted }
+        var targets: [Data: String] = [:]
         for start in stride(from: 0, to: uniqueIDs.count, by: 400) {
             try Task.checkCancellation()
             let slice = Array(uniqueIDs[start..<min(start + 400, uniqueIDs.count)])
@@ -976,10 +978,10 @@ actor DatabaseEngine {
             let rows = try eventRows("SELECT value, article_id FROM article_aliases WHERE kind = 'id' AND value IN (\(placeholders));",
                                      slice.map { .text($0) })
             for row in rows {
-                if let alias = row[0], let target = row[1] { targets[alias] = target }
+                if let alias = row[0], let target = row[1] { targets[Data(alias.utf8)] = target }
             }
         }
-        return ids.map { targets[$0] ?? $0 }
+        return ids.map { targets[Data($0.utf8)] ?? $0 }
     }
 
     /// Keep observed identities across serial URL/GUID changes without rewriting keys.
