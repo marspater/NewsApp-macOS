@@ -4,6 +4,7 @@
 
 ### Changed
 
+- Upgrading from the pre-SQLite cache imports saved stories and read state again. The import used to stop at a nested-transaction error whenever legacy data existed, and it repeated that failure at every launch. Read entries whose story is no longer cached are skipped.
 - Batch read and saved-state updates resolve ID aliases in bounded SQLite queries while preserving input order, ambiguous aliases and transaction rollback.
 
 - Multi-source overviews use on-device plain-text synthesis with citations on introductory sentences and key facts. Unsupported sentences are dropped; weak or refused drafts retain the current excerpt overview. A few covered events warm in the background under the AI and energy settings. Classification and interactive analysis also use plain text to handle sensitive news without guided-output refusals.
