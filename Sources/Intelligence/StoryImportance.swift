@@ -105,6 +105,7 @@ enum StoryCurator {
         budget: Int = 60,
         imageBudget: Int = 30,
         muting: MuteRules = MuteRules(),
+        keepingFeedURLs: [String] = [],
         activeLifetime: TimeInterval = EventCandidatePolicy.standard.activeEventLifetime,
         now: Date = Date()
     ) async throws -> Report {
@@ -119,7 +120,7 @@ enum StoryCurator {
                 }
             }
         }
-        report.expired = try await database.expireWaitingStories(now: now)
+        report.expired = try await database.expireWaitingStories(now: now, keepingFeedURLs: keepingFeedURLs)
         if imageFinder.isAvailable, imageBudget > 0 {
             // ponytail: rows read once per pass; one lookup per event, the rest of an event waits for the next pass.
             var lookedUp = Set<String>()

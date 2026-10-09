@@ -148,6 +148,11 @@ final class AppSettings: ObservableObject {
                                    topics: defaults.stringArray(forKey: Self.mutedTopicsKey) ?? [])
     }
 
+    /// Panel feeds whose stories must outlive waiting-story expiry, because the tension index rebuilds past days from them.
+    var tensionRetainedFeedURLs: [String] {
+        tensionCollectionOptIn ? TensionMethodology.v1.panel.map(\.url) : []
+    }
+
     /// Feed URLs to fetch during refresh: user subscriptions, plus panel feeds when opted in to tension collection.
     var effectiveFeedURLs: [String] {
         guard tensionCollectionOptIn else { return feedURLs }
