@@ -103,32 +103,28 @@ struct SidebarView: View {
     
     // MARK: - Sidebar Sections
     
+    /// A native sidebar row (DESIGN.md 6): the list's selection handles clicks and arrow keys, the system draws
+    /// the badge, and row size follows the person's sidebar size setting.
+    @ViewBuilder
     private func topicRow(title: String, icon: String, badge: Int? = nil, isLoading: Bool = false, accessibility: String? = nil) -> some View {
-        Button {
-            selectedTopic = title
-        } label: {
-            HStack {
-                Label(title, systemImage: icon)
-                Spacer()
-                if isLoading {
+        let count = badge ?? 0
+        let badgeValue = count > 0 ? String(count) : ""
+        Group {
+            if isLoading {
+                HStack {
+                    Label(title, systemImage: icon)
+                    Spacer()
                     ProgressView()
-                        .controlSize(.small)
-                        .scaleEffect(0.7)
-                        .frame(width: 14, height: 14)
-                } else if let b = badge, b > 0 {
-                    Text("\(b)")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundColor(selectedTopic == title ? AppColor.primaryText : AppColor.secondaryText)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 1)
-                        .background(Capsule().fill(selectedTopic == title ? AppColor.surface.opacity(0.8) : AppColor.surface))
+                        .controlSize(.mini)
                 }
+            } else {
+                Label(title, systemImage: icon)
+                    .badge(badge ?? 0)
             }
-            .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
         .tag(title)
         .accessibilityLabel(accessibility ?? title)
+        .accessibilityValue(isLoading ? "Refreshing" : badgeValue)
     }
 
     private var inboxSection: some View {
@@ -179,8 +175,8 @@ struct SidebarView: View {
                                 .foregroundColor(AppColor.secondaryText)
                             Spacer()
                             Image(systemName: "plus")
-                                .font(.system(size: 11, weight: .semibold))
-                                .foregroundColor(AppColor.tertiaryText)
+                                .imageScale(.small)
+                                .foregroundStyle(AppColor.tertiaryText)
                         }
                     }
                     .buttonStyle(.plain)

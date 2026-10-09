@@ -4,6 +4,7 @@
 
 ### Changed
 
+- Sidebar rows are native list rows: the system draws selection and unread/saved count badges, rows follow the System Settings sidebar size, and arrow keys move through them. The refresh indicator on Today uses the mini progress control instead of a scaled one.
 - Complete the native window chrome: Refresh stays visible during toolbar overflow on macOS 26.1+, New Briefing has a separate toolbar group and menu command, and queued updates dim in inactive windows. The reader window title names its publisher. Story sharing, reading mode/options, browser navigation and Add Feed are available from menu commands bound to the active window. ⇧⌘R switches Story/Web even when an overview is open; single-key W keeps its existing overview behavior.
 
 - Menus: View gains as List, as Grid and Group Stories by Event. Actions on a story (read state, save, open in browser, Story or Web) move from Navigate to a new Story menu with the same shortcuts, except Switch Between Story and Web, which moves from ⇧⌘W (Close Window in tabbed apps) to ⇧⌘R. W still switches in the reader.

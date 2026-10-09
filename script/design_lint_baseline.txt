@@ -7,7 +7,6 @@ literal-font-size Sources/Views/ArticleListView.swift 3
 literal-font-size Sources/Views/EventCardView.swift 4
 literal-font-size Sources/Views/EventOverviewReaderView.swift 42
 literal-font-size Sources/Views/SettingsView.swift 24
-literal-font-size Sources/Views/SidebarView.swift 2
 uppercased Sources/Views/ArticleCardView.swift 1
 uppercased Sources/Views/ArticleDetailView.swift 1
 uppercased Sources/Views/EventCardView.swift 1
