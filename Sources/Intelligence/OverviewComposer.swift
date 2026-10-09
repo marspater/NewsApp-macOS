@@ -361,7 +361,18 @@ public struct OverviewComposer: Sendable {
         articles: [FeedArticle],
         model: NewsTextModel
     ) async throws -> EventOverviewDocument {
-        guard !passages.isEmpty else { return fallback }
+        try await composeWithModelOutcome(fallback: fallback, passages: passages, articles: articles, model: model).document
+    }
+
+    /// The same composition, also reporting whether the draft was kept and why lines were dropped (#308).
+    static func composeWithModelOutcome(
+        fallback: EventOverviewDocument,
+        passages: [EvidencePassage],
+        articles: [FeedArticle],
+        model: NewsTextModel
+    ) async throws -> (document: EventOverviewDocument, outcome: OverviewModelOutcome) {
+        var outcome = OverviewModelOutcome(result: .noPassages)
+        guard !passages.isEmpty else { return (fallback, outcome) }
         // Short local IDs are copied reliably; persisted citations always use the original passage and fingerprint.
         let promptPassages = passages.enumerated().map { index, passage in
             EvidencePassage(id: "P\(index + 1)", articleID: "source\(index + 1)", text: passage.text, fingerprint: passage.fingerprint)
@@ -385,7 +396,15 @@ public struct OverviewComposer: Sendable {
         let answer = try await model.respond(prompt, 1000)
         try Task.checkCancellation()
         let lines = answer.split(whereSeparator: \.isNewline)
-        guard (5...8).contains(lines.count) else { return fallback }
+        outcome.lines = lines.count
+        guard (5...8).contains(lines.count) else {
+            let structured = lines.contains { line in
+                let kind = line.split(separator: "|", maxSplits: 1).first?.trimmingCharacters(in: .whitespaces)
+                return kind == "INTRO" || kind == "FACT"
+            }
+            outcome.result = structured ? .lineCount : .unstructured
+            return (fallback, outcome)
+        }
         let articlesByID = Dictionary(uniqueKeysWithValues: articles.map { ($0.id, $0) })
         var introduction: [OverviewFact] = []
         var facts: [OverviewFact] = []
@@ -395,7 +414,10 @@ public struct OverviewComposer: Sendable {
             let fields = line.split(separator: "|", maxSplits: 2, omittingEmptySubsequences: false).map { $0.trimmingCharacters(in: .whitespaces) }
             guard fields.count == 3, fields[0] == "INTRO" || fields[0] == "FACT",
                   let passage = passagesByID[fields[1]], let article = articlesByID[passage.articleID],
-                  !fields[2].isEmpty, fields[2].count <= 500 else { continue }
+                  !fields[2].isEmpty, fields[2].count <= 500 else {
+                outcome.malformedLines += 1
+                continue
+            }
             let statement = ContentExtractionPipeline.shared.decodeHTMLEntities(fields[2])
             let citationID = "model_cite_\(index)"
             let citation = OverviewCitation(id: citationID, articleID: passage.articleID, passageID: passage.id,
@@ -404,29 +426,41 @@ public struct OverviewComposer: Sendable {
             let fact = OverviewFact(id: "model_claim_\(index)", text: statement, citationIDs: [citationID])
             let check = EventOverviewDocument(eventID: fallback.eventID, version: fallback.version,
                 content: OverviewContent(title: fallback.title, summary: "", facts: [fact], citations: [citation]), provenance: fallback.provenance)
-            guard try await verifyModelSentence(check, passage: passage, article: article, model: model) else { continue }
+            switch try await verifyModelSentence(check, passage: passage, article: article, model: model) {
+            case .supported: break
+            case .rejectedDeterministically: outcome.deterministicRejections += 1; continue
+            case .rejectedByModel: outcome.modelRejections += 1; continue
+            }
             citations.append(citation)
             if fields[0] == "INTRO" { introduction.append(fact) } else { facts.append(fact) }
         }
+        outcome.keptIntroduction = introduction.count
+        outcome.keptFacts = facts.count
         guard !introduction.isEmpty, introduction.count <= 3, (3...5).contains(facts.count),
-              (introduction.count + facts.count) * 3 >= lines.count * 2 else { return fallback }
+              (introduction.count + facts.count) * 3 >= lines.count * 2 else {
+            outcome.result = .weakDraft
+            return (fallback, outcome)
+        }
+        outcome.result = .accepted
         let sections = OverviewEvidenceSections(timeline: fallback.timeline, perspectives: fallback.perspectives,
             thematicAngle: fallback.thematicAngle, coverageSentiment: fallback.coverageSentiment, introduction: introduction)
         let content = OverviewContent(title: fallback.title, summary: introduction.map(\.text).joined(separator: " "),
             facts: facts, citations: Array(fallback.citations.values) + citations,
             leadImage: fallback.leadImage, evidenceSections: sections)
-        return EventOverviewDocument(eventID: fallback.eventID, version: fallback.version, content: content,
-            provenance: OverviewProvenance(memberArticleIDs: fallback.provenance.memberArticleIDs, kind: .synthesized))
+        return (EventOverviewDocument(eventID: fallback.eventID, version: fallback.version, content: content,
+            provenance: OverviewProvenance(memberArticleIDs: fallback.provenance.memberArticleIDs, kind: .synthesized)), outcome)
     }
 
+    private enum SentenceCheck { case supported, rejectedDeterministically, rejectedByModel }
+
     private static func verifyModelSentence(_ check: EventOverviewDocument, passage: EvidencePassage,
-                                           article: FeedArticle, model: NewsTextModel) async throws -> Bool {
-        guard let fact = check.facts.first else { return false }
+                                           article: FeedArticle, model: NewsTextModel) async throws -> SentenceCheck {
+        guard let fact = check.facts.first else { return .rejectedDeterministically }
         let tokenizer = NLTokenizer(unit: .sentence)
         tokenizer.string = fact.text
         guard tokenizer.tokens(for: fact.text.startIndex..<fact.text.endIndex).count == 1,
               OverviewClaimVerifier.verifyOverview(check, passages: [passage], articles: [article]).isFullyVerified,
-              OverviewQualityAuditor.auditClaim(fact, citations: check.citations, passages: [passage]).isSupported else { return false }
+              OverviewQualityAuditor.auditClaim(fact, citations: check.citations, passages: [passage]).isSupported else { return .rejectedDeterministically }
         // ponytail: one fresh model judgment per sentence, bounded to eight; human audits remain necessary.
         let prompt = """
         \(GenerationPromptDefense.untrustedDataSystemGuard)
@@ -440,6 +474,32 @@ public struct OverviewComposer: Sendable {
         let support = try await model.respond(prompt, 1)
         try Task.checkCancellation()
         return support.trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters))
-            .caseInsensitiveCompare("YES") == .orderedSame
+            .caseInsensitiveCompare("YES") == .orderedSame ? .supported : .rejectedByModel
     }
+}
+
+/// Why a model draft was kept or replaced by the deterministic overview, with per-line rejection counts (#308).
+/// Production keeps only the document; evaluation reports aggregate these without any text.
+struct OverviewModelOutcome: Sendable, Equatable, Codable {
+    enum Result: String, Sendable, Codable {
+        /// The draft passed every check and replaced the deterministic overview.
+        case accepted
+        /// No stored passages, so the model was not asked.
+        case noPassages
+        /// No INTRO or FACT line at all, for example a refusal written as prose.
+        case unstructured
+        /// Structured lines, but not the 5 to 8 lines the format requires.
+        case lineCount
+        /// The verified lines do not form one to three introduction sentences plus three to five facts,
+        /// or fewer than two thirds of the lines survived.
+        case weakDraft
+    }
+
+    var result: Result
+    var lines = 0
+    var malformedLines = 0
+    var deterministicRejections = 0
+    var modelRejections = 0
+    var keptIntroduction = 0
+    var keptFacts = 0
 }
