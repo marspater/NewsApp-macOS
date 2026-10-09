@@ -40,17 +40,22 @@ actor OnDeviceImportanceJudge {
     func rate(_ report: EventJudgeReport) async -> StoryImportance? {
         let key = "\(report.id)\u{1}\(report.title)\u{1}\(report.summary.hashValue)"
         if let known = cache[key] { return known }
+        guard let level = await Self.modelRating(report) else { return nil }
+        if cache.count >= 5_000 { cache.removeAll() }
+        cache[key] = level
+        return level
+    }
+
+    /// One fresh model answer that bypasses the cache, as the #309 stability re-rate needs; nil without the model.
+    static func modelRating(_ report: EventJudgeReport) async -> StoryImportance? {
         #if canImport(FoundationModels)
         guard #available(macOS 26.0, *), case .available = SystemLanguageModel.default.availability else { return nil }
         do {
             // Like the event judge: news text needs the content-transformation guardrails and a plain-text answer.
             let session = LanguageModelSession(model: SystemLanguageModel(guardrails: .permissiveContentTransformations))
             let response = try await session.respond(
-                to: Self.prompt(report), options: GenerationOptions(sampling: .greedy, maximumResponseTokens: 8))
-            guard let level = Self.level(response.content) else { return nil }
-            if cache.count >= 5_000 { cache.removeAll() }
-            cache[key] = level
-            return level
+                to: prompt(report), options: GenerationOptions(sampling: .greedy, maximumResponseTokens: 8))
+            return level(response.content)
         } catch {
             return nil
         }

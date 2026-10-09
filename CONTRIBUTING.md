@@ -14,6 +14,8 @@ Build on Apple silicon with Xcode 27 selected. The deployment target remains mac
 ./test.sh                         # Full regressions; also run by the commit hook
 ./test.sh --story-regressions     # Focused offline identity, reader and persistence checks
 ./test.sh --curation-live /private/tmp/library-backup.sqlite3 /private/tmp/curation-report # Opt-in on-device rating audit of a SQLite backup; private titles stay local
+python3 script/evaluation/importance_review.py sheet /private/tmp/curation-report  # #309: blind private sheet of minor-rated stories (never overwrites a sheet)
+python3 script/evaluation/importance_review.py report /private/tmp/curation-report # #309: aggregate-only hidden-important rate with Wilson bounds and re-rate stability
 ./test.sh --overviews-live /private/tmp/library-backup.sqlite3 /private/tmp/overview-report # Opt-in on-device labeled controls and live overview audit; private passages stay local
 python3 script/evaluation/overview_review.py sheet /private/tmp/overview-report  # #308: private claim sheet for an independent reviewer (never overwrites a sheet)
 python3 script/evaluation/overview_review.py report /private/tmp/overview-report # #308/#313: aggregate-only rates, Wilson bounds, latency, fallback causes, perspective coverage

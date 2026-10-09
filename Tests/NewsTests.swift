@@ -4615,6 +4615,19 @@ struct NewsTests {
         let visible = Set(try await db.fetchArticles(limit: nil, hidingWaitingStories: true).map(\.id))
         let hiddenMajor = ratings.filter { $0["importance"] == "major" && !visible.contains($0["id"] ?? "") }.count
         assertEqual(hiddenMajor, 0, "No rated major story is hidden")
+        // #309: every minor-rated story in the window, whether it waits, and one fresh re-rate that bypasses the cache.
+        // The review sheet built from this file hides the waiting flag and the re-rate from the labeller.
+        let minorRows = try await db.ratedImportanceRows(level: .minor, activeSince: activeSince)
+        let shownMinor = try await db.notificationStoryIDs(minorRows.map(\.id))
+        var review: [[String: String]] = []
+        for row in minorRows {
+            try Task.checkCancellation()
+            let rerate = await OnDeviceImportanceJudge.modelRating(EventClusterer.report(row))
+            review.append(["id": row.id, "title": row.title, "summary": row.description, "source": row.source,
+                           "waiting": shownMinor.contains(row.id) ? "no" : "yes",
+                           "rerate": rerate.map { String(describing: $0) } ?? "none"])
+        }
+        print("CURATION_REVIEW minor=\(review.count) waiting=\(review.filter { $0["waiting"] == "yes" }.count)")
         let report: [String: Int] = ["library": all.count, "active": active.count, "rated": ratings.count,
                                    "major": ratings.filter { $0["importance"] == "major" }.count,
                                    "notable": ratings.filter { $0["importance"] == "notable" }.count,
@@ -4626,6 +4639,7 @@ struct NewsTests {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         try encoder.encode(ratings).write(to: directory.appendingPathComponent("ratings-private.json"))
+        try encoder.encode(review).write(to: directory.appendingPathComponent("minor-review-private.json"))
         try encoder.encode(report).write(to: directory.appendingPathComponent("curation.json"))
         print("CURATION_REPORT \(String(decoding: try encoder.encode(report), as: UTF8.self))")
         await db.close()
@@ -4866,6 +4880,12 @@ struct NewsTests {
         assertEqual(try await db.fetchArticles(limit: nil).count, all.count, "Lists that do not hide waiting stories list everything")
         try await db.recordImportance("pair-2", .notable, at: now)
         assertTrue(try await listed().isSuperset(of: ["pair-1", "pair-2"]), "One important report shows its whole event")
+        let reviewed = Set(try await db.ratedImportanceRows(level: .minor, activeSince: now.addingTimeInterval(-72 * 3600)).map(\.id))
+        assertEqual(reviewed, ["minor", "saved", "read", "pair-1", "wide-1", "wide-2", "wide-3", "wide-4"],
+                    "The #309 review lists every minor-rated story in the window")
+        assertEqual(reviewed.subtracting(try await db.notificationStoryIDs(Array(reviewed))), ["minor", "saved", "read"],
+                    "The review tells waiting minor stories from shown ones")
+        assertTrue(try await db.ratedImportanceRows(level: .minor, activeSince: now).isEmpty, "Stories before the window are not reviewed")
 
         assertEqual(try await db.expireWaitingStories(now: now.addingTimeInterval(3600)), 0, "Nothing expires within a day")
         assertEqual(try await db.expireWaitingStories(now: now.addingTimeInterval(25 * 3600)), 1, "An unread minor story expires after a day")
