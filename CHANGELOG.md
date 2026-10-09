@@ -13,6 +13,9 @@
 - Design foundations (no visible change): the imitation frosted surface is removed, custom glass helpers use native Liquid Glass on macOS 26 and later with a regular-material fallback on macOS 15, and the design tokens named in docs/DESIGN.md exist. `./test.sh` first runs `script/design_lint.sh`, which fails when a view adds literal font sizes, colors, corner radii, materials, direct glass or `uppercased()` beyond the recorded baseline.
 - Reader: one segmented Overview / Story / Web control in the toolbar replaces the separate overview picker and Reader and Web toggles (Overview appears only for events with an overview). The reader toolbar no longer draws an opaque background or forces a soft scroll edge, so on macOS 26 and 27 it uses the system Liquid Glass and stories scroll beneath it. W still switches modes.
 
+- Settings: panes size to content instead of a fixed 680 × 490 window frame, extra outer padding around grouped forms is dropped, the last-opened pane is remembered across launches, and all literal font sizes are replaced with design typography tokens (lowering the design lint baseline by 24 deviations).
+- Secondary windows and sheets: News Tension and the Feed Catalog adopt `navigationTitle` and hide duplicate toolbar titles with `toolbar(removing: .title)`. The Feed Catalog places Done in the standard toolbar confirmation action without custom sheet backgrounds or bottom button bars, and both views adopt design typography, micro-spacing and continuous container radius tokens.
+
 - Upgrading from the pre-SQLite cache imports saved stories and read state again. The import used to stop at a nested-transaction error whenever legacy data existed, and it repeated that failure at every launch. Read entries whose story is no longer cached are skipped.
 - Batch read and saved-state updates resolve ID aliases in bounded SQLite queries while preserving input order, ambiguous aliases and transaction rollback.
 
