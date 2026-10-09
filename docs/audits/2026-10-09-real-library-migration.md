@@ -1,0 +1,51 @@
+# Installed-library migration check — 9 October 2026
+
+The production bundle built from `main` commit `c5a8fe0ac767c6adae3c33c587688fa80e29780d` successfully migrated a read-only backup of the installed library from schema v16 to v20. This records the completed migration and runtime checks for [#305](https://github.com/marspater/NewsApp-macOS/issues/305). Live macOS notification delivery remains unverified.
+
+## Isolation and build
+
+- macOS 27.0.1, build 26A434; arm64; Xcode 27.0 (27A266a), Swift 6.4.
+- The installed SQLite source was opened read-only with `query_only` enabled and copied through SQLite's backup API. All migrations, refreshes, reading and model generation used the copy.
+- `git archive origin/main` supplied the exact source snapshot. `build_release.sh` built an optimized arm64, ad-hoc signed bundle with its own `com.marspater.news.migrationcheck.6b0dc0e9` identifier and sandbox container. The staged bundle name was News Migration Check.
+- Only staged packaging identity changed. The production container-migration manifest was omitted from the temporary bundle so it could not relocate real preferences, app support or caches. App implementation was unchanged.
+- Bundle launch, plist validation, arm64 architecture and strict signature verification passed. The installed app executable, Info.plist and real preferences matched their recorded hashes after verification. No installation or production-library mutation was performed.
+
+## Migration checkpoint
+
+These measurements were taken before live refresh and UI navigation:
+
+| Measurement | Read-only backup | After first isolated open |
+| --- | ---: | ---: |
+| Schema version | 16 | 20 |
+| Articles | 1,611 | 1,611 |
+| Saved state rows | 3 | 3 |
+| Read state rows | 77 | 77 |
+| History rows | 77 | 77 |
+| SQLite integrity check | ok | ok |
+| Foreign-key violations | 1 | 1 |
+
+The saved/read/history row identities and timestamps match exactly at that checkpoint, verified with a digest of sorted durable state. One saved `article_state` row already lacks its parent article in the v16 backup. The migration preserves that same row and violation; the UI consequently shows two visible saved stories. This is inherited data, tracked in [#331](https://github.com/marspater/NewsApp-macOS/issues/331), rather than a clean foreign-key result or a new migration failure. No repair was attempted.
+
+## Model-generation reconciliation
+
+The first open stored `Version 27.0.1 (Build 26A434)` as `model_generation`. Both stored overviews and all three stored summaries became provisional at analysis version 0.
+
+Opening one previously read source through the production reader regenerated its persisted summary at analysis version 3 with `apple.foundation-model`; opening its event overview persisted analysis version 4 and membership version 2. Both rendered in the reader. Reopening the same isolated bundle retained the generation and these v3/v4 results without resetting them to provisional again.
+
+This verifies invalidation, regeneration and persistence. It does not establish independent summary quality or factual acceptance for [#308](https://github.com/marspater/NewsApp-macOS/issues/308).
+
+## Refresh and UI observations
+
+The copied library refreshed the default BBC News and Ars Technica feeds. At the final observation, it contained 1,650 articles, 238 importance ratings (5 minor, 162 notable, 71 major), and 84 persisted publisher-image URLs. Refresh and retention can change these totals; they are dated observations, not fixed expectations.
+
+The Today view reported four waiting stories. Clicking the control changed it to “Hide 4 waiting” and revealed the filtered stories; clicking again restored the default filtering. Publisher images visibly rendered on grid cards and within the source reader. Reading added history only to the copy; migration preservation measurements above were recorded before those interactions.
+
+One newly fetched page retained a newsletter banner and signup block in its reader document. [#330](https://github.com/marspater/NewsApp-macOS/issues/330) tracks this extraction finding. Publisher passages, generated model text, screenshots and raw library rows remain private.
+
+## Notification boundary and checks
+
+The native UserNotifications settings API, queried without requesting permission under the isolated bundle identifier, returned authorization status `notDetermined`. Live operating-system banner delivery and its timing have not been verified; no notification permission or production setting was changed.
+
+`./test.sh --story-regressions` passed, including `testStoryVisibility`: the production FeedManager dispatches its notification callback after importance rating while publisher-image lookups remain blocked on an explicit gate. That is deterministic dispatch-order proof, separate from macOS delivery. The full commit-hook regressions also passed when publishing this audit.
+
+No sealed holdout replay, parked-language or VoiceOver acceptance, distribution, notarization or installation was performed. The remaining live notification check keeps #305 open.
