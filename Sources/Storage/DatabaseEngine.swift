@@ -735,6 +735,19 @@ actor DatabaseEngine {
                 throw error
             }
         }
+        if version < 21 {
+            try beginTransaction()
+            do {
+                try Task.checkCancellation()
+                // Page images found to be shared site defaults (#338), so a later story declaring one never keeps it.
+                try executeSimple("CREATE TABLE IF NOT EXISTS story_image_defaults (url TEXT PRIMARY KEY);")
+                try setUserVersion(21)
+                try commitTransaction()
+            } catch {
+                try? rollbackTransaction()
+                throw error
+            }
+        }
     }
     
     /// Muting predicates for list queries (`MuteRules`); both are pure functions of their arguments.
@@ -2484,7 +2497,8 @@ actor DatabaseEngine {
     }
 
     /// Records a looked-up page: its lead image, or nil when it has none. An image another story already declared is a
-    /// site default (a brand card), not a lead: it is cleared for both. Returns whether an image was stored.
+    /// site default (a brand card), not a lead: it is cleared for both and remembered, so no later story keeps it.
+    /// Returns whether an image was stored.
     @discardableResult
     func recordStoryImage(_ articleID: String, imageURL: String?, at date: Date = Date(), expectedLink: String? = nil) throws -> Bool {
         try inEventTransaction { () throws -> Bool in
@@ -2492,8 +2506,11 @@ actor DatabaseEngine {
                 return false
             }
             var image = imageURL
-            if let url = imageURL, !(try eventRows("SELECT 1 FROM story_images WHERE image_url = ? AND article_id != ? LIMIT 1;",
-                                                     [.text(url), .text(articleID)])).isEmpty {
+            if let url = imageURL, !(try eventRows("""
+                SELECT 1 FROM story_image_defaults WHERE url = ?1
+                UNION ALL SELECT 1 FROM story_images WHERE image_url = ?1 AND article_id != ?2 LIMIT 1;
+                """, [.text(url), .text(articleID)])).isEmpty {
+                try eventRows("INSERT OR IGNORE INTO story_image_defaults(url) VALUES (?);", [.text(url)])
                 try eventRows("UPDATE story_images SET image_url = NULL WHERE image_url = ?;", [.text(url)])
                 image = nil
             }

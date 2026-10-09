@@ -662,7 +662,7 @@ struct NewsTests {
         assertEqual(value(copy, "SELECT count(*) FROM sqlite_master WHERE name IN ('trg_articles_ai','trg_articles_ad','trg_articles_au');"), "3", "Failed rebuild restores the old triggers")
         execute(copy, "DROP VIEW article_fts_rows;")
         try await db.open()
-        assertEqual(value(copy, "PRAGMA user_version;"), "20", "Copied v14 library upgrades through v15 to the current schema")
+        assertEqual(value(copy, "PRAGMA user_version;"), "21", "Copied v14 library upgrades through v15 to the current schema")
         assertEqual(value(path, "PRAGMA user_version;"), "14", "Original library stays untouched")
         assertEqual(try await db.searchArticles(query: "Research").map(\.id), originalOrder, "Migration preserves ranks and ID tie order")
         assertEqual(value(copy, "SELECT read_at FROM article_state WHERE article_id='one';"), readAt, "Migration preserves read timestamps")
@@ -1274,6 +1274,38 @@ struct NewsTests {
         }
         assertTrue(content.contains("instruction discussed by the researcher"), "Editorial references to a programme remain eligible")
         assertTrue(content.contains("Editorial commentary"), "Comment filtering must not remove editorial commentary")
+
+        // #330: BBC's live layout wraps a newsletter banner and its signup prose in ordinary image and text blocks.
+        func bbcBlock(_ kind: String, _ inner: String) -> String {
+            "<div data-block=\"\(kind)\" class=\"ssrcss-vxwoax-ComponentWrapper\"><div class=\"ssrcss-126h8e-Spacer\">\(inner)</div></div>"
+        }
+        func bbcFigure(_ alt: String, _ caption: String) -> String {
+            bbcBlock("image", "<div data-testid=\"image\"><figure class=\"ssrcss-hc6arm-StyledFigure\"><div><span><picture>"
+                + "<img alt=\"\(alt)\" src=\"https://ichef.bbci.co.uk/ace/standard/976/cpsprodpb/\(caption.count)/live/photo.jpg\" width=\"976\" height=\"549\"/>"
+                + "</picture></span></div>\(caption.isEmpty ? "" : "<figcaption>\(caption)</figcaption>")</figure></div>")
+        }
+        let bbcText = { (inner: String) in bbcBlock("text", "<div data-testid=\"rich-text\"><div class=\"ssrcss-nqezkk-RichTextContainer\"><p>\(inner)</p></div></div>") }
+        let newsletterHTML = "<main><article>" + bbcText(first)
+            + bbcFigure("Officials outside the central bank in London", "The bank's headquarters in the City of London")
+            + bbcText(second)
+            + bbcText("A separate newsletter sent to investors last week warned that rates could rise again before the summer.")
+            + bbcFigure("A thin, grey banner promoting the US Politics Unspun newsletter. The banner reads: “The newsletter that cuts through the noise.”", "")
+            + bbcText("Follow the twists and turns with the US Politics Unspun newsletter. Readers in the UK can <a href=\"/newsletters/zgmn46f\">sign up here</a>. Those outside the UK can <a href=\"/news/articles/c2lkky9zngvo\">sign up here</a>.")
+            + bbcText("Sign up here to get the latest royal stories every week with our Royal Watch <a href=\"https://www.bbc.co.uk/newsletters/zkp3wsg\">newsletter</a>.")
+            + "</article></main>"
+        guard case .success(let newsletterContent, _, let newsletterDocument) = ContentExtractionPipeline.shared.extractFromHTML(newsletterHTML),
+              let newsletterDocument else {
+            assertTrue(false, "BBC newsletter fixture must extract successfully")
+            return
+        }
+        let figures = newsletterDocument.blocks.filter { $0.kind == .figure }
+        assertEqual(figures.map(\.imageAlt), ["Officials outside the central bank in London"], "Newsletter banners are removed; editorial figures stay")
+        assertEqual(figures.first?.text, "The bank's headquarters in the City of London", "Editorial captions stay")
+        for unwanted in ["Politics Unspun", "Royal Watch", "sign up"] {
+            assertFalse(newsletterContent.contains(unwanted), "Plain text excludes newsletter signup: \(unwanted)")
+            assertFalse(newsletterDocument.blocks.contains { $0.text.contains(unwanted) }, "Structured reader excludes newsletter signup: \(unwanted)")
+        }
+        assertTrue(newsletterContent.contains("separate newsletter sent to investors"), "Editorial mentions of newsletters stay")
         let extremeList = HTMLDOMBuilder.parse(html: "<ol start='\(Int.max)'><li>First</li><li>Second</li></ol>")
         assertEqual(extremeList.readingBlocks().count, 2, "Untrusted extreme list numbering must not overflow")
         let tags = EntityResult.readerTags(from: [
@@ -3243,7 +3275,7 @@ struct NewsTests {
         await cancelledDB.close()
         let db = DatabaseEngine(path: copyPath)
         try await db.open()
-        assertEqual(value(copyPath, "PRAGMA user_version;"), "20", "Copied v4 library upgrades to the current schema")
+        assertEqual(value(copyPath, "PRAGMA user_version;"), "21", "Copied v4 library upgrades to the current schema")
         assertEqual(value(originalPath, "PRAGMA user_version;"), "4", "Original fixture stays untouched")
         assertEqual(try await db.fetchArticles(limit: nil).count, 3, "Migration keeps historical rows")
         assertEqual(value(copyPath, "SELECT read_at FROM article_state WHERE article_id = 'alias-first';"), originalReadAt, "Migration preserves read history timestamp")
@@ -3414,7 +3446,7 @@ struct NewsTests {
         assertEqual(value(failure, "SELECT is_saved FROM article_state WHERE article_id='historical-a';"), "0", "Injected failure rolls back survivor state union")
         assertEqual(value(failure, "SELECT article_id FROM article_aliases WHERE value='observed-variant-b';"), "historical-b", "Injected failure preserves old aliases")
         try await migrated.open()
-        assertEqual(value(copy, "PRAGMA user_version;"), "20", "Copied library upgrades to the current schema")
+        assertEqual(value(copy, "PRAGMA user_version;"), "21", "Copied library upgrades to the current schema")
         assertEqual(value(path, "PRAGMA user_version;"), "8", "Original fixture remains untouched")
         assertEqual(try await migrated.fetchArticles(limit: nil).count, 6, "Only confident same-URL text copies are hidden")
         assertEqual(try await migrated.fetchArticles(limit: nil, includingOriginals: true).count, 8, "Every stored original remains reachable")
@@ -4179,7 +4211,7 @@ struct NewsTests {
 
         let db = DatabaseEngine(path: copy)
         try await db.open()
-        assertEqual(value(copy, "PRAGMA user_version;"), "20", "Copied v11 library upgrades to the current schema")
+        assertEqual(value(copy, "PRAGMA user_version;"), "21", "Copied v11 library upgrades to the current schema")
         assertEqual(value(path, "PRAGMA user_version;"), "11", "Original v11 fixture stays untouched")
         assertEqual(try await db.fetchArticles(limit: nil).count, 5, "Event migration keeps every article")
         assertTrue(try await db.isRead(articleId: "event-a"), "Event migration keeps read state")
@@ -4585,23 +4617,35 @@ struct NewsTests {
         }
         let db = DatabaseEngine(path: url.path)
         try await db.open()
-        let clock = Date()
+        // NEWS_IMAGES_NOW (seconds since 1970) repeats an earlier measurement on the same 72-hour denominator (#312).
+        let clock = ProcessInfo.processInfo.environment["NEWS_IMAGES_NOW"].flatMap(TimeInterval.init).map(Date.init(timeIntervalSince1970:)) ?? Date()
+        var placeholders: [[String: String]] = []
         func coverage() async throws -> (cards: Int, pictured: Int) {
             let articles = try await db.fetchArticles(limit: nil, publicationWindow: clock.addingTimeInterval(-72 * 3600)...clock, hidingWaitingStories: true)
             let summaries = try await db.eventFeedSummaries(forArticles: articles.map(\.id))
             let entries = EventFeedGrouping.entries(for: articles, events: summaries, mode: .events)
             var pictured = 0
+            placeholders = []
+            let pending = Set(try await db.imagelessStoryRows(activeSince: clock.addingTimeInterval(-EventCandidatePolicy.standard.activeEventLifetime), limit: 2000).map(\.id))
             for entry in entries {
                 let members: [FeedArticle]
                 switch entry {
                 case .article(let article): members = [article]
                 case .event(let summary, _, _): members = try await db.fetchArticles(limit: nil, eventID: summary.eventID)
                 }
-                if FeedArticle.bestCardImage(in: members) != nil { pictured += 1 }
+                if FeedArticle.bestCardImage(in: members) != nil { pictured += 1; continue }
+                // Private: which cards keep the placeholder, and whether their pages were looked up.
+                let looked = try await db.storyImages(for: members.map(\.id))
+                for member in members {
+                    let checked = pending.contains(member.id) ? "not looked up" : looked[member.id] == nil ? "looked up, none" : "found"
+                    placeholders.append(["card": members.count > 1 ? "event" : "single", "members": String(members.count),
+                                         "link": member.link, "lookup": checked])
+                }
             }
             return (entries.count, pictured)
         }
         let before = try await coverage()
+        let placeholdersBefore = placeholders
         var checks = 0
         var found = 0
         for pass in 1...10 {
@@ -4628,6 +4672,8 @@ struct NewsTests {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         try encoder.encode(report).write(to: directory.appendingPathComponent("images.json"))
+        try JSONSerialization.data(withJSONObject: ["before": placeholdersBefore, "after": placeholders], options: [.prettyPrinted, .sortedKeys])
+            .write(to: directory.appendingPathComponent("placeholders-private.json"))
         print("IMAGE_REPORT \(String(decoding: try encoder.encode(report), as: UTF8.self))")
         await db.close()
     }
@@ -4851,6 +4897,39 @@ struct NewsTests {
         assertEqual(prefix.count, 256 * 1024, "Only a bounded page prefix is retained even for a large declared body")
         assertEqual(await StoryImageFinder.publisherPages(using: client).find("https://example.com/story"),
                     .found("https://example.com/caf%C3%A9.jpg"), "The protected finder respects the publisher's declared character encoding")
+
+        // #312: pages that declare no image. Body prose must pass reader validation, as on a real article page.
+        let prose = (1...4).map { "Paragraph \($0) of the report describes how regional officials responded to the flooding, which closed roads and schools across the valley this week." }
+        func articlePage(_ figures: String) -> String {
+            "<html><head><title>Flooding closes roads</title></head><body><header><img src='/brand/logo.png' alt='Publisher logo'></header>"
+                + "<article><p>\(prose[0])</p>\(figures)<p>\(prose[1])</p><p>\(prose[2])</p><p>\(prose[3])</p></article></body></html>"
+        }
+        let pages = [
+            // All prose precedes the padding, so only the figure lies beyond the prefix.
+            "/late": "<html><body><article>" + prose.map { "<p>\($0)</p>" }.joined() + "<div>" + String(repeating: " ", count: 300 * 1024)
+                + "<figure><img src='/photos/late.jpg' width='1200' height='800'></figure></div></article></body></html>",
+            "/early": "<html><body><article>" + prose.map { "<p>\($0)</p>" }.joined()
+                + "<div><figure><img src='/photos/late.jpg' width='1200' height='800'></figure></div></article></body></html>",
+            "/figure": articlePage("<figure><img src='/photos/pixel.gif' width='1' height='1'></figure>"
+                + "<figure><img src='/photos/flooded-road.jpg' width='1200' height='800' alt='A flooded road'><figcaption>A flooded road near the valley</figcaption></figure>"
+                + "<figure><img src='/photos/second.jpg' width='1200' height='800'></figure>"),
+            "/furniture": articlePage("<figure><img src='/photos/strip.jpg' width='4000' height='200'></figure>"
+                + "<figure><img src='/promo/n.jpg' alt='A thin banner promoting the Morning Briefing newsletter'></figure>"
+                + "<figure><img src='/photos/pixel.gif' width='1' height='1'></figure>")
+        ]
+        MockURLProtocol.requestHandler = { request in
+            (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: ["Content-Type": "text/html; charset=utf-8"])!,
+             Data((pages[request.url!.path] ?? "").utf8))
+        }
+        let pageFinder = StoryImageFinder.publisherPages(using: client)
+        assertEqual(await pageFinder.find("https://example.com/figure"), .found("https://example.com/photos/flooded-road.jpg"),
+                    "Without a declaration, the first qualifying figure in the article body is the lead")
+        assertEqual(await pageFinder.find("https://example.com/furniture"), StoryImageLookup.none,
+                    "Logos, newsletter banners, tracking pixels and extreme strips never stand in for a lead")
+        assertEqual(await pageFinder.find("https://example.com/early"), .found("https://example.com/photos/late.jpg"),
+                    "A figure after the article prose qualifies within the prefix")
+        assertEqual(await pageFinder.find("https://example.com/late"), StoryImageLookup.none,
+                    "Only figures within the bounded page prefix are considered")
         MockURLProtocol.requestHandler = nil
 
         var small = FeedArticle(title: "Report", link: page, guid: "small", description: "", pubDate: Date(), source: "One")
@@ -4894,6 +4973,9 @@ struct NewsTests {
         assertFalse(try await db.recordStoryImage("down", imageURL: "https://cdn.example/found.jpg", at: now),
                     "An image another story already declared is a site default")
         assertTrue(try await db.storyImages(for: ["e1", "e2", "down"]).isEmpty, "A site default is cleared for every story")
+        assertFalse(try await db.recordStoryImage("plain", imageURL: "https://cdn.example/found.jpg", at: now),
+                    "A third story declaring a cleared site default does not keep it (#338)")
+        assertTrue(try await db.storyImages(for: ["e1", "e2", "down", "plain"]).isEmpty, "Site defaults stay cleared regardless of lookup order")
         await db.close()
         try await testStoryImageIndexMigration(fixtureRoot: fixtureRoot)
     }
@@ -4942,7 +5024,7 @@ struct NewsTests {
         assertEqual(value("PRAGMA user_version;"), "18", "Cancellation keeps the previous schema version")
         assertEqual(value("SELECT count(*) FROM sqlite_master WHERE name='idx_story_images_url';"), "0", "Cancellation leaves no partial index")
         try await db.open()
-        assertEqual(value("PRAGMA user_version;"), "20", "Existing v18 libraries receive the image index migration")
+        assertEqual(value("PRAGMA user_version;"), "21", "Existing v18 libraries receive the image index migration")
         assertEqual(sqlite3_exec(handle, "ANALYZE story_images;", nil, nil, nil), SQLITE_OK, "Use current fixture cardinality for the query planner")
         assertTrue(value("EXPLAIN QUERY PLAN SELECT article_id FROM story_images WHERE image_url='https://cdn.example/index.jpg' AND article_id<>'other';", column: 3)?.contains("idx_story_images_url") == true,
                    "Duplicate-image checks use the image URL index")
@@ -4952,6 +5034,7 @@ struct NewsTests {
         await db.close()
         try await db.open()
         assertEqual(value("SELECT count(*) FROM sqlite_master WHERE name='idx_story_images_url';"), "1", "Reopening preserves one index")
+        assertEqual(value("SELECT count(*) FROM sqlite_master WHERE name='story_image_defaults';"), "1", "Upgraded libraries remember site defaults")
         await db.close()
     }
 
@@ -5341,7 +5424,7 @@ struct NewsTests {
         assertEqual(value(copy, "SELECT count(*) FROM sqlite_master WHERE name IN ('event_match_state','event_exclusions','event_state');"), "0", "Cancelled v14 migration rolls back its tables")
         let migrated = DatabaseEngine(path: copy)
         try await migrated.open()
-        assertEqual(value(copy, "PRAGMA user_version;"), "20", "Copied v13 library upgrades to the current schema")
+        assertEqual(value(copy, "PRAGMA user_version;"), "21", "Copied v13 library upgrades to the current schema")
         assertEqual(value(path, "PRAGMA user_version;"), "13", "Original v13 fixture stays untouched")
         assertEqual(try await migrated.fetchEvent(id: event.id)?.memberArticleIDs.count, 5, "Migration keeps events and members")
         assertTrue(try await migrated.isSaved(articleId: "second"), "Migration keeps saved state")
@@ -5620,7 +5703,7 @@ struct NewsTests {
             guard sqlite3_step(statement) == SQLITE_ROW else { return nil }
             return sqlite3_column_text(statement, 0).map { String(cString: $0) }
         }
-        assertEqual(value(copy, "PRAGMA user_version;"), "20", "Provenance schema upgrades to the current schema")
+        assertEqual(value(copy, "PRAGMA user_version;"), "21", "Provenance schema upgrades to the current schema")
         assertEqual(value(original, "PRAGMA user_version;"), "15", "Original v15 fixture remains untouched")
         assertEqual(value(copy, "PRAGMA quick_check;"), "ok", "Upgraded provenance library passes quick_check")
         assertEqual(value(copy, "PRAGMA foreign_key_check;"), nil, "Provenance has no dangling article references")

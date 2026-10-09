@@ -190,6 +190,12 @@ struct StoryImageFinder: Sendable {
             if let url = ContentExtractionPipeline.readerImageURL(pipeline.decodeHTMLEntities(declared), baseURL: pageURL),
                ReaderImageCandidate.usable(url: url) { return .found(url) }
         }
+        // No declaration (#312): the first qualifying figure of the article body in the page prefix. Reader extraction
+        // already drops logos, banners, hidden and tiny images; recordStoryImage clears figures another story shares.
+        if case .success(_, _, let document?) = pipeline.extractFromHTML(html, baseUrl: pageURL),
+           let figure = document.images?.first(where: { $0.origin == .body && $0.aspectRatio.map { (0.25...4).contains($0) } ?? true }) {
+            return .found(figure.url)
+        }
         return .none
     }
 }
