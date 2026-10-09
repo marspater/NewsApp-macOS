@@ -4905,6 +4905,11 @@ struct NewsTests {
                 + "<article><p>\(prose[0])</p>\(figures)<p>\(prose[1])</p><p>\(prose[2])</p><p>\(prose[3])</p></article></body></html>"
         }
         let pages = [
+            // All prose precedes the padding, so only the figure lies beyond the prefix.
+            "/late": "<html><body><article>" + prose.map { "<p>\($0)</p>" }.joined() + "<div>" + String(repeating: " ", count: 300 * 1024)
+                + "<figure><img src='/photos/late.jpg' width='1200' height='800'></figure></div></article></body></html>",
+            "/early": "<html><body><article>" + prose.map { "<p>\($0)</p>" }.joined()
+                + "<div><figure><img src='/photos/late.jpg' width='1200' height='800'></figure></div></article></body></html>",
             "/figure": articlePage("<figure><img src='/photos/pixel.gif' width='1' height='1'></figure>"
                 + "<figure><img src='/photos/flooded-road.jpg' width='1200' height='800' alt='A flooded road'><figcaption>A flooded road near the valley</figcaption></figure>"
                 + "<figure><img src='/photos/second.jpg' width='1200' height='800'></figure>"),
@@ -4921,6 +4926,10 @@ struct NewsTests {
                     "Without a declaration, the first qualifying figure in the article body is the lead")
         assertEqual(await pageFinder.find("https://example.com/furniture"), StoryImageLookup.none,
                     "Logos, newsletter banners, tracking pixels and extreme strips never stand in for a lead")
+        assertEqual(await pageFinder.find("https://example.com/early"), .found("https://example.com/photos/late.jpg"),
+                    "A figure after the article prose qualifies within the prefix")
+        assertEqual(await pageFinder.find("https://example.com/late"), StoryImageLookup.none,
+                    "Only figures within the bounded page prefix are considered")
         MockURLProtocol.requestHandler = nil
 
         var small = FeedArticle(title: "Report", link: page, guid: "small", description: "", pubDate: Date(), source: "One")
