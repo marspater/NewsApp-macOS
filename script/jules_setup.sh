@@ -15,7 +15,7 @@ python3 script/evaluation/publisher_dates.py
 # Swift 6.4 for `swiftc -parse` syntax checks only.
 # Run swiftly outside the checkout so it writes no .swift-version into the repo.
 cd /tmp
-curl -fsSLO "https://download.swift.org/swiftly/linux/swiftly-$(uname -m).tar.gz"
+curl --proto '=https' --tlsv1.2 -fsSLO "https://download.swift.org/swiftly/linux/swiftly-$(uname -m).tar.gz"
 tar zxf "swiftly-$(uname -m).tar.gz"
 ./swiftly init --quiet-shell-followup --assume-yes --skip-install
 # shellcheck source=/dev/null
@@ -25,7 +25,7 @@ swiftly link || true
 hash -r
 
 # The image's apt lists are stale; refresh them before installing toolchain dependencies.
-if [ -s /tmp/swift-post-install.sh ]; then
+if [[ -s /tmp/swift-post-install.sh ]]; then
   sudo apt-get update -qq
   sudo bash /tmp/swift-post-install.sh
 fi
@@ -33,4 +33,4 @@ swiftc --version
 
 # Setup must leave the checkout clean.
 cd "$root"
-test -z "$(git status --porcelain)"
+[[ -z "$(git status --porcelain)" ]]
