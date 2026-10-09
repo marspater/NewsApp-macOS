@@ -1321,16 +1321,16 @@ struct NewsTests {
         print("  - Testing URL Normalization...")
         
         let url1 = "https://example.com/story?utm_source=feed&utm_medium=rss&ref=share"
-        assertEqual(FeedArticle.normalizeURL(url1), "https://example.com/story", "Should strip tracking query parameters")
+        assertEqual(ArticleIdentity.canonicalizeURL(url1), "https://example.com/story", "Should strip tracking query parameters")
         
         let url2 = "https://example.com/path/"
-        assertEqual(FeedArticle.normalizeURL(url2), "https://example.com/path", "Should strip trailing slashes")
+        assertEqual(ArticleIdentity.canonicalizeURL(url2), "https://example.com/path", "Should strip trailing slashes")
         
         let url3 = "https://EXamPLE.COm/Path/"
-        assertEqual(FeedArticle.normalizeURL(url3), "https://example.com/Path", "Should lowercase the host and strip trailing slash")
+        assertEqual(ArticleIdentity.canonicalizeURL(url3), "https://example.com/Path", "Should lowercase the host and strip trailing slash")
         
         let url4 = "http://example.com/path"
-        assertEqual(FeedArticle.normalizeURL(url4), "https://example.com/path", "Should upgrade scheme to https")
+        assertEqual(ArticleIdentity.canonicalizeURL(url4), "https://example.com/path", "Should upgrade scheme to https")
     }
     
     static func testSSRFValidation() async {
@@ -4663,6 +4663,23 @@ struct NewsTests {
         _ = try await db.expireWaitingStories(now: now.addingTimeInterval(StoryVisibilityPolicy.expiryMemory + 26 * 3600))
         assertFalse(try await db.upsertArticles([story("minor", "One")]).isEmpty, "Expiries are forgotten after two weeks")
         await db.close()
+
+        // Tension panel stories outlive expiry while collection is on: past panel days are rebuilt from stored articles.
+        let panel = DatabaseEngine(path: ":memory:")
+        try await panel.open()
+        let panelFeed = TensionMethodology.v1.panel[0].url
+        try await panel.upsertArticles([story("panel-minor", "Panel")], feedUrl: panelFeed)
+        try await panel.upsertArticles([story("other-minor", "Other")], feedUrl: "https://example.com/other.xml")
+        for id in ["panel-minor", "other-minor"] { try await panel.recordImportance(id, .minor, at: now) }
+        assertEqual(try await panel.expireWaitingStories(now: now.addingTimeInterval(25 * 3600), keepingFeedURLs: [panelFeed]), 1,
+                    "Only the non-panel waiting story expires")
+        let panelDay = DateInterval(start: now.addingTimeInterval(-12 * 3600), duration: 24 * 3600)
+        assertEqual(try await panel.tensionCorpus(day: panelDay, feedURLs: [panelFeed]).map(\.article.id), ["panel-minor"],
+                    "The waiting panel story still counts in its tension day")
+        assertTrue(try await panel.fetchArticles(limit: nil, hidingWaitingStories: true).isEmpty, "Kept panel stories still wait")
+        let collectionOff = try await StoryCurator.run(in: panel, judge: .unavailable, now: now.addingTimeInterval(26 * 3600))
+        assertEqual(collectionOff.expired, 1, "With collection off, the curator expires the kept panel story on its next pass")
+        await panel.close()
 
         // The curator rates unrated stories within its budget; without a model nothing is rated and nothing hides.
         let curated = DatabaseEngine(path: ":memory:")

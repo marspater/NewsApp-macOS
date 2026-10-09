@@ -86,19 +86,29 @@ actor FeedFetcher {
             var active = [String: Int]()
             var running = 0
 
+            func dequeueNextEligible() -> String? {
+                guard let index = queue.firstIndex(where: { active[Self.host($0), default: 0] < Self.maximumConcurrentFeedsPerHost }) else {
+                    return nil
+                }
+                return queue.remove(at: index)
+            }
+
+            func schedule(url: String, in group: inout TaskGroup<FeedFetchResult>) {
+                let host = Self.host(url)
+                if let until = hostCooldowns[host], until > now() {
+                    results.append((url, nil, .retryScheduled(until: until), nil))
+                    return
+                }
+                active[host, default: 0] += 1
+                running += 1
+                let known = validators[url]
+                group.addTask { await self.fetchSingleFeed(urlString: url, allowHTTP: allowHTTP, validators: known) }
+            }
+
             func launchEligible(_ group: inout TaskGroup<FeedFetchResult>) {
                 while running < Self.maximumConcurrentFeeds, !Task.isCancelled,
-                      let index = queue.firstIndex(where: { active[Self.host($0), default: 0] < Self.maximumConcurrentFeedsPerHost }) {
-                    let url = queue.remove(at: index)
-                    let host = Self.host(url)
-                    if let until = hostCooldowns[host], until > now() {
-                        results.append((url, nil, .retryScheduled(until: until), nil))
-                        continue
-                    }
-                    active[host, default: 0] += 1
-                    running += 1
-                    let known = validators[url]
-                    group.addTask { await self.fetchSingleFeed(urlString: url, allowHTTP: allowHTTP, validators: known) }
+                      let url = dequeueNextEligible() {
+                    schedule(url: url, in: &group)
                 }
             }
 
