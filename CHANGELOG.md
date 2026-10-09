@@ -4,6 +4,7 @@
 
 ### Changed
 
+- Sidebar rows are native list rows: the system draws selection and unread/saved count badges, rows follow the System Settings sidebar size, and arrow keys move through them. The refresh indicator on Today uses the mini progress control instead of a scaled one.
 - Design foundations (no visible change): the imitation frosted surface is removed, custom glass helpers use native Liquid Glass on macOS 26 and later with a regular-material fallback on macOS 15, and the design tokens named in docs/DESIGN.md exist. `./test.sh` first runs `script/design_lint.sh`, which fails when a view adds literal font sizes, colors, corner radii, materials, direct glass or `uppercased()` beyond the recorded baseline.
 - Reader: one segmented Overview / Story / Web control in the toolbar replaces the separate overview picker and Reader and Web toggles (Overview appears only for events with an overview). The reader toolbar no longer draws an opaque background or forces a soft scroll edge, so on macOS 26 and 27 it uses the system Liquid Glass and stories scroll beneath it. W still switches modes.
 
