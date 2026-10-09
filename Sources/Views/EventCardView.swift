@@ -57,7 +57,7 @@ struct EventCardView: View {
         } label: {
             HStack(spacing: AppSpacing.xs) {
                 Image(systemName: "square.stack.3d.up")
-                    .font(.system(size: 11, weight: .medium))
+                    .font(AppTypography.label)
                 Text(summary.coverageText)
                     .font(AppTypography.label)
                 if let latest = summary.latestDate {
@@ -66,16 +66,11 @@ struct EventCardView: View {
                         .foregroundStyle(AppColor.tertiaryText)
                 }
                 if summary.hasSubstantiveUpdate {
-                    Text("Updated")
-                        .font(.system(size: 9, weight: .bold))
-                        .foregroundStyle(AppColor.accent)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(Capsule().fill(AppColor.accent.opacity(0.12)))
+                    TagView(title: "Updated", tint: AppColor.accent)
                 }
                 Spacer(minLength: AppSpacing.xs)
                 Image(systemName: "chevron.down")
-                    .font(.system(size: 10, weight: .semibold))
+                    .font(AppTypography.eyebrow)
                     .rotationEffect(.degrees(isExpanded ? 180 : 0))
             }
             .foregroundStyle(AppColor.secondaryText)
@@ -157,12 +152,8 @@ private struct EventSourceRow: View {
                 Circle()
                     .fill(isRead ? Color.clear : AppColor.unreadDot)
                     .frame(width: 6, height: 6)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(source.uppercased())
-                        .font(AppTypography.metadata)
-                        .foregroundStyle(AppColor.secondaryText)
-                        .tracking(AppTypography.sourceEyebrowTracking)
-                        .lineLimit(1)
+                VStack(alignment: .leading, spacing: AppSpacing.textStack) {
+                    EyebrowText(source)
                     Text(article.title)
                         .font(AppTypography.bodySmall)
                         .foregroundStyle(isRead ? AppColor.secondaryText : AppColor.primaryText)
@@ -172,7 +163,7 @@ private struct EventSourceRow: View {
                 Spacer(minLength: AppSpacing.xs)
                 if isSaved {
                     Image(systemName: "bookmark.fill")
-                        .font(.system(size: 10))
+                        .font(AppTypography.eyebrow)
                         .foregroundStyle(AppColor.accent)
                 }
                 Text(article.publicationDateText)
