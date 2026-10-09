@@ -100,6 +100,7 @@ actor EnrichmentQueue {
         priority: EnrichmentPriority = .background,
         allowHTTP: Bool = false
     ) {
+        guard !articles.isEmpty else { return }
         for article in articles {
             let articleId = article.id
 
