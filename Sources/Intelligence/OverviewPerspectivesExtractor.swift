@@ -369,10 +369,11 @@ struct OverviewPerspectivesExtractor: Sendable {
         publisher: String?
     ) -> [ExtractedCandidate] {
         var results: [ExtractedCandidate] = []
+        let nsString = text as NSString
         for attribution in attributions {
             let matches = attributedMatches(
                 of: attribution.regex,
-                in: text,
+                in: nsString,
                 participantGroup: attribution.participantGroup,
                 statementGroup: attribution.statementGroup,
                 minimumStatementLength: attribution.minimumLength
@@ -398,13 +399,12 @@ struct OverviewPerspectivesExtractor: Sendable {
     /// of at least `minimumStatementLength` characters.
     private static func attributedMatches(
         of regex: NSRegularExpression,
-        in text: String,
+        in nsString: NSString,
         participantGroup: Int,
         statementGroup: Int,
         minimumStatementLength: Int
     ) -> [(participant: String, statement: String)] {
-        let nsString = text as NSString
-        let matches = regex.matches(in: text, range: NSRange(location: 0, length: nsString.length))
+        let matches = regex.matches(in: nsString as String, range: NSRange(location: 0, length: nsString.length))
         return matches.compactMap { match -> (participant: String, statement: String)? in
             guard match.numberOfRanges >= 3 else { return nil }
             let participant = cleanParticipant(nsString.substring(with: match.range(at: participantGroup)))
