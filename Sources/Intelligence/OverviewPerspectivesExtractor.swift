@@ -327,6 +327,22 @@ struct OverviewPerspectivesExtractor: Sendable {
         return nil
     }
 
+    // Group order and minimum statement length per pattern; matches keep pattern order.
+    private static let attributions: [(regex: NSRegularExpression, participantGroup: Int, statementGroup: Int, minimumLength: Int)] = {
+        // Pattern 1: "[Quote]," (said|announced|stated|argued|warned|noted) [Participant].
+        let patternQuoteFirst = #"\"([^\"]{10,250})\",?\s*(?:said|stated|announced|noted|argued|warned|confirmed|declared|emphasized|urged|reiterated|cautioned|explained)\s+([A-Z][A-Za-z0-9\s,\.\-]{2,60})"#
+        // Pattern 2: [Participant] (said that|stated that|announced that|argued that|warned that|noted that|confirmed that) [Statement].
+        let patternSpeakerFirst = #"([A-Z][A-Za-z0-9\s,\.\-]{2,60})\s+(?:said that|stated that|announced that|argued that|warned that|noted that|confirmed that|emphasized that|urged that)\s+([^\.\n]{15,200})"#
+        // Pattern 3: According to [Participant], [Statement].
+        let patternAccordingTo = #"According to\s+([A-Z][A-Za-z0-9\s,\.\-]{2,60}),\s+([^\.\n]{15,200})"#
+
+        return [
+            (try! NSRegularExpression(pattern: patternQuoteFirst), 2, 1, 0),
+            (try! NSRegularExpression(pattern: patternSpeakerFirst), 1, 2, 10),
+            (try! NSRegularExpression(pattern: patternAccordingTo), 1, 2, 10)
+        ]
+    }()
+
     /// Extracts quotes and statements with attribution to participants.
     private static func extractAttributedQuotes(
         text: String,
@@ -336,23 +352,10 @@ struct OverviewPerspectivesExtractor: Sendable {
         wireSource: String?,
         publisher: String?
     ) -> [ExtractedCandidate] {
-        // Pattern 1: "[Quote]," (said|announced|stated|argued|warned|noted) [Participant].
-        let patternQuoteFirst = #"\"([^\"]{10,250})\",?\s*(?:said|stated|announced|noted|argued|warned|confirmed|declared|emphasized|urged|reiterated|cautioned|explained)\s+([A-Z][A-Za-z0-9\s,\.\-]{2,60})"#
-        // Pattern 2: [Participant] (said that|stated that|announced that|argued that|warned that|noted that|confirmed that) [Statement].
-        let patternSpeakerFirst = #"([A-Z][A-Za-z0-9\s,\.\-]{2,60})\s+(?:said that|stated that|announced that|argued that|warned that|noted that|confirmed that|emphasized that|urged that)\s+([^\.\n]{15,200})"#
-        // Pattern 3: According to [Participant], [Statement].
-        let patternAccordingTo = #"According to\s+([A-Z][A-Za-z0-9\s,\.\-]{2,60}),\s+([^\.\n]{15,200})"#
-
-        // Group order and minimum statement length per pattern; matches keep pattern order.
-        let attributions: [(pattern: String, participantGroup: Int, statementGroup: Int, minimumLength: Int)] = [
-            (patternQuoteFirst, 2, 1, 0),
-            (patternSpeakerFirst, 1, 2, 10),
-            (patternAccordingTo, 1, 2, 10)
-        ]
         var results: [ExtractedCandidate] = []
         for attribution in attributions {
             let matches = attributedMatches(
-                of: attribution.pattern,
+                of: attribution.regex,
                 in: text,
                 participantGroup: attribution.participantGroup,
                 statementGroup: attribution.statementGroup,
@@ -378,13 +381,12 @@ struct OverviewPerspectivesExtractor: Sendable {
     /// Runs one attribution pattern and keeps matches that name a participant and carry a statement
     /// of at least `minimumStatementLength` characters.
     private static func attributedMatches(
-        of pattern: String,
+        of regex: NSRegularExpression,
         in text: String,
         participantGroup: Int,
         statementGroup: Int,
         minimumStatementLength: Int
     ) -> [(participant: String, statement: String)] {
-        guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
         let nsString = text as NSString
         let matches = regex.matches(in: text, range: NSRange(location: 0, length: nsString.length))
         return matches.compactMap { match -> (participant: String, statement: String)? in
