@@ -7391,6 +7391,12 @@ struct NewsTests {
         let waitingAnalysis = try await ArticleAnalyzer(textModel: NewsTextModel { _, _ in throw NewsTextModel.TemporarilyUnavailable() })
             .analyze(title: "Bridge reopened", content: text)
         assertEqual(waitingAnalysis.analysisVersion, 0, "A summary made while the model is off or downloading is redone once it can run")
+        let failedAnalysis = try await ArticleAnalyzer(textModel: NewsTextModel { _, _ in throw URLError(.timedOut) }).analyze(title: "Bridge reopened", content: text)
+        assertEqual(failedAnalysis.analysisVersion, 0, "A summary after a failed model request is redone")
+        let skippedAnalysis = try await ArticleAnalyzer(textModel: analysisModel).analyze(title: "Bridge reopened", content: text, allowFoundationModels: false)
+        assertEqual(skippedAnalysis.analysisVersion, 3, "An explicitly extractive request is final")
+        let malformedAnalysis = try await ArticleAnalyzer(textModel: NewsTextModel { _, _ in "I refuse" }).analyze(title: "Bridge reopened", content: text)
+        assertEqual(malformedAnalysis.analysisVersion, 3, "A malformed answer that greedy sampling would repeat keeps the extractive summary")
         assertEqual(ArticleTextAnswer.analysis("SUMMARY|x\nSUMMARY|y\nPOINT|a\nPOINT|b\nPOINT|c")?.summary, nil, "Duplicate summary is rejected")
         let article1 = FeedArticle(storedID: "plain-a", title: "Bridge repairs", link: "https://\(fixtureHost)/a", guid: "plain-a", description: text, pubDate: Date(), source: "Publisher A")
         let other = "Engineers inspected the bridge before traffic resumed. The council funded the repairs. Residents welcomed the reopening."
