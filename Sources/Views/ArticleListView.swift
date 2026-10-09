@@ -18,6 +18,20 @@ extension FocusedValues {
     }
 }
 
+/// Presentation-only choice: never sort, filter or change the feed's ordered entries.
+/// An event may borrow the image of one of its currently visible publications.
+enum LeadStoryPresentation {
+    static func firstEligibleID(in entries: [FeedEntry], selectedTopic: String?, isSearching: Bool) -> String? {
+        let location = selectedTopic ?? "Today"
+        guard !isSearching, (location == "Today" || location == "Briefing") else { return nil }
+        for entry in entries {
+            let articles = [entry.representative] + entry.visibleArticles.filter { $0.id != entry.representative.id }
+            if FeedArticle.bestCardImage(in: articles) != nil { return entry.id }
+        }
+        return nil
+    }
+}
+
 struct ArticleListView: View {
     @Binding var selectedTopic: String?
     @Binding var searchText: String
@@ -551,51 +565,88 @@ struct ArticleListView: View {
     }
 
     // MARK: - Article Grid
-    
+
+    /// The lead takes the full detail-column width, including the edge by the sidebar.
+    /// Both collections retain their original ordering and existing lazy rendering.
     private func articleGrid(proxy _: ScrollViewProxy) -> some View {
-        Group {
-            if gridLayout {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 300, maximum: 420), spacing: AppLayout.cardGap)], spacing: AppLayout.cardGap) {
-                    articleCards
+        let listed = entries
+        let leadID: String? = {
+            if #available(macOS 26, *) {
+                return LeadStoryPresentation.firstEligibleID(
+                    in: listed, selectedTopic: selectedTopic, isSearching: isSearching
+                )
+            }
+            return nil
+        }()
+
+        return VStack(spacing: AppLayout.cardGap) {
+            if let leadID, let leadIndex = listed.firstIndex(where: { $0.id == leadID }) {
+                if leadIndex > 0 {
+                    cardCollection(Array(listed[..<leadIndex]))
+                        .padding(.horizontal, AppLayout.pageInset)
+                }
+                entryCard(listed[leadIndex], isLead: true)
+                    .frame(maxWidth: .infinity)
+                if leadIndex + 1 < listed.count {
+                    cardCollection(Array(listed[(leadIndex + 1)...]))
+                        .padding(.horizontal, AppLayout.pageInset)
                 }
             } else {
-                LazyVStack(spacing: AppSpacing.sm) {
-                    articleCards
-                }
-                .frame(maxWidth: 1000)
-                .frame(maxWidth: .infinity)
+                cardCollection(listed)
+                    .padding(.horizontal, AppLayout.pageInset)
             }
         }
-        .padding(.horizontal, AppLayout.pageInset)
         .padding(.bottom, AppSpacing.xl)
     }
 
-    private var articleCards: some View {
-        ForEach(entries) { entry in
-            switch entry {
-            case .article(let article):
-                ArticleCardView(article: article, isSelected: article.id == focusedArticleID, compact: !gridLayout) {
-                    openArticle(article)
-                }
-                .id(entry.id)
-                .onAppear(perform: NewsSignposts.firstCardAppeared)
-            case .event(let summary, let representative, let visibleMembers):
-                EventCardView(
-                    representative: representative,
-                    summary: summary,
-                    visibleMembers: visibleMembers,
-                    isSelected: representative.id == focusedArticleID,
-                    compact: !gridLayout,
-                    isExpanded: expansionBinding(summary.eventID),
-                    openRepresentative: { openEvent(summary.eventID, article: representative) },
-                    openMember: { member, members in
-                        openEvent(summary.eventID, article: member, context: members)
-                    },
-                    separate: { member in separate(member, from: summary.eventID) }
-                )
-                .id(entry.id)
-                .onAppear(perform: NewsSignposts.firstCardAppeared)
+    @ViewBuilder
+    private func cardCollection(_ listed: [FeedEntry]) -> some View {
+        if gridLayout {
+            LazyVGrid(
+                columns: [GridItem(.adaptive(minimum: AppLayout.gridColumnMinimum,
+                                            maximum: AppLayout.gridColumnMaximum), spacing: AppLayout.cardGap)],
+                spacing: AppLayout.cardGap
+            ) {
+                ForEach(listed) { entry in entryCard(entry) }
             }
+        } else {
+            LazyVStack(spacing: AppSpacing.sm) {
+                ForEach(listed) { entry in entryCard(entry) }
+            }
+            .frame(maxWidth: AppLayout.listMaxWidth)
+            .frame(maxWidth: .infinity)
+        }
+    }
+
+    @ViewBuilder
+    private func entryCard(_ entry: FeedEntry, isLead: Bool = false) -> some View {
+        switch entry {
+        case .article(let article):
+            ArticleCardView(
+                article: article, isSelected: article.id == focusedArticleID,
+                compact: !gridLayout, isLead: isLead
+            ) {
+                openArticle(article)
+            }
+            .id(entry.id)
+            .onAppear(perform: NewsSignposts.firstCardAppeared)
+        case .event(let summary, let representative, let visibleMembers):
+            EventCardView(
+                representative: representative,
+                summary: summary,
+                visibleMembers: visibleMembers,
+                isSelected: representative.id == focusedArticleID,
+                compact: !gridLayout,
+                isLead: isLead,
+                isExpanded: expansionBinding(summary.eventID),
+                openRepresentative: { openEvent(summary.eventID, article: representative) },
+                openMember: { member, members in
+                    openEvent(summary.eventID, article: member, context: members)
+                },
+                separate: { member in separate(member, from: summary.eventID) }
+            )
+            .id(entry.id)
+            .onAppear(perform: NewsSignposts.firstCardAppeared)
         }
     }
 

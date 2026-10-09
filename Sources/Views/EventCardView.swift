@@ -13,6 +13,7 @@ struct EventCardView: View {
     var visibleMembers: [FeedArticle] = []
     var isSelected = false
     var compact = false
+    var isLead = false
     @Binding var isExpanded: Bool
     let openRepresentative: () -> Void
     let openMember: (FeedArticle, [FeedArticle]) -> Void
@@ -26,7 +27,8 @@ struct EventCardView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: AppSpacing.xs) {
             ArticleCardView(article: representative, isSelected: isSelected, compact: compact,
-                            imageFallbacks: (members.isEmpty ? visibleMembers : members).filter { $0.id != representative.id }, action: openRepresentative)
+                            imageFallbacks: (members.isEmpty ? visibleMembers : members).filter { $0.id != representative.id },
+                            isLead: isLead, action: openRepresentative)
             coverageToggle
             if isExpanded {
                 sourceList

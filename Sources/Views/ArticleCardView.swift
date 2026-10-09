@@ -10,6 +10,8 @@ struct ArticleCardView: View {
     var compact: Bool = false
     /// Other coverage of the same event; the card shows the first of their images when this article has none.
     var imageFallbacks: [FeedArticle] = []
+    /// Opt-in to the macOS 26 image-backed lead treatment.
+    var isLead = false
     let action: () -> Void
     
     @EnvironmentObject private var readManager: ReadManager
