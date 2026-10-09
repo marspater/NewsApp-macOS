@@ -87,7 +87,7 @@ def jaccard(left, right):
 
 
 def private_run(path):
-    directory = path.resolve(strict=True)
+    directory = path.resolve()
     require(directory.is_dir() and directory.stat().st_uid == os.getuid(), 'Use an existing run directory owned by you')
     require(not any((parent / '.git').exists() for parent in (directory, *directory.parents)), 'Keep publisher text outside Git checkouts')
     return directory
@@ -313,6 +313,7 @@ def check_sheet(directory):
     for index, item in enumerate([fixture_record('accepted', 4.0), fixture_record('weakDraft', 6.0), fixture_record(None, 1.0, 'refusal')], 1):
         (directory / f'overview-private-live-{index}.json').write_text(json.dumps(item))
     (directory / 'perspectives.json').write_text(json.dumps({'events': 4, 'twoOrMore': 1, 'one': 1, 'none': 2}))
+    expect_rejected(lambda: report(directory / 'missing'), ValueError, 'A missing run directory was accepted')
     require(sheet(directory) == 5, 'Sheet lists the five retained claims of the accepted overview')
     expect_rejected(lambda: sheet(directory), FileExistsError, 'A labelled sheet was replaced')
     with (directory / SHEET).open(newline='') as sheet_file:
@@ -375,13 +376,16 @@ def main(doc, commands, check, noun):
         check()
     elif args.run is None:
         parser.error('a run directory is required')
-    elif args.command == 'sheet':
+    else:
         try:
-            print(f"Wrote {commands['sheet'](args.run)} {noun} to the run's review sheet")
+            if args.command == 'sheet':
+                print(f"Wrote {commands['sheet'](args.run)} {noun} to the run's review sheet")
+            else:
+                print(json.dumps(commands['report'](args.run), indent=2, sort_keys=True))
         except FileExistsError as error:
             parser.exit(1, f'{error.filename} already exists and may hold labels; it was left unchanged.\n')
-    else:
-        print(json.dumps(commands['report'](args.run), indent=2, sort_keys=True))
+        except ValueError as error:
+            parser.exit(1, f'{error}\n')
 
 
 if __name__ == '__main__':
