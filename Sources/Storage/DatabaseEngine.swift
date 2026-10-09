@@ -1344,6 +1344,7 @@ actor DatabaseEngine {
     // Unknown publisher dates retain their identity sentinel; ingestion time orders them.
     private static let articleDateOrder = "CASE WHEN a.published_at = \(DateParser.unknownDate.timeIntervalSince1970) THEN a.created_at ELSE a.published_at END"
 
+    private static let savedDocumentIDs = "SELECT article_id FROM article_state WHERE is_saved = 1 UNION SELECT r.duplicate_id FROM article_reconciliations r JOIN article_state s ON s.article_id = r.survivor_id WHERE s.is_saved = 1"
     private static let visibleArticle = "NOT EXISTS (SELECT 1 FROM article_reconciliations r WHERE r.duplicate_id = a.id)"
     /// A story waiting for more coverage (`StoryVisibilityPolicy`): rated below important, no report of its event rated
     /// important, and no more than `minorStorySources` publishers in its event. Unrated stories never wait.
@@ -2194,8 +2195,8 @@ actor DatabaseEngine {
     func clearArticleCache() throws {
         try beginTransaction()
         do {
-            try executeSimple("UPDATE articles SET content = NULL, reader_document = NULL WHERE id NOT IN (SELECT article_id FROM article_state WHERE is_saved = 1 UNION SELECT r.duplicate_id FROM article_reconciliations r JOIN article_state s ON s.article_id = r.survivor_id WHERE s.is_saved = 1);")
-            try executeSimple("DELETE FROM article_enrichment WHERE article_id NOT IN (SELECT article_id FROM article_state WHERE is_saved = 1 UNION SELECT r.duplicate_id FROM article_reconciliations r JOIN article_state s ON s.article_id = r.survivor_id WHERE s.is_saved = 1);")
+            try executeSimple("UPDATE articles SET content = NULL, reader_document = NULL WHERE id NOT IN (\(Self.savedDocumentIDs));")
+            try executeSimple("DELETE FROM article_enrichment WHERE article_id NOT IN (\(Self.savedDocumentIDs));")
             // Feed-provided bodies return only from an unconditional refresh.
             try executeSimple("UPDATE feeds SET etag = NULL, last_modified = NULL;")
             try commitTransaction()
@@ -2210,7 +2211,7 @@ actor DatabaseEngine {
         try beginTransaction()
         do {
             try executeSimple("DELETE FROM article_enrichment;")
-            try executeSimple("UPDATE articles SET content = NULL, reader_document = NULL WHERE id NOT IN (SELECT article_id FROM article_state WHERE is_saved = 1 UNION SELECT r.duplicate_id FROM article_reconciliations r JOIN article_state s ON s.article_id = r.survivor_id WHERE s.is_saved = 1);")
+            try executeSimple("UPDATE articles SET content = NULL, reader_document = NULL WHERE id NOT IN (\(Self.savedDocumentIDs));")
             try executeSimple("UPDATE feeds SET etag = NULL, last_modified = NULL;")
             try commitTransaction()
         } catch {
