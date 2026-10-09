@@ -27,3 +27,9 @@
 **Learning:** In `OverviewPerspectivesExtractor.swift`, the `extractAttributedQuotes` method dynamically compiled three `NSRegularExpression` patterns inside a function that is called frequently during article analysis. This repeated compilation of complex regular expressions adds unnecessary CPU overhead.
 
 **Action:** Future Bolt runs should statically compile and store `NSRegularExpression` instances along with any related configuration metadata (like capture group indices or minimum lengths) in a `static let` array of a small private struct, rather than compiling them dynamically within hot paths. Use `try?` with a failable initializer instead of `try!`, and avoid tuples with more than two members; Codacy's SwiftLint rules reject both.
+
+## 2024-10-28 - Batch actor operations to eliminate N+1 async loop context switches
+
+**Learning:** Iterating over a collection of articles and calling `await actor.enqueue(...)` per item causes an N+1 async loop pattern. Each iteration incurs actor isolation context switches, queue lock contentions, and redundant trigger calls to job schedulers (`processNextJobs()`).
+
+**Action:** When enqueuing or updating items in an actor-isolated state machine, provide batch methods (e.g., `enqueue(articles: [FeedArticle])`) that process all items within a single actor entry and execute state update callbacks (like scheduler passes) once per batch.

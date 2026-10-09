@@ -586,15 +586,12 @@ class FeedManager: NSObject, ObservableObject {
             await enrichmentQueue.cancelAll(reason: .superseded)
 
             // Cheap deterministic classification for ingestion; generative analysis stays on demand.
-            for article in snapshot {
-                guard !Task.isCancelled else { return }
-                let priority: EnrichmentPriority = .background
-                await enrichmentQueue.enqueue(
-                    article: article,
-                    priority: priority,
-                    allowHTTP: allowHTTP
-                )
-            }
+            guard !Task.isCancelled else { return }
+            await enrichmentQueue.enqueue(
+                articles: snapshot,
+                priority: .background,
+                allowHTTP: allowHTTP
+            )
         }
     }
 

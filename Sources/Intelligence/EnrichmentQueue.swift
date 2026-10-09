@@ -90,42 +90,49 @@ actor EnrichmentQueue {
         priority: EnrichmentPriority = .background,
         allowHTTP: Bool = false
     ) {
-        let articleId = article.id
+        enqueue(articles: [article], priority: priority, allowHTTP: allowHTTP)
+    }
 
-        // 1. Check for existing job (Duplicate-Job Prevention)
-        if var existing = jobs[articleId] {
-            switch existing.state {
-            case .queued(let currentPriority):
-                if priority > currentPriority {
-                    logger.debug("Promoting article '\(articleId)' from \(currentPriority.rawValue) to \(priority.rawValue)")
-                    existing.priority = priority
-                    existing.state = .queued(priority)
-                    jobs[articleId] = existing
+    /// Enqueues a batch of articles for NLP analysis, summary, and content scraping.
+    /// If an article is already queued with a lower priority, promotes it.
+    func enqueue(
+        articles: [FeedArticle],
+        priority: EnrichmentPriority = .background,
+        allowHTTP: Bool = false
+    ) {
+        for article in articles {
+            let articleId = article.id
+
+            // 1. Check for existing job (Duplicate-Job Prevention)
+            if var existing = jobs[articleId] {
+                switch existing.state {
+                case .queued(let currentPriority):
+                    if priority > currentPriority {
+                        logger.debug("Promoting article '\(articleId)' from \(currentPriority.rawValue) to \(priority.rawValue)")
+                        existing.priority = priority
+                        existing.state = .queued(priority)
+                        jobs[articleId] = existing
+                    }
+                    continue
+                case .running, .completed:
+                    continue
+                case .cancelled, .failed:
+                    break
                 }
-                return
-            case .running:
-                // Already running
-                return
-            case .completed:
-                // Already enriched
-                return
-            case .cancelled, .failed:
-                // Re-enqueue
-                break
             }
-        }
 
-        // 2. Create new job
-        let job = Job(
-            id: articleId,
-            article: article,
-            allowHTTP: allowHTTP,
-            priority: priority,
-            queuedAt: Date(),
-            state: .queued(priority),
-            task: nil
-        )
-        jobs[articleId] = job
+            // 2. Create new job
+            let job = Job(
+                id: articleId,
+                article: article,
+                allowHTTP: allowHTTP,
+                priority: priority,
+                queuedAt: Date(),
+                state: .queued(priority),
+                task: nil
+            )
+            jobs[articleId] = job
+        }
 
         processNextJobs()
     }
