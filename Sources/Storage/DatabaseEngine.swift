@@ -1463,21 +1463,23 @@ actor DatabaseEngine {
         return (join, sql, params)
     }
 
+    private struct FetchCriteria {
+        var section: String?
+        var isRead: Bool?
+        var isSaved: Bool?
+        var limit: Int?
+        var after: ArticleQueryCursor?
+        var id: String?
+        var canonicalURL: String?
+        var eventID: String?
+        var includingOriginals: Bool
+        var publicationWindow: ClosedRange<Date>?
+        var muting: MuteRules
+        var hidingWaitingStories: Bool
+    }
+
     /// Builds the SQL query string and parameters for fetching articles based on criteria.
-    private func buildFetchArticlesQuery(
-        section: String?,
-        isRead: Bool?,
-        isSaved: Bool?,
-        limit: Int?,
-        after: ArticleQueryCursor?,
-        id: String?,
-        canonicalURL: String?,
-        eventID: String?,
-        includingOriginals: Bool,
-        publicationWindow: ClosedRange<Date>?,
-        muting: MuteRules,
-        hidingWaitingStories: Bool
-    ) throws -> (sql: String, params: [QueryParameter]) {
+    private func buildFetchArticlesQuery(criteria: FetchCriteria) throws -> (sql: String, params: [QueryParameter]) {
         var query = """
         SELECT a.id, a.guid, a.canonical_url, a.title, a.description, a.content,
                a.published_at, a.source, a.image_url, coalesce(ae.category, a.category),
@@ -1490,14 +1492,14 @@ actor DatabaseEngine {
         WHERE 1=1
         """
 
-        if !includingOriginals { query += " AND " + Self.visibleArticle }
+        if !criteria.includingOriginals { query += " AND " + Self.visibleArticle }
         var params: [QueryParameter] = []
         
-        if let id {
+        if let id = criteria.id {
             query += " AND a.id = ?"
-            params.append(("text", includingOriginals ? id : try resolvedArticleID(id)))
+            params.append(("text", criteria.includingOriginals ? id : try resolvedArticleID(id)))
         }
-        if let canonicalURL {
+        if let canonicalURL = criteria.canonicalURL {
             if let target = try aliasTarget(kind: "url", value: canonicalURL) {
                 query += " AND a.id = ?"
                 params.append(("text", target))
@@ -1512,32 +1514,32 @@ actor DatabaseEngine {
                 params.append(("text", canonicalURL))
             }
         }
-        if let eventID {
+        if let eventID = criteria.eventID {
             query += " AND a.id IN (SELECT article_id FROM event_members WHERE event_id = ?)"
             params.append(("text", try resolvedEventID(eventID) ?? eventID))
         }
-        if let publicationWindow {
+        if let publicationWindow = criteria.publicationWindow {
             query += " AND a.published_at >= ? AND a.published_at <= ?"
             params += [("double", publicationWindow.lowerBound.timeIntervalSince1970),
                        ("double", publicationWindow.upperBound.timeIntervalSince1970)]
         }
-        let list = listConditions(section: section, isRead: isRead, isSaved: isSaved)
+        let list = listConditions(section: criteria.section, isRead: criteria.isRead, isSaved: criteria.isSaved)
         query += list.sql
         params += list.params
         // Muting and waiting stories are predicates before LIMIT, so every page is full and cursors stay exact.
-        if !muting.isEmpty {
+        if !criteria.muting.isEmpty {
             query += " AND NOT " + Self.mutedArticle
-            params += Self.mutingParameters(muting)
+            params += Self.mutingParameters(criteria.muting)
         }
-        if hidingWaitingStories { query += " AND NOT " + Self.waitingStory }
-        if let after {
+        if criteria.hidingWaitingStories { query += " AND NOT " + Self.waitingStory }
+        if let after = criteria.after {
             query += " AND (\(Self.articleDateOrder) < ? OR (\(Self.articleDateOrder) = ? AND a.id > ?))"
             params += [("double", after.value), ("double", after.value), ("text", after.id)]
         }
 
         query += " ORDER BY \(Self.articleDateOrder) DESC, a.id"
         
-        if let lim = limit {
+        if let lim = criteria.limit {
             query += " LIMIT ?"
             params.append(("int", lim))
         }
@@ -1563,7 +1565,7 @@ actor DatabaseEngine {
     ) throws -> [FeedArticle] {
         guard let db = db else { throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Database not open"]) }
 
-        let (query, params) = try buildFetchArticlesQuery(
+        let criteria = FetchCriteria(
             section: section,
             isRead: isRead,
             isSaved: isSaved,
@@ -1577,6 +1579,7 @@ actor DatabaseEngine {
             muting: muting,
             hidingWaitingStories: hidingWaitingStories
         )
+        let (query, params) = try buildFetchArticlesQuery(criteria: criteria)
         
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, query, -1, &stmt, nil) == SQLITE_OK else {
