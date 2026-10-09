@@ -4,8 +4,6 @@
 
 ### Changed
 
-- Batch read and saved-state updates resolve ID aliases in bounded SQLite queries while preserving input order, ambiguous aliases and transaction rollback.
-
 - Multi-source overviews use on-device plain-text synthesis with citations on introductory sentences and key facts. Unsupported sentences are dropped; weak or refused drafts retain the current excerpt overview. A few covered events warm in the background under the AI and energy settings. Classification and interactive analysis also use plain text to handle sensitive news without guided-output refusals.
 
 - Waiting stories are filtered from notifications after importance rating. A rating computed before a publisher edits a headline is discarded.
