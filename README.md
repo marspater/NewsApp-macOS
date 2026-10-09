@@ -67,7 +67,7 @@ The sandbox database is located at:
 
 ## Repository layout
 
-Standard project, contribution, privacy and security documents stay at the root. Architecture and dated audit evidence live under `docs/`; inactive packaging/notarization helpers live under `script/distribution/`. Active build and test commands retain their root paths.
+Standard project, contribution, privacy and security documents stay at the root. Architecture, the [design language](docs/DESIGN.md) and dated audit evidence live under `docs/`; inactive packaging/notarization helpers live under `script/distribution/`. Active build and test commands retain their root paths.
 
 ## Source layout
 
