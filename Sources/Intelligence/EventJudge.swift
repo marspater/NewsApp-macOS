@@ -47,7 +47,7 @@ actor OnDeviceEventJudge {
             let model = SystemLanguageModel(guardrails: .permissiveContentTransformations)
             let session = LanguageModelSession(model: model)
             let response = try await session.respond(
-                to: Self.prompt(a, b), options: GenerationOptions(samplingMode: .greedy, maximumResponseTokens: 8))
+                to: Self.prompt(a, b), options: GenerationOptions(sampling: .greedy, maximumResponseTokens: 8))
             guard let same = Self.verdict(response.content) else { return nil }
             if cache.count >= 5_000 { cache.removeAll() }
             cache[key] = same
