@@ -465,7 +465,7 @@ struct NewsTests {
         await testFTS5SearchAndOperators()
         try await testUnchangedFTSRefresh()
         try await testFTSRowIDMigration()
-        await testMigrationCoordinatorAtomicity()
+        try await testMigrationCoordinatorAtomicity()
         await testArticleRetentionPolicy()
         await testArticleIntelligenceCapabilities()
         await testContentExtractionPipelineDeep()
@@ -4127,7 +4127,7 @@ struct NewsTests {
         }
     }
     
-    static func testMigrationCoordinatorAtomicity() async {
+    static func testMigrationCoordinatorAtomicity() async throws {
         print("  - Testing MigrationCoordinator Atomic Transaction & ID Reconciliation...")
         
         let runID = ProcessInfo.processInfo.environment["NEWS_TEST_RUN_ID"].flatMap(UUID.init(uuidString:)) ?? UUID()
@@ -4161,6 +4161,24 @@ struct NewsTests {
         
         let version = tempDefaults.integer(forKey: MigrationCoordinator.migrationVersionKey)
         assertEqual(version, MigrationCoordinator.currentMigrationVersion, "Migration version must be set to 1")
+
+        // Real legacy data: a saved story, and a read list that also names a story no longer cached.
+        let legacySuite = suiteName + ".legacy"
+        let legacyDefaults = UserDefaults(suiteName: legacySuite)!
+        defer { legacyDefaults.removePersistentDomain(forName: legacySuite) }
+        let savedStory = FeedArticle(title: "Legacy saved story", link: "https://news.example/legacy-saved", guid: "legacy-saved",
+                                     description: "", pubDate: Date(), source: "Legacy")
+        legacyDefaults.set(try JSONEncoder().encode([savedStory]), forKey: "com.marspater.news.savedStories")
+        legacyDefaults.set([savedStory.id, "legacy-story-no-longer-cached"], forKey: "com.marspater.news.readArticlesList")
+        let legacyDB = DatabaseEngine(path: ":memory:")
+        try await legacyDB.open()
+        let legacyStats = try await MigrationCoordinator(database: legacyDB, userDefaults: legacyDefaults, fileManager: .default).migrateIfNeeded()
+        assertEqual(legacyStats.articlesImported, 1, "Legacy saved stories are imported")
+        assertTrue(try await legacyDB.isSaved(articleId: savedStory.id), "Legacy saved state survives migration")
+        assertTrue(try await legacyDB.isRead(articleId: savedStory.id), "Legacy read state survives migration")
+        assertEqual(legacyDefaults.integer(forKey: MigrationCoordinator.migrationVersionKey), MigrationCoordinator.currentMigrationVersion,
+                    "A read entry without a cached story does not block migration")
+        await legacyDB.close()
     }
     
     @MainActor
