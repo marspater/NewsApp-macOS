@@ -455,6 +455,7 @@ struct NewsTests {
         try await testEventFragmentMergingAndJudge(fixtureRoot: fixtureRoot)
         try await testStoryVisibility(fixtureRoot: fixtureRoot)
         try await testStoryImages(fixtureRoot: fixtureRoot)
+        try await testOrphanStateGuards()
         try await testEventReadingState(fixtureRoot: fixtureRoot)
         await testEventFeedGroupingAndStability()
         try await testFiniteBriefing()
@@ -4865,6 +4866,44 @@ struct NewsTests {
                      "terrorism charges or a real security breach are NOTABLE", "Nationwide price changes of staple goods are NOTABLE"] {
             assertTrue(instructions.contains(rule), "Rating instructions keep the borderline rule: \(rule)")
         }
+    }
+
+    /// #331: the installed library held one `article_state` row for "test_non_existent", saved without a timestamp. No
+    /// app write path can produce it; this pins that, and that the app's own deletions leave no orphan state.
+    static func testOrphanStateGuards() async throws {
+        print("  - Testing that state writes and pruning never leave orphan article state (#331)...")
+        let path = FileManager.default.temporaryDirectory.appendingPathComponent("news-orphan-\(UUID().uuidString).sqlite3").path
+        defer { for suffix in ["", "-wal", "-shm"] { try? FileManager.default.removeItem(atPath: path + suffix) } }
+        let db = DatabaseEngine(path: path)
+        try await db.open()
+        let old = Date().addingTimeInterval(-40 * 86_400)
+        let read = FeedArticle(storedID: "read", title: "Read story", link: "https://news.example/read", guid: "read", description: "", pubDate: old, source: "One")
+        let saved = FeedArticle(storedID: "saved", title: "Saved story", link: "https://news.example/saved", guid: "saved", description: "", pubDate: old, source: "One")
+        try await db.upsertArticles([read, saved])
+        try await db.markRead(articleId: read.id, isRead: true)
+        try await db.setSaved(articleId: saved.id, isSaved: true)
+        let missing = "test_non_existent"
+        _ = try? await db.setSaved(articleId: missing, isSaved: true)
+        _ = try? await db.toggleSaved(articleId: missing)
+        _ = try? await db.markRead(articleId: missing, isRead: true)
+        _ = try? await db.markReadBatch(articleIds: [missing], isRead: true)
+        _ = try? await db.batchMarkSaved([missing])
+        assertEqual(try await db.pruneOldArticles(keepReadDays: 30), 1, "Old read stories are pruned; saved ones stay")
+        assertTrue(try await db.isSaved(articleId: saved.id), "Pruning keeps saved stories")
+        await db.close()
+
+        var handle: OpaquePointer?
+        assertEqual(sqlite3_open(path, &handle), SQLITE_OK, "Open the orphan fixture")
+        defer { sqlite3_close(handle) }
+        func count(_ sql: String) -> Int32 {
+            var statement: OpaquePointer?
+            guard sqlite3_prepare_v2(handle, sql, -1, &statement, nil) == SQLITE_OK else { return -1 }
+            defer { sqlite3_finalize(statement) }
+            return sqlite3_step(statement) == SQLITE_ROW ? sqlite3_column_int(statement, 0) : -1
+        }
+        assertEqual(count("SELECT count(*) FROM pragma_foreign_key_check;"), 0, "No state row outlives or precedes its article")
+        assertEqual(count("SELECT count(*) FROM article_state WHERE article_id = 'test_non_existent';"), 0, "Writes for a missing article store nothing")
+        assertEqual(count("SELECT count(*) FROM article_state WHERE is_saved = 1 AND saved_at IS NULL;"), 0, "Saved state always carries its time")
     }
 
     static func testStoryImages(fixtureRoot: URL) async throws {
