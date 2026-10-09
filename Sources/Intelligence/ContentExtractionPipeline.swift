@@ -439,69 +439,16 @@ enum HTMLDOMBuilder {
         while !scanner.isAtEnd {
             if scanner.scanString("<") != nil {
                 if scanner.scanString("/") != nil {
-                    // Closing tag: </tag>
-                    if let closeTag = scanner.scanUpToString(">") {
-                        _ = scanner.scanString(">")
-                        let tagClean = closeTag.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-                        // Match nearest open tag of this name.
-                        if stack.count > 1, let idx = stack.lastIndex(where: { $0.tag == tagClean }) {
-                            while stack.count > idx {
-                                let popped = stack.removeLast()
-                                let node = popped.build()
-                                if !stack.isEmpty {
-                                    stack.last?.children.append(node)
-                                }
-                            }
-                        }
-                    }
+                    handleClosingTag(scanner: scanner, stack: &stack)
                 } else if scanner.scanString("!") != nil {
                     // DOCTYPE or comment; skip to >
                     _ = scanner.scanUpToString(">")
                     _ = scanner.scanString(">")
                 } else {
-                    // Opening or self-closing tag
-                    if let tagContent = scanner.scanUpToString(">") {
-                        _ = scanner.scanString(">")
-                        let parsed = parseTagContent(tagContent)
-                        let tagName = parsed.tag.lowercased()
-
-                        if ignoredTags.contains(tagName) {
-                            // Skip content until closing tag
-                            if let closing = cleanHTML.range(
-                                of: "</\(tagName)\\s*>", options: [.regularExpression, .caseInsensitive],
-                                range: scanner.currentIndex..<cleanHTML.endIndex
-                            ) {
-                                scanner.currentIndex = closing.upperBound
-                            }
-                            continue
-                        }
-
-                        // HTML permits omitted paragraph end tags.
-                        if tagName == "p", let index = stack.lastIndex(where: { $0.tag == "p" }) {
-                            while stack.count > index {
-                                let node = stack.removeLast().build()
-                                stack.last?.children.append(node)
-                            }
-                        }
-                        // Bound recursion for hostile or malformed publisher HTML.
-                        guard stack.count < 128 else { continue }
-                        let isSelfClosing = parsed.isSelfClosing || voidTags.contains(tagName)
-                        let elementBuilder = DOMElementBuilder(tag: tagName, attributes: parsed.attributes, isSelfClosing: isSelfClosing)
-
-                        if isSelfClosing {
-                            let node = elementBuilder.build()
-                            stack.last?.children.append(node)
-                        } else {
-                            stack.append(elementBuilder)
-                        }
-                    }
+                    handleOpeningTag(scanner: scanner, html: cleanHTML, stack: &stack)
                 }
             } else {
-                // Text node
-                if let textContent = scanner.scanUpToString("<") {
-                    let decoded = ContentExtractionPipeline.shared.decodeHTMLEntities(textContent)
-                    stack.last?.children.append(DOMElementNode(tag: "#text", text: decoded))
-                }
+                handleTextNode(scanner: scanner, stack: &stack)
             }
         }
 
@@ -512,6 +459,68 @@ enum HTMLDOMBuilder {
         }
 
         return stack.first?.build() ?? root
+    }
+
+    private static func handleClosingTag(scanner: Scanner, stack: inout [DOMElementBuilder]) {
+        // Closing tag: </tag>
+        guard let closeTag = scanner.scanUpToString(">") else { return }
+        _ = scanner.scanString(">")
+        let tagClean = closeTag.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        // Match nearest open tag of this name.
+        if stack.count > 1, let idx = stack.lastIndex(where: { $0.tag == tagClean }) {
+            while stack.count > idx {
+                let popped = stack.removeLast()
+                let node = popped.build()
+                if !stack.isEmpty {
+                    stack.last?.children.append(node)
+                }
+            }
+        }
+    }
+
+    private static func handleOpeningTag(scanner: Scanner, html: String, stack: inout [DOMElementBuilder]) {
+        // Opening or self-closing tag
+        guard let tagContent = scanner.scanUpToString(">") else { return }
+        _ = scanner.scanString(">")
+        let parsed = parseTagContent(tagContent)
+        let tagName = parsed.tag.lowercased()
+
+        if ignoredTags.contains(tagName) {
+            // Skip content until closing tag
+            if let closing = html.range(
+                of: "</" + tagName + r"\s*>", options: [.regularExpression, .caseInsensitive],
+                range: scanner.currentIndex..<html.endIndex
+            ) {
+                scanner.currentIndex = closing.upperBound
+            }
+            return
+        }
+
+        // HTML permits omitted paragraph end tags.
+        if tagName == "p", let index = stack.lastIndex(where: { $0.tag == "p" }) {
+            while stack.count > index {
+                let node = stack.removeLast().build()
+                stack.last?.children.append(node)
+            }
+        }
+        // Bound recursion for hostile or malformed publisher HTML.
+        guard stack.count < 128 else { return }
+        let isSelfClosing = parsed.isSelfClosing || voidTags.contains(tagName)
+        let elementBuilder = DOMElementBuilder(tag: tagName, attributes: parsed.attributes, isSelfClosing: isSelfClosing)
+
+        if isSelfClosing {
+            let node = elementBuilder.build()
+            stack.last?.children.append(node)
+        } else {
+            stack.append(elementBuilder)
+        }
+    }
+
+    private static func handleTextNode(scanner: Scanner, stack: inout [DOMElementBuilder]) {
+        // Text node
+        guard let textContent = scanner.scanUpToString("<") else { return }
+        let decoded = ContentExtractionPipeline.shared.decodeHTMLEntities(textContent)
+        stack.last?.children.append(DOMElementNode(tag: "#text", text: decoded))
     }
 
     private struct ParsedTag {
