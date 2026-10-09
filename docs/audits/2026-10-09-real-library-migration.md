@@ -36,7 +36,7 @@ This verifies invalidation, regeneration and persistence. It does not establish 
 
 ## Refresh and UI observations
 
-The copied library refreshed the default BBC News and Ars Technica feeds. At the final observation, it contained 1,650 articles, 238 importance ratings (5 minor, 162 notable, 71 major), and 84 persisted publisher-image URLs. Refresh and retention can change these totals; they are dated observations, not fixed expectations.
+The copied library refreshed the default BBC News and Ars Technica feeds. At the post-refresh observation, it contained 1,650 articles, 238 importance ratings (5 minor, 162 notable, 71 major), and 84 persisted publisher-image URLs. Refresh and retention can change these totals; they are dated observations, not fixed expectations.
 
 The Today view reported four waiting stories. Clicking the control changed it to “Hide 4 waiting” and revealed the filtered stories; clicking again restored the default filtering. Publisher images visibly rendered on grid cards and within the source reader. Reading added history only to the copy; migration preservation measurements above were recorded before those interactions.
 
@@ -44,7 +44,9 @@ One newly fetched page retained a newsletter banner and signup block in its read
 
 ## Notification boundary and checks
 
-The native UserNotifications settings API, queried without requesting permission under the isolated bundle identifier, returned authorization status `notDetermined`. Live operating-system banner delivery and its timing have not been verified; no notification permission or production setting was changed.
+The initial native UserNotifications settings query under the isolated bundle identifier returned authorization status `notDetermined`. Mars then approved enabling notifications for the temporary bundle. The authorization request returned `UNErrorDomain`, code 1, “Notifications are not allowed for this application,” with `granted = false`.
+
+A diagnostic-only rebuild captured the existing AppDelegate authorization callback in the temporary container and confirmed the same rejection as the native helper. The diagnostic changed only result capture, not the permission request or application logic, and was not committed to the repository. No permission was granted. Live operating-system banner delivery and its timing remain unverified; production settings were preserved.
 
 `./test.sh --story-regressions` passed, including `testStoryVisibility`: the production FeedManager dispatches its notification callback after importance rating while publisher-image lookups remain blocked on an explicit gate. That is deterministic dispatch-order proof, separate from macOS delivery. The full commit-hook regressions also passed when publishing this audit.
 
