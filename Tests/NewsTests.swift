@@ -1823,9 +1823,11 @@ struct NewsTests {
         settings.aiEnabled = false
         settings.notificationsEnabled = true
         var notified: [String] = []
+        // No image lookup: stopBackgroundWork only cancels it, so its write transaction could still block the trigger below.
         let manager = FeedManager(settings: settings, store: store, schedulesRefresh: false,
             fetchBatch: { urls, _ in urls.map { ($0, [archived, fresh, fresh], nil, nil) } },
-            notifyBatch: { articles, _ in notified.append(contentsOf: articles.map { $0.id }) })
+            notifyBatch: { articles, _ in notified.append(contentsOf: articles.map { $0.id }) },
+            imageFinder: .unavailable)
         await manager.fetchFeedsAsync()
         let freshID = ArticleIdentity.scopedGUID(fresh.guid, feedURL: settings.feedURLs[0])!
         assertTrue(manager.articles.contains { $0.id == freshID }, "Notified undated story remains in the visible snapshot")
@@ -1901,9 +1903,10 @@ struct NewsTests {
         settings.aiEnabled = false
         let fetcher = FeedFetcher(client: client)
         var notified = 0
+        // No image lookup: it outlives fetchFeedsAsync and its write transaction would hold the lock the trigger edits need.
         let manager = FeedManager(settings: settings, store: store, schedulesRefresh: false,
             fetchBatch: { urls, allowHTTP in await fetcher.fetchAllFeeds(urls: urls, allowHTTP: allowHTTP, state: db) },
-            notifyBatch: { articles, _ in notified += articles.count })
+            notifyBatch: { articles, _ in notified += articles.count }, imageFinder: .unavailable)
         func rss(_ names: [String]) -> Data {
             let items = names.map { "<item><title>Report \($0)</title><link>\(fixtureRoot.appendingPathComponent($0).absoluteString)</link><guid>\($0)</guid><description>Publisher report</description><pubDate>Wed, 21 Oct 2026 07:28:00 +0000</pubDate></item>" }
             return Data("<rss version='2.0'><channel><title>Conditional</title>\(items.joined())</channel></rss>".utf8)
