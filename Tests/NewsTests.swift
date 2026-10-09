@@ -4156,19 +4156,31 @@ struct NewsTests {
         assertTrue(neededBefore, "Migration should be needed initially")
         
         // Test isMigrationNeeded explicitly across various version states (unmigrated, current, future)
-        let version0Defaults = UserDefaults(suiteName: suiteName + ".v0")!
-        defer { version0Defaults.removePersistentDomain(forName: suiteName + ".v0") }
+        let v0Suite = "com.marspater.news.test.\(UUID().uuidString)"
+        let version0Defaults = UserDefaults(suiteName: v0Suite)!
+        defer {
+            version0Defaults.removePersistentDomain(forName: v0Suite)
+            version0Defaults.synchronize()
+        }
         let coordinatorV0 = MigrationCoordinator(database: db, userDefaults: version0Defaults, fileManager: .default)
         assertTrue(await coordinatorV0.isMigrationNeeded(), "Migration should be needed when version is lower than current")
 
-        let currentDefaults = UserDefaults(suiteName: suiteName + ".current")!
-        defer { currentDefaults.removePersistentDomain(forName: suiteName + ".current") }
+        let currentSuite = "com.marspater.news.test.\(UUID().uuidString)"
+        let currentDefaults = UserDefaults(suiteName: currentSuite)!
+        defer {
+            currentDefaults.removePersistentDomain(forName: currentSuite)
+            currentDefaults.synchronize()
+        }
         currentDefaults.set(MigrationCoordinator.currentMigrationVersion, forKey: MigrationCoordinator.migrationVersionKey)
         let coordinatorCurrent = MigrationCoordinator(database: db, userDefaults: currentDefaults, fileManager: .default)
         assertFalse(await coordinatorCurrent.isMigrationNeeded(), "Migration should not be needed when version equals current")
 
-        let futureDefaults = UserDefaults(suiteName: suiteName + ".future")!
-        defer { futureDefaults.removePersistentDomain(forName: suiteName + ".future") }
+        let futureSuite = "com.marspater.news.test.\(UUID().uuidString)"
+        let futureDefaults = UserDefaults(suiteName: futureSuite)!
+        defer {
+            futureDefaults.removePersistentDomain(forName: futureSuite)
+            futureDefaults.synchronize()
+        }
         futureDefaults.set(MigrationCoordinator.currentMigrationVersion + 1, forKey: MigrationCoordinator.migrationVersionKey)
         let coordinatorFuture = MigrationCoordinator(database: db, userDefaults: futureDefaults, fileManager: .default)
         assertFalse(await coordinatorFuture.isMigrationNeeded(), "Migration should not be needed when version exceeds current")
