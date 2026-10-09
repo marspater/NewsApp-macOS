@@ -131,7 +131,7 @@ struct ArticleListView: View {
     }
 
     private var selectedStory: FeedArticle? {
-        guard articlePath.isEmpty else { return nil }
+        guard articlePath.isEmpty, let focusedArticleID else { return nil }
         return filteredArticles.first { $0.id == focusedArticleID }
     }
 
