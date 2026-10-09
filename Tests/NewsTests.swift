@@ -2249,7 +2249,8 @@ struct NewsTests {
         assertEqual(story("https://notaljazeera.com/story", "Other").publisherName, "Other", "Only the same host or its subdomains match")
 
         // A retired subscription ends once per retirement version; subscribing again later is kept.
-        let nyt = AppSettings.retiredFeeds[0].url, onet = AppSettings.retiredFeeds[1].url
+        let nyt = "https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml"
+        let onet = "https://wiadomosci.onet.pl/.feed"
         assertFalse(AppSettings.defaultFeeds.contains(nyt), "Retired feeds are not fresh-install defaults")
         assertFalse(FeedCatalog.allFeeds.contains { $0.url == onet }, "Retired feeds leave the catalog")
         parkedDefaults.set([kept[0], nyt, onet], forKey: AppSettings.feedURLsKey)
@@ -3572,6 +3573,24 @@ struct NewsTests {
             return await pipeline.extractArticleWithIdentity(from: requested.absoluteString)
         }
         assertTrue(await cancelled.value.evidence == nil, "Cancelled extraction returns no identity evidence")
+
+        let insecure = requested.absoluteString.replacingOccurrences(of: "https://", with: "http://")
+        for allowHTTP in [false, true] {
+            requests.removeAll()
+            MockURLProtocol.requestHandler = { request in
+                requests.append(request.url!)
+                return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                        Data("<article><p>\(prose)</p></article>".utf8))
+            }
+            let upgraded = await pipeline.extractArticleWithIdentity(from: insecure, allowHTTP: allowHTTP)
+            assertTrue(upgraded.outcome.isSuccess, "HTTP feed links remain readable under either transport setting")
+            assertEqual(requests.map(\.absoluteString), [allowHTTP ? insecure : requested.absoluteString],
+                        "Extraction upgrades HTTP unless the user explicitly allows it")
+        }
+        requests.removeAll()
+        let malformed = await pipeline.extractArticleWithIdentity(from: "http://[malformed")
+        assertFalse(malformed.outcome.isSuccess, "Malformed article links fail before fetching")
+        assertTrue(requests.isEmpty, "Malformed links never reach the network")
     }
 
     @MainActor
@@ -10242,5 +10261,4 @@ struct NewsTests {
         assertFalse(sentimentEvidence.isEmpty, "OverviewEvidenceSections with sentiment is not empty")
     }
 }
-
 
