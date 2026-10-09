@@ -327,38 +327,6 @@ struct OverviewPerspectivesExtractor: Sendable {
         return nil
     }
 
-    /// One compiled attribution pattern with its capture groups and minimum statement length.
-    private struct Attribution {
-        let regex: NSRegularExpression
-        let participantGroup: Int
-        let statementGroup: Int
-        let minimumLength: Int
-
-        init?(_ pattern: String, participantGroup: Int, statementGroup: Int, minimumLength: Int) {
-            guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
-            self.regex = regex
-            self.participantGroup = participantGroup
-            self.statementGroup = statementGroup
-            self.minimumLength = minimumLength
-        }
-    }
-
-    // Compiled once; matches keep pattern order.
-    private static let attributions: [Attribution] = {
-        // Pattern 1: "[Quote]," (said|announced|stated|argued|warned|noted) [Participant].
-        let patternQuoteFirst = #"\"([^\"]{10,250})\",?\s*(?:said|stated|announced|noted|argued|warned|confirmed|declared|emphasized|urged|reiterated|cautioned|explained)\s+([A-Z][A-Za-z0-9\s,\.\-]{2,60})"#
-        // Pattern 2: [Participant] (said that|stated that|announced that|argued that|warned that|noted that|confirmed that) [Statement].
-        let patternSpeakerFirst = #"([A-Z][A-Za-z0-9\s,\.\-]{2,60})\s+(?:said that|stated that|announced that|argued that|warned that|noted that|confirmed that|emphasized that|urged that)\s+([^\.\n]{15,200})"#
-        // Pattern 3: According to [Participant], [Statement].
-        let patternAccordingTo = #"According to\s+([A-Z][A-Za-z0-9\s,\.\-]{2,60}),\s+([^\.\n]{15,200})"#
-
-        return [
-            Attribution(patternQuoteFirst, participantGroup: 2, statementGroup: 1, minimumLength: 0),
-            Attribution(patternSpeakerFirst, participantGroup: 1, statementGroup: 2, minimumLength: 10),
-            Attribution(patternAccordingTo, participantGroup: 1, statementGroup: 2, minimumLength: 10)
-        ].compactMap { $0 }
-    }()
-
     /// Extracts quotes and statements with attribution to participants.
     private static func extractAttributedQuotes(
         text: String,
@@ -368,12 +336,24 @@ struct OverviewPerspectivesExtractor: Sendable {
         wireSource: String?,
         publisher: String?
     ) -> [ExtractedCandidate] {
+        // Pattern 1: "[Quote]," (said|announced|stated|argued|warned|noted) [Participant].
+        let patternQuoteFirst = #"\"([^\"]{10,250})\",?\s*(?:said|stated|announced|noted|argued|warned|confirmed|declared|emphasized|urged|reiterated|cautioned|explained)\s+([A-Z][A-Za-z0-9\s,\.\-]{2,60})"#
+        // Pattern 2: [Participant] (said that|stated that|announced that|argued that|warned that|noted that|confirmed that) [Statement].
+        let patternSpeakerFirst = #"([A-Z][A-Za-z0-9\s,\.\-]{2,60})\s+(?:said that|stated that|announced that|argued that|warned that|noted that|confirmed that|emphasized that|urged that)\s+([^\.\n]{15,200})"#
+        // Pattern 3: According to [Participant], [Statement].
+        let patternAccordingTo = #"According to\s+([A-Z][A-Za-z0-9\s,\.\-]{2,60}),\s+([^\.\n]{15,200})"#
+
+        // Group order and minimum statement length per pattern; matches keep pattern order.
+        let attributions: [(pattern: String, participantGroup: Int, statementGroup: Int, minimumLength: Int)] = [
+            (patternQuoteFirst, 2, 1, 0),
+            (patternSpeakerFirst, 1, 2, 10),
+            (patternAccordingTo, 1, 2, 10)
+        ]
         var results: [ExtractedCandidate] = []
-        let nsString = text as NSString
         for attribution in attributions {
             let matches = attributedMatches(
-                of: attribution.regex,
-                in: nsString,
+                of: attribution.pattern,
+                in: text,
                 participantGroup: attribution.participantGroup,
                 statementGroup: attribution.statementGroup,
                 minimumStatementLength: attribution.minimumLength
@@ -398,13 +378,15 @@ struct OverviewPerspectivesExtractor: Sendable {
     /// Runs one attribution pattern and keeps matches that name a participant and carry a statement
     /// of at least `minimumStatementLength` characters.
     private static func attributedMatches(
-        of regex: NSRegularExpression,
-        in nsString: NSString,
+        of pattern: String,
+        in text: String,
         participantGroup: Int,
         statementGroup: Int,
         minimumStatementLength: Int
     ) -> [(participant: String, statement: String)] {
-        let matches = regex.matches(in: nsString as String, range: NSRange(location: 0, length: nsString.length))
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
+        let nsString = text as NSString
+        let matches = regex.matches(in: text, range: NSRange(location: 0, length: nsString.length))
         return matches.compactMap { match -> (participant: String, statement: String)? in
             guard match.numberOfRanges >= 3 else { return nil }
             let participant = cleanParticipant(nsString.substring(with: match.range(at: participantGroup)))

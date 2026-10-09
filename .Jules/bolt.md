@@ -21,9 +21,3 @@
 **Learning:** Compiling `NSRegularExpression` is computationally expensive. In `ContentExtractionPipeline.swift`, `extractLeadImage` was dynamically compiling multiple regex patterns for Open Graph image tags inside a loop for every parsed article, causing unnecessary CPU overhead.
 
 **Action:** Future Bolt runs should statically compile and store arrays of `NSRegularExpression` instances using `static let` (e.g., `.compactMap { try? NSRegularExpression(...) }`) when multiple patterns are evaluated per article, avoiding repeated compilation inside loops or frequent method calls.
-
-## 2024-10-27 - Statically compile NSRegularExpression patterns alongside their metadata
-
-**Learning:** In `OverviewPerspectivesExtractor.swift`, the `extractAttributedQuotes` method dynamically compiled three `NSRegularExpression` patterns inside a function that is called frequently during article analysis. This repeated compilation of complex regular expressions adds unnecessary CPU overhead.
-
-**Action:** Future Bolt runs should statically compile and store `NSRegularExpression` instances along with any related configuration metadata (like capture group indices or minimum lengths) in a `static let` array of a small private struct, rather than compiling them dynamically within hot paths. Use `try?` with a failable initializer instead of `try!`, and avoid tuples with more than two members; Codacy's SwiftLint rules reject both.
