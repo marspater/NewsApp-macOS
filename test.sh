@@ -16,6 +16,7 @@ for argument in "$@"; do
     if [[ "$argument" == "--performance-baseline" || "$argument" == "--transport-cancellation" || "$argument" == "--publisher-cancellation" ]]; then TEST_OPT_FLAGS=(-O); fi
 done
 
+script/design_lint.sh
 python3 script/evaluation/evaluate.py
 python3 script/evaluation/publisher_review.py
 python3 script/evaluation/publisher_dates.py

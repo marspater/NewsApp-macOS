@@ -1,111 +1,16 @@
 // GlassSystem.swift
-// NewsApp Frosted Surface & Native Liquid Glass System
+// NewsApp Liquid Glass helpers. See docs/DESIGN.md, sections 3 and 4.
+//
+// Feature views apply custom glass only through these helpers. System glass
+// (toolbars, sidebars, menus, popovers, sheets) needs no helper.
 
 import SwiftUI
 
-// MARK: - Surface Elevation & Tint Tokens
+// MARK: - Native Liquid Glass Modifier
 
-public enum FrostedElevation: Sendable {
-    case control    // Floating toolbars, segmented pickers, buttons
-    case card       // AI summary cards, popovers, containers
-    case elevated   // Dialogs, sheets, modals
-
-    var shadowRadius: CGFloat {
-        switch self {
-        case .control: return 12.0
-        case .card: return 8.0
-        case .elevated: return 20.0
-        }
-    }
-
-    var shadowY: CGFloat {
-        switch self {
-        case .control: return 3.0
-        case .card: return 2.0
-        case .elevated: return 6.0
-        }
-    }
-
-    var shadowOpacity: Double {
-        switch self {
-        case .control: return 0.16
-        case .card: return 0.10
-        case .elevated: return 0.22
-        }
-    }
-
-    var surfaceBackingOpacity: Double {
-        switch self {
-        case .control: return 0.65  // High legibility over bright hero imagery
-        case .card: return 0.38
-        case .elevated: return 0.50
-        }
-    }
-}
-
-// MARK: - Frosted Diffused Surface Modifier
-
-public struct FrostedSurfaceModifier<S: Shape>: ViewModifier {
-    let shape: S
-    let elevation: FrostedElevation
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
-
-    public init(shape: S, elevation: FrostedElevation = .control) {
-        self.shape = shape
-        self.elevation = elevation
-    }
-
-    public func body(content: Content) -> some View {
-        if reduceTransparency {
-            content
-                .background(AppColor.surface, in: shape)
-                .overlay(shape.stroke(AppColor.borderSubtle, lineWidth: 1))
-        } else {
-            content
-                // 1. Apple-native diffuse material providing authentic backdrop diffusion
-                .background(.ultraThinMaterial, in: shape)
-                // 2. Subtle semantic surface tinting (restrained, translucent)
-                .background(AppColor.surface.opacity(elevation.surfaceBackingOpacity), in: shape)
-                // 3. Diffuse specular light highlight
-                .background(
-                    LinearGradient(
-                        colors: [
-                            Color.white.opacity(0.14),
-                            Color.white.opacity(0.02)
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    ),
-                    in: shape
-                )
-                // 4. Delicate precision rim stroke
-                .overlay(
-                    shape.stroke(
-                        LinearGradient(
-                            colors: [
-                                Color.white.opacity(0.32),
-                                Color.white.opacity(0.10),
-                                AppColor.borderSubtle
-                            ],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        ),
-                        lineWidth: 0.75
-                    )
-                )
-                // 5. Restrained ambient shadow
-                .shadow(
-                    color: Color.black.opacity(elevation.shadowOpacity),
-                    radius: elevation.shadowRadius,
-                    x: 0,
-                    y: elevation.shadowY
-                )
-        }
-    }
-}
-
-// MARK: - Native Liquid Glass Modifier (macOS 26+)
-
+/// Liquid Glass on macOS 26 and later; the system adapts it to Reduce Transparency
+/// and Increase Contrast. On macOS 15 the surface falls back to the regular material,
+/// or an opaque surface with a separator stroke under Reduce Transparency.
 public struct NativeLiquidGlassModifier<S: Shape>: ViewModifier {
     let shape: S
     let interactive: Bool
@@ -117,23 +22,16 @@ public struct NativeLiquidGlassModifier<S: Shape>: ViewModifier {
     }
 
     public func body(content: Content) -> some View {
-        if reduceTransparency {
+        if #available(macOS 26.0, *) {
+            content
+                .glassEffect(interactive ? Glass.regular.interactive() : Glass.regular, in: shape)
+        } else if reduceTransparency {
             content
                 .background(AppColor.surface, in: shape)
-                .overlay(shape.stroke(AppColor.borderSubtle, lineWidth: 1))
+                .overlay(shape.stroke(AppColor.separator, lineWidth: 1))
         } else {
-            #if canImport(FoundationModels)
-            if #available(macOS 26.0, *) {
-                content
-                    .glassEffect(interactive ? Glass.regular.interactive() : Glass.regular, in: shape)
-            } else {
-                content
-                    .modifier(FrostedSurfaceModifier(shape: shape, elevation: .control))
-            }
-            #else
             content
-                .modifier(FrostedSurfaceModifier(shape: shape, elevation: .control))
-            #endif
+                .background(.regularMaterial, in: shape)
         }
     }
 }
@@ -151,26 +49,15 @@ public extension View {
         }
     }
 
-    /// Applies the refined frosted diffused surface to a control, toolbar, or container.
-    /// Diffuses content underneath without optical inversion or caustic mirroring.
-    func frostedSurface<S: Shape>(in shape: S, elevation: FrostedElevation = .control) -> some View {
-        self.modifier(FrostedSurfaceModifier(shape: shape, elevation: elevation))
-    }
-
-    /// Convenience wrapper applying a frosted diffused surface in a Capsule pill.
-    func frostedPill(elevation: FrostedElevation = .control) -> some View {
-        self.frostedSurface(in: Capsule(), elevation: elevation)
-    }
-
-    /// Applies Apple-native Liquid Glass (macOS 26+) where optical refraction is contextually desired.
+    /// Custom Liquid Glass for a floating control (DESIGN.md 3.2). Apply it last,
+    /// after the control's content and padding. Never inside content or on another glass surface.
     func nativeLiquidGlass<S: Shape>(in shape: S, interactive: Bool = false) -> some View {
         self.modifier(NativeLiquidGlassModifier(shape: shape, interactive: interactive))
     }
 
-    /// Grouped glass container helper for macOS 26+.
+    /// Groups nearby custom glass so it samples, blends and morphs as one surface on macOS 26 and later.
     @ViewBuilder
     func inGlassContainer() -> some View {
-        #if canImport(FoundationModels)
         if #available(macOS 26.0, *) {
             GlassEffectContainer {
                 self
@@ -178,8 +65,22 @@ public extension View {
         } else {
             self
         }
-        #else
-        self
-        #endif
+    }
+
+    /// Glass button style for floating buttons: `.glass` or `.glassProminent` on macOS 26 and later,
+    /// `.bordered` or `.borderedProminent` on macOS 15.
+    @ViewBuilder
+    func nativeGlassButtonStyle(prominent: Bool = false) -> some View {
+        if #available(macOS 26.0, *) {
+            if prominent {
+                self.buttonStyle(.glassProminent)
+            } else {
+                self.buttonStyle(.glass)
+            }
+        } else if prominent {
+            self.buttonStyle(.borderedProminent)
+        } else {
+            self.buttonStyle(.bordered)
+        }
     }
 }
