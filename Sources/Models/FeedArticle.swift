@@ -52,7 +52,12 @@ struct FeedArticle: Identifiable, Codable, Hashable, Sendable {
 
     /// Picks among curated member leads. Known area wins; tied or unknown sizes prefer publisher-hosted media.
     static func bestCardImage(in articles: [FeedArticle]) -> URL? {
-        let candidates = articles.compactMap { article -> (url: URL, area: Int, own: Bool)? in
+        struct Candidate {
+            let url: URL
+            let area: Int
+            let own: Bool
+        }
+        let candidates = articles.compactMap { article -> Candidate? in
             guard let image = article.readerDocument?.selectedImage(fallback: article.imageUrl) ?? article.imageUrl,
                   let url = URL(string: image) else { return nil }
             let metadata = article.readerDocument?.images?.first { $0.url == image }
@@ -60,8 +65,8 @@ struct FeedArticle: Identifiable, Codable, Hashable, Sendable {
                   metadata?.aspectRatio.map({ $0 <= 4 && $0 >= 0.25 }) ?? true else { return nil }
             let host = URL(string: article.link)?.host?.lowercased().replacingOccurrences(of: "www.", with: "") ?? ""
             let imageHost = url.host?.lowercased() ?? ""
-            return (url, (metadata?.width ?? 0) * (metadata?.height ?? 0),
-                    !host.isEmpty && (imageHost == host || imageHost.hasSuffix("." + host)))
+            return Candidate(url: url, area: (metadata?.width ?? 0) * (metadata?.height ?? 0),
+                             own: !host.isEmpty && (imageHost == host || imageHost.hasSuffix("." + host)))
         }
         return candidates.enumerated().max { lhs, rhs in
             if lhs.element.area != rhs.element.area { return lhs.element.area < rhs.element.area }
