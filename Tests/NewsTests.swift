@@ -4155,6 +4155,24 @@ struct NewsTests {
         let neededBefore = await coordinator.isMigrationNeeded()
         assertTrue(neededBefore, "Migration should be needed initially")
         
+        // Test isMigrationNeeded explicitly across various version states (unmigrated, current, future)
+        let version0Defaults = UserDefaults(suiteName: suiteName + ".v0")!
+        defer { version0Defaults.removePersistentDomain(forName: suiteName + ".v0") }
+        let coordinatorV0 = MigrationCoordinator(database: db, userDefaults: version0Defaults, fileManager: .default)
+        assertTrue(await coordinatorV0.isMigrationNeeded(), "Migration should be needed when version is lower than current")
+
+        let currentDefaults = UserDefaults(suiteName: suiteName + ".current")!
+        defer { currentDefaults.removePersistentDomain(forName: suiteName + ".current") }
+        currentDefaults.set(MigrationCoordinator.currentMigrationVersion, forKey: MigrationCoordinator.migrationVersionKey)
+        let coordinatorCurrent = MigrationCoordinator(database: db, userDefaults: currentDefaults, fileManager: .default)
+        assertFalse(await coordinatorCurrent.isMigrationNeeded(), "Migration should not be needed when version equals current")
+
+        let futureDefaults = UserDefaults(suiteName: suiteName + ".future")!
+        defer { futureDefaults.removePersistentDomain(forName: suiteName + ".future") }
+        futureDefaults.set(MigrationCoordinator.currentMigrationVersion + 1, forKey: MigrationCoordinator.migrationVersionKey)
+        let coordinatorFuture = MigrationCoordinator(database: db, userDefaults: futureDefaults, fileManager: .default)
+        assertFalse(await coordinatorFuture.isMigrationNeeded(), "Migration should not be needed when version exceeds current")
+
         // Execute migration
         let stats = try? await coordinator.migrateIfNeeded()
         assertTrue(stats != nil, "Migration should succeed")
