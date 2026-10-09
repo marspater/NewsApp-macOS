@@ -1060,6 +1060,72 @@ actor DatabaseEngine {
         return targets.count == 1 ? targets.first : nil
     }
 
+    // A refresh whose item brings no publisher text (?17 = 0), such as a document holding only feed media,
+    // keeps a stored document that has text, and its content (ReaderDocument.hasPublisherText).
+    private static let storedHasPublisherText = """
+    EXISTS (SELECT 1 FROM json_each(CASE WHEN json_valid(articles.reader_document)
+        THEN articles.reader_document ELSE '{}' END, '$.blocks') WHERE json_extract(value, '$.kind') <> 'figure')
+    """
+
+    private static let articleUpsertSQL = """
+    INSERT INTO articles (
+        id, guid, canonical_url, title, description, content,
+        published_at, source, image_url, category, feed_url,
+        created_at, updated_at, reader_document
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET
+        guid = coalesce(excluded.guid, articles.guid),
+        canonical_url = CASE WHEN ?
+            THEN excluded.canonical_url ELSE articles.canonical_url END,
+        published_at = CASE WHEN excluded.published_at = ? THEN articles.published_at ELSE excluded.published_at END,
+        title = excluded.title,
+        source = excluded.source,
+        description = excluded.description,
+        content = CASE WHEN articles.reader_document IS NOT NULL AND (excluded.reader_document IS NULL
+                OR (?17 = 0 AND \(storedHasPublisherText)))
+            THEN articles.content ELSE coalesce(excluded.content, articles.content) END,
+        reader_document = CASE WHEN ?17 = 0 AND \(storedHasPublisherText)
+            THEN articles.reader_document ELSE coalesce(excluded.reader_document, articles.reader_document) END,
+        image_url = coalesce(excluded.image_url, articles.image_url),
+        category = coalesce(excluded.category, articles.category),
+        feed_url = coalesce(articles.feed_url, excluded.feed_url),
+        updated_at = excluded.updated_at;
+    """
+
+    private func bindArticleUpsertStatement(
+        _ artStmt: OpaquePointer?,
+        article: FeedArticle,
+        id: String,
+        canonical: String,
+        pubDate: Double,
+        identityFeedURL: String?,
+        validLink: Bool,
+        now: Double
+    ) throws {
+        sqlite3_reset(artStmt)
+        sqlite3_bind_text(artStmt, 1, id, -1, Self.sqliteTransient)
+        if let g = article.guid { sqlite3_bind_text(artStmt, 2, g, -1, Self.sqliteTransient) } else { sqlite3_bind_null(artStmt, 2) }
+        sqlite3_bind_text(artStmt, 3, canonical, -1, Self.sqliteTransient)
+        sqlite3_bind_text(artStmt, 4, article.title, -1, Self.sqliteTransient)
+        sqlite3_bind_text(artStmt, 5, article.description, -1, Self.sqliteTransient)
+        if let c = article.fullContent { sqlite3_bind_text(artStmt, 6, c, -1, Self.sqliteTransient) } else { sqlite3_bind_null(artStmt, 6) }
+        sqlite3_bind_double(artStmt, 7, pubDate)
+        sqlite3_bind_text(artStmt, 8, article.source, -1, Self.sqliteTransient)
+        if let img = article.imageUrl { sqlite3_bind_text(artStmt, 9, img, -1, Self.sqliteTransient) } else { sqlite3_bind_null(artStmt, 9) }
+        if let cat = article.category { sqlite3_bind_text(artStmt, 10, cat, -1, Self.sqliteTransient) } else { sqlite3_bind_null(artStmt, 10) }
+        if let f = identityFeedURL { sqlite3_bind_text(artStmt, 11, f, -1, Self.sqliteTransient) } else { sqlite3_bind_null(artStmt, 11) }
+        sqlite3_bind_double(artStmt, 12, now)
+        sqlite3_bind_double(artStmt, 13, now)
+        if let document = article.readerDocument {
+            let encoded = String(decoding: try JSONEncoder().encode(document), as: UTF8.self)
+            sqlite3_bind_text(artStmt, 14, encoded, -1, Self.sqliteTransient)
+        } else { sqlite3_bind_null(artStmt, 14) }
+
+        sqlite3_bind_int(artStmt, 15, validLink ? 1 : 0)
+        sqlite3_bind_double(artStmt, 16, DateParser.unknownDate.timeIntervalSince1970)
+        sqlite3_bind_int(artStmt, 17, article.readerDocument?.hasPublisherText == true ? 1 : 0)
+    }
+
     /// `validators` accompany a fresh 200 response. They and the response's content stats are written in the same
     /// transaction as the articles, so a feed is only ever answered "not modified" for content that was durably ingested.
     @discardableResult
@@ -1074,37 +1140,6 @@ actor DatabaseEngine {
         defer {
             if sqlite3_get_autocommit(db) == 0 { try? rollbackTransaction() }
         }
-        
-        // A refresh whose item brings no publisher text (?17 = 0), such as a document holding only feed media,
-        // keeps a stored document that has text, and its content (ReaderDocument.hasPublisherText).
-        let storedHasPublisherText = """
-        EXISTS (SELECT 1 FROM json_each(CASE WHEN json_valid(articles.reader_document)
-            THEN articles.reader_document ELSE '{}' END, '$.blocks') WHERE json_extract(value, '$.kind') <> 'figure')
-        """
-        let articleSql = """
-        INSERT INTO articles (
-            id, guid, canonical_url, title, description, content,
-            published_at, source, image_url, category, feed_url,
-            created_at, updated_at, reader_document
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(id) DO UPDATE SET
-            guid = coalesce(excluded.guid, articles.guid),
-            canonical_url = CASE WHEN ?
-                THEN excluded.canonical_url ELSE articles.canonical_url END,
-            published_at = CASE WHEN excluded.published_at = ? THEN articles.published_at ELSE excluded.published_at END,
-            title = excluded.title,
-            source = excluded.source,
-            description = excluded.description,
-            content = CASE WHEN articles.reader_document IS NOT NULL AND (excluded.reader_document IS NULL
-                    OR (?17 = 0 AND \(storedHasPublisherText)))
-                THEN articles.content ELSE coalesce(excluded.content, articles.content) END,
-            reader_document = CASE WHEN ?17 = 0 AND \(storedHasPublisherText)
-                THEN articles.reader_document ELSE coalesce(excluded.reader_document, articles.reader_document) END,
-            image_url = coalesce(excluded.image_url, articles.image_url),
-            category = coalesce(excluded.category, articles.category),
-            feed_url = coalesce(articles.feed_url, excluded.feed_url),
-            updated_at = excluded.updated_at;
-        """
         
         let stateSql = """
         INSERT INTO article_state (article_id, is_read, is_saved, read_at, saved_at)
@@ -1127,7 +1162,7 @@ actor DatabaseEngine {
         var enrichStmt: OpaquePointer?
         var feedStmt: OpaquePointer?
         
-        guard sqlite3_prepare_v2(db, articleSql, -1, &artStmt, nil) == SQLITE_OK,
+        guard sqlite3_prepare_v2(db, Self.articleUpsertSQL, -1, &artStmt, nil) == SQLITE_OK,
               sqlite3_prepare_v2(db, stateSql, -1, &stateStmt, nil) == SQLITE_OK,
               sqlite3_prepare_v2(db, enrichmentSql, -1, &enrichStmt, nil) == SQLITE_OK else {
             sqlite3_finalize(artStmt)
@@ -1188,29 +1223,7 @@ actor DatabaseEngine {
             let preserveExisting = preservingStoredContent && existenceStatus == SQLITE_ROW
             // 1. Insert/Update Article
             if !preserveExisting {
-                sqlite3_reset(artStmt)
-                sqlite3_bind_text(artStmt, 1, id, -1, Self.sqliteTransient)
-                if let g = article.guid { sqlite3_bind_text(artStmt, 2, g, -1, Self.sqliteTransient) } else { sqlite3_bind_null(artStmt, 2) }
-                sqlite3_bind_text(artStmt, 3, canonical, -1, Self.sqliteTransient)
-                sqlite3_bind_text(artStmt, 4, article.title, -1, Self.sqliteTransient)
-                sqlite3_bind_text(artStmt, 5, article.description, -1, Self.sqliteTransient)
-                if let c = article.fullContent { sqlite3_bind_text(artStmt, 6, c, -1, Self.sqliteTransient) } else { sqlite3_bind_null(artStmt, 6) }
-                sqlite3_bind_double(artStmt, 7, pubDate)
-                sqlite3_bind_text(artStmt, 8, article.source, -1, Self.sqliteTransient)
-                if let img = article.imageUrl { sqlite3_bind_text(artStmt, 9, img, -1, Self.sqliteTransient) } else { sqlite3_bind_null(artStmt, 9) }
-                if let cat = article.category { sqlite3_bind_text(artStmt, 10, cat, -1, Self.sqliteTransient) } else { sqlite3_bind_null(artStmt, 10) }
-                if let f = identityFeedURL { sqlite3_bind_text(artStmt, 11, f, -1, Self.sqliteTransient) } else { sqlite3_bind_null(artStmt, 11) }
-                sqlite3_bind_double(artStmt, 12, now)
-                sqlite3_bind_double(artStmt, 13, now)
-                if let document = article.readerDocument {
-                    let encoded = String(decoding: try JSONEncoder().encode(document), as: UTF8.self)
-                    sqlite3_bind_text(artStmt, 14, encoded, -1, Self.sqliteTransient)
-                } else { sqlite3_bind_null(artStmt, 14) }
-
-                sqlite3_bind_int(artStmt, 15, validLink ? 1 : 0)
-                sqlite3_bind_double(artStmt, 16, DateParser.unknownDate.timeIntervalSince1970)
-                sqlite3_bind_int(artStmt, 17, article.readerDocument?.hasPublisherText == true ? 1 : 0)
-
+                try bindArticleUpsertStatement(artStmt, article: article, id: id, canonical: canonical, pubDate: pubDate, identityFeedURL: identityFeedURL, validLink: validLink, now: now)
                 if sqlite3_step(artStmt) != SQLITE_DONE {
                     try rollbackTransaction()
                     throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to step article insert"])
