@@ -31,4 +31,4 @@
 
 **Learning:** When iterating through directories using `FileManager.default.enumerator(at:includingPropertiesForKeys:)`, passing `[.fileSizeKey]` as an array literal to `resourceValues(forKeys:)` inside the loop causes Swift to allocate a new `Set` on every single iteration. Retaining `.fileSizeKey` instead of physical blocks ensures logical byte semantics are maintained.
 
-**Action:** By hoisting the `Set<URLResourceKey>` allocation outside the loop and explicitly verifying `.isRegularFileKey`, you can halve the CPU overhead of the iteration while staying on the Apple-recommended `URL` enumerator API.
+**Action:** By hoisting the `Set<URLResourceKey>` allocation outside the loop, you can halve the CPU overhead of the iteration while staying on the Apple-recommended `URL` enumerator API.
