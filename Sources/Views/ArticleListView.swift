@@ -860,7 +860,7 @@ struct KeyboardShortcutsView: View {
             ("S", "Save or remove from Saved Stories"),
             ("O", "Open in browser"),
             ("E", "Show or hide event coverage"),
-            ("W", "Switch between Story and Web")
+            ("W or ⇧⌘R", "Switch between Story and Web")
         ]),
         ("List", [
             ("G", "Group coverage by event"),

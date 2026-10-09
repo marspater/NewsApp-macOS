@@ -67,6 +67,7 @@ struct NewsApp: App {
                 }
                 .keyboardShortcut("e", modifiers: [.command, .shift])
             }
+            ListViewCommands()
             CommandGroup(after: .sidebar) {
                 Button("Refresh Feeds") {
                     NotificationCenter.default.post(name: .refreshFeedsCommand, object: nil)
@@ -109,28 +110,31 @@ struct NewsApp: App {
                 Button("Show Queued Updates") {
                     NotificationCenter.default.post(name: .showFeedUpdatesCommand, object: nil)
                 }
-
-                Divider()
-
-                Button("Toggle Read / Unread") {
+            }
+            // Actions on the focused or open story, as Mail's Message menu (DESIGN.md 14).
+            CommandMenu("Story") {
+                Button("Mark as Read or Unread") {
                     NotificationCenter.default.post(name: .toggleReadCommand, object: nil)
                 }
                 .keyboardShortcut("u", modifiers: [.command, .shift])
 
-                Button("Save / Bookmark Article") {
+                Button("Save or Remove from Saved") {
                     NotificationCenter.default.post(name: .toggleSaveCommand, object: nil)
                 }
                 .keyboardShortcut("s", modifiers: .command)
+
+                Divider()
 
                 Button("Open in Browser") {
                     NotificationCenter.default.post(name: .openInBrowserCommand, object: nil)
                 }
                 .keyboardShortcut("o", modifiers: .command)
 
-                Button("Toggle Reader / Web View") {
+                // ⇧⌘W is Close Window in tabbed macOS apps, so Story / Web uses ⇧⌘R (design plan D5).
+                Button("Switch Between Story and Web") {
                     NotificationCenter.default.post(name: .toggleViewModeCommand, object: nil)
                 }
-                .keyboardShortcut("w", modifiers: [.command, .shift])
+                .keyboardShortcut("r", modifiers: [.command, .shift])
             }
         }
         
@@ -159,6 +163,27 @@ struct NewsApp: App {
                 .environmentObject(savedStories)
                 .preferredColorScheme(themeManager.appearance.colorScheme)
                 .modifier(SystemSettingsOverrideModifier())
+        }
+    }
+}
+
+/// View → as List, as Grid and Group Stories by Event, sharing the list toolbar's stored preferences.
+struct ListViewCommands: Commands {
+    @AppStorage("articleGridLayout") private var gridLayout = false
+    @AppStorage("groupsEventCoverage") private var groupsEvents = true
+
+    var body: some Commands {
+        CommandGroup(before: .sidebar) {
+            Picker("Story Layout", selection: $gridLayout) {
+                Text("as List").tag(false)
+                Text("as Grid").tag(true)
+            }
+            .pickerStyle(.inline)
+            .labelsHidden()
+
+            Toggle("Group Stories by Event", isOn: $groupsEvents)
+
+            Divider()
         }
     }
 }
