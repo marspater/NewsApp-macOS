@@ -147,8 +147,6 @@ struct NewsApp: App {
 
                 if let story = selectedStory, let url = URL(string: story.link) {
                     ShareLink(item: url, subject: Text(story.title)) { Text("Share Story") }
-                } else {
-                    Button("Share Story") {}.disabled(true)
                 }
 
                 // ⇧⌘W is Close Window in tabbed macOS apps, so Story / Web uses ⇧⌘R (design plan D5).
