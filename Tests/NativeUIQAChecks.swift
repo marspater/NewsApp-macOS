@@ -54,6 +54,7 @@ struct NativeUIQAChecks {
         testVoiceOverStructureAndAnnouncements()
         testWindowWidthsAndLayoutMetrics()
         testLeadStorySelection()
+        testLeadStoryEventImageFallback()
         testTextScalingAdaptation()
         testIncreaseContrastScalers()
         testReduceMotionPolicies()
@@ -305,11 +306,30 @@ struct NativeUIQAChecks {
             LeadStoryPresentation.firstEligibleID(in: [.article(textOnly)], selectedTopic: "Today", isSearching: false),
             nil, "No publisher image means an ordinary card"
         )
+
+    }
+
+    /// Event-member fallback and a missing member image require a normal card.
+    static func testLeadStoryEventImageFallback() {
+        let textOnly = FeedArticle(
+            title: "No-image representative", link: "https://publisher.example/event/one",
+            guid: "lead-event-1", description: "Fixture", pubDate: Date(), source: "Publisher"
+        )
+        var firstImage = FeedArticle(
+            title: "Image-bearing member", link: "https://publisher.example/event/two",
+            guid: "lead-event-2", description: "Fixture", pubDate: Date(), source: "Publisher"
+        )
+        firstImage.imageUrl = "https://images.example/lead-event.jpg"
         let summary = EventFeedSummary(eventID: "lead-event", membershipVersion: 1, seenVersion: nil, members: [])
         let covered: [FeedEntry] = [.event(summary, representative: textOnly, visibleMembers: [textOnly, firstImage])]
         assertEqual(
             LeadStoryPresentation.firstEligibleID(in: covered, selectedTopic: "Today", isSearching: false),
             textOnly.id, "An event can use its visible member's image without changing its representative"
+        )
+        let noImageEvent: [FeedEntry] = [.event(summary, representative: textOnly, visibleMembers: [textOnly])]
+        assertEqual(
+            LeadStoryPresentation.firstEligibleID(in: noImageEvent, selectedTopic: "Today", isSearching: false),
+            nil, "An event without a suitable member image stays a normal coverage card"
         )
     }
 
