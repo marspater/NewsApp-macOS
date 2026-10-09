@@ -7,7 +7,7 @@
 - Multi-source overviews use on-device plain-text synthesis with citations on introductory sentences and key facts. Unsupported sentences are dropped; weak or refused drafts retain the current excerpt overview. A few covered events warm in the background under the AI and energy settings. Classification and interactive analysis also use plain text to handle sensitive news without guided-output refusals.
 
 - Waiting stories are filtered from notifications after importance rating. A rating computed before a publisher edits a headline is discarded.
-- Imageless, unmuted stories look up declared publisher images from a bounded page prefix, including schema.org metadata. Briefing and grouped cards reuse the results; event cards choose the best usable lead across all members. Publishers without a usable image retain the card placeholder.
+- Imageless, unmuted stories look up declared publisher images from a bounded page prefix, including schema.org metadata. Briefing and grouped cards reuse the results; event cards choose the best usable lead across all members. Publishers without a usable image retain the card placeholder. Lookups run after clustering, so slow or unreachable publisher pages never delay notifications.
 
 - Stories are rated major, notable or minor on device. Minor stories wait out of Today, Unread, sections and the Briefing until four publishers cover them (the list says how many wait and can show them); unread ones that are still waiting a day later are removed and are not re-added by later refreshes. Without on-device AI nothing is hidden.
 
@@ -27,7 +27,7 @@
 
 ### Fixed
 
-- An overview made while the on-device model was skipped (AI setting, Low Power Mode, heat) or failed (refused, rate-limited) is kept only provisionally and regenerated on the next request, so a background warmup can no longer pin an event to its excerpt overview. Cancelling the background warmup no longer cancels an overview the reader joined.
+- An overview made while the on-device model was skipped (AI setting, Low Power Mode, heat) or failed (refused, rate-limited) is kept only provisionally and regenerated on the next request, so a background warmup can no longer pin an event to its excerpt overview. Cancelling the background warmup no longer cancels an overview the reader joined. Overviews made while the model was skipped or failed, and reader summaries made after a failed model request (Apple Intelligence switched off, model still downloading, refusal, rate limit), are redone when next requested; a Mac that cannot run it keeps the excerpt versions. After a macOS update, which can replace the on-device model, stored overviews and summaries regenerate with the new model when next opened.
 
 - Overview sentences preserve literal pipes and accept case/punctuation variants of a complete YES verdict; ambiguous answers still fall back. Earlier overviews regenerate with the corrected parser.
 

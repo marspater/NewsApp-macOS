@@ -38,6 +38,15 @@ final class ArticleStore: ObservableObject {
         do {
             try await database.open()
             _ = try await migrationCoordinator?.migrateIfNeeded()
+            // Overviews and summaries from an earlier macOS model regenerate with the current one when next requested.
+            // Only the app's own library tracks this; stores over other databases (tests, audits) are left as they are.
+            if database === DatabaseEngine.shared {
+                do {
+                    try await database.reconcileModelGeneration(NewsTextModel.generation)
+                } catch {
+                    logger.error("Model generation check failed: \(error.localizedDescription)")
+                }
+            }
             self.isReady = await refreshState()
             if !isReady { operationError = "Stored articles could not be loaded. Please try again." }
         } catch {

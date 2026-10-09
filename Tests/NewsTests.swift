@@ -657,7 +657,7 @@ struct NewsTests {
         assertEqual(value(copy, "SELECT count(*) FROM sqlite_master WHERE name IN ('trg_articles_ai','trg_articles_ad','trg_articles_au');"), "3", "Failed rebuild restores the old triggers")
         execute(copy, "DROP VIEW article_fts_rows;")
         try await db.open()
-        assertEqual(value(copy, "PRAGMA user_version;"), "19", "Copied v14 library upgrades through v15 to the current schema")
+        assertEqual(value(copy, "PRAGMA user_version;"), "20", "Copied v14 library upgrades through v15 to the current schema")
         assertEqual(value(path, "PRAGMA user_version;"), "14", "Original library stays untouched")
         assertEqual(try await db.searchArticles(query: "Research").map(\.id), originalOrder, "Migration preserves ranks and ID tie order")
         assertEqual(value(copy, "SELECT read_at FROM article_state WHERE article_id='one';"), readAt, "Migration preserves read timestamps")
@@ -3171,7 +3171,7 @@ struct NewsTests {
         await cancelledDB.close()
         let db = DatabaseEngine(path: copyPath)
         try await db.open()
-        assertEqual(value(copyPath, "PRAGMA user_version;"), "19", "Copied v4 library upgrades to the current schema")
+        assertEqual(value(copyPath, "PRAGMA user_version;"), "20", "Copied v4 library upgrades to the current schema")
         assertEqual(value(originalPath, "PRAGMA user_version;"), "4", "Original fixture stays untouched")
         assertEqual(try await db.fetchArticles(limit: nil).count, 3, "Migration keeps historical rows")
         assertEqual(value(copyPath, "SELECT read_at FROM article_state WHERE article_id = 'alias-first';"), originalReadAt, "Migration preserves read history timestamp")
@@ -3342,7 +3342,7 @@ struct NewsTests {
         assertEqual(value(failure, "SELECT is_saved FROM article_state WHERE article_id='historical-a';"), "0", "Injected failure rolls back survivor state union")
         assertEqual(value(failure, "SELECT article_id FROM article_aliases WHERE value='observed-variant-b';"), "historical-b", "Injected failure preserves old aliases")
         try await migrated.open()
-        assertEqual(value(copy, "PRAGMA user_version;"), "19", "Copied library upgrades to the current schema")
+        assertEqual(value(copy, "PRAGMA user_version;"), "20", "Copied library upgrades to the current schema")
         assertEqual(value(path, "PRAGMA user_version;"), "8", "Original fixture remains untouched")
         assertEqual(try await migrated.fetchArticles(limit: nil).count, 6, "Only confident same-URL text copies are hidden")
         assertEqual(try await migrated.fetchArticles(limit: nil, includingOriginals: true).count, 8, "Every stored original remains reachable")
@@ -4102,7 +4102,7 @@ struct NewsTests {
 
         let db = DatabaseEngine(path: copy)
         try await db.open()
-        assertEqual(value(copy, "PRAGMA user_version;"), "19", "Copied v11 library upgrades to the current schema")
+        assertEqual(value(copy, "PRAGMA user_version;"), "20", "Copied v11 library upgrades to the current schema")
         assertEqual(value(path, "PRAGMA user_version;"), "11", "Original v11 fixture stays untouched")
         assertEqual(try await db.fetchArticles(limit: nil).count, 5, "Event migration keeps every article")
         assertTrue(try await db.isRead(articleId: "event-a"), "Event migration keeps read state")
@@ -4700,13 +4700,20 @@ struct NewsTests {
                         guid: "football", description: "A local team wins a friendly match.", pubDate: now, source: "Sport")
         ]
         var notified: [String] = []
+        // Publisher pages that never answer must not hold notifications back.
+        let pages = OpenGate()
         let manager = FeedManager(settings: settings, store: store, schedulesRefresh: false,
             fetchBatch: { urls, _ in urls.map { ($0, reports, nil, nil) } },
             notifyBatch: { articles, _ in notified += articles.map(\.title) },
             importanceJudge: StoryImportanceJudge { $0.title == reports[0].title ? .major : .minor },
+            imageFinder: StoryImageFinder { _ in await pages.wait(); return .none },
             allowsBackgroundWork: { true })
-        await manager.fetchFeedsAsync()
+        let refresh = Task { await manager.fetchFeedsAsync() }
+        await eventually("Notifications are dispatched while image lookups wait") { notified == [reports[0].title] }
         assertEqual(notified, [reports[0].title], "Refresh rates stories before dispatching notifications")
+        await eventually("Image lookups follow clustering") { await pages.arrivals > 0 }
+        await pages.open()
+        await refresh.value
         manager.stopBackgroundWork()
         await store.database.close()
         assertEqual(OnDeviceImportanceJudge.level("Major."), .major, "MAJOR is major")
@@ -4835,7 +4842,7 @@ struct NewsTests {
         assertEqual(value("PRAGMA user_version;"), "18", "Cancellation keeps the previous schema version")
         assertEqual(value("SELECT count(*) FROM sqlite_master WHERE name='idx_story_images_url';"), "0", "Cancellation leaves no partial index")
         try await db.open()
-        assertEqual(value("PRAGMA user_version;"), "19", "Existing v18 libraries receive the image index migration")
+        assertEqual(value("PRAGMA user_version;"), "20", "Existing v18 libraries receive the image index migration")
         assertEqual(sqlite3_exec(handle, "ANALYZE story_images;", nil, nil, nil), SQLITE_OK, "Use current fixture cardinality for the query planner")
         assertTrue(value("EXPLAIN QUERY PLAN SELECT article_id FROM story_images WHERE image_url='https://cdn.example/index.jpg' AND article_id<>'other';", column: 3)?.contains("idx_story_images_url") == true,
                    "Duplicate-image checks use the image URL index")
@@ -5234,7 +5241,7 @@ struct NewsTests {
         assertEqual(value(copy, "SELECT count(*) FROM sqlite_master WHERE name IN ('event_match_state','event_exclusions','event_state');"), "0", "Cancelled v14 migration rolls back its tables")
         let migrated = DatabaseEngine(path: copy)
         try await migrated.open()
-        assertEqual(value(copy, "PRAGMA user_version;"), "19", "Copied v13 library upgrades to the current schema")
+        assertEqual(value(copy, "PRAGMA user_version;"), "20", "Copied v13 library upgrades to the current schema")
         assertEqual(value(path, "PRAGMA user_version;"), "13", "Original v13 fixture stays untouched")
         assertEqual(try await migrated.fetchEvent(id: event.id)?.memberArticleIDs.count, 5, "Migration keeps events and members")
         assertTrue(try await migrated.isSaved(articleId: "second"), "Migration keeps saved state")
@@ -5513,7 +5520,7 @@ struct NewsTests {
             guard sqlite3_step(statement) == SQLITE_ROW else { return nil }
             return sqlite3_column_text(statement, 0).map { String(cString: $0) }
         }
-        assertEqual(value(copy, "PRAGMA user_version;"), "19", "Provenance schema upgrades to the current schema")
+        assertEqual(value(copy, "PRAGMA user_version;"), "20", "Provenance schema upgrades to the current schema")
         assertEqual(value(original, "PRAGMA user_version;"), "15", "Original v15 fixture remains untouched")
         assertEqual(value(copy, "PRAGMA quick_check;"), "ok", "Upgraded provenance library passes quick_check")
         assertEqual(value(copy, "PRAGMA foreign_key_check;"), nil, "Provenance has no dangling article references")
@@ -7380,6 +7387,16 @@ struct NewsTests {
         assertEqual(shortAnalysis.modelIdentifier, "apple.foundation-model", "Two supported points do not force a short article to invent a third")
         let fallbackAnalysis = try await ArticleAnalyzer(textModel: .unavailable).analyze(title: "Bridge reopened", content: text)
         assertEqual(fallbackAnalysis.modelIdentifier, "apple.natural-language.fallback", "A refusal keeps source-based extraction")
+        assertEqual(fallbackAnalysis.analysisVersion, 3, "A Mac without the model keeps its extractive summary")
+        let waitingAnalysis = try await ArticleAnalyzer(textModel: NewsTextModel { _, _ in throw NewsTextModel.TemporarilyUnavailable() })
+            .analyze(title: "Bridge reopened", content: text)
+        assertEqual(waitingAnalysis.analysisVersion, 0, "A summary made while the model is off or downloading is redone once it can run")
+        let failedAnalysis = try await ArticleAnalyzer(textModel: NewsTextModel { _, _ in throw URLError(.timedOut) }).analyze(title: "Bridge reopened", content: text)
+        assertEqual(failedAnalysis.analysisVersion, 0, "A summary after a failed model request is redone")
+        let skippedAnalysis = try await ArticleAnalyzer(textModel: analysisModel).analyze(title: "Bridge reopened", content: text, allowFoundationModels: false)
+        assertEqual(skippedAnalysis.analysisVersion, 3, "An explicitly extractive request is final")
+        let malformedAnalysis = try await ArticleAnalyzer(textModel: NewsTextModel { _, _ in "I refuse" }).analyze(title: "Bridge reopened", content: text)
+        assertEqual(malformedAnalysis.analysisVersion, 3, "A malformed answer that greedy sampling would repeat keeps the extractive summary")
         assertEqual(ArticleTextAnswer.analysis("SUMMARY|x\nSUMMARY|y\nPOINT|a\nPOINT|b\nPOINT|c")?.summary, nil, "Duplicate summary is rejected")
         let article1 = FeedArticle(storedID: "plain-a", title: "Bridge repairs", link: "https://\(fixtureHost)/a", guid: "plain-a", description: text, pubDate: Date(), source: "Publisher A")
         let other = "Engineers inspected the bridge before traffic resumed. The council funded the repairs. Residents welcomed the reopening."
@@ -7459,8 +7476,10 @@ struct NewsTests {
                     "An overview made while the model was skipped is stored as provisional")
         let upgraded = await coordinator.requestOverview(eventID: "blocked", eventTitle: "Bridge", membershipVersion: 1, articles: [article1, article2])
         assertEqual(upgraded?.content.evidenceSections?.introduction?.count, 2, "A provisional overview is regenerated once the model may run")
-        for (failure, retried) in [(NewsTextModel { _, _ in throw URLError(.timedOut) }, true), (NewsTextModel.unavailable, false)] {
-            let eventID = "failing-\(retried)"
+        let failures = [(NewsTextModel { _, _ in throw URLError(.timedOut) }, true),
+                        (NewsTextModel { _, _ in throw NewsTextModel.TemporarilyUnavailable() }, true), (NewsTextModel.unavailable, false)]
+        for (index, (failure, retried)) in failures.enumerated() {
+            let eventID = "failing-\(index)"
             let failing = OverviewGenerationCoordinator(store: store, queue: EnrichmentQueue(store: store), textModel: failure, allowsModel: { true })
             let shown = await failing.requestOverview(eventID: eventID, eventTitle: "Bridge", membershipVersion: 1, articles: [article1, article2])
             assertTrue(shown != nil, "A failed model still shows the deterministic overview")
@@ -7486,6 +7505,19 @@ struct NewsTests {
         assertEqual(await warmup.value, nil, "The cancelled background request returns nothing")
         assertEqual(await reader.value?.content.evidenceSections?.introduction?.count, 2,
                     "Cancelling the background request does not cancel a reader's joined generation")
+        // A macOS update can replace the on-device model: stored overviews and summaries regenerate with the new one.
+        let summary = ArticleAnalysis(summary: "The bridge reopened.", keyPoints: ["Traffic resumed."], entities: [], category: "World",
+                                      sentiment: nil, modelIdentifier: "apple.foundation-model", analysisVersion: 3)
+        assertTrue(await store.saveArticleAnalysis(summary, for: article1.id), "A model summary is stored")
+        assertTrue(try await database.reconcileModelGeneration("model-a"), "An unrecorded model generation invalidates stored results")
+        assertEqual(try await database.fetchEventOverview(eventID: "plain")?.analysisVersion, 0, "Overviews from an earlier model are provisional")
+        assertTrue((await database.fetchArticleAnalysis(for: article1.id)?.analysisVersion ?? 3) < 3, "Summaries from an earlier model are redone")
+        let current = await coordinator.requestOverview(eventID: "plain", eventTitle: "Bridge reopening", membershipVersion: 1, articles: [article1, article2])
+        assertEqual(current?.analysisVersion, EventOverviewDocument.currentAnalysisVersion, "The next request regenerates with the current model")
+        assertFalse(try await database.reconcileModelGeneration("model-a"), "The same model generation keeps stored results")
+        assertEqual(try await database.fetchEventOverview(eventID: "plain")?.analysisVersion, EventOverviewDocument.currentAnalysisVersion,
+                    "Results stay current until the model changes")
+        assertTrue(try await database.reconcileModelGeneration("model-b"), "A new model generation invalidates them again")
         await database.close()
         let roundTrip = try JSONDecoder().decode(EventOverviewDocument.self, from: JSONEncoder().encode(generated))
         assertEqual(roundTrip.allClaims, generated.allClaims, "Introduction citations survive persistence")
@@ -7499,7 +7531,8 @@ struct NewsTests {
     static func testArticleAnalyzerStructuredOutputAndFallbacks() async throws {
         print("  - Testing ArticleAnalyzer Structured Output (Summary, Key Points, Entities, Sentiment)...")
 
-        let analyzer = ArticleAnalyzer.shared
+        // The extractive path, independent of whether this Mac's on-device model is ready.
+        let analyzer = ArticleAnalyzer(textModel: .unavailable)
         let title = "Tech Giants Unveil Breakthrough Quantum Computing Core"
         let articleBody = """
         Researchers at leading technology institutes have announced a functional 1,000-qubit quantum processor.

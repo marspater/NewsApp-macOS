@@ -722,6 +722,19 @@ actor DatabaseEngine {
                 throw error
             }
         }
+        if version < 20 {
+            try beginTransaction()
+            do {
+                try Task.checkCancellation()
+                // The on-device model generation that produced stored overviews and summaries (`reconcileModelGeneration`).
+                try executeSimple("CREATE TABLE IF NOT EXISTS model_generation (id INTEGER PRIMARY KEY CHECK (id = 1), value TEXT NOT NULL);")
+                try setUserVersion(20)
+                try commitTransaction()
+            } catch {
+                try? rollbackTransaction()
+                throw error
+            }
+        }
     }
     
     /// Muting predicates for list queries (`MuteRules`); both are pure functions of their arguments.
@@ -3039,6 +3052,21 @@ actor DatabaseEngine {
         let result = try body()
         try commitTransaction()
         return result
+    }
+
+    /// When the on-device model generation differs from the one that produced stored results, every overview and
+    /// article summary is marked provisional (analysis version 0), so each is regenerated with the current model the
+    /// next time it is requested. Importance ratings and event memberships are decisions already applied to the
+    /// library and stay. Returns whether stored results were invalidated.
+    @discardableResult
+    func reconcileModelGeneration(_ current: String) throws -> Bool {
+        try inEventTransaction { () throws -> Bool in
+            guard try eventRows("SELECT value FROM model_generation WHERE id = 1;").first?[0] != current else { return false }
+            try eventRows("UPDATE event_overviews SET analysis_version = 0;")
+            try eventRows("UPDATE article_enrichment SET analysis_version = 0 WHERE summary IS NOT NULL;")
+            try eventRows("INSERT OR REPLACE INTO model_generation(id, value) VALUES (1, ?);", [.text(current)])
+            return true
+        }
     }
 
     /// The live event an ID refers to, following merge forwards; nil once the event is gone.

@@ -38,6 +38,7 @@ class FeedManager: NSObject, ObservableObject {
     private let enrichmentQueue: EnrichmentQueue
     private let allowsBackgroundWork: @MainActor () -> Bool
     private let importanceJudge: StoryImportanceJudge
+    private let imageFinder: StoryImageFinder
     private var isStopped = false
     private var storeUpdates: AnyCancellable?
     private var terminationObserver: AnyCancellable?
@@ -46,6 +47,8 @@ class FeedManager: NSObject, ObservableObject {
     private var refreshRunID: UUID?
     private var enrichmentTask: Task<Void, Never>?
     private var overviewWarmupTask: Task<Void, Never>?
+    /// Publisher-page lead images, looked up after clustering so notifications never wait for page downloads.
+    private var imageLookupTask: Task<Void, Never>?
     /// Event clustering after collection; one pass at a time, never part of the refresh itself.
     private var clusteringTask: Task<Void, Never>?
     private var clusteringRunID: UUID?
@@ -74,6 +77,7 @@ class FeedManager: NSObject, ObservableObject {
          },
          enrichmentQueue: EnrichmentQueue? = nil,
          importanceJudge: StoryImportanceJudge = .onDevice,
+         imageFinder: StoryImageFinder = .publisherPages,
          allowsBackgroundWork: @escaping @MainActor () -> Bool = {
              let info = ProcessInfo.processInfo
              return !info.isLowPowerModeEnabled && info.thermalState.rawValue < ProcessInfo.ThermalState.serious.rawValue
@@ -91,6 +95,7 @@ class FeedManager: NSObject, ObservableObject {
         self.notifyBatch = notifyBatch
         self.enrichmentQueue = enrichmentQueue ?? EnrichmentQueue(store: store)
         self.importanceJudge = importanceJudge
+        self.imageFinder = imageFinder
         self.allowsBackgroundWork = allowsBackgroundWork
         self.wakeRefreshDelay = wakeRefreshDelay
         self.now = now
@@ -357,6 +362,8 @@ class FeedManager: NSObject, ObservableObject {
         enrichmentTask = nil
         overviewWarmupTask?.cancel()
         overviewWarmupTask = nil
+        imageLookupTask?.cancel()
+        imageLookupTask = nil
         clusteringTask?.cancel()
         clusteringTask = nil
         clusteringRunID = nil
@@ -490,8 +497,7 @@ class FeedManager: NSObject, ObservableObject {
                 let work = Task.detached(priority: .utility) { () throws -> Bool in
                     let clustering = try await EventClusterer.run(in: database, judge: modelAllowed ? .onDevice : .unavailable)
                     // Importance is rated once clusters are known; waiting stories expire after their lifetime.
-                    let curation = try await StoryCurator.run(in: database, judge: importanceJudge,
-                                                              imageFinder: backgroundAllowed ? .publisherPages : .unavailable, muting: muting)
+                    let curation = try await StoryCurator.run(in: database, judge: importanceJudge, muting: muting)
                     return !clustering.changedEvents.isEmpty || curation.changed
                 }
                 let result = await withTaskCancellationHandler {
@@ -518,6 +524,37 @@ class FeedManager: NSObject, ObservableObject {
                 let muting = self.appSettings.muteRules
                 self.overviewWarmupTask = Task {
                     await OverviewGenerationCoordinator.shared.warmVisibleOverviews(store: store, muting: muting)
+                }
+            }
+            self.lookUpStoryImages()
+        }
+    }
+
+    /// Looks up lead images for shown stories without any, after clustering and outside `waitForEventClustering`, so
+    /// notification triage never waits for publisher pages. A later pass replaces a lookup still running.
+    private func lookUpStoryImages() {
+        imageLookupTask?.cancel()
+        imageLookupTask = nil
+        guard !isStopped, imageFinder.isAvailable, allowsBackgroundWork() else { return }
+        let database = articleStore.database
+        let finder = imageFinder
+        let muting = appSettings.muteRules
+        imageLookupTask = Task { [weak self] in
+            let work = Task.detached(priority: .utility) {
+                try await StoryCurator.run(in: database, judge: .unavailable, imageFinder: finder, muting: muting)
+            }
+            let result = await withTaskCancellationHandler {
+                await work.result
+            } onCancel: {
+                work.cancel()
+            }
+            guard let self, !Task.isCancelled else { return }
+            switch result {
+            case .success(let report):
+                if report.changed { self.articleStore.noteEventsChanged() }
+            case .failure(let error):
+                if !(error is CancellationError) {
+                    self.logger.error("Story image lookup failed: \(error.localizedDescription)")
                 }
             }
         }
