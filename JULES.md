@@ -8,4 +8,4 @@ Keep PRs focused, compare proposed changes with current main, and omit unrelated
 
 Jules runs on Ubuntu Linux without Xcode or the macOS SDK. The app imports SwiftUI, AppKit and FoundationModels, and the tests compile for `arm64-apple-macos15.0`, so `./test.sh`, `build.sh`, `build_release.sh` and `swift build` cannot run there. Run only the Python evaluation scripts that `./test.sh` invokes before compiling. Report Swift builds and tests as not run, never as passed or failed; the GitHub CI and Codemagic macOS runners are the Swift gate.
 
-The default Jules image has no Swift toolchain. When the environment setup installs Swift 6.4 (the Xcode 27 toolchain), run `swiftc -parse` on changed Swift files. This is a syntax-only check: it does not resolve imports or type-check, and it does not replace the macOS checks.
+The default Jules image has no Swift toolchain. The environment setup, [script/jules_setup.sh](script/jules_setup.sh), installs Swift 6.4 (the Xcode 27 toolchain). When `swiftc` is available, run `swiftc -parse` on changed Swift files. This is a syntax-only check: it does not resolve imports or type-check, and it does not replace the macOS checks.
