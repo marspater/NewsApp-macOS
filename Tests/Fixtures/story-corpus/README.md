@@ -139,6 +139,9 @@ Run the preparation command with `--labels /private/path/reviewed-labels.json` a
 
 Tune with `NEWS_EVENT_CORPUS=/private/path/reviewed-event-corpus.json ./test.sh --event-corpus`. Fix the embedding cutoff and deterministic settings on tune before the one holdout run. Record per-language/source support, false merges and recall; same-document copies and correlated pairs must not inflate the event gate.
 
+For an English-only event replay, set `NEWS_EVENT_LANGUAGE=en`; filtering happens before ingestion. `NEWS_EVENT_JUDGE=1` enables the on-device judge with the existing evaluation-only unlimited pass budget; unset it for deterministic matching. `NEWS_EVENT_OUTPUT=/private/new-directory` saves memberships and clustering pass counts as `event-replay-<split>.json`, without publisher text or labels. The directory must already exist with mode 0700 outside the checkout; an existing receipt is rejected before scoring. Counts of settled judgements show whether the judge actually answered; requesting it alone is not proof of availability. Precision and recall include Wilson 95% intervals. Freeze code and settings first, run each agreed judge mode once in a separate fresh process/directory, and review saved memberships without replaying. This event replay is separate from the fingerprint holdout gate.
+
+
 The six same-URL copies in this proposal do not measure the fingerprint gate. Neither the catalog nor the targeted sibling feeds produced a different-URL candidate, so that gate now bounds false merges over all eligible holdout documents (see the fingerprint section above) and stays open until a fresh holdout capture is reviewed.
 
 ## Publisher date and URL evidence follow-up — 4 October 2026

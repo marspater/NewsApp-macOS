@@ -301,7 +301,9 @@ struct NewsTests {
                 exit(1)
             }
             print("🏃 Evaluating event clustering on \(path)...")
-            try await evaluateEventCorpus(path: path, selectedSplit: CommandLine.arguments.contains("--corpus-holdout") ? "holdout" : "tune")
+            try await evaluateEventCorpus(path: path, selectedSplit: CommandLine.arguments.contains("--corpus-holdout") ? "holdout" : "tune",
+                                          language: ProcessInfo.processInfo.environment["NEWS_EVENT_LANGUAGE"],
+                                          outputDirectory: ProcessInfo.processInfo.environment["NEWS_EVENT_OUTPUT"])
             return
         }
         if CommandLine.arguments.contains("--performance-baseline") {
@@ -5623,7 +5625,7 @@ struct NewsTests {
         assertTrue(EventCorpusMetrics().precision == nil, "No predicted positives cannot establish precision")
         assertTrue(EventCorpusMetrics().recall == nil, "No labeled positives cannot establish recall")
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("news-corpus-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         defer { try? FileManager.default.removeItem(at: directory) }
         let formatter = ISO8601DateFormatter()
         let items = EventControlSet.articles(now: Date(), root: fixtureRoot).map { item -> [String: String] in
@@ -5655,6 +5657,20 @@ struct NewsTests {
         let identityMetrics = try await evaluateEventCorpus(path: identityFile.path)
         assertEqual(identityMetrics["tune"]?.truePositives, 1, "Observed URLs resolve copies even when their titles differ")
         assertEqual(identityMetrics["tune"]?.falsePositives, 0, "URL replay preserves document identity without false merges")
+
+        let spanish = ["id": "spanish", "title": "Las autoridades municipales aprueban la construcción de una nueva biblioteca pública",
+                       "source": "Corpus", "published": formatter.string(from: Date()), "split": "tune"]
+        try JSONSerialization.data(withJSONObject: ["articles": identityItems + [spanish]]).write(to: identityFile)
+        let english = try await evaluateEventCorpus(path: identityFile.path, language: "en", outputDirectory: directory.path)
+        assertEqual(english["tune"]?.truePositives, 1, "English replay preserves observed document identity")
+        let output = directory.appendingPathComponent("event-replay-tune.json")
+        let receipt = try JSONSerialization.jsonObject(with: Data(contentsOf: output)) as! [String: Any]
+        assertEqual((receipt["memberships"] as? [String: String])?.count, 2, "Other languages never enter the English replay")
+        assertTrue((receipt["passes"] as? [[String: Int]])?.isEmpty == false, "Saved predictions include clustering pass counts")
+        do {
+            _ = try await evaluateEventCorpus(path: identityFile.path, language: "en", outputDirectory: directory.path)
+            assertTrue(false, "A replay must not overwrite its previous evidence")
+        } catch { /* Existing evidence is rejected before scoring. */ }
 
         print("  - Testing the native embedding comparison (#127)...")
         let now = Date()
@@ -5828,7 +5844,10 @@ struct NewsTests {
         var line: String {
             let precisionText = precision.map { String(format: "%.3f", $0) } ?? "n/a"
             let recallText = recall.map { String(format: "%.3f", $0) } ?? "n/a"
-            return "precision \(precisionText) (TP \(truePositives), FP \(falsePositives)), recall \(recallText) (FN \(falseNegatives))"
+            func interval(_ successes: Int, _ trials: Int) -> String {
+                StoryCorpus.wilson(successes, of: trials).map { String(format: " [95%% %.3f–%.3f]", $0.lowerBound, $0.upperBound) } ?? ""
+            }
+            return "precision \(precisionText)\(interval(truePositives, truePositives + falsePositives)) (TP \(truePositives), FP \(falsePositives)), recall \(recallText)\(interval(truePositives, truePositives + falseNegatives)) (FN \(falseNegatives))"
         }
     }
 
@@ -5838,7 +5857,12 @@ struct NewsTests {
     /// Format: {"articles": [{"id", "title", "description", "source", "published" (ISO 8601),
     /// "event" (label, or absent for singletons), "split" ("tune" or "holdout")}]}.
     @discardableResult
-    static func evaluateEventCorpus(path: String, selectedSplit: String = "tune") async throws -> [String: EventCorpusMetrics] {
+    static func evaluateEventCorpus(path: String, selectedSplit: String = "tune", language: String? = nil,
+                                    outputDirectory: String? = nil) async throws -> [String: EventCorpusMetrics] {
+        let output = try outputDirectory.map { try StoryCorpus.privateDirectory($0).appendingPathComponent("event-replay-\(selectedSplit).json") }
+        if let output, FileManager.default.fileExists(atPath: output.path) {
+            throw StoryCorpus.Failure.invalid("Replay evidence already exists; refusing to score again")
+        }
         struct Corpus: Decodable {
             struct Item: Decodable {
                 let id: String, title: String, description: String?, source: String, published: Date, event: String?, split: String?
@@ -5851,12 +5875,24 @@ struct NewsTests {
         let corpus = try decoder.decode(Corpus.self, from: Data(contentsOf: URL(fileURLWithPath: path)))
         var results: [String: EventCorpusMetrics] = [:]
         for split in [selectedSplit] {
-            let items = corpus.articles.filter { ($0.split ?? "tune") == split }.sorted { $0.published < $1.published }
+            let items = corpus.articles.filter {
+                ($0.split ?? "tune") == split && (language == nil || EventMatchKey.language(of: $0.title + "\n" + ($0.description ?? "")) == language)
+            }.sorted { ($0.published, $0.id) < ($1.published, $1.id) }
             let articles = items.map { item in
                 FeedArticle(storedID: item.id, title: item.title, link: item.url ?? "https://corpus.invalid/\(item.id)", guid: item.id,
                             description: item.description ?? "", pubDate: item.published, source: item.source)
             }
-            let memberships = try await StoryCorpus.eventMemberships(articles: articles)
+            var passes: [[String: Int]] = []
+            let memberships = try await StoryCorpus.eventMemberships(articles: articles) { report in
+                passes.append(["processed": report.processed, "joined": report.joined, "created": report.created,
+                               "merged": report.merged, "judged": report.judged, "conflicts": report.conflicts, "detached": report.detached])
+            }
+            if let output {
+                let receipt: [String: Any] = ["split": split, "language": language ?? "all", "matcherVersion": EventMatcher.version,
+                                             "judgeRequested": ProcessInfo.processInfo.environment["NEWS_EVENT_JUDGE"] == "1",
+                                             "memberships": memberships, "passes": passes]
+                try StoryCorpus.writePrivate(try JSONSerialization.data(withJSONObject: receipt, options: [.sortedKeys]), to: output, replacing: false)
+            }
             let predicted = items.map { memberships[$0.id] }
             let languages = items.map { EventMatchKey.language(of: $0.title + "\n" + ($0.description ?? "")) ?? "unknown" }
             var total = EventCorpusMetrics()
