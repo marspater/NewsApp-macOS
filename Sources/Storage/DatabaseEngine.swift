@@ -965,6 +965,35 @@ actor DatabaseEngine {
         try aliasTarget(kind: "id", value: id) ?? id
     }
 
+    func resolvedArticleIDs(_ ids: [String]) throws -> [String] {
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, "SELECT article_id FROM article_aliases WHERE kind = 'id' AND value = ?;", -1, &statement, nil) == SQLITE_OK else {
+            throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Cannot prepare alias lookup"])
+        }
+        defer { sqlite3_finalize(statement) }
+
+        var resolvedIds: [String] = []
+        resolvedIds.reserveCapacity(ids.count)
+
+        for id in ids {
+            sqlite3_reset(statement)
+            sqlite3_bind_text(statement, 1, id, -1, Self.sqliteTransient)
+            switch sqlite3_step(statement) {
+            case SQLITE_ROW:
+                if let cStr = sqlite3_column_text(statement, 0) {
+                    resolvedIds.append(String(cString: cStr))
+                } else {
+                    resolvedIds.append(id)
+                }
+            case SQLITE_DONE:
+                resolvedIds.append(id)
+            default:
+                throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Cannot read article alias"])
+            }
+        }
+        return resolvedIds
+    }
+
     /// Keep observed identities across serial URL/GUID changes without rewriting keys.
     func resolvedArticleID(for article: FeedArticle, feedURL: String? = nil) throws -> String {
         let scoped = ArticleIdentity.scopedGUID(article.guid, feedURL: feedURL ?? article.identityFeedURL)
@@ -1671,8 +1700,8 @@ actor DatabaseEngine {
 
         try beginTransaction()
         do {
-            for articleId in articleIds {
-                let articleId = try resolvedArticleID(articleId)
+            let resolvedIds = try resolvedArticleIDs(articleIds)
+            for articleId in resolvedIds {
                 sqlite3_reset(stmt)
                 sqlite3_bind_text(stmt, 1, articleId, -1, Self.sqliteTransient)
                 sqlite3_bind_int(stmt, 2, readInt)
