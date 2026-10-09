@@ -327,8 +327,24 @@ struct OverviewPerspectivesExtractor: Sendable {
         return nil
     }
 
-    // Group order and minimum statement length per pattern; matches keep pattern order.
-    private static let attributions: [(regex: NSRegularExpression, participantGroup: Int, statementGroup: Int, minimumLength: Int)] = {
+    /// One compiled attribution pattern with its capture groups and minimum statement length.
+    private struct Attribution {
+        let regex: NSRegularExpression
+        let participantGroup: Int
+        let statementGroup: Int
+        let minimumLength: Int
+
+        init?(_ pattern: String, participantGroup: Int, statementGroup: Int, minimumLength: Int) {
+            guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
+            self.regex = regex
+            self.participantGroup = participantGroup
+            self.statementGroup = statementGroup
+            self.minimumLength = minimumLength
+        }
+    }
+
+    // Compiled once; matches keep pattern order.
+    private static let attributions: [Attribution] = {
         // Pattern 1: "[Quote]," (said|announced|stated|argued|warned|noted) [Participant].
         let patternQuoteFirst = #"\"([^\"]{10,250})\",?\s*(?:said|stated|announced|noted|argued|warned|confirmed|declared|emphasized|urged|reiterated|cautioned|explained)\s+([A-Z][A-Za-z0-9\s,\.\-]{2,60})"#
         // Pattern 2: [Participant] (said that|stated that|announced that|argued that|warned that|noted that|confirmed that) [Statement].
@@ -337,10 +353,10 @@ struct OverviewPerspectivesExtractor: Sendable {
         let patternAccordingTo = #"According to\s+([A-Z][A-Za-z0-9\s,\.\-]{2,60}),\s+([^\.\n]{15,200})"#
 
         return [
-            (try! NSRegularExpression(pattern: patternQuoteFirst), 2, 1, 0),
-            (try! NSRegularExpression(pattern: patternSpeakerFirst), 1, 2, 10),
-            (try! NSRegularExpression(pattern: patternAccordingTo), 1, 2, 10)
-        ]
+            Attribution(patternQuoteFirst, participantGroup: 2, statementGroup: 1, minimumLength: 0),
+            Attribution(patternSpeakerFirst, participantGroup: 1, statementGroup: 2, minimumLength: 10),
+            Attribution(patternAccordingTo, participantGroup: 1, statementGroup: 2, minimumLength: 10)
+        ].compactMap { $0 }
     }()
 
     /// Extracts quotes and statements with attribution to participants.
