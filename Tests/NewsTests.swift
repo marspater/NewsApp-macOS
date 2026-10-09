@@ -7387,6 +7387,10 @@ struct NewsTests {
         assertEqual(shortAnalysis.modelIdentifier, "apple.foundation-model", "Two supported points do not force a short article to invent a third")
         let fallbackAnalysis = try await ArticleAnalyzer(textModel: .unavailable).analyze(title: "Bridge reopened", content: text)
         assertEqual(fallbackAnalysis.modelIdentifier, "apple.natural-language.fallback", "A refusal keeps source-based extraction")
+        assertEqual(fallbackAnalysis.analysisVersion, 3, "A Mac without the model keeps its extractive summary")
+        let waitingAnalysis = try await ArticleAnalyzer(textModel: NewsTextModel { _, _ in throw NewsTextModel.TemporarilyUnavailable() })
+            .analyze(title: "Bridge reopened", content: text)
+        assertEqual(waitingAnalysis.analysisVersion, 0, "A summary made while the model is off or downloading is redone once it can run")
         assertEqual(ArticleTextAnswer.analysis("SUMMARY|x\nSUMMARY|y\nPOINT|a\nPOINT|b\nPOINT|c")?.summary, nil, "Duplicate summary is rejected")
         let article1 = FeedArticle(storedID: "plain-a", title: "Bridge repairs", link: "https://\(fixtureHost)/a", guid: "plain-a", description: text, pubDate: Date(), source: "Publisher A")
         let other = "Engineers inspected the bridge before traffic resumed. The council funded the repairs. Residents welcomed the reopening."
@@ -7466,8 +7470,10 @@ struct NewsTests {
                     "An overview made while the model was skipped is stored as provisional")
         let upgraded = await coordinator.requestOverview(eventID: "blocked", eventTitle: "Bridge", membershipVersion: 1, articles: [article1, article2])
         assertEqual(upgraded?.content.evidenceSections?.introduction?.count, 2, "A provisional overview is regenerated once the model may run")
-        for (failure, retried) in [(NewsTextModel { _, _ in throw URLError(.timedOut) }, true), (NewsTextModel.unavailable, false)] {
-            let eventID = "failing-\(retried)"
+        let failures = [(NewsTextModel { _, _ in throw URLError(.timedOut) }, true),
+                        (NewsTextModel { _, _ in throw NewsTextModel.TemporarilyUnavailable() }, true), (NewsTextModel.unavailable, false)]
+        for (index, (failure, retried)) in failures.enumerated() {
+            let eventID = "failing-\(index)"
             let failing = OverviewGenerationCoordinator(store: store, queue: EnrichmentQueue(store: store), textModel: failure, allowsModel: { true })
             let shown = await failing.requestOverview(eventID: eventID, eventTitle: "Bridge", membershipVersion: 1, articles: [article1, article2])
             assertTrue(shown != nil, "A failed model still shows the deterministic overview")
@@ -7506,7 +7512,8 @@ struct NewsTests {
     static func testArticleAnalyzerStructuredOutputAndFallbacks() async throws {
         print("  - Testing ArticleAnalyzer Structured Output (Summary, Key Points, Entities, Sentiment)...")
 
-        let analyzer = ArticleAnalyzer.shared
+        // The extractive path, independent of whether this Mac's on-device model is ready.
+        let analyzer = ArticleAnalyzer(textModel: .unavailable)
         let title = "Tech Giants Unveil Breakthrough Quantum Computing Core"
         let articleBody = """
         Researchers at leading technology institutes have announced a functional 1,000-qubit quantum processor.

@@ -79,16 +79,28 @@ public enum NewsCategory: String, CaseIterable, Sendable, Codable {
 public struct NewsTextModel: Sendable {
     let respond: @Sendable (String, Int) async throws -> String
 
+    /// Apple Intelligence is switched off or its model is still downloading, so a later request may succeed. Results
+    /// made without the model are then kept only until it can run. `URLError(.resourceUnavailable)` means this Mac
+    /// cannot run the model, and deterministic results are final.
+    public struct TemporarilyUnavailable: Error {}
+
     public static let unavailable = NewsTextModel { _, _ in throw URLError(.resourceUnavailable) }
     public static let onDevice = NewsTextModel { prompt, tokens in
         try Task.checkCancellation()
         #if canImport(FoundationModels)
-        if #available(macOS 26.0, *), case .available = SystemLanguageModel.default.availability {
-            let session = LanguageModelSession(model: SystemLanguageModel(guardrails: .permissiveContentTransformations))
-            // The stable SDK used by CodeQL still requires `sampling:`; newer SDKs retain this initializer.
-            let response = try await session.respond(to: prompt, options: GenerationOptions(sampling: .greedy, maximumResponseTokens: tokens))
-            try Task.checkCancellation()
-            return response.content
+        if #available(macOS 26.0, *) {
+            switch SystemLanguageModel.default.availability {
+            case .available:
+                let session = LanguageModelSession(model: SystemLanguageModel(guardrails: .permissiveContentTransformations))
+                // The stable SDK used by CodeQL still requires `sampling:`; newer SDKs retain this initializer.
+                let response = try await session.respond(to: prompt, options: GenerationOptions(sampling: .greedy, maximumResponseTokens: tokens))
+                try Task.checkCancellation()
+                return response.content
+            case .unavailable(.deviceNotEligible):
+                break
+            case .unavailable:
+                throw TemporarilyUnavailable()
+            }
         }
         #endif
         throw URLError(.resourceUnavailable)
@@ -714,6 +726,9 @@ public final class ArticleAnalyzer: Sendable {
         let contextBudget = 6000
         let budgetedContent = String(effectiveContent.prefix(contextBudget))
 
+        // A summary made while the model is switched off or still downloading is stored at version 0, which the reader
+        // never reuses, so it is redone once the model can run.
+        var provisional = false
         if allowFoundationModels {
             do {
                 let prompt = """
@@ -739,6 +754,8 @@ public final class ArticleAnalyzer: Sendable {
                                        category: category, sentiment: sentiment, modelIdentifier: "apple.foundation-model", analysisVersion: 3)
             } catch is CancellationError {
                 throw AIAnalysisError.cancelled
+            } catch is NewsTextModel.TemporarilyUnavailable {
+                provisional = true
             } catch {
                 // Unavailable, refused or malformed model output retains the extractive fallback.
             }
@@ -759,7 +776,7 @@ public final class ArticleAnalyzer: Sendable {
             category: category,
             sentiment: sentiment,
             modelIdentifier: "apple.natural-language.fallback",
-            analysisVersion: 3
+            analysisVersion: provisional ? 0 : 3
         )
     }
 }

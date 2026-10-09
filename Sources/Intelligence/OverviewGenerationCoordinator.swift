@@ -164,7 +164,8 @@ actor OverviewGenerationCoordinator {
                     // No on-device model on this Mac: the deterministic overview is final.
                     return Task.isCancelled ? nil : overview
                 } catch {
-                    // A refused, rate-limited or busy model: show the deterministic overview and retry on the next request.
+                    // A model that is switched off, still downloading, refused or rate-limited: show the deterministic
+                    // overview and retry on the next request.
                     return Task.isCancelled ? nil : Self.provisional(overview)
                 }
             }
