@@ -5,6 +5,15 @@ import SwiftUI
 import AppKit
 import UniformTypeIdentifiers
 
+private struct AddFeedSubscriptionKey: FocusedValueKey { typealias Value = () -> Void }
+
+extension FocusedValues {
+    var addFeedSubscription: (() -> Void)? {
+        get { self[AddFeedSubscriptionKey.self] }
+        set { self[AddFeedSubscriptionKey.self] = newValue }
+    }
+}
+
 struct SidebarView: View {
     @Binding var selectedTopic: String?
     
@@ -45,6 +54,7 @@ struct SidebarView: View {
             userSectionsSection
             suggestedSection
         }
+        .focusedSceneValue(\.addFeedSubscription, { isSubscribePopoverPresented = true })
         .listStyle(.sidebar)
         .scrollContentBackground(.visible)
         .navigationSplitViewColumnWidth(min: 220, ideal: 240, max: 300)

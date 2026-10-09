@@ -4,6 +4,20 @@
 import SwiftUI
 import AppKit
 
+struct ListCommandActions {
+    let canGroupStories: Bool
+    let newBriefing: (() -> Void)?
+}
+
+private struct ListCommandActionsKey: FocusedValueKey { typealias Value = ListCommandActions }
+
+extension FocusedValues {
+    var listActions: ListCommandActions? {
+        get { self[ListCommandActionsKey.self] }
+        set { self[ListCommandActionsKey.self] = newValue }
+    }
+}
+
 struct ArticleListView: View {
     @Binding var selectedTopic: String?
     @Binding var searchText: String
@@ -18,6 +32,7 @@ struct ArticleListView: View {
     
     @AppStorage("articleGridLayout") private var gridLayout = false
     @AppStorage("groupsEventCoverage") private var groupsEvents = true
+    @Environment(\.appearsActive) private var appearsActive
     @Environment(\.effectiveReduceMotion) private var reduceMotion
     @State private var focusedArticleID: String? = nil
     
@@ -115,6 +130,16 @@ struct ArticleListView: View {
         }
     }
 
+    private var selectedStory: FeedArticle? {
+        guard articlePath.isEmpty else { return nil }
+        return filteredArticles.first { $0.id == focusedArticleID }
+    }
+
+    private var listCommandActions: ListCommandActions? {
+        guard articlePath.isEmpty else { return nil }
+        return ListCommandActions(canGroupStories: !isBriefing, newBriefing: isBriefing ? { startNewBriefing() } : nil)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             ScrollViewReader { proxy in
@@ -174,6 +199,8 @@ struct ArticleListView: View {
                 }
             }
         }
+        .focusedSceneValue(\.selectedStory, selectedStory)
+        .focusedSceneValue(\.listActions, listCommandActions)
         .navigationTitle(locationTitle)
         // The masthead shows the location, so the toolbar does not repeat it (DESIGN.md 5).
         .toolbar(removing: .title)
@@ -351,6 +378,7 @@ struct ArticleListView: View {
         }
         .nativeGlassButtonStyle()
         .buttonBorderShape(.capsule)
+        .opacity(appearsActive ? 1 : 0.5)
         .padding(.top, AppSpacing.xs)
         .help("Show the latest stories (U). The list keeps its place until you do.")
         .accessibilityHint("Moves to the top of the updated list")
@@ -392,6 +420,7 @@ struct ArticleListView: View {
                 .font(AppTypography.masthead)
                 .foregroundStyle(AppColor.primaryText)
                 .accessibilityAddTraits(.isHeader)
+                .accessibilityHeading(.h1)
             HStack(spacing: AppSpacing.xs) {
                 Text(listSubtitle)
                     .font(AppTypography.caption)
@@ -431,16 +460,9 @@ struct ArticleListView: View {
 
     @ToolbarContentBuilder
     private var listToolbar: some ToolbarContent {
-        if isBriefing {
-            ToolbarItem(placement: .primaryAction) {
-                Button("New Briefing", action: startNewBriefing)
-                    .help("Select a new briefing from the latest unread stories")
-            }
-        }
-
         ToolbarItemGroup(placement: .primaryAction) {
             Toggle(isOn: $groupsEvents.animation(reduceMotion ? nil : AppMotion.state)) {
-                Label("Group Coverage by Event", systemImage: "square.stack.3d.up")
+                Label("Group Stories by Event", systemImage: groupsEvents ? "square.stack.3d.up.fill" : "square.stack.3d.up")
             }
             .toggleStyle(.button)
             .help(groupsEvents ? "Showing one card per event. Show individual publications (G)" : "Showing individual publications. Group coverage of the same event (G)")
@@ -463,7 +485,22 @@ struct ArticleListView: View {
             ToolbarSpacer(.fixed, placement: .primaryAction)
         }
 
-        // Pressing again while a refresh runs joins it, so the button stays enabled and keeps its size.
+        if #available(macOS 26.1, *) {
+            refreshToolbarItem.visibilityPriority(.high)
+        } else {
+            refreshToolbarItem
+        }
+        if isBriefing {
+            if #available(macOS 26, *) { ToolbarSpacer(.fixed, placement: .primaryAction) }
+            ToolbarItem(placement: .primaryAction) {
+                Button("New Briefing", action: startNewBriefing)
+                    .help("Select a new briefing from the latest unread stories")
+            }
+        }
+    }
+
+    // Repeated refreshes join the running request, so keep the control enabled and its size stable.
+    private var refreshToolbarItem: some ToolbarContent {
         ToolbarItem(placement: .primaryAction) {
             Button {
                 refreshFeeds()
