@@ -161,12 +161,17 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
         if insideItem && ["enclosure", "media:content", "media:thumbnail"].contains(elementName),
            let raw = attributeDict["url"], !raw.isEmpty {
             let type = attributeDict["type"]?.lowercased()
-            let isImage = type?.hasPrefix("image/") == true || (type == nil && (elementName == "media:thumbnail" || attributeDict["medium"] == "image"))
+            let medium = attributeDict["medium"]?.lowercased()
             let url = resolvedURL(raw)
             let width = attributeDict["width"].flatMap(Int.init), height = attributeDict["height"].flatMap(Int.init)
+            // The Guardian lists sized media:content renditions with neither type nor medium.
+            let isImage = type?.hasPrefix("image/") == true
+                || (type == nil && (elementName == "media:thumbnail" || medium == "image"
+                    || (elementName == "media:content" && medium == nil && width != nil)))
             if isImage, ReaderImageCandidate.usable(url: url, width: width, height: height), itemImageCandidates.count < 8 {
                 itemImageCandidates.append(ReaderImageCandidate(url: url, origin: .feed, width: width, height: height))
-                if itemImageUrl.isEmpty { itemImageUrl = url }
+                // The widest rendition; the first listed when sizes are unknown or equal.
+                itemImageUrl = itemImageCandidates.max { ($0.width ?? 0) < ($1.width ?? 0) }?.url ?? url
             }
         }
 
@@ -345,21 +350,8 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
             with: " ",
             options: .regularExpression
         )
-        text = text
-            .replacingOccurrences(of: "&nbsp;", with: " ")
-            .replacingOccurrences(of: "&amp;", with: "&")
-            .replacingOccurrences(of: "&quot;", with: "\"")
-            .replacingOccurrences(of: "&#39;", with: "'")
-            .replacingOccurrences(of: "&apos;", with: "'")
-            .replacingOccurrences(of: "&lt;", with: "<")
-            .replacingOccurrences(of: "&gt;", with: ">")
-            .replacingOccurrences(of: "&#8217;", with: "\u{2019}")
-            .replacingOccurrences(of: "&#8220;", with: "\u{201C}")
-            .replacingOccurrences(of: "&#8221;", with: "\u{201D}")
-            .replacingOccurrences(of: "&#8212;", with: "\u{2014}")
-            .replacingOccurrences(of: "&mdash;", with: "\u{2014}")
-            .replacingOccurrences(of: "&#8211;", with: "\u{2013}")
-            .replacingOccurrences(of: "&ndash;", with: "\u{2013}")
+        // Every named and numeric form, including zero-padded ones such as `&#039;`.
+        text = ContentExtractionPipeline.shared.decodeHTMLEntities(text)
         
         text = text.replacingOccurrences(of: "[ \\t]+", with: " ", options: .regularExpression)
         text = text.replacingOccurrences(of: "[ \\t]*\\n[ \\t]*", with: "\n", options: .regularExpression)

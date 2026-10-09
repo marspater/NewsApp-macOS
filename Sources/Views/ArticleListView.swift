@@ -40,9 +40,14 @@ struct ArticleListView: View {
     @State private var isPointerInList = false
     /// Set by the reader's own regrouping actions, which apply at once.
     @State private var appliesNextUpdate = false
+    /// Reloads the list once a refresh the reader asked for has finished.
+    @State private var refreshReloads = 0
     /// Stories the reader's muting removes from this list, across every page.
     @State private var mutedCount = 0
     @State private var showsMuted = false
+    /// Stories this list hides until more publishers cover them (`StoryVisibilityPolicy`).
+    @State private var waitingCount = 0
+    @State private var showsWaiting = false
     @State private var confirmsUnmuteAll = false
 
     private var isSearching: Bool {
@@ -58,7 +63,7 @@ struct ArticleListView: View {
 
     private var queryIdentity: String {
         let muting = listMuting
-        return "\(selectedTopic ?? "Today"):\(searchText):\(themeManager.autoHideRead):\(muting.sourceParameter)|\(muting.topicParameter):\(showsMuted)"
+        return "\(selectedTopic ?? "Today"):\(searchText):\(themeManager.autoHideRead):\(muting.sourceParameter)|\(muting.topicParameter):\(showsMuted):\(showsWaiting)"
     }
 
     var filteredArticles: [FeedArticle] { buffer.displayed.articles }
@@ -91,6 +96,9 @@ struct ArticleListView: View {
             ProgressView("Loading articles…").padding(AppSpacing.xl)
         } else if filteredArticles.isEmpty && queryError != nil {
             ContentUnavailableView("Couldn’t Load Articles", systemImage: "exclamationmark.triangle")
+        } else if filteredArticles.isEmpty && isSearching && mutedCount == 0 {
+            ContentUnavailableView.search(text: searchText)
+                .padding(.top, 80)
         } else if filteredArticles.isEmpty {
             emptyStateView
         } else {
@@ -171,7 +179,7 @@ struct ArticleListView: View {
                 }
             }
         }
-        .task(id: "\(queryIdentity):\(articleStore.revision):\(articleStore.eventRevision):\(pageRequest)") {
+        .task(id: "\(queryIdentity):\(articleStore.revision):\(articleStore.eventRevision):\(pageRequest):\(refreshReloads)") {
             let identity = queryIdentity
             let runID = UUID()
             queryRunID = runID
@@ -185,7 +193,7 @@ struct ArticleListView: View {
                         let candidates = try await articleStore.database.fetchArticles(
                             isRead: false, limit: FiniteBriefing.candidateLimit,
                             publicationWindow: now.addingTimeInterval(-FiniteBriefing.duration)...now,
-                            muting: appSettings.muteRules)
+                            muting: appSettings.muteRules, hidingWaitingStories: true)
                         try Task.checkCancellation()
                         briefing = FiniteBriefing(candidates: candidates, readIDs: readManager.readArticles, now: now)
                     }
@@ -221,8 +229,10 @@ struct ArticleListView: View {
                 if !isPaging {
                     var hidden = 0
                     if !muting.isEmpty { hidden = try await countMuted(muting) }
+                    let waiting = hidesWaitingStories || showsWaiting ? try await countWaiting(muting: muting) : 0
                     try Task.checkCancellation()
                     mutedCount = hidden
+                    waitingCount = waiting
                 }
                 let page = Array(fetched.prefix(200))
                 let listed = isPaging ? buffer.displayed.articles + page : page
@@ -271,6 +281,13 @@ struct ArticleListView: View {
         return (topic, read, topic == "Saved Stories" ? true : nil)
     }
 
+    /// Main lists hide stories that wait for more coverage; search, Saved Stories and History list everything.
+    private var listsWaitingStories: Bool {
+        !isSearching && selectedTopic != "Saved Stories" && selectedTopic != "History"
+    }
+
+    private var hidesWaitingStories: Bool { listsWaitingStories && !showsWaiting }
+
     private func fetchPage(after pageCursor: ArticleQueryCursor?, muting: MuteRules) async throws -> [FeedArticle] {
         if isSearching {
             return try await articleStore.database.searchArticles(query: searchText, limit: 201, after: pageCursor, muting: muting)
@@ -278,7 +295,14 @@ struct ArticleListView: View {
         let filters = listFilters
         return try await articleStore.database.fetchArticles(
             section: filters.topic, isRead: filters.read, isSaved: filters.saved,
-            limit: 201, after: pageCursor, muting: muting)
+            limit: 201, after: pageCursor, muting: muting, hidingWaitingStories: hidesWaitingStories)
+    }
+
+    private func countWaiting(muting: MuteRules) async throws -> Int {
+        guard listsWaitingStories else { return 0 }
+        let filters = listFilters
+        return try await articleStore.database.waitingStoryCount(
+            section: filters.topic, isRead: filters.read, isSaved: filters.saved, muting: muting)
     }
 
     private func countMuted(_ muting: MuteRules) async throws -> Int {
@@ -386,9 +410,24 @@ struct ArticleListView: View {
                     .font(AppTypography.display)
                     .foregroundStyle(AppColor.primaryText)
                 HStack(spacing: AppSpacing.xs) {
-                    Text(isBriefing ? "Up to 10 unread stories · Last 24 hours" : "\(entries.count) stories · Your personal edition")
+                    Text(listSubtitle)
                         .font(AppTypography.caption)
                         .foregroundStyle(AppColor.secondaryText)
+                    if waitingCount > 0 && !isBriefing {
+                        Text("·")
+                            .font(AppTypography.caption)
+                            .foregroundStyle(AppColor.secondaryText)
+                            .accessibilityHidden(true)
+                        Button(showsWaiting ? "Hide \(waitingCount) waiting" : "\(waitingCount) waiting for more sources") {
+                            showsWaiting.toggle()
+                        }
+                        .buttonStyle(.plain)
+                        .font(AppTypography.caption)
+                        .foregroundStyle(AppColor.secondaryText)
+                        .help(showsWaiting
+                              ? "Hide minor stories until more publishers cover them"
+                              : "Minor stories appear once \(StoryVisibilityPolicy.minorStorySources + 1) publishers cover them; unread ones expire after a day")
+                    }
                     if mutedCount > 0 && !listMuting.isEmpty {
                         Text("·")
                             .font(AppTypography.caption)
@@ -406,8 +445,8 @@ struct ArticleListView: View {
                     .help("Select a new briefing from the latest unread stories")
             }
 
-            Toggle(isOn: $groupsEvents) {
-                Image(systemName: "square.stack.3d.up")
+            Toggle(isOn: $groupsEvents.animation(reduceMotion ? nil : AppMotion.state)) {
+                Image(systemName: groupsEvents ? "square.stack.3d.up.fill" : "square.stack.3d.up")
                     .font(.system(size: 14, weight: .medium))
             }
             .toggleStyle(.button)
@@ -444,30 +483,37 @@ struct ArticleListView: View {
             .help("Keyboard Shortcuts")
             .accessibilityLabel("Keyboard Shortcuts")
             
+            // Pressing again while a refresh runs joins it, so the button stays enabled and keeps its size.
             Button {
                 refreshFeeds()
             } label: {
-                if feedManager.isAnyFeedLoading {
-                    ProgressView()
-                        .controlSize(.small)
-                        .scaleEffect(0.8)
-                        .frame(width: 18, height: 18)
-                } else {
-                    Image(systemName: "arrow.clockwise")
-                        .font(.system(size: 15, weight: .medium))
-                        .foregroundColor(AppColor.secondaryText)
-                }
+                Image(systemName: "arrow.clockwise")
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundColor(feedManager.isAnyFeedLoading ? AppColor.accent : AppColor.secondaryText)
+                    .symbolEffect(.rotate, options: .repeat(.continuous), isActive: feedManager.isAnyFeedLoading && !reduceMotion)
             }
             .buttonStyle(.plain)
-            .disabled(feedManager.isAnyFeedLoading)
-            .help("Refresh Feeds (R or ⌘R)")
+            .help(feedManager.isAnyFeedLoading ? "Refreshing feeds…" : "Refresh Feeds (R or ⌘R)")
             .accessibilityLabel("Refresh Feeds")
+            .accessibilityValue(feedManager.isAnyFeedLoading ? "Refreshing" : "")
         }
         .padding(.horizontal, AppLayout.pageInset)
         .padding(.top, 24)
         .padding(.bottom, AppLayout.cardGap)
     }
     
+    /// Story count, how many cards group an event's coverage, and when feeds last refreshed.
+    private var listSubtitle: String {
+        if isBriefing { return "Up to 10 unread stories · Last 24 hours" }
+        var parts = ["\(entries.count) \(entries.count == 1 ? "story" : "stories")"]
+        let events = entries.filter { if case .event = $0 { return true } else { return false } }.count
+        if events > 0 { parts.append("\(events) grouped \(events == 1 ? "event" : "events")") }
+        if !isSearching, let refreshed = feedManager.lastRefreshCompletedAt {
+            parts.append("Updated \(refreshed.formatted(date: .omitted, time: .shortened))")
+        }
+        return parts.joined(separator: " · ")
+    }
+
     private func startNewBriefing() {
         briefing = nil
         pageRequest += 1
@@ -518,10 +564,11 @@ struct ArticleListView: View {
                 }
                 .id(entry.id)
                 .onAppear(perform: NewsSignposts.firstCardAppeared)
-            case .event(let summary, let representative, _):
+            case .event(let summary, let representative, let visibleMembers):
                 EventCardView(
                     representative: representative,
                     summary: summary,
+                    visibleMembers: visibleMembers,
                     isSelected: representative.id == focusedArticleID,
                     compact: !gridLayout,
                     isExpanded: expansionBinding(summary.eventID),
@@ -806,8 +853,16 @@ struct ArticleListView: View {
         }
     }
     
+    /// The reader asked for these stories, so they are shown when the refresh ends instead of waiting behind
+    /// the update button.
     private func refreshFeeds() {
-        feedManager.fetchFeeds()
+        Task {
+            await feedManager.fetchFeedsAsync()
+            // An open article keeps the list still; its updates wait as usual.
+            guard articlePath.isEmpty else { return }
+            appliesNextUpdate = true
+            refreshReloads += 1
+        }
     }
     
     // MARK: - Shortcuts Help View

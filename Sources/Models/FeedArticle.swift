@@ -36,12 +36,43 @@ struct FeedArticle: Identifiable, Codable, Hashable, Sendable {
         pubDate == DateParser.unknownDate ? "Date unavailable" : pubDate.formatted(date: .abbreviated, time: .omitted)
     }
 
+    /// The publisher to show: the catalog's name for the story's site, else the first line of the feed's own title,
+    /// which is often a section ("World news") or a slogan.
+    var publisherName: String {
+        FeedCatalog.publisher(forLink: link) ?? EventFeedSummary.displaySource(source)
+    }
+
     var normalizedLink: String {
         ArticleIdentity.canonicalizeURL(link)
     }
 
     static func normalizeURL(_ urlString: String) -> String {
         ArticleIdentity.canonicalizeURL(urlString)
+    }
+
+    /// Picks among curated member leads. Known area wins; tied or unknown sizes prefer publisher-hosted media.
+    static func bestCardImage(in articles: [FeedArticle]) -> URL? {
+        struct Candidate {
+            let url: URL
+            let area: Int
+            let own: Bool
+        }
+        let candidates = articles.compactMap { article -> Candidate? in
+            guard let image = article.readerDocument?.selectedImage(fallback: article.imageUrl) ?? article.imageUrl,
+                  let url = URL(string: image) else { return nil }
+            let metadata = article.readerDocument?.images?.first { $0.url == image }
+            guard ReaderImageCandidate.usable(url: image, width: metadata?.width, height: metadata?.height),
+                  metadata?.aspectRatio.map({ $0 <= 4 && $0 >= 0.25 }) ?? true else { return nil }
+            let host = URL(string: article.link)?.host?.lowercased().replacingOccurrences(of: "www.", with: "") ?? ""
+            let imageHost = url.host?.lowercased() ?? ""
+            return Candidate(url: url, area: (metadata?.width ?? 0) * (metadata?.height ?? 0),
+                             own: !host.isEmpty && (imageHost == host || imageHost.hasSuffix("." + host)))
+        }
+        return candidates.enumerated().max { lhs, rhs in
+            if lhs.element.area != rhs.element.area { return lhs.element.area < rhs.element.area }
+            if lhs.element.own != rhs.element.own { return !lhs.element.own }
+            return lhs.offset > rhs.offset
+        }?.element.url
     }
 }
 
@@ -138,27 +169,22 @@ struct ArticleFilterQuery: Equatable, Sendable {
         guard !trimmed.isEmpty else { return ArticleFilterQuery() }
 
         var query = ArticleFilterQuery()
-        let lowerText = trimmed.lowercased()
-
-        if lowerText.contains("source:") || lowerText.contains("category:") || lowerText.contains("is:") {
-            for token in trimmed.components(separatedBy: .whitespaces) {
-                let lowerToken = token.lowercased()
-                if lowerToken.hasPrefix("source:") {
-                    query.sourceFilter = String(token.dropFirst(7)).trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-                } else if lowerToken.hasPrefix("category:") {
-                    query.categoryFilter = String(token.dropFirst(9)).trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-                } else if lowerToken == "is:read" {
-                    query.isReadFilter = true
-                } else if lowerToken == "is:unread" {
-                    query.isReadFilter = false
-                } else if lowerToken == "is:saved" {
-                    query.isSavedFilter = true
-                } else if !token.isEmpty {
-                    query.terms.append(lowerToken)
-                }
+        // Words are separate terms with or without operators, so "trump tariffs" matches non-adjacent words.
+        for token in trimmed.components(separatedBy: .whitespacesAndNewlines) {
+            let lowerToken = token.lowercased()
+            if lowerToken.hasPrefix("source:") {
+                query.sourceFilter = String(token.dropFirst(7)).trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            } else if lowerToken.hasPrefix("category:") {
+                query.categoryFilter = String(token.dropFirst(9)).trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            } else if lowerToken == "is:read" {
+                query.isReadFilter = true
+            } else if lowerToken == "is:unread" {
+                query.isReadFilter = false
+            } else if lowerToken == "is:saved" {
+                query.isSavedFilter = true
+            } else if !token.isEmpty {
+                query.terms.append(lowerToken)
             }
-        } else {
-            query.terms = [lowerText]
         }
 
         return query
@@ -252,8 +278,21 @@ public struct ReaderImageCandidate: Codable, Hashable, Sendable {
                     return overlap * 10 + (image.origin == .body ? 3 : image.origin == .openGraph ? 2 : 1)
                 }
                 let a = score(lhs.element), b = score(rhs.element)
-                return a == b ? lhs.offset > rhs.offset : a < b
+                guard a == b else { return a < b }
+                // Equal evidence: the larger known rendition, then the earlier candidate.
+                let lhsWidth = lhs.element.width ?? 0
+                let rhsWidth = rhs.element.width ?? 0
+                return lhsWidth == rhsWidth ? lhs.offset > rhs.offset : lhsWidth < rhsWidth
             }?.element
+    }
+
+    /// BBC feeds link 240 px thumbnails; the same CDN path serves a rendition sharp enough for cards and the reader.
+    static func preferredRendition(of url: URL) -> URL {
+        guard url.host?.lowercased() == "ichef.bbci.co.uk" else { return url }
+        var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+        // Only the width segment changes; the rest of the CDN path is kept as published.
+        components?.path = url.path.replacingOccurrences(of: #"(?<=^/ace/standard/)\d{2,3}(?=/)"#, with: "976", options: .regularExpression)
+        return components?.url ?? url
     }
 
     static func usable(url: String, width: Int? = nil, height: Int? = nil) -> Bool {
@@ -261,7 +300,7 @@ public struct ReaderImageCandidate: Codable, Hashable, Sendable {
               width.map({ $0 >= 80 && $0 <= 16_384 }) ?? true,
               height.map({ $0 >= 80 && $0 <= 16_384 }) ?? true else { return false }
         let path = URL(string: url)?.path.lowercased() ?? ""
-        return path.range(of: #"(?:^|[./_-])(?:logo|favicon|tracking|pixel|spacer|advertisement|avatar)(?:[./_-]|$)"#, options: .regularExpression) == nil
+        return path.range(of: #"(?:^|[./_-])(?:logo|favicon|tracking|pixel|spacer|advertisement|avatar|banners?)(?:[./_-]|$)"#, options: .regularExpression) == nil
     }
 }
 

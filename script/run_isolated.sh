@@ -47,11 +47,14 @@ mkdir -p "$LIBRARY_DIR"
 if [[ $SEED -eq 1 ]]; then
     echo "Seeding isolated library with test fixtures..."
     ./test.sh --seed-launch-library "$STAGE/news.sqlite3" | tail -1
+    # A WAL left by an earlier killed run would replay onto the fresh library and corrupt it.
+    rm -f "$LIBRARY_DIR/news.sqlite3-wal" "$LIBRARY_DIR/news.sqlite3-shm"
     cp "$STAGE/news.sqlite3" "$LIBRARY_DIR/news.sqlite3"
 fi
 
 echo "Launching isolated News.app with arguments: ${EXTRA_ARGS[*]:-(default)}..."
-open -n -a "$APP" --args "${EXTRA_ARGS[@]}"
+# macOS bash 3.2 treats an empty array as unbound under `set -u`.
+open -n -a "$APP" --args ${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"}
 
 echo "Isolated News.app launched successfully (PID: $(pgrep -f "^$APP/Contents/MacOS/News" | tail -1 || echo 'unknown'))."
 echo "Staged app: ${APP}"

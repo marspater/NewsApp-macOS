@@ -220,7 +220,7 @@ struct EventOverviewReaderView: View {
         var set = Set<String>()
         var list: [String] = []
         for article in memberArticles {
-            let src = article.source.trimmingCharacters(in: .whitespacesAndNewlines)
+            let src = article.publisherName
             if !src.isEmpty && !set.contains(src) {
                 set.insert(src)
                 list.append(src)
@@ -392,13 +392,29 @@ struct EventOverviewReaderView: View {
             .filter { !$0.isEmpty }
 
         return VStack(alignment: .leading, spacing: 14) {
-            ForEach(Array(paragraphs.enumerated()), id: \.offset) { _, para in
-                Text(para)
+            if let introduction = overview.content.evidenceSections?.introduction, !introduction.isEmpty {
+                ForEach(introduction) { fact in
+                    Text(fact.text)
+                        .font(.system(size: 16 * textScale))
+                        .lineSpacing(6 * textScale)
+                        .foregroundColor(AppColor.primaryText)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                    HStack(spacing: 6) {
+                        ForEach(fact.citationIDs, id: \.self) { id in
+                            if let citation = overview.citations[id] { citationPill(citation) }
+                        }
+                    }
+                }
+            } else {
+                ForEach(Array(paragraphs.enumerated()), id: \.offset) { _, para in
+                    Text(para)
                     .font(.system(size: 16 * textScale, weight: .regular))
                     .lineSpacing(6 * textScale)
                     .foregroundColor(AppColor.primaryText)
                     .fixedSize(horizontal: false, vertical: true)
                     .textSelection(.enabled)
+                }
             }
         }
     }
@@ -555,7 +571,7 @@ struct EventOverviewReaderView: View {
                 ForEach(memberArticles) { article in
                     HStack(alignment: .center, spacing: 12) {
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(article.source)
+                            Text(article.publisherName)
                                 .font(.system(size: 11 * textScale, weight: .bold))
                                 .foregroundColor(AppColor.accent)
 
@@ -579,7 +595,7 @@ struct EventOverviewReaderView: View {
                         .buttonStyle(.bordered)
                         .controlSize(.small)
                         .help("Read this article in Source publication mode")
-                        .accessibilityLabel(Self.readArticleAccessibilityLabel(title: article.title, source: article.source))
+                        .accessibilityLabel(Self.readArticleAccessibilityLabel(title: article.title, source: article.publisherName))
 
                         if let url = URL(string: article.link) {
                             Button {
@@ -592,7 +608,7 @@ struct EventOverviewReaderView: View {
                             .buttonStyle(.plain)
                             .foregroundColor(currentSecondaryTextColor)
                             .help("Open original web publication")
-                            .accessibilityLabel(Self.openWebArticleAccessibilityLabel(title: article.title, source: article.source))
+                            .accessibilityLabel(Self.openWebArticleAccessibilityLabel(title: article.title, source: article.publisherName))
                         }
                     }
                     .padding(.vertical, 4)
@@ -929,7 +945,7 @@ struct EventOverviewReaderView: View {
                                     .foregroundColor(AppColor.accent)
                                     .accessibilityHidden(true)
 
-                                Text(article.source)
+                                Text(article.publisherName)
                                     .font(.system(size: 13 * textScale, weight: .semibold))
                                     .foregroundColor(AppColor.primaryText)
 
@@ -948,8 +964,8 @@ struct EventOverviewReaderView: View {
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
-                        .help("Open original article on \(article.source)")
-                        .accessibilityLabel(Self.openWebArticleAccessibilityLabel(title: article.title, source: article.source))
+                        .help("Open original article on \(article.publisherName)")
+                        .accessibilityLabel(Self.openWebArticleAccessibilityLabel(title: article.title, source: article.publisherName))
                     }
                 }
             }

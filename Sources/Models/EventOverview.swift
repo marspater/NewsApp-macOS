@@ -236,25 +236,29 @@ public struct OverviewCoverageSentiment: Codable, Hashable, Sendable {
 
 /// Optional structured evidence sections: chronological timeline, participant perspectives, thematic angle, and evaluated coverage sentiment.
 public struct OverviewEvidenceSections: Codable, Hashable, Sendable {
+    /// Sentence-level citations for a model-written introduction; absent in older and extractive documents.
+    public let introduction: [OverviewFact]?
     public let timeline: [OverviewTimelineItem]
     public let perspectives: [OverviewPerspective]
     public let thematicAngle: OverviewThematicAngle?
     public let coverageSentiment: OverviewCoverageSentiment?
 
     public var isEmpty: Bool {
-        timeline.isEmpty && perspectives.isEmpty && thematicAngle == nil && coverageSentiment == nil
+        introduction?.isEmpty != false && timeline.isEmpty && perspectives.isEmpty && thematicAngle == nil && coverageSentiment == nil
     }
 
     public init(
         timeline: [OverviewTimelineItem] = [],
         perspectives: [OverviewPerspective] = [],
         thematicAngle: OverviewThematicAngle? = nil,
-        coverageSentiment: OverviewCoverageSentiment? = nil
+        coverageSentiment: OverviewCoverageSentiment? = nil,
+        introduction: [OverviewFact]? = nil
     ) {
         self.timeline = timeline
         self.perspectives = perspectives
         self.thematicAngle = thematicAngle
         self.coverageSentiment = coverageSentiment
+        self.introduction = introduction
     }
 }
 
@@ -335,8 +339,9 @@ public struct OverviewProvenance: Codable, Hashable, Sendable {
 /// Derived overview document model bound to membership version, input text hashes, schema version, and analysis version.
 public struct EventOverviewDocument: Codable, Hashable, Sendable, Identifiable {
     public static let currentSchemaVersion = 1
-    /// 2: sourced timeline items (#143). Overviews stored at an older version are regenerated.
-    public static let currentAnalysisVersion = 2
+    /// 4: verified plain-text synthesis with introduction citations and strict support parsing. Older overviews, and
+    /// provisional ones stored at 0 (`OverviewGenerationCoordinator`), regenerate.
+    public static let currentAnalysisVersion = 4
 
     public let id: String
     public let eventID: String
@@ -350,6 +355,7 @@ public struct EventOverviewDocument: Codable, Hashable, Sendable, Identifiable {
     public var analysisVersion: Int { version.analysisVersion }
     public var title: String { content.title }
     public var summary: String { content.summary }
+    public var allClaims: [OverviewFact] { (content.evidenceSections?.introduction ?? []) + facts }
     public var facts: [OverviewFact] { content.facts }
     public var citations: [String: OverviewCitation] { content.citations }
     public var leadImage: OverviewLeadImage? { content.leadImage }

@@ -13,6 +13,9 @@ Build on Apple silicon with Xcode 27 selected. The deployment target remains mac
 ```sh
 ./test.sh                         # Full regressions; also run by the commit hook
 ./test.sh --story-regressions     # Focused offline identity, reader and persistence checks
+./test.sh --curation-live /private/tmp/library-backup.sqlite3 /private/tmp/curation-report # Opt-in on-device rating audit of a SQLite backup; private titles stay local
+./test.sh --overviews-live /private/tmp/library-backup.sqlite3 /private/tmp/overview-report # Opt-in on-device labeled controls and live overview audit; private passages stay local
+./test.sh --images-live /private/tmp/library-backup.sqlite3 /private/tmp/curation-report # Opt-in protected page-prefix lookups and card-image coverage on the backup
 ./test.sh --performance-baseline --active-work-cancellation # Active clustering, ingestion and feed parsing cancellation; temporary stress fixtures
 ./script/native_performance_baseline.sh # Isolated MainView window, rendered-card samples and process memory
 NEWS_NATIVE_HARNESS=Tests/NativeReadingMemory.swift ./script/native_performance_baseline.sh # Live: read 20 stories twice in the production reader, isolated; waits until each image is decoded
@@ -37,6 +40,7 @@ NEWS_EMBEDDING_THRESHOLD=0.4 NEWS_EVENT_CORPUS=corpus.json ./test.sh --event-cor
 ./build.sh                        # arm64 app with ad-hoc verification signing
 NEWS_LIVE_READER_CHECK=1 ./test.sh # Optional controlled-network and publisher checks
 NEWS_LIVE_CATALOG_CHECK=1 ./test.sh # Optional: fetch every catalog feed through the app's own networking and parsers
+./test.sh --catalog-reader-access # Opt-in, live: open each catalog feed's newest stories in the app's reader extraction (NEWS_CATALOG_FEEDS=id,… NEWS_CATALOG_SAMPLE=N)
 ./build_release.sh                # Optimized arm64 verification bundle
 ```
 

@@ -18,6 +18,7 @@ final class AppSettings: ObservableObject {
     static let mutedSourcesKey = "muted_sources"
     static let mutedTopicsKey = "muted_topics"
     static let tensionCollectionOptInKey = "tension_collection_opt_in"
+    static let retiredFeedsVersionKey = "retired_feeds_version"
 
     enum NotificationMode: String, CaseIterable, Identifiable, Sendable {
         case full = "full"         // Headlines + snippets + images
@@ -50,9 +51,19 @@ final class AppSettings: ObservableObject {
 
     static let defaultFeeds = [
         "https://feeds.arstechnica.com/arstechnica/index",
-        "https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml",
         "https://feeds.bbci.co.uk/news/rss.xml"
     ]
+
+    /// Feeds the app no longer carries, with the retirement version that removed them. The app carries only free,
+    /// open sources whose stories open in the reader. Subscriptions to a retired feed end once, when settings first
+    /// load at or after its version; a later manual subscription stays.
+    static let retiredFeeds: [(url: String, version: Int)] = [
+        // Article pages answer HTTP 403 to automated readers, so stories only open in Web view.
+        ("https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml", 1),
+        // Removed from the catalog as low-quality news.
+        ("https://wiadomosci.onet.pl/.feed", 2)
+    ]
+    static var retiredFeedsVersion: Int { retiredFeeds.map(\.version).max() ?? 0 }
 
     // MARK: - Published Properties
 
@@ -76,12 +87,17 @@ final class AppSettings: ObservableObject {
         if let savedUrls = defaults.stringArray(forKey: Self.feedURLsKey) {
             // Catalog feeds in languages that are not supported yet are parked; earlier subscriptions to them end.
             let parked = Set(FeedCatalog.parkedFeeds.map(\.url))
-            let kept = savedUrls.filter { !parked.contains($0) }
+            // Settings from the first retirement stored only a flag; it means version 1 was applied.
+            let applied = defaults.object(forKey: Self.retiredFeedsVersionKey) as? Int
+                ?? (defaults.bool(forKey: "retired_default_feeds_v1") ? 1 : 0)
+            let retired = Set(Self.retiredFeeds.filter { $0.version > applied }.map(\.url))
+            let kept = savedUrls.filter { !parked.contains($0) && !retired.contains($0) }
             if kept.count != savedUrls.count { defaults.set(kept, forKey: Self.feedURLsKey) }
             self.feedURLs = kept
         } else {
             self.feedURLs = Self.defaultFeeds
         }
+        defaults.set(Self.retiredFeedsVersion, forKey: Self.retiredFeedsVersionKey)
 
         if let savedSections = defaults.stringArray(forKey: Self.userSectionsKey) {
             self.userSections = savedSections

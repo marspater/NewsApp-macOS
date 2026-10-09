@@ -478,13 +478,24 @@ struct ArticleDetailView: View {
 
     private var articleContentParagraphs: some View {
         let storedBlocks = currentArticle.readerDocument?.blocks ?? []
-        let blocks = storedBlocks.isEmpty ? displayParagraphs.map {
+        // Documents stored before a boilerplate or image rule existed are cleaned here too.
+        var blocks = storedBlocks.isEmpty ? displayParagraphs.map {
             ReaderBlock(kind: .paragraph, text: $0)
-        } : storedBlocks
+        } : storedBlocks.filter { block in
+            block.kind == .figure
+                ? ReaderImageCandidate.usable(url: block.imageURL ?? "", width: block.imageWidth, height: block.imageHeight)
+                : !ArticleContentRedactor.isBoilerplateLine(block.text)
+        }
+        // The page's own headline repeats the title above it.
+        if let first = blocks.firstIndex(where: { $0.kind != .figure }),
+           EventFeedSummary.titleKey(blocks[first].text) == EventFeedSummary.titleKey(currentArticle.title) {
+            blocks.remove(at: first)
+        }
+        let leadIndex = blocks.firstIndex { $0.kind == .paragraph }
         return VStack(alignment: .leading, spacing: AppSpacing.lg * readerTextScale) {
             // Positions are stable within the immutable, article-keyed reader document.
             ForEach(Array(blocks.enumerated()), id: \.offset) { index, block in
-                readerBlock(block, isLead: index == 0)
+                readerBlock(block, isLead: index == leadIndex)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -922,10 +933,7 @@ struct ArticleDetailView: View {
         contrast == .increased ? AppColor.primaryText.opacity(0.3) : standard
     }
 
-    private var displaySource: String {
-        (currentArticle.source.components(separatedBy: "\n").first ?? currentArticle.source)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-    }
+    private var displaySource: String { currentArticle.publisherName }
 
     private var displayCategory: String? {
         let raw = analysis?.category ?? currentArticle.category
@@ -1157,7 +1165,7 @@ struct ArticleDetailView: View {
         isAnalyzing = false
 
         // Preserve persisted model identity and analysis version.
-        if let cached = await articleStore.fetchArticleAnalysis(for: activeArticle.id), cached.analysisVersion >= 2 {
+        if let cached = await articleStore.fetchArticleAnalysis(for: activeArticle.id), cached.analysisVersion >= 3 {
             guard !Task.isCancelled, activeArticle.id == targetID,
                   currentArticle.publisherInputHash == targetArticle.publisherInputHash else { return }
             self.analysis = cached

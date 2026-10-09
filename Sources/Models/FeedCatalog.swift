@@ -67,7 +67,7 @@ enum CatalogSet: String, CaseIterable, Identifiable, Sendable {
         case .scienceHealth: return "Science, space and health reporting."
         case .cultureLifestyle: return "Film, television, arts, food and everyday life."
         case .ukraine: return "English-language outlets covering Ukraine."
-        case .europe: return "National news in German, French, Italian, Dutch and Polish."
+        case .europe: return "National news in German, French, Italian and Dutch."
         case .regional: return "English-language news from Asia, the Middle East and Africa."
         }
     }
@@ -75,7 +75,7 @@ enum CatalogSet: String, CaseIterable, Identifiable, Sendable {
 
 enum FeedCatalog {
     /// Date the entries below were last fetched and checked for freshness, parseability and access.
-    static let verifiedOn = "2026-10-01"
+    static let verifiedOn = "2026-10-08"
 
     /// Languages offered in production. Event matching does not work without a word-class model, which macOS lacks for
     /// the other catalog languages (#264), so their entries stay below but are parked until it does.
@@ -83,6 +83,28 @@ enum FeedCatalog {
 
     static func feeds(in set: CatalogSet) -> [CatalogFeed] {
         feeds.filter { $0.set == set }
+    }
+
+    /// Publisher names by site host without `www.`, `rss.` or `feeds.`; offered feeds name a shared host first.
+    private static let publishersByHost: [String: String] = Dictionary((feeds + parkedFeeds).compactMap { feed in
+        URL(string: feed.url)?.host.map { (siteHost($0), feed.publisher) }
+    }, uniquingKeysWith: { first, _ in first })
+
+    private static func siteHost(_ host: String) -> String {
+        let lowered = host.lowercased()
+        for prefix in ["www.", "rss.", "feeds."] where lowered.hasPrefix(prefix) { return String(lowered.dropFirst(prefix.count)) }
+        return lowered
+    }
+
+    /// The catalog publisher for a story link on that publisher's site or one of its subdomains.
+    static func publisher(forLink link: String) -> String? {
+        guard let host = URL(string: link)?.host else { return nil }
+        var candidate = siteHost(host)
+        while candidate.contains(".") {
+            if let name = publishersByHost[candidate] { return name }
+            candidate = String(candidate.drop { $0 != "." }.dropFirst())
+        }
+        return nil
     }
 
     /// The feeds the app offers.
@@ -122,11 +144,11 @@ enum FeedCatalog {
         CatalogFeed(id: "politico", title: "Politico · Politics", publisher: "Politico",
                     url: "https://rss.politico.com/politics-news.xml",
                     language: "en", region: "US", topic: .politics, set: .politics,
-                    fullText: .full, hasImages: true, availability: .previewOnly),
+                    fullText: .full, hasImages: true, availability: .available),
         CatalogFeed(id: "the-hill", title: "The Hill · News", publisher: "The Hill",
                     url: "https://thehill.com/feed",
                     language: "en", region: "US", topic: .politics, set: .politics,
-                    fullText: .summary, hasImages: true, availability: .previewOnly),
+                    fullText: .summary, hasImages: true, availability: .available),
         CatalogFeed(id: "bbc-politics", title: "BBC News · Politics", publisher: "BBC News",
                     url: "https://feeds.bbci.co.uk/news/politics/rss.xml",
                     language: "en", region: "GB", topic: .politics, set: .politics,
@@ -150,7 +172,7 @@ enum FeedCatalog {
         CatalogFeed(id: "fast-company", title: "Fast Company · Latest", publisher: "Fast Company",
                     url: "https://www.fastcompany.com/latest/rss",
                     language: "en", region: "US", topic: .business, set: .business,
-                    fullText: .full, hasImages: true, availability: .previewOnly),
+                    fullText: .full, hasImages: true, availability: .available),
         CatalogFeed(id: "ars-technica", title: "Ars Technica", publisher: "Ars Technica",
                     url: "https://feeds.arstechnica.com/arstechnica/index",
                     language: "en", region: "US", topic: .technology, set: .technology,
@@ -218,7 +240,7 @@ enum FeedCatalog {
         CatalogFeed(id: "ukrainska-pravda", title: "Українська правда", publisher: "Українська правда",
                     url: "https://www.pravda.com.ua/rss",
                     language: "uk", region: "UA", topic: .general, set: .ukraine,
-                    fullText: .partial, hasImages: true, availability: .previewOnly),
+                    fullText: .partial, hasImages: true, availability: .available),
         CatalogFeed(id: "ukrainska-pravda-en", title: "Ukrainska Pravda · English", publisher: "Ukrainska Pravda",
                     url: "https://www.pravda.com.ua/eng/rss",
                     language: "en", region: "UA", topic: .general, set: .ukraine,
@@ -255,10 +277,6 @@ enum FeedCatalog {
                     url: "https://feeds.nos.nl/nosnieuwsalgemeen",
                     language: "nl", region: "NL", topic: .general, set: .europe,
                     fullText: .full, hasImages: true, availability: .available),
-        CatalogFeed(id: "onet-wiadomosci", title: "Onet · Wiadomości", publisher: "Onet",
-                    url: "https://wiadomosci.onet.pl/.feed",
-                    language: "pl", region: "PL", topic: .general, set: .europe,
-                    fullText: .summary, hasImages: true, availability: .available),
         CatalogFeed(id: "franceinfo", title: "franceinfo · Titres", publisher: "franceinfo",
                     url: "https://www.franceinfo.fr/titres.rss",
                     language: "fr", region: "FR", topic: .general, set: .europe,
@@ -270,7 +288,7 @@ enum FeedCatalog {
         CatalogFeed(id: "dawn", title: "Dawn", publisher: "Dawn",
                     url: "https://www.dawn.com/feeds/home",
                     language: "en", region: "PK", topic: .general, set: .regional,
-                    fullText: .full, hasImages: true, availability: .previewOnly),
+                    fullText: .full, hasImages: true, availability: .available),
         CatalogFeed(id: "africanews", title: "Africanews", publisher: "Africanews",
                     url: "https://www.africanews.com/feed/rss",
                     language: "en", region: "global", topic: .general, set: .regional,

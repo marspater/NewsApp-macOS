@@ -37,6 +37,7 @@ class FeedManager: NSObject, ObservableObject {
     private let notifyBatch: @MainActor ([FeedArticle], AppSettings.NotificationMode) async -> Void
     private let enrichmentQueue: EnrichmentQueue
     private let allowsBackgroundWork: @MainActor () -> Bool
+    private let importanceJudge: StoryImportanceJudge
     private var isStopped = false
     private var storeUpdates: AnyCancellable?
     private var terminationObserver: AnyCancellable?
@@ -44,6 +45,7 @@ class FeedManager: NSObject, ObservableObject {
     private var refreshTask: Task<[FeedArticle], Never>?
     private var refreshRunID: UUID?
     private var enrichmentTask: Task<Void, Never>?
+    private var overviewWarmupTask: Task<Void, Never>?
     /// Event clustering after collection; one pass at a time, never part of the refresh itself.
     private var clusteringTask: Task<Void, Never>?
     private var clusteringRunID: UUID?
@@ -53,7 +55,8 @@ class FeedManager: NSObject, ObservableObject {
     private var powerObservers: [AnyCancellable] = []
     private var wakeTask: Task<Void, Never>?
     private var refreshInterruptedBySleep = false
-    private var lastRefreshCompletedAt: Date?
+    /// When the latest refresh published its stories; shown in the list header.
+    @Published private(set) var lastRefreshCompletedAt: Date?
     private let wakeRefreshDelay: Duration
     private let now: () -> Date
 
@@ -70,6 +73,7 @@ class FeedManager: NSObject, ObservableObject {
              await NotificationService.shared.triageAndNotify(newArticles: articles, mode: mode)
          },
          enrichmentQueue: EnrichmentQueue? = nil,
+         importanceJudge: StoryImportanceJudge = .onDevice,
          allowsBackgroundWork: @escaping @MainActor () -> Bool = {
              let info = ProcessInfo.processInfo
              return !info.isLowPowerModeEnabled && info.thermalState.rawValue < ProcessInfo.ThermalState.serious.rawValue
@@ -86,6 +90,7 @@ class FeedManager: NSObject, ObservableObject {
         }
         self.notifyBatch = notifyBatch
         self.enrichmentQueue = enrichmentQueue ?? EnrichmentQueue(store: store)
+        self.importanceJudge = importanceJudge
         self.allowsBackgroundWork = allowsBackgroundWork
         self.wakeRefreshDelay = wakeRefreshDelay
         self.now = now
@@ -350,6 +355,8 @@ class FeedManager: NSObject, ObservableObject {
         cancelRefresh()
         enrichmentTask?.cancel()
         enrichmentTask = nil
+        overviewWarmupTask?.cancel()
+        overviewWarmupTask = nil
         clusteringTask?.cancel()
         clusteringTask = nil
         clusteringRunID = nil
@@ -383,9 +390,13 @@ class FeedManager: NSObject, ObservableObject {
 
         guard !isStopped else { return }
         clusterEventsInBackground()
-        // Muted stories never notify; they stay countable in the lists.
+        // Rate before triage. Collection and its spinner have ended; another refresh can proceed.
+        await waitForEventClustering()
+        guard !Task.isCancelled, !isStopped else { return }
+        guard let eligible = try? await articleStore.database.notificationStoryIDs(newArticles.map(\.id)) else { return }
+        // Muted and waiting stories never notify, in any privacy mode.
         let muting = appSettings.muteRules
-        let notifiable = muting.isEmpty ? newArticles : newArticles.filter { !muting.mutes($0) }
+        let notifiable = newArticles.filter { eligible.contains($0.id) && !muting.mutes($0) }
         if appSettings.notificationsEnabled && !notifiable.isEmpty {
             await notifyBatch(notifiable, appSettings.notificationMode)
         }
@@ -471,8 +482,17 @@ class FeedManager: NSObject, ObservableObject {
         clusteringTask = Task { [weak self] in
             repeat {
                 self?.needsClusteringPass = false
-                let work = Task.detached(priority: .utility) {
-                    try await EventClusterer.run(in: database)
+                // The on-device judge follows the AI setting and, like classification, waits out Low Power Mode and heat.
+                let backgroundAllowed = self.map { $0.allowsBackgroundWork() } == true
+                let modelAllowed = backgroundAllowed && self?.appSettings.aiEnabled == true
+                let importanceJudge = modelAllowed ? self?.importanceJudge ?? .unavailable : .unavailable
+                let muting = self?.appSettings.muteRules ?? MuteRules()
+                let work = Task.detached(priority: .utility) { () throws -> Bool in
+                    let clustering = try await EventClusterer.run(in: database, judge: modelAllowed ? .onDevice : .unavailable)
+                    // Importance is rated once clusters are known; waiting stories expire after their lifetime.
+                    let curation = try await StoryCurator.run(in: database, judge: importanceJudge,
+                                                              imageFinder: backgroundAllowed ? .publisherPages : .unavailable, muting: muting)
+                    return !clustering.changedEvents.isEmpty || curation.changed
                 }
                 let result = await withTaskCancellationHandler {
                     await work.result
@@ -481,8 +501,8 @@ class FeedManager: NSObject, ObservableObject {
                 }
                 guard let self, self.clusteringRunID == runID, !Task.isCancelled else { return }
                 switch result {
-                case .success(let report):
-                    if !report.changedEvents.isEmpty { self.articleStore.noteEventsChanged() }
+                case .success(let changed):
+                    if changed { self.articleStore.noteEventsChanged() }
                 case .failure(let error):
                     if !(error is CancellationError) {
                         self.logger.error("Event clustering failed: \(error.localizedDescription)")
@@ -492,6 +512,14 @@ class FeedManager: NSObject, ObservableObject {
             guard let self, self.clusteringRunID == runID else { return }
             self.clusteringTask = nil
             self.clusteringRunID = nil
+            self.overviewWarmupTask?.cancel()
+            if self.appSettings.aiEnabled, self.allowsBackgroundWork() {
+                let store = self.articleStore
+                let muting = self.appSettings.muteRules
+                self.overviewWarmupTask = Task {
+                    await OverviewGenerationCoordinator.shared.warmVisibleOverviews(store: store, muting: muting)
+                }
+            }
         }
     }
 

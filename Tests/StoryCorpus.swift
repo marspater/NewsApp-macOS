@@ -107,7 +107,10 @@ enum StoryCorpus {
                 }
                 if !batch.isEmpty {
                     try await db.upsertArticles(batch)
-                    _ = try await EventClusterer.run(in: db, now: clock, limit: .max)
+                    // NEWS_EVENT_JUDGE=1 replays with the on-device judge and no per-pass budget.
+                    let judged = ProcessInfo.processInfo.environment["NEWS_EVENT_JUDGE"] == "1"
+                    _ = try await EventClusterer.run(in: db, judge: judged ? .onDevice : .unavailable,
+                                                     judgeBudget: judged ? .max : 0, now: clock, limit: .max)
                 }
                 clock = clock.addingTimeInterval(6 * 3600)
                 if index < items.count, items[index].pubDate > clock { clock = items[index].pubDate }

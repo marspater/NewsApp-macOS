@@ -662,6 +662,66 @@ actor DatabaseEngine {
                 throw error
             }
         }
+        if version < 17 {
+            try beginTransaction()
+            do {
+                try Task.checkCancellation()
+                // Story importance (StoryVisibilityPolicy) and stories that expired before more publishers covered them.
+                try executeSimple("""
+                CREATE TABLE IF NOT EXISTS story_importance (
+                    article_id TEXT PRIMARY KEY REFERENCES articles(id) ON DELETE CASCADE,
+                    level INTEGER NOT NULL,
+                    judged_at REAL NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS expired_stories (
+                    key TEXT PRIMARY KEY,
+                    expired_at REAL NOT NULL
+                );
+                DROP TRIGGER IF EXISTS trg_articles_importance_rejudge;
+                CREATE TRIGGER trg_articles_importance_rejudge AFTER UPDATE OF title, description ON articles
+                WHEN old.title IS NOT new.title OR old.description IS NOT new.description
+                BEGIN
+                    DELETE FROM story_importance WHERE article_id = old.id;
+                END;
+                """)
+                try setUserVersion(17)
+                try commitTransaction()
+            } catch {
+                try? rollbackTransaction()
+                throw error
+            }
+        }
+        if version < 18 {
+            try beginTransaction()
+            do {
+                try Task.checkCancellation()
+                // Lead images found on publisher pages for stories whose feeds carry none; NULL records a page without one.
+                try executeSimple("""
+                CREATE TABLE IF NOT EXISTS story_images (
+                    article_id TEXT PRIMARY KEY REFERENCES articles(id) ON DELETE CASCADE,
+                    image_url TEXT,
+                    checked_at REAL NOT NULL
+                );
+                """)
+                try setUserVersion(18)
+                try commitTransaction()
+            } catch {
+                try? rollbackTransaction()
+                throw error
+            }
+        }
+        if version < 19 {
+            try beginTransaction()
+            do {
+                try Task.checkCancellation()
+                try executeSimple("CREATE INDEX IF NOT EXISTS idx_story_images_url ON story_images(image_url);")
+                try setUserVersion(19)
+                try commitTransaction()
+            } catch {
+                try? rollbackTransaction()
+                throw error
+            }
+        }
     }
     
     /// Muting predicates for list queries (`MuteRules`); both are pure functions of their arguments.
@@ -1047,6 +1107,11 @@ actor DatabaseEngine {
             throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to prepare article existence query"])
         }
         defer { sqlite3_finalize(existenceStmt) }
+        var expiredStmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, "SELECT 1 FROM expired_stories WHERE key IN (?, ?);", -1, &expiredStmt, nil) == SQLITE_OK else {
+            throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to prepare expired story query"])
+        }
+        defer { sqlite3_finalize(expiredStmt) }
         var insertedIDs = Set<String>()
         let now = Date().timeIntervalSince1970
 
@@ -1065,7 +1130,14 @@ actor DatabaseEngine {
             guard existenceStatus == SQLITE_ROW || existenceStatus == SQLITE_DONE else {
                 throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to check stored article identity"])
             }
-            if existenceStatus == SQLITE_DONE { insertedIDs.insert(id) }
+            if existenceStatus == SQLITE_DONE {
+                // A story that expired while waiting for coverage is not brought back by feeds that still list it.
+                sqlite3_reset(expiredStmt)
+                sqlite3_bind_text(expiredStmt, 1, id, -1, Self.sqliteTransient)
+                sqlite3_bind_text(expiredStmt, 2, canonical, -1, Self.sqliteTransient)
+                if sqlite3_step(expiredStmt) == SQLITE_ROW { continue }
+                insertedIDs.insert(id)
+            }
 
             // Bookmarking a frozen/aliased snapshot must register identity without reverting publisher content.
             let preserveExisting = preservingStoredContent && existenceStatus == SQLITE_ROW
@@ -1261,6 +1333,16 @@ actor DatabaseEngine {
 
     private static let savedDocumentIDs = "SELECT article_id FROM article_state WHERE is_saved = 1 UNION SELECT r.duplicate_id FROM article_reconciliations r JOIN article_state s ON s.article_id = r.survivor_id WHERE s.is_saved = 1"
     private static let visibleArticle = "NOT EXISTS (SELECT 1 FROM article_reconciliations r WHERE r.duplicate_id = a.id)"
+    /// A story waiting for more coverage (`StoryVisibilityPolicy`): rated below important, no report of its event rated
+    /// important, and no more than `minorStorySources` publishers in its event. Unrated stories never wait.
+    private static let waitingStory = """
+    (EXISTS (SELECT 1 FROM story_importance i WHERE i.article_id = a.id AND i.level < \(StoryVisibilityPolicy.importantLevel.rawValue))
+     AND NOT EXISTS (SELECT 1 FROM event_members m JOIN event_members peer ON peer.event_id = m.event_id
+        JOIN story_importance pi ON pi.article_id = peer.article_id
+        WHERE m.article_id = a.id AND pi.level >= \(StoryVisibilityPolicy.importantLevel.rawValue))
+     AND coalesce((SELECT count(DISTINCT x.source) FROM event_members m JOIN event_members peer ON peer.event_id = m.event_id
+        JOIN articles x ON x.id = peer.article_id WHERE m.article_id = a.id), 1) <= \(StoryVisibilityPolicy.minorStorySources))
+    """
     /// Binds `MuteRules.sourceParameter` and `MuteRules.topicParameter`, in that order.
     private static let mutedArticle = "(news_muted_source(a.canonical_url, ?) OR news_muted_topic(a.title, a.description, ?))"
 
@@ -1349,7 +1431,8 @@ actor DatabaseEngine {
         eventID: String? = nil,
         includingOriginals: Bool = false,
         publicationWindow: ClosedRange<Date>? = nil,
-        muting: MuteRules = MuteRules()
+        muting: MuteRules = MuteRules(),
+        hidingWaitingStories: Bool = false
     ) throws -> [FeedArticle] {
         guard let db = db else { throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Database not open"]) }
         
@@ -1400,11 +1483,12 @@ actor DatabaseEngine {
         let list = listConditions(section: section, isRead: isRead, isSaved: isSaved)
         query += list.sql
         params += list.params
-        // Muting is a predicate before LIMIT, so every page is full and cursors stay exact.
+        // Muting and waiting stories are predicates before LIMIT, so every page is full and cursors stay exact.
         if !muting.isEmpty {
             query += " AND NOT " + Self.mutedArticle
             params += Self.mutingParameters(muting)
         }
+        if hidingWaitingStories { query += " AND NOT " + Self.waitingStory }
         if let after {
             query += " AND (\(Self.articleDateOrder) < ? OR (\(Self.articleDateOrder) = ? AND a.id > ?))"
             params += [("double", after.value), ("double", after.value), ("text", after.id)]
@@ -1744,7 +1828,7 @@ actor DatabaseEngine {
 
     private func curateImages(in articles: [FeedArticle]) throws -> [FeedArticle] {
         var repeatedBySource = [String: Set<String>]()
-        return try articles.map { original in
+        let curated = try articles.map { original in
             try Task.checkCancellation()
             var article = original
             guard article.imageUrl != nil || article.readerDocument?.images?.isEmpty == false else { return article }
@@ -1760,6 +1844,12 @@ actor DatabaseEngine {
             } else if let url = article.imageUrl, repeated.contains(url) || !ReaderImageCandidate.usable(url: url) {
                 article.imageUrl = nil
             }
+            return article
+        }
+        let found = try storyImages(for: curated.filter { $0.imageUrl == nil }.map(\.id))
+        return curated.map { original in
+            var article = original
+            if article.imageUrl == nil { article.imageUrl = found[article.id] }
             return article
         }
     }
@@ -2224,6 +2314,171 @@ actor DatabaseEngine {
             throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: String(cString: sqlite3_errmsg(db))])
         }
         return Int(sqlite3_column_int64(stmt, 0))
+    }
+
+    // MARK: - Story Visibility
+
+    /// Stories a list hides while they wait for more coverage, under the list's own filters and muting.
+    func waitingStoryCount(section: String? = nil, isRead: Bool? = nil, isSaved: Bool? = nil, muting: MuteRules = MuteRules()) throws -> Int {
+        guard let db = db else { throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Database not open"]) }
+        let conditions = listConditions(section: section, isRead: isRead, isSaved: isSaved)
+        var sql = "SELECT count(*) FROM articles a JOIN article_state s ON s.article_id = a.id WHERE "
+            + Self.visibleArticle + conditions.sql + " AND " + Self.waitingStory
+        var params = conditions.params
+        if !muting.isEmpty {
+            sql += " AND NOT " + Self.mutedArticle
+            params += Self.mutingParameters(muting)
+        }
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to prepare waiting count: \(String(cString: sqlite3_errmsg(db)))"])
+        }
+        defer { sqlite3_finalize(stmt) }
+        bind(params, to: stmt)
+        guard sqlite3_step(stmt) == SQLITE_ROW else {
+            throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: String(cString: sqlite3_errmsg(db))])
+        }
+        return Int(sqlite3_column_int64(stmt, 0))
+    }
+
+    /// Recent stories without an importance rating, best-covered and newest first.
+    func pendingImportanceRows(activeSince: Date, limit: Int) throws -> [EventMatchRow] {
+        try eventMatchRows("""
+        \(Self.eventMatchColumns)
+        WHERE NOT EXISTS (SELECT 1 FROM story_importance i WHERE i.article_id = a.id)
+            AND \(Self.articleDateOrder) >= ? AND \(Self.visibleArticle)
+        ORDER BY (SELECT count(*) FROM event_members peer WHERE peer.event_id = m.event_id) DESC, \(Self.articleDateOrder) DESC, a.id
+        LIMIT ?;
+        """, [.real(activeSince.timeIntervalSince1970), .integer(limit)])
+    }
+
+    @discardableResult
+    func recordImportance(_ articleID: String, _ importance: StoryImportance, at date: Date = Date(),
+                          expectedTitle: String? = nil, expectedDescription: String? = nil) throws -> Bool {
+        let title: EventValue = .text(expectedTitle ?? "")
+        let description: EventValue = .text(expectedDescription ?? "")
+        try eventRows("""
+        INSERT INTO story_importance(article_id, level, judged_at)
+        SELECT id, ?, ? FROM articles WHERE id = ?
+            AND (? = 0 OR title IS ?) AND (? = 0 OR coalesce(description, '') IS ?)
+        ON CONFLICT(article_id) DO UPDATE SET level = excluded.level, judged_at = excluded.judged_at;
+        """, [.integer(importance.rawValue), .real(date.timeIntervalSince1970), .text(articleID),
+              .integer(expectedTitle == nil ? 0 : 1), title, .integer(expectedDescription == nil ? 0 : 1), description])
+        return sqlite3_changes(db) > 0
+    }
+
+    /// Committed stories eligible for notification after curation; expired or waiting stories are excluded.
+    func notificationStoryIDs(_ articleIDs: [String]) throws -> Set<String> {
+        var eligible = Set<String>()
+        for start in stride(from: 0, to: articleIDs.count, by: 500) {
+            let ids = Array(articleIDs[start..<min(start + 500, articleIDs.count)])
+            let placeholders = Array(repeating: "?", count: ids.count).joined(separator: ",")
+            let rows = try eventRows("SELECT a.id FROM articles a WHERE a.id IN (\(placeholders)) AND \(Self.visibleArticle) AND NOT \(Self.waitingStory);",
+                                    ids.map { .text($0) })
+            eligible.formUnion(rows.compactMap { $0[0] })
+        }
+        return eligible
+    }
+
+    /// Deletes stories that waited longer than `minorStoryLifetime` (counted from the first report of their event) and
+    /// remembers their IDs and document URLs, so feeds that still list them do not bring them back. Saved, read and cited
+    /// stories stay. Forgets expiries after `expiryMemory`. Returns the number of stories removed.
+    @discardableResult
+    func expireWaitingStories(now: Date = Date()) throws -> Int {
+        let cutoff = now.timeIntervalSince1970 - StoryVisibilityPolicy.minorStoryLifetime
+        let expired = """
+        SELECT a.id FROM articles a JOIN article_state s ON s.article_id = a.id
+        WHERE s.is_read = 0 AND s.is_saved = 0 AND \(Self.visibleArticle) AND \(Self.waitingStory)
+            AND coalesce((SELECT min(x.created_at) FROM event_members m JOIN event_members peer ON peer.event_id = m.event_id
+                JOIN articles x ON x.id = peer.article_id WHERE m.article_id = a.id), a.created_at) < ?
+            AND NOT EXISTS (SELECT 1 FROM event_overview_citations c WHERE c.article_id = a.id)
+        """
+        let removed = try inEventTransaction { () throws -> Int in
+            let rows = try eventRows("""
+            SELECT id, canonical_url FROM articles WHERE id IN (\(expired)
+                UNION SELECT r.duplicate_id FROM article_reconciliations r WHERE r.survivor_id IN (\(expired)));
+            """, [.real(cutoff), .real(cutoff)])
+            for row in rows {
+                for key in [row[0], row[1].flatMap { Self.isDocumentURL($0) ? $0 : nil }].compactMap({ $0 }) {
+                    try eventRows("INSERT OR REPLACE INTO expired_stories(key, expired_at) VALUES (?, ?);",
+                                  [.text(key), .real(now.timeIntervalSince1970)])
+                }
+                if let id = row[0] { try eventRows("DELETE FROM articles WHERE id = ?;", [.text(id)]) }
+            }
+            try eventRows("DELETE FROM expired_stories WHERE expired_at < ?;",
+                          [.real(now.timeIntervalSince1970 - StoryVisibilityPolicy.expiryMemory)])
+            return rows.count
+        }
+        if removed > 0 { try pruneEmptyEvents() }
+        return removed
+    }
+
+    // MARK: - Story Images
+
+    /// Shown, recent stories without any image in their event and not looked up yet: clustered stories first, then the
+    /// newest. Each row carries its event so a pass looks up one report per event.
+    func imagelessStoryRows(activeSince: Date, limit: Int, muting: MuteRules = MuteRules()) throws -> [(id: String, link: String, eventID: String?)] {
+        // ponytail: at most 2,000 recent candidates per pass, matching the clustering bound.
+        let rows = try eventRows("""
+        SELECT a.id, a.canonical_url, m.event_id FROM articles a
+        LEFT JOIN event_members m ON m.article_id = a.id
+        WHERE \(Self.articleDateOrder) >= ? AND \(Self.visibleArticle) AND NOT \(Self.waitingStory)
+            AND NOT \(Self.mutedArticle)
+            AND NOT EXISTS (SELECT 1 FROM story_images si WHERE si.article_id = a.id)
+        ORDER BY (SELECT count(*) FROM event_members peer WHERE peer.event_id = m.event_id) DESC, \(Self.articleDateOrder) DESC, a.id
+        LIMIT 2000;
+        """, [.real(activeSince.timeIntervalSince1970), .text(muting.sourceParameter), .text(muting.topicParameter)])
+        var results: [(id: String, link: String, eventID: String?)] = []
+        var picturedEvents: [String: Bool] = [:]
+        for row in rows {
+            try Task.checkCancellation()
+            guard results.count < limit else { break }
+            guard let id = row[0], let link = row[1] else { continue }
+            let key = row[2] ?? id
+            let pictured: Bool
+            if let cached = picturedEvents[key] { pictured = cached }
+            else {
+                let members = try fetchArticles(limit: nil, id: row[2] == nil ? id : nil, eventID: row[2])
+                pictured = FeedArticle.bestCardImage(in: members) != nil
+                picturedEvents[key] = pictured
+            }
+            if !pictured { results.append((id, link, row[2])) }
+        }
+        return results
+    }
+
+    /// Records a looked-up page: its lead image, or nil when it has none. An image another story already declared is a
+    /// site default (a brand card), not a lead: it is cleared for both. Returns whether an image was stored.
+    @discardableResult
+    func recordStoryImage(_ articleID: String, imageURL: String?, at date: Date = Date(), expectedLink: String? = nil) throws -> Bool {
+        try inEventTransaction { () throws -> Bool in
+            if let expectedLink, (try eventRows("SELECT canonical_url FROM articles WHERE id = ?;", [.text(articleID)])).first?[0] != expectedLink {
+                return false
+            }
+            var image = imageURL
+            if let url = imageURL, !(try eventRows("SELECT 1 FROM story_images WHERE image_url = ? AND article_id != ? LIMIT 1;",
+                                                     [.text(url), .text(articleID)])).isEmpty {
+                try eventRows("UPDATE story_images SET image_url = NULL WHERE image_url = ?;", [.text(url)])
+                image = nil
+            }
+            try eventRows("INSERT OR REPLACE INTO story_images(article_id, image_url, checked_at) VALUES (?, ?, ?);",
+                          [.text(articleID), image.map { .text($0) } ?? .null, .real(date.timeIntervalSince1970)])
+            return image != nil
+        }
+    }
+
+    /// Found lead images by article ID.
+    func storyImages(for articleIDs: [String]) throws -> [String: String] {
+        guard !articleIDs.isEmpty else { return [:] }
+        var images: [String: String] = [:]
+        for chunk in stride(from: 0, to: articleIDs.count, by: 500).map({ Array(articleIDs[$0..<min($0 + 500, articleIDs.count)]) }) {
+            let placeholders = Array(repeating: "?", count: chunk.count).joined(separator: ",")
+            for row in try eventRows("SELECT article_id, image_url FROM story_images WHERE image_url IS NOT NULL AND article_id IN (\(placeholders));",
+                                     chunk.map { .text($0) }) {
+                if let id = row[0], let url = row[1] { images[id] = url }
+            }
+        }
+        return images
     }
 
     /// Stored stories each muting rule covers, for the muting settings. One pass over the library.
@@ -2737,7 +2992,7 @@ actor DatabaseEngine {
     // MARK: - Events
 
     private enum EventValue {
-        case text(String), integer(Int), real(Double)
+        case text(String), integer(Int), real(Double), null
     }
 
     private static func eventError(_ message: String) -> NSError {
@@ -2759,6 +3014,7 @@ actor DatabaseEngine {
             case .text(let text): sqlite3_bind_text(statement, position, text, -1, Self.sqliteTransient)
             case .integer(let number): sqlite3_bind_int64(statement, position, Int64(number))
             case .real(let number): sqlite3_bind_double(statement, position, number)
+            case .null: sqlite3_bind_null(statement, position)
             }
         }
         var rows: [[String?]] = []
@@ -2859,11 +3115,16 @@ actor DatabaseEngine {
     /// Moves every member of `absorbedID` into `survivorID`. The absorbed ID forwards to the survivor,
     /// so stored links keep resolving; article rows and their read/save state are untouched.
     @discardableResult
-    func mergeEvents(_ absorbedID: String, into survivorID: String, at date: Date = Date()) throws -> StoryEvent {
+    /// With `expectedVersions`, the merge is refused if either event changed since the caller read it.
+    func mergeEvents(_ absorbedID: String, into survivorID: String, expectedVersions: (absorbed: Int, survivor: Int)? = nil,
+                     at date: Date = Date()) throws -> StoryEvent {
         let id = try inEventTransaction { () throws -> String in
             let survivor = try liveEvent(survivorID)
             let absorbed = try liveEvent(absorbedID)
             guard absorbed.id != survivor.id else { return survivor.id }
+            if let expectedVersions, expectedVersions.absorbed != absorbed.version || expectedVersions.survivor != survivor.version {
+                throw Self.eventError("An event changed before it could be merged")
+            }
             let now = date.timeIntervalSince1970
             try eventRows("UPDATE event_members SET event_id = ?, joined_version = ? WHERE event_id = ?;",
                           [.text(survivor.id), .integer(survivor.version + 1), .text(absorbed.id)])
@@ -3040,13 +3301,48 @@ actor DatabaseEngine {
         return (live.id, live.version, members)
     }
 
+    /// Every live event updated since `activeSince`, with its members, for merging fragments of one story.
+    func activeEventMembers(since activeSince: Date) throws -> [(id: String, version: Int, members: [EventMatchRow])] {
+        let since = activeSince.timeIntervalSince1970
+        let versions = try eventRows("SELECT id, membership_version FROM events WHERE merged_into IS NULL AND updated_at >= ? ORDER BY id;",
+                                     [.real(since)])
+        let rows = try eventMatchRows("""
+        \(Self.eventMatchColumns)
+        JOIN events e ON e.id = m.event_id
+        WHERE e.merged_into IS NULL AND e.updated_at >= ?;
+        """, [.real(since)])
+        let byEvent = Dictionary(grouping: rows) { $0.eventID ?? "" }
+        return versions.compactMap { row in
+            guard let id = row[0], let members = byEvent[id], !members.isEmpty else { return nil }
+            return (id, row[1].flatMap { Int($0) } ?? 1, members.sorted { $0.id < $1.id })
+        }
+    }
+
     /// Articles the user marked as a different event from `articleID`.
     func eventExclusions(of articleID: String) throws -> Set<String> {
         guard let member = try memberArticleID(articleID) else { return [] }
-        return Set(try eventRows("""
-        SELECT other_article_id FROM event_exclusions WHERE article_id = ?
-        UNION SELECT article_id FROM event_exclusions WHERE other_article_id = ?;
-        """, [.text(member), .text(member)]).compactMap { $0[0] })
+        return try eventExclusions(for: [member])[member] ?? []
+    }
+
+    /// A symmetric exclusion snapshot for stored member IDs, in bounded SQLite batches.
+    func eventExclusions(for articleIDs: [String]) throws -> [String: Set<String>] {
+        let ids = Set(articleIDs).sorted()
+        var exclusions: [String: Set<String>] = [:]
+        for start in stride(from: 0, to: ids.count, by: 400) {
+            try Task.checkCancellation()
+            let slice = Array(ids[start..<min(start + 400, ids.count)])
+            let placeholders = Array(repeating: "?", count: slice.count).joined(separator: ",")
+            let rows = try eventRows("""
+            SELECT article_id, other_article_id FROM event_exclusions
+            WHERE article_id IN (\(placeholders)) OR other_article_id IN (\(placeholders));
+            """, (slice + slice).map { .text($0) })
+            for row in rows {
+                guard let first = row[0], let second = row[1] else { continue }
+                exclusions[first, default: []].insert(second)
+                exclusions[second, default: []].insert(first)
+            }
+        }
+        return exclusions
     }
 
     func markEventMatchProcessed(_ articleIDs: [String], matcherVersion: Int, at date: Date = Date()) throws {

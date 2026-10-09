@@ -67,7 +67,7 @@ public struct OverviewClaimVerifier: Sendable {
         var verifiedFacts: [OverviewFact] = []
         var unverifiedFacts: [OverviewFact] = []
 
-        for fact in overview.facts {
+        for fact in overview.allClaims {
             let result = verifySingleFact(fact, in: overview, passagesByID: passagesByID)
             claimResults.append(result)
             if result.isValid {
@@ -113,33 +113,7 @@ public struct OverviewClaimVerifier: Sendable {
         var failures: [ClaimVerificationFailureReason] = []
 
         for citationID in fact.citationIDs {
-            guard let citation = overview.citations[citationID] else {
-                failures.append(.missingCitation(citationID: citationID))
-                continue
-            }
-
-            guard let passage = passagesByID[citation.passageID] else {
-                failures.append(.missingPassage(passageID: citation.passageID))
-                continue
-            }
-
-            // Check 1: Quote presence in passage
-            let quoteFailures = verifyQuoteGrounding(quote: citation.quote, passage: passage)
-            failures.append(contentsOf: quoteFailures)
-
-            // Check 2: Numbers, currencies, units, and dates
-            let numericFailures = verifyNumbersAndEntities(statement: fact.text, passage: passage)
-            failures.append(contentsOf: numericFailures)
-
-            // Check 3: Negation preservation
-            if let negFailure = verifyNegationPreservation(statement: fact.text, passage: passage) {
-                failures.append(negFailure)
-            }
-
-            // Check 4: Attribution preservation
-            if let attrFailure = verifyAttributionPreservation(statement: fact.text, passage: passage) {
-                failures.append(attrFailure)
-            }
+            failures.append(contentsOf: verifyCitation(citationID, fact: fact, overview: overview, passagesByID: passagesByID))
         }
 
         return ClaimVerificationResult(
@@ -148,6 +122,18 @@ public struct OverviewClaimVerifier: Sendable {
             isValid: failures.isEmpty,
             failureReasons: failures
         )
+    }
+
+    private static func verifyCitation(_ citationID: String, fact: OverviewFact, overview: EventOverviewDocument,
+                                       passagesByID: [String: EvidencePassage]) -> [ClaimVerificationFailureReason] {
+        guard let citation = overview.citations[citationID] else { return [.missingCitation(citationID: citationID)] }
+        guard let passage = passagesByID[citation.passageID], citation.articleID == passage.articleID,
+              citation.passageFingerprint == passage.fingerprint else { return [.missingPassage(passageID: citation.passageID)] }
+        var failures = verifyQuoteGrounding(quote: citation.quote, passage: passage)
+        failures.append(contentsOf: verifyNumbersAndEntities(statement: fact.text, passage: passage))
+        if let failure = verifyNegationPreservation(statement: fact.text, passage: passage) { failures.append(failure) }
+        if let failure = verifyAttributionPreservation(statement: fact.text, passage: passage) { failures.append(failure) }
+        return failures
     }
 
     // MARK: - Quote Grounding

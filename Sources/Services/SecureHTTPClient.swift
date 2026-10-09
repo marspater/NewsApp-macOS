@@ -59,12 +59,18 @@ actor SecureHTTPClient {
         try await fetchData(from: url, maxBytes: Self.defaultArticleLimit, timeout: Self.defaultTimeout, allowHTTP: allowHTTP)
     }
 
+    /// Metadata lookup reads only the start of a page, then cancels the remaining download.
+    func fetchArticleHead(from url: URL) async throws -> (Data, HTTPURLResponse) {
+        try await fetchData(from: url, maxBytes: 256 * 1024, timeout: Self.defaultTimeout, prefixOnly: true)
+    }
+
     func fetchImage(from url: URL, allowHTTP: Bool = false) async throws -> (Data, HTTPURLResponse) {
         try await fetchData(from: url, maxBytes: Self.defaultImageLimit, timeout: Self.defaultTimeout, allowHTTP: allowHTTP, cachePolicy: .useProtocolCachePolicy)
     }
 
-    /// Decode bounded thumbnails on the networking actor, away from SwiftUI's main actor.
-    func fetchReaderImage(from url: URL) async throws -> CGImage {
+    /// Decodes bounded thumbnails concurrently, away from SwiftUI's main actor and from this actor, so one large image
+    /// never holds up other cards or feed requests.
+    @concurrent nonisolated func fetchReaderImage(from url: URL) async throws -> CGImage {
         let (data, _) = try await fetchImage(from: url)
         try Task.checkCancellation()
         return try Self.decodeReaderImage(data)
@@ -129,7 +135,8 @@ actor SecureHTTPClient {
         cachePolicy: URLRequest.CachePolicy = .reloadIgnoringLocalCacheData,
         validators: FeedValidators? = nil,
         reportsBackpressure: Bool = false,
-        customHeaders: [String: String]? = nil
+        customHeaders: [String: String]? = nil,
+        prefixOnly: Bool = false
     ) async throws -> (Data, HTTPURLResponse) {
         try validateDestination(url, allowHTTP: allowHTTP)
 
@@ -156,6 +163,7 @@ actor SecureHTTPClient {
         // 4. Progressive Byte Streaming Download with Size Enforcement
         let session = try await protectedSession()
         let (asyncBytes, rawResponse) = try await session.bytes(for: request)
+        defer { if prefixOnly { asyncBytes.task.cancel() } }
 
         guard let httpResponse = rawResponse as? HTTPURLResponse else {
             throw FeedError.network("Invalid non-HTTP response received")
@@ -163,7 +171,7 @@ actor SecureHTTPClient {
 
         // 5. Pre-check Content-Length header if available
         let expectedLength = httpResponse.expectedContentLength
-        if expectedLength > 0 && expectedLength > maxBytes {
+        if !prefixOnly && expectedLength > 0 && expectedLength > maxBytes {
             throw FeedError.responseTooLarge(bytes: expectedLength, maxAllowed: maxBytes)
         }
 
@@ -173,6 +181,7 @@ actor SecureHTTPClient {
 
         for try await byte in asyncBytes {
             buffer.append(byte)
+            if prefixOnly && Int64(buffer.count) == maxBytes { break }
             if Int64(buffer.count) > maxBytes {
                 throw FeedError.responseTooLarge(bytes: Int64(buffer.count), maxAllowed: maxBytes)
             }

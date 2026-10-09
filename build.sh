@@ -61,6 +61,8 @@ swiftc -swift-version 6 -O -parse-as-library -target arm64-apple-macos${TARGET_M
     Sources/Intelligence/EventCandidates.swift \
     Sources/Intelligence/EventMatcher.swift \
     Sources/Intelligence/EventClustering.swift \
+    Sources/Intelligence/EventJudge.swift \
+    Sources/Intelligence/StoryImportance.swift \
     Sources/Intelligence/ContentExtractionPipeline.swift \
     Sources/Intelligence/EnrichmentQueue.swift \
     Sources/Intelligence/OverviewGenerationCoordinator.swift \
@@ -122,7 +124,7 @@ cat > "${CONTENTS_DIR}/Info.plist" <<EOF
     <key>CFBundleIconName</key>
     <string>AppIcon</string>
     <key>CFBundleShortVersionString</key>
-    <string>2.0</string>
+    <string>2.0.0</string>
     <key>CFBundleVersion</key>
     <string>3</string>
     <key>LSMinimumSystemVersion</key>

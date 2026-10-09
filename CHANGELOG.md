@@ -4,9 +4,50 @@
 
 ### Changed
 
+- Multi-source overviews use on-device plain-text synthesis with citations on introductory sentences and key facts. Unsupported sentences are dropped; weak or refused drafts retain the current excerpt overview. A few covered events warm in the background under the AI and energy settings. Classification and interactive analysis also use plain text to handle sensitive news without guided-output refusals.
+
+- Waiting stories are filtered from notifications after importance rating. A rating computed before a publisher edits a headline is discarded.
+- Imageless, unmuted stories look up declared publisher images from a bounded page prefix, including schema.org metadata. Briefing and grouped cards reuse the results; event cards choose the best usable lead across all members. Publishers without a usable image retain the card placeholder.
+
+- Stories are rated major, notable or minor on device. Minor stories wait out of Today, Unread, sections and the Briefing until four publishers cover them (the list says how many wait and can show them); unread ones that are still waiting a day later are removed and are not re-added by later refreshes. Without on-device AI nothing is hidden.
+
 - The app supports English-language feeds only for now. The catalog no longer offers its Ukrainian, German, French, Italian, Dutch and Polish feeds, and existing subscriptions to those catalog feeds are removed at launch; custom feeds are kept. The entries stay in the code for a later release (#264).
 
+- Only free, open sources: every catalog feed was opened in the app's own reader on 8 October 2026 (`./test.sh --catalog-reader-access`); none is paywalled or blocked. Onet is removed from the catalog, and existing Onet subscriptions end once at launch. Politico, The Hill, Fast Company, Dawn and Ukrainska Pravda are now marked readable; France 24 stays preview-only because most of its feed items are videos.
+
+- Story links that a feed publishes over `http://` (Africanews) are read over https instead of being refused, and embedded-video consent notices (France 24) no longer appear as article text.
+
+- The New York Times home page feed is no longer a default subscription, and the earlier default subscription ends once at launch: nytimes.com answers automated article requests with HTTP 403, so its stories could only be read in Web view. Subscribing to it again by hand is kept.
+
+- Search uses the system sidebar search field (Liquid Glass on macOS 26). Filter operators (`is:unread`, `is:read`, `is:saved`, `source:`, `category:`) are offered as suggestions while typing, and a search without results says so instead of suggesting a feed refresh.
+
+- Refreshing from the toolbar, ⌘R or R shows the new stories when the refresh ends instead of queueing them behind the update button; the refresh icon spins while feeds load. The list header shows how many events are grouped and when feeds last refreshed, and the grouping button is filled while coverage is grouped.
+
+- Reader: a page's own headline is no longer repeated as the first paragraph, the first paragraph after it takes the lead style, and tag strips such as "Topics: …" are dropped, including from stories stored earlier.
+
 ### Fixed
+
+- An overview made while the on-device model was skipped (AI setting, Low Power Mode, heat) or failed (refused, rate-limited) is kept only provisionally and regenerated on the next request, so a background warmup can no longer pin an event to its excerpt overview. Cancelling the background warmup no longer cancels an overview the reader joined.
+
+- Overview sentences preserve literal pipes and accept case/punctuation variants of a complete YES verdict; ambiguous answers still fall back. Earlier overviews regenerate with the corrected parser.
+
+- Cached card images no longer flash the previous story when a view changes URLs. Fragment merges reuse exclusion reads and refresh their discovery terms. Duplicate publisher-image checks use an indexed lookup, including libraries already on schema v18.
+
+- Event grouping recognises far more coverage of one story. Places are compared as countries ("American", "U.S." and "United States" agree; Madrid and Spain do not contradict), rising casualty tolls no longer split one attack, one dissenting member no longer keeps a matching report out of a larger event, and events of one story that formed separately are merged. Where the rules leave a pair open, the on-device model decides (when on-device AI is enabled), including paraphrased headlines found with on-device sentence embeddings. On the labelled tune split, English recall rose from 0.27 to 0.71 at precision 0.96; replaying the last 72 hours of a real library put 9 of 9 Nobel-prize reports, and every report of the Kramatorsk bus strike, into one event each.
+
+- List cards keep their image inside its column; a wide image no longer runs under the headline, and headlines get their second line before the summary does.
+
+- Stories from catalog publishers show the publisher's name ("The Guardian", "Al Jazeera") instead of a feed title such as "World news" or a slogan; stored source names are unchanged.
+
+- Feed summaries decode every HTML entity, including zero-padded ones such as `&#039;`.
+
+- Section banners (image paths naming a banner) are no longer used as story images or reader figures.
+
+- Card images: images already shown appear at once when scrolled back into view instead of loading again, decoding no longer queues behind feed requests, The Guardian's feed images are recognised (the widest rendition is used), BBC images use a sharper rendition, and an event card without its own image shows one from other listed coverage.
+
+- Search matches every typed word anywhere in a story, as it already did when a `source:`, `category:` or `is:` filter was present; previously a plain multi-word search only found the words adjacent and in order.
+
+- Development builds report version 2.0.0, so Check for Updates can compare them with a published release.
 
 - Stories linked to a publisher homepage keep independent bookmarks; removing one no longer unsaves other stories with the same generic link (#281).
 

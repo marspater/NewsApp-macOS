@@ -8,6 +8,8 @@ struct ArticleCardView: View {
     let article: FeedArticle
     var isSelected: Bool = false
     var compact: Bool = false
+    /// Other coverage of the same event; the card shows the first of their images when this article has none.
+    var imageFallbacks: [FeedArticle] = []
     let action: () -> Void
     
     @EnvironmentObject private var readManager: ReadManager
@@ -89,6 +91,8 @@ struct ArticleCardView: View {
                         .foregroundColor(isRead ? AppColor.secondaryText : AppColor.primaryText)
                         .lineLimit(2)
                         .multilineTextAlignment(.leading)
+                        // In the fixed-height list card the summary gives up lines before the headline does.
+                        .layoutPriority(1)
                     
                     // Description
                     if !article.description.isEmpty {
@@ -128,7 +132,8 @@ struct ArticleCardView: View {
                         }
                     }
                 }
-                .padding(compact ? AppSpacing.lg : AppSpacing.sm)
+                .padding(.horizontal, compact ? AppSpacing.lg : AppSpacing.sm)
+                .padding(.vertical, compact ? AppSpacing.md : AppSpacing.sm)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             .frame(height: compact ? 170 : nil)
@@ -220,15 +225,15 @@ struct ArticleCardView: View {
     
     @ViewBuilder
     private var cardImageHeader: some View {
-        if let imageUrl = article.readerDocument?.selectedImage(fallback: article.imageUrl) ?? (article.readerDocument == nil ? article.imageUrl : nil),
-           ReaderImageCandidate.usable(url: imageUrl), let url = URL(string: imageUrl) {
+        if let url = FeedArticle.bestCardImage(in: [article] + imageFallbacks) {
             ArticleRemoteImage(url: url) { phase in
                 switch phase {
                 case .success(let image):
-                    image.resizable()
-                        .aspectRatio(contentMode: .fill)
-                        .frame(height: compact ? 170 : 140)
+                    // The clear frame takes the column's size; a filled image wider than it must not push past it.
+                    Color.clear
                         .frame(maxWidth: .infinity)
+                        .frame(height: compact ? 170 : 140)
+                        .overlay { image.resizable().aspectRatio(contentMode: .fill) }
                         .clipped()
                         .saturation(isRead ? 0.92 : 1.0)
                         .accessibilityHidden(true)
@@ -259,10 +264,7 @@ struct ArticleCardView: View {
         }
     }
     
-    private var displaySource: String {
-        (article.source.components(separatedBy: "\n").first ?? article.source)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-    }
+    private var displaySource: String { article.publisherName }
     
     private var accessibilityDescription: String {
         let readState = isRead ? "Read" : "Unread"
@@ -292,21 +294,54 @@ extension EnvironmentValues {
     }
 }
 
+/// Decoded images by source URL, so a card scrolled back into view shows its image at once instead of fetching and
+/// decoding it again. NSCache evicts under memory pressure.
+@MainActor private enum DecodedImageCache {
+    static let images: NSCache<NSURL, CGImage> = {
+        let cache = NSCache<NSURL, CGImage>()
+        cache.totalCostLimit = 192 * 1024 * 1024
+        return cache
+    }()
+}
+
 // Feed image URLs use the same bounded, validated network path as article content.
 struct ArticleRemoteImage<Content: View>: View {
     let url: URL
     @ViewBuilder var content: (AsyncImagePhase) -> Content
-    @State private var phase: AsyncImagePhase = .empty
+    @State private var phase: AsyncImagePhase
+    @State private var phaseURL: URL
     @Environment(\.readerImageLoader) private var loadImage
 
+    init(url: URL, @ViewBuilder content: @escaping (AsyncImagePhase) -> Content) {
+        self.url = url
+        self.content = content
+        _phase = State(initialValue: DecodedImageCache.images.object(forKey: url as NSURL).map { .success(Self.image($0)) } ?? .empty)
+        _phaseURL = State(initialValue: url)
+    }
+
+    private static func image(_ image: CGImage) -> Image {
+        Image(image, scale: 1, label: Text("Article image"))
+    }
+
     var body: some View {
-        content(phase)
+        content(phaseURL == url ? phase : .empty)
             .task(id: url) {
+                if phaseURL == url, phase.image != nil {
+                    NotificationCenter.default.post(name: .readerImageFinished, object: url, userInfo: ["success": true])
+                    return
+                }
+                phaseURL = url
+                if let cached = DecodedImageCache.images.object(forKey: url as NSURL) {
+                    phase = .success(Self.image(cached))
+                    NotificationCenter.default.post(name: .readerImageFinished, object: url, userInfo: ["success": true])
+                    return
+                }
                 phase = .empty
                 do {
-                    let image = try await loadImage(url)
+                    let image = try await loadImage(ReaderImageCandidate.preferredRendition(of: url))
                     try Task.checkCancellation()
-                    phase = .success(Image(image, scale: 1, label: Text("Article image")))
+                    DecodedImageCache.images.setObject(image, forKey: url as NSURL, cost: image.bytesPerRow * image.height)
+                    phase = .success(Self.image(image))
                     NotificationCenter.default.post(name: .readerImageFinished, object: url, userInfo: ["success": true])
                 } catch {
                     guard !Task.isCancelled else { return }

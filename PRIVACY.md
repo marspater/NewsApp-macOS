@@ -43,6 +43,9 @@ NewsApp provides three distinct notification privacy modes with clear network an
 ## 4. On-Device Intelligence & Natural Language Processing
 
 * **Local Machine Learning**: All article intelligence operations—topic categorization, sentiment scoring, named entity extraction, and content summarization—are executed locally on-device using Apple's `NaturalLanguage` and, when available, `FoundationModels` frameworks.
+* **Lead Images**: When a shown, unmuted story's group has no usable image, the app reads up to 256 KiB from the start of one report's article page (through the same protected client as the reader) to find its Open Graph, Twitter or schema.org article image. Publishers therefore receive requests for some stories you have not opened, at most 30 per refresh, outside Low Power Mode. Completed lookups are remembered; unreachable pages may retry. Article text from these lookups is not kept.
+* **Story Importance**: Whether a story is major, notable or minor is rated by the on-device model from its headline and feed summary, only while on-device AI is enabled. Minor stories wait for wider coverage; unread ones expire from the local library after a day.
+* **Event Grouping**: Deciding whether two stories report one event can use the on-device model and Apple's on-device sentence embeddings. Only headlines and feed summaries are compared, on your Mac, and only while on-device AI is enabled.
 * **Zero Cloud AI Egress**: Article content, summaries, and extracted metadata are never transmitted to third-party AI or cloud LLM APIs.
 
 ---
@@ -71,4 +74,3 @@ No access is requested or granted for:
 * **Retention Policies**: Configurable automatic pruning keeps local SQLite storage lightweight without removing bookmarked articles.
 * **Exportability**: You can export your entire feed library at any time via the standard OPML 2.0 format (`File > Export OPML...`).
 * **Complete Erasure**: Current application data is stored under `~/Library/Containers/com.marspater.news/`. Quit the app before manually removing its sandbox container. Removing that container does not erase exported OPML files or historical backups stored elsewhere.
-

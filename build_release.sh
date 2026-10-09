@@ -57,6 +57,8 @@ SWIFT_SOURCES=(
     Sources/Intelligence/EventCandidates.swift
     Sources/Intelligence/EventMatcher.swift
     Sources/Intelligence/EventClustering.swift
+    Sources/Intelligence/EventJudge.swift
+    Sources/Intelligence/StoryImportance.swift
     Sources/Intelligence/ContentExtractionPipeline.swift
     Sources/Intelligence/EnrichmentQueue.swift
     Sources/Intelligence/OverviewGenerationCoordinator.swift

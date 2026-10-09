@@ -197,9 +197,13 @@ actor EnrichmentQueue {
             return await operation()
         }
         overviewTasks[eventID] = task
-        defer { overviewTasks.removeValue(forKey: eventID) }
+        defer { if overviewTasks[eventID] == task { overviewTasks.removeValue(forKey: eventID) } }
 
-        return await task.value
+        return await withTaskCancellationHandler {
+            await task.value
+        } onCancel: {
+            task.cancel()
+        }
     }
 
     /// Cancels overview generation for a specific event.
