@@ -4617,23 +4617,35 @@ struct NewsTests {
         }
         let db = DatabaseEngine(path: url.path)
         try await db.open()
-        let clock = Date()
+        // NEWS_IMAGES_NOW (seconds since 1970) repeats an earlier measurement on the same 72-hour denominator (#312).
+        let clock = ProcessInfo.processInfo.environment["NEWS_IMAGES_NOW"].flatMap(TimeInterval.init).map(Date.init(timeIntervalSince1970:)) ?? Date()
+        var placeholders: [[String: String]] = []
         func coverage() async throws -> (cards: Int, pictured: Int) {
             let articles = try await db.fetchArticles(limit: nil, publicationWindow: clock.addingTimeInterval(-72 * 3600)...clock, hidingWaitingStories: true)
             let summaries = try await db.eventFeedSummaries(forArticles: articles.map(\.id))
             let entries = EventFeedGrouping.entries(for: articles, events: summaries, mode: .events)
             var pictured = 0
+            placeholders = []
+            let pending = Set(try await db.imagelessStoryRows(activeSince: clock.addingTimeInterval(-EventCandidatePolicy.standard.activeEventLifetime), limit: 2000).map(\.id))
             for entry in entries {
                 let members: [FeedArticle]
                 switch entry {
                 case .article(let article): members = [article]
                 case .event(let summary, _, _): members = try await db.fetchArticles(limit: nil, eventID: summary.eventID)
                 }
-                if FeedArticle.bestCardImage(in: members) != nil { pictured += 1 }
+                if FeedArticle.bestCardImage(in: members) != nil { pictured += 1; continue }
+                // Private: which cards keep the placeholder, and whether their pages were looked up.
+                let looked = try await db.storyImages(for: members.map(\.id))
+                for member in members {
+                    let checked = pending.contains(member.id) ? "not looked up" : looked[member.id] == nil ? "looked up, none" : "found"
+                    placeholders.append(["card": members.count > 1 ? "event" : "single", "members": String(members.count),
+                                         "link": member.link, "lookup": checked])
+                }
             }
             return (entries.count, pictured)
         }
         let before = try await coverage()
+        let placeholdersBefore = placeholders
         var checks = 0
         var found = 0
         for pass in 1...10 {
@@ -4660,6 +4672,8 @@ struct NewsTests {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         try encoder.encode(report).write(to: directory.appendingPathComponent("images.json"))
+        try JSONSerialization.data(withJSONObject: ["before": placeholdersBefore, "after": placeholders], options: [.prettyPrinted, .sortedKeys])
+            .write(to: directory.appendingPathComponent("placeholders-private.json"))
         print("IMAGE_REPORT \(String(decoding: try encoder.encode(report), as: UTF8.self))")
         await db.close()
     }
@@ -4883,6 +4897,30 @@ struct NewsTests {
         assertEqual(prefix.count, 256 * 1024, "Only a bounded page prefix is retained even for a large declared body")
         assertEqual(await StoryImageFinder.publisherPages(using: client).find("https://example.com/story"),
                     .found("https://example.com/caf%C3%A9.jpg"), "The protected finder respects the publisher's declared character encoding")
+
+        // #312: pages that declare no image. Body prose must pass reader validation, as on a real article page.
+        let prose = (1...4).map { "Paragraph \($0) of the report describes how regional officials responded to the flooding, which closed roads and schools across the valley this week." }
+        func articlePage(_ figures: String) -> String {
+            "<html><head><title>Flooding closes roads</title></head><body><header><img src='/brand/logo.png' alt='Publisher logo'></header>"
+                + "<article><p>\(prose[0])</p>\(figures)<p>\(prose[1])</p><p>\(prose[2])</p><p>\(prose[3])</p></article></body></html>"
+        }
+        let pages = [
+            "/figure": articlePage("<figure><img src='/photos/pixel.gif' width='1' height='1'></figure>"
+                + "<figure><img src='/photos/flooded-road.jpg' width='1200' height='800' alt='A flooded road'><figcaption>A flooded road near the valley</figcaption></figure>"
+                + "<figure><img src='/photos/second.jpg' width='1200' height='800'></figure>"),
+            "/furniture": articlePage("<figure><img src='/photos/strip.jpg' width='4000' height='200'></figure>"
+                + "<figure><img src='/promo/n.jpg' alt='A thin banner promoting the Morning Briefing newsletter'></figure>"
+                + "<figure><img src='/photos/pixel.gif' width='1' height='1'></figure>")
+        ]
+        MockURLProtocol.requestHandler = { request in
+            (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: ["Content-Type": "text/html; charset=utf-8"])!,
+             Data((pages[request.url!.path] ?? "").utf8))
+        }
+        let pageFinder = StoryImageFinder.publisherPages(using: client)
+        assertEqual(await pageFinder.find("https://example.com/figure"), .found("https://example.com/photos/flooded-road.jpg"),
+                    "Without a declaration, the first qualifying figure in the article body is the lead")
+        assertEqual(await pageFinder.find("https://example.com/furniture"), StoryImageLookup.none,
+                    "Logos, newsletter banners, tracking pixels and extreme strips never stand in for a lead")
         MockURLProtocol.requestHandler = nil
 
         var small = FeedArticle(title: "Report", link: page, guid: "small", description: "", pubDate: Date(), source: "One")

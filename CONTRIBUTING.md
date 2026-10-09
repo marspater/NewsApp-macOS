@@ -15,7 +15,7 @@ Build on Apple silicon with Xcode 27 selected. The deployment target remains mac
 ./test.sh --story-regressions     # Focused offline identity, reader and persistence checks
 ./test.sh --curation-live /private/tmp/library-backup.sqlite3 /private/tmp/curation-report # Opt-in on-device rating audit of a SQLite backup; private titles stay local
 ./test.sh --overviews-live /private/tmp/library-backup.sqlite3 /private/tmp/overview-report # Opt-in on-device labeled controls and live overview audit; private passages stay local
-./test.sh --images-live /private/tmp/library-backup.sqlite3 /private/tmp/curation-report # Opt-in protected page-prefix lookups and card-image coverage on the backup
+./test.sh --images-live /private/tmp/library-backup.sqlite3 /private/tmp/curation-report # Opt-in protected page-prefix lookups and card-image coverage on the backup; NEWS_IMAGES_NOW=<epoch> repeats an earlier 72-hour denominator
 ./test.sh --performance-baseline --active-work-cancellation # Active clustering, ingestion and feed parsing cancellation; temporary stress fixtures
 ./script/native_performance_baseline.sh # Isolated MainView window, rendered-card samples and process memory
 NEWS_NATIVE_HARNESS=Tests/NativeReadingMemory.swift ./script/native_performance_baseline.sh # Live: read 20 stories twice in the production reader, isolated; waits until each image is decoded
