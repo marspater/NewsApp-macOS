@@ -965,33 +965,21 @@ actor DatabaseEngine {
         try aliasTarget(kind: "id", value: id) ?? id
     }
 
+    /// Resolves ID aliases in bounded queries, preserving input order and ambiguous/missing fallbacks.
     func resolvedArticleIDs(_ ids: [String]) throws -> [String] {
-        var statement: OpaquePointer?
-        guard sqlite3_prepare_v2(db, "SELECT article_id FROM article_aliases WHERE kind = 'id' AND value = ?;", -1, &statement, nil) == SQLITE_OK else {
-            throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Cannot prepare alias lookup"])
-        }
-        defer { sqlite3_finalize(statement) }
-
-        var resolvedIds: [String] = []
-        resolvedIds.reserveCapacity(ids.count)
-
-        for id in ids {
-            sqlite3_reset(statement)
-            sqlite3_bind_text(statement, 1, id, -1, Self.sqliteTransient)
-            switch sqlite3_step(statement) {
-            case SQLITE_ROW:
-                if let cStr = sqlite3_column_text(statement, 0) {
-                    resolvedIds.append(String(cString: cStr))
-                } else {
-                    resolvedIds.append(id)
-                }
-            case SQLITE_DONE:
-                resolvedIds.append(id)
-            default:
-                throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Cannot read article alias"])
+        let uniqueIDs = Set(ids).sorted()
+        var targets: [String: String] = [:]
+        for start in stride(from: 0, to: uniqueIDs.count, by: 400) {
+            try Task.checkCancellation()
+            let slice = Array(uniqueIDs[start..<min(start + 400, uniqueIDs.count)])
+            let placeholders = Array(repeating: "?", count: slice.count).joined(separator: ",")
+            let rows = try eventRows("SELECT value, article_id FROM article_aliases WHERE kind = 'id' AND value IN (\(placeholders));",
+                                     slice.map { .text($0) })
+            for row in rows {
+                if let alias = row[0], let target = row[1] { targets[alias] = target }
             }
         }
-        return resolvedIds
+        return ids.map { targets[$0] ?? $0 }
     }
 
     /// Keep observed identities across serial URL/GUID changes without rewriting keys.
@@ -1743,8 +1731,8 @@ actor DatabaseEngine {
         let now = Date().timeIntervalSince1970
         try beginTransaction()
         do {
-            for articleId in articleIds {
-                let articleId = try resolvedArticleID(articleId)
+            let resolvedIDs = try resolvedArticleIDs(Array(articleIds))
+            for articleId in resolvedIDs {
                 sqlite3_reset(stmt)
                 sqlite3_bind_text(stmt, 1, articleId, -1, Self.sqliteTransient)
                 sqlite3_bind_double(stmt, 2, now)
