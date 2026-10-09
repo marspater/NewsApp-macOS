@@ -41,7 +41,7 @@ struct ArticleWebView: NSViewRepresentable {
     func makeNSView(context: Context) -> WKWebView {
         let configuration = WKWebViewConfiguration()
         // Do not inherit publisher service workers or cookies from earlier previews.
-        configuration.websiteDataStore = .nonPersistent()
+        configuration.websiteDataStore = WKWebsiteDataStore.nonPersistent()
         let preferences = WKWebpagePreferences()
         // Public WebKit proxies do not constrain WebRTC sockets created by publisher scripts.
         preferences.allowsContentJavaScript = false
