@@ -2257,7 +2257,8 @@ struct NewsTests {
         assertEqual(story("https://notaljazeera.com/story", "Other").publisherName, "Other", "Only the same host or its subdomains match")
 
         // A retired subscription ends once per retirement version; subscribing again later is kept.
-        let nyt = AppSettings.retiredFeeds[0].url, onet = AppSettings.retiredFeeds[1].url
+        let nyt = "https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml"
+        let onet = "https://wiadomosci.onet.pl/.feed"
         assertFalse(AppSettings.defaultFeeds.contains(nyt), "Retired feeds are not fresh-install defaults")
         assertFalse(FeedCatalog.allFeeds.contains { $0.url == onet }, "Retired feeds leave the catalog")
         parkedDefaults.set([kept[0], nyt, onet], forKey: AppSettings.feedURLsKey)
@@ -3580,6 +3581,24 @@ struct NewsTests {
             return await pipeline.extractArticleWithIdentity(from: requested.absoluteString)
         }
         assertTrue(await cancelled.value.evidence == nil, "Cancelled extraction returns no identity evidence")
+
+        let insecure = requested.absoluteString.replacingOccurrences(of: "https://", with: "http://")
+        for allowHTTP in [false, true] {
+            requests.removeAll()
+            MockURLProtocol.requestHandler = { request in
+                requests.append(request.url!)
+                return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                        Data("<article><p>\(prose)</p></article>".utf8))
+            }
+            let upgraded = await pipeline.extractArticleWithIdentity(from: insecure, allowHTTP: allowHTTP)
+            assertTrue(upgraded.outcome.isSuccess, "HTTP feed links remain readable under either transport setting")
+            assertEqual(requests.map(\.absoluteString), [allowHTTP ? insecure : requested.absoluteString],
+                        "Extraction upgrades HTTP unless the user explicitly allows it")
+        }
+        requests.removeAll()
+        let malformed = await pipeline.extractArticleWithIdentity(from: "http://[malformed")
+        assertFalse(malformed.outcome.isSuccess, "Malformed article links fail before fetching")
+        assertTrue(requests.isEmpty, "Malformed links never reach the network")
     }
 
     @MainActor
@@ -4348,6 +4367,37 @@ struct NewsTests {
         assertEqual(try await EventClusterer.run(in: db, now: now).merged, 0, "A merged story is not merged again")
         await db.close()
 
+        // Newly merged members supply the terms needed to discover a third fragment.
+        let chain = DatabaseEngine(path: ":memory:")
+        try await chain.open()
+        let titles = ["Aurora Meridian growers harvest apples",
+                      "Aurora Meridian growers harvest apples with Cobalt Zenith harvest robots",
+                      "Cobalt Zenith engineers deploy harvest robots"]
+        var groups: [[FeedArticle]] = []
+        for (group, count) in [6, 4, 2].enumerated() {
+            let members = (0..<count).map { index in
+                article("chain-\(group)-\(index)", titles[group], "Scientists report that \(titles[group]).",
+                        hoursAgo: 1, source: "Publisher \(group)-\(index)")
+            }
+            groups.append(members)
+            try await chain.upsertArticles(members)
+            _ = try await chain.createEvent(memberArticleIDs: members.map(\.id), at: now)
+        }
+        func terms(_ story: FeedArticle) -> Set<String> {
+            let value = EventFeatures(title: story.title, description: story.description, date: now)
+            return value.specificAnchors.union(value.keywords)
+        }
+        assertTrue(terms(groups[0][0]).intersection(terms(groups[2][0])).count < 2, "The third fragment requires terms introduced by the second")
+        var chainPolicy = EventMatchPolicy.standard
+        chainPolicy.minimumSharedTerms = 2
+        chainPolicy.matchScore = 0.35
+        chainPolicy.compatibilityScore = 0
+        chainPolicy.compatibleShare = 0
+        let chainReport = try await EventClusterer.run(in: chain, matchPolicy: chainPolicy,
+                                                      judge: EventJudge { _, _ in true }, now: now, limit: 0)
+        assertEqual(chainReport.merged, 2, "A successful merge refreshes terms before considering the next fragment")
+        await chain.close()
+
         // A local exclusion between fragments always wins.
         let excluded = try await library()
         if let event = try await excluded.eventID(forArticle: "m3") {
@@ -4355,6 +4405,12 @@ struct NewsTests {
             try await excluded.separateArticle("m1", fromEvent: event, at: now)
         }
         _ = try await excluded.addArticles(["m1"], toEvent: try await excluded.eventID(forArticle: "m2") ?? "", at: now)
+        let exclusions = try await excluded.eventExclusions(for: quake.map(\.id) + (0..<450).map { "a-missing-\($0)" })
+        assertEqual(exclusions["m1"], Set(["m3", "m4"]), "Bulk exclusions span SQLite parameter batches")
+        assertEqual(exclusions["m3"], Set(["m1"]), "Bulk exclusions work from either endpoint")
+        assertEqual(exclusions["m4"], Set(["m1"]), "Repeated rows across batches do not duplicate exclusions")
+        assertEqual(exclusions.count, 3, "Unknown and unexcluded members create no exclusion entries")
+        assertTrue(try await excluded.eventExclusions(for: []).isEmpty, "An empty member set needs no exclusion query")
         assertEqual(try await EventClusterer.run(in: excluded, now: now).merged, 0, "Excluded members keep fragments apart")
         await excluded.close()
 
