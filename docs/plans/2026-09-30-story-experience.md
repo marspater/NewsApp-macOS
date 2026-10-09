@@ -14,26 +14,30 @@ Merged follow-ups:
 | Importance / waiting (#289; #292 closed) | 667 active publications rated; 64 waiting; zero rated-major publications hidden | Independent labels and stability in #309; the predicate measurement does not validate model ratings |
 | Publisher images (#290; #293 closed) | 466 / 473 active cards had usable images (98.5%); all 128 added URLs decoded | Seven placeholders remain; in-article figure fallback in #312 |
 | Plain-text overviews (#291; #294 closed) | Five of eight live drafts accepted, 40 retained claims reviewed with zero detected critical errors; the three labelled controls fell back | Independent accepted-draft controls, error bounds and latency in #308 |
-| Reliability (#296/#297) | Parser/card/clustering corrections, image-URL index, provisional overview/summary retry and schema v20 model-generation invalidation after macOS updates | Real-library v16 → v20 upgrade and isolated end-to-end verification in #305 |
+| Reliability (#296/#297) | Parser/card/clustering corrections, image-URL index, provisional overview/summary retry and schema v20 model-generation invalidation after macOS updates | Copied-library v16 → v20 migration, preserved state and regeneration passed; #305 awaits audit PR #332 merge. OS notification delivery is deferred to the real compiled app in #334 |
 | Tension retention (#321; #310 closed) | Waiting-story expiry preserves panel history while collection is enabled | Real-panel calibration #235 remains outside the core release |
 | PR maintenance (#299–#303/#306, #325–#327) | Reviewed cleanup, bounded read/save alias resolution, synchronized completion-claim regression and reused cache size keys | No new release gate; this does not replace #305/#307/#308 |
 
 The [curation/image audit](../audits/2026-10-09-story-curation-images.md) and [overview audit](../audits/2026-10-09-plain-text-overviews.md) retain aggregate measurements and their limits; [Codacy corrections](../audits/2026-10-09-codacy-slices.md) and [Sonar corrections](../audits/2026-10-09-sonar-slices.md) record follow-up verification. Publisher passages and private evaluation data remain local. The installed app/library has not been upgraded by this documentation work.
 
-Open follow-ups as of this update:
+Follow-up status as of this update:
 
 | Issue | Status / scope | Work |
 | --- | --- | --- |
-| #305 | Ready · P1 | Verify current main in an isolated bundle on a read-only backup of the installed library |
+| #305 | In review · P1 · [PR #332](https://github.com/marspater/NewsApp-macOS/pull/332) | Isolated copied-library migration, preservation, regeneration and live UI checks passed; real-app notification delivery is tracked separately in #334 |
 | #307 | Ready · P1 | Freeze and evaluate the current event matcher; Mars approved one regression replay of the earlier holdout, followed by a fresh English release sample |
 | #308 | Ready · P1 | Independent overview claim review, error bounds and latency |
-| #309 | Backlog · P2 | Mars settled the three borderline importance cases; implement the rules, then measure independent labels and stability |
-| #311 | In review · P2 · [PR #328](https://github.com/marspater/NewsApp-macOS/pull/328) | Full suite leaves no new test plist; exact-run cleanup and narrow legacy instructions await merge |
+| #309 | Ready · P2 | Mars settled the three borderline importance cases; implement the rules, then measure independent labels and stability |
+| #311 | Done · P2 · [PR #328](https://github.com/marspater/NewsApp-macOS/pull/328) merged | Full suite leaves no new test plist; exact-run cleanup and narrow legacy instructions are merged |
 | #312 | Backlog · P2 | Figure fallback for card images, with furniture rejection and a coverage remeasurement |
-| #315 | In review · P2 · this update | Refresh README, plan status and Unreleased date; not Done until merged |
+| #315 | Done · P2 · [PR #329](https://github.com/marspater/NewsApp-macOS/pull/329) merged | README, plan status and Unreleased date are updated; this audit reconciles the later status changes |
+| #330/#331 | Backlog · P2 | Live reader newsletter removal and diagnosis of the inherited saved-state orphan; no production-data repair yet |
+| #334 | Backlog · P1 · deferred | Validate actual notification delivery and timing in the real compiled app; Mars deferred this from the isolated migration check |
 | #313/#314 | Backlog · ideas | Perspective coverage and related-event timeline proposals; not release dependencies |
 | #264/#268 | Parked | Non-English event matching and spoken VoiceOver; resume only at Mars's request |
 | #99/#235/#244 | Optional / outside core release | Tension experiment/calibration and source discovery |
+
+The [9 October work log and migration audit](../audits/2026-10-09-real-library-migration.md#work-log-and-remaining-queue--9-october-2026) records completed checks, the approved temporary-bundle retry, deferred real-app validation and current PR/issue states. PRs #328/#329 are merged; #332 is the remaining review PR. New-head and merged-main hosted checks must complete before claiming CI acceptance.
 
 ## Historical scope decision — 5 October 2026
 
