@@ -42,6 +42,7 @@ struct NewsApp: App {
         .windowToolbarStyle(.unified)
         .commands {
             SidebarCommands()
+            KeyboardShortcutsCommands()
             CommandGroup(after: .appInfo) {
                 Button("Check for Updates...") {
                     Task { @MainActor in
@@ -133,6 +134,13 @@ struct NewsApp: App {
             }
         }
         
+        Window("Keyboard Shortcuts", id: KeyboardShortcutsCommands.windowID) {
+            KeyboardShortcutsView()
+                .preferredColorScheme(themeManager.appearance.colorScheme)
+                .modifier(SystemSettingsOverrideModifier())
+        }
+        .windowResizability(.contentSize)
+
         Window("News Tension", id: "tension") {
             TensionIndexView()
                 .environmentObject(appSettings)
@@ -151,6 +159,20 @@ struct NewsApp: App {
                 .environmentObject(savedStories)
                 .preferredColorScheme(themeManager.appearance.colorScheme)
                 .modifier(SystemSettingsOverrideModifier())
+        }
+    }
+}
+
+/// Help → Keyboard Shortcuts opens the single-key shortcut list in its own window.
+struct KeyboardShortcutsCommands: Commands {
+    static let windowID = "keyboard-shortcuts"
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some Commands {
+        CommandGroup(after: .help) {
+            Button("Keyboard Shortcuts") {
+                openWindow(id: Self.windowID)
+            }
         }
     }
 }

@@ -47,8 +47,7 @@ struct MainView: View {
                     ArticleListView(
                         selectedTopic: $selectedTopic,
                         searchText: $searchText,
-                        articlePath: $articlePath,
-                        columnVisibility: $columnVisibility
+                        articlePath: $articlePath
                     )
                     .environmentObject(appSettings)
                     .environmentObject(articleStore)
@@ -64,6 +63,8 @@ struct MainView: View {
                         path: $articlePath
                     )
                     .navigationBarBackButtonHidden(true)
+                    // In full screen the toolbar steps aside for the story and returns on hover.
+                    .windowToolbarFullScreenVisibility(.onHover)
                     .environmentObject(appSettings)
                     .environmentObject(articleStore)
                     .environmentObject(feedManager)
@@ -85,7 +86,6 @@ struct MainView: View {
         // The system sidebar field: Liquid Glass on macOS 26, the standard search field on macOS 15.
         .searchable(text: $searchText, placement: .sidebar, prompt: "Search")
         .searchSuggestions { searchOperatorSuggestions }
-        .softScrollEdge()
         .frame(minWidth: 900, minHeight: 600)
         .onAppear {
             if feedManager.articles.isEmpty {

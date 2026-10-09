@@ -3,7 +3,7 @@
 literal-color Sources/Views/EventOverviewReaderView.swift 2
 literal-font-size Sources/Views/ArticleCardView.swift 5
 literal-font-size Sources/Views/ArticleDetailView.swift 33
-literal-font-size Sources/Views/ArticleListView.swift 8
+literal-font-size Sources/Views/ArticleListView.swift 3
 literal-font-size Sources/Views/EventCardView.swift 4
 literal-font-size Sources/Views/EventOverviewReaderView.swift 42
 literal-font-size Sources/Views/SettingsView.swift 24
