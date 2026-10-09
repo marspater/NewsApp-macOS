@@ -208,7 +208,7 @@ def label_metrics(rows, audits):
 
 def verbatim_metrics(rows):
     copied = [row[1] for row in rows]
-    whole = sum(row[2] > 0 and row[1] == row[2] for row in rows)
+    whole = sum(0 < row[2] == row[1] for row in rows)
     return {'medianLongestCopiedRun': percentile(copied, 50),
             'claimsCopyingAtLeast8Words': rate(sum(run >= 8 for run in copied), len(rows)),
             'claimsCopiedWhole': rate(whole, len(rows))}
@@ -321,7 +321,8 @@ def check_report(directory):
     require((groups['refusal'], groups['format'], groups['weakDraft']) == (1, 0, 1), 'Fallback groups')
     latency = result['latencySeconds']
     expected = {'all': {'p50': 4.0, 'p95': 5.8}, 'accepted': {'p50': 4.0, 'p95': 4.0}}
-    require(all(math.isclose(latency[group][key], value) for group in expected for key, value in expected[group].items()), 'Latency percentiles')
+    require(all(math.isclose(latency[group][key], value) for group, values in expected.items() for key, value in values.items()),
+            'Latency percentiles')
     require((claims_report['retained'], claims_report['labelled'], claims_report['critical']['count']) == (5, 5, 1), 'Labelled claim counts')
     require(math.isclose(claims_report['criticalUpperBound95'], wilson(1, 5)[1]), 'Critical-error Wilson upper bound')
     verbatim = result['verbatim']
