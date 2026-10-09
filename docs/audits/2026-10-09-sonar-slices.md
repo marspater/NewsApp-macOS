@@ -32,6 +32,6 @@ The 55 open warnings across #286–#291 were addressed on each slice and merged 
 | BBC rendition path literal (S1075) | #286 | A lookbehind replaces only the width segment. |
 | Closure nesting (S3087) | #291 | Source count computed before the generation closures. |
 | Empty catch block (S108) | #291 | The cancellation test records and asserts the outcome. |
-| Retired subscription URLs (S1075, 3) | #286, #287 | Kept. They identify subscriptions to end and are not endpoints to configure; they need an accepted or false-positive status in SonarQube Cloud. |
+| Retired subscription URLs (S1075, 3) | #286, #287 | Kept. They identify subscriptions to end and are not endpoints to configure; marked false positive in SonarQube Cloud with that reason. |
 
-No rule, quality profile or gate was changed. After the pushes, #288, #289 and #290 reported no open warnings; #286 and #287 reported only the retired-subscription URLs.
+No rule, quality profile or gate was changed. After the pushes, #288, #289 and #290 reported no open warnings; #286 and #287 reported only the retired-subscription URLs, which were then marked false positive, leaving no open warnings on any slice.
