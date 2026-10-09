@@ -219,15 +219,16 @@ def report(directory):
 def self_check():
     assert wilson(0, 0) is None
     low, high = wilson(0, 30)
-    assert low == 0.0 and abs(high - 0.1135) < 1e-3, high
-    assert percentile([4.0, 1.0, 3.0, 2.0], 50) == 2.5 and abs(percentile([1.0, 2.0, 3.0, 4.0], 95) - 3.85) < 1e-9
+    assert math.isclose(low, 0.0, abs_tol=1e-12) and math.isclose(high, 0.1135, abs_tol=1e-3), high
+    assert math.isclose(percentile([4.0, 1.0, 3.0, 2.0], 50), 2.5) and math.isclose(percentile([1.0, 2.0, 3.0, 4.0], 95), 3.85)
     assert longest_shared_run('The council approved the repairs.', 'Yesterday the council approved the repairs at noon.') == (5, 5)
-    assert jaccard('The bridge reopened on Monday.', 'The bridge reopened Monday after repairs.') == 0.6
+    assert math.isclose(jaccard('The bridge reopened on Monday.', 'The bridge reopened Monday after repairs.'), 0.6)
 
     def record(result, seconds, failure=None):
         passage = {'id': 'pass-1', 'articleID': 'a1', 'text': 'Officials said the bridge reopened on Monday after repairs costing $4m.', 'fingerprint': 'f'}
         citation = {'id': 'c1', 'articleID': 'a1', 'passageID': 'pass-1', 'passageFingerprint': 'f', 'quote': passage['text'], 'sourceName': 'Publisher A'}
-        fact = lambda i, text: {'id': f'model_claim_{i}', 'text': text, 'citationIDs': ['c1']}
+        def fact(i, text):
+            return {'id': f'model_claim_{i}', 'text': text, 'citationIDs': ['c1']}
         document = {'eventID': f'e-{seconds}', 'citations': {'c1': citation},
                     'facts': [fact(2, 'The bridge reopened on Monday after repairs costing $4m.'), fact(3, 'Repairs cost $4m.'), fact(4, 'Officials confirmed it.')],
                     'evidenceSections': {'introduction': [fact(0, 'The bridge reopened on Monday.'), fact(1, 'Officials gave the cost.')]}}
@@ -246,7 +247,8 @@ def self_check():
             raise AssertionError('A labelled sheet was replaced')
         except FileExistsError:
             pass
-        rows = list(csv.DictReader((directory / SHEET).open()))
+        with (directory / SHEET).open(newline='') as sheet_file:
+            rows = list(csv.DictReader(sheet_file))
         assert [row['claim'] for row in rows][:2] == ['1:model_claim_0', '1:model_claim_1'] and rows[0]['section'] == 'introduction'
         unlabelled = report(directory)
         assert unlabelled['claims']['unlabelled'] == 5 and not unlabelled['decisionInputs']['labellingComplete']
@@ -260,14 +262,14 @@ def self_check():
         assert result['overviews']['attempted'] == 3 and result['overviews']['accepted']['count'] == 1
         assert result['overviews']['fallbackCauses'] == {'accepted': 1, 'refusal': 1, 'weakDraft': 1}
         assert result['overviews']['modelFailures'] == 1 and result['overviews']['lineCounts']['malformed'] == 2
-        assert result['latencySeconds']['all']['p50'] == 4.0 and result['latencySeconds']['accepted']['p95'] == 4.0
+        assert math.isclose(result['latencySeconds']['all']['p50'], 4.0) and math.isclose(result['latencySeconds']['accepted']['p95'], 4.0)
         claims_report = result['claims']
         assert (claims_report['retained'], claims_report['labelled'], claims_report['critical']['count']) == (5, 5, 1)
-        assert abs(claims_report['criticalUpperBound95'] - wilson(1, 5)[1]) < 1e-12
+        assert math.isclose(claims_report['criticalUpperBound95'], wilson(1, 5)[1])
         assert result['verbatim']['claimsCopiedWhole']['count'] == 2 and result['verbatim']['claimsCopyingAtLeast8Words']['count'] == 1
         assert result['introductionRepetition']['repeatingAFact']['count'] == 0
         assert result['decisionInputs']['labellingComplete'] and result['decisionInputs']['criticalErrorObserved']
-        assert result['perspectiveCoverage']['twoOrMoreRate']['rate'] == 0.25
+        assert math.isclose(result['perspectiveCoverage']['twoOrMoreRate']['rate'], 0.25)
         public = (directory / REPORT).read_text()
         assert 'bridge' not in public.lower() and 'Publisher A' not in public, 'Report must not carry publisher or model text'
         (directory / SHEET).write_text('claim,label\n1:model_claim_0,maybe\n')
