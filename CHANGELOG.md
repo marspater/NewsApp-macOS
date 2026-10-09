@@ -12,6 +12,7 @@
 - Imageless, unmuted stories look up declared publisher images from a bounded page prefix, including schema.org metadata. Briefing and grouped cards reuse the results; event cards choose the best usable lead across all members. Publishers without a usable image retain the card placeholder. Lookups run after clustering, so slow or unreachable publisher pages never delay notifications.
 
 - Stories are rated major, notable or minor on device. Minor stories wait out of Today, Unread, sections and the Briefing until four publishers cover them (the list says how many wait and can show them); unread ones that are still waiting a day later are removed and are not re-added by later refreshes. Without on-device AI nothing is hidden.
+- Importance ratings follow three borderline rules (#309): broadcaster or industry business news is minor unless it affects a whole sector or national policy; incidents at military sites count by consequence (trespass arrests minor; damage, sabotage, terrorism charges or a real breach notable); nationwide staple price changes are notable, single-company or regional ones minor.
 
 - The app supports English-language feeds only for now. The catalog no longer offers its Ukrainian, German, French, Italian, Dutch and Polish feeds, and existing subscriptions to those catalog feeds are removed at launch; custom feeds are kept. The entries stay in the code for a later release (#264).
 

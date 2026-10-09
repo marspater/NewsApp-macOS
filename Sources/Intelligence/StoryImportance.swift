@@ -80,6 +80,11 @@ actor OnDeviceImportanceJudge {
         NOTABLE: significant national or international news with a narrower reach.
         MINOR: local or niche news, celebrity and lifestyle, sports results, features, opinion, explainers, live blogs, \
         quizzes, how-to and shopping.
+        Media or industry business news, such as programme cuts at a broadcaster, is MINOR unless it affects a \
+        whole sector or national policy.
+        Incidents at military sites count by consequence: trespass arrests are MINOR; damage, sabotage, terrorism \
+        charges or a real security breach are NOTABLE.
+        Nationwide price changes of staple goods are NOTABLE; a change by one company or in one region is MINOR.
         Answer with exactly one word: MAJOR, NOTABLE or MINOR.
 
         \(GenerationPromptDefense.frameArticleData(title: report.title, description: report.summary))
