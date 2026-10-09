@@ -6886,7 +6886,11 @@ struct NewsTests {
     static func testProxyStartupFailure() async throws {
         print("  - Testing proxy startup failure state and catch block...")
         let proxy = NetworkBoundaryProxy()
-        let t1 = Task { try await proxy.port() }
+        let t1 = Task {
+            // Pre-cancel the task by yielding, ensuring the SOCKSListener setup throws CancellationError
+            try await Task.sleep(nanoseconds: 10_000_000)
+            return try await proxy.port()
+        }
         t1.cancel() // Immediately cancel to force throwing CancellationError inside the SOCKSListener setup.
 
         do {
