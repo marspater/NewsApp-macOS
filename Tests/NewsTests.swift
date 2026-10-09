@@ -657,7 +657,7 @@ struct NewsTests {
         assertEqual(value(copy, "SELECT count(*) FROM sqlite_master WHERE name IN ('trg_articles_ai','trg_articles_ad','trg_articles_au');"), "3", "Failed rebuild restores the old triggers")
         execute(copy, "DROP VIEW article_fts_rows;")
         try await db.open()
-        assertEqual(value(copy, "PRAGMA user_version;"), "19", "Copied v14 library upgrades through v15 to the current schema")
+        assertEqual(value(copy, "PRAGMA user_version;"), "20", "Copied v14 library upgrades through v15 to the current schema")
         assertEqual(value(path, "PRAGMA user_version;"), "14", "Original library stays untouched")
         assertEqual(try await db.searchArticles(query: "Research").map(\.id), originalOrder, "Migration preserves ranks and ID tie order")
         assertEqual(value(copy, "SELECT read_at FROM article_state WHERE article_id='one';"), readAt, "Migration preserves read timestamps")
@@ -3171,7 +3171,7 @@ struct NewsTests {
         await cancelledDB.close()
         let db = DatabaseEngine(path: copyPath)
         try await db.open()
-        assertEqual(value(copyPath, "PRAGMA user_version;"), "19", "Copied v4 library upgrades to the current schema")
+        assertEqual(value(copyPath, "PRAGMA user_version;"), "20", "Copied v4 library upgrades to the current schema")
         assertEqual(value(originalPath, "PRAGMA user_version;"), "4", "Original fixture stays untouched")
         assertEqual(try await db.fetchArticles(limit: nil).count, 3, "Migration keeps historical rows")
         assertEqual(value(copyPath, "SELECT read_at FROM article_state WHERE article_id = 'alias-first';"), originalReadAt, "Migration preserves read history timestamp")
@@ -3342,7 +3342,7 @@ struct NewsTests {
         assertEqual(value(failure, "SELECT is_saved FROM article_state WHERE article_id='historical-a';"), "0", "Injected failure rolls back survivor state union")
         assertEqual(value(failure, "SELECT article_id FROM article_aliases WHERE value='observed-variant-b';"), "historical-b", "Injected failure preserves old aliases")
         try await migrated.open()
-        assertEqual(value(copy, "PRAGMA user_version;"), "19", "Copied library upgrades to the current schema")
+        assertEqual(value(copy, "PRAGMA user_version;"), "20", "Copied library upgrades to the current schema")
         assertEqual(value(path, "PRAGMA user_version;"), "8", "Original fixture remains untouched")
         assertEqual(try await migrated.fetchArticles(limit: nil).count, 6, "Only confident same-URL text copies are hidden")
         assertEqual(try await migrated.fetchArticles(limit: nil, includingOriginals: true).count, 8, "Every stored original remains reachable")
@@ -4102,7 +4102,7 @@ struct NewsTests {
 
         let db = DatabaseEngine(path: copy)
         try await db.open()
-        assertEqual(value(copy, "PRAGMA user_version;"), "19", "Copied v11 library upgrades to the current schema")
+        assertEqual(value(copy, "PRAGMA user_version;"), "20", "Copied v11 library upgrades to the current schema")
         assertEqual(value(path, "PRAGMA user_version;"), "11", "Original v11 fixture stays untouched")
         assertEqual(try await db.fetchArticles(limit: nil).count, 5, "Event migration keeps every article")
         assertTrue(try await db.isRead(articleId: "event-a"), "Event migration keeps read state")
@@ -4842,7 +4842,7 @@ struct NewsTests {
         assertEqual(value("PRAGMA user_version;"), "18", "Cancellation keeps the previous schema version")
         assertEqual(value("SELECT count(*) FROM sqlite_master WHERE name='idx_story_images_url';"), "0", "Cancellation leaves no partial index")
         try await db.open()
-        assertEqual(value("PRAGMA user_version;"), "19", "Existing v18 libraries receive the image index migration")
+        assertEqual(value("PRAGMA user_version;"), "20", "Existing v18 libraries receive the image index migration")
         assertEqual(sqlite3_exec(handle, "ANALYZE story_images;", nil, nil, nil), SQLITE_OK, "Use current fixture cardinality for the query planner")
         assertTrue(value("EXPLAIN QUERY PLAN SELECT article_id FROM story_images WHERE image_url='https://cdn.example/index.jpg' AND article_id<>'other';", column: 3)?.contains("idx_story_images_url") == true,
                    "Duplicate-image checks use the image URL index")
@@ -5241,7 +5241,7 @@ struct NewsTests {
         assertEqual(value(copy, "SELECT count(*) FROM sqlite_master WHERE name IN ('event_match_state','event_exclusions','event_state');"), "0", "Cancelled v14 migration rolls back its tables")
         let migrated = DatabaseEngine(path: copy)
         try await migrated.open()
-        assertEqual(value(copy, "PRAGMA user_version;"), "19", "Copied v13 library upgrades to the current schema")
+        assertEqual(value(copy, "PRAGMA user_version;"), "20", "Copied v13 library upgrades to the current schema")
         assertEqual(value(path, "PRAGMA user_version;"), "13", "Original v13 fixture stays untouched")
         assertEqual(try await migrated.fetchEvent(id: event.id)?.memberArticleIDs.count, 5, "Migration keeps events and members")
         assertTrue(try await migrated.isSaved(articleId: "second"), "Migration keeps saved state")
@@ -5520,7 +5520,7 @@ struct NewsTests {
             guard sqlite3_step(statement) == SQLITE_ROW else { return nil }
             return sqlite3_column_text(statement, 0).map { String(cString: $0) }
         }
-        assertEqual(value(copy, "PRAGMA user_version;"), "19", "Provenance schema upgrades to the current schema")
+        assertEqual(value(copy, "PRAGMA user_version;"), "20", "Provenance schema upgrades to the current schema")
         assertEqual(value(original, "PRAGMA user_version;"), "15", "Original v15 fixture remains untouched")
         assertEqual(value(copy, "PRAGMA quick_check;"), "ok", "Upgraded provenance library passes quick_check")
         assertEqual(value(copy, "PRAGMA foreign_key_check;"), nil, "Provenance has no dangling article references")
@@ -7499,6 +7499,19 @@ struct NewsTests {
         assertEqual(await warmup.value, nil, "The cancelled background request returns nothing")
         assertEqual(await reader.value?.content.evidenceSections?.introduction?.count, 2,
                     "Cancelling the background request does not cancel a reader's joined generation")
+        // A macOS update can replace the on-device model: stored overviews and summaries regenerate with the new one.
+        let summary = ArticleAnalysis(summary: "The bridge reopened.", keyPoints: ["Traffic resumed."], entities: [], category: "World",
+                                      sentiment: nil, modelIdentifier: "apple.foundation-model", analysisVersion: 3)
+        assertTrue(await store.saveArticleAnalysis(summary, for: article1.id), "A model summary is stored")
+        assertTrue(try await database.reconcileModelGeneration("model-a"), "An unrecorded model generation invalidates stored results")
+        assertEqual(try await database.fetchEventOverview(eventID: "plain")?.analysisVersion, 0, "Overviews from an earlier model are provisional")
+        assertTrue((await database.fetchArticleAnalysis(for: article1.id)?.analysisVersion ?? 3) < 3, "Summaries from an earlier model are redone")
+        let current = await coordinator.requestOverview(eventID: "plain", eventTitle: "Bridge reopening", membershipVersion: 1, articles: [article1, article2])
+        assertEqual(current?.analysisVersion, EventOverviewDocument.currentAnalysisVersion, "The next request regenerates with the current model")
+        assertFalse(try await database.reconcileModelGeneration("model-a"), "The same model generation keeps stored results")
+        assertEqual(try await database.fetchEventOverview(eventID: "plain")?.analysisVersion, EventOverviewDocument.currentAnalysisVersion,
+                    "Results stay current until the model changes")
+        assertTrue(try await database.reconcileModelGeneration("model-b"), "A new model generation invalidates them again")
         await database.close()
         let roundTrip = try JSONDecoder().decode(EventOverviewDocument.self, from: JSONEncoder().encode(generated))
         assertEqual(roundTrip.allClaims, generated.allClaims, "Introduction citations survive persistence")

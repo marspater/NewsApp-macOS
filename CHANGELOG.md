@@ -27,7 +27,7 @@
 
 ### Fixed
 
-- An overview made while the on-device model was skipped (AI setting, Low Power Mode, heat) or failed (refused, rate-limited) is kept only provisionally and regenerated on the next request, so a background warmup can no longer pin an event to its excerpt overview. Cancelling the background warmup no longer cancels an overview the reader joined. Overviews and reader summaries made while Apple Intelligence is switched off or its model is still downloading are redone once the model can run; a Mac that cannot run it keeps the excerpt versions.
+- An overview made while the on-device model was skipped (AI setting, Low Power Mode, heat) or failed (refused, rate-limited) is kept only provisionally and regenerated on the next request, so a background warmup can no longer pin an event to its excerpt overview. Cancelling the background warmup no longer cancels an overview the reader joined. Overviews and reader summaries made while Apple Intelligence is switched off or its model is still downloading are redone once the model can run; a Mac that cannot run it keeps the excerpt versions. After a macOS update, which can replace the on-device model, stored overviews and summaries regenerate with the new model when next opened.
 
 - Overview sentences preserve literal pipes and accept case/punctuation variants of a complete YES verdict; ambiguous answers still fall back. Earlier overviews regenerate with the corrected parser.
 

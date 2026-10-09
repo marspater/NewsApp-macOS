@@ -84,6 +84,10 @@ public struct NewsTextModel: Sendable {
     /// cannot run the model, and deterministic results are final.
     public struct TemporarilyUnavailable: Error {}
 
+    /// The on-device model generation. FoundationModels exposes no model version and the model ships with macOS, so
+    /// the macOS build identifies it; an update that keeps the model only causes one extra regeneration.
+    public static var generation: String { ProcessInfo.processInfo.operatingSystemVersionString }
+
     public static let unavailable = NewsTextModel { _, _ in throw URLError(.resourceUnavailable) }
     public static let onDevice = NewsTextModel { prompt, tokens in
         try Task.checkCancellation()
