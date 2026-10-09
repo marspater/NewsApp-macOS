@@ -1320,16 +1320,16 @@ struct NewsTests {
         print("  - Testing URL Normalization...")
         
         let url1 = "https://example.com/story?utm_source=feed&utm_medium=rss&ref=share"
-        assertEqual(FeedArticle.normalizeURL(url1), "https://example.com/story", "Should strip tracking query parameters")
+        assertEqual(ArticleIdentity.canonicalizeURL(url1), "https://example.com/story", "Should strip tracking query parameters")
         
         let url2 = "https://example.com/path/"
-        assertEqual(FeedArticle.normalizeURL(url2), "https://example.com/path", "Should strip trailing slashes")
+        assertEqual(ArticleIdentity.canonicalizeURL(url2), "https://example.com/path", "Should strip trailing slashes")
         
         let url3 = "https://EXamPLE.COm/Path/"
-        assertEqual(FeedArticle.normalizeURL(url3), "https://example.com/Path", "Should lowercase the host and strip trailing slash")
+        assertEqual(ArticleIdentity.canonicalizeURL(url3), "https://example.com/Path", "Should lowercase the host and strip trailing slash")
         
         let url4 = "http://example.com/path"
-        assertEqual(FeedArticle.normalizeURL(url4), "https://example.com/path", "Should upgrade scheme to https")
+        assertEqual(ArticleIdentity.canonicalizeURL(url4), "https://example.com/path", "Should upgrade scheme to https")
     }
     
     static func testSSRFValidation() async {

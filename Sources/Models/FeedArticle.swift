@@ -46,9 +46,6 @@ struct FeedArticle: Identifiable, Codable, Hashable, Sendable {
         ArticleIdentity.canonicalizeURL(link)
     }
 
-    static func normalizeURL(_ urlString: String) -> String {
-        ArticleIdentity.canonicalizeURL(urlString)
-    }
 
     /// Picks among curated member leads. Known area wins; tied or unknown sizes prefer publisher-hosted media.
     static func bestCardImage(in articles: [FeedArticle]) -> URL? {
