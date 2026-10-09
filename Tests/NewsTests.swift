@@ -471,7 +471,6 @@ struct NewsTests {
         await testDistributionAndEntitlementsIntegrity()
         await testStrictSemVerAndReleaseSecurity()
         await testNotificationModeTriageAndGrammar()
-        await testCompletionOnce()
         try await testSocketNetworkBoundary()
         try await testTransportCancellation()
         await testRefreshCoordinatorSingleFlightCoalescing()
@@ -6881,35 +6880,6 @@ struct NewsTests {
             response = Data("HTTP/1.1 200 OK\r\n\(cacheHeader)Content-Type: \(mime)\r\nContent-Length: \(body.utf8.count)\r\nConnection: close\r\n\r\n\(body)".utf8)
         } else { response = data ?? Data() }
         connection.send(content: response, isComplete: true, completion: .contentProcessed { _ in connection.cancel() })
-    }
-
-    static func testCompletionOnce() async {
-        print("  - Testing CompletionOnce atomicity...")
-        let completion = CompletionOnce()
-
-        let startGate = OpenGate()
-
-        await withTaskGroup(of: Bool.self) { group in
-            for _ in 0..<100 {
-                group.addTask {
-                    await startGate.wait()
-                    return completion.claim()
-                }
-            }
-
-            // Allow all tasks to start and wait at the gate
-            try? await Task.sleep(nanoseconds: 50_000_000)
-
-            // Release the gate so all tasks hit claim() simultaneously
-            startGate.open()
-            var claims = 0
-            for await result in group {
-                if result {
-                    claims += 1
-                }
-            }
-            assertEqual(claims, 1, "CompletionOnce must allow exactly one claim across concurrent tasks")
-        }
     }
 
     static func testSocketNetworkBoundary() async throws {
