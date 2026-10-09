@@ -488,7 +488,7 @@ enum HTMLDOMBuilder {
         if ignoredTags.contains(tagName) {
             // Skip content until closing tag
             if let closing = html.range(
-                of: "</" + tagName + r"\s*>", options: [.regularExpression, .caseInsensitive],
+                of: "</\(tagName)\\s*>", options: [.regularExpression, .caseInsensitive],
                 range: scanner.currentIndex..<html.endIndex
             ) {
                 scanner.currentIndex = closing.upperBound
