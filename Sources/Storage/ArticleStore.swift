@@ -14,6 +14,7 @@ final class ArticleStore: ObservableObject {
     
     @Published private(set) var articles: [FeedArticle] = []
     @Published private(set) var savedArticles: [FeedArticle] = []
+    @Published private(set) var savedArticleIDs: Set<String> = []
     @Published private(set) var readArticleIDs: Set<String> = []
     @Published private(set) var unreadCount: Int = 0
     @Published private(set) var savedCount: Int = 0
@@ -67,6 +68,7 @@ final class ArticleStore: ObservableObject {
             self.articles = fetched
             self.readArticleIDs = readIDs
             self.savedArticles = saved
+            self.savedArticleIDs = Set(saved.map { $0.id })
             self.unreadCount = counts.unread
             self.savedCount = counts.saved
             revision &+= 1
@@ -152,7 +154,7 @@ final class ArticleStore: ObservableObject {
     }
     
     func isSaved(_ article: FeedArticle) -> Bool {
-        savedArticles.contains { $0.id == article.id }
+        savedArticleIDs.contains(article.id)
     }
     
     func markAsRead(id: String, isRead: Bool = true) async {
@@ -215,11 +217,13 @@ final class ArticleStore: ObservableObject {
             guard let storedArticle = try await database.fetchArticles(limit: 1, id: id).first else { return false }
             try await database.setSaved(articleId: storedArticle.id, isSaved: nextState)
             if nextState {
-                if !savedArticles.contains(where: { $0.id == storedArticle.id }) {
+                if !savedArticleIDs.contains(storedArticle.id) {
                     savedArticles.insert(storedArticle, at: 0)
+                    savedArticleIDs.insert(storedArticle.id)
                 }
             } else {
                 savedArticles.removeAll { $0.id == storedArticle.id }
+                savedArticleIDs.remove(storedArticle.id)
             }
             let counts = try await database.counts()
             self.savedCount = counts.saved
@@ -273,7 +277,10 @@ final class ArticleStore: ObservableObject {
     private func publishStoredArticle(_ id: String) async throws {
         guard let updated = try await database.fetchArticles(limit: 1, id: id).first else { return }
         if let index = articles.firstIndex(where: { $0.id == id }) { articles[index] = updated }
-        if let index = savedArticles.firstIndex(where: { $0.id == id }) { savedArticles[index] = updated }
+        if let index = savedArticles.firstIndex(where: { $0.id == id }) {
+            savedArticles[index] = updated
+            savedArticleIDs.insert(updated.id)
+        }
         revision &+= 1
     }
 
