@@ -3329,6 +3329,35 @@ actor DatabaseEngine {
         return (live.id, live.version, members)
     }
 
+    func eventMatchMembers(eventIDs: [String]) throws -> [String: (id: String, version: Int, members: [EventMatchRow])] {
+        let uniqueIDs = Set(eventIDs).sorted()
+        var results: [String: (id: String, version: Int, members: [EventMatchRow])] = [:]
+
+        var validIDs: [String: Int] = [:]
+        for id in uniqueIDs {
+            if let live = try? liveEvent(id) {
+                validIDs[live.id] = live.version
+            }
+        }
+
+        guard !validIDs.isEmpty else { return [:] }
+        let liveEventIDs = Array(validIDs.keys).sorted()
+
+        for start in stride(from: 0, to: liveEventIDs.count, by: 400) {
+            let slice = Array(liveEventIDs[start..<min(start + 400, liveEventIDs.count)])
+            let placeholders = Array(repeating: "?", count: slice.count).joined(separator: ", ")
+            let members = try eventMatchRows("\(Self.eventMatchColumns) WHERE m.event_id IN (\(placeholders));", slice.map { .text($0) })
+
+            let grouped = Dictionary(grouping: members) { $0.eventID ?? "" }
+            for eventID in slice {
+                if let version = validIDs[eventID], let eventMembers = grouped[eventID] {
+                    results[eventID] = (eventID, version, eventMembers)
+                }
+            }
+        }
+        return results
+    }
+
     /// Every live event updated since `activeSince`, with its members, for merging fragments of one story.
     func activeEventMembers(since activeSince: Date) throws -> [(id: String, version: Int, members: [EventMatchRow])] {
         let since = activeSince.timeIntervalSince1970

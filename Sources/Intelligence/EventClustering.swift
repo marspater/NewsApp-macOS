@@ -80,17 +80,25 @@ enum EventClusterer {
                 activeSince: now.addingTimeInterval(-candidatePolicy.activeEventLifetime),
                 matcherVersion: EventMatcher.version, limit: min(batchSize, remaining))
             guard !pending.isEmpty else { break }
+
+            // Prefetch batch exclusions and current event members
+            let pendingIDs = pending.map { $0.id }
+            let pendingExclusions = try await database.eventExclusions(for: pendingIDs)
+
+            let currentEventIDs = pending.compactMap { $0.eventID }
+            let pendingCurrentEvents = try await database.eventMatchMembers(eventIDs: currentEventIDs)
+
             for row in pending where !handled.contains(row.id) {
                 try Task.checkCancellation()
                 remaining -= 1
                 report.processed += 1
                 let article = features(row)
-                let excluded = try await database.eventExclusions(of: row.id)
+                let excluded = pendingExclusions[row.id] ?? []
 
                 // A changed member stays only while it still fits the rest of its event. An unchanged
                 // member pending only for a newer matcher keeps its event: the whole-event check now
                 // covers members that joined after it and would detach the earliest ones.
-                if let current = row.eventID, let event = try await database.eventMatchMembers(eventID: current) {
+                if let current = row.eventID, let event = pendingCurrentEvents[current] {
                     let others = event.members.filter { $0.id != row.id }
                     if !others.isEmpty {
                         let fits = row.previouslyMatched || EventMatcher.eventScore(
@@ -114,9 +122,12 @@ enum EventClusterer {
 
                 // Join the best active event the article fits as a whole.
                 var best: (id: String, version: Int, score: Double)?
-                for eventID in Set(candidates.compactMap(\.eventID)).sorted() {
+                let candidateEventIDs = Set(candidates.compactMap(\.eventID)).sorted()
+                let candidateEvents = try await database.eventMatchMembers(eventIDs: candidateEventIDs)
+
+                for eventID in candidateEventIDs {
                     try Task.checkCancellation()
-                    guard let event = try await database.eventMatchMembers(eventID: eventID) else { continue }
+                    guard let event = candidateEvents[eventID] else { continue }
                     let members = event.members.filter { $0.id != row.id }
                     guard !members.isEmpty, members.count < matchPolicy.maximumEventSize,
                           !members.contains(where: { excluded.contains($0.id) }) else { continue }
@@ -146,10 +157,14 @@ enum EventClusterer {
                     }
                     scored.sort { $0.score != $1.score ? $0.score > $1.score : $0.row.id < $1.row.id }
                     var group: [(id: String, features: EventFeatures)] = []
+
+                    let candidateIDs = scored.prefix(matchPolicy.maximumEventSize).map { $0.row.id }
+                    let candidateExclusions = try await database.eventExclusions(for: candidateIDs)
+
                     for candidate in scored where group.count + 1 < matchPolicy.maximumEventSize {
                         let candidateFeatures = features(candidate.row)
                         guard group.allSatisfy({ EventMatcher.assess(candidateFeatures, $0.features, policy: matchPolicy).isCompatible }) else { continue }
-                        let partnerExclusions = try await database.eventExclusions(of: candidate.row.id)
+                        let partnerExclusions = candidateExclusions[candidate.row.id] ?? []
                         guard !group.contains(where: { partnerExclusions.contains($0.id) }) else { continue }
                         group.append((candidate.row.id, candidateFeatures))
                     }

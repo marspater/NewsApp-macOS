@@ -1,0 +1,109 @@
+commit 38c323f87fb7fb29a6fea4ad953c2496ca2c1452
+Author: google-labs-jules[bot] <161369871+google-labs-jules[bot]@users.noreply.github.com>
+Date:   Fri Oct 9 11:03:56 2026 +0000
+
+    ⚡ Bolt: Optimize N+1 queries in EventClustering
+
+diff --git a/Sources/Intelligence/EventClustering.swift b/Sources/Intelligence/EventClustering.swift
+index 0269491..a23d391 100644
+--- a/Sources/Intelligence/EventClustering.swift
++++ b/Sources/Intelligence/EventClustering.swift
+@@ -80,17 +80,25 @@ enum EventClusterer {
+                 activeSince: now.addingTimeInterval(-candidatePolicy.activeEventLifetime),
+                 matcherVersion: EventMatcher.version, limit: min(batchSize, remaining))
+             guard !pending.isEmpty else { break }
++
++            // Prefetch batch exclusions and current event members
++            let pendingIDs = pending.map { $0.id }
++            let pendingExclusions = try await database.eventExclusions(for: pendingIDs)
++
++            let currentEventIDs = pending.compactMap { $0.eventID }
++            let pendingCurrentEvents = try await database.eventMatchMembers(eventIDs: currentEventIDs)
++
+             for row in pending where !handled.contains(row.id) {
+                 try Task.checkCancellation()
+                 remaining -= 1
+                 report.processed += 1
+                 let article = features(row)
+-                let excluded = try await database.eventExclusions(of: row.id)
++                let excluded = pendingExclusions[row.id] ?? []
+
+                 // A changed member stays only while it still fits the rest of its event. An unchanged
+                 // member pending only for a newer matcher keeps its event: the whole-event check now
+                 // covers members that joined after it and would detach the earliest ones.
+-                if let current = row.eventID, let event = try await database.eventMatchMembers(eventID: current) {
++                if let current = row.eventID, let event = pendingCurrentEvents[current] {
+                     let others = event.members.filter { $0.id != row.id }
+                     if !others.isEmpty {
+                         let fits = row.previouslyMatched || EventMatcher.eventScore(
+@@ -114,9 +122,12 @@ enum EventClusterer {
+
+                 // Join the best active event the article fits as a whole.
+                 var best: (id: String, version: Int, score: Double)?
+-                for eventID in Set(candidates.compactMap(\.eventID)).sorted() {
++                let candidateEventIDs = Set(candidates.compactMap(\.eventID)).sorted()
++                let candidateEvents = try await database.eventMatchMembers(eventIDs: candidateEventIDs)
++
++                for eventID in candidateEventIDs {
+                     try Task.checkCancellation()
+-                    guard let event = try await database.eventMatchMembers(eventID: eventID) else { continue }
++                    guard let event = candidateEvents[eventID] else { continue }
+                     let members = event.members.filter { $0.id != row.id }
+                     guard !members.isEmpty, members.count < matchPolicy.maximumEventSize,
+                           !members.contains(where: { excluded.contains($0.id) }) else { continue }
+@@ -146,10 +157,14 @@ enum EventClusterer {
+                     }
+                     scored.sort { $0.score != $1.score ? $0.score > $1.score : $0.row.id < $1.row.id }
+                     var group: [(id: String, features: EventFeatures)] = []
++
++                    let candidateIDs = scored.prefix(matchPolicy.maximumEventSize).map { $0.row.id }
++                    let candidateExclusions = try await database.eventExclusions(for: candidateIDs)
++
+                     for candidate in scored where group.count + 1 < matchPolicy.maximumEventSize {
+                         let candidateFeatures = features(candidate.row)
+                         guard group.allSatisfy({ EventMatcher.assess(candidateFeatures, $0.features, policy: matchPolicy).isCompatible }) else { continue }
+-                        let partnerExclusions = try await database.eventExclusions(of: candidate.row.id)
++                        let partnerExclusions = candidateExclusions[candidate.row.id] ?? []
+                         guard !group.contains(where: { partnerExclusions.contains($0.id) }) else { continue }
+                         group.append((candidate.row.id, candidateFeatures))
+                     }
+diff --git a/Sources/Storage/DatabaseEngine.swift b/Sources/Storage/DatabaseEngine.swift
+index 642d3e5..a2fc7d0 100644
+--- a/Sources/Storage/DatabaseEngine.swift
++++ b/Sources/Storage/DatabaseEngine.swift
+@@ -3329,6 +3329,35 @@ actor DatabaseEngine {
+         return (live.id, live.version, members)
+     }
+
++    func eventMatchMembers(eventIDs: [String]) throws -> [String: (id: String, version: Int, members: [EventMatchRow])] {
++        let uniqueIDs = Set(eventIDs).sorted()
++        var results: [String: (id: String, version: Int, members: [EventMatchRow])] = [:]
++
++        var validIDs: [String: Int] = [:]
++        for id in uniqueIDs {
++            if let live = try? liveEvent(id) {
++                validIDs[live.id] = live.version
++            }
++        }
++
++        guard !validIDs.isEmpty else { return [:] }
++        let liveEventIDs = Array(validIDs.keys).sorted()
++
++        for start in stride(from: 0, to: liveEventIDs.count, by: 400) {
++            let slice = Array(liveEventIDs[start..<min(start + 400, liveEventIDs.count)])
++            let placeholders = Array(repeating: "?", count: slice.count).joined(separator: ", ")
++            let members = try eventMatchRows("\(Self.eventMatchColumns) WHERE m.event_id IN (\(placeholders));", slice.map { .text($0) })
++
++            let grouped = Dictionary(grouping: members) { $0.eventID ?? "" }
++            for eventID in slice {
++                if let version = validIDs[eventID], let eventMembers = grouped[eventID] {
++                    results[eventID] = (eventID, version, eventMembers)
++                }
++            }
++        }
++        return results
++    }
++
+     /// Every live event updated since `activeSince`, with its members, for merging fragments of one story.
+     func activeEventMembers(since activeSince: Date) throws -> [(id: String, version: Int, members: [EventMatchRow])] {
+         let since = activeSince.timeIntervalSince1970
