@@ -7,16 +7,13 @@ reviewer labels each story `important` or `minor` blind. `report RUN` writes RUN
 stories the reviewer judged important while the app hides them, with Wilson 95% bounds, and the stability of one
 fresh re-rate. It contains no story text. With no arguments, the script checks itself on a synthetic run.
 """
-import argparse
-import csv
-import io
 import json
 import math
-import os
 import pathlib
 import tempfile
 
-from overview_review import expect_rejected, private_run, rate, require, wilson
+from overview_review import (expect_rejected, label_sheet, main, private_run, rate, read_sheet_labels, require,
+                             wilson, write_new_sheet)
 
 LABELS = ('important', 'minor')
 LEVELS = ('minor', 'notable', 'major')
@@ -31,34 +28,15 @@ def stories(directory):
     require(path.exists(), f'No {SOURCE} in the run directory; run ./test.sh --curation-live first')
     rows = json.loads(path.read_text())
     require(all(row.get('waiting') in ('yes', 'no') for row in rows), 'Every story needs a waiting flag')
-    return [(f's{index}', row) for index, row in enumerate(rows, 1)]
+    # The opaque article ID keys each row, so a sheet built from another run cannot be applied to this one.
+    return [(row['id'], row) for row in rows]
 
 
 def sheet(directory):
     directory = private_run(directory)
-    out = io.StringIO()
-    writer = csv.DictWriter(out, COLUMNS, lineterminator='\n')
-    writer.writeheader()
-    rows = stories(directory)
-    for key, row in rows:
-        writer.writerow({'story': key, 'publisher': row.get('source', ''), 'title': row['title'],
-                         'summary': row.get('summary', ''), 'label': '', 'note': ''})
-    # Never replace a sheet that may already hold a reviewer's labels.
-    descriptor = os.open(directory / SHEET, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
-    with os.fdopen(descriptor, 'w') as output:
-        output.write(out.getvalue())
-    return len(rows)
-
-
-def read_labels(path):
-    labels = {}
-    with path.open(newline='') as sheet_file:
-        for row in csv.DictReader(sheet_file):
-            label = (row.get('label') or '').strip().lower()
-            require(label in ('',) + LABELS, f"Unknown label {label!r} for story {row['story']}")
-            require(row['story'] not in labels, f"Duplicate story {row['story']}")
-            labels[row['story']] = label or None
-    return labels
+    rows = [{'story': key, 'publisher': row.get('source', ''), 'title': row['title'], 'summary': row.get('summary', ''),
+             'label': '', 'note': ''} for key, row in stories(directory)]
+    return write_new_sheet(directory / SHEET, COLUMNS, rows)
 
 
 def upper_bound(successes, trials):
@@ -102,7 +80,7 @@ def report(directory):
     directory = private_run(directory)
     rows = stories(directory)
     sheet_path = directory / SHEET
-    labels = read_labels(sheet_path) if sheet_path.exists() else {}
+    labels = read_sheet_labels(sheet_path, 'story', LABELS, [key for key, _ in rows]) if sheet_path.exists() else {}
     review = hidden_important(rows, labels)
     result = {
         'minorRated': len(rows), 'waiting': sum(row['waiting'] == 'yes' for _, row in rows),
@@ -127,18 +105,6 @@ def fixture(directory):
     (directory / SOURCE).write_text(json.dumps(rows))
 
 
-def label_sheet(directory, labels):
-    with (directory / SHEET).open(newline='') as sheet_file:
-        rows = list(csv.DictReader(sheet_file))
-    for row, label in zip(rows, labels):
-        row['label'] = label
-    with (directory / SHEET).open('w', newline='') as output:
-        writer = csv.DictWriter(output, COLUMNS, lineterminator='\n')
-        writer.writeheader()
-        writer.writerows(rows)
-    return rows
-
-
 def check_sheet(directory):
     fixture(directory)
     require(sheet(directory) == 5, 'Sheet lists every minor-rated story')
@@ -146,8 +112,8 @@ def check_sheet(directory):
     text = (directory / SHEET).read_text()
     require('waiting' not in text and 'notable' not in text, 'Sheet hides the waiting flag and the re-rate')
     require(not report(directory)['decisionInputs']['labellingComplete'], 'Unlabelled stories leave labelling incomplete')
-    rows = label_sheet(directory, ['important', 'minor', 'minor', 'important', 'minor'])
-    require([row['story'] for row in rows] == ['s1', 's2', 's3', 's4', 's5'], 'Stories keep their run order')
+    rows = label_sheet(directory / SHEET, COLUMNS, ['important', 'minor', 'minor', 'important', 'minor'])
+    require([row['story'] for row in rows] == ['a1', 'a2', 'a3', 'a4', 'a5'], 'Stories keep their run order and article IDs')
 
 
 def check_report(directory):
@@ -162,7 +128,9 @@ def check_report(directory):
     require(result['decisionInputs']['labellingComplete'] and result['decisionInputs']['hiddenImportantObserved'], 'Decision inputs')
     public = (directory / REPORT).read_text()
     require('Headline' not in public and 'Private summary' not in public, 'Report must not carry story text')
-    (directory / SHEET).write_text('story,label\ns1,maybe\n')
+    (directory / SHEET).write_text('story,label\na1,important\nb9,minor\n')
+    expect_rejected(lambda: report(directory), ValueError, 'A sheet from another run was accepted')
+    (directory / SHEET).write_text('story,label\na1,maybe\n')
     expect_rejected(lambda: report(directory), ValueError, 'Unknown label accepted')
 
 
@@ -175,15 +143,4 @@ def self_check():
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument('command', nargs='?', choices=['sheet', 'report'])
-    parser.add_argument('run', nargs='?', type=pathlib.Path)
-    args = parser.parse_args()
-    if args.command is None:
-        self_check()
-    elif args.run is None:
-        parser.error('a run directory is required')
-    elif args.command == 'sheet':
-        print(f'Wrote {sheet(args.run)} stories to {args.run / SHEET}')
-    else:
-        print(json.dumps(report(args.run), indent=2, sort_keys=True))
+    main(__doc__, {'sheet': sheet, 'report': report}, self_check, 'stories')

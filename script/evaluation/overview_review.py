@@ -119,36 +119,55 @@ def claims(record):
             yield section, fact, citation, passage
 
 
-def sheet(directory):
-    directory = private_run(directory)
+def write_new_sheet(path, columns, rows):
+    """Creates a private reviewer sheet; never replaces one that may already hold a reviewer's labels."""
     out = io.StringIO()
-    writer = csv.DictWriter(out, COLUMNS, lineterminator='\n')
+    writer = csv.DictWriter(out, columns, lineterminator='\n')
     writer.writeheader()
-    rows = 0
-    for index, record in runs(directory):
-        if cause(record) != 'accepted':
-            continue
-        for section, fact, citation, passage in claims(record):
-            writer.writerow({'claim': f"{index}:{fact['id']}", 'overview': index, 'section': section,
-                             'publisher': citation.get('sourceName') or '', 'text': fact['text'], 'passage': passage,
-                             'label': '', 'note': ''})
-            rows += 1
-    # Never replace a sheet that may already hold a reviewer's labels.
-    descriptor = os.open(directory / SHEET, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    writer.writerows(rows)
+    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
     with os.fdopen(descriptor, 'w') as output:
         output.write(out.getvalue())
+    return len(rows)
+
+
+def label_sheet(path, columns, labels):
+    """Self-check helper: fills the sheet's label column in row order, as a reviewer would."""
+    with path.open(newline='') as sheet_file:
+        rows = list(csv.DictReader(sheet_file))
+    for row, label in zip(rows, labels):
+        row['label'] = label
+    with path.open('w', newline='') as output:
+        writer = csv.DictWriter(output, columns, lineterminator='\n')
+        writer.writeheader()
+        writer.writerows(rows)
     return rows
 
 
-def read_labels(path):
+def sheet(directory):
+    directory = private_run(directory)
+    rows = [{'claim': f"{index}:{fact['id']}", 'overview': index, 'section': section,
+             'publisher': citation.get('sourceName') or '', 'text': fact['text'], 'passage': passage, 'label': '', 'note': ''}
+            for index, record in accepted_records(runs(directory)) for section, fact, citation, passage in claims(record)]
+    return write_new_sheet(directory / SHEET, COLUMNS, rows)
+
+
+def read_sheet_labels(path, key_column, allowed, expected):
+    """Reviewer labels from a sheet whose rows are exactly `expected`; a sheet from another run is rejected."""
     labels = {}
     with path.open(newline='') as sheet_file:
         for row in csv.DictReader(sheet_file):
+            key = row.get(key_column)
             label = (row.get('label') or '').strip().lower()
-            require(label in ('',) + LABELS, f"Unknown label {label!r} for claim {row['claim']}")
-            require(row['claim'] not in labels, f"Duplicate claim {row['claim']}")
-            labels[row['claim']] = label or None
+            require(label in ('',) + tuple(allowed), f'Unknown label {label!r} for {key_column} {key}')
+            require(key not in labels, f'Duplicate {key_column} {key}')
+            labels[key] = label or None
+    require(set(labels) == set(expected), f'{path.name} does not list exactly the {key_column}s of this run; rebuild it')
     return labels
+
+
+def claim_keys(records):
+    return {f"{index}:{fact['id']}" for index, record in accepted_records(records) for _, fact, _, _ in claims(record)}
 
 
 def accepted_records(records):
@@ -236,7 +255,7 @@ def report(directory):
     directory = private_run(directory)
     records = runs(directory)
     sheet_path = directory / SHEET
-    labels = read_labels(sheet_path) if sheet_path.exists() else {}
+    labels = read_sheet_labels(sheet_path, 'claim', LABELS, claim_keys(records)) if sheet_path.exists() else {}
     overviews, latency = overview_metrics(records)
     claims_report, verbatim, repetition = claim_metrics(records, labels)
     target = (run_json(directory, 'overviews.json') or {}).get('target', DEFAULT_TARGET)
@@ -303,12 +322,7 @@ def check_sheet(directory):
     unlabelled = report(directory)
     require(unlabelled['claims']['unlabelled'] == 5, 'Unlabelled claims are counted')
     require(not unlabelled['decisionInputs']['labellingComplete'], 'Unlabelled claims leave labelling incomplete')
-    for row, label in zip(rows, ['supported', 'supported', 'supported', 'unsupported', 'critical']):
-        row['label'] = label
-    with (directory / SHEET).open('w', newline='') as output:
-        writer = csv.DictWriter(output, COLUMNS, lineterminator='\n')
-        writer.writeheader()
-        writer.writerows(rows)
+    label_sheet(directory / SHEET, COLUMNS, ['supported', 'supported', 'supported', 'unsupported', 'critical'])
 
 
 def check_report(directory):
@@ -336,6 +350,8 @@ def check_report(directory):
     require(report(directory)['decisionInputs']['acceptedTargetMet'], 'The run summary sets the target')
     public = (directory / REPORT).read_text()
     require('bridge' not in public.lower() and 'Publisher A' not in public, 'Report must not carry publisher or model text')
+    (directory / SHEET).write_text('claim,label\n1:model_claim_0,supported\n')
+    expect_rejected(lambda: report(directory), ValueError, 'A sheet missing claims was accepted')
     (directory / SHEET).write_text('claim,label\n1:model_claim_0,maybe\n')
     expect_rejected(lambda: report(directory), ValueError, 'Unknown label accepted')
 
@@ -349,16 +365,24 @@ def self_check():
     print('Overview review self-check passed')
 
 
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+def main(doc, commands, check, noun):
+    """`sheet RUN` and `report RUN` subcommands; no arguments runs the self-check."""
+    parser = argparse.ArgumentParser(description=doc, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('command', nargs='?', choices=['sheet', 'report'])
     parser.add_argument('run', nargs='?', type=pathlib.Path)
     args = parser.parse_args()
     if args.command is None:
-        self_check()
+        check()
     elif args.run is None:
         parser.error('a run directory is required')
     elif args.command == 'sheet':
-        print(f'Wrote {sheet(args.run)} claims to {args.run / SHEET}')
+        try:
+            print(f"Wrote {commands['sheet'](args.run)} {noun} to the run's review sheet")
+        except FileExistsError as error:
+            parser.exit(1, f'{error.filename} already exists and may hold labels; it was left unchanged.\n')
     else:
-        print(json.dumps(report(args.run), indent=2, sort_keys=True))
+        print(json.dumps(commands['report'](args.run), indent=2, sort_keys=True))
+
+
+if __name__ == '__main__':
+    main(__doc__, {'sheet': sheet, 'report': report}, self_check, 'claims')
