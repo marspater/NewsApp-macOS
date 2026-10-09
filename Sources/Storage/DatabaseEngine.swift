@@ -1440,6 +1440,7 @@ actor DatabaseEngine {
         limit: Int? = 500,
         after: ArticleQueryCursor? = nil,
         id: String? = nil,
+        ids: [String]? = nil,
         canonicalURL: String? = nil,
         eventID: String? = nil,
         includingOriginals: Bool = false,
@@ -1758,9 +1759,43 @@ actor DatabaseEngine {
         try beginTransaction()
         var success = false
         defer { if !success { try? rollbackTransaction() } }
-        for id in articleIds {
-            try setSaved(articleId: id, isSaved: isSaved)
+
+        let sql = """
+        INSERT INTO article_state (article_id, is_read, is_saved, read_at, saved_at)
+        VALUES (?, 0, ?, NULL, ?)
+        ON CONFLICT(article_id) DO UPDATE SET
+            is_saved = excluded.is_saved,
+            saved_at = excluded.saved_at;
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to prepare toggleSaved statement"])
         }
+        defer { sqlite3_finalize(stmt) }
+
+        let now = Date().timeIntervalSince1970
+        let isSavedInt = isSaved ? 1 : 0
+
+        // Resolve all IDs outside of the transaction or statement execution
+        var resolvedIds = [String]()
+        for id in articleIds {
+            resolvedIds.append(try resolvedArticleID(id))
+        }
+
+        for articleId in resolvedIds {
+            sqlite3_reset(stmt)
+            sqlite3_bind_text(stmt, 1, articleId, -1, Self.sqliteTransient)
+            sqlite3_bind_int(stmt, 2, Int32(isSavedInt))
+            if isSaved {
+                sqlite3_bind_double(stmt, 3, now)
+            } else {
+                sqlite3_bind_null(stmt, 3)
+            }
+            if sqlite3_step(stmt) != SQLITE_DONE {
+                throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to execute toggleSaved"])
+            }
+        }
+
         try commitTransaction()
         success = true
     }

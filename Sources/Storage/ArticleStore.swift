@@ -217,13 +217,12 @@ final class ArticleStore: ObservableObject {
         guard !articles.isEmpty else { return true }
         do {
             _ = try await database.upsertArticles(articles, preservingStoredContent: true)
-            var storedArticles = [FeedArticle]()
+            var ids = [String]()
             for article in articles {
-                let id = try await database.resolvedArticleID(for: article)
-                if let storedArticle = try await database.fetchArticles(limit: 1, id: id).first {
-                    storedArticles.append(storedArticle)
-                }
+                ids.append(try await database.resolvedArticleID(for: article))
             }
+            let storedArticles = try await database.fetchArticles(ids: ids)
+            guard !storedArticles.isEmpty else { return false }
             try await database.setSaved(articleIds: storedArticles.map { $0.id }, isSaved: nextState)
             if nextState {
                 for storedArticle in storedArticles {
