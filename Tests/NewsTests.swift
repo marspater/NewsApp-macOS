@@ -8289,7 +8289,14 @@ struct NewsTests {
     static func testOverviewDocumentModelBoundToInputsAndVersions(fixtureHost: String = "example.com") async throws {
         print("  - Testing Overview document model bound to inputs, versions and retention safety...")
 
+        // 1. Passage and Input Text Hash determinism
         let passage1 = EvidencePassage(id: "p1", articleID: "art-1", text: "Mars rover discovered signs of ancient water flow.", ordinal: 0)
+        let passage2 = EvidencePassage(id: "p2", articleID: "art-2", text: "Subsurface ice detected at landing site by orbital spectrometry.", ordinal: 1)
+        let passage3 = EvidencePassage(id: "p3", articleID: "art-1", text: "Mission scientists confirm delta deposit features.", ordinal: 2)
+
+        let hash1 = EventOverviewDocument.testComputeInputTextHash(passages: [passage1, passage2, passage3])
+        let hash2 = EventOverviewDocument.testComputeInputTextHash(passages: [passage3, passage1, passage2])
+        assertEqual(hash1, hash2, "Input text hash is deterministic across passage insertion order")
 
         // 2. Citations bound to article ID and evidence passage ID/fingerprint
         let citation1 = OverviewCitation(
@@ -8682,8 +8689,7 @@ struct NewsTests {
             text: "Emergency response teams reported minor structural damage and zero casualties.",
             ordinal: 2
         )
-        let pHash = [passage1, passage2].map { $0.fingerprint }.sorted().joined(separator: ":")
-        let hash = ArticleIdentity.sha256Hex(pHash)
+        let hash = EventOverviewDocument.testComputeInputTextHash(passages: [passage1, passage2])
         let context = OverviewVersionContext(membershipVersion: 1, inputTextHash: hash)
 
         let fallbackDoc = macOS15Probe.buildFallbackOverview(
@@ -8827,8 +8833,7 @@ struct NewsTests {
         for _ in 0..<10 {
             _ = supportedProbe.resolveSynthesisStrategy(for: detectedEn)
             _ = PassageFactExtractor.deterministicExtract(passages: samplePassages)
-            let pHash = samplePassages.map { $0.fingerprint }.sorted().joined(separator: ":")
-            let hash = ArticleIdentity.sha256Hex(pHash)
+            let hash = EventOverviewDocument.testComputeInputTextHash(passages: samplePassages)
             let context = OverviewVersionContext(membershipVersion: 1, inputTextHash: hash)
             _ = macOS15Probe.buildFallbackOverview(
                 eventID: "event-dresden-probe",
@@ -10983,5 +10988,17 @@ struct NewsTests {
 
         let sentimentEvidence = OverviewEvidenceSections(coverageSentiment: customSentiment)
         assertFalse(sentimentEvidence.isEmpty, "OverviewEvidenceSections with sentiment is not empty")
+    }
+}
+
+extension EventOverviewDocument {
+    static func testComputeInputTextHash(passages: [EvidencePassage]) -> String {
+        let sorted = passages.sorted {
+            if $0.articleID != $1.articleID { return $0.articleID < $1.articleID }
+            if ($0.ordinal ?? 0) != ($1.ordinal ?? 0) { return ($0.ordinal ?? 0) < ($1.ordinal ?? 0) }
+            return $0.id < $1.id
+        }
+        let combined = sorted.map { "\($0.articleID):\($0.fingerprint)" }.joined(separator: "|")
+        return ArticleIdentity.sha256Hex(combined)
     }
 }
