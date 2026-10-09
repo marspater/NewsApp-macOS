@@ -60,21 +60,17 @@ struct ArticleCardView: View {
                     .accessibilityHidden(true)
                 
                 // Content Body Container
-                VStack(alignment: .leading, spacing: 6) {
+                VStack(alignment: .leading, spacing: AppSpacing.eyebrowGap) {
                     // Eyebrow Row: Source + Badges
-                    HStack(spacing: 6) {
-                        Text(displaySource.uppercased())
-                            .font(AppTypography.metadata)
-                            .foregroundColor(AppColor.secondaryText)
-                            .tracking(AppTypography.sourceEyebrowTracking)
-                            .lineLimit(1)
-                        
+                    HStack(spacing: AppSpacing.eyebrowGap) {
+                        EyebrowText(displaySource)
+
                         Spacer()
-                        
+
                         if isSaved {
                             Image(systemName: "bookmark.fill")
-                                .font(.system(size: 10))
-                                .foregroundColor(AppColor.accent)
+                                .font(AppTypography.eyebrow)
+                                .foregroundStyle(AppColor.accent)
                         }
                         
                         if !isRead {
@@ -87,7 +83,7 @@ struct ArticleCardView: View {
                     
                     // Headline
                     Text(article.title)
-                        .font(compact ? .system(size: 20, weight: .semibold, design: .serif) : AppTypography.headline)
+                        .font(AppTypography.cardHeadline(compact ? .list : .grid))
                         .foregroundColor(isRead ? AppColor.secondaryText : AppColor.primaryText)
                         .lineLimit(2)
                         .multilineTextAlignment(.leading)
@@ -106,10 +102,10 @@ struct ArticleCardView: View {
                         }
                     }
                     
-                    Spacer(minLength: 4)
-                    
+                    Spacer(minLength: AppSpacing.xxs)
+
                     // Footer Row: Timestamp & Optional AI Badge
-                    HStack(spacing: 8) {
+                    HStack(spacing: AppSpacing.xs) {
                         Text(article.publicationDateText)
                             .font(AppTypography.caption)
                             .foregroundColor(AppColor.tertiaryText)
@@ -117,17 +113,8 @@ struct ArticleCardView: View {
                         Spacer()
                         
                         if article.aiSummary != nil {
-                            HStack(spacing: 3) {
-                                Text("✦")
-                                    .font(.system(size: 8))
-                                Text("AI")
-                                    .font(.system(size: 9, weight: .bold))
-                            }
-                            .foregroundColor(AppColor.intelligence)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(Capsule().fill(AppColor.intelligence.opacity(0.12)))
-                            .help("AI summary available")
+                            TagView.intelligence()
+                                .help("AI summary available")
                             .accessibilityLabel("AI summary available")
                         }
                     }
@@ -258,9 +245,9 @@ struct ArticleCardView: View {
             .frame(maxWidth: .infinity)
             
             Image(systemName: "newspaper")
-                .font(.system(size: 18))
-                .foregroundColor(AppColor.tertiaryText.opacity(0.35))
-                .padding(10)
+                .imageScale(.large)
+                .foregroundStyle(AppColor.quaternaryLabel)
+                .padding(AppSpacing.sm)
         }
     }
     

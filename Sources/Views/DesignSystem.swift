@@ -218,3 +218,54 @@ enum AppMotion {
     static let responsive = state
     static let smooth = navigation
 }
+
+// MARK: - Components (DESIGN.md 18)
+
+/// Publisher name or kicker above a headline. Uppercased for display only, so VoiceOver reads words.
+struct EyebrowText: View {
+    let text: String
+
+    init(_ text: String) {
+        self.text = text
+    }
+
+    var body: some View {
+        Text(text)
+            .font(AppTypography.eyebrow)
+            .tracking(AppTypography.eyebrowTracking)
+            .textCase(.uppercase)
+            .foregroundStyle(AppColor.secondaryText)
+            .lineLimit(1)
+    }
+}
+
+/// A small capsule for a state or label ("Updated", the intelligence tag). The fill is the tint at 12 %,
+/// 22 % with Increase Contrast (DESIGN.md 11).
+struct TagView: View {
+    let title: String
+    var systemImage: String?
+    var tint: Color = AppColor.secondaryText
+    @Environment(\.effectiveContrast) private var contrast
+
+    var body: some View {
+        HStack(spacing: AppSpacing.textStack) {
+            if let systemImage {
+                Image(systemName: systemImage)
+                    .imageScale(.small)
+            }
+            Text(title)
+        }
+        .font(AppTypography.eyebrow)
+        .foregroundStyle(tint)
+        .padding(.horizontal, AppSpacing.eyebrowGap)
+        .padding(.vertical, AppSpacing.textStack)
+        .background(tint.opacity(contrast == .increased ? 0.22 : 0.12), in: Capsule())
+    }
+}
+
+extension TagView {
+    /// Marks generated content; the only use of the intelligence color besides its glyphs.
+    static func intelligence(_ title: String = "AI") -> TagView {
+        TagView(title: title, systemImage: "sparkles", tint: AppColor.intelligence)
+    }
+}
