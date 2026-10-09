@@ -35,10 +35,11 @@ public final class CacheManager: @unchecked Sendable {
     /// Calculates total byte size of cached network responses and web assets on disk.
     public func calculateTotalCacheSize() -> Int64 {
         var totalSize: Int64 = 0
-        let keys = Set<URLResourceKey>([.fileSizeKey])
+        let keys = Set<URLResourceKey>([.fileSizeKey, .isRegularFileKey])
         if let enumerator = fileManager.enumerator(at: cacheDirectory, includingPropertiesForKeys: Array(keys), options: []) {
             for case let fileURL as URL in enumerator {
                 if let resourceValues = try? fileURL.resourceValues(forKeys: keys),
+                   resourceValues.isRegularFile == true,
                    let size = resourceValues.fileSize {
                     totalSize += Int64(size)
                 }
