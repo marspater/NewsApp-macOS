@@ -62,6 +62,32 @@ The VoiceOver harness is parked (#268) and is not part of release verification; 
 
 `--live` checks rendered AX nodes while scrolling, invokes card actions and verifies SQLite state, opens/dismisses a real citation and observes the production feed-buffer notification after inserting three fixture stories. Missing numeric heading metadata is reported as unverified and requires the manual rotor pass. AX tree order and observed notifications do not establish VoiceOver cursor order, rotor traversal, pronunciation or speech. Use `--manual`, enable VoiceOver yourself, and record that separate pass in #268. The Fixtures menu switches between Feed, Source Reader and Event Overview. On Feed, Queue New Stories holds the list through its production navigation command and inserts three stories. Close the fixture window to clean up. The harness does not change system accessibility settings.
 
+## Remove legacy test preferences (#311)
+
+Older test runs left migration-test preferences behind. The following one-time cleanup previews only files named `com.marspater.news.test.<UUID>.plist` in the user and app-container preferences directories. It never selects `com.marspater.news.plist` or other settings. Run it with the tests stopped; set `delete = True` only after reviewing the preview to remove those test files.
+
+```sh
+python3 - <<'PY'
+from pathlib import Path
+import re
+
+delete = False
+pattern = re.compile(r"com\.marspater\.news\.test\.[0-9A-Fa-f]{8}(?:-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}\.plist")
+directories = [
+    Path.home() / "Library/Preferences",
+    Path.home() / "Library/Containers/com.marspater.news/Data/Library/Preferences",
+]
+for directory in directories:
+    if not directory.is_dir():
+        continue
+    for path in sorted(directory.iterdir()):
+        if pattern.fullmatch(path.name) and path.is_file() and not path.is_symlink():
+            print(path)
+            if delete:
+                path.unlink()
+PY
+```
+
 ## Story experience tracking
 
 Use the [News · Story experience project](https://github.com/users/marspater/projects/2) and [program issue #90](https://github.com/marspater/NewsApp-macOS/issues/90) for this work. Before starting a slice, read its task acceptance criteria and dependencies. Update the relevant issue checklists and log implementation scope, completed checks, remaining gaps, and commit/PR state after each coherent slice.
