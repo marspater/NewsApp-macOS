@@ -2397,6 +2397,16 @@ actor DatabaseEngine {
         """, [.real(activeSince.timeIntervalSince1970), .integer(limit)])
     }
 
+    /// Recent visible stories rated at `level`, newest first: the population of the independent importance review (#309).
+    func ratedImportanceRows(level: StoryImportance, activeSince: Date) throws -> [EventMatchRow] {
+        try eventMatchRows("""
+        \(Self.eventMatchColumns)
+        WHERE EXISTS (SELECT 1 FROM story_importance i WHERE i.article_id = a.id AND i.level = ?)
+            AND \(Self.articleDateOrder) >= ? AND \(Self.visibleArticle)
+        ORDER BY \(Self.articleDateOrder) DESC, a.id;
+        """, [.integer(level.rawValue), .real(activeSince.timeIntervalSince1970)])
+    }
+
     @discardableResult
     func recordImportance(_ articleID: String, _ importance: StoryImportance, at date: Date = Date(),
                           expectedTitle: String? = nil, expectedDescription: String? = nil) throws -> Bool {

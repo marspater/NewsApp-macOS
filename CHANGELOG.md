@@ -99,6 +99,10 @@
 
 ### Added
 
+- The opt-in `--curation-live` audit also lists every minor-rated story of the 72-hour window, records whether each one waits, and re-rates it once with a sampled, uncached model call (production rates greedily, so an identical call would always agree). `script/evaluation/importance_review.py` turns that into a blind private sheet (no waiting flag or re-rate shown) and an aggregate-only report: important stories the app would hide, with Wilson 95% bounds, and re-rate stability (#309). App behaviour is unchanged.
+
+- The opt-in `--overviews-live` audit now generates until 30 drafts are accepted (`NEWS_OVERVIEWS_TARGET`), can skip an earlier run's events (`NEWS_OVERVIEWS_EXCLUDE`), records latency and why each draft fell back (refusal, format, weak draft), and measures how many covered events show two or more attributed perspectives and which extraction step stopped the rest. `script/evaluation/overview_review.py` prepares a private claim sheet for an independent reviewer and reports aggregate-only rates with Wilson bounds (#308, #313). App behaviour is unchanged.
+
 - Add bounded, isolated native accessibility QA with offline reader images, rendered-tree/action checks and a separate manual VoiceOver fixture (#155).
 
 - News Tension window (experiment): a Swift Charts history of the panel's tension index by UTC day, with coverage, the largest event contributions and the methodology. Days without enough coverage are shown as gaps, never zero, and the history starts when panel collection began (#159).

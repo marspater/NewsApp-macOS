@@ -4615,6 +4615,19 @@ struct NewsTests {
         let visible = Set(try await db.fetchArticles(limit: nil, hidingWaitingStories: true).map(\.id))
         let hiddenMajor = ratings.filter { $0["importance"] == "major" && !visible.contains($0["id"] ?? "") }.count
         assertEqual(hiddenMajor, 0, "No rated major story is hidden")
+        // #309: every minor-rated story in the window, whether it waits, and one sampled re-rate that bypasses the cache.
+        // The review sheet built from this file hides the waiting flag and the re-rate from the labeller.
+        let minorRows = try await db.ratedImportanceRows(level: .minor, activeSince: activeSince)
+        let shownMinor = try await db.notificationStoryIDs(minorRows.map(\.id))
+        var review: [[String: String]] = []
+        for row in minorRows {
+            try Task.checkCancellation()
+            let rerate = await OnDeviceImportanceJudge.modelRating(EventClusterer.report(row), sampled: true)
+            review.append(["id": row.id, "title": row.title, "summary": row.description, "source": row.source,
+                           "waiting": shownMinor.contains(row.id) ? "no" : "yes",
+                           "rerate": rerate.map { String(describing: $0) } ?? "none"])
+        }
+        print("CURATION_REVIEW minor=\(review.count) waiting=\(review.filter { $0["waiting"] == "yes" }.count)")
         let report: [String: Int] = ["library": all.count, "active": active.count, "rated": ratings.count,
                                    "major": ratings.filter { $0["importance"] == "major" }.count,
                                    "notable": ratings.filter { $0["importance"] == "notable" }.count,
@@ -4626,6 +4639,7 @@ struct NewsTests {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         try encoder.encode(ratings).write(to: directory.appendingPathComponent("ratings-private.json"))
+        try encoder.encode(review).write(to: directory.appendingPathComponent("minor-review-private.json"))
         try encoder.encode(report).write(to: directory.appendingPathComponent("curation.json"))
         print("CURATION_REPORT \(String(decoding: try encoder.encode(report), as: UTF8.self))")
         await db.close()
@@ -4700,12 +4714,27 @@ struct NewsTests {
         await db.close()
     }
 
-    /// On-device generation and labeled controls; private text stays in the temporary audit directory.
+    /// Opt-in #308/#313 measurement on a copied library: labeled controls, model overviews for covered events until
+    /// `NEWS_OVERVIEWS_TARGET` drafts (default 30) are accepted, and deterministic perspective coverage for every covered
+    /// event in the window. `NEWS_OVERVIEWS_EXCLUDE` names an earlier output directory whose live events are skipped for
+    /// generation. Private text stays in the temporary audit directory.
     @MainActor
     static func measureLiveOverviews(path: String, output: String) async throws {
         let url = URL(fileURLWithPath: path).resolvingSymlinksInPath()
         guard (url.path.hasPrefix("/private/tmp/") || url.path.hasPrefix("/tmp/")), output.hasPrefix("/private/tmp/") else {
             throw NSError(domain: "LiveOverviews", code: 1)
+        }
+        let environment = ProcessInfo.processInfo.environment
+        let target = environment["NEWS_OVERVIEWS_TARGET"].flatMap(Int.init) ?? 30
+        let maxAttempts = environment["NEWS_OVERVIEWS_MAX_EVENTS"].flatMap(Int.init) ?? 120
+        var excluded = Set<String>()
+        if let previous = environment["NEWS_OVERVIEWS_EXCLUDE"] {
+            let previousDirectory = URL(fileURLWithPath: previous)
+            for file in try FileManager.default.contentsOfDirectory(atPath: previous) where file.hasPrefix("overview-private-live-") {
+                let object = try JSONSerialization.jsonObject(with: Data(contentsOf: previousDirectory.appendingPathComponent(file))) as? [String: Any]
+                if let id = (object?["document"] as? [String: Any])?["eventID"] as? String { excluded.insert(id) }
+            }
+            guard !excluded.isEmpty else { throw NSError(domain: "LiveOverviews", code: 2) }
         }
         let db = DatabaseEngine(path: url.path)
         try await db.open()
@@ -4714,35 +4743,67 @@ struct NewsTests {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         let active = try await db.fetchArticles(limit: nil, publicationWindow: Date().addingTimeInterval(-72 * 3600)...Date(), hidingWaitingStories: true)
-        let events = try await db.eventFeedSummaries(forArticles: active.map(\.id)).filter { $0.sources.count > 1 }.sorted { $0.sources.count > $1.sources.count }.prefix(8)
+        let events = try await db.eventFeedSummaries(forArticles: active.map(\.id)).filter { $0.sources.count > 1 }.sorted { $0.sources.count > $1.sources.count }
         var report = ["liveEvents": 0, "liveGenerated": 0, "liveClaims": 0, "liveUnsupported": 0, "liveCritical": 0,
-                      "controls": 0, "controlsGenerated": 0, "controlClaims": 0, "controlUnsupported": 0, "controlCritical": 0]
+                      "controls": 0, "controlsGenerated": 0, "controlClaims": 0, "controlUnsupported": 0, "controlCritical": 0,
+                      "target": target, "excludedEvents": excluded.count]
+        var coverage: [String: Int] = ["events": 0, "twoOrMore": 0, "one": 0, "none": 0]
         let measuredModel = NewsTextModel { prompt, tokens in
                 let answer = try await NewsTextModel.onDevice.respond(prompt, tokens)
                 let data = try JSONSerialization.data(withJSONObject: ["prompt": prompt, "answer": answer], options: [.prettyPrinted, .sortedKeys])
                 try data.write(to: directory.appendingPathComponent("model-private-\(UUID().uuidString).json"))
                 return answer
             }
-        func measure(id: String, title: String, passages: [EvidencePassage], articles: [FeedArticle], live: Bool, membership: Int = 1) async throws {
+        /// Model failures by kind; refusals surface as FoundationModels guardrail or refusal errors.
+        func failureKind(_ error: Error) -> String {
+            if error is NewsTextModel.TemporarilyUnavailable { return "unavailable" }
+            if let urlError = error as? URLError, urlError.code == .resourceUnavailable { return "unavailable" }
+            let name = String(reflecting: error).lowercased()
+            if name.contains("guardrail") || name.contains("refusal") { return "refusal" }
+            return name.contains("context") ? "contextWindow" : "error"
+        }
+        /// The first step that left an event with fewer than two perspectives.
+        func perspectiveGap(shown: Int, diagnosis: OverviewPerspectivesDiagnosis) -> String? {
+            guard shown < 2 else { return nil }
+            if diagnosis.passages == 0 { return "noPassages" }
+            if diagnosis.candidates == 0 { return diagnosis.passagesWithUnmatchedSpeech > 0 ? "speechNotMatched" : "noAttributedSpeech" }
+            if diagnosis.voices == 0 { return "onlyVagueSpeakers" }
+            if diagnosis.perspectives < 2 { return diagnosis.rejections.isEmpty ? "singleVoice" : "validatorRejected" }
+            return "fallbackOverview"
+        }
+        func measure(id: String, title: String, passages: [EvidencePassage], articles: [FeedArticle], live: Bool,
+                     membership: Int = 1, sources: Int = 0, perspectives: OverviewPerspectivesDiagnosis? = nil) async throws {
             let fallback = OverviewComposer.composeOverview(eventID: id, eventTitle: title,
                 verifiedFacts: PassageFactExtractor.deterministicExtract(passages: passages), passages: passages, articles: articles, membershipVersion: membership)
             let start = Date()
-            let document: EventOverviewDocument
-            do { document = try await OverviewComposer.composeWithModel(fallback: fallback, passages: passages, articles: articles, model: measuredModel) }
+            var document = fallback
+            var outcome: OverviewModelOutcome?
+            var failure: String?
+            do {
+                let composed = try await OverviewComposer.composeWithModelOutcome(fallback: fallback, passages: passages, articles: articles, model: measuredModel)
+                document = composed.document
+                outcome = composed.outcome
+            }
             catch is CancellationError { throw CancellationError() }
-            catch { document = fallback }
-            let audit = OverviewQualityAuditor.auditOverview(document, passages: passages, duration: Date().timeIntervalSince(start))
+            catch { failure = failureKind(error) }
+            let duration = Date().timeIntervalSince(start)
+            let audit = OverviewQualityAuditor.auditOverview(document, passages: passages, duration: duration)
+            let prefix = live ? "live" : "control"
             report[live ? "liveEvents" : "controls", default: 0] += 1
-            report[live ? "liveGenerated" : "controlsGenerated", default: 0] += document.content.evidenceSections?.introduction == nil ? 0 : 1
+            report[live ? "liveGenerated" : "controlsGenerated", default: 0] += outcome?.result == .accepted ? 1 : 0
             report[live ? "liveClaims" : "controlClaims", default: 0] += audit.totalClaims
             report[live ? "liveUnsupported" : "controlUnsupported", default: 0] += audit.unsupportedClaims
             report[live ? "liveCritical" : "controlCritical", default: 0] += audit.totalCriticalErrors
-            let privateJSON: [String: Any] = ["document": try JSONSerialization.jsonObject(with: encoder.encode(document)),
+            report["\(prefix)Outcome_\(failure ?? outcome?.result.rawValue ?? "unknown")", default: 0] += 1
+            var privateJSON: [String: Any] = ["document": try JSONSerialization.jsonObject(with: encoder.encode(document)),
                 "passages": try JSONSerialization.jsonObject(with: encoder.encode(passages)),
-                "audit": try JSONSerialization.jsonObject(with: encoder.encode(audit))]
-            try JSONSerialization.data(withJSONObject: privateJSON, options: [.prettyPrinted, .sortedKeys]).write(to: directory.appendingPathComponent("overview-private-\(live ? "live" : "control")-\(report[live ? "liveEvents" : "controls"]!).json"))
+                "audit": try JSONSerialization.jsonObject(with: encoder.encode(audit)),
+                "durationSeconds": duration, "sources": sources, "failure": failure.map { $0 as Any } ?? NSNull(),
+                "outcome": try outcome.map { try JSONSerialization.jsonObject(with: encoder.encode($0)) } ?? NSNull()]
+            if let perspectives { privateJSON["perspectives"] = try JSONSerialization.jsonObject(with: encoder.encode(perspectives)) }
+            try JSONSerialization.data(withJSONObject: privateJSON, options: [.prettyPrinted, .sortedKeys]).write(to: directory.appendingPathComponent("overview-private-\(prefix)-\(report[live ? "liveEvents" : "controls"]!).json"))
             if live { _ = try await db.recordEventOverview(document) }
-            print("OVERVIEW_AUDIT \(live ? "live" : "control") generated=\(document.content.evidenceSections?.introduction != nil) claims=\(audit.totalClaims) critical=\(audit.totalCriticalErrors)")
+            print("OVERVIEW_AUDIT \(prefix) result=\(failure ?? outcome?.result.rawValue ?? "unknown") seconds=\(String(format: "%.1f", duration)) claims=\(audit.totalClaims) critical=\(audit.totalCriticalErrors)")
             fflush(stdout)
         }
         for sample in OverviewControlSample.standardBenchmark() {
@@ -4751,8 +4812,29 @@ struct NewsTests {
         for event in events {
             let members = try await db.fetchArticles(limit: nil, eventID: event.eventID)
             guard let first = members.first else { continue }
-            try await measure(id: event.eventID, title: first.title, passages: OverviewPassageSelector().selectPassages(from: members, budget: OverviewTokenBudget()).passages,
-                              articles: members, live: true, membership: event.membershipVersion)
+            let passages = OverviewPassageSelector().selectPassages(from: members, budget: OverviewTokenBudget()).passages
+            // Every passage is citable, as in a synthesized overview, so the diagnosis sees what the extractor would.
+            let citations = Dictionary(passages.map { ($0.id, OverviewCitation(id: $0.id, articleID: $0.articleID, passageID: $0.id,
+                passageFingerprint: $0.fingerprint, quote: String($0.text.prefix(200)))) }, uniquingKeysWith: { kept, _ in kept })
+            let diagnosis = OverviewPerspectivesExtractor.diagnosePerspectives(passages: passages, articles: members, existingCitations: citations)
+            let shown = OverviewComposer.composeOverview(eventID: event.eventID, eventTitle: first.title,
+                verifiedFacts: PassageFactExtractor.deterministicExtract(passages: passages), passages: passages, articles: members,
+                membershipVersion: event.membershipVersion).perspectives.count
+            coverage["events", default: 0] += 1
+            coverage[shown >= 2 ? "twoOrMore" : shown == 1 ? "one" : "none", default: 0] += 1
+            if let gap = perspectiveGap(shown: shown, diagnosis: diagnosis) { coverage["gap_\(gap)", default: 0] += 1 }
+            for (key, value) in ["passages": diagnosis.passages, "passagesWithCandidates": diagnosis.passagesWithCandidates,
+                                 "passagesWithUnmatchedSpeech": diagnosis.passagesWithUnmatchedSpeech,
+                                 "passagesWithTypographicQuotes": diagnosis.passagesWithTypographicQuotes,
+                                 "candidates": diagnosis.candidates, "vagueCandidates": diagnosis.vagueCandidates,
+                                 "voices": diagnosis.voices, "extractedPerspectives": diagnosis.perspectives] {
+                coverage[key, default: 0] += value
+            }
+            for (rule, count) in diagnosis.rejections { coverage["rejected_\(rule)", default: 0] += count }
+            guard !excluded.contains(event.eventID), report["liveGenerated", default: 0] < target,
+                  report["liveEvents", default: 0] < maxAttempts else { continue }
+            try await measure(id: event.eventID, title: first.title, passages: passages, articles: members, live: true,
+                              membership: event.membershipVersion, sources: event.sources.count, perspectives: diagnosis)
         }
         if let harsh = active.first(where: { ($0.title + $0.description).lowercased().contains("killed") }) {
             let classification = await ArticleClassifier(textModel: measuredModel).classify(title: harsh.title, description: harsh.description)
@@ -4762,7 +4844,9 @@ struct NewsTests {
             try encoder.encode(analysis).write(to: directory.appendingPathComponent("analysis-private.json"))
         }
         try encoder.encode(report).write(to: directory.appendingPathComponent("overviews.json"))
+        try encoder.encode(coverage).write(to: directory.appendingPathComponent("perspectives.json"))
         print("OVERVIEW_REPORT \(String(decoding: try encoder.encode(report), as: UTF8.self))")
+        print("PERSPECTIVE_COVERAGE \(String(decoding: try encoder.encode(coverage), as: UTF8.self))")
         await db.close()
     }
 
@@ -4796,6 +4880,12 @@ struct NewsTests {
         assertEqual(try await db.fetchArticles(limit: nil).count, all.count, "Lists that do not hide waiting stories list everything")
         try await db.recordImportance("pair-2", .notable, at: now)
         assertTrue(try await listed().isSuperset(of: ["pair-1", "pair-2"]), "One important report shows its whole event")
+        let reviewed = Set(try await db.ratedImportanceRows(level: .minor, activeSince: now.addingTimeInterval(-72 * 3600)).map(\.id))
+        assertEqual(reviewed, ["minor", "saved", "read", "pair-1", "wide-1", "wide-2", "wide-3", "wide-4"],
+                    "The #309 review lists every minor-rated story in the window")
+        assertEqual(reviewed.subtracting(try await db.notificationStoryIDs(Array(reviewed))), ["minor", "saved", "read"],
+                    "The review tells waiting minor stories from shown ones")
+        assertTrue(try await db.ratedImportanceRows(level: .minor, activeSince: now).isEmpty, "Stories before the window are not reviewed")
 
         assertEqual(try await db.expireWaitingStories(now: now.addingTimeInterval(3600)), 0, "Nothing expires within a day")
         assertEqual(try await db.expireWaitingStories(now: now.addingTimeInterval(25 * 3600)), 1, "An unread minor story expires after a day")
@@ -7751,6 +7841,28 @@ struct NewsTests {
         assertEqual(refused.id, fallback.id, "Malformed draft retains the current overview")
         let rejected = try await OverviewComposer.composeWithModel(fallback: fallback, passages: passages, articles: [article1, article2], model: NewsTextModel { prompt, _ in prompt.contains("Return plain text only:") ? answer : "NO" })
         assertEqual(rejected.id, fallback.id, "Too many rejected sentences retain the current overview")
+        // #308: the outcome names why a draft was kept or replaced, without changing the document.
+        func outcome(_ model: NewsTextModel, passages: [EvidencePassage]) async throws -> OverviewModelOutcome {
+            try await OverviewComposer.composeWithModelOutcome(fallback: fallback, passages: passages, articles: [article1, article2], model: model).outcome
+        }
+        let kept = try await outcome(overviewModel, passages: passages)
+        assertEqual(kept.result, .accepted, "Outcome reports a kept draft")
+        assertEqual([kept.lines, kept.keptIntroduction, kept.keptFacts, kept.malformedLines], [6, 2, 3, 0], "Outcome counts lines and kept sentences")
+        assertEqual(kept.deterministicRejections + kept.modelRejections, 1, "The unsupported sentence is counted once")
+        let prose = try await outcome(NewsTextModel { _, _ in "I refuse" }, passages: passages)
+        assertEqual(prose.result, .unstructured, "Prose without protocol lines is a refusal-like fallback")
+        let short = answer.split(separator: "\n").prefix(3).joined(separator: "\n")
+        let truncated = try await outcome(NewsTextModel { _, _ in short }, passages: passages)
+        assertEqual(truncated.result, .lineCount, "Too few protocol lines is a format fallback")
+        let weakDraft = try await outcome(NewsTextModel { prompt, _ in prompt.contains("Return plain text only:") ? answer : "NO" }, passages: passages)
+        assertEqual(weakDraft.result, .weakDraft, "Rejected sentences make a weak draft")
+        assertEqual(weakDraft.keptIntroduction + weakDraft.keptFacts, 0, "A weak draft keeps no sentence")
+        let misnumbered = answer.replacingOccurrences(of: "FACT|P2|Engineers destroyed", with: "FACT|P9|Engineers destroyed")
+        let malformed = try await outcome(NewsTextModel { prompt, _ in prompt.contains("Return plain text only:") ? misnumbered : "YES" }, passages: passages)
+        assertEqual([malformed.malformedLines, malformed.modelRejections], [1, 0], "An unknown passage ID is malformed, not judged")
+        assertEqual(malformed.result, .accepted, "Five of six valid lines still form a draft")
+        let unasked = try await outcome(overviewModel, passages: [])
+        assertEqual(unasked.result, .noPassages, "No passages skips the model")
         let staleCitation = OverviewCitation(id: "stale", articleID: article1.id, passageID: "p1", passageFingerprint: "old", quote: text)
         let stale = EventOverviewDocument(eventID: "plain", version: fallback.version,
             content: OverviewContent(title: "Bridge", summary: "", facts: [OverviewFact(id: "stale", text: text, citationIDs: ["stale"])], citations: [staleCitation]))
@@ -11008,6 +11120,31 @@ struct NewsTests {
             existingCitations: ["c_1": citations["c_1"]!]
         )
         assertTrue(emptyPerspectives.isEmpty, "Absent section rule: Section omitted when no verified attributed perspective exists")
+
+        // #313: rejection rules and the coverage diagnosis carry no speaker or passage text.
+        assertEqual(valVague1.rule, .vagueParticipant, "Vague speaker rule is named")
+        assertEqual(valSynthetic.rule, .ungrounded, "Ungrounded position rule is named")
+        assertEqual(valSourceless.rule, .noCitation, "Missing citation rule is named")
+        assertEqual(valBadSource.rule, .unknownCitation, "Unknown citation rule is named")
+        let diagnosis = OverviewPerspectivesExtractor.diagnosePerspectives(
+            passages: [passage1, passage2, passage3],
+            articles: [article1, article2, article3],
+            existingCitations: citations
+        )
+        assertEqual(diagnosis.perspectives, perspectives.count, "Diagnosis counts what extraction returns")
+        assertEqual([diagnosis.passages, diagnosis.passagesWithCandidates, diagnosis.candidates, diagnosis.voices], [3, 3, 3, 2],
+                    "Diagnosis counts candidates per passage and collapses the reprint into one voice")
+        let typographic = EvidencePassage(id: "pass_typo", articleID: "art_persp_1",
+            text: "\u{201C}The evacuation routes are open,\u{201D} Mayor Elena Rostova said.")
+        let typographicCitation = OverviewCitation(id: "c_typo", articleID: "art_persp_1", passageID: "pass_typo",
+            passageFingerprint: typographic.fingerprint, quote: "The evacuation routes are open")
+        let unmatched = OverviewPerspectivesExtractor.diagnosePerspectives(
+            passages: [typographic, passageDescriptive],
+            articles: [article1],
+            existingCitations: ["c_typo": typographicCitation]
+        )
+        assertEqual([unmatched.uncitedPassages, unmatched.passagesWithTypographicQuotes, unmatched.candidates, unmatched.passagesWithUnmatchedSpeech],
+                    [1, 1, 0, 1], "Diagnosis counts an uncited passage and quoted speech that no attribution pattern matched")
     }
 
     static func testThematicAngleFromExistingFacts(fixtureHost: String = "example.com") async throws {
