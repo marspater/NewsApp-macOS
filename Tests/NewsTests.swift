@@ -4096,8 +4096,13 @@ struct NewsTests {
     static func testMigrationCoordinatorAtomicity() async {
         print("  - Testing MigrationCoordinator Atomic Transaction & ID Reconciliation...")
         
-        let tempDefaults = UserDefaults(suiteName: "com.marspater.news.test.\(UUID().uuidString)")!
-        defer { tempDefaults.removePersistentDomain(forName: tempDefaults.description) }
+        let runID = ProcessInfo.processInfo.environment["NEWS_TEST_RUN_ID"].flatMap(UUID.init(uuidString:)) ?? UUID()
+        let suiteName = "com.marspater.news.test.\(runID.uuidString)"
+        let tempDefaults = UserDefaults(suiteName: suiteName)!
+        defer {
+            tempDefaults.removePersistentDomain(forName: suiteName)
+            tempDefaults.synchronize()
+        }
         
         let db = DatabaseEngine(path: ":memory:")
         try? await db.open()

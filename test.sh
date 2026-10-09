@@ -1,6 +1,11 @@
 #!/bin/bash
 set -e
 
+# Own this run's migration-test domain so its empty plist can be removed after process exit.
+NEWS_TEST_RUN_ID="$(uuidgen)"
+export NEWS_TEST_RUN_ID
+trap 'rm -f "$HOME/Library/Preferences/com.marspater.news.test.$NEWS_TEST_RUN_ID.plist"' EXIT
+
 TARGET_MACOS="${TARGET_MACOS:-15.0}"
 export CLANG_MODULE_CACHE_PATH="${CLANG_MODULE_CACHE_PATH:-${TMPDIR:-/tmp}/news-module-cache}"
 export SWIFT_MODULECACHE_PATH="$CLANG_MODULE_CACHE_PATH"
