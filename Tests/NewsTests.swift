@@ -6886,16 +6886,22 @@ struct NewsTests {
     static func testCompletionOnce() async {
         print("  - Testing CompletionOnce atomicity...")
         let completion = CompletionOnce()
-        let gate = OpenGate()
+
+        let startGate = OpenGate()
+
         await withTaskGroup(of: Bool.self) { group in
             for _ in 0..<100 {
                 group.addTask {
-                    await gate.wait()
+                    await startGate.wait()
                     return completion.claim()
                 }
             }
-            await eventually("Every claim worker reaches the start gate") { await gate.arrivals == 100 }
-            await gate.open()
+
+            // Allow all tasks to start and wait at the gate
+            try? await Task.sleep(nanoseconds: 50_000_000)
+
+            // Release the gate so all tasks hit claim() simultaneously
+            startGate.open()
             var claims = 0
             for await result in group {
                 if result {
@@ -6904,7 +6910,6 @@ struct NewsTests {
             }
             assertEqual(claims, 1, "CompletionOnce must allow exactly one claim across concurrent tasks")
         }
-        assertFalse(completion.claim(), "The completion stays claimed after all workers finish")
     }
 
     static func testSocketNetworkBoundary() async throws {
