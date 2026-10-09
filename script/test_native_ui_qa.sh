@@ -71,6 +71,7 @@ swiftc -swift-version 6 -O -parse-as-library -target $(uname -m)-apple-macos${TA
     Sources/App/UpdateChecker.swift \
     Sources/Views/FeedHealthLine.swift \
     Sources/Views/FeedCatalogView.swift \
+    Sources/Views/TensionIndexView.swift \
     Sources/Views/SettingsView.swift \
     Tests/NativeUIQAChecks.swift \
     -o native_ui_qa_runner

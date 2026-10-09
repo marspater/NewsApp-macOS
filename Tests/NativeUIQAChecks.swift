@@ -61,6 +61,7 @@ struct NativeUIQAChecks {
         testEventOverviewGenerationAndCachingLifecycle()
         testCitationRoutingAndBanner()
         testSettingsPanePersistenceAndSizing()
+        testSecondaryWindowAndSheetChrome()
         await testRemoteImageReuse()
 
         print("Finished \(testsRun) Native UI QA checks with \(failures) failures.")
@@ -419,5 +420,14 @@ struct NativeUIQAChecks {
         assertEqual(SettingsPane.updates.rawValue, "updates", "Updates pane raw value")
         assertEqual(SettingsView.lastPaneStorageKey, "lastSettingsPane", "Last pane storage key matches standard")
         assertEqual(SettingsView.paneWidth, 500, "Settings pane width is 500pt")
+    }
+
+    static func testSecondaryWindowAndSheetChrome() {
+        print("  - Testing Secondary Window and Sheet Chrome Rules (#357)...")
+        assertEqual(FeedCatalogView.navigationTitleText, "Feed Catalog", "Feed catalog navigation title")
+        assertEqual(TensionIndexView.navigationTitleText, "News Tension", "News tension navigation title")
+        assertTrue(FeedCatalogView.showsDoneInToolbar, "Feed catalog presents Done in confirmationAction toolbar")
+        assertFalse(FeedCatalogView.hasBottomDoneBar, "Feed catalog does not put Done or critical controls at the bottom")
+        assertFalse(FeedCatalogView.hasCustomSheetBackground, "Feed catalog uses system sheet background without custom override")
     }
 }

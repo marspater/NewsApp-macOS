@@ -2,6 +2,11 @@ import SwiftUI
 
 /// Opt-in browser for the curated starter catalog. Nothing is subscribed until the user chooses it.
 struct FeedCatalogView: View {
+    static let navigationTitleText = "Feed Catalog"
+    static let showsDoneInToolbar = true
+    static let hasBottomDoneBar = false
+    static let hasCustomSheetBackground = false
+
     @EnvironmentObject private var appSettings: AppSettings
     @EnvironmentObject private var feedManager: FeedManager
     @Environment(\.dismiss) private var dismiss
@@ -14,7 +19,7 @@ struct FeedCatalogView: View {
                     .foregroundColor(AppColor.primaryText)
                     .accessibilityAddTraits(.isHeader)
                 Text("Choose a set or single feeds. Nothing is subscribed automatically, and every subscription can be removed in Subscriptions. Details describe how each feed looked when checked on \(FeedCatalog.verifiedOn); they say nothing about the accuracy of a publisher's reporting.")
-                    .font(AppTypography.bodySmall)
+                    .font(AppTypography.callout)
                     .foregroundColor(AppColor.secondaryText)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -35,17 +40,16 @@ struct FeedCatalogView: View {
                 }
             }
             .listStyle(.inset)
-
-            Divider()
-
-            HStack {
-                Spacer()
+        }
+        .frame(minWidth: 620, idealWidth: 680, minHeight: 560)
+        .navigationTitle(Self.navigationTitleText)
+        .toolbar(removing: .title)
+        .toolbar {
+            ToolbarItem(placement: .confirmationAction) {
                 Button("Done") { dismiss() }
                     .keyboardShortcut(.defaultAction)
             }
-            .padding(AppSpacing.md)
         }
-        .frame(minWidth: 620, idealWidth: 680, minHeight: 560)
         .task { await feedManager.reloadFeedHealth() }
     }
 

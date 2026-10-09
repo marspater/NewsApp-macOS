@@ -4,6 +4,8 @@ import Charts
 /// The news tension experiment (#159): what the fixed panel reported, by UTC day. Gap days are shown as gaps,
 /// never as zero, and the series starts when panel collection began.
 struct TensionIndexView: View {
+    static let navigationTitleText = "News Tension"
+
     @EnvironmentObject var articleStore: ArticleStore
     @EnvironmentObject var appSettings: AppSettings
 
@@ -38,10 +40,14 @@ struct TensionIndexView: View {
         }
         .frame(minWidth: 560, minHeight: 480)
         .background(AppColor.background)
+        .navigationTitle(Self.navigationTitleText)
+        .toolbar(removing: .title)
         .toolbar {
-            Button { Task { await load() } } label: { Label("Recalculate", systemImage: "arrow.clockwise") }
-                .disabled(loading)
-                .help("Score the stored panel coverage again")
+            ToolbarItem(placement: .primaryAction) {
+                Button { Task { await load() } } label: { Label("Recalculate", systemImage: "arrow.clockwise") }
+                    .disabled(loading)
+                    .help("Score the stored panel coverage again")
+            }
         }
         .task { await load() }
     }
@@ -72,7 +78,7 @@ struct TensionIndexView: View {
                 .font(AppTypography.label)
                 .foregroundColor(AppColor.secondaryText)
             Text(TensionMethodology.disclaimer)
-                .font(AppTypography.bodySmall)
+                .font(AppTypography.callout)
                 .foregroundColor(AppColor.secondaryText)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -85,7 +91,7 @@ struct TensionIndexView: View {
             Text(appSettings.tensionCollectionOptIn
                  ? "A day is scored once at least \(methodology.minimumReportingFeeds) panel feeds from \(methodology.minimumReportingRegions) regions have reported. The history starts on the day collection began."
                  : "Turn on panel collection in Settings to start a history. News has no historical corpus, so the history starts on the day collection begins.")
-                .font(AppTypography.bodySmall)
+                .font(AppTypography.callout)
                 .foregroundColor(AppColor.secondaryText)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -132,7 +138,7 @@ struct TensionIndexView: View {
                 .font(AppTypography.headline)
                 .accessibilityAddTraits(.isHeader)
             Text("\(day.coverage.reporting.count) of \(methodology.panel.count) panel feeds · \(day.coverage.regions.count) of \(methodology.panelRegions.count) regions")
-                .font(AppTypography.bodySmall)
+                .font(AppTypography.callout)
                 .foregroundColor(AppColor.secondaryText)
             if let daily = day.score.calibratedIndex, let smoothed = day.score.smoothedIndex {
                 HStack(spacing: AppSpacing.lg) {
@@ -141,7 +147,7 @@ struct TensionIndexView: View {
                 }
             } else {
                 Text(day.coverage.status == .noData ? "No panel feed reported this day." : "Insufficient data: too few panel feeds or regions reported.")
-                    .font(AppTypography.bodySmall)
+                    .font(AppTypography.callout)
             }
             if day.score.isProvisional {
                 Text("Provisional: late items and event grouping can still change this day.")
@@ -156,11 +162,11 @@ struct TensionIndexView: View {
                 ForEach(day.contributions.prefix(5), id: \.score.key) { contribution in
                     HStack(alignment: .firstTextBaseline) {
                         Text(contribution.title)
-                            .font(AppTypography.bodySmall)
+                            .font(AppTypography.body)
                             .lineLimit(2)
                         Spacer()
                         Text(String(format: "%.1f", contribution.score.rawScore))
-                            .font(AppTypography.bodySmall.monospacedDigit())
+                            .font(AppTypography.callout.monospacedDigit())
                             .foregroundColor(AppColor.secondaryText)
                             .accessibilityLabel("\(String(format: "%.1f", contribution.score.rawScore)) points")
                     }
@@ -169,7 +175,7 @@ struct TensionIndexView: View {
             }
         }
         .padding(AppSpacing.md)
-        .background(AppColor.surface, in: RoundedRectangle(cornerRadius: AppRadius.card))
+        .background(AppColor.surface, in: RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous))
     }
 
     private var dayList: some View {
@@ -187,7 +193,7 @@ struct TensionIndexView: View {
                             .foregroundColor(AppColor.secondaryText)
                             .monospacedDigit()
                     }
-                    .font(AppTypography.bodySmall)
+                    .font(AppTypography.body)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -203,7 +209,7 @@ struct TensionIndexView: View {
     }
 
     private func metric(_ label: String, _ value: String) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: AppSpacing.textStack) {
             Text(value).font(AppTypography.title.monospacedDigit())
             Text(label).font(AppTypography.caption).foregroundColor(AppColor.secondaryText)
         }
