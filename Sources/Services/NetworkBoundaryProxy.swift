@@ -116,7 +116,7 @@ private final class SOCKSListener: @unchecked Sendable {
     }
 }
 
-private final class CompletionOnce: @unchecked Sendable {
+final class CompletionOnce: @unchecked Sendable {
     private let lock = NSLock()
     private var completed = false
     func claim() -> Bool {
