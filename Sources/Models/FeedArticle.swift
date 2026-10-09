@@ -255,7 +255,8 @@ public struct ReaderImageCandidate: Codable, Hashable, Sendable {
                 let a = score(lhs.element), b = score(rhs.element)
                 guard a == b else { return a < b }
                 // Equal evidence: the larger known rendition, then the earlier candidate.
-                let lhsWidth = lhs.element.width ?? 0, rhsWidth = rhs.element.width ?? 0
+                let lhsWidth = lhs.element.width ?? 0
+                let rhsWidth = rhs.element.width ?? 0
                 return lhsWidth == rhsWidth ? lhs.offset > rhs.offset : lhsWidth < rhsWidth
             }?.element
     }
@@ -264,7 +265,8 @@ public struct ReaderImageCandidate: Codable, Hashable, Sendable {
     static func preferredRendition(of url: URL) -> URL {
         guard url.host?.lowercased() == "ichef.bbci.co.uk" else { return url }
         var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
-        components?.path = url.path.replacingOccurrences(of: #"^/ace/standard/\d{2,3}/"#, with: "/ace/standard/976/", options: .regularExpression)
+        // Only the width segment changes; the rest of the CDN path is kept as published.
+        components?.path = url.path.replacingOccurrences(of: #"(?<=^/ace/standard/)\d{2,3}(?=/)"#, with: "976", options: .regularExpression)
         return components?.url ?? url
     }
 
