@@ -1574,6 +1574,33 @@ actor DatabaseEngine {
 
     // MARK: - Article Queries
 
+    private func executeQueryArticles(sql: String, params: [QueryParameter], prepareErrorMessage: String) throws -> [FeedArticle] {
+        guard let db = db else { throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Database not open"]) }
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            let msg = String(cString: sqlite3_errmsg(db))
+            throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "\(prepareErrorMessage): \(msg)"])
+        }
+        defer { sqlite3_finalize(stmt) }
+
+        bind(params, to: stmt)
+
+        var results: [FeedArticle] = []
+        var status = sqlite3_step(stmt)
+        while status == SQLITE_ROW {
+            try Task.checkCancellation()
+            if var article = parseArticleRow(stmt) {
+                article.queryOrderValue = sqlite3_column_double(stmt, 18)
+                results.append(article)
+            }
+            status = sqlite3_step(stmt)
+        }
+        guard status == SQLITE_DONE else {
+            throw NSError(domain: "DatabaseEngine", code: Int(status), userInfo: [NSLocalizedDescriptionKey: String(cString: sqlite3_errmsg(db))])
+        }
+        return results
+    }
+
     func fetchArticles(
         section: String? = nil,
         isRead: Bool? = nil,
@@ -1588,8 +1615,6 @@ actor DatabaseEngine {
         muting: MuteRules = MuteRules(),
         hidingWaitingStories: Bool = false
     ) throws -> [FeedArticle] {
-        guard let db = db else { throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Database not open"]) }
-
         let criteria = FetchCriteria(
             section: section,
             isRead: isRead,
@@ -1605,35 +1630,12 @@ actor DatabaseEngine {
             hidingWaitingStories: hidingWaitingStories
         )
         let (query, params) = try buildFetchArticlesQuery(criteria: criteria)
-        
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, query, -1, &stmt, nil) == SQLITE_OK else {
-            let msg = String(cString: sqlite3_errmsg(db))
-            throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to prepare fetch query: \(msg)"])
-        }
-        defer { sqlite3_finalize(stmt) }
-        
-        bind(params, to: stmt)
-        
-        var results: [FeedArticle] = []
-        var status = sqlite3_step(stmt)
-        while status == SQLITE_ROW {
-            try Task.checkCancellation()
-            if var article = parseArticleRow(stmt) {
-                article.queryOrderValue = sqlite3_column_double(stmt, 18)
-                results.append(article)
-            }
-            status = sqlite3_step(stmt)
-        }
-        guard status == SQLITE_DONE else {
-            throw NSError(domain: "DatabaseEngine", code: Int(status), userInfo: [NSLocalizedDescriptionKey: String(cString: sqlite3_errmsg(db))])
-        }
-        
+        let results = try executeQueryArticles(sql: query, params: params, prepareErrorMessage: "Failed to prepare fetch query")
         return includingOriginals ? results : try curateImages(in: results)
     }
-    
+
     // MARK: - Full Text Search (FTS5)
-    
+
     private func buildSearchQuery(parsed: ArticleFilterQuery, muting: MuteRules, after: ArticleQueryCursor?, limit: Int) -> (sql: String, params: [QueryParameter]) {
         let cleanTerms = parsed.terms
         let hasFTS = !cleanTerms.isEmpty
@@ -1657,7 +1659,7 @@ actor DatabaseEngine {
             sql += " AND NOT " + Self.mutedArticle
             params += Self.mutingParameters(muting)
         }
-        
+
         if let after {
             if hasFTS {
                 sql += " AND (fts.rank > ? OR (fts.rank = ? AND a.id > ?))"
@@ -1682,35 +1684,12 @@ actor DatabaseEngine {
         after: ArticleQueryCursor? = nil,
         muting: MuteRules = MuteRules()
     ) throws -> [FeedArticle] {
-        guard let db = db else { throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Database not open"]) }
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return [] }
 
         let parsed = ArticleFilterQuery.parse(trimmed)
         let (sql, params) = buildSearchQuery(parsed: parsed, muting: muting, after: after, limit: limit)
-        
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
-            let msg = String(cString: sqlite3_errmsg(db))
-            throw NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to prepare FTS search query: \(msg)"])
-        }
-        defer { sqlite3_finalize(stmt) }
-        
-        bind(params, to: stmt)
-        
-        var results: [FeedArticle] = []
-        var status = sqlite3_step(stmt)
-        while status == SQLITE_ROW {
-            try Task.checkCancellation()
-            if var article = parseArticleRow(stmt) {
-                article.queryOrderValue = sqlite3_column_double(stmt, 18)
-                results.append(article)
-            }
-            status = sqlite3_step(stmt)
-        }
-        guard status == SQLITE_DONE else {
-            throw NSError(domain: "DatabaseEngine", code: Int(status), userInfo: [NSLocalizedDescriptionKey: String(cString: sqlite3_errmsg(db))])
-        }
+        let results = try executeQueryArticles(sql: sql, params: params, prepareErrorMessage: "Failed to prepare FTS search query")
         return try curateImages(in: results)
     }
     
