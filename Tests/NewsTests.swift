@@ -5413,6 +5413,88 @@ struct NewsTests {
             assertTrue(try await db.isSaved(articleId: art2.id), "art2 should be marked saved via batch")
             assertTrue(try await db.isSaved(articleId: art3.id), "art3 should be marked saved via batch")
 
+            // Verify query-condition helpers and combined criteria in fetchArticles
+            let queryArticle1 = FeedArticle(
+                title: "Alpha Article",
+                link: "https://example.com/alpha",
+                guid: "alpha-guid",
+                description: "Alpha desc",
+                pubDate: Date(timeIntervalSince1970: 1_700_000_100),
+                source: "SourceA",
+                category: "Tech"
+            )
+            let queryArticle2 = FeedArticle(
+                title: "Beta Article",
+                link: "https://example.com/beta",
+                guid: "beta-guid",
+                description: "Beta desc",
+                pubDate: Date(timeIntervalSince1970: 1_700_000_200),
+                source: "SourceB",
+                category: "General"
+            )
+            try await db.upsertArticles([queryArticle1, queryArticle2], feedUrl: "https://example.com/feed2.xml")
+
+            // 1. ID filtering (preserves includingOriginals and parameter binding)
+            let byID = try await db.fetchArticles(id: queryArticle1.id)
+            assertEqual(byID.count, 1, "fetchArticles by ID should return exactly 1 article")
+            assertEqual(byID.first?.id, queryArticle1.id, "ID filter returned correct article")
+
+            let byIDWithOriginals = try await db.fetchArticles(id: queryArticle1.id, includingOriginals: true)
+            assertEqual(byIDWithOriginals.count, 1, "fetchArticles with includingOriginals: true returns article")
+
+            let byNonexistentID = try await db.fetchArticles(id: "nonexistent-id")
+            assertTrue(byNonexistentID.isEmpty, "Nonexistent ID returns empty results")
+
+            // 2. Canonical URL filtering (handles unique canonical URLs and unmatched URLs)
+            let byCanonical = try await db.fetchArticles(canonicalURL: queryArticle2.normalizedLink)
+            assertEqual(byCanonical.count, 1, "fetchArticles by canonicalURL returns matching article")
+            assertEqual(byCanonical.first?.id, queryArticle2.id, "Canonical URL filter matched expected article")
+
+            let byNonexistentCanonical = try await db.fetchArticles(canonicalURL: "https://example.com/nonexistent")
+            assertTrue(byNonexistentCanonical.isEmpty, "Nonexistent canonical URL returns empty")
+
+            // 3. Event filtering (binds event members and handles nonexistent event IDs)
+            let storyEvent = try await db.createEvent(memberArticleIDs: [queryArticle1.id])
+            let byEvent = try await db.fetchArticles(eventID: storyEvent.id)
+            assertEqual(byEvent.count, 1, "fetchArticles by eventID returns event members")
+            assertEqual(byEvent.first?.id, queryArticle1.id, "fetchArticles by eventID matches queryArticle1")
+
+            let byNonexistentEvent = try await db.fetchArticles(eventID: "nonexistent-event")
+            assertTrue(byNonexistentEvent.isEmpty, "Nonexistent event ID returns empty")
+
+            // 4. Publication window filtering (inclusive bounds and parameter typing)
+            let windowBoth = try await db.fetchArticles(
+                publicationWindow: Date(
+                    timeIntervalSince1970: 1_700_000_050)...Date(timeIntervalSince1970: 1_700_000_250)
+            )
+            let windowBothIDs = Set(windowBoth.map(\.id))
+            assertTrue(windowBothIDs.contains(queryArticle1.id), "Window includes queryArticle1")
+            assertTrue(windowBothIDs.contains(queryArticle2.id), "Window includes queryArticle2")
+
+            let windowUpperOnly = try await db.fetchArticles(
+                publicationWindow: Date(
+                    timeIntervalSince1970: 1_700_000_150)...Date(timeIntervalSince1970: 1_700_000_250)
+            )
+            let windowUpperIDs = Set(windowUpperOnly.map(\.id))
+            assertFalse(windowUpperIDs.contains(queryArticle1.id), "Window excludes queryArticle1 before lowerBound")
+            assertTrue(windowUpperIDs.contains(queryArticle2.id), "Window includes queryArticle2")
+
+            // 5. Cursor filtering (preserves ordering conditions and excludes cursor article)
+            let cursor = ArticleQueryCursor(queryArticle2)
+            let afterCursor = try await db.fetchArticles(after: cursor)
+            assertTrue(
+                afterCursor.allSatisfy { $0.id != queryArticle2.id }, "Cursor excludes the cursor article itself")
+
+            // 6. Combined criteria (combining section, id, and publicationWindow)
+            let combined = try await db.fetchArticles(
+                section: "Tech",
+                id: queryArticle1.id,
+                publicationWindow: Date(
+                    timeIntervalSince1970: 1_700_000_000)...Date(timeIntervalSince1970: 1_700_000_300)
+            )
+            assertEqual(combined.count, 1, "Combined criteria returns exact matching article")
+            assertEqual(combined.first?.id, queryArticle1.id, "Combined criteria returned expected article")
+
             // Verify closed database contract
             let closedDB = DatabaseEngine(path: ":memory:")
             do {

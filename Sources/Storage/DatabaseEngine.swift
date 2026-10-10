@@ -1722,6 +1722,52 @@ actor DatabaseEngine {
         var hidingWaitingStories: Bool
     }
 
+    private func idFilterConditions(id: String, includingOriginals: Bool) throws -> (
+        sql: String, params: [QueryParameter]
+    ) {
+        let resolvedID = includingOriginals ? id : try resolvedArticleID(id)
+        return (" AND a.id = ?", [("text", resolvedID)])
+    }
+
+    private func canonicalURLFilterConditions(canonicalURL: String) throws -> (sql: String, params: [QueryParameter]) {
+        if let target = try aliasTarget(kind: "url", value: canonicalURL) {
+            return (" AND a.id = ?", [("text", target)])
+        } else {
+            let sql = """
+                 AND a.canonical_url = ?
+                 AND (SELECT count(*) FROM articles WHERE canonical_url = ?) = 1
+                 AND NOT EXISTS (SELECT 1 FROM article_aliases WHERE kind = 'url' AND value = ? AND article_id IS NULL)
+                """
+            return (sql, [("text", canonicalURL), ("text", canonicalURL), ("text", canonicalURL)])
+        }
+    }
+
+    private func eventFilterConditions(eventID: String) throws -> (sql: String, params: [QueryParameter]) {
+        let resolvedID = try resolvedEventID(eventID) ?? eventID
+        return (" AND a.id IN (SELECT article_id FROM event_members WHERE event_id = ?)", [("text", resolvedID)])
+    }
+
+    private func publicationWindowConditions(_ publicationWindow: ClosedRange<Date>) -> (
+        sql: String, params: [QueryParameter]
+    ) {
+        let sql = " AND a.published_at >= ? AND a.published_at <= ?"
+        let params: [QueryParameter] = [
+            ("double", publicationWindow.lowerBound.timeIntervalSince1970),
+            ("double", publicationWindow.upperBound.timeIntervalSince1970),
+        ]
+        return (sql, params)
+    }
+
+    private func cursorConditions(_ after: ArticleQueryCursor) -> (sql: String, params: [QueryParameter]) {
+        let sql = " AND (\(Self.articleDateOrder) < ? OR (\(Self.articleDateOrder) = ? AND a.id > ?))"
+        let params: [QueryParameter] = [
+            ("double", after.value),
+            ("double", after.value),
+            ("text", after.id),
+        ]
+        return (sql, params)
+    }
+
     /// Builds the SQL query string and parameters for fetching articles based on criteria.
     private func buildFetchArticlesQuery(criteria: FetchCriteria) throws -> (sql: String, params: [QueryParameter]) {
         var query = """
@@ -1740,34 +1786,24 @@ actor DatabaseEngine {
         var params: [QueryParameter] = []
 
         if let id = criteria.id {
-            query += " AND a.id = ?"
-            params.append(("text", criteria.includingOriginals ? id : try resolvedArticleID(id)))
+            let filter = try idFilterConditions(id: id, includingOriginals: criteria.includingOriginals)
+            query += filter.sql
+            params += filter.params
         }
         if let canonicalURL = criteria.canonicalURL {
-            if let target = try aliasTarget(kind: "url", value: canonicalURL) {
-                query += " AND a.id = ?"
-                params.append(("text", target))
-            } else {
-                query += """
-                     AND a.canonical_url = ?
-                     AND (SELECT count(*) FROM articles WHERE canonical_url = ?) = 1
-                     AND NOT EXISTS (SELECT 1 FROM article_aliases WHERE kind = 'url' AND value = ? AND article_id IS NULL)
-                    """
-                params.append(("text", canonicalURL))
-                params.append(("text", canonicalURL))
-                params.append(("text", canonicalURL))
-            }
+            let filter = try canonicalURLFilterConditions(canonicalURL: canonicalURL)
+            query += filter.sql
+            params += filter.params
         }
         if let eventID = criteria.eventID {
-            query += " AND a.id IN (SELECT article_id FROM event_members WHERE event_id = ?)"
-            params.append(("text", try resolvedEventID(eventID) ?? eventID))
+            let filter = try eventFilterConditions(eventID: eventID)
+            query += filter.sql
+            params += filter.params
         }
         if let publicationWindow = criteria.publicationWindow {
-            query += " AND a.published_at >= ? AND a.published_at <= ?"
-            params += [
-                ("double", publicationWindow.lowerBound.timeIntervalSince1970),
-                ("double", publicationWindow.upperBound.timeIntervalSince1970),
-            ]
+            let filter = publicationWindowConditions(publicationWindow)
+            query += filter.sql
+            params += filter.params
         }
         let list = listConditions(section: criteria.section, isRead: criteria.isRead, isSaved: criteria.isSaved)
         query += list.sql
@@ -1779,8 +1815,9 @@ actor DatabaseEngine {
         }
         if criteria.hidingWaitingStories { query += " AND NOT " + Self.waitingStory }
         if let after = criteria.after {
-            query += " AND (\(Self.articleDateOrder) < ? OR (\(Self.articleDateOrder) = ? AND a.id > ?))"
-            params += [("double", after.value), ("double", after.value), ("text", after.id)]
+            let filter = cursorConditions(after)
+            query += filter.sql
+            params += filter.params
         }
 
         query += " ORDER BY \(Self.articleDateOrder) DESC, a.id"
@@ -1919,7 +1956,7 @@ actor DatabaseEngine {
         after: ArticleQueryCursor? = nil,
         muting: MuteRules = MuteRules()
     ) throws -> [FeedArticle] {
-        guard let db = db else {
+        guard db != nil else {
             throw NSError(
                 domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Database not open"])
         }
