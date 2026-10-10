@@ -22,7 +22,7 @@ VALID_REASONS = {
 }
 VALID_UNCERTAINTIES = {"known", "provisional", "unknown"}
 DATE_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}$")
-FEED_PATTERN = re.compile(r'CatalogFeed\(\s*id:\s*"([^"]+)".*?url:\s*"([^"]+)",\s*language:\s*"([^"]+)"', re.S)
+FEED_PATTERN = re.compile(r'CatalogFeed\(\s*id:\s*"([^"]+)".*?url:\s*"([^"]+)",\s*language:\s*"([^"]+)"', re.DOTALL)
 ADVISORY_PATTERN = re.compile(r'"([^"]+)":\s*FeedAdvisory\(\s*date:\s*"([^"]+)"')
 
 
