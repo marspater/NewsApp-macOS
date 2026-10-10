@@ -152,16 +152,6 @@ private struct EventSourceRow: View {
     private var isSaved: Bool { savedStories.isSaved(article) }
     private var source: String { article.publisherName }
 
-    /// The muting action for this story's publisher host: unmute the rules covering it, or mute the host.
-    private var sourceMuting: (title: String, apply: () -> Void)? {
-        let covering = appSettings.muteRules.matchedSources(link: article.link)
-        if let rule = covering.first {
-            return ("Unmute \(rule)", { for source in covering { appSettings.unmuteSource(source) } })
-        }
-        guard let host = MuteRules.host(article.link) else { return nil }
-        return ("Mute \(host)", { _ = appSettings.muteSource(host) })
-    }
-
     var body: some View {
         Button(action: open) {
             HStack(alignment: .firstTextBaseline, spacing: AppSpacing.xs) {
@@ -193,47 +183,14 @@ private struct EventSourceRow: View {
         .buttonStyle(.plain)
         .buttonBorderShape(.roundedRectangle(radius: AppRadius.card))
         .contextMenu {
-            Button {
-                readManager.toggleRead(article.id)
-            } label: {
-                Label(
-                    isRead ? "Mark as Unread" : "Mark as Read", systemImage: isRead ? "circle" : "checkmark.circle.fill"
-                )
-            }
-            Button {
-                toggleSaved()
-            } label: {
-                Label(
-                    isSaved ? "Remove from Saved" : "Save Story", systemImage: isSaved ? "bookmark.slash" : "bookmark")
-            }
-            if let muting = sourceMuting {
-                Button(action: muting.apply) {
-                    Label(muting.title, systemImage: "speaker.slash")
-                }
-            }
-            Divider()
-            Button {
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(article.link, forType: .string)
-            } label: {
-                Label("Copy Link", systemImage: "link")
-            }
-            if let url = URL(string: article.link) {
-                Button {
-                    NSWorkspace.shared.open(url)
-                } label: {
-                    Label("Open in Browser", systemImage: "safari")
-                }
-                ShareLink(item: url, subject: Text(article.title), message: Text(article.title)) {
-                    Label("Share Story", systemImage: "square.and.arrow.up")
-                }
-            }
-            if canSeparate {
-                Divider()
-                Button {
-                    separate()
-                } label: {
-                    Label("Not the Same Event", systemImage: "rectangle.split.2x1")
+            StoryContextMenuItems(article: article) {
+                if canSeparate {
+                    Divider()
+                    Button {
+                        separate()
+                    } label: {
+                        Label("Not the Same Event", systemImage: "rectangle.split.2x1")
+                    }
                 }
             }
         }
@@ -250,7 +207,7 @@ private struct EventSourceRow: View {
         .accessibilityActions {
             Button(isRead ? "Mark as Unread" : "Mark as Read") { readManager.toggleRead(article.id) }
             Button(isSaved ? "Remove from Saved" : "Save Story") { toggleSaved() }
-            if let muting = sourceMuting {
+            if let muting = appSettings.sourceMuting(for: article.link) {
                 Button(muting.title, action: muting.apply)
             }
             if canSeparate {
