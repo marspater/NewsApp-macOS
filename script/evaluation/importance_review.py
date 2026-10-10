@@ -28,15 +28,18 @@ def stories(directory):
     require(path.exists(), f'No {SOURCE} in the run directory; run ./test.sh --curation-live first')
     rows = json.loads(path.read_text())
     require(all(row.get('waiting') in ('yes', 'no') for row in rows), 'Every story needs a waiting flag')
-    # The opaque article ID keys each row, so a sheet built from another run cannot be applied to this one.
+    require(len({row['id'] for row in rows}) == len(rows), 'Duplicate story in review inputs')
     return [(row['id'], row) for row in rows]
+
+
+def review_rows(rows):
+    return [{'story': key, 'publisher': row.get('source', ''), 'title': row['title'], 'summary': row.get('summary', ''),
+             'label': '', 'note': ''} for key, row in rows]
 
 
 def sheet(directory):
     directory = private_run(directory)
-    rows = [{'story': key, 'publisher': row.get('source', ''), 'title': row['title'], 'summary': row.get('summary', ''),
-             'label': '', 'note': ''} for key, row in stories(directory)]
-    return write_new_sheet(directory / SHEET, COLUMNS, rows)
+    return write_new_sheet(directory / SHEET, COLUMNS, review_rows(stories(directory)))
 
 
 def upper_bound(successes, trials):
@@ -80,7 +83,7 @@ def report(directory):
     directory = private_run(directory)
     rows = stories(directory)
     sheet_path = directory / SHEET
-    labels = read_sheet_labels(sheet_path, 'story', LABELS, [key for key, _ in rows]) if sheet_path.exists() else {}
+    labels = read_sheet_labels(sheet_path, 'story', LABELS, review_rows(rows)) if sheet_path.exists() else {}
     review = hidden_important(rows, labels)
     result = {
         'minorRated': len(rows), 'waiting': sum(row['waiting'] == 'yes' for _, row in rows),
@@ -133,6 +136,18 @@ def check_report(directory):
     require(result['decisionInputs']['labellingComplete'] and result['decisionInputs']['hiddenImportantObserved'], 'Decision inputs')
     public = (directory / REPORT).read_text()
     require('Headline' not in public and 'Private summary' not in public, 'Report must not carry story text')
+    source = directory / SOURCE
+    original = source.read_text()
+    for column in ('title', 'summary', 'source'):
+        changed = json.loads(original)
+        changed[0][column] += ' changed'
+        source.write_text(json.dumps(changed))
+        expect_rejected(lambda: report(directory), ValueError, f'Changed {column} inherited an old label')
+        require((directory / REPORT).read_text() == public, 'Rejected inputs replaced the last report')
+    changed.append(changed[0])
+    source.write_text(json.dumps(changed))
+    expect_rejected(lambda: report(directory), ValueError, 'Duplicate story inputs accepted')
+    source.write_text(original)
     (directory / SHEET).write_text('story,label\na1,important\nb9,minor\n')
     expect_rejected(lambda: report(directory), ValueError, 'A sheet from another run was accepted')
     (directory / SHEET).write_text('story,label\na1,maybe\n')
