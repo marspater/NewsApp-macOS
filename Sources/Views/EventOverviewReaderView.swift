@@ -314,10 +314,14 @@ struct EventOverviewReaderView: View {
     private var headerSection: some View {
         VStack(alignment: .leading, spacing: AppSpacing.sm) {
             HStack(spacing: AppSpacing.xs) {
-                TagView(title: "Event overview", tint: AppColor.accent)
-                
+                TagView(
+                    title: "Event overview", tint: AppColor.accent,
+                    font: AppTypography.overviewFont(.eyebrow, scale: textScale))
+
                 if overview.kind == .fallbackExcerpts {
-                    TagView(title: "Verified excerpts", tint: currentSecondaryTextColor)
+                    TagView(
+                        title: "Verified excerpts", tint: currentSecondaryTextColor,
+                        font: AppTypography.overviewFont(.eyebrow, scale: textScale))
                 }
             }
             .accessibilityElement(children: .combine)
@@ -673,7 +677,7 @@ struct EventOverviewReaderView: View {
                                     tint: AppColor.accent,
                                     font: AppTypography.overviewFont(.micro, scale: textScale)
                                 )
-                                    .accessibilityLabel("Planned event")
+                                .accessibilityLabel("Planned event")
                             }
 
                             if let pubDate = item.publicationDate, item.eventDate != nil {
