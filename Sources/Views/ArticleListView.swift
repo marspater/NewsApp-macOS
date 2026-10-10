@@ -499,11 +499,16 @@ struct ArticleListView: View {
             ToolbarSpacer(.fixed, placement: .primaryAction)
         }
 
+        // Xcode 26.3 (CodeQL tracing) cannot resolve this newer SwiftUI modifier.
+        #if compiler(>=6.4)
         if #available(macOS 26.1, *) {
             refreshToolbarItem.visibilityPriority(.high)
         } else {
             refreshToolbarItem
         }
+        #else
+        refreshToolbarItem
+        #endif
         if isBriefing {
             if #available(macOS 26, *) { ToolbarSpacer(.fixed, placement: .primaryAction) }
             ToolbarItem(placement: .primaryAction) {
