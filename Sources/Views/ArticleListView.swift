@@ -132,10 +132,17 @@ struct ArticleListView: View {
         if filteredArticles.isEmpty && isLoadingPage {
             ProgressView("Loading articles…").padding(AppSpacing.xl)
         } else if filteredArticles.isEmpty && queryError != nil {
-            ContentUnavailableView("Couldn’t Load Articles", systemImage: "exclamationmark.triangle")
-        } else if filteredArticles.isEmpty && isSearching && mutedCount == 0 {
-            ContentUnavailableView.search(text: searchText)
-                .padding(.top, 80)
+            queryFailureView
+        } else if filteredArticles.isEmpty && isSearching {
+            VStack(spacing: AppSpacing.md) {
+                ContentUnavailableView.search(text: searchText)
+                if mutedCount > 0 && !showsMuted && !listMuting.isEmpty {
+                    Button(mutedCount == 1 ? "Show 1 Muted Story" : "Show \(mutedCount) Muted Stories") {
+                        showsMuted = true
+                    }
+                }
+            }
+            .padding(.top, AppSpacing.xl)
         } else if filteredArticles.isEmpty {
             emptyStateView
         } else {
@@ -147,12 +154,35 @@ struct ArticleListView: View {
                     .padding(.bottom, AppSpacing.lg)
             }
         }
-        if let queryError {
-            VStack(spacing: AppSpacing.sm) {
-                Text(queryError).foregroundStyle(AppColor.secondaryText)
-                Button("Retry") { pageRequest += 1 }
-            }.padding()
+        if queryError != nil && !filteredArticles.isEmpty {
+            queryFailureView
         }
+    }
+
+    private var queryFailureView: some View {
+        VStack(spacing: AppSpacing.md) {
+            ContentUnavailableView {
+                Label(
+                    filteredArticles.isEmpty ? "Couldn’t Load Articles" : "Couldn’t Load More Articles",
+                    systemImage: "exclamationmark.triangle")
+            } description: {
+                Text("The archive could not be loaded. Please try again.")
+            } actions: {
+                Button("Retry") { pageRequest += 1 }
+            }
+            if let queryError {
+                DisclosureGroup("Technical Details") {
+                    Text(queryError)
+                        .font(AppTypography.caption)
+                        .foregroundStyle(AppColor.secondaryText)
+                        .textSelection(.enabled)
+                }
+                .font(AppTypography.caption)
+                .padding(.horizontal, AppLayout.pageInset)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.top, AppSpacing.xl)
     }
 
     private var selectedStory: FeedArticle? {
@@ -724,113 +754,62 @@ struct ArticleListView: View {
 
     // MARK: - Empty States & Diagnostics
 
+    /// A consistent system treatment for empty lists and exhausted feeds (DESIGN.md §8.4).
     private var emptyStateView: some View {
-        VStack(spacing: AppSpacing.md) {
-            let failedFeeds = feedManager.feedStatuses.filter {
-                if case .failed = $0.value { return true }
-                return false
-            }
-
+        let failedFeeds = feedManager.feedStatuses.keys.sorted().filter { url in
+            if case .some(.failed) = feedManager.feedStatuses[url] { return true }
+            return false
+        }
+        return VStack(spacing: AppSpacing.md) {
             if !isBriefing && feedManager.isAnyFeedLoading {
-                ProgressView()
+                ProgressView("Refreshing news feeds…")
                     .controlSize(.regular)
-                    .padding(.bottom, 4)
-                Text("Refreshing news feeds...")
-                    .font(AppTypography.body)
-                    .foregroundColor(AppColor.secondaryText)
-            } else if !isBriefing && (selectedTopic != "Saved Stories" && selectedTopic != "History")
-                && !failedFeeds.isEmpty && filteredArticles.isEmpty
+            } else if !isBriefing && selectedTopic != "Saved Stories" && selectedTopic != "History"
+                && !failedFeeds.isEmpty
             {
-                VStack(spacing: 12) {
-                    Image(systemName: "exclamationmark.triangle")
-                        .font(.system(size: 32))
-                        .foregroundColor(AppColor.warning)
-
-                    Text("\(failedFeeds.count) feeds couldn't be refreshed")
-                        .font(AppTypography.headline)
-                        .foregroundColor(AppColor.primaryText)
-
-                    VStack(spacing: 4) {
-                        ForEach(Array(failedFeeds.keys.prefix(4)), id: \.self) { urlString in
-                            let host = URL(string: urlString)?.host ?? urlString
-                            Text(host)
-                                .font(AppTypography.bodySmall)
-                                .foregroundColor(AppColor.secondaryText)
-                        }
-                    }
-
-                    HStack(spacing: 10) {
-                        Button("Retry Feeds") {
-                            refreshFeeds()
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .tint(AppColor.accent)
-                        .controlSize(.small)
-                    }
-                    .padding(.top, 4)
-
-                    DisclosureGroup("Technical Details") {
-                        VStack(alignment: .leading, spacing: 6) {
-                            ForEach(Array(failedFeeds.keys), id: \.self) { urlString in
-                                if case .failed(let err) = feedManager.feedStatuses[urlString] {
-                                    Text("\(urlString): \(err.localizedDescription)")
-                                        .font(.system(size: 10, design: .monospaced))
-                                        .foregroundColor(AppColor.secondaryText)
-                                        .lineLimit(2)
-                                }
+                ContentUnavailableView {
+                    Label(
+                        failedFeeds.count == 1
+                            ? "1 Feed Couldn’t Refresh" : "\(failedFeeds.count) Feeds Couldn’t Refresh",
+                        systemImage: "exclamationmark.triangle")
+                } description: {
+                    Text("No stories are currently available from these feeds.")
+                } actions: {
+                    Button("Retry Feeds") { refreshFeeds() }
+                }
+                DisclosureGroup("Technical Details") {
+                    VStack(alignment: .leading, spacing: AppSpacing.xxs) {
+                        ForEach(failedFeeds, id: \.self) { url in
+                            if case .some(.failed(let error)) = feedManager.feedStatuses[url] {
+                                Text("\(url): \(error.localizedDescription)")
+                                    .font(AppTypography.caption)
+                                    .foregroundStyle(AppColor.secondaryText)
+                                    .textSelection(.enabled)
                             }
                         }
-                        .padding(.top, 6)
                     }
-                    .font(AppTypography.caption)
-                    .foregroundColor(AppColor.tertiaryText)
-                    .frame(maxWidth: 360)
                 }
-                .padding(20)
-                .background(
-                    RoundedRectangle(cornerRadius: AppRadius.container)
-                        .fill(AppColor.surface)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: AppRadius.container)
-                                .stroke(AppColor.borderSubtle, lineWidth: 1)
-                        )
-                )
-                .frame(maxWidth: 420)
+                .font(AppTypography.caption)
+                .padding(.horizontal, AppLayout.pageInset)
             } else {
-                Image(systemName: emptyStateIcon)
-                    .font(.system(size: 36))
-                    .foregroundColor(AppColor.tertiaryText)
-
-                Text(emptyStateTitle)
-                    .font(AppTypography.headline)
-                    .foregroundColor(AppColor.primaryText)
-
-                Text(emptyStateText)
-                    .font(AppTypography.bodySmall)
-                    .foregroundColor(AppColor.secondaryText)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: 340)
-
-                if mutedCount > 0 && !showsMuted && !listMuting.isEmpty {
-                    Button(mutedCount == 1 ? "Show 1 Muted Story" : "Show \(mutedCount) Muted Stories") {
-                        showsMuted = true
+                ContentUnavailableView {
+                    Label(emptyStateTitle, systemImage: emptyStateIcon)
+                } description: {
+                    Text(emptyStateText)
+                } actions: {
+                    if mutedCount > 0 && !showsMuted && !listMuting.isEmpty {
+                        Button(mutedCount == 1 ? "Show 1 Muted Story" : "Show \(mutedCount) Muted Stories") {
+                            showsMuted = true
+                        }
                     }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                }
-
-                if selectedTopic == "Today" || selectedTopic == "Unread" {
-                    Button("Refresh Feeds") {
-                        refreshFeeds()
+                    if selectedTopic == "Today" || selectedTopic == "Unread" {
+                        Button("Refresh Feeds") { refreshFeeds() }
                     }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    .padding(.top, 4)
                 }
             }
         }
         .frame(maxWidth: .infinity)
-        .padding(.top, 80)
+        .padding(.top, AppSpacing.xl)
     }
 
     private var emptyStateIcon: String {
