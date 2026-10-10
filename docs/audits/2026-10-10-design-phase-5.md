@@ -18,12 +18,12 @@ Verification uses an isolated checkout and, for interaction checks, a separate a
 
 | Check | Result |
 | --- | --- |
-| Design lint and formatting | Passed before rebase; rebased code retains the zero-deviation baseline from phase 4 |
-| Full offline regressions | Passed before rebase; final rebase verification pending |
-| Native UI QA, macOS 15 deployment target | Passed before rebase; final rebase verification pending |
-| arm64 ad-hoc staged bundle, macOS 15 deployment target | Passed before rebase; final rebase verification pending |
-| Isolated launch and reading-options interaction | Pending |
-| Light / dark and narrow / wide reader | Pending |
+| Design lint and formatting | Passed: zero design deviations; changed-file formatting and diff checks pass |
+| Full offline regressions | Passed on the rebased implementation |
+| Native UI QA, macOS 15 deployment target | Passed: 141 checks, zero failures on the rebased implementation |
+| arm64 ad-hoc staged bundle, macOS 15 deployment target | Passed on the rebased implementation; signed bundle launched |
+| Isolated launch and reading-options interaction | Passed: A−/A+, all three styles, menu and ⌘+/⌘−/⌘0 in story and overview; another story and relaunch retain size/style; Escape dismisses the popover without leaving the reader; overview citation opens the cited story and notice |
+| Visual coverage | Reader and overview inspected in dark appearance at the existing wide window size; light appearance also inspected during isolated launch. Full appearance/accessibility matrix and exact 900 pt sizing not verified |
 | macOS 15 runtime | Not run; host is macOS 27.0.1 |
 | Spoken VoiceOver | Parked #268; not part of this issue |
 | Installation and publisher-network checks | Not run; this change concerns offline reader controls |
