@@ -1,8 +1,8 @@
 // ArticleDetailView.swift
 // NewsApp Article Detail Reading Experience & Native Toolbar
 
-import SwiftUI
 import AppKit
+import SwiftUI
 
 enum DetailViewMode: String, CaseIterable, Identifiable {
     case reader = "Reader"
@@ -168,13 +168,15 @@ struct ArticleDetailView: View {
                     transaction.animation = nil
                 }
             }
-            .modifier(ArticleNavigationCommands(
-                onNextArticle: nextArticle,
-                onPrevArticle: prevArticle,
-                onToggleRead: { readManager.toggleRead(currentArticle.id) },
-                onToggleSave: toggleSave,
-                onOpenInBrowser: openInBrowser
-            ))
+            .modifier(
+                ArticleNavigationCommands(
+                    onNextArticle: nextArticle,
+                    onPrevArticle: prevArticle,
+                    onToggleRead: { readManager.toggleRead(currentArticle.id) },
+                    onToggleSave: toggleSave,
+                    onOpenInBrowser: openInBrowser
+                )
+            )
             // Publisher-input changes invalidate the stored overview; request it again from current inputs.
             .task(id: "\(activeArticle.id):\(currentArticle.publisherInputHash)") {
                 await loadEventOverviewForActiveArticle()
@@ -330,11 +332,12 @@ struct ArticleDetailView: View {
                             .foregroundColor(AppColor.secondaryText)
                     }
                     .accessibilityElement(children: .ignore)
-                    .accessibilityLabel(Self.sourceLineAccessibilityLabel(
-                        source: displaySource,
-                        publicationDateText: currentArticle.publicationDateText,
-                        readingTimeEstimate: readingTimeEstimate
-                    ))
+                    .accessibilityLabel(
+                        Self.sourceLineAccessibilityLabel(
+                            source: displaySource,
+                            publicationDateText: currentArticle.publicationDateText,
+                            readingTimeEstimate: readingTimeEstimate
+                        ))
 
                     // Headline
                     Text(currentArticle.title)
@@ -375,7 +378,6 @@ struct ArticleDetailView: View {
                     // Terminal Affordance: "Read original article on <source>"
                     terminalAffordance
 
-
                 }
                 .padding(.horizontal, AppLayout.pageInset)
                 .padding(.vertical, AppSpacing.xl)
@@ -389,11 +391,14 @@ struct ArticleDetailView: View {
     private var publisherUpdates: some View {
         let updates = publisherRevisions.filter { $0.kind == .publisherUpdate }
         if let latest = updates.first {
-            DisclosureGroup("Publisher updated · \(latest.observedAt.formatted(date: .abbreviated, time: .shortened))") {
+            DisclosureGroup("Publisher updated · \(latest.observedAt.formatted(date: .abbreviated, time: .shortened))")
+            {
                 VStack(alignment: .leading, spacing: AppSpacing.sm) {
                     Text("Changes observed on this Mac. An update is not a verified correction.")
                     ForEach(updates) { revision in
-                        Text("Version \(revision.version) · \(revision.changeDescription) · \(revision.observedAt.formatted(date: .abbreviated, time: .shortened))")
+                        Text(
+                            "Version \(revision.version) · \(revision.changeDescription) · \(revision.observedAt.formatted(date: .abbreviated, time: .shortened))"
+                        )
                     }
                 }
                 .font(AppTypography.caption)
@@ -407,12 +412,17 @@ struct ArticleDetailView: View {
 
     @ViewBuilder
     private var heroImageHeader: some View {
-        if let imageUrl = currentArticle.readerDocument?.selectedImage(fallback: currentArticle.imageUrl) ?? (currentArticle.readerDocument == nil ? currentArticle.imageUrl : nil), let url = URL(string: imageUrl),
-           currentArticle.readerDocument?.blocks.contains(where: { $0.kind == .figure && $0.imageURL == imageUrl }) != true {
+        if let imageUrl = currentArticle.readerDocument?.selectedImage(fallback: currentArticle.imageUrl)
+            ?? (currentArticle.readerDocument == nil ? currentArticle.imageUrl : nil), let url = URL(string: imageUrl),
+            currentArticle.readerDocument?.blocks.contains(where: { $0.kind == .figure && $0.imageURL == imageUrl })
+                != true
+        {
             let candidate = currentArticle.readerDocument?.images?.first { $0.url == imageUrl }
-            ReaderFigureView(block: ReaderBlock(kind: .figure, text: candidate?.caption ?? "",
-                imageURL: imageUrl, imageAlt: candidate?.alt, imageCredit: candidate?.credit,
-                imageWidth: candidate?.width, imageHeight: candidate?.height), url: url, textScale: readerTextScale)
+            ReaderFigureView(
+                block: ReaderBlock(
+                    kind: .figure, text: candidate?.caption ?? "",
+                    imageURL: imageUrl, imageAlt: candidate?.alt, imageCredit: candidate?.credit,
+                    imageWidth: candidate?.width, imageHeight: candidate?.height), url: url, textScale: readerTextScale)
         }
     }
 
@@ -498,7 +508,8 @@ struct ArticleDetailView: View {
         }
         .padding(16)
         .background(AppColor.surface.opacity(0.55), in: RoundedRectangle(cornerRadius: AppRadius.card))
-        .overlay(RoundedRectangle(cornerRadius: AppRadius.card).stroke(borderColor(AppColor.borderSubtle), lineWidth: 1))
+        .overlay(
+            RoundedRectangle(cornerRadius: AppRadius.card).stroke(borderColor(AppColor.borderSubtle), lineWidth: 1))
     }
 
     @ViewBuilder
@@ -518,16 +529,21 @@ struct ArticleDetailView: View {
     private var articleContentParagraphs: some View {
         let storedBlocks = currentArticle.readerDocument?.blocks ?? []
         // Documents stored before a boilerplate or image rule existed are cleaned here too.
-        var blocks = storedBlocks.isEmpty ? displayParagraphs.map {
-            ReaderBlock(kind: .paragraph, text: $0)
-        } : storedBlocks.filter { block in
-            block.kind == .figure
-                ? ReaderImageCandidate.usable(url: block.imageURL ?? "", width: block.imageWidth, height: block.imageHeight)
-                : !ArticleContentRedactor.isBoilerplateLine(block.text)
-        }
+        var blocks =
+            storedBlocks.isEmpty
+            ? displayParagraphs.map {
+                ReaderBlock(kind: .paragraph, text: $0)
+            }
+            : storedBlocks.filter { block in
+                block.kind == .figure
+                    ? ReaderImageCandidate.usable(
+                        url: block.imageURL ?? "", width: block.imageWidth, height: block.imageHeight)
+                    : !ArticleContentRedactor.isBoilerplateLine(block.text)
+            }
         // The page's own headline repeats the title above it.
         if let first = blocks.firstIndex(where: { $0.kind != .figure }),
-           EventFeedSummary.titleKey(blocks[first].text) == EventFeedSummary.titleKey(currentArticle.title) {
+            EventFeedSummary.titleKey(blocks[first].text) == EventFeedSummary.titleKey(currentArticle.title)
+        {
             blocks.remove(at: first)
         }
         let leadIndex = blocks.firstIndex { $0.kind == .paragraph }
@@ -549,7 +565,11 @@ struct ArticleDetailView: View {
             }
         case .heading, .subheading:
             Text(readerText(block))
-                .font(.system(size: (block.kind == .heading ? 22 : 15) * readerTextScale, weight: block.kind == .heading ? .bold : .semibold))
+                .font(
+                    .system(
+                        size: (block.kind == .heading ? 22 : 15) * readerTextScale,
+                        weight: block.kind == .heading ? .bold : .semibold)
+                )
                 .foregroundStyle(AppColor.primaryText)
                 .padding(.top, AppSpacing.md)
                 .accessibilityAddTraits(.isHeader)
@@ -586,7 +606,11 @@ struct ArticleDetailView: View {
                 .background(AppColor.surface, in: RoundedRectangle(cornerRadius: AppRadius.control))
         case .paragraph:
             Text(readerText(block))
-                .font(isLead ? AppTypography.leadFont(for: themeManager.articleTheme, scale: readerTextScale) : AppTypography.bodyFont(for: themeManager.articleTheme, scale: readerTextScale))
+                .font(
+                    isLead
+                        ? AppTypography.leadFont(for: themeManager.articleTheme, scale: readerTextScale)
+                        : AppTypography.bodyFont(for: themeManager.articleTheme, scale: readerTextScale)
+                )
                 .foregroundStyle(AppColor.primaryText)
                 .lineSpacing(AppTypography.bodyLineSpacing(for: themeManager.articleTheme) * readerTextScale)
                 .fixedSize(horizontal: false, vertical: true)
@@ -600,8 +624,10 @@ struct ArticleDetailView: View {
             .foregroundStyle(emphasized ? AppColor.accent : AppColor.secondaryText)
             .padding(.horizontal, AppSpacing.sm)
             .padding(.vertical, 6)
-            .background(emphasized ? AppColor.accent.opacity(0.10) : AppColor.badgeBackground,
-                        in: RoundedRectangle(cornerRadius: AppRadius.control))
+            .background(
+                emphasized ? AppColor.accent.opacity(0.10) : AppColor.badgeBackground,
+                in: RoundedRectangle(cornerRadius: AppRadius.control)
+            )
             .fixedSize(horizontal: false, vertical: true)
     }
 
@@ -639,7 +665,10 @@ struct ArticleDetailView: View {
                     .padding(.vertical, 8)
                     .background(AppColor.surface.opacity(0.85))
                     .clipShape(Capsule())
-                    .overlay(Capsule().stroke(borderColor(Color.primary.opacity(Self.capsuleBorderOpacity(for: contrast))), lineWidth: 0.5))
+                    .overlay(
+                        Capsule().stroke(
+                            borderColor(Color.primary.opacity(Self.capsuleBorderOpacity(for: contrast))), lineWidth: 0.5
+                        ))
                 }
                 .buttonStyle(.plain)
                 .buttonBorderShape(.capsule)
@@ -661,7 +690,10 @@ struct ArticleDetailView: View {
                         .padding(.vertical, 8)
                         .background(AppColor.surface.opacity(0.6))
                         .clipShape(Capsule())
-                        .overlay(Capsule().stroke(borderColor(Color.primary.opacity(Self.capsuleBorderOpacity(for: contrast))), lineWidth: 0.5))
+                        .overlay(
+                            Capsule().stroke(
+                                borderColor(Color.primary.opacity(Self.capsuleBorderOpacity(for: contrast))),
+                                lineWidth: 0.5))
                     }
                     .buttonStyle(.plain)
                     .buttonBorderShape(.capsule)
@@ -765,9 +797,11 @@ struct ArticleDetailView: View {
             .pickerStyle(.segmented)
             .labelsHidden()
             .fixedSize()
-            .help(currentOverview != nil
-                  ? "Show the event overview, the publisher's story or its page (W)"
-                  : "Show the publisher's story or its page (W)")
+            .help(
+                currentOverview != nil
+                    ? "Show the event overview, the publisher's story or its page (W)"
+                    : "Show the publisher's story or its page (W)"
+            )
             .accessibilityLabel("Reading mode")
 
             if isOverviewLoading && currentOverview == nil {
@@ -785,20 +819,25 @@ struct ArticleDetailView: View {
         }
         ToolbarItemGroup(placement: .primaryAction) {
             if readerModeBinding.wrappedValue == .web {
-                Button { webAction = .goBack } label: {
+                Button {
+                    webAction = .goBack
+                } label: {
                     Label("Browser back", systemImage: "arrow.left")
                 }
                 .disabled(!webCanGoBack)
                 .help("Browser back")
-                Button { webAction = .goForward } label: {
+                Button {
+                    webAction = .goForward
+                } label: {
                     Label("Browser forward", systemImage: "arrow.right")
                 }
                 .disabled(!webCanGoForward)
                 .help("Browser forward")
             }
             Button(action: toggleSave) {
-                Label(isSaved ? "Remove from Saved Stories" : "Save Story",
-                      systemImage: isSaved ? "bookmark.fill" : "bookmark")
+                Label(
+                    isSaved ? "Remove from Saved Stories" : "Save Story",
+                    systemImage: isSaved ? "bookmark.fill" : "bookmark")
             }
             .help(isSaved ? "Remove from Saved Stories (S)" : "Save Story (S)")
 
@@ -863,8 +902,9 @@ struct ArticleDetailView: View {
 
     private func nextArticle() {
         guard !allArticles.isEmpty,
-              let idx = allArticles.firstIndex(where: { $0.id == activeArticle.id }),
-              idx + 1 < allArticles.count else { return }
+            let idx = allArticles.firstIndex(where: { $0.id == activeArticle.id }),
+            idx + 1 < allArticles.count
+        else { return }
         resetReaderState()
         let next = allArticles[idx + 1]
         activeArticle = next
@@ -873,8 +913,9 @@ struct ArticleDetailView: View {
 
     private func prevArticle() {
         guard !allArticles.isEmpty,
-              let idx = allArticles.firstIndex(where: { $0.id == activeArticle.id }),
-              idx > 0 else { return }
+            let idx = allArticles.firstIndex(where: { $0.id == activeArticle.id }),
+            idx > 0
+        else { return }
         resetReaderState()
         let prev = allArticles[idx - 1]
         activeArticle = prev
@@ -968,7 +1009,9 @@ struct ArticleDetailView: View {
         reduceMotion ? nil : .easeInOut(duration: 0.2)
     }
 
-    static func sourceLineAccessibilityLabel(source: String, publicationDateText: String, readingTimeEstimate: String) -> String {
+    static func sourceLineAccessibilityLabel(source: String, publicationDateText: String, readingTimeEstimate: String)
+        -> String
+    {
         "\(source), \(publicationDateText), \(readingTimeEstimate)"
     }
 
@@ -1002,7 +1045,8 @@ struct ArticleDetailView: View {
     private var displayCategory: String? {
         let raw = analysis?.category ?? currentArticle.category
         guard let raw = raw, !raw.isEmpty else { return nil }
-        let firstLine = raw.components(separatedBy: .newlines)
+        let firstLine =
+            raw.components(separatedBy: .newlines)
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .first(where: { !$0.isEmpty }) ?? ""
         guard !firstLine.isEmpty else { return nil }
@@ -1037,9 +1081,12 @@ struct ArticleDetailView: View {
                         .font(.system(size: 12))
                         .foregroundColor(AppColor.intelligence)
                         .accessibilityHidden(true)
-                    Text(analysis.modelIdentifier == "apple.natural-language.fallback" ? "Extractive summary" : "AI-generated summary")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(AppColor.primaryText)
+                    Text(
+                        analysis.modelIdentifier == "apple.natural-language.fallback"
+                            ? "Extractive summary" : "AI-generated summary"
+                    )
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(AppColor.primaryText)
                 }
 
                 Text(analysis.summary)
@@ -1140,15 +1187,20 @@ struct ArticleDetailView: View {
     private func refreshActiveArticleFromStore() async {
         let id = activeArticle.id
         guard let stored = try? await articleStore.database.fetchArticles(limit: 1, id: id).first,
-              !Task.isCancelled, activeArticle.id == id, stored.id == id,
-              stored.publisherInputHash != activeArticle.publisherInputHash else { return }
+            !Task.isCancelled, activeArticle.id == id, stored.id == id,
+            stored.publisherInputHash != activeArticle.publisherInputHash
+        else { return }
         activeArticle = stored
     }
 
     private func ensureContentExtracted(forceRefresh: Bool = false) async {
         // A stored document stands in for extraction only with publisher text; feed media alone does not.
-        if !forceRefresh, currentArticle.readerDocument.map({ (1...ReaderDocument.currentVersion).contains($0.version) && $0.hasPublisherText }) == true,
-           let existing = currentArticle.fullContent, !ArticleContentRedactor.redactAndSplit(existing).isEmpty {
+        if !forceRefresh,
+            currentArticle.readerDocument.map({
+                (1...ReaderDocument.currentVersion).contains($0.version) && $0.hasPublisherText
+            }) == true,
+            let existing = currentArticle.fullContent, !ArticleContentRedactor.redactAndSplit(existing).isEmpty
+        {
             contentState = .ready
             return
         }
@@ -1176,14 +1228,15 @@ struct ArticleDetailView: View {
             case .success(let content, let imageUrl, let extractedDocument):
                 var document = extractedDocument
                 if let extractedDocument {
-                    document = extractedDocument.curated(feedImage: currentArticle.imageUrl, title: currentArticle.title)
+                    document = extractedDocument.curated(
+                        feedImage: currentArticle.imageUrl, title: currentArticle.title)
                     do {
                         let repeated = try await articleStore.database.repeatedImageURLs(source: currentArticle.source)
                         try Task.checkCancellation()
                         guard activeArticle.id == targetId else { return }
                         document = document?.curated(feedImage: nil, title: currentArticle.title, excluding: repeated)
-                    } catch is CancellationError { return }
-                    catch { /* Recurrence is optional; protected images still use local filters. */ }
+                    } catch is CancellationError { return } catch
+                    { /* Recurrence is optional; protected images still use local filters. */  }
                 }
                 let saved = await articleStore.updateEnrichment(
                     id: targetId,
@@ -1231,7 +1284,8 @@ struct ArticleDetailView: View {
         // Preserve persisted model identity and analysis version.
         if let cached = await articleStore.fetchArticleAnalysis(for: activeArticle.id), cached.analysisVersion >= 3 {
             guard !Task.isCancelled, activeArticle.id == targetID,
-                  currentArticle.publisherInputHash == targetArticle.publisherInputHash else { return }
+                currentArticle.publisherInputHash == targetArticle.publisherInputHash
+            else { return }
             self.analysis = cached
             return
         }
@@ -1259,7 +1313,8 @@ struct ArticleDetailView: View {
 
             try Task.checkCancellation()
 
-            let saved = await articleStore.saveArticleAnalysis(result, for: targetArticle.id, expectedInputHash: targetArticle.publisherInputHash)
+            let saved = await articleStore.saveArticleAnalysis(
+                result, for: targetArticle.id, expectedInputHash: targetArticle.publisherInputHash)
             guard !Task.isCancelled, activeArticle.id == targetArticle.id else { return }
             guard saved, currentArticle.publisherInputHash == targetArticle.publisherInputHash else {
                 isAnalyzing = false
@@ -1284,7 +1339,8 @@ struct ArticleDetailView: View {
         guard !Task.isCancelled else { return }
         let summaries = (try? await articleStore.eventFeedSummaries(for: [articleID])) ?? []
         guard !Task.isCancelled, activeArticle.id == articleID,
-              currentArticle.publisherInputHash == inputHash else { return }
+            currentArticle.publisherInputHash == inputHash
+        else { return }
         guard let summary = summaries.first, summary.isConfirmed, summary.sources.count >= 2 else {
             isOverviewLoading = false
             currentOverview = nil
@@ -1298,19 +1354,22 @@ struct ArticleDetailView: View {
         let membershipVersion = summary.membershipVersion
 
         if let existing = currentOverview,
-           existing.eventID == eventID,
-           !existing.isStale(currentMembershipVersion: membershipVersion) {
+            existing.eventID == eventID,
+            !existing.isStale(currentMembershipVersion: membershipVersion)
+        {
             isOverviewLoading = false
             let members = (try? await articleStore.eventMemberArticles(eventID: eventID)) ?? []
             guard !Task.isCancelled, activeArticle.id == articleID,
-                  currentArticle.publisherInputHash == inputHash else { return }
+                currentArticle.publisherInputHash == inputHash
+            else { return }
             eventMemberArticles = members.isEmpty ? [activeArticle] : members
             return
         }
 
         let members = (try? await articleStore.eventMemberArticles(eventID: eventID)) ?? []
         guard !Task.isCancelled, activeArticle.id == articleID,
-              currentArticle.publisherInputHash == inputHash else { return }
+            currentArticle.publisherInputHash == inputHash
+        else { return }
         let resolvedMembers = members.isEmpty ? [activeArticle] : members
         let eventTitle = resolvedMembers.first?.title ?? summary.members.first?.title ?? activeArticle.title
 
@@ -1333,7 +1392,8 @@ struct ArticleDetailView: View {
         )
 
         guard !Task.isCancelled, activeArticle.id == articleID,
-              currentArticle.publisherInputHash == inputHash else { return }
+            currentArticle.publisherInputHash == inputHash
+        else { return }
 
         isOverviewLoading = false
         if let doc = doc {
@@ -1371,8 +1431,9 @@ private struct ReaderTagLayout: Layout {
     func placeSubviews(in bounds: CGRect, proposal _: ProposedViewSize, subviews: Subviews, cache _: inout ()) {
         let layout = arrange(width: bounds.width, subviews: subviews)
         for (index, item) in layout.items.enumerated() {
-            subviews[index].place(at: CGPoint(x: bounds.minX + item.minX, y: bounds.minY + item.minY),
-                                 proposal: ProposedViewSize(item.size))
+            subviews[index].place(
+                at: CGPoint(x: bounds.minX + item.minX, y: bounds.minY + item.minY),
+                proposal: ProposedViewSize(item.size))
         }
     }
 
@@ -1396,7 +1457,6 @@ private struct ReaderTagLayout: Layout {
         return (CGSize(width: width, height: y + rowHeight), items)
     }
 }
-
 
 /// Whole-image fit plus a fixed ratio keeps known media stable before loading.
 struct ReaderFigureView: View {
@@ -1433,11 +1493,14 @@ struct ReaderFigureView: View {
                 .clipShape(RoundedRectangle(cornerRadius: AppRadius.card))
             }
             if !block.text.isEmpty {
-                Text(block.text).font(.system(size: 11 * textScale)).foregroundStyle(AppColor.secondaryText).textSelection(.enabled)
+                Text(block.text).font(.system(size: 11 * textScale)).foregroundStyle(AppColor.secondaryText)
+                    .textSelection(.enabled)
             }
             if let credit = block.imageCredit, !credit.isEmpty {
-                Text(credit).font(.system(size: 11 * textScale)).foregroundStyle(AppColor.secondaryText).textSelection(.enabled)
-                    .accessibilityLabel("Image credit: " + credit)
+                Text(credit).font(.system(size: 11 * textScale)).foregroundStyle(AppColor.secondaryText).textSelection(
+                    .enabled
+                )
+                .accessibilityLabel("Image credit: " + credit)
             }
             Text("Image source: " + (url.host ?? "Publisher"))
                 .font(.system(size: 11 * textScale)).foregroundStyle(AppColor.secondaryText).textSelection(.enabled)
@@ -1468,7 +1531,9 @@ private struct ArticleNavigationCommands: ViewModifier {
 }
 
 func readerText(_ block: ReaderBlock) -> AttributedString {
-    guard let runs = block.inlineRuns, runs.map(\.text).joined() == block.text else { return AttributedString(block.text) }
+    guard let runs = block.inlineRuns, runs.map(\.text).joined() == block.text else {
+        return AttributedString(block.text)
+    }
     var text = AttributedString()
     for run in runs {
         var part = AttributedString(run.text)

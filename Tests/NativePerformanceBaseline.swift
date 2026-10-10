@@ -1,6 +1,6 @@
 import AppKit
-import SwiftUI
 import Darwin
+import SwiftUI
 import Vision
 
 /// A separate entry point: renders the production MainView with isolated, offline dependencies.
@@ -36,7 +36,8 @@ private final class BaselineDelegate: NSObject, NSApplicationDelegate {
 
     private func measure() async throws {
         let output = URL(fileURLWithPath: CommandLine.arguments[1], isDirectory: true)
-        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("news-native-\(UUID().uuidString)")
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "news-native-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let suite = "test.native.performance.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
@@ -71,15 +72,20 @@ private final class BaselineDelegate: NSObject, NSApplicationDelegate {
         // A steady-state library: archived rows were matched by an earlier refresh.
         try await database.markEventMatchProcessed(articles.map(\.id), matcherVersion: EventMatcher.version, at: now)
         guard await store.refreshState() else { throw Failure.storage }
-        let incoming = [FeedArticle(title: "Native refreshed story", link: "https://baseline.example/new",
-                                   guid: "native-new", description: "A new article collected by the mocked feed.",
-                                   pubDate: now.addingTimeInterval(1), source: "Publisher 0")]
-        let manager = FeedManager(settings: settings, store: store, schedulesRefresh: false,
-                                  fetchBatch: { urls, _ in urls.map { ($0, incoming, nil, nil) } })
+        let incoming = [
+            FeedArticle(
+                title: "Native refreshed story", link: "https://baseline.example/new",
+                guid: "native-new", description: "A new article collected by the mocked feed.",
+                pubDate: now.addingTimeInterval(1), source: "Publisher 0")
+        ]
+        let manager = FeedManager(
+            settings: settings, store: store, schedulesRefresh: false,
+            fetchBatch: { urls, _ in urls.map { ($0, incoming, nil, nil) } })
         // Finish the initial catch-up before window timing; refresh still uses real collection/signposts.
         await manager.waitForEventClustering()
-        let container = AppContainer(appSettings: settings, articleStore: store, feedManager: manager,
-                                     themeManager: ThemeManager())
+        let container = AppContainer(
+            appSettings: settings, articleStore: store, feedManager: manager,
+            themeManager: ThemeManager())
         defer { manager.stopBackgroundWork() }
         var samples: [Double] = []
         var scrollFrameSamples: [Double] = []
@@ -97,8 +103,9 @@ private final class BaselineDelegate: NSObject, NSApplicationDelegate {
                 .defaultAppStorage(defaults)
                 .environment(\.readerImageLoader) { url in try await imageProbe.load(url) }
             let view = NSHostingView(rootView: root)
-            let current = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1100, height: 800),
-                                   styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
+            let current = NSWindow(
+                contentRect: NSRect(x: 0, y: 0, width: 1100, height: 800),
+                styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
             current.isReleasedWhenClosed = false
             current.title = "News — isolated performance baseline"
             current.contentView = view
@@ -126,7 +133,9 @@ private final class BaselineDelegate: NSObject, NSApplicationDelegate {
                 if found {
                     samples.append((capturedAt - start) * 1000)
                     if index == 0 {
-                        guard let png = bitmap.representation(using: .png, properties: [:]) else { throw Failure.render }
+                        guard let png = bitmap.representation(using: .png, properties: [:]) else {
+                            throw Failure.render
+                        }
                         try png.write(to: output.appendingPathComponent("first-card.png"))
                     }
                     break
@@ -165,7 +174,8 @@ private final class BaselineDelegate: NSObject, NSApplicationDelegate {
         var expected = incoming[0]
         expected.identityFeedURL = settings.feedURLs[0]
         guard manager.articles.first?.id == expected.id, !manager.isAnyFeedLoading,
-              try await database.counts().total == 10_001 else { throw Failure.storage }
+            try await database.counts().total == 10_001
+        else { throw Failure.storage }
         await manager.waitForEventClustering()
         var usage = rusage()
         guard getrusage(RUSAGE_SELF, &usage) == 0 else { throw Failure.memory }
@@ -180,7 +190,8 @@ private final class BaselineDelegate: NSObject, NSApplicationDelegate {
             "refresh_one_mocked_feed_ms": refreshMilliseconds,
             "peak_process_rss_bytes": usage.ru_maxrss, "os": ProcessInfo.processInfo.operatingSystemVersionString,
             "physical_memory_bytes": ProcessInfo.processInfo.physicalMemory,
-            "scope": "Seeded native MainView, offline synthetic articles; optionally a mock publisher image on first Today entry. First-card samples measure time to bitmap containing the title (prior failed capture/OCR polls included, successful OCR excluded). Scroll samples measure synchronous clip move/layout/display/bitmap readback, not GPU latency or FPS. Memory includes setup, SwiftUI and Vision. Not cold launch, network or model timing."
+            "scope":
+                "Seeded native MainView, offline synthetic articles; optionally a mock publisher image on first Today entry. First-card samples measure time to bitmap containing the title (prior failed capture/OCR polls included, successful OCR excluded). Scroll samples measure synchronous clip move/layout/display/bitmap readback, not GPU latency or FPS. Memory includes setup, SwiftUI and Vision. Not cold launch, network or model timing.",
         ]
         try JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys])
             .write(to: output.appendingPathComponent("native-baseline.json"))
@@ -215,11 +226,13 @@ private final class NativeLeadImageProbe {
     func load(_ url: URL) throws -> CGImage {
         guard url.host == "images.example" else { throw URLError(.badURL) }
         requests += 1
-        guard let context = CGContext(
-            data: nil, width: 1200, height: 680, bitsPerComponent: 8,
-            bytesPerRow: 4800, space: CGColorSpaceCreateDeviceRGB(),
-            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-        ) else { throw URLError(.cannotDecodeContentData) }
+        guard
+            let context = CGContext(
+                data: nil, width: 1200, height: 680, bitsPerComponent: 8,
+                bytesPerRow: 4800, space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            )
+        else { throw URLError(.cannotDecodeContentData) }
         context.setFillColor(CGColor(gray: 0.24, alpha: 1))
         context.fill(CGRect(x: 0, y: 0, width: 1200, height: 680))
         guard let result = context.makeImage() else { throw URLError(.cannotDecodeContentData) }

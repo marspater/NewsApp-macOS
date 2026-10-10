@@ -1,8 +1,8 @@
 // DesignSystem.swift
 // NewsApp Design Token System
 
-import SwiftUI
 import AppKit
+import SwiftUI
 
 // MARK: - App Colors
 
@@ -26,7 +26,7 @@ enum AppColor {
 
     // Semantic Accents & Status (90% Neutral, 7% Accent, 3% Intelligence)
     static var accent: Color { Color.accentColor }
-    static let intelligence = Color(.displayP3, red: 0.85, green: 0.65, blue: 0.20, opacity: 1.0) // Subtle warm gold
+    static let intelligence = Color(.displayP3, red: 0.85, green: 0.65, blue: 0.20, opacity: 1.0)  // Subtle warm gold
     static let success = Color(NSColor.systemGreen)
     static let warning = Color(NSColor.systemYellow)
     static let danger = Color(NSColor.systemRed)

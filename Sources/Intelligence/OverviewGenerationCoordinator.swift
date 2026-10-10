@@ -48,13 +48,16 @@ actor OverviewGenerationCoordinator {
     private let textModel: NewsTextModel
     private let allowsModel: @Sendable () async -> Bool
 
-    init(store: ArticleStore? = nil, queue: EnrichmentQueue = .shared,
-         textModel: NewsTextModel = .onDevice,
-         allowsModel: @escaping @Sendable () async -> Bool = {
-             let enabled = AppSettings.shared.aiEnabled
-             let info = ProcessInfo.processInfo
-             return enabled && !info.isLowPowerModeEnabled && info.thermalState.rawValue < ProcessInfo.ThermalState.serious.rawValue
-         }) {
+    init(
+        store: ArticleStore? = nil, queue: EnrichmentQueue = .shared,
+        textModel: NewsTextModel = .onDevice,
+        allowsModel: @escaping @Sendable () async -> Bool = {
+            let enabled = AppSettings.shared.aiEnabled
+            let info = ProcessInfo.processInfo
+            return enabled && !info.isLowPowerModeEnabled
+                && info.thermalState.rawValue < ProcessInfo.ThermalState.serious.rawValue
+        }
+    ) {
         self.store = store
         self.queue = queue
         self.textModel = textModel
@@ -79,7 +82,8 @@ actor OverviewGenerationCoordinator {
         let model = textModel
         guard !Task.isCancelled else { return nil }
         // Storage rejects the result if any article's publisher input changed while it was generated.
-        let expectedArticleInputs = Dictionary(articles.map { ($0.id, $0.publisherInputHash) }, uniquingKeysWith: { first, _ in first })
+        let expectedArticleInputs = Dictionary(
+            articles.map { ($0.id, $0.publisherInputHash) }, uniquingKeysWith: { first, _ in first })
 
         // Step A: Token-budgeted representative passage selection
         let selection = OverviewPassageSelector().selectPassages(
@@ -101,11 +105,13 @@ actor OverviewGenerationCoordinator {
 
         // Persistent storage is authoritative: publisher-input changes atomically remove old overviews.
         if let stored = try? await targetStore.fetchEventOverview(eventID: eventID),
-           !stored.isStale(currentMembershipVersion: membershipVersion, currentInputTextHash: inputTextHash) {
+            !stored.isStale(currentMembershipVersion: membershipVersion, currentInputTextHash: inputTextHash)
+        {
             guard !Task.isCancelled else { return nil }
             logger.debug("Store cache hit for event \(eventID) v\(membershipVersion)")
             if let cached = memoryCache[eventID], cached.id == stored.id,
-               !cached.isStale(currentMembershipVersion: membershipVersion, currentInputTextHash: inputTextHash) {
+                !cached.isStale(currentMembershipVersion: membershipVersion, currentInputTextHash: inputTextHash)
+            {
                 return cached
             }
             memoryCache[eventID] = stored
@@ -117,7 +123,8 @@ actor OverviewGenerationCoordinator {
         // 3. Join a running generation only if it was started from the same inputs; otherwise it is superseded
         if let running = inFlightTasks[eventID] {
             if running.membershipVersion == membershipVersion && running.inputTextHash == inputTextHash
-                && running.articleInputs == expectedArticleInputs {
+                && running.articleInputs == expectedArticleInputs
+            {
                 let result = await running.task.value
                 return Task.isCancelled ? nil : result
             }
@@ -157,7 +164,8 @@ actor OverviewGenerationCoordinator {
                 guard multiSource else { return overview }
                 guard modelAllowed else { return Self.provisional(overview) }
                 do {
-                    return try await OverviewComposer.composeWithModel(fallback: overview, passages: passages, articles: articles, model: model)
+                    return try await OverviewComposer.composeWithModel(
+                        fallback: overview, passages: passages, articles: articles, model: model)
                 } catch is CancellationError {
                     return nil
                 } catch let error as URLError where error.code == .resourceUnavailable {
@@ -184,8 +192,9 @@ actor OverviewGenerationCoordinator {
             return isCurrent ? generated : nil
         }
 
-        inFlightTasks[eventID] = InFlightGeneration(task: task, membershipVersion: membershipVersion, inputTextHash: inputTextHash,
-                                                   articleInputs: expectedArticleInputs)
+        inFlightTasks[eventID] = InFlightGeneration(
+            task: task, membershipVersion: membershipVersion, inputTextHash: inputTextHash,
+            articleInputs: expectedArticleInputs)
         // Another request may join this generation, so a cancelled caller stops waiting without cancelling it;
         // `cancel(eventID:)` stops it for every caller.
         let result = await task.value
@@ -199,9 +208,11 @@ actor OverviewGenerationCoordinator {
     /// Stored for its citations and input checks, but stale on the next request, so a model skipped for energy or
     /// the AI setting, or one that failed, gets another chance instead of leaving the deterministic overview in place.
     private static func provisional(_ overview: EventOverviewDocument) -> EventOverviewDocument {
-        EventOverviewDocument(id: overview.id, eventID: overview.eventID,
-            version: OverviewVersionContext(membershipVersion: overview.membershipVersion, inputTextHash: overview.inputTextHash,
-                                            schemaVersion: overview.schemaVersion, analysisVersion: 0),
+        EventOverviewDocument(
+            id: overview.id, eventID: overview.eventID,
+            version: OverviewVersionContext(
+                membershipVersion: overview.membershipVersion, inputTextHash: overview.inputTextHash,
+                schemaVersion: overview.schemaVersion, analysisVersion: 0),
             content: overview.content, provenance: overview.provenance)
     }
 
@@ -216,19 +227,24 @@ actor OverviewGenerationCoordinator {
     ) async -> Bool {
         // A result from inputs that are no longer the latest requested is stale, even at the same membership version
         if let latest = latestRequestedInputs[eventID],
-           latest.membershipVersion != membershipVersion || latest.inputTextHash != inputTextHash {
+            latest.membershipVersion != membershipVersion || latest.inputTextHash != inputTextHash
+        {
             logger.info("Dropping overview result for \(eventID) built from superseded inputs")
             return false
         }
 
         // If memory cache already holds a newer membership version, drop stale result
         if let existing = memoryCache[eventID], existing.membershipVersion > membershipVersion {
-            logger.info("Dropping stale overview result for \(eventID): v\(membershipVersion) < current v\(existing.membershipVersion)")
+            logger.info(
+                "Dropping stale overview result for \(eventID): v\(membershipVersion) < current v\(existing.membershipVersion)"
+            )
             return true
         }
 
         // DatabaseEngine also atomically prevents an older result from overwriting newer
-        let saved = (try? await targetStore.recordEventOverview(document, expectedArticleInputs: expectedArticleInputs)) ?? false
+        let saved =
+            (try? await targetStore.recordEventOverview(document, expectedArticleInputs: expectedArticleInputs))
+            ?? false
         if saved {
             memoryCache[eventID] = document
             logger.debug("Committed overview for event \(eventID) v\(membershipVersion)")
@@ -241,18 +257,25 @@ actor OverviewGenerationCoordinator {
     /// Warm only three covered events from the current visible feed, under the same model/energy policy.
     func warmVisibleOverviews(store: ArticleStore, muting: MuteRules) async {
         guard await allowsModel(), !Task.isCancelled else { return }
-        guard let articles = try? await store.database.fetchArticles(limit: 100,
-            publicationWindow: Date().addingTimeInterval(-72 * 3600)...Date(), muting: muting, hidingWaitingStories: true),
-              let events = try? await store.eventFeedSummaries(for: articles.map(\.id)) else { return }
+        guard
+            let articles = try? await store.database.fetchArticles(
+                limit: 100,
+                publicationWindow: Date().addingTimeInterval(-72 * 3600)...Date(), muting: muting,
+                hidingWaitingStories: true),
+            let events = try? await store.eventFeedSummaries(for: articles.map(\.id))
+        else { return }
         let top = events.filter { $0.sources.count > 1 }.sorted {
             if $0.sources.count != $1.sources.count { return $0.sources.count > $1.sources.count }
             return ($0.latestDate ?? .distantPast) > ($1.latestDate ?? .distantPast)
         }.prefix(3)
         for event in top {
             guard !Task.isCancelled, await allowsModel(),
-                  let members = try? await store.database.fetchArticles(limit: nil, eventID: event.eventID, muting: muting),
-                  let first = members.first else { return }
-            _ = await requestOverview(eventID: event.eventID, eventTitle: first.title,
+                let members = try? await store.database.fetchArticles(
+                    limit: nil, eventID: event.eventID, muting: muting),
+                let first = members.first
+            else { return }
+            _ = await requestOverview(
+                eventID: event.eventID, eventTitle: first.title,
                 membershipVersion: event.membershipVersion, articles: members, priority: .background, store: store)
         }
     }
@@ -280,7 +303,8 @@ actor OverviewGenerationCoordinator {
 
         // Cancellation above suspends this actor; a newer reader may now own the visible event.
         guard !Task.isCancelled, currentVisibleEventID == eventID,
-              currentVisibleOwner == (eventID == nil ? nil : owner) else { return nil }
+            currentVisibleOwner == (eventID == nil ? nil : owner)
+        else { return nil }
 
         // If new event is visible and data provided, trigger generation with visibleEvent priority
         if let newID = eventID, let title = eventTitle, let version = membershipVersion, let arts = articles {
@@ -345,7 +369,9 @@ actor OverviewGenerationCoordinator {
         store: ArticleStore? = nil
     ) async -> EventOverviewDocument? {
         if let cached = memoryCache[eventID],
-           !cached.isStale(currentMembershipVersion: currentMembershipVersion, currentInputTextHash: currentInputTextHash) {
+            !cached.isStale(
+                currentMembershipVersion: currentMembershipVersion, currentInputTextHash: currentInputTextHash)
+        {
             return cached
         }
         let targetStore: ArticleStore
@@ -357,7 +383,9 @@ actor OverviewGenerationCoordinator {
             targetStore = await ArticleStore.shared
         }
         if let stored = try? await targetStore.fetchEventOverview(eventID: eventID),
-           !stored.isStale(currentMembershipVersion: currentMembershipVersion, currentInputTextHash: currentInputTextHash) {
+            !stored.isStale(
+                currentMembershipVersion: currentMembershipVersion, currentInputTextHash: currentInputTextHash)
+        {
             memoryCache[eventID] = stored
             return stored
         }

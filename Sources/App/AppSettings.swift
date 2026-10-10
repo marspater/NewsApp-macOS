@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 
 /// Centralized application settings and user preference store.
 /// Decouples persistence and configuration state from feed ingestion and network services.
@@ -21,16 +22,18 @@ final class AppSettings: ObservableObject {
     static let retiredFeedsVersionKey = "retired_feeds_version"
 
     enum NotificationMode: String, CaseIterable, Identifiable, Sendable {
-        case full = "full"         // Headlines + snippets + images
-        case privacy = "private" // Generic non-identifying updates
-        case minimal = "minimal"   // Aggregated count only
+        case full = "full"  // Headlines + snippets + images
+        case privacy = "private"  // Generic non-identifying updates
+        case minimal = "minimal"  // Aggregated count only
 
         var id: String { rawValue }
 
         var detail: String {
             switch self {
-            case .privacy: return "Private mode: Displays generic alerts with no identifying headlines, sources, or preview text."
-            case .minimal: return "Minimal mode: Aggregates new stories into a single count summary (e.g., '5 new articles')."
+            case .privacy:
+                return "Private mode: Displays generic alerts with no identifying headlines, sources, or preview text."
+            case .minimal:
+                return "Minimal mode: Aggregates new stories into a single count summary (e.g., '5 new articles')."
             case .full: return "Full mode: Displays article headline, source publication, and lead image banner."
             }
         }
@@ -46,12 +49,12 @@ final class AppSettings: ObservableObject {
 
     static let defaultSections = [
         "Entertainment", "Politics", "Business", "Tech",
-        "Food", "Health & Wellness", "Lifestyle", "Science"
+        "Food", "Health & Wellness", "Lifestyle", "Science",
     ]
 
     static let defaultFeeds = [
         "https://feeds.arstechnica.com/arstechnica/index",
-        "https://feeds.bbci.co.uk/news/rss.xml"
+        "https://feeds.bbci.co.uk/news/rss.xml",
     ]
 
     /// Feeds the app no longer carries, with the retirement version that removed them. The app carries only free,
@@ -61,7 +64,7 @@ final class AppSettings: ObservableObject {
         // Article pages answer HTTP 403 to automated readers, so stories only open in Web view.
         ("https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml", 1),
         // Removed from the catalog as low-quality news.
-        ("https://wiadomosci.onet.pl/.feed", 2)
+        ("https://wiadomosci.onet.pl/.feed", 2),
     ]
     static var retiredFeedsVersion: Int { retiredFeeds.map(\.version).max() ?? 0 }
 
@@ -88,7 +91,8 @@ final class AppSettings: ObservableObject {
             // Catalog feeds in languages that are not supported yet are parked; earlier subscriptions to them end.
             let parked = Set(FeedCatalog.parkedFeeds.map(\.url))
             // Settings from the first retirement stored only a flag; it means version 1 was applied.
-            let applied = defaults.object(forKey: Self.retiredFeedsVersionKey) as? Int
+            let applied =
+                defaults.object(forKey: Self.retiredFeedsVersionKey) as? Int
                 ?? (defaults.bool(forKey: "retired_default_feeds_v1") ? 1 : 0)
             let retired = Set(Self.retiredFeeds.filter { $0.version > applied }.map(\.url))
             let kept = savedUrls.filter { !parked.contains($0) && !retired.contains($0) }
@@ -129,10 +133,13 @@ final class AppSettings: ObservableObject {
         // 3. If absent and privateNotificationsEnabled == false -> .full
         // 4. Persist migrated key to prevent repeating fallback
         if let modeRaw = defaults.string(forKey: Self.notificationModeKey),
-           let mode = NotificationMode(rawValue: modeRaw) {
+            let mode = NotificationMode(rawValue: modeRaw)
+        {
             self.notificationMode = mode
             self.privateNotificationsEnabled = (mode == .privacy)
-        } else if defaults.object(forKey: Self.privateNotificationsEnabledKey) != nil && defaults.bool(forKey: Self.privateNotificationsEnabledKey) {
+        } else if defaults.object(forKey: Self.privateNotificationsEnabledKey) != nil
+            && defaults.bool(forKey: Self.privateNotificationsEnabledKey)
+        {
             self.notificationMode = .privacy
             self.privateNotificationsEnabled = true
             defaults.set(NotificationMode.privacy.rawValue, forKey: Self.notificationModeKey)
@@ -144,8 +151,9 @@ final class AppSettings: ObservableObject {
 
         self.allowInsecureHTTP = defaults.bool(forKey: Self.allowInsecureHTTPKey)
         self.tensionCollectionOptIn = defaults.bool(forKey: Self.tensionCollectionOptInKey)
-        self.muteRules = MuteRules(sources: defaults.stringArray(forKey: Self.mutedSourcesKey) ?? [],
-                                   topics: defaults.stringArray(forKey: Self.mutedTopicsKey) ?? [])
+        self.muteRules = MuteRules(
+            sources: defaults.stringArray(forKey: Self.mutedSourcesKey) ?? [],
+            topics: defaults.stringArray(forKey: Self.mutedTopicsKey) ?? [])
     }
 
     /// Panel feeds whose stories must outlive waiting-story expiry, because the tension index rebuilds past days from them.
@@ -177,8 +185,9 @@ final class AppSettings: ObservableObject {
         let withScheme = hasScheme ? trimmed : "https://" + trimmed
 
         guard let url = URL(string: withScheme),
-              var components = URLComponents(url: url, resolvingAgainstBaseURL: false),
-              let host = components.host, !host.isEmpty else {
+            var components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+            let host = components.host, !host.isEmpty
+        else {
             return nil
         }
 
@@ -199,7 +208,6 @@ final class AppSettings: ObservableObject {
 
         return components.url?.absoluteString
     }
-
 
     // MARK: - Mutation APIs
 
@@ -333,16 +341,22 @@ final class AppSettings: ObservableObject {
         let items = OPMLParser.parse(data: opmlData)
         var addedCount = 0
         var sectionsChanged = false
+
+        var knownFeeds = Set(feedURLs)
+        var knownSections = Set(userSections)
+
         for item in items {
             guard let normalized = Self.normalizeFeedURL(item.url, allowInsecureHTTP: allowInsecureHTTP) else {
                 continue
             }
 
-            if !feedURLs.contains(normalized) {
+            if !knownFeeds.contains(normalized) {
+                knownFeeds.insert(normalized)
                 feedURLs.append(normalized)
                 addedCount += 1
             }
-            if let folder = item.folder, !folder.isEmpty, !userSections.contains(folder) {
+            if let folder = item.folder, !folder.isEmpty, !knownSections.contains(folder) {
+                knownSections.insert(folder)
                 userSections.append(folder)
                 sectionsChanged = true
             }
@@ -368,8 +382,6 @@ final class AppSettings: ObservableObject {
 }
 
 // MARK: - System Settings Overrides (Isolated QA & Audits)
-
-import SwiftUI
 
 /// System settings overrides for isolated native QA, accessibility audits, and automated runs.
 /// Allows simulating VoiceOver, Increase Contrast, Reduce Motion, and Text Scaling
@@ -399,15 +411,27 @@ public struct SystemSettingsOverrides: Sendable {
         var overrides = SystemSettingsOverrides()
 
         // 1. UserDefaults check (handles -key value from standard macOS launch args)
-        if defaults.object(forKey: "increase_contrast") != nil || defaults.object(forKey: "IncreaseContrast") != nil || defaults.object(forKey: "AppleIncreaseContrast") != nil {
-            let val = defaults.bool(forKey: "increase_contrast") || defaults.bool(forKey: "IncreaseContrast") || defaults.bool(forKey: "AppleIncreaseContrast")
+        if defaults.object(forKey: "increase_contrast") != nil || defaults.object(forKey: "IncreaseContrast") != nil
+            || defaults.object(forKey: "AppleIncreaseContrast") != nil
+        {
+            let val =
+                defaults.bool(forKey: "increase_contrast") || defaults.bool(forKey: "IncreaseContrast")
+                || defaults.bool(forKey: "AppleIncreaseContrast")
             overrides.contrast = val ? .increased : .standard
         }
-        if defaults.object(forKey: "reduce_motion") != nil || defaults.object(forKey: "ReduceMotion") != nil || defaults.object(forKey: "AppleReduceMotion") != nil {
-            overrides.reduceMotion = defaults.bool(forKey: "reduce_motion") || defaults.bool(forKey: "ReduceMotion") || defaults.bool(forKey: "AppleReduceMotion")
+        if defaults.object(forKey: "reduce_motion") != nil || defaults.object(forKey: "ReduceMotion") != nil
+            || defaults.object(forKey: "AppleReduceMotion") != nil
+        {
+            overrides.reduceMotion =
+                defaults.bool(forKey: "reduce_motion") || defaults.bool(forKey: "ReduceMotion")
+                || defaults.bool(forKey: "AppleReduceMotion")
         }
-        if defaults.object(forKey: "voice_over") != nil || defaults.object(forKey: "VoiceOver") != nil || defaults.object(forKey: "AppleAccessibilityVoiceOverEnabled") != nil {
-            overrides.voiceOverEnabled = defaults.bool(forKey: "voice_over") || defaults.bool(forKey: "VoiceOver") || defaults.bool(forKey: "AppleAccessibilityVoiceOverEnabled")
+        if defaults.object(forKey: "voice_over") != nil || defaults.object(forKey: "VoiceOver") != nil
+            || defaults.object(forKey: "AppleAccessibilityVoiceOverEnabled") != nil
+        {
+            overrides.voiceOverEnabled =
+                defaults.bool(forKey: "voice_over") || defaults.bool(forKey: "VoiceOver")
+                || defaults.bool(forKey: "AppleAccessibilityVoiceOverEnabled")
         }
         if defaults.object(forKey: "text_scale") != nil {
             let scale = defaults.double(forKey: "text_scale")
@@ -459,34 +483,34 @@ private struct OverrideVoiceOverKey: EnvironmentKey {
     static let defaultValue: Bool? = nil
 }
 
-public extension EnvironmentValues {
-    var overrideContrast: ColorSchemeContrast? {
+extension EnvironmentValues {
+    public var overrideContrast: ColorSchemeContrast? {
         get { self[OverrideContrastKey.self] }
         set { self[OverrideContrastKey.self] = newValue }
     }
 
-    var overrideReduceMotion: Bool? {
+    public var overrideReduceMotion: Bool? {
         get { self[OverrideReduceMotionKey.self] }
         set { self[OverrideReduceMotionKey.self] = newValue }
     }
 
-    var overrideVoiceOver: Bool? {
+    public var overrideVoiceOver: Bool? {
         get { self[OverrideVoiceOverKey.self] }
         set { self[OverrideVoiceOverKey.self] = newValue }
     }
 
     /// Effective contrast: uses override if set (e.g. via CLI / isolated build), otherwise system setting.
-    var effectiveContrast: ColorSchemeContrast {
+    public var effectiveContrast: ColorSchemeContrast {
         overrideContrast ?? colorSchemeContrast
     }
 
     /// Effective reduce motion: uses override if set, otherwise system setting.
-    var effectiveReduceMotion: Bool {
+    public var effectiveReduceMotion: Bool {
         overrideReduceMotion ?? accessibilityReduceMotion
     }
 
     /// Effective VoiceOver status: uses override if set, otherwise system setting.
-    var effectiveVoiceOver: Bool {
+    public var effectiveVoiceOver: Bool {
         overrideVoiceOver ?? accessibilityVoiceOverEnabled
     }
 }
@@ -527,4 +551,3 @@ public struct SystemSettingsOverrideModifier: ViewModifier {
         return .accessibility3
     }
 }
-

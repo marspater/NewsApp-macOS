@@ -8,24 +8,24 @@ public final class CacheManager: @unchecked Sendable {
     public static let shared = CacheManager()
     private let logger = Logger(subsystem: "com.marspater.news", category: "CacheManager")
     private let fileManager = FileManager.default
-    
+
     private var cacheDirectory: URL {
         let paths = fileManager.urls(for: .cachesDirectory, in: .userDomainMask)
         let isTest = ProcessInfo.processInfo.processName.contains("test")
         let dirName = isTest ? "com.marspater.news.testcache" : "com.marspater.news.cache"
         let appCacheDir = paths[0].appendingPathComponent(dirName)
-        
+
         if !fileManager.fileExists(atPath: appCacheDir.path) {
             try? fileManager.createDirectory(at: appCacheDir, withIntermediateDirectories: true)
         }
         return appCacheDir
     }
-    
+
     /// Configures the shared URLCache with 64MB RAM and 512MB disk capacity
     /// for persistent offline WebKit rendering and asset retrieval.
     public func configureOfflineCache() {
-        let memoryCapacity = 64 * 1024 * 1024 // 64 MB RAM
-        let diskCapacity = 512 * 1024 * 1024 // 512 MB Disk
+        let memoryCapacity = 64 * 1024 * 1024  // 64 MB RAM
+        let diskCapacity = 512 * 1024 * 1024  // 512 MB Disk
         let cacheURL = cacheDirectory.appendingPathComponent("web_cache")
         let cache = URLCache(memoryCapacity: memoryCapacity, diskCapacity: diskCapacity, directory: cacheURL)
         URLCache.shared = cache
@@ -36,10 +36,13 @@ public final class CacheManager: @unchecked Sendable {
     public func calculateTotalCacheSize() -> Int64 {
         var totalSize: Int64 = 0
         let keys = Set<URLResourceKey>([.fileSizeKey])
-        if let enumerator = fileManager.enumerator(at: cacheDirectory, includingPropertiesForKeys: Array(keys), options: []) {
+        if let enumerator = fileManager.enumerator(
+            at: cacheDirectory, includingPropertiesForKeys: Array(keys), options: [])
+        {
             for case let fileURL as URL in enumerator {
                 if let resourceValues = try? fileURL.resourceValues(forKeys: keys),
-                   let size = resourceValues.fileSize {
+                    let size = resourceValues.fileSize
+                {
                     totalSize += Int64(size)
                 }
             }

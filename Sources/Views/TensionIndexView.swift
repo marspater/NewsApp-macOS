@@ -1,5 +1,5 @@
-import SwiftUI
 import Charts
+import SwiftUI
 
 /// The news tension experiment (#159): what the fixed panel reported, by UTC day. Gap days are shown as gaps,
 /// never as zero, and the series starts when panel collection began.
@@ -14,7 +14,8 @@ struct TensionIndexView: View {
     @State private var loadFailed = false
     @State private var selectedDay: Date?
 
-    private static let methodologyURL = URL(string: "https://github.com/marspater/NewsApp-macOS/blob/main/docs/methodology/tension-index-v1.md")!
+    private static let methodologyURL = URL(
+        string: "https://github.com/marspater/NewsApp-macOS/blob/main/docs/methodology/tension-index-v1.md")!
     private let methodology = TensionMethodology.v1
 
     var body: some View {
@@ -44,9 +45,13 @@ struct TensionIndexView: View {
         .toolbar(removing: .title)
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
-                Button { Task { await load() } } label: { Label("Recalculate", systemImage: "arrow.clockwise") }
-                    .disabled(loading)
-                    .help("Score the stored panel coverage again")
+                Button {
+                    Task { await load() }
+                } label: {
+                    Label("Recalculate", systemImage: "arrow.clockwise")
+                }
+                .disabled(loading)
+                .help("Score the stored panel coverage again")
             }
         }
         .task { await load() }
@@ -88,12 +93,14 @@ struct TensionIndexView: View {
         VStack(alignment: .leading, spacing: AppSpacing.xs) {
             Text("Insufficient data")
                 .font(AppTypography.headline)
-            Text(appSettings.tensionCollectionOptIn
-                 ? "A day is scored once at least \(methodology.minimumReportingFeeds) panel feeds from \(methodology.minimumReportingRegions) regions have reported. The history starts on the day collection began."
-                 : "Turn on panel collection in Settings to start a history. News has no historical corpus, so the history starts on the day collection begins.")
-                .font(AppTypography.callout)
-                .foregroundColor(AppColor.secondaryText)
-                .fixedSize(horizontal: false, vertical: true)
+            Text(
+                appSettings.tensionCollectionOptIn
+                    ? "A day is scored once at least \(methodology.minimumReportingFeeds) panel feeds from \(methodology.minimumReportingRegions) regions have reported. The history starts on the day collection began."
+                    : "Turn on panel collection in Settings to start a history. News has no historical corpus, so the history starts on the day collection begins."
+            )
+            .font(AppTypography.callout)
+            .foregroundColor(AppColor.secondaryText)
+            .fixedSize(horizontal: false, vertical: true)
         }
     }
 
@@ -102,21 +109,27 @@ struct TensionIndexView: View {
             ForEach(Array(history.enumerated()), id: \.offset) { index, day in
                 let date = Self.plotDate(day)
                 if let smoothed = day.score.smoothedIndex, let daily = day.score.calibratedIndex {
-                    LineMark(x: .value("Day", date, unit: .day), y: .value("7-day index", smoothed),
-                             series: .value("Segment", segment(of: index)))
-                        .foregroundStyle(AppColor.accent)
-                        .interpolationMethod(.monotone)
+                    LineMark(
+                        x: .value("Day", date, unit: .day), y: .value("7-day index", smoothed),
+                        series: .value("Segment", segment(of: index))
+                    )
+                    .foregroundStyle(AppColor.accent)
+                    .interpolationMethod(.monotone)
                     PointMark(x: .value("Day", date, unit: .day), y: .value("Daily index", daily))
                         .foregroundStyle(AppColor.accent.opacity(day.score.isProvisional ? 0.4 : 0.9))
                         .symbolSize(day.score.day.start == selected?.score.day.start ? 90 : 30)
                         .accessibilityLabel(Self.dateText(day))
-                        .accessibilityValue("Daily \(Self.indexText(daily)), 7-day \(Self.indexText(smoothed))\(day.score.isProvisional ? ", provisional" : "")")
+                        .accessibilityValue(
+                            "Daily \(Self.indexText(daily)), 7-day \(Self.indexText(smoothed))\(day.score.isProvisional ? ", provisional" : "")"
+                        )
                 } else {
-                    RectangleMark(xStart: .value("Start", day.score.day.start), xEnd: .value("End", day.score.day.end),
-                                  yStart: .value("Bottom", 0), yEnd: .value("Top", 100))
-                        .foregroundStyle(AppColor.secondaryText.opacity(0.12))
-                        .accessibilityLabel(Self.dateText(day))
-                        .accessibilityValue("Insufficient data")
+                    RectangleMark(
+                        xStart: .value("Start", day.score.day.start), xEnd: .value("End", day.score.day.end),
+                        yStart: .value("Bottom", 0), yEnd: .value("Top", 100)
+                    )
+                    .foregroundStyle(AppColor.secondaryText.opacity(0.12))
+                    .accessibilityLabel(Self.dateText(day))
+                    .accessibilityValue("Insufficient data")
                 }
             }
         }
@@ -126,7 +139,9 @@ struct TensionIndexView: View {
         .accessibilityLabel("News tension by day")
         .onChange(of: selectedDay) { _, date in
             // Chart selection reports any instant; snap it to the UTC day that contains it.
-            if let date, history.contains(where: { $0.score.day.contains(date) }), !history.contains(where: { $0.score.day.start == date }) {
+            if let date, history.contains(where: { $0.score.day.contains(date) }),
+                !history.contains(where: { $0.score.day.start == date })
+            {
                 selectedDay = TensionMethodology.day(containing: date).start
             }
         }
@@ -137,17 +152,23 @@ struct TensionIndexView: View {
             Text(Self.dateText(day))
                 .font(AppTypography.headline)
                 .accessibilityAddTraits(.isHeader)
-            Text("\(day.coverage.reporting.count) of \(methodology.panel.count) panel feeds · \(day.coverage.regions.count) of \(methodology.panelRegions.count) regions")
-                .font(AppTypography.callout)
-                .foregroundColor(AppColor.secondaryText)
+            Text(
+                "\(day.coverage.reporting.count) of \(methodology.panel.count) panel feeds · \(day.coverage.regions.count) of \(methodology.panelRegions.count) regions"
+            )
+            .font(AppTypography.callout)
+            .foregroundColor(AppColor.secondaryText)
             if let daily = day.score.calibratedIndex, let smoothed = day.score.smoothedIndex {
                 HStack(spacing: AppSpacing.lg) {
                     metric("Daily index", Self.indexText(daily))
                     metric("7-day index", Self.indexText(smoothed))
                 }
             } else {
-                Text(day.coverage.status == .noData ? "No panel feed reported this day." : "Insufficient data: too few panel feeds or regions reported.")
-                    .font(AppTypography.callout)
+                Text(
+                    day.coverage.status == .noData
+                        ? "No panel feed reported this day."
+                        : "Insufficient data: too few panel feeds or regions reported."
+                )
+                .font(AppTypography.callout)
             }
             if day.score.isProvisional {
                 Text("Provisional: late items and event grouping can still change this day.")
@@ -185,7 +206,9 @@ struct TensionIndexView: View {
                 .foregroundColor(AppColor.secondaryText)
                 .accessibilityAddTraits(.isHeader)
             ForEach(history.reversed(), id: \.score.day.start) { day in
-                Button { selectedDay = day.score.day.start } label: {
+                Button {
+                    selectedDay = day.score.day.start
+                } label: {
                     HStack {
                         Text(Self.dateText(day))
                         Spacer()

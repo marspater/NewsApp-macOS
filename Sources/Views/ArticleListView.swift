@@ -1,8 +1,8 @@
 // ArticleListView.swift
 // NewsApp Article Grid List View & Navigation Coordinator
 
-import SwiftUI
 import AppKit
+import SwiftUI
 
 struct ListCommandActions {
     let canGroupStories: Bool
@@ -23,7 +23,7 @@ extension FocusedValues {
 enum LeadStoryPresentation {
     static func firstEligibleID(in entries: [FeedEntry], selectedTopic: String?, isSearching: Bool) -> String? {
         let location = selectedTopic ?? "Today"
-        guard !isSearching, (location == "Today" || location == "Briefing") else { return nil }
+        guard !isSearching, location == "Today" || location == "Briefing" else { return nil }
         for entry in entries {
             let articles = [entry.representative] + entry.visibleArticles.filter { $0.id != entry.representative.id }
             if FeedArticle.bestCardImage(in: articles) != nil { return entry.id }
@@ -36,20 +36,20 @@ struct ArticleListView: View {
     @Binding var selectedTopic: String?
     @Binding var searchText: String
     @Binding var articlePath: NavigationPath
-    
+
     @EnvironmentObject private var appSettings: AppSettings
     @EnvironmentObject private var articleStore: ArticleStore
     @EnvironmentObject private var feedManager: FeedManager
     @EnvironmentObject private var themeManager: ThemeManager
     @EnvironmentObject private var readManager: ReadManager
     @EnvironmentObject private var savedStories: SavedStoriesManager
-    
+
     @AppStorage("articleGridLayout") private var gridLayout = false
     @AppStorage("groupsEventCoverage") private var groupsEvents = true
     @Environment(\.appearsActive) private var appearsActive
     @Environment(\.effectiveReduceMotion) private var reduceMotion
     @State private var focusedArticleID: String? = nil
-    
+
     @State private var briefing: FiniteBriefing?
     @State private var buffer = FeedUpdateBuffer()
     @State private var pageRequest = 0
@@ -84,19 +84,22 @@ struct ArticleListView: View {
 
     /// Muting applies to the feed lists and search; Saved Stories and History list everything the reader kept or opened.
     private var listMuting: MuteRules {
-        isSearching || (selectedTopic != "Saved Stories" && selectedTopic != "History") ? appSettings.muteRules : MuteRules()
+        isSearching || (selectedTopic != "Saved Stories" && selectedTopic != "History")
+            ? appSettings.muteRules : MuteRules()
     }
 
     private var queryIdentity: String {
         let muting = listMuting
-        return "\(selectedTopic ?? "Today"):\(searchText):\(themeManager.autoHideRead):\(muting.sourceParameter)|\(muting.topicParameter):\(showsMuted):\(showsWaiting)"
+        return
+            "\(selectedTopic ?? "Today"):\(searchText):\(themeManager.autoHideRead):\(muting.sourceParameter)|\(muting.topicParameter):\(showsMuted):\(showsWaiting)"
     }
 
     var filteredArticles: [FeedArticle] { buffer.displayed.articles }
 
     /// Saved Stories and History list exactly what the reader kept or opened.
     private var groupingMode: FeedGroupingMode {
-        groupsEvents && !isBriefing && selectedTopic != "Saved Stories" && selectedTopic != "History" ? .events : .publications
+        groupsEvents && !isBriefing && selectedTopic != "Saved Stories" && selectedTopic != "History"
+            ? .events : .publications
     }
 
     private var entries: [FeedEntry] { buffer.displayed.entries(groupingMode) }
@@ -196,7 +199,8 @@ struct ArticleListView: View {
                 }
                 .onReceive(NotificationCenter.default.publisher(for: .toggleSaveCommand)) { _ in
                     if articlePath.isEmpty, let id = focusedArticleID,
-                       let art = filteredArticles.first(where: { $0.id == id }) {
+                        let art = filteredArticles.first(where: { $0.id == id })
+                    {
                         if savedStories.isSaved(art) {
                             savedStories.remove(art)
                         } else {
@@ -206,8 +210,9 @@ struct ArticleListView: View {
                 }
                 .onReceive(NotificationCenter.default.publisher(for: .openInBrowserCommand)) { _ in
                     if articlePath.isEmpty, let id = focusedArticleID,
-                       let art = filteredArticles.first(where: { $0.id == id }),
-                       let url = URL(string: art.link) {
+                        let art = filteredArticles.first(where: { $0.id == id }),
+                        let url = URL(string: art.link)
+                    {
                         NSWorkspace.shared.open(url)
                     }
                 }
@@ -219,7 +224,10 @@ struct ArticleListView: View {
         // The masthead shows the location, so the toolbar does not repeat it (DESIGN.md 5).
         .toolbar(removing: .title)
         .toolbar { listToolbar }
-        .task(id: "\(queryIdentity):\(articleStore.revision):\(articleStore.eventRevision):\(pageRequest):\(refreshReloads)") {
+        .task(
+            id:
+                "\(queryIdentity):\(articleStore.revision):\(articleStore.eventRevision):\(pageRequest):\(refreshReloads)"
+        ) {
             let identity = queryIdentity
             let runID = UUID()
             queryRunID = runID
@@ -264,7 +272,8 @@ struct ArticleListView: View {
             do {
                 if !isPaging { try await Task.sleep(for: .milliseconds(180)) }
                 let muting = listMuting
-                let fetched = try await fetchPage(after: isPaging ? cursor : nil, muting: showsMuted ? MuteRules() : muting)
+                let fetched = try await fetchPage(
+                    after: isPaging ? cursor : nil, muting: showsMuted ? MuteRules() : muting)
                 try Task.checkCancellation()
                 if !isPaging {
                     var hidden = 0
@@ -315,9 +324,13 @@ struct ArticleListView: View {
     private var listFilters: (topic: String, read: Bool?, saved: Bool?) {
         let topic = selectedTopic ?? "Today"
         let read: Bool?
-        if topic == "History" { read = true }
-        else if topic == "Unread" || (themeManager.autoHideRead && topic != "Saved Stories") { read = false }
-        else { read = nil }
+        if topic == "History" {
+            read = true
+        } else if topic == "Unread" || (themeManager.autoHideRead && topic != "Saved Stories") {
+            read = false
+        } else {
+            read = nil
+        }
         return (topic, read, topic == "Saved Stories" ? true : nil)
     }
 
@@ -330,7 +343,8 @@ struct ArticleListView: View {
 
     private func fetchPage(after pageCursor: ArticleQueryCursor?, muting: MuteRules) async throws -> [FeedArticle] {
         if isSearching {
-            return try await articleStore.database.searchArticles(query: searchText, limit: 201, after: pageCursor, muting: muting)
+            return try await articleStore.database.searchArticles(
+                query: searchText, limit: 201, after: pageCursor, muting: muting)
         }
         let filters = listFilters
         return try await articleStore.database.fetchArticles(
@@ -363,16 +377,20 @@ struct ArticleListView: View {
             Divider()
             Button("Unmute All…", role: .destructive) { confirmsUnmuteAll = true }
         } label: {
-            Label(showsMuted ? "Showing \(mutedCount) muted" : "\(mutedCount) hidden by muting",
-                  systemImage: showsMuted ? "eye" : "eye.slash")
-                .font(AppTypography.caption)
-                .foregroundStyle(AppColor.secondaryText)
+            Label(
+                showsMuted ? "Showing \(mutedCount) muted" : "\(mutedCount) hidden by muting",
+                systemImage: showsMuted ? "eye" : "eye.slash"
+            )
+            .font(AppTypography.caption)
+            .foregroundStyle(AppColor.secondaryText)
         }
         .menuStyle(.button)
         .buttonStyle(.plain)
         .fixedSize()
         .help(showsMuted ? "Muted stories are shown in this list" : "Stories hidden by your muted sources and topics")
-        .accessibilityLabel(showsMuted ? "Showing \(mutedCount) muted stories" : "\(mutedCount) stories hidden by muting")
+        .accessibilityLabel(
+            showsMuted ? "Showing \(mutedCount) muted stories" : "\(mutedCount) stories hidden by muting"
+        )
         .confirmationDialog("Unmute every source and topic?", isPresented: $confirmsUnmuteAll) {
             Button("Unmute All", role: .destructive) { appSettings.clearMuting() }
         } message: {
@@ -387,8 +405,10 @@ struct ArticleListView: View {
         return Button {
             applyPendingUpdates(proxy: proxy)
         } label: {
-            Label(count > 0 ? "\(count) new \(count == 1 ? "story" : "stories")" : "Show updates", systemImage: "arrow.up")
-                .font(AppTypography.label)
+            Label(
+                count > 0 ? "\(count) new \(count == 1 ? "story" : "stories")" : "Show updates", systemImage: "arrow.up"
+            )
+            .font(AppTypography.label)
         }
         .nativeGlassButtonStyle()
         .buttonBorderShape(.capsule)
@@ -415,10 +435,12 @@ struct ArticleListView: View {
     private func announceUpdates(_ count: Int) {
         guard let application = NSApp else { return }
         let message = count == 1 ? "1 new story available" : "\(count) new stories available"
-        NSAccessibility.post(element: application, notification: .announcementRequested, userInfo: [
-            .announcement: message,
-            .priority: NSAccessibilityPriorityLevel.medium.rawValue
-        ])
+        NSAccessibility.post(
+            element: application, notification: .announcementRequested,
+            userInfo: [
+                .announcement: message,
+                .priority: NSAccessibilityPriorityLevel.medium.rawValue,
+            ])
     }
 
     // MARK: - Masthead
@@ -451,9 +473,11 @@ struct ArticleListView: View {
                     .buttonStyle(.plain)
                     .font(AppTypography.caption)
                     .foregroundStyle(AppColor.secondaryText)
-                    .help(showsWaiting
-                          ? "Hide minor stories until more publishers cover them"
-                          : "Minor stories appear once \(StoryVisibilityPolicy.minorStorySources + 1) publishers cover them; unread ones expire after a day")
+                    .help(
+                        showsWaiting
+                            ? "Hide minor stories until more publishers cover them"
+                            : "Minor stories appear once \(StoryVisibilityPolicy.minorStorySources + 1) publishers cover them; unread ones expire after a day"
+                    )
                 }
                 if mutedCount > 0 && !listMuting.isEmpty {
                     Text("·")
@@ -476,10 +500,16 @@ struct ArticleListView: View {
     private var listToolbar: some ToolbarContent {
         ToolbarItemGroup(placement: .primaryAction) {
             Toggle(isOn: $groupsEvents.animation(reduceMotion ? nil : AppMotion.state)) {
-                Label("Group Stories by Event", systemImage: groupsEvents ? "square.stack.3d.up.fill" : "square.stack.3d.up")
+                Label(
+                    "Group Stories by Event",
+                    systemImage: groupsEvents ? "square.stack.3d.up.fill" : "square.stack.3d.up")
             }
             .toggleStyle(.button)
-            .help(groupsEvents ? "Showing one card per event. Show individual publications (G)" : "Showing individual publications. Group coverage of the same event (G)")
+            .help(
+                groupsEvents
+                    ? "Showing one card per event. Show individual publications (G)"
+                    : "Showing individual publications. Group coverage of the same event (G)"
+            )
             .disabled(isBriefing)
             .accessibilityLabel("Group Coverage by Event")
 
@@ -501,13 +531,13 @@ struct ArticleListView: View {
 
         // Xcode 26.3 (CodeQL tracing) cannot resolve this newer SwiftUI modifier.
         #if compiler(>=6.4)
-        if #available(macOS 26.1, *) {
-            refreshToolbarItem.visibilityPriority(.high)
-        } else {
-            refreshToolbarItem
-        }
+            if #available(macOS 26.1, *) {
+                refreshToolbarItem.visibilityPriority(.high)
+            } else {
+                refreshToolbarItem
+            }
         #else
-        refreshToolbarItem
+            refreshToolbarItem
         #endif
         if isBriefing {
             if #available(macOS 26, *) { ToolbarSpacer(.fixed, placement: .primaryAction) }
@@ -525,7 +555,8 @@ struct ArticleListView: View {
                 refreshFeeds()
             } label: {
                 Label("Refresh Feeds", systemImage: "arrow.clockwise")
-                    .symbolEffect(.rotate, options: .repeat(.continuous), isActive: feedManager.isAnyFeedLoading && !reduceMotion)
+                    .symbolEffect(
+                        .rotate, options: .repeat(.continuous), isActive: feedManager.isAnyFeedLoading && !reduceMotion)
             }
             .help(feedManager.isAnyFeedLoading ? "Refreshing feeds…" : "Refresh Feeds (R or ⌘R)")
             .accessibilityLabel("Refresh Feeds")
@@ -556,11 +587,17 @@ struct ArticleListView: View {
     private var briefingCompletion: some View {
         VStack(spacing: AppSpacing.sm) {
             if let briefing {
-                Text(briefing.isComplete(readManager.readArticles) ? "Briefing complete" : "\(briefing.readCount(readManager.readArticles)) of \(briefing.articles.count) stories read")
-                    .font(AppTypography.headline)
-                Text("Selection frozen at \(briefing.startedAt.formatted(date: .omitted, time: .shortened)). New stories stay in your regular feed.")
-                    .font(AppTypography.caption)
-                    .foregroundStyle(AppColor.secondaryText)
+                Text(
+                    briefing.isComplete(readManager.readArticles)
+                        ? "Briefing complete"
+                        : "\(briefing.readCount(readManager.readArticles)) of \(briefing.articles.count) stories read"
+                )
+                .font(AppTypography.headline)
+                Text(
+                    "Selection frozen at \(briefing.startedAt.formatted(date: .omitted, time: .shortened)). New stories stay in your regular feed."
+                )
+                .font(AppTypography.caption)
+                .foregroundStyle(AppColor.secondaryText)
                 Button("Back to Today") { selectedTopic = "Today" }
             }
         }
@@ -608,8 +645,12 @@ struct ArticleListView: View {
     private func cardCollection(_ listed: [FeedEntry]) -> some View {
         if gridLayout {
             LazyVGrid(
-                columns: [GridItem(.adaptive(minimum: AppLayout.gridColumnMinimum,
-                                            maximum: AppLayout.gridColumnMaximum), spacing: AppLayout.cardGap)],
+                columns: [
+                    GridItem(
+                        .adaptive(
+                            minimum: AppLayout.gridColumnMinimum,
+                            maximum: AppLayout.gridColumnMaximum), spacing: AppLayout.cardGap)
+                ],
                 spacing: AppLayout.cardGap
             ) {
                 ForEach(listed) { entry in entryCard(entry) }
@@ -665,14 +706,14 @@ struct ArticleListView: View {
     }
 
     // MARK: - Empty States & Diagnostics
-    
+
     private var emptyStateView: some View {
         VStack(spacing: AppSpacing.md) {
             let failedFeeds = feedManager.feedStatuses.filter {
                 if case .failed = $0.value { return true }
                 return false
             }
-            
+
             if !isBriefing && feedManager.isAnyFeedLoading {
                 ProgressView()
                     .controlSize(.regular)
@@ -680,16 +721,18 @@ struct ArticleListView: View {
                 Text("Refreshing news feeds...")
                     .font(AppTypography.body)
                     .foregroundColor(AppColor.secondaryText)
-            } else if !isBriefing && (selectedTopic != "Saved Stories" && selectedTopic != "History") && !failedFeeds.isEmpty && filteredArticles.isEmpty {
+            } else if !isBriefing && (selectedTopic != "Saved Stories" && selectedTopic != "History")
+                && !failedFeeds.isEmpty && filteredArticles.isEmpty
+            {
                 VStack(spacing: 12) {
                     Image(systemName: "exclamationmark.triangle")
                         .font(.system(size: 32))
                         .foregroundColor(AppColor.warning)
-                    
+
                     Text("\(failedFeeds.count) feeds couldn't be refreshed")
                         .font(AppTypography.headline)
                         .foregroundColor(AppColor.primaryText)
-                    
+
                     VStack(spacing: 4) {
                         ForEach(Array(failedFeeds.keys.prefix(4)), id: \.self) { urlString in
                             let host = URL(string: urlString)?.host ?? urlString
@@ -698,7 +741,7 @@ struct ArticleListView: View {
                                 .foregroundColor(AppColor.secondaryText)
                         }
                     }
-                    
+
                     HStack(spacing: 10) {
                         Button("Retry Feeds") {
                             refreshFeeds()
@@ -708,7 +751,7 @@ struct ArticleListView: View {
                         .controlSize(.small)
                     }
                     .padding(.top, 4)
-                    
+
                     DisclosureGroup("Technical Details") {
                         VStack(alignment: .leading, spacing: 6) {
                             ForEach(Array(failedFeeds.keys), id: \.self) { urlString in
@@ -740,11 +783,11 @@ struct ArticleListView: View {
                 Image(systemName: emptyStateIcon)
                     .font(.system(size: 36))
                     .foregroundColor(AppColor.tertiaryText)
-                
+
                 Text(emptyStateTitle)
                     .font(AppTypography.headline)
                     .foregroundColor(AppColor.primaryText)
-                
+
                 Text(emptyStateText)
                     .font(AppTypography.bodySmall)
                     .foregroundColor(AppColor.secondaryText)
@@ -752,11 +795,13 @@ struct ArticleListView: View {
                     .frame(maxWidth: 340)
 
                 if mutedCount > 0 && !showsMuted && !listMuting.isEmpty {
-                    Button(mutedCount == 1 ? "Show 1 Muted Story" : "Show \(mutedCount) Muted Stories") { showsMuted = true }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
+                    Button(mutedCount == 1 ? "Show 1 Muted Story" : "Show \(mutedCount) Muted Stories") {
+                        showsMuted = true
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
                 }
-                
+
                 if selectedTopic == "Today" || selectedTopic == "Unread" {
                     Button("Refresh Feeds") {
                         refreshFeeds()
@@ -770,7 +815,7 @@ struct ArticleListView: View {
         .frame(maxWidth: .infinity)
         .padding(.top, 80)
     }
-    
+
     private var emptyStateIcon: String {
         switch selectedTopic {
         case "Briefing": return "text.book.closed"
@@ -780,7 +825,7 @@ struct ArticleListView: View {
         default: return "tray"
         }
     }
-    
+
     private var emptyStateTitle: String {
         switch selectedTopic {
         case "Briefing": return "No Stories for This Briefing"
@@ -791,24 +836,28 @@ struct ArticleListView: View {
         default: return "Nothing in \(selectedTopic ?? "Section")"
         }
     }
-    
+
     private var emptyStateText: String {
         switch selectedTopic {
-        case "Briefing": return "There are no unread, unmuted stories published in the last 24 hours. Your archive and normal feed remain available."
+        case "Briefing":
+            return
+                "There are no unread, unmuted stories published in the last 24 hours. Your archive and normal feed remain available."
         case "Today": return "Subscribe to feeds or click refresh to load the latest stories."
         case "Unread": return "You've read all stories in your feeds. Check back later for updates."
         case "Saved Stories": return "Stories you bookmark will be kept here for easy reading."
         case "History": return "Articles you have opened will appear here."
-        default: return "New articles matching \(selectedTopic ?? "this section") will appear here once your feeds refresh."
+        default:
+            return "New articles matching \(selectedTopic ?? "this section") will appear here once your feeds refresh."
         }
     }
-    
+
     // MARK: - Keyboard Handling
-    
+
     private func handleKeyPress(press: KeyPress, proxy: ScrollViewProxy) -> KeyPress.Result {
         guard articlePath.isEmpty,
-              press.modifiers.intersection([.command, .control, .option]).isEmpty else { return .ignored }
-        
+            press.modifiers.intersection([.command, .control, .option]).isEmpty
+        else { return .ignored }
+
         switch press.key {
         case .downArrow:
             navigateList(offset: 1, proxy: proxy)
@@ -853,7 +902,8 @@ struct ArticleListView: View {
                 return .handled
             } else if press.characters == "o" {
                 if let id = focusedArticleID, let art = filteredArticles.first(where: { $0.id == id }),
-                   let url = URL(string: art.link) {
+                    let url = URL(string: art.link)
+                {
                     NSWorkspace.shared.open(url)
                 }
                 return .handled
@@ -861,7 +911,7 @@ struct ArticleListView: View {
             return .ignored
         }
     }
-    
+
     private func navigateList(offset: Int, proxy: ScrollViewProxy) {
         let listed = entries
         guard !listed.isEmpty else { return }
@@ -878,7 +928,7 @@ struct ArticleListView: View {
             proxy.scrollTo(target.id, anchor: .center)
         }
     }
-    
+
     private func openFocusedArticle() {
         let listed = entries
         guard let entry = listed.first(where: { $0.id == focusedArticleID }) ?? listed.first else { return }
@@ -890,7 +940,8 @@ struct ArticleListView: View {
 
     private func toggleFocusedEventSources() {
         guard let entry = entries.first(where: { $0.id == focusedArticleID }),
-              case .event(let summary, _, _) = entry else { return }
+            case .event(let summary, _, _) = entry
+        else { return }
         let binding = expansionBinding(summary.eventID)
         withAnimation(reduceMotion ? nil : AppMotion.state) { binding.wrappedValue.toggle() }
         if binding.wrappedValue {
@@ -923,7 +974,7 @@ struct ArticleListView: View {
             }
         }
     }
-    
+
     /// The reader asked for these stories, so they are shown when the refresh ends instead of waiting behind
     /// the update button.
     private func refreshFeeds() {
@@ -942,25 +993,34 @@ struct ArticleListView: View {
 /// Help → Keyboard Shortcuts. Lists the single-key shortcuts that menus cannot show.
 struct KeyboardShortcutsView: View {
     private static let sections: [(title: String, rows: [(keys: String, action: String)])] = [
-        ("Navigation", [
-            ("J or ↓", "Next story"),
-            ("K or ↑", "Previous story"),
-            ("Space or ↵", "Open focused story"),
-            ("Esc or ←", "Back to list")
-        ]),
-        ("Story", [
-            ("M", "Mark as read or unread"),
-            ("S", "Save or remove from Saved Stories"),
-            ("O", "Open in browser"),
-            ("E", "Show or hide event coverage"),
-            ("W or ⇧⌘R", "Switch between Story and Web")
-        ]),
-        ("List", [
-            ("G", "Group coverage by event"),
-            ("U", "Show queued updates"),
-            ("R or ⌘R", "Refresh feeds"),
-            ("⌘1 – ⌘4", "Today, Unread, Saved Stories, History")
-        ])
+        (
+            "Navigation",
+            [
+                ("J or ↓", "Next story"),
+                ("K or ↑", "Previous story"),
+                ("Space or ↵", "Open focused story"),
+                ("Esc or ←", "Back to list"),
+            ]
+        ),
+        (
+            "Story",
+            [
+                ("M", "Mark as read or unread"),
+                ("S", "Save or remove from Saved Stories"),
+                ("O", "Open in browser"),
+                ("E", "Show or hide event coverage"),
+                ("W or ⇧⌘R", "Switch between Story and Web"),
+            ]
+        ),
+        (
+            "List",
+            [
+                ("G", "Group coverage by event"),
+                ("U", "Show queued updates"),
+                ("R or ⌘R", "Refresh feeds"),
+                ("⌘1 – ⌘4", "Today, Unread, Saved Stories, History"),
+            ]
+        ),
     ]
 
     var body: some View {

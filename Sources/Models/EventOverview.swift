@@ -12,7 +12,8 @@ public struct EvidencePassage: Codable, Hashable, Sendable, Identifiable {
         self.id = id
         self.articleID = articleID
         self.text = text
-        self.fingerprint = fingerprint ?? ArticleIdentity.sha256Hex(text.trimmingCharacters(in: .whitespacesAndNewlines))
+        self.fingerprint =
+            fingerprint ?? ArticleIdentity.sha256Hex(text.trimmingCharacters(in: .whitespacesAndNewlines))
         self.ordinal = ordinal
     }
 }
@@ -244,7 +245,8 @@ public struct OverviewEvidenceSections: Codable, Hashable, Sendable {
     public let coverageSentiment: OverviewCoverageSentiment?
 
     public var isEmpty: Bool {
-        introduction?.isEmpty != false && timeline.isEmpty && perspectives.isEmpty && thematicAngle == nil && coverageSentiment == nil
+        introduction?.isEmpty != false && timeline.isEmpty && perspectives.isEmpty && thematicAngle == nil
+            && coverageSentiment == nil
     }
 
     public init(
