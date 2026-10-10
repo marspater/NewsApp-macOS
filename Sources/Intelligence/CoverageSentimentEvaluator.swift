@@ -124,13 +124,13 @@ public final class CoverageSentimentEvaluator: Sendable {
     private static let adverseKeywords: [String] = [
         "earthquake", "fatalities", "casualt", "injured", "killed", "dead", "death",
         "crash", "derail", "explosion", "crisis", "disaster", "collapse", "devastat",
-        "damage", "flood", "fire", "attack", "plunge", "loss", "recession"
+        "damage", "flood", "fire", "attack", "plunge", "loss", "recession",
     ]
 
     /// Subjective opinion and editorial markers that indicate genuine author framing.
     private static let subjectiveEditorialMarkers: [String] = [
         "disastrous decision", "reckless policy", "shameful", "outrageous", "incompetent",
-        "brilliant triumph", "visionary leadership", "unacceptable blunder", "scandalous"
+        "brilliant triumph", "visionary leadership", "unacceptable blunder", "scandalous",
     ]
 
     /// Default frozen evaluation corpus containing objective crisis news, opinion pieces, milestones, and multilingual text.
@@ -138,7 +138,8 @@ public final class CoverageSentimentEvaluator: Sendable {
         CorpusEvaluationItem(
             id: "corpus_crisis_1",
             headline: "Magnitude 6.8 earthquake strikes prefecture",
-            text: "A magnitude 6.8 earthquake struck the northern coast at 04:30 local time, damaging dozens of residential buildings and injuring 18 residents. Municipal emergency services deployed search-and-rescue teams to inspect utility lines and secure transport corridors.",
+            text:
+                "A magnitude 6.8 earthquake struck the northern coast at 04:30 local time, damaging dozens of residential buildings and injuring 18 residents. Municipal emergency services deployed search-and-rescue teams to inspect utility lines and secure transport corridors.",
             language: "en",
             eventNature: .adverseOrCrisis,
             groundTruthTone: .objectiveFactual
@@ -146,7 +147,8 @@ public final class CoverageSentimentEvaluator: Sendable {
         CorpusEvaluationItem(
             id: "corpus_crisis_2",
             headline: "Commuter train derails outside terminal",
-            text: "A passenger train derailed near the southern junction during morning transit, causing rail delays across the metropolitan network. Transport safety investigators arrived to document track signals and interview dispatch staff.",
+            text:
+                "A passenger train derailed near the southern junction during morning transit, causing rail delays across the metropolitan network. Transport safety investigators arrived to document track signals and interview dispatch staff.",
             language: "en",
             eventNature: .adverseOrCrisis,
             groundTruthTone: .objectiveFactual
@@ -154,7 +156,8 @@ public final class CoverageSentimentEvaluator: Sendable {
         CorpusEvaluationItem(
             id: "corpus_crisis_3",
             headline: "Consumer price index rises 3.2 percent",
-            text: "Annual inflation reached 3.2 percent in September according to data released by the statistics bureau. Energy costs contributed the largest single-month increase, while food commodity prices held steady across retail distributors.",
+            text:
+                "Annual inflation reached 3.2 percent in September according to data released by the statistics bureau. Energy costs contributed the largest single-month increase, while food commodity prices held steady across retail distributors.",
             language: "en",
             eventNature: .adverseOrCrisis,
             groundTruthTone: .objectiveFactual
@@ -162,7 +165,8 @@ public final class CoverageSentimentEvaluator: Sendable {
         CorpusEvaluationItem(
             id: "corpus_crisis_4",
             headline: "Federal court opens trial on corporate securities fraud",
-            text: "Prosecutors delivered opening statements in federal district court regarding allegations of fraudulent accounting disclosures. Defense counsel responded that audited financial statements complied with relevant statutory standards.",
+            text:
+                "Prosecutors delivered opening statements in federal district court regarding allegations of fraudulent accounting disclosures. Defense counsel responded that audited financial statements complied with relevant statutory standards.",
             language: "en",
             eventNature: .adverseOrCrisis,
             groundTruthTone: .objectiveFactual
@@ -170,7 +174,8 @@ public final class CoverageSentimentEvaluator: Sendable {
         CorpusEvaluationItem(
             id: "corpus_crisis_5",
             headline: "Severe river flooding inundates agricultural lowlands",
-            text: "River crest levels exceeded seasonal records following three consecutive days of rainfall, submerging low-lying farmland. Regional water authorities opened relief spillways to relieve pressure on reservoir levees.",
+            text:
+                "River crest levels exceeded seasonal records following three consecutive days of rainfall, submerging low-lying farmland. Regional water authorities opened relief spillways to relieve pressure on reservoir levees.",
             language: "en",
             eventNature: .adverseOrCrisis,
             groundTruthTone: .objectiveFactual
@@ -178,7 +183,8 @@ public final class CoverageSentimentEvaluator: Sendable {
         CorpusEvaluationItem(
             id: "corpus_editorial_critique",
             headline: "Editorial: City Council's reckless budget failure",
-            text: "The municipal administration's disastrous decision to defund road maintenance is a shameful and reckless policy that abandons working families. This incompetent leadership must face immediate electoral accountability.",
+            text:
+                "The municipal administration's disastrous decision to defund road maintenance is a shameful and reckless policy that abandons working families. This incompetent leadership must face immediate electoral accountability.",
             language: "en",
             eventNature: .adverseOrCrisis,
             groundTruthTone: .subjectiveCritical
@@ -186,7 +192,8 @@ public final class CoverageSentimentEvaluator: Sendable {
         CorpusEvaluationItem(
             id: "corpus_editorial_praise",
             headline: "Opinion: A visionary triumph for public transit",
-            text: "The inauguration of the regional electrified high-speed link marks a brilliant triumph and visionary leadership by transport planners, proving ambitious public investment delivers extraordinary community returns.",
+            text:
+                "The inauguration of the regional electrified high-speed link marks a brilliant triumph and visionary leadership by transport planners, proving ambitious public investment delivers extraordinary community returns.",
             language: "en",
             eventNature: .positiveMilestone,
             groundTruthTone: .subjectivePositive
@@ -194,7 +201,8 @@ public final class CoverageSentimentEvaluator: Sendable {
         CorpusEvaluationItem(
             id: "corpus_milestone_science",
             headline: "Deep space observatory captures distant galactic cluster",
-            text: "The orbital telescope completed its calibrated infrared exposure of deep galaxy cluster NGC-4921, transmitting multi-spectral imaging data back to ground stations for spectroscopic cataloging.",
+            text:
+                "The orbital telescope completed its calibrated infrared exposure of deep galaxy cluster NGC-4921, transmitting multi-spectral imaging data back to ground stations for spectroscopic cataloging.",
             language: "en",
             eventNature: .positiveMilestone,
             groundTruthTone: .objectiveFactual
@@ -202,7 +210,8 @@ public final class CoverageSentimentEvaluator: Sendable {
         CorpusEvaluationItem(
             id: "corpus_multilingual_uk",
             headline: "Ремонтні бригади відновлюють електропостачання в області",
-            text: "Внаслідок нічної негоди було пошкоджено високовольтні лінії передач у трьох районах. Бригади енергетиків оперативно приступили до ліквідації обривів та заживлення соціальних об'єктів.",
+            text:
+                "Внаслідок нічної негоди було пошкоджено високовольтні лінії передач у трьох районах. Бригади енергетиків оперативно приступили до ліквідації обривів та заживлення соціальних об'єктів.",
             language: "uk",
             eventNature: .adverseOrCrisis,
             groundTruthTone: .objectiveFactual
@@ -210,11 +219,12 @@ public final class CoverageSentimentEvaluator: Sendable {
         CorpusEvaluationItem(
             id: "corpus_multilingual_de",
             headline: "Bundestag verabschiedet Gesetz zur Modernisierung",
-            text: "Das Parlament hat heute mit breiter Mehrheit dem Gesetzentwurf zur Reform der Verwaltungsverfahren zugestimmt. Die neuen Bestimmungen treten nach Unterzeichnung im Bundesgesetzblatt in Kraft.",
+            text:
+                "Das Parlament hat heute mit breiter Mehrheit dem Gesetzentwurf zur Reform der Verwaltungsverfahren zugestimmt. Die neuen Bestimmungen treten nach Unterzeichnung im Bundesgesetzblatt in Kraft.",
             language: "de",
             eventNature: .neutralDevelopment,
             groundTruthTone: .objectiveFactual
-        )
+        ),
     ]
 
     public init() {}
@@ -262,9 +272,11 @@ public final class CoverageSentimentEvaluator: Sendable {
         if !justifies {
             let pct = String(format: "%.1f", falseNegativityRate * 100)
             let langPct = String(format: "%.1f", multilingualRate * 100)
-            rationale = "Evaluation demonstrates high noise: raw sentiment conflates adverse event facts with reporting tone (\(pct)% false negativity on neutral crisis reports) and covers only \(langPct)% of catalog languages. Per absent sections rule, sentiment must be omitted from event overviews."
+            rationale =
+                "Evaluation demonstrates high noise: raw sentiment conflates adverse event facts with reporting tone (\(pct)% false negativity on neutral crisis reports) and covers only \(langPct)% of catalog languages. Per absent sections rule, sentiment must be omitted from event overviews."
         } else {
-            rationale = "Evaluation demonstrates high precision and multilingual coverage; overview sentiment is justified."
+            rationale =
+                "Evaluation demonstrates high precision and multilingual coverage; overview sentiment is justified."
         }
 
         return CoverageSentimentMetrics(
@@ -314,7 +326,8 @@ public final class CoverageSentimentEvaluator: Sendable {
                 label: "Neutral",
                 confidence: 0.85,
                 isConfoundedByEventAdversity: true,
-                rationale: "Lexical sentiment confounded by adverse event vocabulary; reporting tone is objective factual."
+                rationale:
+                    "Lexical sentiment confounded by adverse event vocabulary; reporting tone is objective factual."
             )
         }
 

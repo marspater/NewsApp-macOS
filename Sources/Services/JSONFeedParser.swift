@@ -16,7 +16,7 @@ struct JSONFeedItem: Decodable {
     let datePublished: String?
     let image: String?
     let tags: [String]?
-    
+
     // For RSS-in-JSON compatibility some apis use 'link' or 'pubDate' or 'thumbnail'
     let link: String?
     let pubDate: String?
@@ -35,43 +35,47 @@ struct JSONFeedItem: Decodable {
 class JSONFeedParser {
     static func parse(data: Data, feedURL: String) -> [FeedArticle]? {
         let decoder = JSONDecoder()
-        
+
         // Determine source
         var baseSource = "Feed"
         if let urlComponents = URL(string: feedURL), let host = urlComponents.host {
             baseSource = host.replacingOccurrences(of: "www.", with: "")
                 .replacingOccurrences(of: "api.", with: "")
         }
-        
+
         // Try parsing strict JSON Feed format first
         if let feed = try? decoder.decode(JSONFeed.self, from: data) {
             let sourceName = feed.title ?? baseSource
-            
+
             var articles = [FeedArticle]()
             for item in feed.items.prefix(500) {
                 if Task.isCancelled { return nil }
                 let link = item.url ?? item.link ?? item.id ?? ""
                 if link.isEmpty { continue }
-                
+
                 let title = item.title ?? "Untitled"
-                
+
                 let rawDate = item.datePublished ?? item.pubDate ?? ""
                 let pubDate = DateParser.parse(rawDate) ?? DateParser.unknownDate
-                
+
                 let imageUrl = item.image ?? item.thumbnail
-                
+
                 var category: String? = nil
                 if let tags = item.tags, !tags.isEmpty {
                     category = tags.first
                 } else if let cats = item.categories, !cats.isEmpty {
                     category = cats.first
                 }
-                
+
                 let cleanDesc = item.summary ?? stripSimpleHTML(item.description ?? "")
                 let cleanContent = item.contentHTML.map(stripSimpleHTML) ?? item.contentText
-                let readableContent = cleanContent.flatMap { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0 }
+                let readableContent = cleanContent.flatMap {
+                    $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0
+                }
 
-                let extracted = item.contentHTML.map { ContentExtractionPipeline.shared.extractFromHTML($0, baseUrl: link) }
+                let extracted = item.contentHTML.map {
+                    ContentExtractionPipeline.shared.extractFromHTML($0, baseUrl: link)
+                }
                 let article = FeedArticle(
                     title: title.trimmingCharacters(in: .whitespacesAndNewlines),
                     link: link,
@@ -84,26 +88,32 @@ class JSONFeedParser {
                     fullContent: extracted?.content ?? readableContent,
                     category: category,
                     contentFetched: readableContent != nil,
-                    readerDocument: { if case .success(_, _, let document) = extracted { return document?.curated(feedImage: imageUrl, title: title) }; return nil }()
+                    readerDocument: {
+                        if case .success(_, _, let document) = extracted {
+                            return document?.curated(feedImage: imageUrl, title: title)
+                        }
+                        return nil
+                    }()
                 )
                 articles.append(article)
             }
             return articles
         }
-        
+
         return nil
     }
-    
+
     private static func stripSimpleHTML(_ html: String) -> String {
-        var str = html.replacingOccurrences(of: "(?i)</(p|div|blockquote|h[1-6]|li|tr)>", with: "\n\n", options: .regularExpression)
+        var str = html.replacingOccurrences(
+            of: "(?i)</(p|div|blockquote|h[1-6]|li|tr)>", with: "\n\n", options: .regularExpression)
         str = str.replacingOccurrences(of: "(?i)<(br|hr)\\s*/?>", with: "\n", options: .regularExpression)
         str = str.replacingOccurrences(of: "<[^>]+>", with: " ", options: .regularExpression)
-        
+
         let entities: [(String, String)] = [
             ("&nbsp;", " "), ("&amp;", "&"), ("&quot;", "\""), ("&apos;", "'"),
             ("&#39;", "'"), ("&lt;", "<"), ("&gt;", ">"), ("&#8217;", "\u{2019}"),
             ("&#8220;", "\u{201C}"), ("&#8221;", "\u{201D}"), ("&#8212;", "\u{2014}"),
-            ("&mdash;", "\u{2014}"), ("&#8211;", "\u{2013}"), ("&ndash;", "\u{2013}")
+            ("&mdash;", "\u{2014}"), ("&#8211;", "\u{2013}"), ("&ndash;", "\u{2013}"),
         ]
         for (entity, replacement) in entities {
             str = str.replacingOccurrences(of: entity, with: replacement, options: .caseInsensitive)

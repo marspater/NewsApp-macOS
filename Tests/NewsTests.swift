@@ -444,6 +444,7 @@ struct NewsTests {
             try await testEventReadingState(fixtureRoot: fixtureRoot)
             testEventFeedSummaryUnit()
             await testEventFeedGroupingAndStability()
+            testEventFeedGroupingOptimization()
             try await testFiniteBriefing()
             try await testPublisherContentProvenance()
             try await testRefreshClustersEvents(fixtureRoot: fixtureRoot)
@@ -537,6 +538,7 @@ struct NewsTests {
         try await testEventReadingState(fixtureRoot: fixtureRoot)
         testEventFeedSummaryUnit()
         await testEventFeedGroupingAndStability()
+        testEventFeedGroupingOptimization()
         try await testFiniteBriefing()
         try await testPublisherContentProvenance()
         try await testRefreshClustersEvents(fixtureRoot: fixtureRoot)
@@ -7801,6 +7803,104 @@ struct NewsTests {
                 FeedSnapshot(articles: [a, b], events: [seen]), holding: true, mode: .events, hasMore: true),
             .refreshedInPlace, "A same-order first page keeps further pages")
         assertEqual(buffer.displayed.articles.count, 4, "Loaded pages stay")
+    }
+
+    static func testEventFeedGroupingOptimization() {
+        print("  - Testing FeedEntry array allocation avoidance logic for ID derivation...")
+        let now = Date()
+        func article(_ id: String, source: String, minutesAgo: Double, title: String? = nil) -> FeedArticle {
+            FeedArticle(
+                storedID: id, title: title ?? "Story \(id)", link: "https://example.com/\(id)", guid: id,
+                description: "", pubDate: now.addingTimeInterval(-minutesAgo * 60), source: source)
+        }
+        func member(_ article: FeedArticle, joined: Int = 1) -> EventFeedMember {
+            EventFeedMember(
+                articleID: article.id, source: article.source, title: article.title, date: article.pubDate,
+                joinedVersion: joined, isRead: false, isSaved: false)
+        }
+
+        let a = article("a", source: "Wire One", minutesAgo: 30)
+        let b = article("b", source: "Daily Two", minutesAgo: 45)
+        let c = article("c", source: "Solo", minutesAgo: 60)
+        let d = article("d", source: "Another", minutesAgo: 70)
+        let e = article("e", source: "Extra", minutesAgo: 80)
+
+        // Confirmed event (2 members: a, b)
+        let eventAB = EventFeedSummary(
+            eventID: "e1", membershipVersion: 1, seenVersion: nil, members: [member(a), member(b)])
+        // Unconfirmed event (1 member: e)
+        let eventUnconfirmed = EventFeedSummary(
+            eventID: "e2", membershipVersion: 1, seenVersion: nil, members: [member(e)])
+
+        let articlesWithDupes = [a, a, b, c, c, d, e]
+        let events = [eventAB, eventUnconfirmed]
+
+        // 1. Verify entryIDs matches entries().map(\.id) in event mode with dupes and grouped members
+        assertEqual(
+            EventFeedGrouping.entryIDs(for: articlesWithDupes, events: events, mode: .events),
+            EventFeedGrouping.entries(for: articlesWithDupes, events: events, mode: .events).map(\.id),
+            "Optimized entryIDs matches entries().map(\\.id) for events"
+        )
+
+        // 2. Verify entryIDs matches entries().map(\.id) in non-event mode (publications)
+        assertEqual(
+            EventFeedGrouping.entryIDs(for: articlesWithDupes, events: events, mode: .publications),
+            EventFeedGrouping.entries(for: articlesWithDupes, events: events, mode: .publications).map(\.id),
+            "Optimized entryIDs matches entries().map(\\.id) for publications"
+        )
+
+        // 3. Reordered articles
+        let articlesReordered = [d, c, b, a]
+        assertEqual(
+            EventFeedGrouping.entryIDs(for: articlesReordered, events: events, mode: .events),
+            EventFeedGrouping.entries(for: articlesReordered, events: events, mode: .events).map(\.id),
+            "Optimized entryIDs matches for reordered articles"
+        )
+
+        // 4. Newly grouped articles
+        let eventCD = EventFeedSummary(
+            eventID: "e3", membershipVersion: 1, seenVersion: nil, members: [member(c), member(d)])
+        assertEqual(
+            EventFeedGrouping.entryIDs(for: [a, b, c, d], events: [eventAB, eventCD], mode: .events),
+            EventFeedGrouping.entries(for: [a, b, c, d], events: [eventAB, eventCD], mode: .events).map(\.id),
+            "Optimized entryIDs matches for newly grouped articles"
+        )
+
+        // 5. Scaling and allocation behavior: 200, 1000, and 10000 items
+        for count in [200, 1000, 10000] {
+            var syntheticArticles: [FeedArticle] = []
+            syntheticArticles.reserveCapacity(count)
+            var syntheticMembers: [EventFeedMember] = []
+            syntheticMembers.reserveCapacity(count / 2)
+
+            for i in 0..<count {
+                let id = "art_\(count)_\(i)"
+                let art = article(id, source: "Source_\(i % 5)", minutesAgo: Double(i))
+                syntheticArticles.append(art)
+                if i % 2 == 0 {
+                    syntheticMembers.append(member(art))
+                }
+            }
+
+            let syntheticEvent = EventFeedSummary(
+                eventID: "syn_event_\(count)",
+                membershipVersion: 1,
+                seenVersion: nil,
+                members: syntheticMembers
+            )
+
+            assertEqual(
+                EventFeedGrouping.entryIDs(for: syntheticArticles, events: [syntheticEvent], mode: .events),
+                EventFeedGrouping.entries(for: syntheticArticles, events: [syntheticEvent], mode: .events).map(\.id),
+                "Scaled entryIDs matches entries for \(count) items (.events mode)"
+            )
+            assertEqual(
+                EventFeedGrouping.entryIDs(for: syntheticArticles, events: [syntheticEvent], mode: .publications),
+                EventFeedGrouping.entries(for: syntheticArticles, events: [syntheticEvent], mode: .publications).map(
+                    \.id),
+                "Scaled entryIDs matches entries for \(count) items (.publications mode)"
+            )
+        }
     }
 
     @MainActor

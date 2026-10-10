@@ -26,7 +26,7 @@ struct OverviewThematicAngleValidator: Sendable {
         "expected to drop", "expected to fall", "expected to reach",
         "will reach", "will hit", "will surge", "will double", "will triple",
         "outlook suggests", "price target", "price targets",
-        "analysts anticipate", "analysts project", "projected by 20"
+        "analysts anticipate", "analysts project", "projected by 20",
     ]
 
     /// Known investment advice, stock ratings, and trading recommendation keywords.
@@ -37,7 +37,7 @@ struct OverviewThematicAngleValidator: Sendable {
         "recommend selling", "stock pick", "stock picks", "trading advice",
         "investment advice", "portfolio allocation", "buy rating",
         "sell rating", "hold rating", "target price recommendation",
-        "should buy shares", "should sell shares", "buy shares"
+        "should buy shares", "should sell shares", "buy shares",
     ]
 
     /// Evaluates whether text contains speculative forecasts or forward-looking projections.
@@ -149,12 +149,12 @@ struct OverviewThematicAngleExtractor: Sendable {
         "$", "€", "£", "¥", "₴", "usd", "eur", "gbp", "cad", "aud",
         "million", "billion", "trillion", "revenue", "valuation",
         "market cap", "earnings", "profit", "loss", "budget", "funding",
-        "debt", "dividend", "acquisition price", "cash and equity"
+        "debt", "dividend", "acquisition price", "cash and equity",
     ]
 
     private static let quantitativeMarkers: [String] = [
         "%", "percent", "employees", "workforce", "megawatts", "gigawatts",
-        "kilometers", "kilometres", "tonnes", "hectares", "acres", "passengers"
+        "kilometers", "kilometres", "tonnes", "hectares", "acres", "passengers",
     ]
 
     /// Extracts a validated thematic angle from existing verified facts and source evidence.
@@ -179,10 +179,11 @@ struct OverviewThematicAngleExtractor: Sendable {
 
         for fact in facts {
             // Rule 1 & 2: Filter out forecasts or investment advice
-            if OverviewThematicAngleValidator.isForecast(fact.statement) ||
-               OverviewThematicAngleValidator.isForecast(fact.quote) ||
-               OverviewThematicAngleValidator.isInvestmentAdvice(fact.statement) ||
-               OverviewThematicAngleValidator.isInvestmentAdvice(fact.quote) {
+            if OverviewThematicAngleValidator.isForecast(fact.statement)
+                || OverviewThematicAngleValidator.isForecast(fact.quote)
+                || OverviewThematicAngleValidator.isInvestmentAdvice(fact.statement)
+                || OverviewThematicAngleValidator.isInvestmentAdvice(fact.quote)
+            {
                 continue
             }
 
@@ -221,11 +222,12 @@ struct OverviewThematicAngleExtractor: Sendable {
             let citID = item.citationID
             allCitationIDs.insert(citID)
 
-            angleFacts.append(OverviewFact(
-                id: "angle_fact_\(index + 1)",
-                text: item.fact.statement,
-                citationIDs: [citID]
-            ))
+            angleFacts.append(
+                OverviewFact(
+                    id: "angle_fact_\(index + 1)",
+                    text: item.fact.statement,
+                    citationIDs: [citID]
+                ))
         }
 
         // Synthesize a factual, non-speculative summary sentence from the first 2 facts
