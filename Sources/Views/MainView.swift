@@ -20,6 +20,7 @@ extension Notification.Name {
 struct MainView: View {
     @State private var selectedTopic: String? = "Today"
     @State private var searchText: String = ""
+    @State private var searchTokens: [ArchiveSearchToken] = []
     @State private var mastheadNotice: MastheadNotice?
     @State private var articlePath = NavigationPath()
 
@@ -47,7 +48,10 @@ struct MainView: View {
 
                     ArticleListView(
                         selectedTopic: $selectedTopic,
-                        searchText: $searchText,
+                        searchText: Binding(
+                            get: { archiveQuery },
+                            set: { searchText = $0 }
+                        ),
                         mastheadNotice: $mastheadNotice,
                         articlePath: $articlePath
                     )
@@ -88,8 +92,10 @@ struct MainView: View {
             Text(articleStore.operationError ?? "Please try again.")
         }
         .navigationSplitViewStyle(.balanced)
-        // The system sidebar field: Liquid Glass on macOS 26, the standard search field on macOS 15.
-        .searchable(text: $searchText, placement: .sidebar, prompt: "Search")
+        // One archive search in the trailing toolbar, shared by list and reader.
+        .searchable(text: $searchText, tokens: $searchTokens, placement: .toolbar, prompt: "Search archive") { token in
+            Text(token.expression)
+        }
         .searchSuggestions { searchOperatorSuggestions }
         .frame(minWidth: 900, minHeight: 600)
         .onAppear {
@@ -117,7 +123,19 @@ struct MainView: View {
         .onChange(of: selectedTopic) { _, _ in
             articlePath = NavigationPath()
         }
-        .onChange(of: searchText) { _, _ in
+        .onChange(of: searchText) { _, updatedText in
+            let promoted = ArchiveSearchToken.promoteCompleted(in: updatedText)
+            if !promoted.tokens.isEmpty {
+                for token in promoted.tokens where !searchTokens.contains(token) {
+                    searchTokens.append(token)
+                }
+                searchText = promoted.text
+            }
+            if !articlePath.isEmpty { articlePath = NavigationPath() }
+        }
+        .onChange(of: searchTokens) { _, tokens in
+            let kept = ArchiveSearchToken.latestPerField(tokens)
+            if kept != tokens { searchTokens = kept }
             if !articlePath.isEmpty { articlePath = NavigationPath() }
         }
         // Notification Deep Link & Section Jump Routing
@@ -155,6 +173,10 @@ struct MainView: View {
 
     // MARK: - Search Operators
 
+    private var archiveQuery: String {
+        ArchiveSearchToken.query(text: searchText, tokens: searchTokens)
+    }
+
     private static let searchOperators: [(token: String, summary: String)] = [
         ("is:unread", "Unread stories"),
         ("is:read", "Stories you have read"),
@@ -176,11 +198,26 @@ struct MainView: View {
             Self.searchOperators.filter { lowered.isEmpty || ($0.token.hasPrefix(lowered) && $0.token != lowered) },
             id: \.token
         ) { option in
-            HStack(spacing: AppSpacing.sm) {
-                Text(option.token).font(.system(.body, design: .monospaced))
-                Text(option.summary).foregroundStyle(AppColor.secondaryText)
+            if let token = ArchiveSearchToken(completedExpression: option.token) {
+                HStack(spacing: AppSpacing.sm) {
+                    Text(option.token).font(.system(.body, design: .monospaced))
+                    Text(option.summary).foregroundStyle(AppColor.secondaryText)
+                }
+                .searchCompletion(token)
+            } else {
+                // Source and category need values before becoming tokens.
+                HStack(spacing: AppSpacing.sm) {
+                    Text(option.token).font(.system(.body, design: .monospaced))
+                    Text(option.summary).foregroundStyle(AppColor.secondaryText)
+                }
+                .searchCompletion(typed + option.token)
             }
-            .searchCompletion(typed + option.token)
+        }
+        if let token = ArchiveSearchToken(completedExpression: word),
+            lowered.hasPrefix("source:") || lowered.hasPrefix("category:")
+        {
+            Text("Filter: \(token.expression)")
+                .searchCompletion(token)
         }
     }
 
