@@ -48,6 +48,8 @@ enum EventClusterer {
         }
         var judgementsLeft = judgeBudget
         var judged = 0
+        // A settled verdict remains authoritative for this pass, including after the budget is exhausted.
+        var settledPairs: [Set<String>: EventPairAssessment] = [:]
         var embeddings: [String: NLEmbedding?] = [:]
         func paraphrased(_ a: EventMatchRow, _ b: EventMatchRow, language: String?) -> Bool {
             guard let language else { return false }
@@ -60,6 +62,8 @@ enum EventClusterer {
         }
         /// The deterministic assessment, settled by the judge when it is open and budget remains.
         func resolved(_ a: EventMatchRow, _ b: EventMatchRow) async -> EventPairAssessment {
+            let key = Set([a.id, b.id])
+            if let known = settledPairs[key] { return known }
             let first = features(a)
             let second = features(b)
             var pair = EventMatcher.assess(first, second, policy: matchPolicy)
@@ -74,7 +78,9 @@ enum EventClusterer {
             else { return pair }
             judgementsLeft -= 1
             judged += 1
-            return same ? EventMatcher.confirmed(pair, policy: matchPolicy) : EventMatcher.rejected(pair)
+            pair = same ? EventMatcher.confirmed(pair, policy: matchPolicy) : EventMatcher.rejected(pair)
+            settledPairs[key] = pair
+            return pair
         }
 
         var remaining = limit
@@ -131,7 +137,10 @@ enum EventClusterer {
                     guard !members.isEmpty, members.count < matchPolicy.maximumEventSize,
                         !members.contains(where: { excluded.contains($0.id) })
                     else { continue }
-                    var pairs = members.map { EventMatcher.assess(article, features($0), policy: matchPolicy) }
+                    var pairs = members.map {
+                        settledPairs[Set([row.id, $0.id])]
+                            ?? EventMatcher.assess(article, features($0), policy: matchPolicy)
+                    }
                     // The judge settles open pairs, and confirms an admission that rests only on thin matches.
                     let admitted = EventMatcher.eventScore(pairs: pairs, policy: matchPolicy) != nil
                     let thin = !pairs.contains { $0.isMatch && !$0.needsConfirmation }
@@ -157,17 +166,20 @@ enum EventClusterer {
                         if pair.isMatch { scored.append((candidateRow, pair.score)) }
                     }
                     scored.sort { $0.score != $1.score ? $0.score > $1.score : $0.row.id < $1.row.id }
-                    var group: [(id: String, features: EventFeatures)] = []
+                    var group: [EventMatchRow] = []
                     for candidate in scored where group.count + 1 < matchPolicy.maximumEventSize {
-                        let candidateFeatures = features(candidate.row)
-                        guard
-                            group.allSatisfy({
-                                EventMatcher.assess(candidateFeatures, $0.features, policy: matchPolicy).isCompatible
-                            })
-                        else { continue }
+                        var compatible = true
+                        for partner in group {
+                            try Task.checkCancellation()
+                            if !(await resolved(candidate.row, partner)).isCompatible {
+                                compatible = false
+                                break
+                            }
+                        }
+                        guard compatible else { continue }
                         let partnerExclusions = try await database.eventExclusions(of: candidate.row.id)
                         guard !group.contains(where: { partnerExclusions.contains($0.id) }) else { continue }
-                        group.append((candidate.row.id, candidateFeatures))
+                        group.append(candidate.row)
                     }
                     if !group.isEmpty { decision = .create(with: group.map(\.id)) }
                 }

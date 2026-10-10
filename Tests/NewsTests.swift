@@ -6506,6 +6506,33 @@ struct NewsTests {
         assertEqual(try await EventClusterer.run(in: db, now: now).merged, 0, "A merged story is not merged again")
         await db.close()
 
+        // A seed matching two partners does not make those partners one occurrence. A settled
+        // DIFFERENT must also survive budget exhaustion when the remaining partner tries to join.
+        for separatesPartners in [true, false] {
+            let forming = DatabaseEngine(path: ":memory:")
+            try await forming.open()
+            try await forming.upsertArticles(Array(quake.prefix(3)))
+            var confirmation = EventMatchPolicy.standard
+            confirmation.strictWhat = 2  // Exercise the judge without a live model.
+            let controlled = EventJudge { a, b in
+                !separatesPartners || Set([a.id, b.id]) != Set(["m2", "m3"])
+            }
+            let formed = try await EventClusterer.run(
+                in: forming, matchPolicy: confirmation, judge: controlled, judgeBudget: 3, now: now)
+            let first = try await forming.eventID(forArticle: "m1")
+            let second = try await forming.eventID(forArticle: "m2")
+            let third = try await forming.eventID(forArticle: "m3")
+            assertTrue(first != nil, "Confirmed seed pairs still form an event")
+            if separatesPartners {
+                assertTrue(second == nil || second != third, "A DIFFERENT partner pair cannot share a new event")
+                assertEqual(formed.joined, 0, "The rejected partner cannot rejoin after the judge budget runs out")
+            } else {
+                assertTrue(first == second && first == third, "Three confirmed SAME pairs form one event")
+            }
+            assertEqual(formed.judged, 3, "Each of the three pairs is settled once within the budget")
+            await forming.close()
+        }
+
         // One explicit DIFFERENT cross-pair vetoes a merge despite an otherwise compatible majority.
         let vetoed = try await library()
         var confirmingPolicy = EventMatchPolicy.standard

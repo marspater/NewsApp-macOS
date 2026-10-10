@@ -380,7 +380,7 @@ struct EventPairAssessment: Sendable, Equatable {
 enum EventMatcher {
     /// Bump when matching changes; recent articles are then matched again. Event members whose
     /// title and description are unchanged keep their events.
-    static let version = 3
+    static let version = 4
 
     /// Who, what, where and when for one pair. Headline similarity alone never passes: a match needs
     /// a shared name or place, shared action terms, closeness in time and no contradicting facts.
