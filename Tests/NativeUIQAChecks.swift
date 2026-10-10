@@ -243,7 +243,11 @@ struct NativeUIQAChecks {
         // E key: expands/collapses event sources
         // G key: toggles event grouping
         // U key: applies queued updates
-        // W key: toggles reader experience mode / web view
+        // W key: steps through the reader's modes in toolbar order
+        assertEqual(ReaderMode.overview.next(hasOverview: true), .story, "W moves from Overview to Story")
+        assertEqual(ReaderMode.story.next(hasOverview: true), .web, "W moves from Story to Web")
+        assertEqual(ReaderMode.web.next(hasOverview: true), .overview, "W returns from Web to Overview for events")
+        assertEqual(ReaderMode.web.next(hasOverview: false), .story, "W returns from Web to Story without an overview")
         // J/K: previous / next article
         // M: toggle read/unread
         // S: toggle saved/bookmark
@@ -683,7 +687,7 @@ struct NativeUIQAChecks {
         assertEqual(SettingsPane.storage.rawValue, "storage", "Storage pane raw value")
         assertEqual(SettingsPane.updates.rawValue, "updates", "Updates pane raw value")
         assertEqual(SettingsView.lastPaneStorageKey, "lastSettingsPane", "Last pane storage key matches standard")
-        assertEqual(SettingsView.paneWidth, 500, "Settings pane width is 500pt")
+        assertEqual(SettingsView.paneWidth, 720, "Settings pane width fits all nine tabs")
     }
 
     static func testSecondaryWindowAndSheetChrome() {

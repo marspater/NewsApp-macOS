@@ -64,6 +64,8 @@ struct FeedCatalogView: View {
             }
         }
         .task { await feedManager.reloadFeedHealth() }
+        // Sheets close with Esc as well as Done (DESIGN.md 4).
+        .onExitCommand { dismiss() }
     }
 
     private var gapsHeader: some View {

@@ -40,6 +40,8 @@ struct EventOverviewReaderView: View {
     @Environment(\.effectiveReduceMotion) private var reduceMotion
 
     @State private var isSourcesExpanded: Bool = false
+    /// The lead image could not load, so its caption and credit are hidden with it.
+    @State private var leadImageFailed = false
     @State private var activeCitationPreview: OverviewCitation? = nil
 
     // MARK: - Layout Metrics & Bounds
@@ -255,7 +257,7 @@ struct EventOverviewReaderView: View {
 
     private var articleCountText: String {
         let count = max(memberArticles.count, overview.memberArticleIDs.count)
-        return count == 1 ? "1 article" : "\(count) articles"
+        return count == 1 ? "1 story" : "\(count) stories"
     }
 
     private var publisherCountText: String {
@@ -407,33 +409,36 @@ struct EventOverviewReaderView: View {
             if let url = URL(string: leadImage.url) {
                 AsyncImage(url: url) { phase in
                     if let image = phase.image {
+                        // Figures fill the measure and are never cropped (DESIGN.md 9).
                         image
                             .resizable()
-                            .aspectRatio(contentMode: .fill)
-                            .frame(maxHeight: 380)
-                            .clipped()
+                            .aspectRatio(contentMode: .fit)
+                            .frame(maxWidth: .infinity, maxHeight: 380)
                             .clipShape(RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous))
                     } else if phase.error != nil {
-                        EmptyView()
+                        Color.clear
+                            .frame(height: 0)
+                            .onAppear { leadImageFailed = true }
                     } else {
                         Rectangle()
                             .fill(AppColor.surface)
                             .frame(height: 220)
                             .clipShape(RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous))
-                            .overlay(ProgressView().scaleEffect(0.8))
+                            .overlay(ProgressView().controlSize(.small))
                     }
                 }
                 .accessibilityHidden(true)
+                .onChange(of: leadImage.url) { _, _ in leadImageFailed = false }
             }
 
-            if let caption = leadImage.caption?.trimmingCharacters(in: .whitespacesAndNewlines), !caption.isEmpty {
+            if !leadImageFailed, let caption = leadImage.caption?.trimmingCharacters(in: .whitespacesAndNewlines), !caption.isEmpty {
                 Text(caption)
                     .font(AppTypography.overviewFont(.annotation, scale: textScale))
                     .foregroundColor(currentSecondaryTextColor)
                     .textSelection(.enabled)
             }
 
-            if let credit = leadImage.credit?.trimmingCharacters(in: .whitespacesAndNewlines), !credit.isEmpty {
+            if !leadImageFailed, let credit = leadImage.credit?.trimmingCharacters(in: .whitespacesAndNewlines), !credit.isEmpty {
                 Text(credit)
                     .font(AppTypography.overviewFont(.caption, scale: textScale))
                     .foregroundColor(currentTertiaryTextColor)

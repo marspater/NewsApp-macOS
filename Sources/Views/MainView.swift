@@ -32,15 +32,26 @@ struct MainView: View {
     @EnvironmentObject private var savedStories: SavedStoriesManager
 
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
+    /// The tension series behind the sidebar reading; the sheet opens with it.
+    @State private var tensionHistory: [TensionHistoryDay] = []
+    @State private var showsTension = false
+    @State private var tensionUpdatedAt: Date?
+    /// The UTC day the reading belongs to; it advances at midnight UTC so the sidebar moves to the new day's reading.
+    @State private var tensionDayStart = TensionMethodology.day(containing: Date()).start
     @State private var isWindowDropTargeted = false
 
     var body: some View {
         NavigationSplitView(columnVisibility: $columnVisibility) {
-            SidebarView(selectedTopic: $selectedTopic, mastheadNotice: $mastheadNotice)
-                .environmentObject(appSettings)
-                .environmentObject(feedManager)
-                .environmentObject(savedStories)
-                .environmentObject(readManager)
+            SidebarView(
+                selectedTopic: $selectedTopic, mastheadNotice: $mastheadNotice,
+                showsTensionReading: appSettings.tensionCollectionOptIn,
+                tensionReading: TensionHistory.latestReading(in: tensionHistory),
+                openTension: { showsTension = true }
+            )
+            .environmentObject(appSettings)
+            .environmentObject(feedManager)
+            .environmentObject(savedStories)
+            .environmentObject(readManager)
         } detail: {
             NavigationStack(path: $articlePath) {
                 ZStack {
@@ -92,6 +103,32 @@ struct MainView: View {
             Text(articleStore.operationError ?? "Please try again.")
         }
         .navigationSplitViewStyle(.balanced)
+        // A sheet, so the rest of the window waits until the reader closes it.
+        .sheet(isPresented: $showsTension) {
+            TensionIndexView(history: tensionHistory, updatedAt: tensionUpdatedAt)
+                .environmentObject(articleStore)
+                .environmentObject(appSettings)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .showNewsTensionCommand)) { _ in
+            if NewsTensionRequest.take() { showsTension = true }
+        }
+        .task(id: tensionReloadKey) {
+            guard appSettings.tensionCollectionOptIn, articleStore.isReady else {
+                tensionHistory = []
+                return
+            }
+            guard let loaded = try? await TensionHistory.load(from: articleStore.database, now: Date()),
+                !Task.isCancelled
+            else { return }
+            tensionHistory = loaded
+            tensionUpdatedAt = Date()
+        }
+        .task(id: tensionDayStart) {
+            let nextDay = TensionMethodology.day(containing: Date()).end
+            try? await Task.sleep(for: .seconds(max(1, nextDay.timeIntervalSinceNow + 1)))
+            guard !Task.isCancelled else { return }
+            tensionDayStart = TensionMethodology.day(containing: Date()).start
+        }
         // One archive search in the trailing toolbar, shared by list and reader.
         .searchable(text: $searchText, tokens: $searchTokens, placement: .toolbar, prompt: "Search archive") { token in
             Text(token.expression)
@@ -102,6 +139,8 @@ struct MainView: View {
             if feedManager.articles.isEmpty {
                 feedManager.fetchFeeds()
             }
+            // A window Settings reopened missed the notification; the request is still pending.
+            if NewsTensionRequest.take() { showsTension = true }
         }
         .onDrop(of: [.fileURL], isTargeted: $isWindowDropTargeted) { providers in
             handleWindowOPMLDrop(providers: providers)
@@ -171,6 +210,11 @@ struct MainView: View {
         }
     }
 
+    /// The sidebar reading is rescored when collection is turned on, after each refresh and when a new UTC day begins.
+    private var tensionReloadKey: String {
+        "\(appSettings.tensionCollectionOptIn):\(articleStore.isReady):\(feedManager.lastRefreshCompletedAt?.timeIntervalSince1970 ?? 0):\(tensionDayStart.timeIntervalSince1970)"
+    }
+
     // MARK: - Search Operators
 
     private var archiveQuery: String {
@@ -199,18 +243,12 @@ struct MainView: View {
             id: \.token
         ) { option in
             if let token = ArchiveSearchToken(completedExpression: option.token) {
-                HStack(spacing: AppSpacing.sm) {
-                    Text(option.token).font(.system(.body, design: .monospaced))
-                    Text(option.summary).foregroundStyle(AppColor.secondaryText)
-                }
-                .searchCompletion(token)
+                operatorSuggestion(option)
+                    .searchCompletion(token)
             } else {
                 // Source and category need values before becoming tokens.
-                HStack(spacing: AppSpacing.sm) {
-                    Text(option.token).font(.system(.body, design: .monospaced))
-                    Text(option.summary).foregroundStyle(AppColor.secondaryText)
-                }
-                .searchCompletion(typed + option.token)
+                operatorSuggestion(option)
+                    .searchCompletion(typed + option.token)
             }
         }
         if let token = ArchiveSearchToken(completedExpression: word),
@@ -220,6 +258,22 @@ struct MainView: View {
                 .searchCompletion(token)
         }
     }
+
+    /// One suggestion row. The operator column is as wide as the longest operator, so every description starts at
+    /// the same position.
+    private func operatorSuggestion(_ option: (token: String, summary: String)) -> some View {
+        HStack(spacing: AppSpacing.sm) {
+            ZStack(alignment: .leading) {
+                Text(Self.longestSearchOperator).hidden().accessibilityHidden(true)
+                Text(option.token)
+            }
+            .font(.system(.body, design: .monospaced))
+            Text(option.summary).foregroundStyle(AppColor.secondaryText)
+        }
+    }
+
+    private static let longestSearchOperator =
+        searchOperators.map(\.token).max { $0.count < $1.count } ?? ""
 
     // MARK: - Window-Level OPML Drop
 

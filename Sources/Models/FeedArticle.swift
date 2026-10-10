@@ -34,8 +34,27 @@ struct FeedArticle: Identifiable, Codable, Hashable, Sendable {
         PublisherContentRevision.inputHash(title: title, description: description, content: fullContent)
     }
 
+    /// The full publication date for the reader and accessibility labels ("October 10, 2026" in English).
     var publicationDateText: String {
-        pubDate == DateParser.unknownDate ? "Date unavailable" : pubDate.formatted(date: .abbreviated, time: .omitted)
+        pubDate == DateParser.unknownDate ? "Date unavailable" : pubDate.formatted(date: .long, time: .omitted)
+    }
+
+    /// The short date cards show (DESIGN.md 8.2): relative within a day ("2 hr. ago"), then month and day, with the
+    /// year only for earlier years.
+    func cardDateText(now: Date = Date(), calendar: Calendar = .current) -> String {
+        guard pubDate != DateParser.unknownDate else { return "Date unavailable" }
+        let age = now.timeIntervalSince(pubDate)
+        if age < 60 { return "Just now" }
+        if age < 24 * 60 * 60 {
+            let formatter = RelativeDateTimeFormatter()
+            formatter.unitsStyle = .abbreviated
+            formatter.dateTimeStyle = .numeric
+            return formatter.localizedString(for: pubDate, relativeTo: now)
+        }
+        if calendar.component(.year, from: pubDate) == calendar.component(.year, from: now) {
+            return pubDate.formatted(.dateTime.month(.abbreviated).day())
+        }
+        return pubDate.formatted(.dateTime.year().month(.abbreviated).day())
     }
 
     /// The publisher to show: the catalog's name for the story's site, else the first line of the feed's own title,

@@ -76,6 +76,9 @@ struct ArticleListView: View {
     @State private var appliesNextUpdate = false
     /// Reloads the list once a refresh the reader asked for has finished.
     @State private var refreshReloads = 0
+    /// A refresh the reader started: its results replace the list as they arrive instead of queueing behind
+    /// the updates button.
+    @State private var isReaderRefreshing = false
     /// Stories the reader's muting removes from this list, across every page.
     @State private var mutedCount = 0
     @State private var showsMuted = false
@@ -112,9 +115,12 @@ struct ArticleListView: View {
 
     private var entries: [FeedEntry] { buffer.displayed.entries(groupingMode) }
 
-    /// The reader is looking at the list or an article from it, so cards must not move underneath.
+    /// The reader is looking at the list or an article from it, so cards must not move underneath. A refresh the
+    /// reader started is the exception while the list is showing: they asked for the new stories.
     private var isHoldingList: Bool {
-        !appliesNextUpdate && (!articlePath.isEmpty || isScrolledAway || isPointerInList || focusedArticleID != nil)
+        guard !appliesNextUpdate else { return false }
+        if !articlePath.isEmpty { return true }
+        return !isReaderRefreshing && (isScrolledAway || isPointerInList || focusedArticleID != nil)
     }
 
     private var queuedUpdateCount: Int {
@@ -129,11 +135,29 @@ struct ArticleListView: View {
 
     @ViewBuilder
     private func listContent(proxy: ScrollViewProxy) -> some View {
-        if filteredArticles.isEmpty && isLoadingPage {
-            ProgressView("Loading articles…").padding(AppSpacing.xl)
-        } else if filteredArticles.isEmpty && queryError != nil {
+        if !filteredArticles.isEmpty {
+            articleGrid(proxy: proxy)
+            if isBriefing { briefingCompletion }
+            if hasMoreResults {
+                Button("Load More Stories") { pageRequest += 1 }
+                    .disabled(isLoadingPage)
+                    .padding(.bottom, AppSpacing.lg)
+            }
+            if queryError != nil {
+                queryFailureView
+                    .padding(.top, AppSpacing.xl)
+            }
+        }
+    }
+
+    /// Loading, failure, no results and empty sections, centered in the visible list area under the masthead.
+    @ViewBuilder
+    private var emptyListContent: some View {
+        if isLoadingPage {
+            ProgressView("Loading stories…")
+        } else if queryError != nil {
             queryFailureView
-        } else if filteredArticles.isEmpty && isSearching {
+        } else if isSearching {
             VStack(spacing: AppSpacing.md) {
                 ContentUnavailableView.search(text: searchText)
                 if mutedCount > 0 && !showsMuted && !listMuting.isEmpty {
@@ -142,20 +166,8 @@ struct ArticleListView: View {
                     }
                 }
             }
-            .padding(.top, AppSpacing.xl)
-        } else if filteredArticles.isEmpty {
-            emptyStateView
         } else {
-            articleGrid(proxy: proxy)
-            if isBriefing { briefingCompletion }
-            if hasMoreResults {
-                Button("Load more articles") { pageRequest += 1 }
-                    .disabled(isLoadingPage)
-                    .padding(.bottom, AppSpacing.lg)
-            }
-        }
-        if queryError != nil && !filteredArticles.isEmpty {
-            queryFailureView
+            emptyStateView
         }
     }
 
@@ -163,7 +175,7 @@ struct ArticleListView: View {
         VStack(spacing: AppSpacing.md) {
             ContentUnavailableView {
                 Label(
-                    filteredArticles.isEmpty ? "Couldn’t Load Articles" : "Couldn’t Load More Articles",
+                    filteredArticles.isEmpty ? "Couldn’t Load Stories" : "Couldn’t Load More Stories",
                     systemImage: "exclamationmark.triangle")
             } description: {
                 Text("The archive could not be loaded. Please try again.")
@@ -182,7 +194,6 @@ struct ArticleListView: View {
             }
         }
         .frame(maxWidth: .infinity)
-        .padding(.top, AppSpacing.xl)
     }
 
     private var selectedStory: FeedArticle? {
@@ -201,6 +212,14 @@ struct ArticleListView: View {
                 ScrollView {
                     masthead
                     listContent(proxy: proxy)
+                }
+                // An empty list keeps its masthead at the top and centers its state in the visible area.
+                .overlay {
+                    if filteredArticles.isEmpty {
+                        emptyListContent
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.horizontal, AppLayout.pageInset)
+                    }
                 }
                 // Queued updates float over the list (DESIGN.md 8.4); the list keeps its place underneath.
                 .overlay(alignment: .top) {
@@ -429,11 +448,6 @@ struct ArticleListView: View {
         .accessibilityLabel(
             showsMuted ? "Showing \(mutedCount) muted stories" : "\(mutedCount) stories hidden by muting"
         )
-        .confirmationDialog("Unmute every source and topic?", isPresented: $confirmsUnmuteAll) {
-            Button("Unmute All", role: .destructive) { appSettings.clearMuting() }
-        } message: {
-            Text("Muted stories return to every list.")
-        }
     }
 
     // MARK: - Queued Updates
@@ -444,7 +458,7 @@ struct ArticleListView: View {
             applyPendingUpdates(proxy: proxy)
         } label: {
             Label(
-                count > 0 ? "\(count) new \(count == 1 ? "story" : "stories")" : "Show updates", systemImage: "arrow.up"
+                count > 0 ? "\(count) new \(count == 1 ? "story" : "stories")" : "Show Updates", systemImage: "arrow.up"
             )
             .font(AppTypography.label)
         }
@@ -458,11 +472,7 @@ struct ArticleListView: View {
 
     private func applyPendingUpdates(proxy: ScrollViewProxy) {
         guard buffer.pending != nil else { return }
-        withAnimation(reduceMotion ? nil : AppMotion.state) {
-            buffer.applyPending()
-        }
-        cursor = buffer.displayed.articles.last.map(ArticleQueryCursor.init)
-        hasMoreResults = pendingHasMore
+        showPendingUpdates()
         if let first = entries.first {
             withAnimation(reduceMotion ? nil : AppMotion.quick) {
                 proxy.scrollTo(first.id, anchor: .top)
@@ -495,43 +505,16 @@ struct ArticleListView: View {
                 .foregroundStyle(AppColor.primaryText)
                 .accessibilityAddTraits(.isHeader)
                 .accessibilityHeading(.h1)
-            HStack(spacing: AppSpacing.xs) {
-                Text(listSubtitle)
-                    .font(AppTypography.caption)
-                    .foregroundStyle(AppColor.secondaryText)
-                    .monospacedDigit()
-                if let mastheadNotice {
-                    Text("·")
-                        .font(AppTypography.caption)
-                        .foregroundStyle(AppColor.secondaryText)
-                        .accessibilityHidden(true)
-                    Text(mastheadNotice.message)
-                        .font(AppTypography.caption)
-                        .foregroundStyle(AppColor.secondaryText)
+            // One line when it fits; at narrow widths the inline actions move to a second line instead of
+            // squeezing every part into its own wrapped column.
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: AppSpacing.xs) {
+                    statusText
+                    statusExtras(startsLine: false)
                 }
-                if waitingCount > 0 && !isBriefing {
-                    Text("·")
-                        .font(AppTypography.caption)
-                        .foregroundStyle(AppColor.secondaryText)
-                        .accessibilityHidden(true)
-                    Button(showsWaiting ? "Hide \(waitingCount) waiting" : "\(waitingCount) waiting for more sources") {
-                        showsWaiting.toggle()
-                    }
-                    .buttonStyle(.plain)
-                    .font(AppTypography.caption)
-                    .foregroundStyle(AppColor.secondaryText)
-                    .help(
-                        showsWaiting
-                            ? "Hide minor stories until more publishers cover them"
-                            : "Minor stories appear once \(StoryVisibilityPolicy.minorStorySources + 1) publishers cover them; unread ones expire after a day"
-                    )
-                }
-                if mutedCount > 0 && !listMuting.isEmpty {
-                    Text("·")
-                        .font(AppTypography.caption)
-                        .foregroundStyle(AppColor.secondaryText)
-                        .accessibilityHidden(true)
-                    mutingMenu
+                VStack(alignment: .leading, spacing: AppSpacing.textStack) {
+                    statusText
+                    HStack(spacing: AppSpacing.xs) { statusExtras(startsLine: true) }
                 }
             }
         }
@@ -539,12 +522,66 @@ struct ArticleListView: View {
         .padding(.horizontal, AppLayout.pageInset)
         .padding(.top, AppSpacing.md)
         .padding(.bottom, AppLayout.cardGap)
+        .confirmationDialog("Unmute every source and topic?", isPresented: $confirmsUnmuteAll) {
+            Button("Unmute All", role: .destructive) { appSettings.clearMuting() }
+        } message: {
+            Text("Muted stories return to every list.")
+        }
+    }
+
+    private var statusText: some View {
+        Text(listSubtitle)
+            .font(AppTypography.caption)
+            .foregroundStyle(AppColor.secondaryText)
+            .monospacedDigit()
+    }
+
+    private var statusSeparator: some View {
+        Text("·")
+            .font(AppTypography.caption)
+            .foregroundStyle(AppColor.secondaryText)
+            .accessibilityHidden(true)
+    }
+
+    /// The masthead notice and inline actions. `startsLine` drops the separator before the first one.
+    @ViewBuilder
+    private func statusExtras(startsLine: Bool) -> some View {
+        let showsWaitingAction = waitingCount > 0 && !isBriefing
+        if let mastheadNotice {
+            if !startsLine { statusSeparator }
+            Text(mastheadNotice.message)
+                .font(AppTypography.caption)
+                .foregroundStyle(AppColor.secondaryText)
+        }
+        if showsWaitingAction {
+            if !startsLine || mastheadNotice != nil { statusSeparator }
+            Button(showsWaiting ? "Hide \(waitingCount) waiting" : "\(waitingCount) waiting for more sources") {
+                showsWaiting.toggle()
+            }
+            .buttonStyle(.plain)
+            .font(AppTypography.caption)
+            .foregroundStyle(AppColor.secondaryText)
+            .help(
+                showsWaiting
+                    ? "Hide minor stories until more publishers cover them"
+                    : "Minor stories appear once \(StoryVisibilityPolicy.minorStorySources + 1) publishers cover them; unread ones expire after a day"
+            )
+        }
+        if mutedCount > 0 && !listMuting.isEmpty {
+            if !startsLine || mastheadNotice != nil || showsWaitingAction { statusSeparator }
+            mutingMenu
+        }
     }
 
     // MARK: - Toolbar
 
     @ToolbarContentBuilder
     private var listToolbar: some ToolbarContent {
+        // With the duplicate title removed nothing fills the toolbar, so macOS 26 and later would lay the list
+        // controls out from the leading edge. A flexible spacer keeps them, and search, at the trailing edge.
+        if #available(macOS 26.0, *) {
+            ToolbarSpacer(.flexible, placement: .primaryAction)
+        }
         ToolbarItemGroup(placement: .primaryAction) {
             Toggle(isOn: $groupsEvents.animation(reduceMotion ? nil : AppMotion.state)) {
                 Label(
@@ -696,7 +733,7 @@ struct ArticleListView: View {
                     GridItem(
                         .adaptive(
                             minimum: AppLayout.gridColumnMinimum,
-                            maximum: AppLayout.gridColumnMaximum), spacing: AppLayout.cardGap)
+                            maximum: AppLayout.gridColumnMaximum), spacing: AppLayout.cardGap, alignment: .top)
                 ],
                 spacing: AppLayout.cardGap
             ) {
@@ -761,7 +798,7 @@ struct ArticleListView: View {
             return false
         }
         return VStack(spacing: AppSpacing.md) {
-            if !isBriefing && feedManager.isAnyFeedLoading {
+            if !isBriefing && feedManager.isAnyFeedLoading && listsWaitingStories {
                 ProgressView("Refreshing news feeds…")
                     .controlSize(.regular)
             } else if !isBriefing && selectedTopic != "Saved Stories" && selectedTopic != "History"
@@ -809,7 +846,6 @@ struct ArticleListView: View {
             }
         }
         .frame(maxWidth: .infinity)
-        .padding(.top, AppSpacing.xl)
     }
 
     private var emptyStateIcon: String {
@@ -825,7 +861,7 @@ struct ArticleListView: View {
     private var emptyStateTitle: String {
         switch selectedTopic {
         case "Briefing": return "No Stories for This Briefing"
-        case "Today": return "No Articles Yet"
+        case "Today": return "No Stories Yet"
         case "Unread": return "All Caught Up"
         case "Saved Stories": return "No Saved Stories"
         case "History": return "No Reading History"
@@ -841,7 +877,7 @@ struct ArticleListView: View {
         case "Today": return "Subscribe to feeds or click refresh to load the latest stories."
         case "Unread": return "You've read all stories in your feeds. Check back later for updates."
         case "Saved Stories": return "Stories you bookmark will be kept here for easy reading."
-        case "History": return "Articles you have opened will appear here."
+        case "History": return "Stories you have opened will appear here."
         default:
             return "New articles matching \(selectedTopic ?? "this section") will appear here once your feeds refresh."
         }
@@ -973,8 +1009,22 @@ struct ArticleListView: View {
 
     /// The reader asked for these stories, so they are shown when the refresh ends instead of waiting behind
     /// the update button.
+    private func showPendingUpdates() {
+        guard buffer.pending != nil else { return }
+        withAnimation(reduceMotion ? nil : AppMotion.state) {
+            buffer.applyPending()
+        }
+        cursor = buffer.displayed.articles.last.map(ArticleQueryCursor.init)
+        hasMoreResults = pendingHasMore
+    }
+
+    /// Refresh means "show me what's new": queued updates appear at once, and results arriving during the refresh
+    /// (collection, event grouping, rating) replace the list instead of waiting behind the updates button.
     private func refreshFeeds() {
         Task {
+            if articlePath.isEmpty { showPendingUpdates() }
+            isReaderRefreshing = true
+            defer { isReaderRefreshing = false }
             await feedManager.fetchFeedsAsync()
             // An open article keeps the list still; its updates wait as usual.
             guard articlePath.isEmpty else { return }
@@ -995,7 +1045,7 @@ struct KeyboardShortcutsView: View {
                 ("J or ↓", "Next story"),
                 ("K or ↑", "Previous story"),
                 ("Space or ↵", "Open focused story"),
-                ("Esc or ←", "Back to list"),
+                ("Esc, ← or B", "Back to list"),
             ]
         ),
         (
@@ -1005,7 +1055,9 @@ struct KeyboardShortcutsView: View {
                 ("S", "Save or remove from Saved Stories"),
                 ("O", "Open in browser"),
                 ("E", "Show or hide event coverage"),
-                ("W or ⇧⌘R", "Switch between Story and Web"),
+                ("W", "Next reading mode: Overview, Story, Web"),
+                ("⇧⌘R", "Switch between Story and Web"),
+                ("C", "Copy link"),
                 ("⌘+ / ⌘− / ⌘0", "Bigger text, smaller text, actual size"),
             ]
         ),

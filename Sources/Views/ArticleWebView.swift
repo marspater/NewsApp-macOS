@@ -87,7 +87,13 @@ struct ArticleWebView: NSViewRepresentable {
                 if nsView.canGoForward { nsView.goForward() }
             case .reload:
                 if context.coordinator.gatewayReady {
-                    nsView.reload()
+                    // After a blocked or failed first load there is no page to reload; request the story again.
+                    if nsView.backForwardList.currentItem == nil {
+                        DispatchQueue.main.async { self.loadError = nil }
+                        nsView.load(URLRequest(url: url))
+                    } else {
+                        nsView.reload()
+                    }
                 } else {
                     context.coordinator.prepareGateway(nsView)
                 }

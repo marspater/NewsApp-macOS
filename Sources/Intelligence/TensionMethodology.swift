@@ -657,10 +657,12 @@ struct TensionHistoryDay: Sendable {
     let contributions: [TensionContribution]
 }
 
-/// An event's share of a day's score, with the headline of one of its panel stories.
+/// An event's share of a day's score, with the headline of one of its panel stories and what the classifier found.
 struct TensionContribution: Sendable {
     let score: TensionEventScore
     let title: String
+    var classification: TensionEventClassification?
+    var reportingFeeds = 0
 }
 
 enum TensionHistory {
@@ -687,15 +689,183 @@ enum TensionHistory {
         let scores = TensionCalibrator.scoreSeries(assessments: assessments, weights: weights)
         var history: [TensionHistoryDay] = []
         for (assessment, score) in zip(assessments, scores) {
-            var articleIDs: [String: [String]] = [:]
-            for event in assessment.events { articleIDs[event.key] = event.articleIDs }
+            var events: [String: TensionEventDay] = [:]
+            for event in assessment.events { events[event.key] = event }
             var contributions: [TensionContribution] = []
             for event in score.eventScores.sorted(by: { $0.rawScore > $1.rawScore }) where event.rawScore > 0 {
-                let title = articleIDs[event.key, default: []].lazy.compactMap { titles[$0] }.first ?? event.key
-                contributions.append(TensionContribution(score: event, title: title))
+                let day = events[event.key]
+                let title = (day?.articleIDs ?? []).lazy.compactMap { titles[$0] }.first ?? event.key
+                contributions.append(
+                    TensionContribution(
+                        score: event, title: title, classification: day?.classification,
+                        reportingFeeds: day?.reporting.count ?? 0))
             }
             history.append(TensionHistoryDay(score: score, coverage: assessment.coverage, contributions: contributions))
         }
         return history
+    }
+}
+
+extension TensionHistory {
+    /// The most recent day with a 7-day index: the reading the sidebar and the tension sheet lead with.
+    static func latestReading(in history: [TensionHistoryDay]) -> TensionHistoryDay? {
+        history.last { $0.score.smoothedIndex != nil }
+    }
+}
+
+// MARK: - Presentation bands
+
+/// Names for ranges of the 0–100 index, so a reading can say "44° Warm". Presentation only: the bands never feed
+/// back into scoring, and they describe what the panel reported, not how dangerous the world is.
+enum TensionLevel: String, CaseIterable, Sendable {
+    case calm = "Calm"
+    case mild = "Mild"
+    case warm = "Warm"
+    case hot = "Hot"
+    case boiling = "Boiling"
+
+    init(index: Double) {
+        switch index {
+        case ..<20: self = .calm
+        case ..<40: self = .mild
+        case ..<60: self = .warm
+        case ..<80: self = .hot
+        default: self = .boiling
+        }
+    }
+
+    /// The index rounded to whole degrees, as the reading shows it.
+    static func degrees(_ index: Double) -> Int {
+        Int(min(100, max(0, index)).rounded())
+    }
+}
+
+// MARK: - Explanation (#159)
+
+/// Everything a tension explanation may say: findings scoring already made, nothing else.
+/// The displayed paragraph is assembled directly from these facts, without model-generated claims.
+struct TensionBriefFacts: Hashable, Sendable {
+    struct Driver: Hashable, Sendable {
+        let headline: String
+        let type: TensionEventType?
+        let deaths: TensionMagnitude
+        let affected: TensionMagnitude
+        let escalation: TensionEscalation
+        let reportingFeeds: Int
+    }
+
+    let day: Date
+    let degrees: Int
+    let level: TensionLevel
+    /// Whole degrees since the previous scored day; nil when it is the first.
+    let change: Int?
+    /// Mean 7-day reading over the scored days shown; nil with fewer than three.
+    let typicalDegrees: Int?
+    let isProvisional: Bool
+    let drivers: [Driver]
+
+    /// The latest reading of a history, with up to three drivers; nil when no day is scored.
+    static func latest(in history: [TensionHistoryDay]) -> TensionBriefFacts? {
+        let scored = history.filter { $0.score.smoothedIndex != nil }
+        guard let day = scored.last, let index = day.score.smoothedIndex else { return nil }
+        let degrees = TensionLevel.degrees(index)
+        let previous = scored.dropLast().last?.score.smoothedIndex.map(TensionLevel.degrees)
+        let readings = scored.compactMap(\.score.smoothedIndex)
+        let typical = readings.count >= 3 ? TensionLevel.degrees(readings.reduce(0, +) / Double(readings.count)) : nil
+        let drivers = day.contributions.prefix(3).map { contribution in
+            Driver(
+                headline: contribution.title, type: contribution.classification?.type,
+                deaths: contribution.classification?.deaths ?? .notReported,
+                affected: contribution.classification?.affected ?? .notReported,
+                escalation: contribution.classification?.escalation ?? .noSignal,
+                reportingFeeds: contribution.reportingFeeds)
+        }
+        return TensionBriefFacts(
+            day: day.score.day.start, degrees: degrees, level: TensionLevel(index: index),
+            change: previous.map { degrees - $0 }, typicalDegrees: typical, isProvisional: day.score.isProvisional,
+            drivers: drivers)
+    }
+
+    // MARK: Plain-language parts
+
+    var readingSentence: String {
+        var parts = ["News tension reads \(degrees)° (\(level.rawValue.lowercased()))"]
+        if let change {
+            parts.append(
+                change == 0
+                    ? "unchanged from the previous day"
+                    : "\(change > 0 ? "up" : "down") \(abs(change))° from the previous day")
+        }
+        if let typicalDegrees {
+            let gap = degrees - typicalDegrees
+            parts.append(
+                abs(gap) <= 3
+                    ? "close to its 30-day average of \(typicalDegrees)°"
+                    : "\(gap > 0 ? "above" : "below") its 30-day average of \(typicalDegrees)°")
+        }
+        return parts.joined(separator: ", ") + "."
+    }
+
+    static func typePhrase(_ type: TensionEventType?) -> String {
+        switch type {
+        case .armedConflict: return "armed conflict"
+        case .terrorism: return "terrorism"
+        case .civilUnrest: return "civil unrest"
+        case .coercion: return "military or economic pressure"
+        case .disaster: return "a disaster"
+        case .healthEmergency: return "a health emergency"
+        case .cyberAttack: return "a cyberattack"
+        case nil: return "a reported incident"
+        }
+    }
+
+    /// "dozens of deaths reported": the order of magnitude the classifier recorded, never an exact figure.
+    static func magnitudePhrase(_ magnitude: TensionMagnitude, _ noun: String) -> String? {
+        switch magnitude {
+        case .notReported: return nil
+        case .units: return "fewer than ten \(noun)"
+        case .tens: return "dozens of \(noun)"
+        case .hundreds: return "hundreds of \(noun)"
+        case .thousands: return "thousands of \(noun)"
+        }
+    }
+
+    static func escalationPhrase(_ escalation: TensionEscalation) -> String? {
+        switch escalation {
+        case .noSignal: return nil
+        case .escalating: return "reports of escalation"
+        case .deescalating: return "signs of de-escalation"
+        case .mixed: return "mixed signs of escalation and de-escalation"
+        }
+    }
+
+    /// One driver as a phrase: its type, reported harm and escalation.
+    static func describe(_ driver: Driver) -> String {
+        var details: [String] = []
+        if let deaths = magnitudePhrase(driver.deaths, "deaths reported") { details.append(deaths) }
+        if let affected = magnitudePhrase(driver.affected, "people reported hurt or displaced") {
+            details.append(affected)
+        }
+        if let escalation = escalationPhrase(driver.escalation) { details.append(escalation) }
+        let base = typePhrase(driver.type)
+        return details.isEmpty ? base : "\(base) with \(details.joined(separator: " and "))"
+    }
+
+    /// The paragraph without a model: every clause comes from a scored finding.
+    var deterministicParagraph: String {
+        var sentences = [readingSentence]
+        if let first = drivers.first {
+            let feeds = first.reportingFeeds == 1 ? "1 panel feed" : "\(first.reportingFeeds) panel feeds"
+            sentences.append(
+                "The largest contribution is \(Self.describe(first)), covered by \(feeds): “\(first.headline)”.")
+        }
+        let others = drivers.dropFirst().map { "\(Self.describe($0)) (“\($0.headline)”)" }
+        if !others.isEmpty {
+            sentences.append("Also contributing: \(others.joined(separator: "; ")).")
+        }
+        if isProvisional {
+            sentences.append("Today's reading is provisional and can still change.")
+        }
+        return sentences.joined(separator: " ")
     }
 }

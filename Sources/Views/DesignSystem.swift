@@ -31,6 +31,19 @@ enum AppColor {
     static let success = Color(NSColor.systemGreen)
     static let warning = Color(NSColor.systemYellow)
     static let danger = Color(NSColor.systemRed)
+    static let caution = Color(NSColor.systemOrange)
+
+    /// The news tension scale from calm to boiling, for the gauge, glyph and trend points.
+    static let tensionScale = Gradient(colors: [success, warning, caution, danger])
+
+    static func tension(_ level: TensionLevel) -> Color {
+        switch level {
+        case .calm: return success
+        case .mild: return warning
+        case .warm: return caution
+        case .hot, .boiling: return danger
+        }
+    }
 
     // Borders, Focus Rings & Badges
     static let borderSubtle = Color(NSColor.separatorColor)
@@ -124,8 +137,12 @@ enum AppTypography {
 
     // System text styles for chrome (DESIGN.md 10)
     static let masthead = Font.largeTitle.bold()
+    /// The news tension reading ("44°").
+    static let tensionReading = Font.system(size: 44, weight: .bold, design: .rounded)
     static let sectionTitle = Font.title3.weight(.semibold)
     static let callout = Font.callout
+    /// A summary paragraph that leads a sheet or panel, such as the news tension explanation.
+    static let lede = Font.title3
     /// Publisher and kicker; pair with `eyebrowTracking` and `.textCase(.uppercase)`.
     static let eyebrow = Font.caption2.weight(.semibold)
 

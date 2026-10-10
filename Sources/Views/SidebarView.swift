@@ -17,6 +17,10 @@ extension FocusedValues {
 struct SidebarView: View {
     @Binding var selectedTopic: String?
     @Binding var mastheadNotice: MastheadNotice?
+    /// Panel collection is on, so the sidebar foot shows the news tension reading.
+    var showsTensionReading = false
+    var tensionReading: TensionHistoryDay?
+    var openTension: () -> Void = {}
 
     @EnvironmentObject private var appSettings: AppSettings
     @EnvironmentObject private var feedManager: FeedManager
@@ -58,6 +62,13 @@ struct SidebarView: View {
             suggestedSection
         }
         .focused($isListFocused)
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if showsTensionReading {
+                TensionSidebarButton(reading: tensionReading, open: openTension)
+                    .padding(.horizontal, AppLayout.sidebarInset)
+                    .padding(.vertical, AppSpacing.sm)
+            }
+        }
         .focusedSceneValue(\.addFeedSubscription, { isSubscribePopoverPresented = true })
         .listStyle(.sidebar)
         .scrollContentBackground(.visible)
@@ -119,8 +130,8 @@ struct SidebarView: View {
         Section("Inbox") {
             topicRow(
                 title: "Today", icon: "newspaper.fill", isLoading: feedManager.isAnyFeedLoading,
-                accessibility: "Today's Articles")
-            topicRow(title: "Unread", icon: "circle.circle.fill", badge: unreadBadge, accessibility: "Unread Articles")
+                accessibility: "Today's Stories")
+            topicRow(title: "Unread", icon: "circle.circle.fill", badge: unreadBadge, accessibility: "Unread Stories")
             topicRow(title: "Briefing", icon: "text.book.closed", accessibility: "Finite Briefing")
         }
     }
@@ -188,26 +199,31 @@ struct SidebarView: View {
             TextField("https://example.com/feed.xml", text: $newFeedURL)
                 .textFieldStyle(.roundedBorder)
                 .frame(width: 280)
+                .onSubmit(addFromPopover)
 
             HStack {
                 Spacer()
                 Button("Cancel") {
                     isSubscribePopoverPresented = false
                 }
+                .keyboardShortcut(.cancelAction)
 
-                Button("Add") {
-                    let trimmed = newFeedURL.trimmingCharacters(in: .whitespacesAndNewlines)
-                    if !trimmed.isEmpty {
-                        subscribe(to: trimmed)
-                        newFeedURL = ""
-                        isSubscribePopoverPresented = false
-                    }
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(AppColor.accent)
+                Button("Add", action: addFromPopover)
+                    .buttonStyle(.borderedProminent)
+                    .tint(AppColor.accent)
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(newFeedURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
         .padding()
+    }
+
+    private func addFromPopover() {
+        let trimmed = newFeedURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        subscribe(to: trimmed)
+        newFeedURL = ""
+        isSubscribePopoverPresented = false
     }
 
     // MARK: - Drag and Drop Handling

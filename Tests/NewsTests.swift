@@ -2214,6 +2214,26 @@ struct NewsTests {
         let second = FeedXMLParser(data: undatedXML).parse().first!
         assertEqual(first.pubDate, DateParser.unknownDate, "Undated XML stories do not become breaking news")
         assertEqual(first.publicationDateText, "Date unavailable", "Unknown dates have an honest display label")
+        assertEqual(first.cardDateText(), "Date unavailable", "Cards keep the honest unknown-date label")
+        do {
+            let now = Date(timeIntervalSince1970: 1_700_000_000)
+            func story(ageInSeconds age: TimeInterval) -> FeedArticle {
+                FeedArticle(
+                    title: "Dated", link: "https://example.com/dated", guid: "dated", description: "Text",
+                    pubDate: now.addingTimeInterval(-age), source: "Test")
+            }
+            assertEqual(
+                story(ageInSeconds: 20).cardDateText(now: now), "Just now", "A story under a minute old reads Just now")
+            let formatter = RelativeDateTimeFormatter()
+            formatter.unitsStyle = .abbreviated
+            formatter.dateTimeStyle = .numeric
+            for age: TimeInterval in [60, 2 * 60 * 60, 24 * 60 * 60 - 1] {
+                assertEqual(
+                    story(ageInSeconds: age).cardDateText(now: now),
+                    formatter.localizedString(fromTimeInterval: -age),
+                    "Relative card dates use the supplied reference time, not the wall clock")
+            }
+        }
         assertEqual(first.id, second.id, "Undated stories without GUID or link retain a stable fingerprint")
         let json = Data(
             #"{"items":[{"id":"undated","url":"\#(fixtureRoot.appendingPathComponent("story").absoluteString)","date_published":"broken"}]}"#
@@ -3429,6 +3449,61 @@ struct NewsTests {
                 "Panel feed \(member.catalogID) publishes in the methodology language")
         }
         assertEqual(methodology.panelRegions.count, 6, "The v1 panel spans six regions")
+        assertEqual(TensionLevel(index: 0), .calm, "Zero reads as calm")
+        assertEqual(TensionLevel(index: 19.9), .calm, "Bands are half-open: 19.9 is still calm")
+        assertEqual(TensionLevel(index: 20), .mild, "20 starts the mild band")
+        assertEqual(TensionLevel(index: 44), .warm, "44 reads as warm")
+        assertEqual(TensionLevel(index: 60), .hot, "60 starts the hot band")
+        assertEqual(TensionLevel(index: 80), .boiling, "80 starts the boiling band")
+        assertEqual(TensionLevel(index: 100), .boiling, "100 reads as boiling")
+        assertEqual(TensionLevel.degrees(43.6), 44, "Readings round to whole degrees")
+        assertEqual(TensionLevel.degrees(104), 100, "Readings never exceed 100 degrees")
+
+        let brief = TensionBriefFacts(
+            day: Date(timeIntervalSince1970: 0), degrees: 44, level: .warm, change: 3, typicalDegrees: 38,
+            isProvisional: true,
+            drivers: [
+                .init(
+                    headline: "Airport hit again", type: .armedConflict, deaths: .tens, affected: .notReported,
+                    escalation: .escalating, reportingFeeds: 5),
+                .init(
+                    headline: "Quake strikes coast", type: .disaster, deaths: .notReported, affected: .hundreds,
+                    escalation: .noSignal, reportingFeeds: 1),
+            ])
+        let paragraph = brief.deterministicParagraph
+        assertTrue(
+            paragraph.hasPrefix(
+                "News tension reads 44° (warm), up 3° from the previous day, above its 30-day average of 38°."),
+            "The explanation opens with the reading, the daily change and the 30-day comparison")
+        assertTrue(
+            paragraph.contains(
+                "armed conflict with dozens of deaths reported and reports of escalation, covered by 5 panel feeds"),
+            "The largest driver is described from its classification")
+        assertTrue(
+            paragraph.contains("a disaster with hundreds of people reported hurt or displaced"),
+            "Further drivers are listed")
+        assertTrue(
+            paragraph.hasSuffix("Today's reading is provisional and can still change."), "Provisional days say so")
+        assertEqual(
+            paragraph,
+            "News tension reads 44° (warm), up 3° from the previous day, above its 30-day average of 38°. "
+                + "The largest contribution is armed conflict with dozens of deaths reported and reports of escalation, covered by 5 panel feeds: “Airport hit again”. "
+                + "Also contributing: a disaster with hundreds of people reported hurt or displaced (“Quake strikes coast”). "
+                + "Today's reading is provisional and can still change.",
+            "The displayed paragraph contains only scored facts and attributed headlines")
+        let lowerBrief = TensionBriefFacts(
+            day: brief.day, degrees: 19, level: .calm, change: -3, typicalDegrees: 38,
+            isProvisional: false, drivers: [])
+        assertEqual(
+            lowerBrief.deterministicParagraph,
+            "News tension reads 19° (calm), down 3° from the previous day, below its 30-day average of 38°.",
+            "A new reading recomputes the band, direction and average comparison without cached prose")
+        let firstBrief = TensionBriefFacts(
+            day: brief.day, degrees: 44, level: .warm, change: nil, typicalDegrees: nil,
+            isProvisional: false, drivers: [])
+        assertEqual(
+            firstBrief.deterministicParagraph, "News tension reads 44° (warm).",
+            "A first reading invents neither a previous-day change nor an average")
         assertFalse(
             methodology.panelRegions.contains(.latinAmerica) || methodology.panelRegions.contains(.oceania),
             "Latin America and Oceania are stated v1 gaps")
