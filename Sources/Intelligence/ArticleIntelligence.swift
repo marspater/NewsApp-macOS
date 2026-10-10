@@ -7,7 +7,7 @@ import os
 
     @available(macOS 26.0, *)
     extension GenerationOptions {
-        #if compiler(<6.4)
+        #if !canImport(FoundationModels, _version: "2.0")
             // The stable SDK used by CodeQL (Xcode 26.3) requires `sampling:`; newer SDKs provide `samplingMode:`.
             init(
                 samplingMode: SamplingMode,
