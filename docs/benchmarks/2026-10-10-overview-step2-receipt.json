@@ -1,10 +1,11 @@
 {
   "run": "overview-evidence-step2-fixed",
   "issue": 308,
+  "receiptType": "retrospective",
+  "receiptNote": "Generated retrospectively from preserved run artifacts to document reported provenance. Not recorded synchronously at execution time.",
   "producerCommit": "8f5377088c1ea61696124ab9369790bce88d601f",
-  "producerTreeClean": true,
   "reportedProvenance": "claude/verifier-long-passages at 8f53770 / bbfd8a9",
-  "dirtyCodeFingerprint": "clean (0 uncommitted changes)",
+  "dirtyCodeFingerprint": "clean (0 uncommitted changes reported)",
   "captureTimeUTC": "2026-10-10T09:37:30Z",
   "windowBoundsUTC": {
     "start": "2026-10-06T17:20:35Z",

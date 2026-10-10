@@ -71,10 +71,10 @@ Final run: no line-count fallbacks, 18 weak drafts, 5 thin-evidence events. 20 s
 
 Against the step-2 targets, format fallbacks (0 %), end-to-end time and requests per event now pass. Acceptance (60.3 %, upper bound 71.9 %) remains below 70 %, and independent claim labels (step 3) are open.
 
-## Execution receipt and provenance
+## Retrospective execution receipt and provenance
 
-- **Receipt**: [overview-step2-receipt.json](../benchmarks/2026-10-10-overview-step2-receipt.json).
-- **Producer commit**: `8f5377088c1ea61696124ab9369790bce88d601f` (worktree `claude/verifier-long-passages` at `bbfd8a9b33a93addba86629723344c24d28f12aa`, clean dirty-code fingerprint).
+- **Receipt**: [overview-step2-receipt.json](../benchmarks/2026-10-10-overview-step2-receipt.json) (retrospectively constructed to document reported provenance; not captured synchronously by the execution runner).
+- **Reported producer commit**: `8f5377088c1ea61696124ab9369790bce88d601f` (worktree `claude/verifier-long-passages` at `bbfd8a9b33a93addba86629723344c24d28f12aa`, reported clean dirty-code fingerprint).
 - **Capture time**: 2026-10-10T09:37:30Z.
 - **UTC window bounds**: 2026-10-06T17:20:35Z to 2026-10-08T17:10:00Z (7–8 October window; 1,659 articles across 58 multi-source events).
 - **Library SHA-256**: `84a63dfb3f9669703a653832035498843773358ac4013946b05e0da0c57a33d9`.
