@@ -291,62 +291,52 @@ public struct OverviewClaimVerifier: Sendable {
 
     // MARK: - Detached Quotation Verification
 
+    private static let quoteCharacters: Set<Character> = ["\"", "'", "“", "”", "‘", "’", "«", "»"]
+
+    private static let reportingVerbs: Set<String> = [
+        "said", "says", "told", "tells", "called", "calls", "asked", "asks",
+        "spoke", "speaks", "stated", "states", "declared", "declares", "shouted",
+        "wrote", "writes", "explained", "explains", "added", "adds", "warned",
+        "warns", "remarked", "hailed", "promised", "promises", "announced", "announces",
+    ]
+
+    private static let firstPersonPronouns: Set<String> = [
+        "i", "me", "my", "mine", "myself", "we", "us", "our", "ours", "ourselves",
+    ]
+
     private static func verifyDetachedQuotation(
         statement: String,
         passage: EvidencePassage
     ) -> ClaimVerificationFailureReason? {
+        isDetachedQuotation(statement) ? .detachedQuotation(claimText: statement, passageID: passage.id) : nil
+    }
+
+    /// Shared with `OverviewQualityAuditor`: an unframed quoted question, or a first-person quote with
+    /// no reporting verb, reads as dialogue detached from its speaker.
+    static func isDetachedQuotation(_ statement: String) -> Bool {
         let trimmed = statement.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return nil }
-
-        // 1. Unframed question / standalone dialogue:
-        let quoteChars: Set<Character> = ["\"", "'", "“", "”", "‘", "’", "«", "»"]
-        if let first = trimmed.first, quoteChars.contains(first) {
-            let strippedEnd = trimmed.trimmingCharacters(in: CharacterSet(charactersIn: "\"“”'’» "))
-            if strippedEnd.hasSuffix("?") {
-                return .detachedQuotation(claimText: statement, passageID: passage.id)
-            }
+        guard let first = trimmed.first else { return false }
+        if quoteCharacters.contains(first),
+            trimmed.trimmingCharacters(in: CharacterSet(charactersIn: "\"“”'’» ")).hasSuffix("?")
+        {
+            return true
         }
-
-        // 2. Unattributed first-person quote:
-        let quotes = extractQuotedSubstrings(trimmed)
-        for q in quotes {
-            if containsFirstPersonPronoun(q) {
-                let reportingVerbs: Set<String> = [
-                    "said", "says", "told", "tells", "called", "calls", "asked", "asks",
-                    "spoke", "speaks", "stated", "states", "declared", "declares", "shouted",
-                    "wrote", "writes", "explained", "explains", "added", "adds", "warned",
-                    "warns", "remarked", "hailed", "promised", "promises", "announced", "announces",
-                ]
-                let tokens = Set(tokenize(trimmed.lowercased()))
-                if tokens.isDisjoint(with: reportingVerbs) {
-                    return .detachedQuotation(claimText: statement, passageID: passage.id)
-                }
-            }
+        let quotesFirstPerson = extractQuotedSubstrings(trimmed).contains {
+            !firstPersonPronouns.isDisjoint(with: tokenize($0))
         }
-
-        return nil
+        return quotesFirstPerson && reportingVerbs.isDisjoint(with: tokenize(trimmed))
     }
 
     private static func extractQuotedSubstrings(_ text: String) -> [String] {
-        var results: [String] = []
-        let pattern = #"["“]([^"”]+)["”]|['‘]([^'’]+)['’]"#
+        // Straight or curly double quotes, or straight or curly single quotes. Quote characters are
+        // escaped so static analysers do not read the apostrophe as an unterminated literal.
+        let pattern =
+            #"[\x{22}\x{201C}]([^\x{22}\x{201D}]+)[\x{22}\x{201D}]|[\x{27}\x{2018}]([^\x{27}\x{2019}]+)[\x{27}\x{2019}]"#
         guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
         let ns = text as NSString
-        let matches = regex.matches(in: text, range: NSRange(location: 0, length: ns.length))
-        for m in matches {
-            if m.range(at: 1).location != NSNotFound {
-                results.append(ns.substring(with: m.range(at: 1)))
-            } else if m.range(at: 2).location != NSNotFound {
-                results.append(ns.substring(with: m.range(at: 2)))
-            }
+        return regex.matches(in: text, range: NSRange(location: 0, length: ns.length)).compactMap { match in
+            [match.range(at: 1), match.range(at: 2)].first { $0.location != NSNotFound }.map(ns.substring(with:))
         }
-        return results
-    }
-
-    private static func containsFirstPersonPronoun(_ text: String) -> Bool {
-        let tokens = tokenize(text.lowercased())
-        let firstPerson: Set<String> = ["i", "me", "my", "mine", "myself", "we", "us", "our", "ours", "ourselves"]
-        return !firstPerson.isDisjoint(with: tokens)
     }
 
     // MARK: - Dropped Attribution Verification
@@ -366,83 +356,66 @@ public struct OverviewClaimVerifier: Sendable {
         "заявив", "сказав", "повідомив", "підкреслив",
     ]
 
+    private static let motivePhrases = ["in order to", "feared", "sought to"]
+    private static let militaryClaimPattern =
+        #"\b(destroyed|\d+.*targets (had been|were) destroyed|intercepted|forces intercepted)\b"#
+    private static let closurePhrases = ["ceasing operations", "closing its operations", "ended its duties"]
+
     private static func verifyDroppedAttribution(
         statement: String,
         passage: EvidencePassage
     ) -> ClaimVerificationFailureReason? {
-        let claimTokens = tokenize(statement.lowercased())
-        let claimTokenSet = Set(claimTokens)
+        droppedAttributionSpeaker(statement: statement, passageText: passage.text).map {
+            .droppedAttribution(speaker: $0, claimText: statement, passageID: passage.id)
+        }
+    }
 
-        let passageLower = passage.text.lowercased()
+    /// Shared with `OverviewQualityAuditor`: names the speaker a claim drops when it restates a motive,
+    /// battlefield result or contested closure that the passage attributes to an official.
+    static func droppedAttributionSpeaker(statement: String, passageText: String) -> String? {
+        let passageLower = passageText.lowercased()
         let passageTokens = Set(tokenize(passageLower))
-
         let hasSpokesperson = !spokespersonKeywords.isDisjoint(with: passageTokens)
         let hasOfficialSpeaker =
             !officialKeywords.isDisjoint(with: passageTokens) && !speechVerbs.isDisjoint(with: passageTokens)
         let hasDirectQuoteSaid = passageLower.contains("he said") || passageLower.contains("she said")
 
-        guard hasSpokesperson || hasOfficialSpeaker || hasDirectQuoteSaid else { return nil }
-
-        let knownSpeakers = spokespersonKeywords.union(officialKeywords)
-        let retainedSpeaker = !knownSpeakers.isDisjoint(with: claimTokenSet)
-        if retainedSpeaker { return nil }
+        guard hasSpokesperson || hasOfficialSpeaker || hasDirectQuoteSaid,
+            spokespersonKeywords.union(officialKeywords).isDisjoint(with: tokenize(statement))
+        else { return nil }
 
         let statementLower = statement.lowercased()
-
-        // (a) Motives / political allegations
-        if statementLower.contains("in order to") || statementLower.contains("feared")
-            || statementLower.contains("sought to")
-        {
-            if hasOfficialSpeaker || hasSpokesperson {
-                return .droppedAttribution(
-                    speaker: "official/spokesperson", claimText: statement, passageID: passage.id)
-            }
+        let hasNamedSpeaker = hasSpokesperson || hasOfficialSpeaker
+        if hasNamedSpeaker, motivePhrases.contains(where: { statementLower.contains($0) }) {
+            return "official/spokesperson"
         }
-
-        // (b) Military battlefield / interception / destruction claims
-        let militaryPattern = #"\b(destroyed|\d+.*targets (had been|were) destroyed|intercepted|forces intercepted)\b"#
-        if let regex = try? NSRegularExpression(pattern: militaryPattern),
-            regex.firstMatch(in: statementLower, range: NSRange(location: 0, length: statementLower.utf16.count)) != nil
-        {
-            if hasSpokesperson || hasOfficialSpeaker {
-                return .droppedAttribution(
-                    speaker: "military spokesperson", claimText: statement, passageID: passage.id)
-            }
+        if hasNamedSpeaker, statementLower.range(of: militaryClaimPattern, options: .regularExpression) != nil {
+            return "military spokesperson"
         }
-
-        // (c) Contested status / closure claims
-        if statementLower.contains("ceasing operations") || statementLower.contains("closing its operations")
-            || statementLower.contains("ended its duties")
-        {
-            if hasOfficialSpeaker || hasDirectQuoteSaid {
-                return .droppedAttribution(speaker: "foreign official", claimText: statement, passageID: passage.id)
-            }
+        if hasOfficialSpeaker || hasDirectQuoteSaid, closurePhrases.contains(where: { statementLower.contains($0) }) {
+            return "foreign official"
         }
-
         return nil
     }
 
     // MARK: - Citation Grounding Verification
 
+    private static let groundingTerms = ["mission", "sri lanka"]
+
     private static func verifyCitationGrounding(
         statement: String,
         passage: EvidencePassage
     ) -> [ClaimVerificationFailureReason] {
-        var reasons: [ClaimVerificationFailureReason] = []
-        let passageLower = passage.text.lowercased()
+        ungroundedCitationTerms(statement: statement, passageText: passage.text).map {
+            .ungroundedCitation(missingToken: $0, passageID: passage.id)
+        }
+    }
+
+    /// Shared with `OverviewQualityAuditor`: distinctive terms the claim uses that the passage never mentions.
+    static func ungroundedCitationTerms(statement: String, passageText: String) -> [String] {
         let statementLower = statement.lowercased()
-
-        // 1. Missing distinctive subject entities: e.g. "mission" when passage only mentions "consulate"
-        if statementLower.contains("mission") && !passageLower.contains("mission") {
-            reasons.append(.ungroundedCitation(missingToken: "mission", passageID: passage.id))
-        }
-
-        // 2. Missing country / place entities: e.g. "sri lanka" when passage does not mention "sri lanka"
-        if statementLower.contains("sri lanka") && !passageLower.contains("sri lanka") {
-            reasons.append(.ungroundedCitation(missingToken: "sri lanka", passageID: passage.id))
-        }
-
-        return reasons
+        let passageLower = passageText.lowercased()
+        return groundingTerms.filter { statementLower.contains($0) && !passageLower.contains($0) }
     }
 
     // MARK: - Fallback Overview Creation

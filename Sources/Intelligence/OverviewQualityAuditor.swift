@@ -865,110 +865,18 @@ public struct OverviewQualityAuditor: Sendable {
     }
 
     private static func checkCitationGrounding(claimText: String, normalizedPassage: String) -> String? {
-        let claimLower = claimText.lowercased()
-
-        // 1. Missing distinctive subject entities: e.g. "mission" when passage only mentions "consulate"
-        if claimLower.contains("mission") && !normalizedPassage.contains("mission") {
-            return "Claim refers to subject 'mission' not mentioned in cited passage"
-        }
-
-        // 2. Missing country / place entities: e.g. "sri lanka" when passage does not mention "sri lanka"
-        if claimLower.contains("sri lanka") && !normalizedPassage.contains("sri lanka") {
-            return "Claim refers to entity 'Sri Lanka' not mentioned in cited passage"
-        }
-
-        return nil
+        OverviewClaimVerifier.ungroundedCitationTerms(statement: claimText, passageText: normalizedPassage).first
+            .map { "Claim refers to '\($0)' not mentioned in cited passage" }
     }
 
     private static func checkAttributionFidelity(claimText: String, normalizedPassage: String) -> String? {
-        let trimmed = claimText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return nil }
-
-        // 1. Detached quotations
-        let quoteChars: Set<Character> = ["\"", "'", "“", "”", "‘", "’", "«", "»"]
-        if let first = trimmed.first, quoteChars.contains(first) {
-            let strippedEnd = trimmed.trimmingCharacters(in: CharacterSet(charactersIn: "\"“”'’» "))
-            if strippedEnd.hasSuffix("?") {
-                return "Claim contains detached question or unanchored quotation: '\(claimText)'"
-            }
+        if OverviewClaimVerifier.isDetachedQuotation(claimText) {
+            return "Claim contains detached or unattributed quotation: '\(claimText)'"
         }
-
-        // Unattributed first-person quote
-        let quotes = extractQuotedSubstrings(trimmed)
-        for q in quotes {
-            if containsFirstPersonPronoun(q) {
-                let reportingVerbs: Set<String> = [
-                    "said", "says", "told", "tells", "called", "calls", "asked", "asks",
-                    "spoke", "speaks", "stated", "states", "declared", "declares", "shouted",
-                    "wrote", "writes", "explained", "explains", "added", "adds", "warned",
-                    "warns", "remarked", "hailed", "promised", "promises", "announced", "announces",
-                ]
-                let tokens = Set(tokenize(trimmed.lowercased()))
-                if tokens.isDisjoint(with: reportingVerbs) {
-                    return "Claim contains first-person quotation without attributing reporting verb: '\(claimText)'"
-                }
-            }
-        }
-
-        // 2. Dropped speaker attribution for motives, military claims, and contested positions
-        let claimTokens = tokenize(trimmed.lowercased())
-        let claimTokenSet = Set(claimTokens)
-
-        let spokespersonKeywords: Set<String> = [
-            "spokesman", "spokesperson", "spokespeople", "речник", "речниця",
-        ]
-        let officialKeywords: Set<String> = [
-            "minister", "leader", "official", "schlein", "saar", "sa'ar", "malki", "maliki", "zohar",
-            "commissioner", "physician", "grey", "oswald", "varma", "cole",
-            "міністр", "керівник", "представник",
-        ]
-        let speechVerbs: Set<String> = [
-            "said", "told", "warned", "alleged", "stated", "has said", "reported", "claimed",
-            "заявив", "сказав", "повідомив", "підкреслив",
-        ]
-
-        let passageTokens = Set(tokenize(normalizedPassage))
-        let hasSpokesperson = !spokespersonKeywords.isDisjoint(with: passageTokens)
-        let hasOfficialSpeaker =
-            !officialKeywords.isDisjoint(with: passageTokens) && !speechVerbs.isDisjoint(with: passageTokens)
-        let hasQuoteSaid = normalizedPassage.contains("he said") || normalizedPassage.contains("she said")
-
-        if hasSpokesperson || hasOfficialSpeaker || hasQuoteSaid {
-            let knownSpeakers = spokespersonKeywords.union(officialKeywords)
-            let retainedSpeaker = !knownSpeakers.isDisjoint(with: claimTokenSet)
-
-            if !retainedSpeaker {
-                let claimLower = trimmed.lowercased()
-                // (a) Motives / political allegations
-                if claimLower.contains("in order to") || claimLower.contains("feared")
-                    || claimLower.contains("sought to")
-                {
-                    if hasOfficialSpeaker || hasSpokesperson {
-                        return "Claim drops official/spokesperson attribution for motive or allegation: '\(claimText)'"
-                    }
-                }
-
-                // (b) Military battlefield / interception / destruction claims
-                let militaryPattern =
-                    #"\b(destroyed|\d+.*targets (had been|were) destroyed|intercepted|forces intercepted)\b"#
-                if let regex = try? NSRegularExpression(pattern: militaryPattern),
-                    regex.firstMatch(in: claimLower, range: NSRange(location: 0, length: claimLower.utf16.count)) != nil
-                {
-                    if hasSpokesperson || hasOfficialSpeaker {
-                        return
-                            "Claim drops spokesperson attribution for battlefield or military interception claim: '\(claimText)'"
-                    }
-                }
-
-                // (c) Contested status / closure claims
-                if claimLower.contains("ceasing operations") || claimLower.contains("closing its operations")
-                    || claimLower.contains("ended its duties")
-                {
-                    if hasOfficialSpeaker || hasQuoteSaid {
-                        return "Claim drops official speaker attribution for contested closure status: '\(claimText)'"
-                    }
-                }
-            }
+        if let speaker = OverviewClaimVerifier.droppedAttributionSpeaker(
+            statement: claimText, passageText: normalizedPassage)
+        {
+            return "Claim drops \(speaker) attribution: '\(claimText)'"
         }
 
         let nsClaim = claimText as NSString
@@ -1012,33 +920,5 @@ public struct OverviewQualityAuditor: Sendable {
         }
 
         return entityError
-    }
-
-    private static func tokenize(_ text: String) -> [String] {
-        return text.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
-            .components(separatedBy: CharacterSet.alphanumerics.inverted)
-            .filter { !$0.isEmpty }
-    }
-
-    private static func extractQuotedSubstrings(_ text: String) -> [String] {
-        var results: [String] = []
-        let pattern = #"["“]([^"”]+)["”]|['‘]([^'’]+)['’]"#
-        guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
-        let ns = text as NSString
-        let matches = regex.matches(in: text, range: NSRange(location: 0, length: ns.length))
-        for m in matches {
-            if m.range(at: 1).location != NSNotFound {
-                results.append(ns.substring(with: m.range(at: 1)))
-            } else if m.range(at: 2).location != NSNotFound {
-                results.append(ns.substring(with: m.range(at: 2)))
-            }
-        }
-        return results
-    }
-
-    private static func containsFirstPersonPronoun(_ text: String) -> Bool {
-        let tokens = tokenize(text.lowercased())
-        let firstPerson: Set<String> = ["i", "me", "my", "mine", "myself", "we", "us", "our", "ours", "ourselves"]
-        return !firstPerson.isDisjoint(with: tokens)
     }
 }

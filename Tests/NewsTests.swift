@@ -14770,7 +14770,7 @@ struct NewsTests {
             }), "Citing passage lacking 'mission' flags ungroundedCitation")
         assertEqual(
             mismatchMission.audit.status,
-            .unsupported(reason: "Claim refers to subject 'mission' not mentioned in cited passage"),
+            .unsupported(reason: "Claim refers to 'mission' not mentioned in cited passage"),
             "Citing passage lacking 'mission' is unsupported in auditor")
 
         let inquiryPassage = EvidencePassage(
@@ -14787,7 +14787,7 @@ struct NewsTests {
             }), "Citing passage lacking 'Sri Lanka' flags ungroundedCitation")
         assertEqual(
             mismatchArrest.audit.status,
-            .unsupported(reason: "Claim refers to entity 'Sri Lanka' not mentioned in cited passage"),
+            .unsupported(reason: "Claim refers to 'sri lanka' not mentioned in cited passage"),
             "Citing passage lacking 'Sri Lanka' is unsupported in auditor")
 
         // 5h. Valid controls: ordinary reported facts without attribution wrappers pass cleanly (#308)
