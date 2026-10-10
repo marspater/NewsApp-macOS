@@ -53,6 +53,7 @@ struct NativeUIQAChecks {
         testKeyboardShortcutsAndKeyHandling()
         testVoiceOverStructureAndAnnouncements()
         testWindowWidthsAndLayoutMetrics()
+        testLeadStorySelection()
         testTextScalingAdaptation()
         testIncreaseContrastScalers()
         testReduceMotionPolicies()
@@ -257,6 +258,59 @@ struct NativeUIQAChecks {
 
         let wideColWidth = EventOverviewReaderView.readingColumnMaxWidth(for: 1.0)
         assertTrue(wideColWidth <= 720.0, "Wide windows keep maximum measure bounded to 720px for readability")
+    }
+
+    // MARK: - Phase 6: lead selection never changes the feed order
+    static func testLeadStorySelection() {
+        func story(_ index: Int, hasImage: Bool) -> FeedArticle {
+            var article = FeedArticle(
+                title: "Story \(index)", link: "https://publisher.example/story/\(index)",
+                guid: "lead-\(index)", description: "Fixture", pubDate: Date(), source: "Publisher"
+            )
+            if hasImage { article.imageUrl = "https://images.example/lead-\(index).jpg" }
+            return article
+        }
+        let textOnly = story(1, hasImage: false)
+        let firstImage = story(2, hasImage: true)
+        let laterImage = story(3, hasImage: true)
+        let entries: [FeedEntry] = [.article(textOnly), .article(firstImage), .article(laterImage)]
+        assertEqual(
+            LeadStoryPresentation.firstEligibleID(in: entries, selectedTopic: "Today", isSearching: false),
+            firstImage.id, "First image-bearing entry is highlighted without moving the text-only entry"
+        )
+        assertEqual(entries.map(\.id), [textOnly.id, firstImage.id, laterImage.id], "Lead selection leaves the order intact")
+        assertEqual(
+            LeadStoryPresentation.firstEligibleID(in: entries, selectedTopic: nil, isSearching: false),
+            firstImage.id, "The default Today location can use the first image-bearing entry"
+        )
+        assertEqual(
+            LeadStoryPresentation.firstEligibleID(in: entries, selectedTopic: "Briefing", isSearching: false),
+            firstImage.id, "Briefing can select the same first image-bearing entry"
+        )
+        for section in ["Unread", "Saved Stories", "History"] {
+            assertEqual(
+                LeadStoryPresentation.firstEligibleID(in: entries, selectedTopic: section, isSearching: false),
+                nil, "Lead presentation is excluded from \(section)"
+            )
+        }
+        assertEqual(
+            LeadStoryPresentation.firstEligibleID(in: entries, selectedTopic: "Today", isSearching: true),
+            nil, "Search results never use the lead treatment"
+        )
+        assertEqual(
+            LeadStoryPresentation.firstEligibleID(in: entries, selectedTopic: "Briefing", isSearching: true),
+            nil, "Briefing search results cannot use the lead treatment"
+        )
+        assertEqual(
+            LeadStoryPresentation.firstEligibleID(in: [.article(textOnly)], selectedTopic: "Today", isSearching: false),
+            nil, "No publisher image means an ordinary card"
+        )
+        let summary = EventFeedSummary(eventID: "lead-event", membershipVersion: 1, seenVersion: nil, members: [])
+        let covered: [FeedEntry] = [.event(summary, representative: textOnly, visibleMembers: [textOnly, firstImage])]
+        assertEqual(
+            LeadStoryPresentation.firstEligibleID(in: covered, selectedTopic: "Today", isSearching: false),
+            textOnly.id, "An event can use its visible member's image without changing its representative"
+        )
     }
 
     // MARK: - 5. Text Scaling Adaptation
