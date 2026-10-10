@@ -18,7 +18,7 @@ script/design_lint.sh              # DESIGN.md ratchet (first step of ./test.sh)
 ./test.sh --curation-live /private/tmp/library-backup.sqlite3 /private/tmp/curation-report # Opt-in on-device rating audit of a SQLite backup; private titles stay local
 python3 script/evaluation/importance_review.py sheet /private/tmp/curation-report  # #309: blind private sheet of minor-rated stories (never overwrites a sheet)
 python3 script/evaluation/importance_review.py report /private/tmp/curation-report # #309: aggregate-only hidden-important rate with Wilson bounds and re-rate stability
-./test.sh --overviews-live /private/tmp/library-backup.sqlite3 /private/tmp/overview-report # Opt-in on-device labeled controls and live overview audit; private passages stay local
+./test.sh --overviews-live /private/tmp/library-backup.sqlite3 /private/tmp/overview-report # Opt-in on-device labeled controls and live overview audit; private passages stay local. NEWS_OVERVIEWS_EXTRACT=1 first stores publisher text through the production coordinator (#308)
 python3 script/evaluation/overview_review.py sheet /private/tmp/overview-report  # #308: private claim sheet for an independent reviewer (never overwrites a sheet)
 python3 script/evaluation/overview_review.py report /private/tmp/overview-report # #308/#313: aggregate-only rates, Wilson bounds, latency, fallback causes, perspective coverage
 ./test.sh --images-live /private/tmp/library-backup.sqlite3 /private/tmp/curation-report # Opt-in protected page-prefix lookups and card-image coverage on the backup; NEWS_IMAGES_NOW=<epoch> repeats an earlier 72-hour denominator

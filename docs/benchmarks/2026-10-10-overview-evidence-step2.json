@@ -1,0 +1,169 @@
+{
+  "claims": {
+    "auditorHeuristic": {
+      "critical": 0,
+      "unsupported": 0
+    },
+    "critical": {
+      "count": 0,
+      "of": 0,
+      "rate": null,
+      "wilson95": null
+    },
+    "criticalUpperBound95": null,
+    "labelled": 0,
+    "retained": 80,
+    "supported": {
+      "count": 0,
+      "of": 0,
+      "rate": null,
+      "wilson95": null
+    },
+    "unlabelled": 80,
+    "unsupported": {
+      "count": 0,
+      "of": 0,
+      "rate": null,
+      "wilson95": null
+    }
+  },
+  "decisionInputs": {
+    "acceptedTarget": 30,
+    "acceptedTargetMet": false,
+    "criticalErrorObserved": false,
+    "formatFallbacks": {
+      "count": 9,
+      "of": 58,
+      "rate": 0.15517241379310345,
+      "wilson95": [
+        0.08384397416750201,
+        0.26934223058787304
+      ]
+    },
+    "labellingComplete": false
+  },
+  "evidence": {
+    "endToEndSeconds": {
+      "p50": 4.865419447422028,
+      "p95": 8.152008408308028
+    },
+    "events": 58,
+    "outcomes": {
+      "httpError": 12,
+      "success": 138
+    },
+    "pageRequests": {
+      "maxPerEvent": 4,
+      "total": 150
+    },
+    "seconds": {
+      "p50": 0.8877314925193787,
+      "p95": 3.0983389794826506
+    },
+    "storedTexts": 138
+  },
+  "introductionRepetition": {
+    "medianBestFactJaccard": 0.5106100795755968,
+    "repeatingAFact": {
+      "count": 13,
+      "of": 28,
+      "rate": 0.4642857142857143,
+      "wilson95": [
+        0.29531303739659587,
+        0.6418760485789833
+      ]
+    },
+    "sentences": 28,
+    "threshold": 0.6
+  },
+  "latencySeconds": {
+    "accepted": {
+      "p50": 4.512802958488464,
+      "p95": 7.7364522695541345
+    },
+    "all": {
+      "p50": 3.891349971294403,
+      "p95": 6.2343797981739035
+    }
+  },
+  "limitations": "Labels come from the reviewer sheet; the auditor heuristic is not a label. Verbatim runs and Jaccard repetition are lexical measures. Latency includes per-sentence verification calls.",
+  "overviews": {
+    "accepted": {
+      "count": 17,
+      "of": 58,
+      "rate": 0.29310344827586204,
+      "wilson95": [
+        0.1917802782864472,
+        0.42013144456677776
+      ]
+    },
+    "attempted": 58,
+    "fallbackCauses": {
+      "accepted": 17,
+      "lineCount": 9,
+      "thinEvidence": 5,
+      "weakDraft": 27
+    },
+    "fallbackGroups": {
+      "format": 9,
+      "modelUnavailableOrError": 0,
+      "notAsked": 5,
+      "refusal": 0,
+      "weakDraft": 27
+    },
+    "lineCounts": {
+      "deterministicRejections": 59,
+      "lines": 260,
+      "malformed": 0,
+      "modelRejections": 4
+    },
+    "modelFailures": 0
+  },
+  "perspectiveCoverage": {
+    "candidates": 30,
+    "events": 58,
+    "extractedPerspectives": 29,
+    "gap_noAttributedSpeech": 2,
+    "gap_singleVoice": 23,
+    "gap_speechNotMatched": 31,
+    "none": 33,
+    "one": 23,
+    "passages": 341,
+    "passagesWithCandidates": 30,
+    "passagesWithTypographicQuotes": 86,
+    "passagesWithUnmatchedSpeech": 223,
+    "twoOrMore": 2,
+    "twoOrMoreRate": {
+      "count": 2,
+      "of": 58,
+      "rate": 0.034482758620689655,
+      "wilson95": [
+        0.009507728866485675,
+        0.11729364755327057
+      ]
+    },
+    "vagueCandidates": 0,
+    "voices": 29
+  },
+  "verbatim": {
+    "claimsCopiedWhole": {
+      "count": 66,
+      "of": 80,
+      "rate": 0.825,
+      "wilson95": [
+        0.7274225612441251,
+        0.8927946101839012
+      ]
+    },
+    "claimsCopyingAtLeast8Words": {
+      "count": 77,
+      "of": 80,
+      "rate": 0.9625,
+      "wilson95": [
+        0.8954510802560568,
+        0.9871656636992113
+      ]
+    },
+    "medianLongestCopiedRun": 25.0
+  }
+}

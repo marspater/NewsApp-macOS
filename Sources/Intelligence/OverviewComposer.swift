@@ -399,7 +399,8 @@ public struct OverviewComposer: Sendable {
         try Task.checkCancellation()
         let lines = answer.split(whereSeparator: \.isNewline)
         outcome.lines = lines.count
-        guard (5...8).contains(lines.count) else {
+        // Four lines can still make a complete draft: one introduction and three facts.
+        guard (4...8).contains(lines.count) else {
             outcome.result = lines.contains { isProtocolLine($0) } ? .lineCount : .unstructured
             return (fallback, outcome)
         }
@@ -408,6 +409,7 @@ public struct OverviewComposer: Sendable {
         outcome.malformedLines = draft.malformedLines
         outcome.deterministicRejections = draft.deterministicRejections
         outcome.modelRejections = draft.modelRejections
+        outcome.rejectionReasons = draft.rejectionReasons
         outcome.keptIntroduction = draft.introduction.count
         outcome.keptFacts = draft.facts.count
         guard draft.isComplete(lineCount: lines.count) else {
@@ -463,6 +465,7 @@ public struct OverviewComposer: Sendable {
         var malformedLines = 0
         var deterministicRejections = 0
         var modelRejections = 0
+        var rejectionReasons: [String: Int] = [:]
 
         /// One to three introduction sentences, three to five facts, and at least two thirds of the lines kept.
         func isComplete(lineCount: Int) -> Bool {
@@ -508,15 +511,21 @@ public struct OverviewComposer: Sendable {
                 passageFingerprint: passage.fingerprint, quote: passage.text,
                 source: OverviewSourceMetadata(
                     title: article.title, name: article.source, url: article.link, publishedAt: article.pubDate))
-            let fact = OverviewFact(id: "model_claim_\(index)", text: parsed.statement, citationIDs: [citationID])
+            guard let statement = firstCompleteSentence(parsed.statement) else {
+                draft.deterministicRejections += 1
+                draft.rejectionReasons["notOneSentence", default: 0] += 1
+                continue
+            }
+            let fact = OverviewFact(id: "model_claim_\(index)", text: statement, citationIDs: [citationID])
             let check = EventOverviewDocument(
                 eventID: fallback.eventID, version: fallback.version,
                 content: OverviewContent(title: fallback.title, summary: "", facts: [fact], citations: [citation]),
                 provenance: fallback.provenance)
             switch try await verifyModelSentence(check, passage: passage, article: article, model: model) {
             case .supported: break
-            case .rejectedDeterministically:
+            case .rejectedDeterministically(let reason):
                 draft.deterministicRejections += 1
+                draft.rejectionReasons[reason, default: 0] += 1
                 continue
             case .rejectedByModel:
                 draft.modelRejections += 1
@@ -526,6 +535,22 @@ public struct OverviewComposer: Sendable {
             if parsed.isIntroduction { draft.introduction.append(fact) } else { draft.facts.append(fact) }
         }
         return draft
+    }
+
+    /// The line's sentence, or the first sentence of a pasted paragraph when it stands alone: six or more words
+    /// and balanced quotation marks. Every check then runs on that sentence only.
+    static func firstCompleteSentence(_ text: String) -> String? {
+        let tokenizer = NLTokenizer(unit: .sentence)
+        tokenizer.string = text
+        let sentences = tokenizer.tokens(for: text.startIndex..<text.endIndex)
+        guard let first = sentences.first else { return nil }
+        if sentences.count == 1 { return text }
+        let sentence = text[first].trimmingCharacters(in: .whitespaces)
+        let straight = sentence.filter { $0 == "\"" }.count
+        guard sentence.split(separator: " ").count >= 6, straight.isMultiple(of: 2),
+            sentence.filter({ $0 == "\u{201C}" }).count == sentence.filter({ $0 == "\u{201D}" }).count
+        else { return nil }
+        return sentence
     }
 
     /// One `KIND|P1|sentence` line naming a known passage, with its sentence decoded.
@@ -559,19 +584,32 @@ public struct OverviewComposer: Sendable {
         isProtocolKind(line.split(separator: "|", maxSplits: 1).first?.trimmingCharacters(in: .whitespaces))
     }
 
-    private enum SentenceCheck { case supported, rejectedDeterministically, rejectedByModel }
+    /// A deterministic rejection names the first failed check, for aggregate evaluation only (#308).
+    private enum SentenceCheck {
+        case supported
+        case rejectedDeterministically(String)
+        case rejectedByModel
+    }
 
     private static func verifyModelSentence(
         _ check: EventOverviewDocument, passage: EvidencePassage,
         article: FeedArticle, model: NewsTextModel
     ) async throws -> SentenceCheck {
-        guard let fact = check.facts.first else { return .rejectedDeterministically }
+        guard let fact = check.facts.first else { return .rejectedDeterministically("emptyClaim") }
         let tokenizer = NLTokenizer(unit: .sentence)
         tokenizer.string = fact.text
-        guard tokenizer.tokens(for: fact.text.startIndex..<fact.text.endIndex).count == 1,
-            OverviewClaimVerifier.verifyOverview(check, passages: [passage], articles: [article]).isFullyVerified,
-            OverviewQualityAuditor.auditClaim(fact, citations: check.citations, passages: [passage]).isSupported
-        else { return .rejectedDeterministically }
+        guard tokenizer.tokens(for: fact.text.startIndex..<fact.text.endIndex).count == 1 else {
+            return .rejectedDeterministically("notOneSentence")
+        }
+        let verification = OverviewClaimVerifier.verifyOverview(check, passages: [passage], articles: [article])
+        guard verification.isFullyVerified else {
+            let reason = verification.allFailureReasons.first.map { "\($0)".prefix { $0 != "(" } } ?? "unverified"
+            return .rejectedDeterministically("verifier_\(reason)")
+        }
+        let audit = OverviewQualityAuditor.auditClaim(fact, citations: check.citations, passages: [passage])
+        guard audit.isSupported else {
+            return .rejectedDeterministically(audit.criticalErrorKind.map { "auditor_\($0)" } ?? "auditor_unsupported")
+        }
         // ponytail: one fresh model judgment per sentence, bounded to eight; human audits remain necessary.
         let prompt = """
             \(GenerationPromptDefense.untrustedDataSystemGuard)
@@ -601,7 +639,7 @@ struct OverviewModelOutcome: Sendable, Equatable, Codable {
         case thinEvidence
         /// No INTRO or FACT line at all, for example a refusal written as prose.
         case unstructured
-        /// Structured lines, but not the 5 to 8 lines the format requires.
+        /// Structured lines, but not the 4 to 8 lines the format allows.
         case lineCount
         /// The verified lines do not form one to three introduction sentences plus three to five facts,
         /// or fewer than two thirds of the lines survived.
@@ -613,6 +651,8 @@ struct OverviewModelOutcome: Sendable, Equatable, Codable {
     var malformedLines = 0
     var deterministicRejections = 0
     var modelRejections = 0
+    /// Deterministic rejections by first failed check, such as `notOneSentence` or `verifier_numericMismatch`.
+    var rejectionReasons: [String: Int] = [:]
     var keptIntroduction = 0
     var keptFacts = 0
 }

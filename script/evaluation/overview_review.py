@@ -194,10 +194,15 @@ def total(counts, names):
 
 def line_counts(records):
     lines = dict.fromkeys(LINE_FIELDS, 0)
+    reasons = {}
     for _, record in records:
         outcome = record.get('outcome') or {}
         for key, field in LINE_FIELDS.items():
             lines[key] += outcome.get(field, 0)
+        for reason, count in (outcome.get('rejectionReasons') or {}).items():
+            reasons[reason] = reasons.get(reason, 0) + count
+    if reasons:
+        lines['deterministicRejectionReasons'] = reasons
     return lines
 
 
@@ -261,6 +266,22 @@ def run_json(directory, name):
     return json.loads(path.read_text()) if path.exists() else None
 
 
+def evidence_metrics(records):
+    """#308 step 2: publisher-text extraction before generation, for runs that measured it."""
+    measured = [record for _, record in records if record.get('evidence')]
+    if not measured:
+        return None
+    outcomes = {}
+    for record in measured:
+        for kind, count in record['evidence'].get('outcomes', {}).items():
+            outcomes[kind] = outcomes.get(kind, 0) + count
+    requests = [record['evidence']['pageRequests'] for record in measured]
+    return {'events': len(measured), 'seconds': quantiles([record['evidence']['seconds'] for record in measured]),
+            'endToEndSeconds': quantiles([record['evidence']['seconds'] + record['durationSeconds'] for record in measured]),
+            'pageRequests': {'total': sum(requests), 'maxPerEvent': max(requests)},
+            'storedTexts': sum(record['evidence']['storedTexts'] for record in measured), 'outcomes': outcomes}
+
+
 def report(directory):
     directory = private_run(directory)
     records = runs(directory)
@@ -274,10 +295,14 @@ def report(directory):
         'verbatim': verbatim, 'introductionRepetition': repetition,
         'decisionInputs': {'labellingComplete': claims_report['retained'] > 0 and claims_report['unlabelled'] == 0,
                            'criticalErrorObserved': claims_report['critical']['count'] > 0,
-                           'acceptedTarget': target, 'acceptedTargetMet': overviews['accepted']['count'] >= target},
+                           'acceptedTarget': target, 'acceptedTargetMet': overviews['accepted']['count'] >= target,
+                           'formatFallbacks': rate(overviews['fallbackGroups']['format'], overviews['attempted'])},
         'limitations': 'Labels come from the reviewer sheet; the auditor heuristic is not a label. Verbatim runs and '
                        'Jaccard repetition are lexical measures. Latency includes per-sentence verification calls.',
     }
+    evidence = evidence_metrics(records)
+    if evidence is not None:
+        result['evidence'] = evidence
     coverage = run_json(directory, 'perspectives.json')
     if coverage is not None:
         result['perspectiveCoverage'] = {**coverage, 'twoOrMoreRate': rate(coverage.get('twoOrMore', 0), coverage.get('events', 0))}
@@ -360,7 +385,19 @@ def check_sheet(directory):
 
 
 def check_report(directory):
+    for name, seconds, requests in (('1', 0.5, 2), ('2', 1.5, 3)):
+        path = directory / f'overview-private-live-{name}.json'
+        record = json.loads(path.read_text())
+        record['evidence'] = {'seconds': seconds, 'pageRequests': requests, 'storedTexts': 1,
+                              'outcomes': {'success': 1, 'cutAtDeadline': requests - 1}}
+        path.write_text(json.dumps(record))
     result = report(directory)
+    evidence = result['evidence']
+    require((evidence['events'], evidence['pageRequests'], evidence['storedTexts']) == (2, {'total': 5, 'maxPerEvent': 3}, 2),
+            'Evidence events, page requests and stored texts')
+    require(evidence['outcomes'] == {'success': 2, 'cutAtDeadline': 3}, 'Evidence fetch outcomes')
+    require(math.isclose(evidence['endToEndSeconds']['p95'], 7.35), 'End-to-end time adds evidence and generation')
+    require(result['decisionInputs']['formatFallbacks']['of'] == 3, 'Format fallback rate over attempts')
     overviews, claims_report = result['overviews'], result['claims']
     require((overviews['attempted'], overviews['accepted']['count'], overviews['modelFailures']) == (3, 1, 1), 'Attempted, accepted and failed counts')
     require(overviews['fallbackCauses'] == {'accepted': 1, 'refusal': 1, 'weakDraft': 1}, 'Raw fallback causes')
