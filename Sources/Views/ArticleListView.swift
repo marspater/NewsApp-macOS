@@ -485,11 +485,7 @@ struct ArticleListView: View {
             ToolbarSpacer(.fixed, placement: .primaryAction)
         }
 
-        if #available(macOS 26.1, *) {
-            refreshToolbarItem.visibilityPriority(.high)
-        } else {
-            refreshToolbarItem
-        }
+        refreshToolbarItem
         if isBriefing {
             if #available(macOS 26, *) { ToolbarSpacer(.fixed, placement: .primaryAction) }
             ToolbarItem(placement: .primaryAction) {
