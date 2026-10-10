@@ -14289,6 +14289,49 @@ struct NewsTests {
                 return false
             }), "Report flags attributionMissing for White House")
 
+        // 5d. Long passages (#308): checks read the matching sentence and the words around a verbatim quote.
+        let longPassage = EvidencePassage(
+            id: "pass-long", articleID: "art-gamma",
+            text: """
+                The council approved the bridge repairs on Monday. Officials did not give a reopening date. \
+                “We will go on with the work,” Kovalenko said after the vote.
+                """)
+        let longPassages = passages + [longPassage]
+        func failures(_ statement: String) -> [ClaimVerificationFailureReason] {
+            let fact = PassageAnchoredFact(
+                id: "f-long", statement: statement, passageID: longPassage.id, quote: longPassage.text,
+                articleID: "art-gamma")
+            let overview = OverviewComposer.composeOverview(
+                eventID: "event-long", eventTitle: "Long passage", verifiedFacts: [fact, validFact1, validFact2],
+                passages: longPassages, articles: articles)
+            return OverviewClaimVerifier.verifyOverview(overview, passages: longPassages, articles: articles)
+                .allFailureReasons
+        }
+        func flagged(_ reasons: [ClaimVerificationFailureReason], negation: Bool) -> Bool {
+            reasons.contains {
+                switch $0 {
+                case .negationFlipped: negation
+                case .attributionMissing: !negation
+                default: false
+                }
+            }
+        }
+        assertFalse(
+            flagged(failures("The council approved the bridge repairs on Monday."), negation: true),
+            "A negation elsewhere in the passage does not flag a faithful positive sentence")
+        assertTrue(
+            flagged(failures("Officials gave a reopening date."), negation: true),
+            "Dropping the negation of the matching sentence is still flagged")
+        assertTrue(
+            flagged(failures("The council didn't approve the bridge repairs on Monday."), negation: true),
+            "A contracted negation counts as a negation")
+        assertFalse(
+            flagged(failures("“We will go on with the work,” Kovalenko said after the vote."), negation: false),
+            "Punctuation around a verbatim quote does not hide its speaker")
+        assertTrue(
+            flagged(failures("The governor said the work will go on."), negation: false),
+            "A speaker absent from the passage is still flagged")
+
         // 6. Failure behavior: never store failed retelling as finished overview; show verified excerpts and source list
         let fallbackDoc = OverviewClaimVerifier.createFallbackOverview(
             from: numOverview,

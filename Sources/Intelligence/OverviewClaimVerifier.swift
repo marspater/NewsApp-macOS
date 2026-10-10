@@ -1,4 +1,5 @@
 import Foundation
+import NaturalLanguage
 
 /// Specific failure reason for an overview claim verification check.
 public enum ClaimVerificationFailureReason: Sendable, Equatable {
@@ -214,21 +215,34 @@ public struct OverviewClaimVerifier: Sendable {
         "не", "ні", "ніколи", "жоден", "відмовився", "відхилив", "заперечив",
     ]
 
+    /// Compares the claim with the passage sentence it most resembles. A long article almost always negates
+    /// something elsewhere, so the whole passage is not the reference.
     private static func verifyNegationPreservation(
         statement: String,
         passage: EvidencePassage
     ) -> ClaimVerificationFailureReason? {
-        let claimTokens = tokenize(statement)
-        let passageTokens = tokenize(passage.text)
-
-        let claimHasNegation = !negationWords.isDisjoint(with: claimTokens)
-        let passageHasNegation = !negationWords.isDisjoint(with: passageTokens)
-
-        if claimHasNegation != passageHasNegation {
+        let claimTokens = negationTokens(statement)
+        let tokenizer = NLTokenizer(unit: .sentence)
+        tokenizer.string = passage.text
+        let sentences = tokenizer.tokens(for: passage.text.startIndex..<passage.text.endIndex).map {
+            negationTokens(String(passage.text[$0]))
+        }
+        let claimWords = Set(claimTokens)
+        guard
+            let reference = sentences.max(by: {
+                Set($0).intersection(claimWords).count < Set($1).intersection(claimWords).count
+            })
+        else { return nil }
+        if negationWords.isDisjoint(with: claimTokens) != negationWords.isDisjoint(with: reference) {
             return .negationFlipped(claimText: statement, passageID: passage.id)
         }
-
         return nil
+    }
+
+    /// Word tokens with "n't" contractions read as "not", so "didn't" counts as a negation.
+    private static func negationTokens(_ text: String) -> [String] {
+        tokenize(
+            text.replacingOccurrences(of: "n\u{2019}t", with: " not").replacingOccurrences(of: "n't", with: " not"))
     }
 
     // MARK: - Attribution Preservation
@@ -242,22 +256,16 @@ public struct OverviewClaimVerifier: Sendable {
         statement: String,
         passage: EvidencePassage
     ) -> ClaimVerificationFailureReason? {
-        let normalizedStatement = statement.folding(
-            options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
-        let normalizedPassage = passage.text.folding(
-            options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
-
+        // Words only: punctuation around a verbatim quote ("…on,” Zelensky said) must not hide the speaker.
+        let passageWords = " " + tokenize(passage.text).joined(separator: " ") + " "
         for pattern in attributionPatterns {
-            if let range = normalizedStatement.range(of: pattern) {
+            // Search the original statement, so the range indexes the same string.
+            if let range = statement.range(of: pattern, options: [.caseInsensitive, .diacriticInsensitive]) {
                 let prefix = String(statement[..<range.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
                 let entityCandidate = extractAttributionEntity(from: prefix)
-
-                if !entityCandidate.isEmpty {
-                    let normalizedEntity = entityCandidate.folding(
-                        options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
-                    if !normalizedPassage.contains(normalizedEntity) {
-                        return .attributionMissing(claimAttribution: entityCandidate, passageID: passage.id)
-                    }
+                let entityWords = tokenize(entityCandidate).joined(separator: " ")
+                if !entityWords.isEmpty, !passageWords.contains(" " + entityWords + " ") {
+                    return .attributionMissing(claimAttribution: entityCandidate, passageID: passage.id)
                 }
             }
         }
