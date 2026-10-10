@@ -59,6 +59,8 @@
 
 - The migration regression clears its temporary preferences domain by its suite name, and the test script removes only that run’s UUID-named plist after the runner exits (#311).
 
+- Attributed overview perspectives recognize paired curly quotation marks and both `said Speaker` and `Speaker said` after a quote. Statements retain their original passage text; vague speakers and syndicated duplicates remain excluded. Older cached overviews regenerate on request (#313).
+
 - While tension collection is on, waiting minor stories from panel feeds are no longer deleted after a day, so past tension days keep the stories they were built from (#310). They stay hidden from the reading views as before.
 
 - An overview made while the on-device model was skipped (AI setting, Low Power Mode, heat) or failed (refused, rate-limited) is kept only provisionally and regenerated on the next request, so a background warmup can no longer pin an event to its excerpt overview. Cancelling the background warmup no longer cancels an overview the reader joined. Overviews made while the model was skipped or failed, and reader summaries made after a failed model request (Apple Intelligence switched off, model still downloading, refusal, rate limit), are redone when next requested; a Mac that cannot run it keeps the excerpt versions. After a macOS update, which can replace the on-device model, stored overviews and summaries regenerate with the new model when next opened.
