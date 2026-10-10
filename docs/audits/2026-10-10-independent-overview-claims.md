@@ -1,6 +1,6 @@
 # Independent overview claim review — 10 October 2026
 
-Refs #308. Agent 1 reviewed the handed-off claim sheet independently of overview synthesis/rating implementation. Detailed labels, passages and model records remain local. This is proposed independent adjudication, not Mars's acceptance or validation of a later synthesis fix.
+Refs #308. Agent 1 reviewed the handed-off claim sheet independently of overview synthesis/rating implementation. Detailed labels, passages and model records remain local. The adjudication report subsequently supplied by Mars confirms the labels below. This is bounded review of the frozen sample, not fresh-window acceptance or validation of a later synthesis fix.
 
 ## Scope and lineage
 
@@ -16,13 +16,13 @@ Titles, deterministic excerpt sections and perspectives are outside this model-c
 | --- | ---: | ---: |
 | Supported | 154 | 92.22% |
 | Unsupported by the cited passage | 2 | 1.20% |
-| Proposed critical attribution error | 11 | 6.59% |
+| Critical attribution error confirmed by supplied report | 11 | 6.59% |
 
 Critical-error Wilson 95% interval: **3.72–11.41%**, upper bound **11.41%**. Unsupported-only interval: **0.33–4.26%**. Counting both non-supported classes gives 13/167 (7.78%). The 11 critical labels affect 7/35 accepted overviews; both non-supported classes affect 8/35.
 
 Critical labels concern speakerless first-person quotes, political motive allegations, combatant success assessments and disputed official positions losing their reporting frame. The two other unsupported claims use passages that do not establish the displayed assertion, although another passage in their respective packet supports it. No number/date mismatch was identified in this review. Exact exception IDs and reasoning stay in the private handoff sheet.
 
-The saved automatic auditor reported zero critical/unsupported claims. That heuristic result differs from these independent labels. Repeated claims and shared events make claim outcomes dependent; nominal per-claim Wilson bounds do not establish event-level or general release accuracy. Mars must adjudicate the proposed severity judgments.
+The saved automatic auditor reported zero critical/unsupported claims. That heuristic result differs from these independent labels. Repeated claims and shared events make claim outcomes dependent; nominal per-claim Wilson bounds do not establish event-level or general release accuracy. The supplied adjudication report confirms all 13 exception labels; the decision scope is recorded below.
 
 ## Existing-run measurements
 
@@ -32,9 +32,17 @@ The saved automatic auditor reported zero critical/unsupported claims. That heur
 - Introduction/fact repetition: 24/60 introductory claims (40%) have best content-word Jaccard similarity at least 0.6 to a retained fact; median best similarity 0.341. This is lexical overlap, not independent semantic adjudication.
 - Recorded evidence preparation made 12 page requests, all HTTP failures, and stored no new publisher texts. Review uses the exact passages already saved in the packet.
 
+## Supplied adjudication — 10 October 2026
+
+Mars supplied an adjudication report confirming all 13 exception decisions: 11 critical and 2 unsupported. It also reports an exhaustive audit retaining the other 154 supported labels. These are report-supplied decisions; the report does not supply the CSV exports it says were reconciled. Agent 1 reconstructed separate private sheets from the unchanged frozen inputs, preserved the original independent review, and validated all non-label fields with the existing reporter. Counts and rates are unchanged. This import establishes correspondence with the saved packet, not independent proof of how the report's review was conducted.
+
+The later Agent 2 receipt at `e91111b` is retrospective. Its capture time matches a subsequent library modification at 09:37 UTC, whereas the packet files were written at 09:13 UTC. Its library hash describes that later copy; its article-date extents do not establish the harness's selection bounds. Producer commit and clean-tree state are not proved for the generation run. The saved output hashes remain useful, but this record cannot retroactively provide a contemporaneous receipt or fresh-window eligibility.
+
+No corrected output packet has been handed off for independent review. Prompt edits and passing regressions do not establish that the adjudicated errors were resolved. The next bounded review must bind corrected claims to their exact saved passages and producer inputs, include valid-attribution controls, and report acceptance/fallback changes. Mars's keep/tune/narrow implementation choice and a separate acceptance set remain open; the report's recommendation does not authorize model retraining or prove later implementation quality.
+
 ## Decision and verification
 
-Under these proposed labels, #308's rule that any critical error blocks keeping the generative path unchanged is triggered. No generation threshold, verifier, composer or rating code is changed by this review. Agent 2 can use the private exceptions for targeted corrections; this reviewed sample then provides development evidence, not a new untouched acceptance set.
+With all 11 critical labels confirmed by the supplied report, #308's rule that any critical error blocks keeping the reviewed generative path unchanged is triggered. No generation threshold, verifier, composer or rating code is changed by this review. Agent 2 can use the private exceptions for targeted corrections; this reviewed sample then provides development evidence, not a new untouched acceptance set.
 
 All 167 labels are present, unique and accepted by the existing binding validator; original input hashes are unchanged. The reporter's synthetic self-check and documentation consistency checks are recorded with publication. No new generation, several-day collection, historical holdout replay, app launch or installation is performed. The subsequently supplied #309 packet is reviewed in the [independent importance audit](2026-10-10-independent-importance-review.md), with its own eligibility limits. Mars's keep/tune/narrow decision remains open.
 

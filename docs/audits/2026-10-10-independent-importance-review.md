@@ -4,16 +4,22 @@ Refs #309. Agent 1, outside rating implementation, reviewed all 70 records in th
 
 ## Labels and hidden-important rate
 
-| Proposed independent label | Records / 70 | Rate |
+| Independent label, with report adjudication below | Records / 70 | Rate |
 | --- | ---: | ---: |
 | Minor | 66 | 94.29% |
 | Important (at least notable) | 4 | 5.71% |
 
-All four proposed important records have saved `waiting: yes` flags. Both the reviewed-sample hidden-important rate and waiting-only rate are **4/70 (5.71%)**, Wilson 95% interval **2.24–13.79%**, upper bound **13.79%**. These are recorded snapshot flags, not a current-library visibility check.
+All four important records confirmed by the supplied report have saved `waiting: yes` flags. Both the reviewed-sample hidden-important rate and waiting-only rate are **4/70 (5.71%)**, Wilson 95% interval **2.24–13.79%**, upper bound **13.79%**. These are recorded snapshot flags, not a current-library visibility check.
 
 Two important labels concern military-site reports with a physical breach or criminal-damage allegation, going beyond simple trespass. They describe the same development. The other two concern national manufacturing regulation and multi-day public protests with many reported arrests. Individual records are therefore not independent events; the nominal row-level interval is descriptive, not general release acceptance. Exact titles, summaries, IDs and rationales stay in a private adjudication sheet.
 
-The review follows Mars's 9 October decisions on media-business changes, military incidents and staple prices. The earlier regional staple-price case remains minor; a quoted broader cost claim is flagged for scope adjudication. Generic feature/live-blog format does not defeat a specific reported security-consequence exception. The four important judgments and other borderline minor cases await Mars; no automatic relabelling or acceptance is granted.
+The review follows Mars's 9 October decisions on media-business changes, military incidents and staple prices. The earlier regional staple-price case remains minor; a quoted broader cost claim is flagged for scope adjudication. Generic feature/live-blog format does not defeat a specific reported security-consequence exception. The adjudication report supplied by Mars confirms the four important judgments and four borderline minor cases. This does not automatically change stored ratings or grant fresh-window acceptance.
+
+## Supplied adjudication — 10 October 2026
+
+The report supplied by Mars explicitly confirms all eight priority cases: four important and four minor. Its summary retains the overall 4 important / 66 minor result. The remaining 62 minor records do not have individual decisions in the report; those retain Agent 1's original labels rather than being presented as newly reviewed by Mars. Abbreviated story identifiers in the report resolve uniquely to the private priority sheet.
+
+The report's referenced CSV exports were not supplied. Agent 1 reconstructed a separate private sheet, recorded the distinction between individual report decisions and retained labels, and reran the existing field-binding validator and aggregate reporter. Original source fields and reviewer files remain unchanged. Rates are unchanged. Fresh-window eligibility and the model-update retention policy remain open; no rating behavior is changed.
 
 ## Saved repeat ratings
 
