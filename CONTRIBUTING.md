@@ -12,6 +12,7 @@ Build on Apple silicon with Xcode 27 selected. The deployment target remains mac
 
 ```sh
 ./test.sh                         # Full regressions; also run by the commit hook
+script/format.sh                  # swift-format; automatically formats staged Swift files in pre-commit hook
 script/design_lint.sh              # DESIGN.md ratchet (first step of ./test.sh); --update only after lowering counts
 ./test.sh --story-regressions     # Focused offline identity, reader and persistence checks
 ./test.sh --curation-live /private/tmp/library-backup.sqlite3 /private/tmp/curation-report # Opt-in on-device rating audit of a SQLite backup; private titles stay local
