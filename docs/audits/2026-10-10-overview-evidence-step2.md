@@ -4,7 +4,7 @@ Refs #308. This is the first live check after #414, which extracts publisher tex
 
 ## Sample
 
-The source is a backup of the isolated collection app's library (#314). That app runs `main` at `7c2d01f`, was seeded from the installed library and had made one refresh. The 72-hour window therefore matches the [summary-only audit](2026-10-10-overview-live-audit.md) (#412) on 7–8 October, so the comparison uses the same events. Only the backup was written.
+The source is a backup of the isolated collection app's library (#314). That app runs `main` at `7c2d01f`, was seeded from the installed library and had made one refresh. The 72-hour window therefore matches the [summary-only audit](2026-10-10-overview-live-audit.md) (#412) on 7–8 October. Both runs draw on largely the same events, except that the earlier audit excluded the 8 events from 9 October. Only the backup was written.
 
 `NEWS_OVERVIEWS_EXTRACT=1 ./test.sh --overviews-live` attempted all 58 multi-source events. Before each event, it used the production coordinator path (4-second deadline per page, two fetches at a time, at most four representatives).
 
