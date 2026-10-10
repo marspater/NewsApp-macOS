@@ -151,10 +151,10 @@ struct FeedCatalogView: View {
                 if let advisory = appSettings.visibleAdvisory(for: feed.url) {
                     Text("Review note (\(advisory.date)): \(advisory.summary)")
                         .font(AppTypography.caption)
-                        .foregroundColor(AppColor.warning)
+                        .foregroundColor(AppColor.primaryText)
                 }
                 if feed.availability == .previewOnly {
-                    Text("Article pages may refuse the in-app reader; the feed preview still works.")
+                    Text("Story pages may refuse the in-app reader; the feed preview still works.")
                         .font(AppTypography.caption)
                         .foregroundColor(AppColor.tertiaryText)
                 }

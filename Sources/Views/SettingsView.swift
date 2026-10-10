@@ -193,8 +193,8 @@ struct SettingsView: View {
 
             Divider()
 
-            // Feed list
-            List {
+            // Form keeps subscription actions reachable through system keyboard navigation.
+            Form {
                 ForEach(feedManager.feedURLs, id: \.self) { urlString in
                     HStack(spacing: AppSpacing.sm) {
                         let status = feedManager.feedStatuses[urlString]
@@ -279,9 +279,10 @@ struct SettingsView: View {
                         .accessibilityLabel("Unsubscribe from feed")
                     }
                     .padding(.vertical, AppSpacing.xxs)
+                    .accessibilityElement(children: .contain)
                 }
             }
-            .listStyle(.plain)
+            .formStyle(.grouped)
 
             Text(FeedHealth.disclaimer)
                 .font(AppTypography.caption)

@@ -10,7 +10,7 @@
       "advisory": {
         "date": "2026-10-08",
         "reason": "reader_inaccessible",
-        "summary": "Article pages refuse automated reader extraction; in-app reader shows feed preview instead.",
+        "summary": "Story pages refuse automated reader extraction; in-app reader shows feed preview instead.",
         "evidenceLinks": [
           "https://www.france24.com/en/rss"
         ],
@@ -29,7 +29,7 @@
       "advisory": {
         "date": "2026-10-01",
         "reason": "paywall_introduced",
-        "summary": "Article pages answer HTTP 403 to automated readers, requiring web browser view.",
+        "summary": "Story pages answer HTTP 403 to automated readers, requiring web browser view.",
         "evidenceLinks": [
           "https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml"
         ],

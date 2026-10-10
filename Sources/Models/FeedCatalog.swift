@@ -120,7 +120,7 @@ enum FeedCatalog {
         "https://www.france24.com/en/rss": FeedAdvisory(
             date: "2026-10-08",
             reason: .readerInaccessible,
-            summary: "Article pages refuse automated reader extraction; in-app reader shows feed preview instead.",
+            summary: "Story pages refuse automated reader extraction; in-app reader shows feed preview instead.",
             evidenceLinks: ["https://www.france24.com/en/rss"],
             uncertainty: .known,
             suggestedAlternativeFeedIDs: ["bbc-world", "dw-english", "euronews"]
@@ -128,7 +128,7 @@ enum FeedCatalog {
         "https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml": FeedAdvisory(
             date: "2026-10-01",
             reason: .paywallIntroduced,
-            summary: "Article pages answer HTTP 403 to automated readers, requiring web browser view.",
+            summary: "Story pages answer HTTP 403 to automated readers, requiring web browser view.",
             evidenceLinks: ["https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml"],
             uncertainty: .known,
             suggestedAlternativeFeedIDs: ["guardian-world", "bbc-world"]

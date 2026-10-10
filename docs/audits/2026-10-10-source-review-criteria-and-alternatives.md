@@ -75,3 +75,23 @@ The manifest is versioned and stored under `Tests/Fixtures/catalog-review/catalo
 2. Validates that every suggested alternative references a valid, offered catalog feed.
 3. Enforces valid ISO 8601 calendar dates and evidence URL schemes.
 4. Verifies that no private local paths or tracking mechanisms are introduced.
+
+## Design review follow-up — 10 October 2026
+
+The live review found that the subscription `List` collapsed the nested advisory controls into its feed row and skipped Alternatives and Dismiss during keyboard traversal. Subscription rows now use the native grouped `Form`, matching the other Settings panes, with contained accessibility children. No custom focus handling or AppKit bridge was added. Catalog advisory paragraphs use the primary label color; advisory summaries and the adjacent preview-only notice use “Story”. The review manifest matches the revised summaries.
+
+Verification uses an isolated production bundle under `com.marspater.news.pr424fixqa`, with separate preferences and SQLite and an empty staged container-migration resource. The installed app and real user data are preserved.
+
+- With macOS Keyboard navigation enabled, Tab from the subscription field reaches Browse Catalog, Import OPML, Export OPML, Unsubscribe, Alternatives and Dismiss. Space opens Alternatives and exposes BBC World, DW and Euronews; Escape closes it, Tab reaches Dismiss, and Space removes the notice while retaining the France 24 subscription. The rendered accessibility tree exposes the menu and button separately.
+- The final optimized bundle passes the same keyboard sequence. The fixed Settings notice wraps at its existing pane width in light and dark appearance; the catalog notice uses primary label text in both appearances. Catalog Done responds to Return. System keyboard navigation is restored to its original off value after verification.
+- Earlier review also exercised main-window widths of 900 pt and a wide desktop window, light/dark appearance, Increase Contrast, Reduce Motion and Reduce Transparency. The final follow-up repeats the affected notice layout, catalog colors and complete advisory keyboard path.
+
+| Final check | Result |
+| --- | --- |
+| `./test.sh` (pre-commit hook; includes design lint and catalog manifest/self-checks) | Passed |
+| `script/test_native_ui_qa.sh` | Passed: 150 checks, zero failures |
+| Isolated optimized `./build.sh` | Passed; arm64, ad-hoc signed |
+| `codesign --verify --deep --strict`, `lipo -archs` | Passed; arm64 |
+| Live launch, keyboard actions and light/dark notice checks | Passed in the isolated bundle |
+
+The target remains macOS 15; runtime checks used macOS 27. No macOS 15 runtime, distribution/notarization run or parked VoiceOver speech/rotor QA is claimed. Hosted CI for the updated PR head is reported separately.
