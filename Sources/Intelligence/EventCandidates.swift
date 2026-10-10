@@ -113,3 +113,103 @@ enum EventCandidateFinder {
         return candidates
     }
 }
+
+// MARK: - Developing-story relations (#314)
+
+/// A navigation candidate, never a clustering decision or an asserted event date.
+struct RelatedStoryEvent: Hashable, Sendable {
+    let eventID: String
+    let articleID: String
+    let title: String
+    let firstPublishedAt: Date
+}
+
+/// Experimental, read-only relation. Keep it out of the reader until reviewed wrong-link rates
+/// are acceptable. Missing signals deliberately produce no link.
+enum EventStoryRelation {
+    static let window: TimeInterval = 72 * 3600
+    static let candidateLimit = 40
+    static let linkLimit = 3
+    static let memberLimit = 100
+
+    static func find(eventID: String, in database: DatabaseEngine) async throws -> [RelatedStoryEvent] {
+        let snapshot = try await database.relatedStoryEventRows(eventID: eventID)
+        // NaturalLanguage work must not hold either the database actor or the main actor.
+        let work = Task.detached(priority: .utility) {
+            try links(target: snapshot.target, candidates: snapshot.candidates)
+        }
+        return try await withTaskCancellationHandler {
+            let result = try await work.value
+            try Task.checkCancellation()
+            return result
+        } onCancel: {
+            work.cancel()
+        }
+    }
+
+    static func supports(_ earlier: EventFeatures, _ later: EventFeatures) -> Bool {
+        let gap = later.date.timeIntervalSince(earlier.date)
+        guard earlier.language == "en", later.language == "en",
+            earlier.date != DateParser.unknownDate, later.date != DateParser.unknownDate,
+            gap > 0, gap <= window,
+            !earlier.people.union(earlier.organizations)
+                .isDisjoint(with: later.people.union(later.organizations)),
+            !earlier.localPlaces.isDisjoint(with: later.localPlaces),
+            earlier.keywords.intersection(later.keywords)
+                .subtracting(earlier.anchors.union(later.anchors)).count >= 2
+        else { return false }
+        // A shared town must not override explicit contradictory countries or reporting periods.
+        for (a, b) in [
+            (earlier.countries, later.countries), (earlier.periods, later.periods), (earlier.years, later.years),
+        ] {
+            if !a.isEmpty && !b.isEmpty && a.isDisjoint(with: b) { return false }
+        }
+        return true
+    }
+
+    static func links(
+        target: [EventMatchRow], candidates: [(id: String, members: [EventMatchRow])]
+    ) throws -> [RelatedStoryEvent] {
+        try Task.checkCancellation()
+        guard !target.isEmpty, target.count <= memberLimit,
+            target.allSatisfy({ $0.date != DateParser.unknownDate }),
+            let start = target.map(\.date).min()
+        else { return [] }
+        let targetIDs = Set(target.compactMap(\.eventID))
+        let targetFeatures = target.map { EventFeatures(title: $0.title, description: $0.description, date: $0.date) }
+        var links: [RelatedStoryEvent] = []
+        for candidate in candidates.prefix(candidateLimit) {
+            try Task.checkCancellation()
+            let members = candidate.members
+            guard !targetIDs.contains(candidate.id), !members.isEmpty, members.count <= memberLimit,
+                members.allSatisfy({
+                    $0.date != DateParser.unknownDate && $0.date < start && start.timeIntervalSince($0.date) <= window
+                }),
+                let first = members.min(by: { ($0.date, $0.id) < ($1.date, $1.id) })
+            else { continue }
+            let features = members.map { EventFeatures(title: $0.title, description: $0.description, date: $0.date) }
+            var supportedEarlier = Set<Int>()
+            var supportedLater = Set<Int>()
+            // ponytail: at most 40 events × 100 × 100 pairs; use indexed features if those caps grow.
+            for (i, earlier) in features.enumerated() {
+                try Task.checkCancellation()
+                for (j, later) in targetFeatures.enumerated() where supports(earlier, later) {
+                    supportedEarlier.insert(i)
+                    supportedLater.insert(j)
+                }
+            }
+            guard supportedEarlier.count * 3 >= members.count * 2,
+                supportedLater.count * 3 >= target.count * 2
+            else { continue }
+            links.append(
+                RelatedStoryEvent(
+                    eventID: candidate.id, articleID: first.id, title: first.title, firstPublishedAt: first.date))
+        }
+        // Direct evidence only: never expand a link's neighbours into a transitive story family.
+        return Array(
+            links.sorted {
+                $0.firstPublishedAt == $1.firstPublishedAt
+                    ? $0.eventID < $1.eventID : $0.firstPublishedAt > $1.firstPublishedAt
+            }.prefix(linkLimit))
+    }
+}
