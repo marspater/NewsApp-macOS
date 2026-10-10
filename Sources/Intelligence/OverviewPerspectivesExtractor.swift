@@ -62,7 +62,9 @@ struct OverviewPerspectivesValidator: Sendable {
         "some people", "people", "many people", "many believe", "analysts", "analysts say",
         "sources", "sources say", "sources claim", "unnamed sources", "anonymous sources",
         "opponents", "opponents claim", "opponents argue", "skeptics", "the other side",
-        "officials say", "experts", "experts say", "commentators",
+        "officials say", "experts", "experts say", "commentators", "officials",
+        // A pronoun names no participant on its own.
+        "he", "she", "it", "they", "we", "i", "you",
     ]
 
     /// Evaluates whether a participant string represents a vague anonymous generality.
@@ -449,6 +451,14 @@ struct OverviewPerspectivesExtractor: Sendable {
         // Pattern 2: [Participant] (said that|stated that|announced that|argued that|warned that|noted that|confirmed that) [Statement].
         let patternSpeakerFirst =
             #"([A-Z][A-Za-z0-9\s,\.\-]{2,60})\s+(?:said that|stated that|announced that|argued that|warned that|noted that|confirmed that|emphasized that|urged that)\s+([^\.\n]{15,200})"#
+        // Pattern 2b: reported speech without an adjacent "that" (#313): "Foreign Secretary Ed Miliband said his
+        // country does not accept…", "Édouard Geffray told TF1 television on Thursday night that…". The speaker
+        // excludes full stops, so it cannot reach back into the previous sentence.
+        // When and where the remark was made: "on Thursday night", "Tuesday", "in a statement", "at a news conference".
+        let time =
+            #"(?:\s+(?:(?:on|late on|earlier on|late|early)\s+)?(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday|this week|last week|this month|last month|earlier|later)(?:\s+(?:night|morning|evening|afternoon))?(?:\s+\([^)]{1,30}\))?)?(?:\s+(?:in a statement|in an interview|in a report|in a post|at a news conference|during a news conference)[^:,]{0,30}[:,]?)?"#
+        let patternReported =
+            #"(\p{Lu}[\p{L}0-9\s,'’\-]{1,60}?)\s+(?:(?:said|says)\#(time)\s+(?:that\s+)?|told\s+(?:(?:[Tt]he|[Aa]n?)\s+[\p{L}0-9\s]{1,40}?|\p{Lu}[\p{L}0-9\s]{1,40}?)\#(time)\s+that\s+)(?!(?:in|on|at|of|for|during|after|before|while|with|is|are|was|were|has|have|had|would|will|could|should|can)\b|\p{Ll}+ing\b)([\p{L}0-9“\"][^\.\n]{15,200})"#
         // Pattern 3: According to [Participant], [Statement].
         let patternAccordingTo = #"According to\s+([A-Z][A-Za-z0-9\s,\.\-]{2,60}),\s+([^\.\n]{15,200})"#
 
@@ -456,6 +466,7 @@ struct OverviewPerspectivesExtractor: Sendable {
             (quoted + [
                 Attribution(patternSpeakerFirst, participantGroup: 1, statementGroup: 2, minimumLength: 10),
                 Attribution(patternAccordingTo, participantGroup: 1, statementGroup: 2, minimumLength: 10),
+                Attribution(patternReported, participantGroup: 1, statementGroup: 2, minimumLength: 15),
             ]).compactMap { $0 }
     }()
 
@@ -534,7 +545,49 @@ struct OverviewPerspectivesExtractor: Sendable {
             cleaned = String(cleaned.dropFirst(word.count))
         }
 
-        // If trailing clause was captured (e.g. "Dr. Sarah Jensen, Lead Volcanologist,"), preserve title but trim comma
-        return cleaned.trimmingCharacters(in: CharacterSet(charactersIn: "\"'.,:-"))
+        // Only the last sentence names the speaker: "…studies literature. He" is "He". A title such as "Dr." or
+        // "Gov." is capitalized, so a stop after a lowercase word marks the sentence end.
+        if let lastStop = cleaned.range(of: ". ", options: .backwards),
+            let before = cleaned[..<lastStop.lowerBound].split(separator: " ").last,
+            before.allSatisfy({ $0.isLowercase })
+        {
+            cleaned = String(cleaned[lastStop.upperBound...])
+        }
+        // A leading adverbial is not the speaker: "Last month, Germany", "On Wednesday, Canada's justice minister, …".
+        var segments = cleaned.components(separatedBy: ", ")
+        while segments.count > 1, let first = segments.first?.split(separator: " ").first,
+            leadingAdverbials.contains(first.lowercased())
+        {
+            segments.removeFirst()
+        }
+        // A participle clause describes the speaker: "Hilliard, sitting at the high court…" is "Hilliard".
+        if let clause = segments.dropFirst().firstIndex(where: {
+            $0.split(separator: " ").first?.hasSuffix("ing") == true
+        }) {
+            segments = Array(segments[..<clause])
+        }
+        var words = segments.joined(separator: ", ").split(separator: " ").map(String.init)
+        while let first = words.first, ["and", "but", "so", "the", "a", "an"].contains(first.lowercased()) {
+            words.removeFirst()
+        }
+        while let last = words.last, ["also", "has", "have", "had", "will", "would"].contains(last.lowercased()) {
+            words.removeLast()
+        }
+        // A speaker cut off at a relative word or pronoun is incomplete: "Seoul, which", "Kyiv and".
+        if let last = words.last?.lowercased(), danglingWords.contains(last) { return "" }
+        // A speaker names someone: "court filing" or "father of four" has no capitalized word.
+        guard words.contains(where: { $0.first?.isUppercase == true }) else { return "" }
+        return words.joined(separator: " ").trimmingCharacters(in: CharacterSet(charactersIn: "\"'.,:-"))
     }
+
+    private static let leadingAdverbials: Set<String> = [
+        "and", "but", "so", "meanwhile", "later", "earlier", "last", "this", "next", "on", "in", "at", "during",
+        "after", "before", "since", "while", "when", "speaking", "monday", "tuesday", "wednesday", "thursday",
+        "friday", "saturday", "sunday", "january", "february", "march", "april", "may", "june", "july", "august",
+        "september", "october", "november", "december",
+    ]
+    private static let danglingWords: Set<String> = [
+        "which", "who", "whom", "whose", "that", "and", "or", "but", "she", "he", "they", "it", "her", "his", "their",
+        "its",
+    ]
 }
