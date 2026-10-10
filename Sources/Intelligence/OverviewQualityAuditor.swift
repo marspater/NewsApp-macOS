@@ -919,6 +919,7 @@ public struct OverviewQualityAuditor: Sendable {
         ]
         let officialKeywords: Set<String> = [
             "minister", "leader", "official", "schlein", "saar", "sa'ar", "malki", "maliki", "zohar",
+            "commissioner", "physician", "grey", "oswald", "varma", "cole",
             "міністр", "керівник", "представник",
         ]
         let speechVerbs: Set<String> = [

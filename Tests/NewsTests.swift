@@ -6967,14 +6967,114 @@ struct NewsTests {
             }
             guard !excluded.isEmpty else { throw NSError(domain: "LiveOverviews", code: 2) }
         }
-        let db = DatabaseEngine(path: url.path)
-        try await db.open()
         let directory = URL(fileURLWithPath: output)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+
+        func runGitCommand(_ arguments: [String]) -> String? {
+            let proc = Process()
+            proc.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+            proc.arguments = arguments
+            let pipe = Pipe()
+            proc.standardOutput = pipe
+            proc.standardError = Pipe()
+            do {
+                try proc.run()
+                proc.waitUntilExit()
+                guard proc.terminationStatus == 0 else { return nil }
+                let data = pipe.fileHandleForReading.readDataToEndOfFile()
+                return String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+            } catch {
+                return nil
+            }
+        }
+
+        func fileSHA256(_ fileURL: URL) -> String? {
+            guard let data = try? Data(contentsOf: fileURL) else { return nil }
+            return SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+        }
+
+        // Immutable SQLite snapshot consistency (backup API / checkpoint handling)
+        let snapshotURL = directory.appendingPathComponent("library-snapshot.sqlite3")
+        if FileManager.default.fileExists(atPath: snapshotURL.path) {
+            try FileManager.default.removeItem(at: snapshotURL)
+        }
+        let sqliteProc = Process()
+        sqliteProc.executableURL = URL(fileURLWithPath: "/usr/bin/sqlite3")
+        sqliteProc.arguments = [
+            url.path,
+            "PRAGMA wal_checkpoint(TRUNCATE); VACUUM INTO '\(snapshotURL.path)';",
+        ]
+        let sqliteErrPipe = Pipe()
+        sqliteProc.standardError = sqliteErrPipe
+        try sqliteProc.run()
+        sqliteProc.waitUntilExit()
+        guard sqliteProc.terminationStatus == 0, FileManager.default.fileExists(atPath: snapshotURL.path) else {
+            let errData = sqliteErrPipe.fileHandleForReading.readDataToEndOfFile()
+            let errMsg = String(decoding: errData, as: UTF8.self)
+            throw NSError(
+                domain: "LiveOverviews", code: 3,
+                userInfo: [NSLocalizedDescriptionKey: "Failed to create SQLite snapshot: \(errMsg)"])
+        }
+        guard let snapshotSHA256 = fileSHA256(snapshotURL) else {
+            throw NSError(
+                domain: "LiveOverviews", code: 4,
+                userInfo: [NSLocalizedDescriptionKey: "Failed to compute snapshot SHA256"])
+        }
+
+        let runLibraryURL = directory.appendingPathComponent("run-library.sqlite3")
+        if FileManager.default.fileExists(atPath: runLibraryURL.path) {
+            try FileManager.default.removeItem(at: runLibraryURL)
+        }
+        try FileManager.default.copyItem(at: snapshotURL, to: runLibraryURL)
+
+        let db = DatabaseEngine(path: runLibraryURL.path)
+        try await db.open()
+
+        let captureDate = Date()
+        let isoFormatter = ISO8601DateFormatter()
+        isoFormatter.timeZone = TimeZone(secondsFromGMT: 0)
+        let captureTimeUTC = isoFormatter.string(from: captureDate)
+
+        let selectionAnchor = captureDate
+        let selectionWindowStart = selectionAnchor.addingTimeInterval(-72 * 3600)
+        let selectionWindowEnd = selectionAnchor
+        let selectionAnchorUTC = isoFormatter.string(from: selectionAnchor)
+        let selectionStartUTC = isoFormatter.string(from: selectionWindowStart)
+        let selectionEndUTC = isoFormatter.string(from: selectionWindowEnd)
+
+        let gitCommit = runGitCommand(["rev-parse", "HEAD"]) ?? "unknown"
+        let gitBranch = runGitCommand(["rev-parse", "--abbrev-ref", "HEAD"]) ?? "unknown"
+        let gitStatus = runGitCommand(["status", "--porcelain"]) ?? ""
+        let dirtyFingerprint =
+            gitStatus.isEmpty ? "clean" : "dirty (\(gitStatus.split(separator: "\n").count) uncommitted changes)"
+
+        let preProvenance: [String: Any] = [
+            "stage": "pre-generation",
+            "run": environment["NEWS_OVERVIEWS_RUN_NAME"] ?? "live-overview-measurement",
+            "issue": 308,
+            "captureTimeUTC": captureTimeUTC,
+            "gitCommit": gitCommit,
+            "gitBranch": gitBranch,
+            "dirtyCodeFingerprint": dirtyFingerprint,
+            "selectionBoundsUTC": [
+                "anchor": selectionAnchorUTC,
+                "start": selectionStartUTC,
+                "end": selectionEndUTC,
+            ],
+            "librarySnapshot": [
+                "path": "library-snapshot.sqlite3",
+                "sha256": snapshotSHA256,
+                "sourcePath": url.path,
+            ],
+        ]
+        let preProvenanceData = try JSONSerialization.data(
+            withJSONObject: preProvenance, options: [.prettyPrinted, .sortedKeys])
+        try preProvenanceData.write(to: directory.appendingPathComponent("provenance-pre-generation.json"))
+
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         let active = try await db.fetchArticles(
-            limit: nil, publicationWindow: Date().addingTimeInterval(-72 * 3600)...Date(), hidingWaitingStories: true)
+            limit: nil, publicationWindow: selectionWindowStart...selectionWindowEnd, hidingWaitingStories: true)
         let events = try await db.eventFeedSummaries(forArticles: active.map(\.id)).filter { $0.sources.count > 1 }
             .sorted { $0.sources.count > $1.sources.count }
         var report = [
@@ -7155,48 +7255,15 @@ struct NewsTests {
         print("PERSPECTIVE_COVERAGE \(String(decoding: try encoder.encode(coverage), as: UTF8.self))")
 
         // Automatically record synchronous run receipt and provenance (#308/#313).
-        let captureDate = Date()
-        let isoFormatter = ISO8601DateFormatter()
-        isoFormatter.timeZone = TimeZone(secondsFromGMT: 0)
-        let captureTimeUTC = isoFormatter.string(from: captureDate)
-
-        func runGitCommand(_ arguments: [String]) -> String? {
-            let proc = Process()
-            proc.executableURL = URL(fileURLWithPath: "/usr/bin/git")
-            proc.arguments = arguments
-            let pipe = Pipe()
-            proc.standardOutput = pipe
-            proc.standardError = Pipe()
-            do {
-                try proc.run()
-                proc.waitUntilExit()
-                guard proc.terminationStatus == 0 else { return nil }
-                let data = pipe.fileHandleForReading.readDataToEndOfFile()
-                return String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
-            } catch {
-                return nil
-            }
-        }
-
-        func fileSHA256(_ fileURL: URL) -> String? {
-            guard let data = try? Data(contentsOf: fileURL) else { return nil }
-            return SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
-        }
-
-        let gitCommit = runGitCommand(["rev-parse", "HEAD"]) ?? "unknown"
-        let gitBranch = runGitCommand(["rev-parse", "--abbrev-ref", "HEAD"]) ?? "unknown"
-        let gitStatus = runGitCommand(["status", "--porcelain"]) ?? ""
-        let dirtyFingerprint =
-            gitStatus.isEmpty ? "clean" : "dirty (\(gitStatus.split(separator: "\n").count) uncommitted changes)"
-
-        let activeDates = active.map(\.pubDate)
-        let windowStartUTC = activeDates.min().map { isoFormatter.string(from: $0) } ?? "unknown"
-        let windowEndUTC = activeDates.max().map { isoFormatter.string(from: $0) } ?? "unknown"
-
         var outputFiles: [String: [String: Any]] = [:]
         if let enumerator = FileManager.default.enumerator(at: directory, includingPropertiesForKeys: nil) {
             for case let fileURL as URL in enumerator {
-                guard !fileURL.hasDirectoryPath, fileURL.lastPathComponent != "receipt.json" else { continue }
+                guard !fileURL.hasDirectoryPath,
+                    fileURL.lastPathComponent != "receipt.json",
+                    fileURL.lastPathComponent != "run-library.sqlite3",
+                    fileURL.lastPathComponent != "run-library.sqlite3-wal",
+                    fileURL.lastPathComponent != "run-library.sqlite3-shm"
+                else { continue }
                 if let hash = fileSHA256(fileURL) {
                     outputFiles[fileURL.lastPathComponent] = [
                         "sha256": hash
@@ -7213,13 +7280,15 @@ struct NewsTests {
             "gitCommit": gitCommit,
             "gitBranch": gitBranch,
             "dirtyCodeFingerprint": dirtyFingerprint,
-            "windowBoundsUTC": [
-                "start": windowStartUTC,
-                "end": windowEndUTC,
+            "selectionBoundsUTC": [
+                "anchor": selectionAnchorUTC,
+                "start": selectionStartUTC,
+                "end": selectionEndUTC,
             ],
             "library": [
-                "path": url.path,
-                "sha256": fileSHA256(url) ?? "unknown",
+                "snapshotPath": "library-snapshot.sqlite3",
+                "snapshotSHA256": snapshotSHA256,
+                "sourcePath": url.path,
                 "articleCount": active.count,
                 "multiSourceActiveEvents": events.count,
             ],
@@ -14573,12 +14642,12 @@ struct NewsTests {
         let quotePassage = EvidencePassage(
             id: "pass-quote", articleID: "art-gamma",
             text:
-                "At the Nova site, Katia Zohar, whose daughter Bar Zohar was killed at age 23, called the start of the attack at 6:29am (0329 GMT) \"the minute that changed our lives forever\".",
+                "At the research station, Dr. Clara Oswald called the equipment activation at 6:29am \"the minute that changed our lives forever\".",
             ordinal: 2)
         let pikePassage = EvidencePassage(
-            id: "pass-pike", articleID: "art-gamma",
+            id: "pass-dialogue", articleID: "art-gamma",
             text:
-                "‘Where am I and who are you?’ Those were the first words death row inmate Christa Pike spoke after regaining consciousness, according to her lawyer.",
+                "‘Where am I and who are you?’ Those were the first words patient Jordan Cole spoke after regaining consciousness, according to the attending physician.",
             ordinal: 3)
         func checkClaim(_ statement: String, passage: EvidencePassage) -> (
             failures: [ClaimVerificationFailureReason], audit: ClaimAuditResult
@@ -14599,7 +14668,7 @@ struct NewsTests {
         }
 
         let detached1 = checkClaim(
-            "the start of the attack at 6:29am (0329 GMT) \"the minute that changed our lives forever\"",
+            "the activation at 6:29am \"the minute that changed our lives forever\"",
             passage: quotePassage)
         assertTrue(
             detached1.failures.contains(where: {
@@ -14621,7 +14690,7 @@ struct NewsTests {
             "Standalone quote is flagged as critical attribution error by auditor")
 
         let validQuote1 = checkClaim(
-            "Katia Zohar called the start of the attack at 6:29am \"the minute that changed our lives forever\".",
+            "Dr. Clara Oswald called the equipment activation at 6:29am \"the minute that changed our lives forever\".",
             passage: quotePassage)
         assertFalse(
             validQuote1.failures.contains(where: {
@@ -14634,22 +14703,22 @@ struct NewsTests {
         let motivePassage = EvidencePassage(
             id: "pass-motive", articleID: "art-gamma",
             text:
-                "Israeli Foreign Minister Gideon Saar said Thursday's move to downsize the U.K. presence had followed a dialogue with the British government in order to avoid an escalation of tensions between the two countries.",
+                "Regional Commissioner Alan Grey said Thursday's move to downsize the field presence had followed a dialogue with municipal leadership in order to avoid an escalation of tensions between the two departments.",
             ordinal: 4)
         let droppedMotive = checkClaim(
-            "The move to downsize the U.K. presence had followed a dialogue with the British government in order to avoid an escalation of tensions between the two countries.",
+            "The move to downsize the field presence had followed a dialogue with municipal leadership in order to avoid an escalation of tensions between the two departments.",
             passage: motivePassage)
         assertTrue(
             droppedMotive.failures.contains(where: {
                 if case .droppedAttribution = $0 { return true }
                 return false
-            }), "Dropping speaker attribution on diplomatic motive is flagged by verifier")
+            }), "Dropping speaker attribution on administrative motive is flagged by verifier")
         assertEqual(
             droppedMotive.audit.criticalErrorKind, .attributionError,
             "Dropping speaker on motive is flagged as critical attribution error")
 
         let validMotive = checkClaim(
-            "Israeli Foreign Minister Gideon Saar said Thursday's move had followed a dialogue with the British government in order to avoid an escalation of tensions between the two countries.",
+            "Regional Commissioner Alan Grey said Thursday's move had followed a dialogue with municipal leadership in order to avoid an escalation of tensions between the two departments.",
             passage: motivePassage)
         assertFalse(
             validMotive.failures.contains(where: {
@@ -14661,10 +14730,10 @@ struct NewsTests {
         let militaryPassage = EvidencePassage(
             id: "pass-mil", articleID: "art-gamma",
             text:
-                "The spokesperson for the Saudi-led coalition fighting the Houthis, Major General Turki al-Malki, said forces intercepted a ballistic missile north of Riyadh and destroyed a platform in Yemen's capital of Sana.",
+                "The spokesperson for the coalition command, General Jordan Cole, said forces intercepted a drone north of the perimeter and destroyed a platform in the northern valley.",
             ordinal: 5)
         let droppedMil = checkClaim(
-            "forces intercepted a ballistic missile north of Riyadh and destroyed a platform in Yemen's capital of Sana.",
+            "forces intercepted a drone north of the perimeter and destroyed a platform in the northern valley.",
             passage: militaryPassage)
         assertTrue(
             droppedMil.failures.contains(where: {
@@ -14676,7 +14745,7 @@ struct NewsTests {
             "Dropping spokesperson on military claim is critical error in auditor")
 
         let validMil = checkClaim(
-            "Coalition spokesman Major General Turki al-Malki said forces intercepted a ballistic missile north of Riyadh and destroyed a platform in Yemen's capital of Sana.",
+            "Coalition spokesman General Jordan Cole said forces intercepted a drone north of the perimeter and destroyed a platform in the northern valley.",
             passage: militaryPassage)
         assertFalse(
             validMil.failures.contains(where: {
@@ -14686,13 +14755,14 @@ struct NewsTests {
         assertEqual(validMil.audit.status, .supported, "Retaining coalition spokesperson is supported by auditor")
 
         // 5g. Citation grounding & selection mismatches (#308)
-        let consulatePassage = EvidencePassage(
-            id: "pass-consulate", articleID: "art-gamma",
+        let outpostPassage = EvidencePassage(
+            id: "pass-outpost", articleID: "art-gamma",
             text:
-                "The consulate is separate from the UK embassy, based in Tel Aviv, and has a distinct diplomatic role, covering East Jerusalem, the rest of the West Bank and Gaza.",
+                "The regional outpost is separate from the central headquarters, based in Metro City, and has a distinct liaison role, covering the northern district and coastal areas.",
             ordinal: 6)
         let mismatchMission = checkClaim(
-            "The UK Mission will remain separate from the UK embassy in Tel Aviv.", passage: consulatePassage)
+            "The regional mission will remain separate from the central headquarters in Metro City.",
+            passage: outpostPassage)
         assertTrue(
             mismatchMission.failures.contains(where: {
                 if case .ungroundedCitation(let token, _) = $0 { return token == "mission" }
@@ -14703,13 +14773,13 @@ struct NewsTests {
             .unsupported(reason: "Claim refers to subject 'mission' not mentioned in cited passage"),
             "Citing passage lacking 'mission' is unsupported in auditor")
 
-        let arrestPassage = EvidencePassage(
-            id: "pass-arrest", articleID: "art-gamma",
+        let inquiryPassage = EvidencePassage(
+            id: "pass-inquiry", articleID: "art-gamma",
             text:
-                "Ms. Rajapaksa travelled to Singapore on September 16 for medical treatment. She flew back after filing a court petition seeking to prevent her arrest, news agency AFP reported.",
+                "Ms. Elena Varma travelled to Singapore on September 16 for medical treatment. She returned after filing a court petition seeking to prevent her detention, the agency reported.",
             ordinal: 7)
         let mismatchArrest = checkClaim(
-            "Sri Lanka arrests ex-President Rajapaksa's wife in graft case", passage: arrestPassage)
+            "Sri Lanka arrests former director Varma in corruption inquiry", passage: inquiryPassage)
         assertTrue(
             mismatchArrest.failures.contains(where: {
                 if case .ungroundedCitation(let token, _) = $0 { return token == "sri lanka" }
