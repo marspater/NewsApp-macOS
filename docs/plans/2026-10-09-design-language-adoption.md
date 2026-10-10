@@ -16,7 +16,7 @@ Tracked in #350, with one issue per phase.
 | 6 Optional glass moments | #356 | #377–#379 | Done |
 | 7 Settings and secondary windows | #357 | #365, #366, #368 | Done |
 
-Evidence: [window chrome](../audits/2026-10-10-native-window-chrome.md), [phase 3](../audits/2026-10-10-design-phase-3.md), [phase 4](../audits/2026-10-10-design-phase-4.md), [phase 5](../audits/2026-10-10-design-phase-5.md), [phase 6](../audits/2026-10-10-design-phase-6.md) and [phases 2–4 acceptance](../audits/2026-10-10-design-acceptance.md). CI compiles every phase for macOS 15, but no phase has run on macOS 15 or 26. The system Reduce Transparency and Reduce Motion settings, the glass slider and full-screen hover remain unverified.
+Evidence: [window chrome](../audits/2026-10-10-native-window-chrome.md), [phase 3](../audits/2026-10-10-design-phase-3.md), [phase 4](../audits/2026-10-10-design-phase-4.md), [phase 5](../audits/2026-10-10-design-phase-5.md), [phase 6](../audits/2026-10-10-design-phase-6.md) and [phases 2–4 acceptance](../audits/2026-10-10-design-acceptance.md). CI compiles every phase for macOS 15. Runtime checks on macOS 15 and 26 are out of scope because no such machines are available. The system Reduce Transparency and Reduce Motion settings, the glass slider and full-screen hover remain unverified.
 
 ## Goal and limits
 

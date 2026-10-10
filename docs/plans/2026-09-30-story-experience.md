@@ -21,7 +21,7 @@ Merged follow-ups:
 | Related events (#403) | Read-only backend for earlier related-event candidates with bounded retrieval and direct actor, place and topic evidence ([audit](../audits/2026-10-10-related-event-backend.md)) | Reader links and a reviewed wrong-link measurement in #314 |
 | Reliability (#296/#297, #332, #342–#344) | Parser/card/clustering corrections, image-URL index, provisional overview/summary retry and schema v20 model-generation invalidation. Copied-library v16 → v20 migration, preserved state and regeneration passed (#305). The backup's orphan state row is not producible by the app, and a regression pins it (#331). The legacy cache import completes | OS notification delivery is deferred to the real compiled app in #334 |
 | Reader (#337, #408) | BBC newsletter banners and signup prose are removed (#330); responsive figure captions (The Guardian) appear once | Fixture regressions only; neither fix was rechecked on a live page in the app |
-| Design language (#347, #349, #358–#361, #363, #365–#368, #377–#379, #394–#396, #398–#400, #402, #407) | All seven phases of the [adoption plan](2026-10-09-design-language-adoption.md) are merged. The acceptance pass fixed a frozen adaptive overview color, card contrast with Increase Contrast and sidebar keyboard focus ([acceptance](../audits/2026-10-10-design-acceptance.md)) | None. Mars accepted phases 2–4 on 10 October; macOS 15/26 runtime remains unverified, and live OPML drops and the feed-failure view are out of scope |
+| Design language (#347, #349, #358–#361, #363, #365–#368, #377–#379, #394–#396, #398–#400, #402, #407) | All seven phases of the [adoption plan](2026-10-09-design-language-adoption.md) are merged. The acceptance pass fixed a frozen adaptive overview color, card contrast with Increase Contrast and sidebar keyboard focus ([acceptance](../audits/2026-10-10-design-acceptance.md)) | None. Mars accepted phases 2–4 on 10 October; macOS 15/26 runtime, live OPML drops and the feed-failure view are out of scope |
 | Tension retention (#321; #310 closed) | Waiting-story expiry preserves panel history while collection is enabled | Real-panel calibration #235 remains outside the core release |
 | PR maintenance (#299–#303/#306, #325–#327, #370–#376, #380, #382, #386–#392) | Reviewed cleanup, bounded read/save alias resolution, completion-claim regression and reused cache size keys; later automated PRs add tests, extract database and extraction helpers, batch enrichment enqueueing and keep WebKit data stores non-persistent | No new release gate |
 
@@ -37,7 +37,7 @@ Follow-up status as of this update:
 | #313 | In progress · P2 · idea | Live perspective coverage, then the model-proposal decision |
 | #314 | In progress · P2 · idea | Reader links and a reviewed wrong-link measurement; not a release dependency |
 | #334 | Backlog · P1 · deferred | Actual notification delivery and timing in the real compiled app |
-| #350 | In progress | Design language: all seven phases (#351–#357) are Done |
+| #350 | Done | Design language: all seven phases (#351–#357) are Done |
 | #305, #311, #312, #315, #330, #331, #338 | Done | #305 by #332; #311 by #328; #312 by #339 and #340; #315 by #329; #330 by #337; #331 by #342; #338 by #340 |
 | #264/#268 | Parked | Non-English event matching and spoken VoiceOver; resume only at Mars's request |
 | #99/#235/#244 | Optional / outside core release | Tension experiment/calibration and source discovery |
