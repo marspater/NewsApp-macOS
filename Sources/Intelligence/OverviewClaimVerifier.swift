@@ -21,7 +21,8 @@ public struct ClaimVerificationResult: Sendable, Equatable {
     public let isValid: Bool
     public let failureReasons: [ClaimVerificationFailureReason]
 
-    public init(factID: String, statement: String, isValid: Bool, failureReasons: [ClaimVerificationFailureReason] = []) {
+    public init(factID: String, statement: String, isValid: Bool, failureReasons: [ClaimVerificationFailureReason] = [])
+    {
         self.factID = factID
         self.statement = statement
         self.isValid = isValid
@@ -113,7 +114,8 @@ public struct OverviewClaimVerifier: Sendable {
         var failures: [ClaimVerificationFailureReason] = []
 
         for citationID in fact.citationIDs {
-            failures.append(contentsOf: verifyCitation(citationID, fact: fact, overview: overview, passagesByID: passagesByID))
+            failures.append(
+                contentsOf: verifyCitation(citationID, fact: fact, overview: overview, passagesByID: passagesByID))
         }
 
         return ClaimVerificationResult(
@@ -124,15 +126,20 @@ public struct OverviewClaimVerifier: Sendable {
         )
     }
 
-    private static func verifyCitation(_ citationID: String, fact: OverviewFact, overview: EventOverviewDocument,
-                                       passagesByID: [String: EvidencePassage]) -> [ClaimVerificationFailureReason] {
+    private static func verifyCitation(
+        _ citationID: String, fact: OverviewFact, overview: EventOverviewDocument,
+        passagesByID: [String: EvidencePassage]
+    ) -> [ClaimVerificationFailureReason] {
         guard let citation = overview.citations[citationID] else { return [.missingCitation(citationID: citationID)] }
         guard let passage = passagesByID[citation.passageID], citation.articleID == passage.articleID,
-              citation.passageFingerprint == passage.fingerprint else { return [.missingPassage(passageID: citation.passageID)] }
+            citation.passageFingerprint == passage.fingerprint
+        else { return [.missingPassage(passageID: citation.passageID)] }
         var failures = verifyQuoteGrounding(quote: citation.quote, passage: passage)
         failures.append(contentsOf: verifyNumbersAndEntities(statement: fact.text, passage: passage))
         if let failure = verifyNegationPreservation(statement: fact.text, passage: passage) { failures.append(failure) }
-        if let failure = verifyAttributionPreservation(statement: fact.text, passage: passage) { failures.append(failure) }
+        if let failure = verifyAttributionPreservation(statement: fact.text, passage: passage) {
+            failures.append(failure)
+        }
         return failures
     }
 
@@ -177,18 +184,14 @@ public struct OverviewClaimVerifier: Sendable {
 
         // 2. Currencies
         let currencies = extractCurrencies(from: statement)
-        for curr in currencies {
-            if !containsCurrency(curr, in: passage.text) {
-                reasons.append(.currencyMismatch(claimCurrency: curr, passageID: passage.id))
-            }
+        for curr in currencies where !containsCurrency(curr, in: passage.text) {
+            reasons.append(.currencyMismatch(claimCurrency: curr, passageID: passage.id))
         }
 
         // 3. Units
         let units = extractUnits(from: statement)
-        for unit in units {
-            if !containsUnit(unit, in: passage.text) {
-                reasons.append(.unitMismatch(claimUnit: unit, passageID: passage.id))
-            }
+        for unit in units where !containsUnit(unit, in: passage.text) {
+            reasons.append(.unitMismatch(claimUnit: unit, passageID: passage.id))
         }
 
         // 4. Dates / Years
@@ -208,7 +211,7 @@ public struct OverviewClaimVerifier: Sendable {
     private static let negationWords: Set<String> = [
         "not", "no", "never", "neither", "nor", "none", "cannot", "can't", "didn't",
         "doesn't", "won't", "isn't", "aren't", "refused", "denied", "rejected",
-        "не", "ні", "ніколи", "жоден", "відмовився", "відхилив", "заперечив"
+        "не", "ні", "ніколи", "жоден", "відмовився", "відхилив", "заперечив",
     ]
 
     private static func verifyNegationPreservation(
@@ -232,15 +235,17 @@ public struct OverviewClaimVerifier: Sendable {
 
     private static let attributionPatterns: [String] = [
         "announced", "said", "stated", "claimed", "reported", "according to",
-        "повідомило", "заявив", "повідомив", "зазначив", "підкреслив", "за словами", "згідно з"
+        "повідомило", "заявив", "повідомив", "зазначив", "підкреслив", "за словами", "згідно з",
     ]
 
     private static func verifyAttributionPreservation(
         statement: String,
         passage: EvidencePassage
     ) -> ClaimVerificationFailureReason? {
-        let normalizedStatement = statement.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
-        let normalizedPassage = passage.text.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+        let normalizedStatement = statement.folding(
+            options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+        let normalizedPassage = passage.text.folding(
+            options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
 
         for pattern in attributionPatterns {
             if let range = normalizedStatement.range(of: pattern) {
@@ -248,7 +253,8 @@ public struct OverviewClaimVerifier: Sendable {
                 let entityCandidate = extractAttributionEntity(from: prefix)
 
                 if !entityCandidate.isEmpty {
-                    let normalizedEntity = entityCandidate.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+                    let normalizedEntity = entityCandidate.folding(
+                        options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
                     if !normalizedPassage.contains(normalizedEntity) {
                         return .attributionMissing(claimAttribution: entityCandidate, passageID: passage.id)
                     }
@@ -361,16 +367,12 @@ public struct OverviewClaimVerifier: Sendable {
     private static func extractCurrencies(from text: String) -> [String] {
         var results: [String] = []
         let singleCharSymbols = ["$", "€", "£", "¥", "₴"]
-        for sym in singleCharSymbols {
-            if text.contains(sym) {
-                results.append(sym)
-            }
+        for sym in singleCharSymbols where text.contains(sym) {
+            results.append(sym)
         }
         let wordCodes = ["USD", "EUR", "GBP", "UAH", "грн"]
-        for code in wordCodes {
-            if containsWholeWord(code, in: text) {
-                results.append(code)
-            }
+        for code in wordCodes where containsWholeWord(code, in: text) {
+            results.append(code)
         }
         return results
     }
