@@ -263,7 +263,7 @@ struct ArticleCardView: View {
             let cleanDesc = ArticleContentRedactor.cleanText(article.description)
             if !cleanDesc.isEmpty {
                 Text(cleanDesc)
-                    .font(AppTypography.bodySmall)
+                    .font(AppTypography.body)
                     .foregroundColor(AppColor.secondaryText.opacity(0.85))
                     .lineLimit(2)
                     .multilineTextAlignment(.leading)
@@ -359,7 +359,7 @@ struct ArticleCardView: View {
             let cleanDescription = ArticleContentRedactor.cleanText(article.description)
             if !cleanDescription.isEmpty {
                 Text(cleanDescription)
-                    .font(AppTypography.bodySmall)
+                    .font(AppTypography.body)
                     .foregroundStyle(AppColor.leadSecondaryText)
                     .lineLimit(2)
                     .multilineTextAlignment(.leading)

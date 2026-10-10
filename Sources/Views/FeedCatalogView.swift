@@ -61,7 +61,7 @@ struct FeedCatalogView: View {
         return HStack(alignment: .firstTextBaseline, spacing: AppSpacing.sm) {
             VStack(alignment: .leading, spacing: AppSpacing.xxs) {
                 Text(set.title)
-                    .font(AppTypography.headline)
+                    .font(AppTypography.sectionTitle)
                     .foregroundColor(AppColor.primaryText)
                     .accessibilityAddTraits(.isHeader)
                 Text(set.summary)

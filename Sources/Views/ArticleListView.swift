@@ -639,7 +639,7 @@ struct ArticleListView: View {
                         ? "Briefing complete"
                         : "\(briefing.readCount(readManager.readArticles)) of \(briefing.articles.count) stories read"
                 )
-                .font(AppTypography.headline)
+                .font(AppTypography.sectionTitle)
                 Text(
                     "Selection frozen at \(briefing.startedAt.formatted(date: .omitted, time: .shortened)). New stories stay in your regular feed."
                 )

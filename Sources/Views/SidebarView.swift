@@ -177,7 +177,7 @@ struct SidebarView: View {
     private var subscribePopover: some View {
         VStack(alignment: .leading, spacing: AppSpacing.sm) {
             Text("Subscribe to RSS Feed")
-                .font(AppTypography.headline)
+                .font(AppTypography.sectionTitle)
 
             TextField("https://example.com/feed.xml", text: $newFeedURL)
                 .textFieldStyle(.roundedBorder)

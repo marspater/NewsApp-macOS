@@ -349,7 +349,7 @@ struct ArticleDetailView: View {
                         DisclosureGroup("On-device summary", isExpanded: summaryExpandedBinding) {
                             aiAnalysisSection.padding(.top, AppSpacing.sm)
                         }
-                        .font(AppTypography.bodySmall)
+                        .font(AppTypography.body)
                         .foregroundStyle(AppColor.secondaryText)
                         .disabled(contentState == .loading)
                     }
@@ -397,7 +397,7 @@ struct ArticleDetailView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.top, AppSpacing.sm)
             }
-            .font(AppTypography.bodySmall)
+            .font(AppTypography.body)
             .foregroundStyle(AppColor.secondaryText)
         }
     }
@@ -447,7 +447,8 @@ struct ArticleDetailView: View {
     }
 
     private func fallbackStateView(reason: String) -> some View {
-        VStack(alignment: .leading, spacing: AppSpacing.sm) {
+        NoticeView {
+            VStack(alignment: .leading, spacing: AppSpacing.sm) {
             HStack(spacing: AppSpacing.xs) {
                 Image(systemName: "doc.text.magnifyingglass")
                     .font(AppTypography.sectionTitle)
@@ -497,11 +498,8 @@ struct ArticleDetailView: View {
                 .foregroundColor(tertiaryText)
 
             articleDescriptionParagraphs
+            }
         }
-        .padding(AppSpacing.md)
-        .background(AppColor.surface.opacity(0.55), in: RoundedRectangle(cornerRadius: AppRadius.card))
-        .overlay(
-            RoundedRectangle(cornerRadius: AppRadius.card).stroke(borderColor(AppColor.borderSubtle), lineWidth: 1))
     }
 
     @ViewBuilder
@@ -705,7 +703,7 @@ struct ArticleDetailView: View {
                     Label(webLoadError, systemImage: "exclamationmark.triangle")
                     Button("Reload") { webAction = .reload }
                 }
-                .font(AppTypography.bodySmall)
+                .font(AppTypography.body)
                 .padding(AppSpacing.sm)
             }
             if isWebLoading {
@@ -1112,7 +1110,8 @@ struct ArticleDetailView: View {
             .padding(AppSpacing.sm)
             .background(AppColor.surface, in: RoundedRectangle(cornerRadius: AppRadius.card))
         } else if let error = analysisError {
-            HStack(spacing: AppSpacing.xs) {
+            NoticeView(tint: AppColor.warning) {
+                HStack(spacing: AppSpacing.xs) {
                 Image(systemName: "exclamationmark.triangle")
                     .foregroundColor(AppColor.warning)
                 Text("AI analysis unavailable: \(error)")
@@ -1130,9 +1129,8 @@ struct ArticleDetailView: View {
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
+                }
             }
-            .padding(AppSpacing.sm)
-            .background(AppColor.surface, in: RoundedRectangle(cornerRadius: AppRadius.card))
         } else if let ai = currentArticle.aiSummary {
             VStack(alignment: .leading, spacing: AppSpacing.xs) {
                 IntelligenceLabel("AI-generated summary")

@@ -92,7 +92,7 @@ struct TensionIndexView: View {
     private var insufficientData: some View {
         VStack(alignment: .leading, spacing: AppSpacing.xs) {
             Text("Insufficient data")
-                .font(AppTypography.headline)
+                .font(AppTypography.sectionTitle)
             Text(
                 appSettings.tensionCollectionOptIn
                     ? "A day is scored once at least \(methodology.minimumReportingFeeds) panel feeds from \(methodology.minimumReportingRegions) regions have reported. The history starts on the day collection began."
@@ -150,7 +150,7 @@ struct TensionIndexView: View {
     private func details(_ day: TensionHistoryDay) -> some View {
         VStack(alignment: .leading, spacing: AppSpacing.sm) {
             Text(Self.dateText(day))
-                .font(AppTypography.headline)
+                .font(AppTypography.sectionTitle)
                 .accessibilityAddTraits(.isHeader)
             Text(
                 "\(day.coverage.reporting.count) of \(methodology.panel.count) panel feeds · \(day.coverage.regions.count) of \(methodology.panelRegions.count) regions"

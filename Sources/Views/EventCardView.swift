@@ -158,7 +158,7 @@ private struct EventSourceRow: View {
                 VStack(alignment: .leading, spacing: AppSpacing.textStack) {
                     EyebrowText(source)
                     Text(article.title)
-                        .font(AppTypography.bodySmall)
+                        .font(AppTypography.body)
                         .foregroundStyle(isRead ? AppColor.secondaryText : AppColor.primaryText)
                         .lineLimit(2)
                         .multilineTextAlignment(.leading)

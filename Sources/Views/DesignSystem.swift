@@ -14,9 +14,9 @@ enum AppColor {
     static let cardBackground = Color(NSColor.controlBackgroundColor.withAlphaComponent(0.6))
 
     // Semantic Typography Text Colors
-    static let primaryText = Color.primary
-    static let secondaryText = Color.secondary
-    static let tertiaryText = Color.secondary.opacity(0.65)
+    static let primaryText = Color(NSColor.labelColor)
+    static let secondaryText = Color(NSColor.secondaryLabelColor)
+    static let tertiaryText = Color(NSColor.tertiaryLabelColor)
 
     // System label colors (DESIGN.md 11): hierarchy without lowering primary-text opacity
     static let label = Color(NSColor.labelColor)
@@ -32,10 +32,10 @@ enum AppColor {
     static let danger = Color(NSColor.systemRed)
 
     // Borders, Focus Rings & Badges
-    static let borderSubtle = Color.primary.opacity(0.08)
+    static let borderSubtle = Color(NSColor.separatorColor)
     static let separator = Color(NSColor.separatorColor)
     static let focusRing = Color.accentColor.opacity(0.65)
-    static let badgeBackground = Color.secondary.opacity(0.12)
+    static let badgeBackground = Color(NSColor.quaternaryLabelColor).opacity(0.12)
     static let unreadDot = Color.accentColor
 
     // Image-caption contrast remains independent of Liquid Glass transparency.
@@ -101,15 +101,12 @@ enum AppTypography {
     static let eyebrowTracking: Double = 0.5
 
     // Standard semantic typographic scale
-    static let display = Font.system(size: 32, weight: .bold)
-    static let title = Font.system(size: 22, weight: .bold)
-    static let headline = Font.system(size: 15, weight: .semibold)
+    static let title = Font.title.bold()
+    static let headline = Font.headline
     static let leadStoryHeadline = Font.system(size: 28, weight: .semibold, design: .serif)
-    static let body = Font.system(size: 14, weight: .regular)
-    static let bodySmall = Font.system(size: 13, weight: .regular)
-    static let label = Font.system(size: 12, weight: .medium)
-    static let caption = Font.system(size: 11, weight: .regular)
-    static let metadata = Font.system(size: 10, weight: .semibold)
+    static let body = Font.body
+    static let label = Font.callout.weight(.medium)
+    static let caption = Font.subheadline
 
     // System text styles for chrome (DESIGN.md 10)
     static let masthead = Font.largeTitle.bold()

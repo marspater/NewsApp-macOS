@@ -4,6 +4,7 @@
 
 ### Changed
 
+- Phase 4 content consistency: reader and event overview use shared typography tokens and scaled editorial styles; publisher eyebrows, AI labels, citation tags and in-content notices share components. Semantic system label/separator colors replace faded text and custom borders, and the design lint requires zero literal fonts, colors and code uppercasing in feature views.
 - Phase 3 search now lives at the trailing end of the toolbar. Its existing archive-wide operators (read/unread/saved, source and category) are native search tokens, and source/category suggestions become chips once a value is entered. A newer chip replaces an earlier one for the same filter.
 - Feed-add and OPML import confirmations use the scrolling list masthead with accessibility announcements instead of temporary sidebar rows; rejected additions and malformed imports use alerts. Empty, no-results and feed/query-failure states use system `ContentUnavailableView`, with Retry and technical details disclosed on demand.
 - Story and event cards use the shared design tokens and components: publisher eyebrows uppercase for display only (VoiceOver reads the name), headlines use the card headline token, and the AI and Updated tags are one tag component with the sparkles symbol instead of a "✦" character; tag fills strengthen with Increase Contrast.
