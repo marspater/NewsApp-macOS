@@ -71,6 +71,7 @@ Native macOS, local-first RSS reader. This document defines the supported techno
 - `Sources/Views/MainView.swift`: top-level UI coordinator.
 - `Sources/Views/SidebarView.swift`, `ArticleListView.swift`, `ArticleCardView.swift`: navigation and list presentation.
 - `Sources/Views/ArticleDetailView.swift`, `ArticleWebView.swift`: article reading and WebKit rendering.
+- `Sources/Views/ArticleRemoteImage.swift`: remote card, reader and overview images, loaded through the protected reader image path with a decoded-image cache.
 - `Sources/Views/SettingsView.swift`: user settings.
 - `Sources/Views/DesignSystem.swift`, `GlassSystem.swift`: semantic design tokens and Liquid Glass integration.
 

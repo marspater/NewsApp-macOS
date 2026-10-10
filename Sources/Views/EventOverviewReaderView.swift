@@ -407,7 +407,7 @@ struct EventOverviewReaderView: View {
     private func leadImageSection(_ leadImage: OverviewLeadImage) -> some View {
         VStack(alignment: .leading, spacing: AppSpacing.xs) {
             if let url = URL(string: leadImage.url) {
-                AsyncImage(url: url) { phase in
+                ArticleRemoteImage(url: url) { phase in
                     if let image = phase.image {
                         // Figures fill the measure and are never cropped (DESIGN.md 9).
                         image
@@ -431,14 +431,18 @@ struct EventOverviewReaderView: View {
                 .onChange(of: leadImage.url) { _, _ in leadImageFailed = false }
             }
 
-            if !leadImageFailed, let caption = leadImage.caption?.trimmingCharacters(in: .whitespacesAndNewlines), !caption.isEmpty {
+            if !leadImageFailed, let caption = leadImage.caption?.trimmingCharacters(in: .whitespacesAndNewlines),
+                !caption.isEmpty
+            {
                 Text(caption)
                     .font(AppTypography.overviewFont(.annotation, scale: textScale))
                     .foregroundColor(currentSecondaryTextColor)
                     .textSelection(.enabled)
             }
 
-            if !leadImageFailed, let credit = leadImage.credit?.trimmingCharacters(in: .whitespacesAndNewlines), !credit.isEmpty {
+            if !leadImageFailed, let credit = leadImage.credit?.trimmingCharacters(in: .whitespacesAndNewlines),
+                !credit.isEmpty
+            {
                 Text(credit)
                     .font(AppTypography.overviewFont(.caption, scale: textScale))
                     .foregroundColor(currentTertiaryTextColor)

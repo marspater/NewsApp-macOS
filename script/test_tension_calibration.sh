@@ -63,6 +63,7 @@ swiftc -target "$(uname -m)-apple-macos${TARGET_MACOS}" \
     Sources/Services/OPMLManager.swift \
     Sources/Views/DesignSystem.swift \
     Sources/Views/GlassSystem.swift \
+    Sources/Views/ArticleRemoteImage.swift \
     Sources/Views/EventOverviewReaderView.swift \
     Sources/Coordinators/RefreshCoordinator.swift \
     Sources/App/NewsSignposts.swift \

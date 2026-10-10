@@ -60,6 +60,7 @@ swiftc -swift-version 6 -O -parse-as-library -target "$(uname -m)-apple-macos${T
     Sources/Views/GlassSystem.swift \
     Sources/Views/ArticleCardView.swift \
     Sources/Views/ArticleWebView.swift \
+    Sources/Views/ArticleRemoteImage.swift \
     Sources/Views/EventOverviewReaderView.swift \
     Sources/Views/ArticleDetailView.swift \
     Sources/Storage/SavedStoriesManager.swift \
