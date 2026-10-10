@@ -289,20 +289,62 @@ public struct OverviewClaimVerifier: Sendable {
         return candidateTokens.joined(separator: " ")
     }
 
-    // MARK: - Detached Quotation Verification
-
-    private static let quoteCharacters: Set<Character> = ["\"", "'", "“", "”", "‘", "’", "«", "»"]
+    // MARK: - Reported Speech Helpers
 
     private static let reportingVerbs: Set<String> = [
-        "said", "says", "told", "tells", "called", "calls", "asked", "asks",
-        "spoke", "speaks", "stated", "states", "declared", "declares", "shouted",
-        "wrote", "writes", "explained", "explains", "added", "adds", "warned",
-        "warns", "remarked", "hailed", "promised", "promises", "announced", "announces",
+        "said", "says", "told", "tells", "called", "calls", "asked", "asks", "spoke", "speaks", "stated", "states",
+        "declared", "declares", "shouted", "wrote", "writes", "explained", "explains", "added", "adds", "warned",
+        "warns", "remarked", "hailed", "promised", "promises", "announced", "announces", "claimed", "claims",
+        "alleged", "alleges", "insisted", "insists", "argued", "argues", "reported", "reports", "accused", "accuses",
+        "denied", "denies", "acknowledged", "acknowledges", "confirmed", "confirms", "according",
+    ]
+
+    /// Roles that identify a speaker even without a name: "the regional prosecutor's office said".
+    private static let speakerRoles: Set<String> = [
+        "spokesperson", "spokesman", "spokeswoman", "minister", "ministry", "president", "official", "officials",
+        "office", "police", "prosecutor", "prosecutors", "army", "military", "government", "commander", "governor",
+        "mayor", "chief", "director", "agency", "court", "judge", "authorities", "department", "council",
+    ]
+
+    /// Capitalized at the start of a sentence without naming anyone.
+    private static let capitalizedFunctionWords: Set<String> = [
+        "the", "a", "an", "he", "she", "they", "it", "we", "i", "you", "this", "that", "these", "those", "his",
+        "her", "their", "its", "our", "my", "your", "in", "on", "at", "but", "and", "after", "before", "when",
+        "while", "as", "for", "with", "by", "from", "of", "to", "if", "there", "some", "many",
     ]
 
     private static let firstPersonPronouns: Set<String> = [
         "i", "me", "my", "mine", "myself", "we", "us", "our", "ours", "ourselves",
     ]
+
+    /// Straight or curly double quotes, or single quotes that are not apostrophes inside a word ("Thursday's").
+    /// Quote characters are escaped so static analysers do not read the apostrophe as an unterminated literal.
+    private static let quotationRegex = try? NSRegularExpression(
+        pattern:
+            #"[\x{22}\x{201C}]([^\x{22}\x{201D}]+)[\x{22}\x{201D}]|(?<![\p{L}\p{N}])[\x{27}\x{2018}]([^\x{27}\x{2019}]+)[\x{27}\x{2019}](?![\p{L}\p{N}])"#
+    )
+
+    /// Case-preserving words, so proper names stay recognisable.
+    private static func words(_ text: String) -> [String] {
+        text.components(separatedBy: CharacterSet.alphanumerics.inverted).filter { !$0.isEmpty }
+    }
+
+    /// Proper names and speaker roles among `words`: whom a reporting verb can point at.
+    private static func speakerWords(_ words: some Sequence<String>) -> [String] {
+        words.filter { word in
+            let lower = word.lowercased()
+            if speakerRoles.contains(lower) { return true }
+            return word.first?.isUppercase == true && !capitalizedFunctionWords.contains(lower)
+                && !reportingVerbs.contains(lower)
+        }
+    }
+
+    /// A reporting verb together with an identified speaker; "he said" alone does not identify anyone.
+    private static func hasReportingConstruction(_ words: [String]) -> Bool {
+        !reportingVerbs.isDisjoint(with: words.map { $0.lowercased() }) && !speakerWords(words).isEmpty
+    }
+
+    // MARK: - Detached Quotation Verification
 
     private static func verifyDetachedQuotation(
         statement: String,
@@ -311,50 +353,23 @@ public struct OverviewClaimVerifier: Sendable {
         isDetachedQuotation(statement) ? .detachedQuotation(claimText: statement, passageID: passage.id) : nil
     }
 
-    /// Shared with `OverviewQualityAuditor`: an unframed quoted question, or a first-person quote with
-    /// no reporting verb, reads as dialogue detached from its speaker.
+    /// Shared with `OverviewQualityAuditor`. A claim that is only a quotation, or quotes someone in the first
+    /// person without saying who outside the quotation marks, reads as dialogue detached from its speaker.
     static func isDetachedQuotation(_ statement: String) -> Bool {
-        let trimmed = statement.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let first = trimmed.first else { return false }
-        if quoteCharacters.contains(first),
-            trimmed.trimmingCharacters(in: CharacterSet(charactersIn: "\"“”'’» ")).hasSuffix("?")
-        {
-            return true
-        }
-        let quotesFirstPerson = extractQuotedSubstrings(trimmed).contains {
-            !firstPersonPronouns.isDisjoint(with: tokenize($0))
-        }
-        return quotesFirstPerson && reportingVerbs.isDisjoint(with: tokenize(trimmed))
-    }
-
-    private static func extractQuotedSubstrings(_ text: String) -> [String] {
-        // Straight or curly double quotes, or straight or curly single quotes. Quote characters are
-        // escaped so static analysers do not read the apostrophe as an unterminated literal.
-        let pattern =
-            #"[\x{22}\x{201C}]([^\x{22}\x{201D}]+)[\x{22}\x{201D}]|[\x{27}\x{2018}]([^\x{27}\x{2019}]+)[\x{27}\x{2019}]"#
-        guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
-        let ns = text as NSString
-        return regex.matches(in: text, range: NSRange(location: 0, length: ns.length)).compactMap { match in
+        guard let regex = quotationRegex else { return false }
+        let ns = statement as NSString
+        let range = NSRange(location: 0, length: ns.length)
+        let quotes = regex.matches(in: statement, range: range).compactMap { match in
             [match.range(at: 1), match.range(at: 2)].first { $0.location != NSNotFound }.map(ns.substring(with:))
         }
+        guard !quotes.isEmpty else { return false }
+        let outside = words(regex.stringByReplacingMatches(in: statement, range: range, withTemplate: " "))
+        if outside.isEmpty { return true }
+        let quotesFirstPerson = quotes.contains { !firstPersonPronouns.isDisjoint(with: tokenize($0)) }
+        return quotesFirstPerson && !hasReportingConstruction(outside)
     }
 
     // MARK: - Dropped Attribution Verification
-
-    private static let spokespersonKeywords: Set<String> = [
-        "spokesman", "spokesperson", "spokespeople", "речник", "речниця",
-    ]
-
-    private static let officialKeywords: Set<String> = [
-        "minister", "leader", "official", "schlein", "saar", "sa'ar", "malki", "maliki", "zohar",
-        "commissioner", "physician", "grey", "oswald", "varma", "cole",
-        "міністр", "керівник", "представник",
-    ]
-
-    private static let speechVerbs: Set<String> = [
-        "said", "told", "warned", "alleged", "stated", "has said", "reported", "claimed",
-        "заявив", "сказав", "повідомив", "підкреслив",
-    ]
 
     private static let motivePhrases = ["in order to", "feared", "sought to"]
     private static let militaryClaimPattern =
@@ -370,37 +385,48 @@ public struct OverviewClaimVerifier: Sendable {
         }
     }
 
-    /// Shared with `OverviewQualityAuditor`: names the speaker a claim drops when it restates a motive,
-    /// battlefield result or contested closure that the passage attributes to an official.
+    /// Shared with `OverviewQualityAuditor`. When a claim restates a motive, battlefield result or contested
+    /// closure that the closest passage sentence attributes to a speaker, the claim must keep a reporting verb
+    /// and that speaker; a generic stand-in such as "officials" for a named general does not count. Returns
+    /// the dropped speaker.
     static func droppedAttributionSpeaker(statement: String, passageText: String) -> String? {
-        let passageLower = passageText.lowercased()
-        let passageTokens = Set(tokenize(passageLower))
-        let hasSpokesperson = !spokespersonKeywords.isDisjoint(with: passageTokens)
-        let hasOfficialSpeaker =
-            !officialKeywords.isDisjoint(with: passageTokens) && !speechVerbs.isDisjoint(with: passageTokens)
-        let hasDirectQuoteSaid = passageLower.contains("he said") || passageLower.contains("she said")
-
-        guard hasSpokesperson || hasOfficialSpeaker || hasDirectQuoteSaid,
-            spokespersonKeywords.union(officialKeywords).isDisjoint(with: tokenize(statement))
-        else { return nil }
-
         let statementLower = statement.lowercased()
-        let hasNamedSpeaker = hasSpokesperson || hasOfficialSpeaker
-        if hasNamedSpeaker, motivePhrases.contains(where: { statementLower.contains($0) }) {
-            return "official/spokesperson"
+        let contested =
+            motivePhrases.contains { statementLower.contains($0) }
+            || statementLower.range(of: militaryClaimPattern, options: .regularExpression) != nil
+            || closurePhrases.contains { statementLower.contains($0) }
+        guard contested else { return nil }
+
+        let sentence = words(closestSentence(to: statement, in: passageText))
+        var speaker: [String] = []
+        for (index, word) in sentence.enumerated() where reportingVerbs.contains(word.lowercased()) {
+            // "General Jordan Cole said", else "said General Jordan Cole" or "according to the agency".
+            let before = speakerWords(sentence[max(0, index - 6)..<index])
+            let after = speakerWords(sentence[(index + 1)..<min(index + 7, sentence.count)])
+            speaker += word.lowercased() == "according" || before.isEmpty ? after : before
         }
-        if hasNamedSpeaker, statementLower.range(of: militaryClaimPattern, options: .regularExpression) != nil {
-            return "military spokesperson"
+        guard !speaker.isEmpty else { return nil }
+
+        let claimWords = words(statement)
+        let claimLower = Set(claimWords.map { $0.lowercased() })
+        if hasReportingConstruction(claimWords), !claimLower.isDisjoint(with: speaker.map { $0.lowercased() }) {
+            return nil
         }
-        if hasOfficialSpeaker || hasDirectQuoteSaid, closurePhrases.contains(where: { statementLower.contains($0) }) {
-            return "foreign official"
-        }
-        return nil
+        var seen = Set<String>()
+        return speaker.filter { seen.insert($0).inserted }.joined(separator: " ")
+    }
+
+    /// The passage sentence sharing the most words with the claim; attribution elsewhere in a long
+    /// passage says nothing about this claim.
+    private static func closestSentence(to statement: String, in passage: String) -> String {
+        let claim = Set(tokenize(statement))
+        let tokenizer = NLTokenizer(unit: .sentence)
+        tokenizer.string = passage
+        return tokenizer.tokens(for: passage.startIndex..<passage.endIndex).map { String(passage[$0]) }
+            .max { claim.intersection(tokenize($0)).count < claim.intersection(tokenize($1)).count } ?? passage
     }
 
     // MARK: - Citation Grounding Verification
-
-    private static let groundingTerms = ["mission", "sri lanka"]
 
     private static func verifyCitationGrounding(
         statement: String,
@@ -411,11 +437,23 @@ public struct OverviewClaimVerifier: Sendable {
         }
     }
 
-    /// Shared with `OverviewQualityAuditor`: distinctive terms the claim uses that the passage never mentions.
+    /// Shared with `OverviewQualityAuditor`: places the claim names that the cited passage never mentions.
+    /// Full stops are ignored so "US" matches "U.S.".
     static func ungroundedCitationTerms(statement: String, passageText: String) -> [String] {
-        let statementLower = statement.lowercased()
-        let passageLower = passageText.lowercased()
-        return groundingTerms.filter { statementLower.contains($0) && !passageLower.contains($0) }
+        func nameTokens(_ text: String) -> [String] { tokenize(text.replacingOccurrences(of: ".", with: "")) }
+        let passage = " " + nameTokens(passageText).joined(separator: " ") + " "
+        let tagger = NLTagger(tagSchemes: [.nameType])
+        tagger.string = statement
+        var missing: [String] = []
+        tagger.enumerateTags(
+            in: statement.startIndex..<statement.endIndex, unit: .word, scheme: .nameType,
+            options: [.omitWhitespace, .omitPunctuation, .joinNames]
+        ) { tag, range in
+            let place = nameTokens(String(statement[range])).joined(separator: " ")
+            if tag == .placeName, !place.isEmpty, !passage.contains(" \(place) ") { missing.append(place) }
+            return true
+        }
+        return missing
     }
 
     // MARK: - Fallback Overview Creation

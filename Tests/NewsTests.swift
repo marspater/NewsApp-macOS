@@ -6993,16 +6993,19 @@ struct NewsTests {
             return SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
         }
 
-        // Immutable SQLite snapshot consistency (backup API / checkpoint handling)
+        // Consistent snapshot of the input library, WAL included. The input opens read-only, so the
+        // snapshot never checkpoints or otherwise writes the library it reads.
         let snapshotURL = directory.appendingPathComponent("library-snapshot.sqlite3")
         if FileManager.default.fileExists(atPath: snapshotURL.path) {
             try FileManager.default.removeItem(at: snapshotURL)
         }
+        let inputFiles = [url, URL(fileURLWithPath: url.path + "-wal")]
+        let inputHashes = inputFiles.map(fileSHA256)
         let sqliteProc = Process()
         sqliteProc.executableURL = URL(fileURLWithPath: "/usr/bin/sqlite3")
         sqliteProc.arguments = [
-            url.path,
-            "PRAGMA wal_checkpoint(TRUNCATE); VACUUM INTO '\(snapshotURL.path)';",
+            url.absoluteString + "?mode=ro",
+            "VACUUM INTO '\(snapshotURL.path.replacingOccurrences(of: "'", with: "''"))';",
         ]
         let sqliteErrPipe = Pipe()
         sqliteProc.standardError = sqliteErrPipe
@@ -7014,6 +7017,11 @@ struct NewsTests {
             throw NSError(
                 domain: "LiveOverviews", code: 3,
                 userInfo: [NSLocalizedDescriptionKey: "Failed to create SQLite snapshot: \(errMsg)"])
+        }
+        guard inputFiles.map(fileSHA256) == inputHashes else {
+            throw NSError(
+                domain: "LiveOverviews", code: 5,
+                userInfo: [NSLocalizedDescriptionKey: "Snapshot changed the input library"])
         }
         guard let snapshotSHA256 = fileSHA256(snapshotURL) else {
             throw NSError(
@@ -14699,6 +14707,26 @@ struct NewsTests {
             }), "Attributed quote with speaker is not flagged as detached quote")
         assertEqual(validQuote1.audit.status, .supported, "Attributed quote with speaker is supported by auditor")
 
+        let stationPassage = EvidencePassage(
+            id: "pass-station", articleID: "art-gamma",
+            text:
+                "Station director Mara Lind said: “We will not leave the station.” The council's plan passed on Thursday.",
+            ordinal: 9)
+        func isDetached(_ statement: String) -> Bool {
+            checkClaim(statement, passage: stationPassage).failures.contains {
+                if case .detachedQuotation = $0 { return true }
+                return false
+            }
+        }
+        assertTrue(isDetached("He said: “We will not leave the station.”"), "A pronoun does not identify the speaker")
+        assertTrue(
+            isDetached("“I said we will not leave the station” on Thursday."),
+            "A reporting verb inside the quotation does not attribute it")
+        assertFalse(
+            isDetached("Station director Mara Lind said: “We will not leave the station.”"),
+            "A named speaker outside the quotation attributes it")
+        assertFalse(isDetached("The council's plan passed on Thursday."), "Apostrophes are not quotation marks")
+
         // 5f. Dropped speaker attribution (#308): motives, military claims, and contested positions.
         let motivePassage = EvidencePassage(
             id: "pass-motive", articleID: "art-gamma",
@@ -14754,25 +14782,19 @@ struct NewsTests {
             }), "Retaining coalition spokesperson passes verifier")
         assertEqual(validMil.audit.status, .supported, "Retaining coalition spokesperson is supported by auditor")
 
-        // 5g. Citation grounding & selection mismatches (#308)
-        let outpostPassage = EvidencePassage(
-            id: "pass-outpost", articleID: "art-gamma",
-            text:
-                "The regional outpost is separate from the central headquarters, based in Metro City, and has a distinct liaison role, covering the northern district and coastal areas.",
-            ordinal: 6)
-        let mismatchMission = checkClaim(
-            "The regional mission will remain separate from the central headquarters in Metro City.",
-            passage: outpostPassage)
+        let genericMil = checkClaim(
+            "Officials said forces intercepted a drone north of the perimeter and destroyed a platform in the northern valley.",
+            passage: militaryPassage)
         assertTrue(
-            mismatchMission.failures.contains(where: {
-                if case .ungroundedCitation(let token, _) = $0 { return token == "mission" }
+            genericMil.failures.contains(where: {
+                if case .droppedAttribution(let speaker, _, _) = $0 { return speaker == "General Jordan Cole" }
                 return false
-            }), "Citing passage lacking 'mission' flags ungroundedCitation")
+            }), "Generic officials do not stand in for the named spokesperson")
         assertEqual(
-            mismatchMission.audit.status,
-            .unsupported(reason: "Claim refers to 'mission' not mentioned in cited passage"),
-            "Citing passage lacking 'mission' is unsupported in auditor")
+            genericMil.audit.criticalErrorKind, .attributionError,
+            "Generic officials in place of the named spokesperson are a critical error in auditor")
 
+        // 5g. Citation grounding (#308): a place the cited passage never names is unsupported.
         let inquiryPassage = EvidencePassage(
             id: "pass-inquiry", articleID: "art-gamma",
             text:
@@ -14787,8 +14809,19 @@ struct NewsTests {
             }), "Citing passage lacking 'Sri Lanka' flags ungroundedCitation")
         assertEqual(
             mismatchArrest.audit.status,
-            .unsupported(reason: "Claim refers to 'sri lanka' not mentioned in cited passage"),
+            .unsupported(reason: "Claim names place 'sri lanka' not mentioned in cited passage"),
             "Citing passage lacking 'Sri Lanka' is unsupported in auditor")
+
+        let abbreviatedPlace = checkClaim(
+            "US President Donald Trump said on Wednesday that he should win the prize.",
+            passage: EvidencePassage(
+                id: "pass-us", articleID: "art-gamma",
+                text: "U.S. President Donald Trump said on Wednesday that he should win the prize.", ordinal: 6))
+        assertFalse(
+            abbreviatedPlace.failures.contains(where: {
+                if case .ungroundedCitation = $0 { return true }
+                return false
+            }), "US matches U.S. in the cited passage")
 
         // 5h. Valid controls: ordinary reported facts without attribution wrappers pass cleanly (#308)
         let plainFactPassage = EvidencePassage(
@@ -15609,6 +15642,19 @@ struct NewsTests {
         )
         let valVague3 = OverviewPerspectivesValidator.validatePerspective(vaguePerspective3, against: citations)
         assertFalse(valVague3.isValid, "Rule 1: Vague participant 'Some people' is rejected")
+
+        // A time phrase left over from "said Thursday" or "said earlier this year" is not a position (#313).
+        for position in ["earlier this year.", "Thursday, warning it could be among the strongest", "Friday night"] {
+            assertTrue(OverviewPerspectivesValidator.isTimePhrase(position), "Time phrase '\(position)' is no position")
+        }
+        assertFalse(
+            OverviewPerspectivesValidator.isTimePhrase("Monday's vote was not legitimate."),
+            "A possessive day name starts a real position")
+        let timePerspective = OverviewPerspective(
+            id: "p_time", participant: "Ahmad Mobeen", position: "earlier this year", citationIDs: ["c_1"])
+        assertEqual(
+            OverviewPerspectivesValidator.validatePerspective(timePerspective, against: citations).rule, .timePhrase,
+            "Time-phrase positions report their own rule")
 
         // 3. Rule 2: Never invent an "other side"
         // When only one side has spoken, extraction preserves that single perspective without fabricating an opposing stance

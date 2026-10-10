@@ -4,7 +4,8 @@ import NaturalLanguage
 /// Result of deterministically validating an overview perspective against evidence passages and rules.
 struct OverviewPerspectiveValidationResult: Sendable, Equatable {
     enum Rule: String, Sendable, Codable {
-        case noCitation, unknownCitation, emptyQuote, shortParticipant, vagueParticipant, shortPosition, ungrounded
+        case noCitation, unknownCitation, emptyQuote, shortParticipant, vagueParticipant, shortPosition, timePhrase,
+            ungrounded
     }
 
     let isValid: Bool
@@ -29,6 +30,7 @@ struct OverviewPerspectiveValidationResult: Sendable, Equatable {
         ("Participant name is empty or too short", .shortParticipant),
         ("is an unattributed generality", .vagueParticipant),
         ("Position statement is empty or too short", .shortPosition),
+        ("Position statement is a time phrase, not a position", .timePhrase),
         ("is not grounded in cited passage text (synthetic or hallucinated claim)", .ungrounded),
     ]
 }
@@ -76,6 +78,16 @@ struct OverviewPerspectivesValidator: Sendable {
     private static let dayNames: Set<String> = [
         "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
     ]
+
+    /// When a remark was made rather than what was said: "earlier this year", or "Thursday, warning…" left
+    /// over from "said Thursday". A possessive such as "Monday's vote" is a position.
+    static func isTimePhrase(_ position: String) -> Bool {
+        let punctuation = CharacterSet(charactersIn: "\"'.,:- ")
+        let normalized = position.trimmingCharacters(in: punctuation).lowercased()
+        if pureTimePhrases.contains(normalized) { return true }
+        guard let first = normalized.split(separator: " ").first else { return false }
+        return dayNames.contains(first.trimmingCharacters(in: punctuation))
+    }
 
     /// Evaluates whether a participant string represents a vague anonymous generality.
     static func isVagueParticipant(_ participant: String) -> Bool {
@@ -152,18 +164,10 @@ struct OverviewPerspectivesValidator: Sendable {
             )
         }
 
-        let positionNormalized = positionCleaned.trimmingCharacters(in: CharacterSet(charactersIn: "\"'.,:- "))
-            .lowercased()
-        if pureTimePhrases.contains(positionNormalized) {
+        if isTimePhrase(positionCleaned) {
             return OverviewPerspectiveValidationResult(
                 isValid: false,
-                rejectionReason: "Position statement is empty or too short"
-            )
-        }
-        if let firstWord = positionNormalized.split(separator: " ").first, dayNames.contains(String(firstWord)) {
-            return OverviewPerspectiveValidationResult(
-                isValid: false,
-                rejectionReason: "Position statement is empty or too short"
+                rejectionReason: "Position statement is a time phrase, not a position"
             )
         }
 
@@ -570,6 +574,14 @@ struct OverviewPerspectivesExtractor: Sendable {
 
     /// Strips leading conjunctions, wire datelines, or trailing punctuation from participant strings.
     private static func cleanParticipant(_ raw: String) -> String {
+        let words = trimmedSpeakerWords(stripSpeakerPrefixes(raw))
+        return isCompleteSpeaker(words)
+            ? words.joined(separator: " ").trimmingCharacters(in: CharacterSet(charactersIn: "\"'.,:-")) : ""
+    }
+
+    /// Removes datelines, leading articles and earlier sentences: "LONDON (Reuters) - The minister" is "minister",
+    /// "…studies literature. He" is "He".
+    private static func stripSpeakerPrefixes(_ raw: String) -> String {
         var cleaned = raw.trimmingCharacters(in: .whitespacesAndNewlines)
             .trimmingCharacters(in: CharacterSet(charactersIn: "\"'.,:-"))
 
@@ -594,6 +606,11 @@ struct OverviewPerspectivesExtractor: Sendable {
         {
             cleaned = String(cleaned[lastStop.upperBound...])
         }
+        return cleaned
+    }
+
+    /// Drops leading adverbials, describing participle clauses and dangling connectives around the speaker.
+    private static func trimmedSpeakerWords(_ cleaned: String) -> [String] {
         // A leading adverbial is not the speaker: "Last month, Germany", "On Wednesday, Canada's justice minister, …".
         var segments = cleaned.components(separatedBy: ", ")
         while segments.count > 1, let first = segments.first?.split(separator: " ").first,
@@ -614,25 +631,21 @@ struct OverviewPerspectivesExtractor: Sendable {
         while let last = words.last, ["also", "has", "have", "had", "will", "would"].contains(last.lowercased()) {
             words.removeLast()
         }
+        return words
+    }
+
+    /// A speaker is a capitalized noun phrase, not a clause fragment.
+    private static func isCompleteSpeaker(_ words: [String]) -> Bool {
         // A speaker cut off at a relative word or pronoun is incomplete: "Seoul, which", "Kyiv and", "outbreak and is".
-        if let last = words.last?.lowercased(), danglingWords.contains(last) { return "" }
-        // A speaker does not contain finite verbs, relative pronouns, speech verbs, or clause conjunctions:
-        let invalidSpeakerWords: Set<String> = [
-            "is", "are", "was", "were", "which", "whom", "whose", "where", "who",
-            "said", "says", "told", "after", "before", "because", "since", "until",
-        ]
-        guard
-            !words.contains(where: {
-                invalidSpeakerWords.contains(
-                    $0.trimmingCharacters(in: CharacterSet(charactersIn: "\"'.,:-")).lowercased())
-            })
-        else { return "" }
-        if let first = words.first?.lowercased(), ["while", "when", "although", "though", "if"].contains(first) {
-            return ""
+        if let last = words.last?.lowercased(), danglingWords.contains(last) { return false }
+        // A finite verb, relative pronoun, speech verb or clause conjunction means the match spans a clause.
+        let clauseWord = words.contains {
+            clauseWords.contains($0.trimmingCharacters(in: CharacterSet(charactersIn: "\"'.,:-")).lowercased())
         }
+        if clauseWord { return false }
+        if let first = words.first?.lowercased(), subordinators.contains(first) { return false }
         // A speaker names someone: "court filing" or "father of four" has no capitalized word.
-        guard words.contains(where: { $0.first?.isUppercase == true }) else { return "" }
-        return words.joined(separator: " ").trimmingCharacters(in: CharacterSet(charactersIn: "\"'.,:-"))
+        return words.contains { $0.first?.isUppercase == true }
     }
 
     private static let leadingAdverbials: Set<String> = [
@@ -641,6 +654,11 @@ struct OverviewPerspectivesExtractor: Sendable {
         "friday", "saturday", "sunday", "january", "february", "march", "april", "may", "june", "july", "august",
         "september", "october", "november", "december",
     ]
+    private static let clauseWords: Set<String> = [
+        "is", "are", "was", "were", "which", "whom", "whose", "where", "who",
+        "said", "says", "told", "after", "before", "because", "since", "until",
+    ]
+    private static let subordinators: Set<String> = ["while", "when", "although", "though", "if"]
     private static let danglingWords: Set<String> = [
         "which", "who", "whom", "whose", "that", "and", "or", "but", "she", "he", "they", "it", "her", "his", "their",
         "its", "is", "are", "was", "were", "be", "been", "being",

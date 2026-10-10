@@ -22,7 +22,7 @@ The exact claims review sheet (`claims-review-private.csv`, 195 claims) and exec
 ## 1. Provenance and execution receipt
 
 - **Execution mode**: Synchronous live execution with pre-generation SQLite checkpoint and vacuum.
-- **Input library**: `/private/tmp/news-overview-step2/library.sqlite3` (read-only input; unwritten).
+- **Input library**: `/private/tmp/news-overview-step2/library.sqlite3`. This run checkpointed the input (`PRAGMA wal_checkpoint(TRUNCATE)`) before `VACUUM INTO`, so the input file was written although its contents were preserved. The harness now opens the input read-only and fails if the library or its WAL change.
 - **Immutable snapshot**: `/private/tmp/news-overview-bounded-comparison/library-snapshot.sqlite3`
   - SHA-256: `a8250b16258ed598a654aacd1f169465b3b4089587339e82b849332a5cb2e0ee`
 - **Capture anchor (UTC)**: `2026-10-10T13:50:23Z`
@@ -59,6 +59,8 @@ The 11 critical attribution/quote errors and 2 citation selection failures ident
 1. **Detached quotations**: Stands alone without framing or first-person quotation lacking reporting verbs (`“the minute that changed our lives forever”`, `‘Where am I and who are you?’`) are deterministically identified and rejected.
 2. **Dropped speaker attribution**: Diplomatic motives (`“in order to avoid an escalation of tensions”`), military battlefield / interception assessments (`“forces intercepted a ballistic missile”`, `“82 targets destroyed”`), and contested diplomatic closure statuses (`“ceasing operations”`) require explicit retention of the speaker/spokesperson; dropping them triggers deterministic rejection.
 3. **Citation entity grounding**: Claims citing passages lacking distinctive subject entities (e.g. `mission` vs. `consulate`, or unmentioned countries/parties) are flagged as ungrounded citation selection errors.
+
+The heuristics used in this run listed speaker names and terms taken from the development data and test fixtures. They have since been replaced with general rules: a quotation needs a named speaker or role outside the quotation marks, a restated motive or battlefield claim must keep the speaker of the closest passage sentence, and a place named in a claim must appear in its cited passage. Common-noun substitutions such as `mission` for `consulate` are no longer checked deterministically; the model support check still applies. Replayed on this run's 195 accepted claims and 211 judged claim/passage pairs, the general rules reject none, so the acceptance figures above are unchanged; the rejection counts in this section reflect the earlier rules.
 
 During generation, **34 model lines** were deterministically rejected:
 - `auditor_attributionError`: 3

@@ -584,7 +584,7 @@ public struct OverviewQualityAuditor: Sendable {
             options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
 
         // 1b. Check Citation Grounding (Unsupported)
-        if let citationError = checkCitationGrounding(claimText: claim.text, normalizedPassage: normalizedPassage) {
+        if let citationError = checkCitationGrounding(claimText: claim.text, passageText: combinedPassageText) {
             return ClaimAuditResult(
                 id: claim.id,
                 claimText: claim.text,
@@ -617,7 +617,8 @@ public struct OverviewQualityAuditor: Sendable {
         }
 
         // 4. Check Attribution Fidelity (Critical Attribution Error)
-        if let attributionError = checkAttributionFidelity(claimText: claim.text, normalizedPassage: normalizedPassage)
+        if let attributionError = checkAttributionFidelity(
+            claimText: claim.text, passageText: combinedPassageText, normalizedPassage: normalizedPassage)
         {
             return ClaimAuditResult(
                 id: claim.id,
@@ -864,19 +865,22 @@ public struct OverviewQualityAuditor: Sendable {
         return nil
     }
 
-    private static func checkCitationGrounding(claimText: String, normalizedPassage: String) -> String? {
-        OverviewClaimVerifier.ungroundedCitationTerms(statement: claimText, passageText: normalizedPassage).first
-            .map { "Claim refers to '\($0)' not mentioned in cited passage" }
+    private static func checkCitationGrounding(claimText: String, passageText: String) -> String? {
+        OverviewClaimVerifier.ungroundedCitationTerms(statement: claimText, passageText: passageText).first
+            .map { "Claim names place '\($0)' not mentioned in cited passage" }
     }
 
-    private static func checkAttributionFidelity(claimText: String, normalizedPassage: String) -> String? {
+    /// `passageText` keeps capitals so speaker names stay recognisable; `normalizedPassage` is folded.
+    private static func checkAttributionFidelity(
+        claimText: String, passageText: String, normalizedPassage: String
+    ) -> String? {
         if OverviewClaimVerifier.isDetachedQuotation(claimText) {
             return "Claim contains detached or unattributed quotation: '\(claimText)'"
         }
         if let speaker = OverviewClaimVerifier.droppedAttributionSpeaker(
-            statement: claimText, passageText: normalizedPassage)
+            statement: claimText, passageText: passageText)
         {
-            return "Claim drops \(speaker) attribution: '\(claimText)'"
+            return "Claim drops attribution to \(speaker): '\(claimText)'"
         }
 
         let nsClaim = claimText as NSString
