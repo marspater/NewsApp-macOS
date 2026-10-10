@@ -3429,6 +3429,15 @@ struct NewsTests {
                 "Panel feed \(member.catalogID) publishes in the methodology language")
         }
         assertEqual(methodology.panelRegions.count, 6, "The v1 panel spans six regions")
+        assertEqual(TensionLevel(index: 0), .calm, "Zero reads as calm")
+        assertEqual(TensionLevel(index: 19.9), .calm, "Bands are half-open: 19.9 is still calm")
+        assertEqual(TensionLevel(index: 20), .mild, "20 starts the mild band")
+        assertEqual(TensionLevel(index: 44), .warm, "44 reads as warm")
+        assertEqual(TensionLevel(index: 60), .hot, "60 starts the hot band")
+        assertEqual(TensionLevel(index: 80), .boiling, "80 starts the boiling band")
+        assertEqual(TensionLevel(index: 100), .boiling, "100 reads as boiling")
+        assertEqual(TensionLevel.degrees(43.6), 44, "Readings round to whole degrees")
+        assertEqual(TensionLevel.degrees(104), 100, "Readings never exceed 100 degrees")
         assertFalse(
             methodology.panelRegions.contains(.latinAmerica) || methodology.panelRegions.contains(.oceania),
             "Latin America and Oceania are stated v1 gaps")

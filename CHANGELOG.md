@@ -2,6 +2,9 @@
 
 ## Unreleased — 10 October 2026
 
+- UI polish: pressing Refresh shows the new stories instead of a "N new stories" button; results that arrive during a refresh you started replace the list, and an open story still keeps it still. List controls and search sit at the trailing edge of the toolbar on macOS 26 and 27. Search operator suggestions line up in two columns. Reading options use one label column (Text Size, Reading Style). Settings panes are 720 pt wide so all nine tabs fit without the overflow menu.
+- News Tension moves from its own window into the main window: with panel collection on, the foot of the sidebar shows the reading (for example "44° Warm", with a flame that flickers unless Reduce Motion is on), and clicking it opens a modal sheet with the 7-day reading on a 0–100 gauge, what drove the selected day and the 30-day trend. The bands (Calm, Mild, Warm, Hot, Boiling) are names for index ranges only and do not change scoring. Settings → Intelligence → Show News Tension opens the same sheet.
+
 - Event creation checks the judge between candidate partners. Settled pair verdicts are reused throughout the pass, so exhausting its budget cannot forget a DIFFERENT veto (#307).
 
 - Source review notices use readable label colors and story terminology; subscription-row advisory actions remain separate controls for keyboard and accessibility navigation.

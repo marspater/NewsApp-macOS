@@ -32,11 +32,19 @@ struct MainView: View {
     @EnvironmentObject private var savedStories: SavedStoriesManager
 
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
+    /// The tension series behind the sidebar reading; the sheet opens with it.
+    @State private var tensionHistory: [TensionHistoryDay] = []
+    @State private var showsTension = false
     @State private var isWindowDropTargeted = false
 
     var body: some View {
         NavigationSplitView(columnVisibility: $columnVisibility) {
-            SidebarView(selectedTopic: $selectedTopic, mastheadNotice: $mastheadNotice)
+            SidebarView(
+                selectedTopic: $selectedTopic, mastheadNotice: $mastheadNotice,
+                showsTensionReading: appSettings.tensionCollectionOptIn,
+                tensionReading: TensionHistory.latestReading(in: tensionHistory),
+                openTension: { showsTension = true }
+            )
                 .environmentObject(appSettings)
                 .environmentObject(feedManager)
                 .environmentObject(savedStories)
@@ -92,6 +100,26 @@ struct MainView: View {
             Text(articleStore.operationError ?? "Please try again.")
         }
         .navigationSplitViewStyle(.balanced)
+        // A sheet, so the rest of the window waits until the reader closes it.
+        .sheet(isPresented: $showsTension) {
+            TensionIndexView(history: tensionHistory)
+                .environmentObject(articleStore)
+                .environmentObject(appSettings)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .showNewsTensionCommand)) { _ in
+            showsTension = true
+        }
+        .task(id: tensionReloadKey) {
+            guard appSettings.tensionCollectionOptIn, articleStore.isReady else {
+                tensionHistory = []
+                return
+            }
+            if let loaded = try? await TensionHistory.load(from: articleStore.database, now: Date()),
+                !Task.isCancelled
+            {
+                tensionHistory = loaded
+            }
+        }
         // One archive search in the trailing toolbar, shared by list and reader.
         .searchable(text: $searchText, tokens: $searchTokens, placement: .toolbar, prompt: "Search archive") { token in
             Text(token.expression)
@@ -169,6 +197,11 @@ struct MainView: View {
                 articleStore.operationError = "The notification story could not be loaded. Please try again."
             }
         }
+    }
+
+    /// The sidebar reading is rescored when collection is turned on and after each refresh.
+    private var tensionReloadKey: String {
+        "\(appSettings.tensionCollectionOptIn):\(articleStore.isReady):\(feedManager.lastRefreshCompletedAt?.timeIntervalSince1970 ?? 0)"
     }
 
     // MARK: - Search Operators

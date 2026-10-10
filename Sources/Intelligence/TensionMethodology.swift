@@ -699,3 +699,37 @@ enum TensionHistory {
         return history
     }
 }
+
+extension TensionHistory {
+    /// The most recent day with a 7-day index: the reading the sidebar and the tension sheet lead with.
+    static func latestReading(in history: [TensionHistoryDay]) -> TensionHistoryDay? {
+        history.last { $0.score.smoothedIndex != nil }
+    }
+}
+
+// MARK: - Presentation bands
+
+/// Names for ranges of the 0–100 index, so a reading can say "44° Warm". Presentation only: the bands never feed
+/// back into scoring, and they describe what the panel reported, not how dangerous the world is.
+enum TensionLevel: String, CaseIterable, Sendable {
+    case calm = "Calm"
+    case mild = "Mild"
+    case warm = "Warm"
+    case hot = "Hot"
+    case boiling = "Boiling"
+
+    init(index: Double) {
+        switch index {
+        case ..<20: self = .calm
+        case ..<40: self = .mild
+        case ..<60: self = .warm
+        case ..<80: self = .hot
+        default: self = .boiling
+        }
+    }
+
+    /// The index rounded to whole degrees, as the reading shows it.
+    static func degrees(_ index: Double) -> Int {
+        Int(min(100, max(0, index)).rounded())
+    }
+}

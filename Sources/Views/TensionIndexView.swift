@@ -1,16 +1,23 @@
 import Charts
 import SwiftUI
 
-/// The news tension experiment (#159): what the fixed panel reported, by UTC day. Gap days are shown as gaps,
-/// never as zero, and the series starts when panel collection began.
+extension Notification.Name {
+    /// Settings asks the main window to show the tension sheet.
+    static let showNewsTensionCommand = Notification.Name("showNewsTensionCommand")
+}
+
+/// The news tension experiment (#159) as a modal sheet: the current reading as a temperature, what drives it and
+/// the 30-day trend. Gap days are shown as gaps, never as zero, and the series starts when panel collection began.
 struct TensionIndexView: View {
     static let navigationTitleText = "News Tension"
 
     @EnvironmentObject var articleStore: ArticleStore
     @EnvironmentObject var appSettings: AppSettings
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.effectiveReduceMotion) private var reduceMotion
 
-    @State private var history: [TensionHistoryDay] = []
-    @State private var loading = true
+    @State private var history: [TensionHistoryDay]
+    @State private var loading: Bool
     @State private var loadFailed = false
     @State private var selectedDay: Date?
 
@@ -18,89 +25,165 @@ struct TensionIndexView: View {
         string: "https://github.com/marspater/NewsApp-macOS/blob/main/docs/methodology/tension-index-v1.md")!
     private let methodology = TensionMethodology.v1
 
+    /// `history` is the series the sidebar already loaded, so the sheet opens without a spinner.
+    init(history: [TensionHistoryDay] = []) {
+        _history = State(initialValue: history)
+        _loading = State(initialValue: history.isEmpty)
+    }
+
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: AppSpacing.lg) {
-                header
-                if loading && history.isEmpty {
-                    ProgressView("Scoring panel coverage…")
-                } else if loadFailed {
-                    Text("The tension history could not be loaded.")
-                        .foregroundColor(AppColor.secondaryText)
-                } else if !history.contains(where: { $0.score.calibratedIndex != nil }) {
-                    insufficientData
-                } else {
-                    chart
-                    if let day = selected { details(day) }
+        VStack(spacing: 0) {
+            header
+            Divider()
+            ScrollView {
+                VStack(alignment: .leading, spacing: AppSpacing.lg) {
+                    if loading && history.isEmpty {
+                        ProgressView("Scoring panel coverage…")
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, AppSpacing.xl)
+                    } else if loadFailed && history.isEmpty {
+                        Text("The tension history could not be loaded.")
+                            .foregroundStyle(AppColor.secondaryText)
+                    } else if let latest = TensionHistory.latestReading(in: history) {
+                        reading(latest)
+                        drivers
+                        trend
+                    } else {
+                        insufficientData
+                    }
+                    footer
                 }
-                if !history.isEmpty { dayList }
-                footer
-            }
-            .padding(AppLayout.pageInset)
-            .frame(maxWidth: 900, alignment: .leading)
-        }
-        .frame(minWidth: 560, minHeight: 480)
-        .background(AppColor.background)
-        .navigationTitle(Self.navigationTitleText)
-        .toolbar(removing: .title)
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Button {
-                    Task { await load() }
-                } label: {
-                    Label("Recalculate", systemImage: "arrow.clockwise")
-                }
-                .disabled(loading)
-                .help("Score the stored panel coverage again")
+                .padding(AppLayout.pageInset)
             }
         }
-        .task { await load() }
-    }
-
-    private var selected: TensionHistoryDay? {
-        history.first { $0.score.day.start == selectedDay } ?? history.last
-    }
-
-    private func load() async {
-        loading = true
-        defer { loading = false }
-        do {
-            history = try await TensionHistory.load(from: articleStore.database, now: Date())
-            loadFailed = false
-        } catch {
-            if !Task.isCancelled { loadFailed = true }
+        .frame(width: 540, height: 580)
+        .task {
+            if history.isEmpty { await load() }
         }
     }
-
-    // MARK: - Sections
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: AppSpacing.xs) {
-            Text("News Tension")
-                .font(AppTypography.title)
+        HStack {
+            Text(Self.navigationTitleText)
+                .font(AppTypography.sectionTitle)
                 .accessibilityAddTraits(.isHeader)
-            Text("Experiment · methodology v\(methodology.version) · \(methodology.panel.count) panel feeds")
-                .font(AppTypography.label)
-                .foregroundColor(AppColor.secondaryText)
-            Text(TensionMethodology.disclaimer)
-                .font(AppTypography.callout)
-                .foregroundColor(AppColor.secondaryText)
-                .fixedSize(horizontal: false, vertical: true)
+            Spacer()
+            Button {
+                dismiss()
+            } label: {
+                Label("Close", systemImage: "xmark")
+                    .labelStyle(.iconOnly)
+            }
+            .buttonStyle(.borderless)
+            .keyboardShortcut(.cancelAction)
+            .help("Close (Esc)")
+        }
+        .padding(.horizontal, AppLayout.pageInset)
+        .padding(.vertical, AppSpacing.md)
+    }
+
+    // MARK: - Reading
+
+    private func reading(_ day: TensionHistoryDay) -> some View {
+        let index = day.score.smoothedIndex ?? 0
+        let level = TensionLevel(index: index)
+        return VStack(alignment: .leading, spacing: AppSpacing.md) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: AppSpacing.xxs) {
+                    HStack(alignment: .firstTextBaseline, spacing: AppSpacing.sm) {
+                        Text("\(TensionLevel.degrees(index))°")
+                            .font(AppTypography.tensionReading)
+                            .monospacedDigit()
+                        Text(level.rawValue)
+                            .font(AppTypography.sectionTitle)
+                            .foregroundStyle(AppColor.secondaryText)
+                    }
+                    Text("7-day index · \(Self.dateText(day))\(day.score.isProvisional ? " · provisional" : "")")
+                        .font(AppTypography.caption)
+                        .foregroundStyle(AppColor.secondaryText)
+                }
+                Spacer()
+                TensionGlyph(level: level, animated: !reduceMotion)
+                    .font(AppTypography.tensionReading)
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(
+                "News tension \(TensionLevel.degrees(index)) degrees, \(level.rawValue), 7-day index for \(Self.dateText(day))"
+            )
+
+            Gauge(value: min(100, max(0, index)), in: 0...100) {
+                Text("Tension index")
+            } currentValueLabel: {
+                Text("\(TensionLevel.degrees(index))")
+            } minimumValueLabel: {
+                Text("0")
+            } maximumValueLabel: {
+                Text("100")
+            }
+            .gaugeStyle(.accessoryLinear)
+            .tint(AppColor.tensionScale)
+            .labelsHidden()
+            .accessibilityValue("\(TensionLevel.degrees(index)) of 100")
         }
     }
 
-    private var insufficientData: some View {
-        VStack(alignment: .leading, spacing: AppSpacing.xs) {
-            Text("Insufficient data")
-                .font(AppTypography.sectionTitle)
-            Text(
-                appSettings.tensionCollectionOptIn
-                    ? "A day is scored once at least \(methodology.minimumReportingFeeds) panel feeds from \(methodology.minimumReportingRegions) regions have reported. The history starts on the day collection began."
-                    : "Turn on panel collection in Settings to start a history. News has no historical corpus, so the history starts on the day collection begins."
-            )
-            .font(AppTypography.callout)
-            .foregroundColor(AppColor.secondaryText)
-            .fixedSize(horizontal: false, vertical: true)
+    // MARK: - Drivers
+
+    /// What the selected day's largest contributions were. Deterministic: story headlines and their scores only.
+    private var drivers: some View {
+        let day = selected
+        return VStack(alignment: .leading, spacing: AppSpacing.sm) {
+            if let day {
+                Text(day.score.day.start == TensionHistory.latestReading(in: history)?.score.day.start
+                    ? "What drives it" : "What drove \(Self.dateText(day))")
+                    .font(AppTypography.headline)
+                    .accessibilityAddTraits(.isHeader)
+                if day.contributions.isEmpty {
+                    Text(
+                        day.coverage.status == .sufficient
+                            ? "No story added to the index this day."
+                            : "Too few panel feeds or regions reported this day to score it."
+                    )
+                    .font(AppTypography.callout)
+                    .foregroundStyle(AppColor.secondaryText)
+                } else {
+                    ForEach(day.contributions.prefix(4), id: \.score.key) { contribution in
+                        HStack(alignment: .firstTextBaseline, spacing: AppSpacing.sm) {
+                            Text(contribution.title)
+                                .font(AppTypography.body)
+                                .lineLimit(2)
+                            Spacer(minLength: AppSpacing.sm)
+                            Text(String(format: "%.1f", contribution.score.rawScore))
+                                .font(AppTypography.callout.monospacedDigit())
+                                .foregroundStyle(AppColor.secondaryText)
+                                .accessibilityLabel("\(String(format: "%.1f", contribution.score.rawScore)) points")
+                        }
+                        .accessibilityElement(children: .combine)
+                    }
+                }
+                Text(
+                    "\(day.coverage.reporting.count) of \(methodology.panel.count) panel feeds · \(day.coverage.regions.count) of \(methodology.panelRegions.count) regions reported"
+                )
+                .font(AppTypography.caption)
+                .foregroundStyle(AppColor.secondaryText)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(AppSpacing.md)
+        .background(AppColor.surface, in: RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous))
+    }
+
+    // MARK: - Trend
+
+    private var trend: some View {
+        VStack(alignment: .leading, spacing: AppSpacing.sm) {
+            Text("30-Day Trend")
+                .font(AppTypography.headline)
+                .accessibilityAddTraits(.isHeader)
+            chart
+            Text("Select a day to see what drove it.")
+                .font(AppTypography.caption)
+                .foregroundStyle(AppColor.secondaryText)
         }
     }
 
@@ -113,10 +196,11 @@ struct TensionIndexView: View {
                         x: .value("Day", date, unit: .day), y: .value("7-day index", smoothed),
                         series: .value("Segment", segment(of: index))
                     )
-                    .foregroundStyle(AppColor.accent)
+                    .foregroundStyle(AppColor.secondaryText)
                     .interpolationMethod(.monotone)
                     PointMark(x: .value("Day", date, unit: .day), y: .value("Daily index", daily))
-                        .foregroundStyle(AppColor.accent.opacity(day.score.isProvisional ? 0.4 : 0.9))
+                        .foregroundStyle(
+                            AppColor.tension(TensionLevel(index: daily)).opacity(day.score.isProvisional ? 0.5 : 1))
                         .symbolSize(day.score.day.start == selected?.score.day.start ? 90 : 30)
                         .accessibilityLabel(Self.dateText(day))
                         .accessibilityValue(
@@ -127,15 +211,25 @@ struct TensionIndexView: View {
                         xStart: .value("Start", day.score.day.start), xEnd: .value("End", day.score.day.end),
                         yStart: .value("Bottom", 0), yEnd: .value("Top", 100)
                     )
-                    .foregroundStyle(AppColor.secondaryText.opacity(0.12))
+                    .foregroundStyle(AppColor.badgeBackground)
                     .accessibilityLabel(Self.dateText(day))
                     .accessibilityValue("Insufficient data")
                 }
             }
         }
         .chartYScale(domain: 0...100)
+        .chartYAxis {
+            AxisMarks(values: [0.0, 25, 50, 75, 100]) { value in
+                AxisGridLine()
+                AxisValueLabel {
+                    if let degrees = value.as(Double.self) { Text("\(Int(degrees))°") }
+                }
+            }
+        }
         .chartXSelection(value: $selectedDay.animation(nil))
-        .frame(height: 240)
+        .frame(height: 180)
+        .padding(AppSpacing.md)
+        .background(AppColor.surface, in: RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous))
         .accessibilityLabel("News tension by day")
         .onChange(of: selectedDay) { _, date in
             // Chart selection reports any instant; snap it to the UTC day that contains it.
@@ -147,96 +241,58 @@ struct TensionIndexView: View {
         }
     }
 
-    private func details(_ day: TensionHistoryDay) -> some View {
-        VStack(alignment: .leading, spacing: AppSpacing.sm) {
-            Text(Self.dateText(day))
-                .font(AppTypography.sectionTitle)
-                .accessibilityAddTraits(.isHeader)
+    // MARK: - States and footer
+
+    private var insufficientData: some View {
+        VStack(alignment: .leading, spacing: AppSpacing.xs) {
+            Text("Not enough data yet")
+                .font(AppTypography.headline)
             Text(
-                "\(day.coverage.reporting.count) of \(methodology.panel.count) panel feeds · \(day.coverage.regions.count) of \(methodology.panelRegions.count) regions"
+                appSettings.tensionCollectionOptIn
+                    ? "A day is scored once at least \(methodology.minimumReportingFeeds) panel feeds from \(methodology.minimumReportingRegions) regions have reported. The history starts on the day collection began."
+                    : "Turn on panel collection in Settings → Intelligence to start a history. News has no historical corpus, so the history starts on the day collection begins."
             )
             .font(AppTypography.callout)
-            .foregroundColor(AppColor.secondaryText)
-            if let daily = day.score.calibratedIndex, let smoothed = day.score.smoothedIndex {
-                HStack(spacing: AppSpacing.lg) {
-                    metric("Daily index", Self.indexText(daily))
-                    metric("7-day index", Self.indexText(smoothed))
-                }
-            } else {
-                Text(
-                    day.coverage.status == .noData
-                        ? "No panel feed reported this day."
-                        : "Insufficient data: too few panel feeds or regions reported."
-                )
-                .font(AppTypography.callout)
-            }
-            if day.score.isProvisional {
-                Text("Provisional: late items and event grouping can still change this day.")
-                    .font(AppTypography.caption)
-                    .foregroundColor(AppColor.secondaryText)
-            }
-            if !day.contributions.isEmpty {
-                Text("Largest contributions")
-                    .font(AppTypography.label)
-                    .foregroundColor(AppColor.secondaryText)
-                    .accessibilityAddTraits(.isHeader)
-                ForEach(day.contributions.prefix(5), id: \.score.key) { contribution in
-                    HStack(alignment: .firstTextBaseline) {
-                        Text(contribution.title)
-                            .font(AppTypography.body)
-                            .lineLimit(2)
-                        Spacer()
-                        Text(String(format: "%.1f", contribution.score.rawScore))
-                            .font(AppTypography.callout.monospacedDigit())
-                            .foregroundColor(AppColor.secondaryText)
-                            .accessibilityLabel("\(String(format: "%.1f", contribution.score.rawScore)) points")
-                    }
-                    .accessibilityElement(children: .combine)
-                }
-            }
-        }
-        .padding(AppSpacing.md)
-        .background(AppColor.surface, in: RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous))
-    }
-
-    private var dayList: some View {
-        VStack(alignment: .leading, spacing: AppSpacing.xxs) {
-            Text("Days")
-                .font(AppTypography.label)
-                .foregroundColor(AppColor.secondaryText)
-                .accessibilityAddTraits(.isHeader)
-            ForEach(history.reversed(), id: \.score.day.start) { day in
-                Button {
-                    selectedDay = day.score.day.start
-                } label: {
-                    HStack {
-                        Text(Self.dateText(day))
-                        Spacer()
-                        Text(day.score.smoothedIndex.map { "7-day \(Self.indexText($0))" } ?? "Insufficient data")
-                            .foregroundColor(AppColor.secondaryText)
-                            .monospacedDigit()
-                    }
-                    .font(AppTypography.body)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .padding(.vertical, AppSpacing.xxs)
-                .accessibilityAddTraits(day.score.day.start == selected?.score.day.start ? .isSelected : [])
-            }
+            .foregroundStyle(AppColor.secondaryText)
+            .fixedSize(horizontal: false, vertical: true)
         }
     }
 
     private var footer: some View {
-        Link("How the indicator is calculated", destination: Self.methodologyURL)
-            .font(AppTypography.label)
+        VStack(alignment: .leading, spacing: AppSpacing.sm) {
+            Text(TensionMethodology.disclaimer)
+                .font(AppTypography.caption)
+                .foregroundStyle(AppColor.secondaryText)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack {
+                Link("How the indicator is calculated", destination: Self.methodologyURL)
+                Spacer()
+                Button("Recalculate") { Task { await load() } }
+                    .disabled(loading)
+                    .help("Score the stored panel coverage again")
+            }
+            .font(AppTypography.callout)
+            Text("Experiment · methodology v\(methodology.version) · \(methodology.panel.count) panel feeds")
+                .font(AppTypography.caption)
+                .foregroundStyle(AppColor.tertiaryText)
+        }
     }
 
-    private func metric(_ label: String, _ value: String) -> some View {
-        VStack(alignment: .leading, spacing: AppSpacing.textStack) {
-            Text(value).font(AppTypography.title.monospacedDigit())
-            Text(label).font(AppTypography.caption).foregroundColor(AppColor.secondaryText)
+    // MARK: - Data
+
+    private var selected: TensionHistoryDay? {
+        history.first { $0.score.day.start == selectedDay } ?? TensionHistory.latestReading(in: history)
+    }
+
+    private func load() async {
+        loading = true
+        defer { loading = false }
+        do {
+            history = try await TensionHistory.load(from: articleStore.database, now: Date())
+            loadFailed = false
+        } catch {
+            if !Task.isCancelled { loadFailed = true }
         }
-        .accessibilityElement(children: .combine)
     }
 
     // MARK: - Formatting
@@ -251,11 +307,88 @@ struct TensionIndexView: View {
         day.score.day.start.addingTimeInterval(12 * 60 * 60)
     }
 
-    private static func dateText(_ day: TensionHistoryDay) -> String {
+    static func dateText(_ day: TensionHistoryDay) -> String {
         day.score.day.start.formatted(Date.FormatStyle(date: .abbreviated, time: .omitted, timeZone: .gmt))
     }
 
     private static func indexText(_ value: Double) -> String {
         String(format: "%.0f", value)
+    }
+}
+
+// MARK: - Glyph
+
+/// A thermometer for calm and mild readings, a flame from warm up. The flame flickers unless Reduce Motion is on.
+struct TensionGlyph: View {
+    let level: TensionLevel
+    var animated = true
+
+    var body: some View {
+        switch level {
+        case .calm, .mild:
+            Image(systemName: level == .calm ? "thermometer.low" : "thermometer.medium")
+                .symbolRenderingMode(.hierarchical)
+                .foregroundStyle(AppColor.tension(level))
+                .accessibilityHidden(true)
+        case .warm, .hot, .boiling:
+            Image(systemName: "flame.fill")
+                .symbolRenderingMode(.multicolor)
+                .symbolEffect(.breathe.pulse.byLayer, options: .repeat(.continuous), isActive: animated)
+                .accessibilityHidden(true)
+        }
+    }
+}
+
+// MARK: - Sidebar reading
+
+/// The current reading at the foot of the sidebar; it opens the tension sheet.
+struct TensionSidebarButton: View {
+    let reading: TensionHistoryDay?
+    let open: () -> Void
+    @Environment(\.effectiveReduceMotion) private var reduceMotion
+
+    var body: some View {
+        Button(action: open) {
+            HStack(spacing: AppSpacing.sm) {
+                if let index = reading?.score.smoothedIndex {
+                    let level = TensionLevel(index: index)
+                    TensionGlyph(level: level, animated: !reduceMotion)
+                        .font(AppTypography.sectionTitle)
+                        .frame(width: AppSpacing.lg)
+                    VStack(alignment: .leading, spacing: AppSpacing.textStack) {
+                        Text("\(TensionLevel.degrees(index))° \(level.rawValue)")
+                            .font(AppTypography.headline)
+                            .monospacedDigit()
+                        Text(TensionIndexView.navigationTitleText)
+                            .font(AppTypography.caption)
+                            .foregroundStyle(AppColor.secondaryText)
+                    }
+                } else {
+                    Image(systemName: "thermometer.medium")
+                        .font(AppTypography.sectionTitle)
+                        .foregroundStyle(AppColor.secondaryText)
+                        .frame(width: AppSpacing.lg)
+                        .accessibilityHidden(true)
+                    VStack(alignment: .leading, spacing: AppSpacing.textStack) {
+                        Text(TensionIndexView.navigationTitleText)
+                            .font(AppTypography.headline)
+                        Text("Collecting data")
+                            .font(AppTypography.caption)
+                            .foregroundStyle(AppColor.secondaryText)
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help("Show what drives the news tension index")
+        .accessibilityLabel(accessibilityText)
+        .accessibilityHint("Opens the news tension details")
+    }
+
+    private var accessibilityText: String {
+        guard let index = reading?.score.smoothedIndex else { return "News tension, collecting data" }
+        return "News tension, \(TensionLevel.degrees(index)) degrees, \(TensionLevel(index: index).rawValue)"
     }
 }

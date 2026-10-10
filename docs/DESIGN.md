@@ -62,7 +62,7 @@ The single design language for News on macOS. It applies to every change that ad
 - Main window: `NavigationSplitView` with the sidebar column and a detail `NavigationStack` (list, then reader). Do not add a third column or nested split view without updating this document.
 - The system sidebar toggle is the only sidebar toggle. Never draw a second one in content.
 - Each window sets `navigationTitle` to the current location ("Today", "Saved Stories", the story's publisher in the reader), never the app name. Where the content already shows that title (the list masthead, the reader eyebrow), hide the duplicate toolbar title with `toolbar(removing: .title)`; the window title still names the window in Mission Control and the Window menu.
-- Secondary windows (News Tension) and sheets (Feed Catalog) follow the same rules. Sheets use system sizing and background; no custom `presentationBackground`.
+- Secondary windows (Keyboard Shortcuts) and sheets (Feed Catalog, News Tension) follow the same rules. Sheets use system sizing and background; no custom `presentationBackground`. A sheet is modal to its window and closes with a close button and Esc.
 - In full screen the reader shows the toolbar on hover: `windowToolbarFullScreenVisibility(.onHover)`.
 - Do not put critical controls or information at the bottom of a window or sidebar.
 - Minimum main window size: 900 × 600. Layouts must work from that size to a full-screen 6K display; wide windows widen margins, never the reading measure.
@@ -95,6 +95,7 @@ The single design language for News on macOS. It applies to every change that ad
 - No backgrounds, materials or custom selection drawing. Row height, text and symbol size follow the person's sidebar size setting, so never set fonts or frames on sidebar rows.
 - Progress in a row uses `ProgressView().controlSize(.mini)`; never scale a control with `scaleEffect`.
 - Transient confirmations (OPML imported, feed added) never insert rows into the list; use an alert, a toolbar status item or the masthead status line.
+- With panel collection on, the sidebar foot shows the news tension reading (degrees, band and glyph) in a `safeAreaInset`, not as a list row; it opens the News Tension sheet. Its flame glyph animates only without Reduce Motion, and the status colors name the band, never the danger of the world.
 
 ## 7. Search
 

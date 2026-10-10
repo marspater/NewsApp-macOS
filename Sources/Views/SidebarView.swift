@@ -17,6 +17,10 @@ extension FocusedValues {
 struct SidebarView: View {
     @Binding var selectedTopic: String?
     @Binding var mastheadNotice: MastheadNotice?
+    /// Panel collection is on, so the sidebar foot shows the news tension reading.
+    var showsTensionReading = false
+    var tensionReading: TensionHistoryDay?
+    var openTension: () -> Void = {}
 
     @EnvironmentObject private var appSettings: AppSettings
     @EnvironmentObject private var feedManager: FeedManager
@@ -58,6 +62,13 @@ struct SidebarView: View {
             suggestedSection
         }
         .focused($isListFocused)
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if showsTensionReading {
+                TensionSidebarButton(reading: tensionReading, open: openTension)
+                    .padding(.horizontal, AppLayout.sidebarInset)
+                    .padding(.vertical, AppSpacing.sm)
+            }
+        }
         .focusedSceneValue(\.addFeedSubscription, { isSubscribePopoverPresented = true })
         .listStyle(.sidebar)
         .scrollContentBackground(.visible)

@@ -179,14 +179,6 @@ struct NewsApp: App {
         }
         .windowResizability(.contentSize)
 
-        Window("News Tension", id: "tension") {
-            TensionIndexView()
-                .environmentObject(appSettings)
-                .environmentObject(articleStore)
-                .preferredColorScheme(themeManager.appearance.colorScheme)
-                .modifier(SystemSettingsOverrideModifier())
-        }
-
         Settings {
             SettingsView()
                 .environmentObject(appSettings)
