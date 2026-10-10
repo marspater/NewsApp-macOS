@@ -14456,7 +14456,7 @@ struct NewsTests {
             id: "pass_persp_2",
             articleID: "art_persp_2",
             text:
-                "(Reuters) - \"The evacuation routes are fully operational and emergency services have responded rapidly,\" announced Mayor Elena Rostova.",
+                "(Reuters) - “The evacuation routes are fully operational and emergency services have responded rapidly,” announced Mayor Elena Rostova.",
             ordinal: 1
         )
         // Passage 3: Another distinct participant with explicit stance
@@ -14672,17 +14672,42 @@ struct NewsTests {
         let typographicCitation = OverviewCitation(
             id: "c_typo", articleID: "art_persp_1", passageID: "pass_typo",
             passageFingerprint: typographic.fingerprint, quote: "The evacuation routes are open")
-        let unmatched = OverviewPerspectivesExtractor.diagnosePerspectives(
+        let matched = OverviewPerspectivesExtractor.diagnosePerspectives(
             passages: [typographic, passageDescriptive],
             articles: [article1],
             existingCitations: ["c_typo": typographicCitation]
         )
         assertEqual(
             [
-                unmatched.uncitedPassages, unmatched.passagesWithTypographicQuotes, unmatched.candidates,
-                unmatched.passagesWithUnmatchedSpeech,
+                matched.uncitedPassages, matched.passagesWithTypographicQuotes, matched.candidates,
+                matched.passagesWithUnmatchedSpeech,
             ],
-            [1, 1, 0, 1], "Diagnosis counts an uncited passage and quoted speech that no attribution pattern matched")
+            [1, 1, 1, 0], "Diagnosis counts an uncited passage and the recovered typographic attribution")
+        for text in [
+            "“The evacuation routes are open,” said Mayor Elena Rostova.",
+            "“The evacuation routes are open,” Mayor Elena Rostova said.",
+            "\"The evacuation routes are open,\" Mayor Elena Rostova said.",
+        ] {
+            let passage = EvidencePassage(id: typographic.id, articleID: typographic.articleID, text: text)
+            let extracted = OverviewPerspectivesExtractor.extractPerspectives(
+                passages: [passage], articles: [article1], existingCitations: ["c_typo": typographicCitation])
+            assertEqual(extracted.count, 1, "Both quote styles and speaker orders produce one verified voice")
+            assertEqual(extracted.first?.participant, "Mayor Elena Rostova", "The named speaker is preserved")
+            assertEqual(extracted.first?.position, "The evacuation routes are open,", "Statement is verbatim")
+            assertEqual(extracted.first?.citationIDs, ["c_typo"], "The statement keeps its passage citation")
+        }
+        for text in [
+            "“The evacuation routes are open,\" Mayor Elena Rostova said.",
+            "\"The evacuation routes are open,” Mayor Elena Rostova said.",
+            "“The evacuation routes are open,” without any attributed speaker.",
+            "“The evacuation routes are open,” Critics said.",
+        ] {
+            let passage = EvidencePassage(id: typographic.id, articleID: typographic.articleID, text: text)
+            assertTrue(
+                OverviewPerspectivesExtractor.extractPerspectives(
+                    passages: [passage], articles: [article1], existingCitations: ["c_typo": typographicCitation]
+                ).isEmpty, "Mismatched delimiters, unattributed quotes and vague speakers stay excluded")
+        }
     }
 
     static func testThematicAngleFromExistingFacts(fixtureHost: String = "example.com") async throws {
