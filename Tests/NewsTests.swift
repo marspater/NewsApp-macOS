@@ -15504,8 +15504,24 @@ struct NewsTests {
             "He said Israel would also expel British representatives from the consulate.",
             "It said 224 schools were closed in the morning, down to 157 by lunchtime.",
             "Officials said the bridge would reopen to traffic next week.",
+            // Attribution regressions (#313): nearby places, clauses, poll results and time phrases.
+            "A letter from the attorney to the county commission in Florida said Trump offered to deem the club a presidential retreat.",
+            "The Death Penalty Information Center, which publishes data and analysis on capital punishment in the United States, said Pike was the first inmate to survive after being injected with lethal doses of execution drugs.",
+            "Trump, who waged war with Iran and has yet to broker peace in Ukraine, said on Wednesday that he should win.",
+            "First reported by the Palm Beach Post, an attorney who represents the golf course said Trump is offering.",
+            "At a base in southeast England housing US operations, police said an incident led to withdrawals.",
+            "A poll showed that 68% of Jewish Israelis said that the events were central.",
+            "A witness told The Associated Press, a day after the kingdom said an attack occurred.",
+            "Counter Terrorism Policing London is investigating and commander Helen Flanagan said officers were not linking it.",
+            "This is the 17th outbreak in the DRC and is said to be its deadliest.",
+            "Wednesday in which Saudi civil aviation authorities said three people were killed.",
+            "While the interior ministry said that 256,000 people protested nationwide, organisers put the figure higher.",
+            "Ahmad Mobeen, principal economist at S&P Global Market Intelligence, said earlier this year.",
+            "El Nino will intensify before peaking, the United Nations said Thursday, warning it could be among the strongest.",
         ] {
-            assertTrue(reported(text).isEmpty, "Pronouns and generic officials are not named participants")
+            assertTrue(
+                reported(text).isEmpty,
+                "Nearby places, passive/clause fragments, poll subjects and time phrases are excluded")
         }
     }
 

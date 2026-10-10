@@ -67,6 +67,16 @@ struct OverviewPerspectivesValidator: Sendable {
         "he", "she", "it", "they", "we", "i", "you",
     ]
 
+    private static let pureTimePhrases: Set<String> = [
+        "earlier this year", "earlier this month", "earlier today", "earlier this week",
+        "late last year", "late last month", "late last week", "last year", "last month",
+        "this year", "this month", "this week", "earlier", "later",
+    ]
+
+    private static let dayNames: Set<String> = [
+        "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
+    ]
+
     /// Evaluates whether a participant string represents a vague anonymous generality.
     static func isVagueParticipant(_ participant: String) -> Bool {
         let cleaned = participant.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -136,6 +146,21 @@ struct OverviewPerspectivesValidator: Sendable {
 
         let positionCleaned = perspective.position.trimmingCharacters(in: .whitespacesAndNewlines)
         guard positionCleaned.count >= 5 else {
+            return OverviewPerspectiveValidationResult(
+                isValid: false,
+                rejectionReason: "Position statement is empty or too short"
+            )
+        }
+
+        let positionNormalized = positionCleaned.trimmingCharacters(in: CharacterSet(charactersIn: "\"'.,:- "))
+            .lowercased()
+        if pureTimePhrases.contains(positionNormalized) {
+            return OverviewPerspectiveValidationResult(
+                isValid: false,
+                rejectionReason: "Position statement is empty or too short"
+            )
+        }
+        if let firstWord = positionNormalized.split(separator: " ").first, dayNames.contains(String(firstWord)) {
             return OverviewPerspectiveValidationResult(
                 isValid: false,
                 rejectionReason: "Position statement is empty or too short"
@@ -456,7 +481,7 @@ struct OverviewPerspectivesExtractor: Sendable {
         // excludes full stops, so it cannot reach back into the previous sentence.
         // When and where the remark was made: "on Thursday night", "Tuesday", "in a statement", "at a news conference".
         let time =
-            #"(?:\s+(?:(?:on|late on|earlier on|late|early)\s+)?(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday|this week|last week|this month|last month|earlier|later)(?:\s+(?:night|morning|evening|afternoon))?(?:\s+\([^)]{1,30}\))?)?(?:\s+(?:in a statement|in an interview|in a report|in a post|at a news conference|during a news conference)[^:,]{0,30}[:,]?)?"#
+            #"(?:\s+(?:(?:on|late on|earlier on|late|early)\s+)?(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday|this week|last week|this month|last month|this year|last year|earlier this year|earlier this month|earlier today|earlier|later)(?:\s+(?:night|morning|evening|afternoon))?(?:\s+\([^)]{1,30}\))?)?(?:\s+(?:in a statement|in an interview|in a report|in a post|at a news conference|during a news conference)[^:,]{0,30})?[:,]?"#
         let patternReported =
             #"(\p{Lu}[\p{L}0-9\s,'’\-]{1,60}?)\s+(?:(?:said|says)\#(time)\s+(?:that\s+)?|told\s+(?:(?:[Tt]he|[Aa]n?)\s+[\p{L}0-9\s]{1,40}?|\p{Lu}[\p{L}0-9\s]{1,40}?)\#(time)\s+that\s+)(?!(?:in|on|at|of|for|during|after|before|while|with|is|are|was|were|has|have|had|would|will|could|should|can)\b|\p{Ll}+ing\b)([\p{L}0-9“\"][^\.\n]{15,200})"#
         // Pattern 3: According to [Participant], [Statement].
@@ -507,6 +532,11 @@ struct OverviewPerspectivesExtractor: Sendable {
         return results
     }
 
+    private static let precedingPrepositionRegex = try? NSRegularExpression(
+        pattern:
+            #"(?:\b(?:in|at|from|to|by|near|across|around|into|with|during|about|against|told)\s+(?:the\s+|a\s+|an\s+|southeast\s+|north\s+|south\s+|east\s+|west\s+)?|%\s+of\s+)$"#,
+        options: [.caseInsensitive])
+
     /// Runs one attribution pattern and keeps matches that name a participant and carry a statement
     /// of at least `minimumStatementLength` characters.
     private static func attributedMatches(
@@ -519,7 +549,18 @@ struct OverviewPerspectivesExtractor: Sendable {
         let matches = regex.matches(in: nsString as String, range: NSRange(location: 0, length: nsString.length))
         return matches.compactMap { match -> (participant: String, statement: String)? in
             guard match.numberOfRanges >= 3 else { return nil }
-            let participant = cleanParticipant(nsString.substring(with: match.range(at: participantGroup)))
+            let participantRange = match.range(at: participantGroup)
+            if participantRange.location > 0 {
+                let checkLength = min(40, participantRange.location)
+                let checkRange = NSRange(location: participantRange.location - checkLength, length: checkLength)
+                let precedingText = nsString.substring(with: checkRange)
+                if precedingPrepositionRegex?.firstMatch(
+                    in: precedingText, range: NSRange(location: 0, length: precedingText.utf16.count)) != nil
+                {
+                    return nil
+                }
+            }
+            let participant = cleanParticipant(nsString.substring(with: participantRange))
             let statement = nsString.substring(with: match.range(at: statementGroup)).trimmingCharacters(
                 in: .whitespacesAndNewlines)
             guard !participant.isEmpty, statement.count >= minimumStatementLength else { return nil }
@@ -573,8 +614,22 @@ struct OverviewPerspectivesExtractor: Sendable {
         while let last = words.last, ["also", "has", "have", "had", "will", "would"].contains(last.lowercased()) {
             words.removeLast()
         }
-        // A speaker cut off at a relative word or pronoun is incomplete: "Seoul, which", "Kyiv and".
+        // A speaker cut off at a relative word or pronoun is incomplete: "Seoul, which", "Kyiv and", "outbreak and is".
         if let last = words.last?.lowercased(), danglingWords.contains(last) { return "" }
+        // A speaker does not contain finite verbs, relative pronouns, speech verbs, or clause conjunctions:
+        let invalidSpeakerWords: Set<String> = [
+            "is", "are", "was", "were", "which", "whom", "whose", "where", "who",
+            "said", "says", "told", "after", "before", "because", "since", "until",
+        ]
+        guard
+            !words.contains(where: {
+                invalidSpeakerWords.contains(
+                    $0.trimmingCharacters(in: CharacterSet(charactersIn: "\"'.,:-")).lowercased())
+            })
+        else { return "" }
+        if let first = words.first?.lowercased(), ["while", "when", "although", "though", "if"].contains(first) {
+            return ""
+        }
         // A speaker names someone: "court filing" or "father of four" has no capitalized word.
         guard words.contains(where: { $0.first?.isUppercase == true }) else { return "" }
         return words.joined(separator: " ").trimmingCharacters(in: CharacterSet(charactersIn: "\"'.,:-"))
@@ -588,6 +643,6 @@ struct OverviewPerspectivesExtractor: Sendable {
     ]
     private static let danglingWords: Set<String> = [
         "which", "who", "whom", "whose", "that", "and", "or", "but", "she", "he", "they", "it", "her", "his", "their",
-        "its",
+        "its", "is", "are", "was", "were", "be", "been", "being",
     ]
 }

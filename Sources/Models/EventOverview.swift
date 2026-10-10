@@ -341,9 +341,8 @@ public struct OverviewProvenance: Codable, Hashable, Sendable {
 /// Derived overview document model bound to membership version, input text hashes, schema version, and analysis version.
 public struct EventOverviewDocument: Codable, Hashable, Sendable, Identifiable {
     public static let currentSchemaVersion = 1
-    /// 5: attributed straight/typographic quotations with both post-quote speaker orders. Older overviews, and
-    /// provisional ones stored at 0 (`OverviewGenerationCoordinator`), regenerate.
-    public static let currentAnalysisVersion = 6
+    /// 7: reported speech attribution guards (preposition context, verb/relative exclusions, time phrases).
+    public static let currentAnalysisVersion = 7
 
     public let id: String
     public let eventID: String
