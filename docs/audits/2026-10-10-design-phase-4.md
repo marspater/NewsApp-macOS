@@ -4,7 +4,7 @@ Date: 2026-10-10 · Issue #354
 
 ## Scope and implementation stack
 - Merged predecessor #363: story/event cards, EyebrowText and TagView.
-- #398 (slice 2): reader type tokens, summary tags, shared IntelligenceLabel/NoticeView, cited passage, display-only uppercase.
+- #398 (slice 2): reader type tokens, summary tags, shared IntelligenceLabel/NoticeView, cited passage, display-only uppercase. Final integration also adopts NoticeView for the extraction fallback and AI error callout.
 - #399 (slice 3): overview type roles and reading scale, citation/Plan/status tags, publisher eyebrow and removal of literal blue/white.
 - Final slice (this commit): remap old font names before token values change; system label and separator colors; list font cleanup; hard zero gate, Native UI QA smoke test, CHANGELOG and this audit.
 

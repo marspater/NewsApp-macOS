@@ -481,7 +481,9 @@ struct NativeUIQAChecks {
         }
         _ = AppColor.separator
         _ = AppColor.borderSubtle
-        assertTrue(true, "Shared content tokens and components construct")
+        assertEqual(AppSpacing.textStack, CGFloat(2), "Text-stack spacing token remains 2 pt")
+        assertEqual(AppSpacing.eyebrowGap, CGFloat(6), "Eyebrow micro-gap remains 6 pt")
+        assertEqual(AppSpacing.xxs, CGFloat(4), "Smallest standard grid step remains 4 pt")
     }
 
     // MARK: - 9. Feed Stability and Queued Updates Buffer
