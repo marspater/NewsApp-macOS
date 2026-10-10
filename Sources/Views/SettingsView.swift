@@ -231,6 +231,33 @@ struct SettingsView: View {
                                 .lineLimit(1)
                                 .foregroundColor(AppColor.primaryText)
                             FeedHealthLine(health: feedManager.feedHealth[urlString])
+                            if let advisory = FeedCatalog.advisory(for: urlString),
+                                !appSettings.isAdvisoryDismissed(for: urlString, date: advisory.date)
+                            {
+                                NoticeView(tint: AppColor.warning) {
+                                    VStack(alignment: .leading, spacing: AppSpacing.xxs) {
+                                        Text("Review note (\(advisory.date)): \(advisory.summary)")
+                                            .font(AppTypography.caption)
+                                            .foregroundColor(AppColor.primaryText)
+                                            .fixedSize(horizontal: false, vertical: true)
+                                        HStack(spacing: AppSpacing.sm) {
+                                            Button("View Alternatives") {
+                                                showsCatalog = true
+                                            }
+                                            .font(AppTypography.caption)
+                                            .controlSize(.small)
+                                            .accessibilityLabel("View alternatives for \(urlString)")
+
+                                            Button("Dismiss") {
+                                                appSettings.dismissAdvisory(for: urlString, date: advisory.date)
+                                            }
+                                            .font(AppTypography.caption)
+                                            .controlSize(.small)
+                                            .accessibilityLabel("Dismiss review note for \(urlString)")
+                                        }
+                                    }
+                                }
+                            }
                         }
                         Spacer()
                         Button(role: .destructive) {
