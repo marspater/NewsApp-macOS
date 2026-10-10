@@ -768,7 +768,10 @@ struct ArticleListView: View {
                 && !failedFeeds.isEmpty
             {
                 ContentUnavailableView {
-                    Label("\(failedFeeds.count) Feeds Couldn’t Refresh", systemImage: "exclamationmark.triangle")
+                    Label(
+                        failedFeeds.count == 1
+                            ? "1 Feed Couldn’t Refresh" : "\(failedFeeds.count) Feeds Couldn’t Refresh",
+                        systemImage: "exclamationmark.triangle")
                 } description: {
                     Text("No stories are currently available from these feeds.")
                 } actions: {

@@ -226,7 +226,10 @@ struct MainView: View {
     private func handleWindowOPMLDrop(providers: [NSItemProvider]) -> Bool {
         for provider in providers where provider.canLoadObject(ofClass: URL.self) {
             _ = provider.loadObject(ofClass: URL.self) { item, _ in
-                guard let url = item else { return }
+                guard let url = item else {
+                    Task { @MainActor in articleStore.operationError = "The dropped file could not be read." }
+                    return
+                }
 
                 if url.isFileURL
                     && (url.pathExtension.lowercased() == "opml" || url.pathExtension.lowercased() == "xml")
