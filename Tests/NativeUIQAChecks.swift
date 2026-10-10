@@ -243,7 +243,11 @@ struct NativeUIQAChecks {
         // E key: expands/collapses event sources
         // G key: toggles event grouping
         // U key: applies queued updates
-        // W key: toggles reader experience mode / web view
+        // W key: steps through the reader's modes in toolbar order
+        assertEqual(ReaderMode.overview.next(hasOverview: true), .story, "W moves from Overview to Story")
+        assertEqual(ReaderMode.story.next(hasOverview: true), .web, "W moves from Story to Web")
+        assertEqual(ReaderMode.web.next(hasOverview: true), .overview, "W returns from Web to Overview for events")
+        assertEqual(ReaderMode.web.next(hasOverview: false), .story, "W returns from Web to Story without an overview")
         // J/K: previous / next article
         // M: toggle read/unread
         // S: toggle saved/bookmark

@@ -30,10 +30,11 @@ struct SettingsView: View {
 
     @AppStorage(SettingsView.lastPaneStorageKey) private var selectedPane: SettingsPane = .general
     @State private var newFeedURL: String = ""
-    @State private var webCacheSize: String = "Calculating..."
-    @State private var databaseSize: String = "Calculating..."
-    @State private var totalStorageSize: String = "Calculating..."
+    @State private var webCacheSize: String = "Calculating…"
+    @State private var databaseSize: String = "Calculating…"
+    @State private var totalStorageSize: String = "Calculating…"
     @State private var cacheActionMessage: String? = nil
+    @State private var cacheActionFailed = false
     @State private var opmlStatusMessage: String? = nil
     @State private var showsCatalog = false
     @State private var newMutedSource = ""
@@ -129,17 +130,12 @@ struct SettingsView: View {
                     .imageScale(.large)
                 TextField("Enter RSS / Atom / JSON Feed URL", text: $newFeedURL)
                     .textFieldStyle(.roundedBorder)
-                Button("Subscribe") {
-                    let trimmed = newFeedURL.trimmingCharacters(in: .whitespacesAndNewlines)
-                    if !trimmed.isEmpty {
-                        feedManager.addFeed(url: trimmed)
-                        newFeedURL = ""
-                    }
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(AppColor.accent)
-                .controlSize(.small)
-                .disabled(newFeedURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .onSubmit(subscribeFromField)
+                Button("Subscribe", action: subscribeFromField)
+                    .buttonStyle(.borderedProminent)
+                    .tint(AppColor.accent)
+                    .controlSize(.small)
+                    .disabled(newFeedURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
             .padding(.horizontal, AppLayout.pageInset)
             .padding(.top, AppSpacing.md)
@@ -150,7 +146,7 @@ struct SettingsView: View {
                 Button {
                     showsCatalog = true
                 } label: {
-                    Label("Browse Catalog...", systemImage: "books.vertical")
+                    Label("Browse Catalog…", systemImage: "books.vertical")
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
@@ -158,13 +154,14 @@ struct SettingsView: View {
                 Button {
                     OPMLDialogs.importOPML { data in
                         let count = feedManager.importFeeds(from: data)
-                        opmlStatusMessage = count > 0 ? "Imported \(count) feed(s)" : "No new feeds imported."
+                        opmlStatusMessage =
+                            count > 0 ? "Imported \(count) \(count == 1 ? "feed" : "feeds")" : "No new feeds imported"
                         DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
                             opmlStatusMessage = nil
                         }
                     }
                 } label: {
-                    Label("Import OPML...", systemImage: "square.and.arrow.down")
+                    Label("Import OPML…", systemImage: "square.and.arrow.down")
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
@@ -173,7 +170,7 @@ struct SettingsView: View {
                     let opml = feedManager.exportOPML()
                     OPMLDialogs.exportOPML(xmlString: opml)
                 } label: {
-                    Label("Export OPML...", systemImage: "square.and.arrow.up")
+                    Label("Export OPML…", systemImage: "square.and.arrow.up")
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
@@ -185,7 +182,7 @@ struct SettingsView: View {
                 }
 
                 Spacer()
-                Text("\(feedManager.feedURLs.count) feeds")
+                Text("\(feedManager.feedURLs.count) \(feedManager.feedURLs.count == 1 ? "feed" : "feeds")")
                     .font(AppTypography.caption)
                     .foregroundColor(AppColor.secondaryText)
             }
@@ -217,8 +214,8 @@ struct SettingsView: View {
                                 .controlSize(.small)
                                 .scaleEffect(0.7)
                                 .frame(width: 14, height: 14)
-                                .help("Fetching updates...")
-                                .accessibilityLabel("Fetching updates...")
+                                .help("Fetching updates…")
+                                .accessibilityLabel("Fetching updates…")
                         case .failed(let err)?:
                             Image(systemName: "exclamationmark.triangle.fill")
                                 .foregroundColor(AppColor.warning)
@@ -619,10 +616,10 @@ struct SettingsView: View {
                 .foregroundColor(AppColor.secondaryText)
             }
 
-            Section("Article Typography") {
-                Picker("Theme Style", selection: $themeManager.articleTheme) {
+            Section("Reading") {
+                Picker("Reading Style", selection: $themeManager.articleTheme) {
                     ForEach(ArticleThemeType.allCases) { theme in
-                        Text(theme.rawValue).tag(theme)
+                        Text(theme.displayName).tag(theme)
                     }
                 }
                 .pickerStyle(.radioGroup)
@@ -669,15 +666,20 @@ struct SettingsView: View {
                 Spacer()
 
                 if let message = cacheActionMessage {
-                    Text(message)
-                        .font(AppTypography.label)
-                        .foregroundColor(AppColor.success)
-                        .padding(.horizontal, AppSpacing.xs)
-                        .padding(.vertical, AppSpacing.xxs)
-                        .background(
-                            RoundedRectangle(cornerRadius: AppRadius.control).fill(AppColor.success.opacity(0.12))
-                        )
-                        .transition(.opacity)
+                    // Status colour marks the symbol only; the text stays a label colour (DESIGN.md 11).
+                    Label {
+                        Text(message).foregroundStyle(AppColor.primaryText)
+                    } icon: {
+                        Image(systemName: cacheActionFailed ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
+                            .foregroundStyle(cacheActionFailed ? AppColor.danger : AppColor.success)
+                    }
+                    .font(AppTypography.label)
+                    .padding(.horizontal, AppSpacing.xs)
+                    .padding(.vertical, AppSpacing.xxs)
+                    .background(
+                        RoundedRectangle(cornerRadius: AppRadius.control).fill(AppColor.badgeBackground)
+                    )
+                    .transition(.opacity)
                 }
             }
             .padding(.horizontal, AppLayout.pageInset)
@@ -717,7 +719,7 @@ struct SettingsView: View {
                             Text("Article Content Cache")
                                 .font(AppTypography.sectionTitle)
                                 .foregroundColor(AppColor.primaryText)
-                            Text("\(articleStore.articles.count) articles")
+                            Text("\(articleStore.articles.count) \(articleStore.articles.count == 1 ? "story" : "stories")")
                                 .font(AppTypography.label.monospacedDigit())
                                 .foregroundColor(AppColor.secondaryText)
                         }
@@ -843,7 +845,7 @@ struct SettingsView: View {
                 if updateChecker.isChecking {
                     ProgressView()
                         .controlSize(.small)
-                    Text("Checking for updates...")
+                    Text("Checking for updates…")
                         .font(AppTypography.caption)
                         .foregroundColor(AppColor.secondaryText)
                 } else if updateChecker.updateAvailable {
@@ -935,7 +937,7 @@ struct SettingsView: View {
                 calculateStorageSizes()
                 showActionMessage("AI analysis data cleared.")
             } catch {
-                showActionMessage("Cache cleanup failed: \(error.localizedDescription)")
+                showActionMessage("Cache cleanup failed: \(error.localizedDescription)", failed: true)
             }
         }
     }
@@ -947,7 +949,7 @@ struct SettingsView: View {
                 calculateStorageSizes()
                 showActionMessage("Article body cache cleared.")
             } catch {
-                showActionMessage("Cache cleanup failed: \(error.localizedDescription)")
+                showActionMessage("Cache cleanup failed: \(error.localizedDescription)", failed: true)
             }
         }
     }
@@ -960,13 +962,21 @@ struct SettingsView: View {
                 calculateStorageSizes()
                 showActionMessage("All local caches cleared.")
             } catch {
-                showActionMessage("Cache cleanup failed: \(error.localizedDescription)")
+                showActionMessage("Cache cleanup failed: \(error.localizedDescription)", failed: true)
             }
         }
     }
 
-    private func showActionMessage(_ msg: String) {
+    private func subscribeFromField() {
+        let trimmed = newFeedURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        feedManager.addFeed(url: trimmed)
+        newFeedURL = ""
+    }
+
+    private func showActionMessage(_ msg: String, failed: Bool = false) {
         withAnimation(reduceMotion ? nil : AppMotion.responsive) {
+            cacheActionFailed = failed
             cacheActionMessage = msg
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 3) {

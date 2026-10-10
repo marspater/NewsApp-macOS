@@ -167,7 +167,7 @@ struct ArticleCardView: View {
             }
 
             ShareLink(item: url, subject: Text(article.title), message: Text(article.title)) {
-                Label("Share Story...", systemImage: "square.and.arrow.up")
+                Label("Share Story…", systemImage: "square.and.arrow.up")
             }
         }
 
@@ -316,6 +316,7 @@ struct ArticleCardView: View {
             } else {
                 // Keep the loading surface dark so the image caption stays readable.
                 AppColor.leadPlaceholder
+                    .clipShape(RoundedRectangle(cornerRadius: AppRadius.container))
                     .accessibilityHidden(true)
             }
 
@@ -326,7 +327,7 @@ struct ArticleCardView: View {
         .frame(height: AppLayout.leadStoryHeight)
         .containerShape(RoundedRectangle(cornerRadius: AppRadius.container))
         .overlay {
-            RoundedRectangle(cornerRadius: AppRadius.card)
+            RoundedRectangle(cornerRadius: AppRadius.container)
                 .stroke(appearance.border, lineWidth: appearance.width)
         }
         .shadow(color: appearance.shadow, radius: appearance.radius, x: 0, y: appearance.y)
@@ -425,7 +426,8 @@ struct ArticleCardView: View {
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )
-            .frame(height: compact ? 170 : 54)
+            // Grid cards keep one header height with or without an image, so a row's cards line up.
+            .frame(height: compact ? 170 : 140)
             .frame(maxWidth: .infinity)
 
             Image(systemName: "newspaper")

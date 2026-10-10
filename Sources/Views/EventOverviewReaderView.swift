@@ -255,7 +255,7 @@ struct EventOverviewReaderView: View {
 
     private var articleCountText: String {
         let count = max(memberArticles.count, overview.memberArticleIDs.count)
-        return count == 1 ? "1 article" : "\(count) articles"
+        return count == 1 ? "1 story" : "\(count) stories"
     }
 
     private var publisherCountText: String {

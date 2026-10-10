@@ -19,6 +19,15 @@ enum ReaderMode: Hashable {
     static let webShortcut: KeyEquivalent = "r"
     static let webShortcutModifiers: EventModifiers = [.command, .shift]
     var toggledPublicationMode: ReaderMode { self == .web ? .story : .web }
+
+    /// W steps through the modes the toolbar offers, in its order: Overview (events only), Story, Web.
+    func next(hasOverview: Bool) -> ReaderMode {
+        switch self {
+        case .overview: return .story
+        case .story: return .web
+        case .web: return hasOverview ? .overview : .story
+        }
+    }
 }
 
 /// Window-scoped bindings and actions let menu commands operate on the same reader as its toolbar.
@@ -490,16 +499,12 @@ struct ArticleDetailView: View {
                     Button {
                         viewMode = .web
                     } label: {
-                        HStack(spacing: AppSpacing.xxs) {
-                            Image(systemName: "safari")
-                                .accessibilityHidden(true)
-                            Text("Open Web View (W)")
-                        }
-                        .font(AppTypography.eyebrow)
+                        Label("Open Web View", systemImage: "globe")
+                            .font(AppTypography.caption)
                     }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.bordered)
                     .controlSize(.small)
-                    .accessibilityLabel("Open Web View")
+                    .help("Open Web View (W)")
                 }
 
                 Text(reason)
@@ -508,9 +513,10 @@ struct ArticleDetailView: View {
 
                 Divider().opacity(Self.dividerOpacity(for: contrast))
 
-                Text(currentArticle.fullContent == nil ? "FEED SUMMARY PREVIEW" : "PREVIOUSLY SAVED TEXT")
+                Text(currentArticle.fullContent == nil ? "Feed summary preview" : "Previously saved text")
                     .font(AppTypography.eyebrow)
-                    .tracking(1.0)
+                    .tracking(AppTypography.eyebrowTracking)
+                    .textCase(.uppercase)
                     .foregroundColor(tertiaryText)
 
                 articleDescriptionParagraphs
@@ -769,17 +775,17 @@ struct ArticleDetailView: View {
                 Button {
                     webAction = .goBack
                 } label: {
-                    Label("Browser back", systemImage: "arrow.left")
+                    Label("Web Back", systemImage: "arrow.left")
                 }
                 .disabled(!webCanGoBack)
-                .help("Browser back")
+                .help("Web Back")
                 Button {
                     webAction = .goForward
                 } label: {
-                    Label("Browser forward", systemImage: "arrow.right")
+                    Label("Web Forward", systemImage: "arrow.right")
                 }
                 .disabled(!webCanGoForward)
-                .help("Browser forward")
+                .help("Web Forward")
             }
             Button(action: toggleSave) {
                 Label(
@@ -790,10 +796,10 @@ struct ArticleDetailView: View {
 
             if let url = URL(string: currentArticle.link) {
                 ShareLink(item: url, subject: Text(currentArticle.title)) {
-                    Label("Share story", systemImage: "square.and.arrow.up")
+                    Label("Share Story", systemImage: "square.and.arrow.up")
                 }
-                .help("Share story")
-                .accessibilityLabel("Share story")
+                .help("Share Story")
+                .accessibilityLabel("Share Story")
             }
         }
         if #available(macOS 26, *) {
@@ -941,7 +947,7 @@ struct ArticleDetailView: View {
             if !path.isEmpty { path.removeLast() }
             return .handled
         }
-        if press.characters == "b" || press.characters == "h" {
+        if press.key == .leftArrow || press.characters == "b" || press.characters == "h" {
             if !path.isEmpty { path.removeLast() }
             return .handled
         } else if press.characters == "j" {
@@ -964,11 +970,7 @@ struct ArticleDetailView: View {
             NSPasteboard.general.setString(currentArticle.link, forType: .string)
             return .handled
         } else if press.characters == "w" {
-            if currentOverview != nil {
-                experienceMode = (experienceMode == .eventOverview ? .sourcePublication : .eventOverview)
-            } else {
-                viewMode = (viewMode == .reader ? .web : .reader)
-            }
+            readerModeBinding.wrappedValue = readerModeBinding.wrappedValue.next(hasOverview: currentOverview != nil)
             return .handled
         }
         return .ignored
@@ -1049,7 +1051,7 @@ struct ArticleDetailView: View {
                 ProgressView()
                     .controlSize(.small)
                     .scaleEffect(0.8)
-                Text("Analyzing article with on-device AI...")
+                Text("Analyzing the story on device…")
                     .font(AppTypography.label)
                     .foregroundColor(AppColor.secondaryText)
             }
@@ -1120,7 +1122,7 @@ struct ArticleDetailView: View {
                         .font(AppTypography.callout)
                         .foregroundColor(AppColor.secondaryText)
                     Spacer()
-                    Button("Close summary") {
+                    Button("Close Summary") {
                         if reduceMotion {
                             summaryExpanded = false
                         } else {

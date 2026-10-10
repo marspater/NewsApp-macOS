@@ -139,7 +139,7 @@ struct ArticleListView: View {
             articleGrid(proxy: proxy)
             if isBriefing { briefingCompletion }
             if hasMoreResults {
-                Button("Load more articles") { pageRequest += 1 }
+                Button("Load More Stories") { pageRequest += 1 }
                     .disabled(isLoadingPage)
                     .padding(.bottom, AppSpacing.lg)
             }
@@ -154,7 +154,7 @@ struct ArticleListView: View {
     @ViewBuilder
     private var emptyListContent: some View {
         if isLoadingPage {
-            ProgressView("Loading articles…")
+            ProgressView("Loading stories…")
         } else if queryError != nil {
             queryFailureView
         } else if isSearching {
@@ -175,7 +175,7 @@ struct ArticleListView: View {
         VStack(spacing: AppSpacing.md) {
             ContentUnavailableView {
                 Label(
-                    filteredArticles.isEmpty ? "Couldn’t Load Articles" : "Couldn’t Load More Articles",
+                    filteredArticles.isEmpty ? "Couldn’t Load Stories" : "Couldn’t Load More Stories",
                     systemImage: "exclamationmark.triangle")
             } description: {
                 Text("The archive could not be loaded. Please try again.")
@@ -463,7 +463,7 @@ struct ArticleListView: View {
             applyPendingUpdates(proxy: proxy)
         } label: {
             Label(
-                count > 0 ? "\(count) new \(count == 1 ? "story" : "stories")" : "Show updates", systemImage: "arrow.up"
+                count > 0 ? "\(count) new \(count == 1 ? "story" : "stories")" : "Show Updates", systemImage: "arrow.up"
             )
             .font(AppTypography.label)
         }
@@ -716,7 +716,7 @@ struct ArticleListView: View {
                     GridItem(
                         .adaptive(
                             minimum: AppLayout.gridColumnMinimum,
-                            maximum: AppLayout.gridColumnMaximum), spacing: AppLayout.cardGap)
+                            maximum: AppLayout.gridColumnMaximum), spacing: AppLayout.cardGap, alignment: .top)
                 ],
                 spacing: AppLayout.cardGap
             ) {
@@ -781,7 +781,7 @@ struct ArticleListView: View {
             return false
         }
         return VStack(spacing: AppSpacing.md) {
-            if !isBriefing && feedManager.isAnyFeedLoading {
+            if !isBriefing && feedManager.isAnyFeedLoading && listsWaitingStories {
                 ProgressView("Refreshing news feeds…")
                     .controlSize(.regular)
             } else if !isBriefing && selectedTopic != "Saved Stories" && selectedTopic != "History"
@@ -844,7 +844,7 @@ struct ArticleListView: View {
     private var emptyStateTitle: String {
         switch selectedTopic {
         case "Briefing": return "No Stories for This Briefing"
-        case "Today": return "No Articles Yet"
+        case "Today": return "No Stories Yet"
         case "Unread": return "All Caught Up"
         case "Saved Stories": return "No Saved Stories"
         case "History": return "No Reading History"
@@ -860,7 +860,7 @@ struct ArticleListView: View {
         case "Today": return "Subscribe to feeds or click refresh to load the latest stories."
         case "Unread": return "You've read all stories in your feeds. Check back later for updates."
         case "Saved Stories": return "Stories you bookmark will be kept here for easy reading."
-        case "History": return "Articles you have opened will appear here."
+        case "History": return "Stories you have opened will appear here."
         default:
             return "New articles matching \(selectedTopic ?? "this section") will appear here once your feeds refresh."
         }
@@ -1028,7 +1028,7 @@ struct KeyboardShortcutsView: View {
                 ("J or ↓", "Next story"),
                 ("K or ↑", "Previous story"),
                 ("Space or ↵", "Open focused story"),
-                ("Esc or ←", "Back to list"),
+                ("Esc, ← or B", "Back to list"),
             ]
         ),
         (
@@ -1038,7 +1038,9 @@ struct KeyboardShortcutsView: View {
                 ("S", "Save or remove from Saved Stories"),
                 ("O", "Open in browser"),
                 ("E", "Show or hide event coverage"),
-                ("W or ⇧⌘R", "Switch between Story and Web"),
+                ("W", "Next reading mode: Overview, Story, Web"),
+                ("⇧⌘R", "Switch between Story and Web"),
+                ("C", "Copy link"),
                 ("⌘+ / ⌘− / ⌘0", "Bigger text, smaller text, actual size"),
             ]
         ),

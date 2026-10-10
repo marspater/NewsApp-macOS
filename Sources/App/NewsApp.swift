@@ -47,7 +47,7 @@ struct NewsApp: App {
             SidebarCommands()
             KeyboardShortcutsCommands()
             CommandGroup(after: .appInfo) {
-                Button("Check for Updates...") {
+                Button("Check for Updates…") {
                     Task { @MainActor in
                         await UpdateChecker.shared.checkForUpdates(userInitiated: true)
                         if UpdateChecker.shared.updateAvailable {
@@ -60,14 +60,14 @@ struct NewsApp: App {
                 Button("Add Feed Subscription…") { addFeedSubscription?() }
                     .disabled(addFeedSubscription == nil)
                 Divider()
-                Button("Import Subscriptions (OPML)...") {
+                Button("Import Subscriptions (OPML)…") {
                     OPMLDialogs.importOPML { data in
                         feedManager.importFeeds(from: data)
                     }
                 }
                 .keyboardShortcut("i", modifiers: [.command, .shift])
 
-                Button("Export Subscriptions (OPML)...") {
+                Button("Export Subscriptions (OPML)…") {
                     let opml = feedManager.exportOPML()
                     OPMLDialogs.exportOPML(xmlString: opml)
                 }
@@ -108,12 +108,12 @@ struct NewsApp: App {
 
                 Divider()
 
-                Button("Next Article") {
+                Button("Next Story") {
                     NotificationCenter.default.post(name: .nextArticleCommand, object: nil)
                 }
                 .keyboardShortcut("j", modifiers: .command)
 
-                Button("Previous Article") {
+                Button("Previous Story") {
                     NotificationCenter.default.post(name: .prevArticleCommand, object: nil)
                 }
                 .keyboardShortcut("k", modifiers: .command)
