@@ -31,12 +31,7 @@ struct ArticleCardView: View {
 
     /// The muting action for this story's publisher host: unmute the rules covering it, or mute the host.
     private var sourceMuting: (title: String, apply: () -> Void)? {
-        let covering = appSettings.muteRules.matchedSources(link: article.link)
-        if let rule = covering.first {
-            return ("Unmute \(rule)", { for source in covering { appSettings.unmuteSource(source) } })
-        }
-        guard let host = MuteRules.host(article.link) else { return nil }
-        return ("Mute \(host)", { _ = appSettings.muteSource(host) })
+        appSettings.sourceMuting(for: article.link)
     }
 
     private var cardLayout: AnyLayout {
@@ -122,55 +117,7 @@ struct ArticleCardView: View {
 
     @ViewBuilder
     private var storyContextMenu: some View {
-        Button {
-            readManager.toggleRead(article.id)
-        } label: {
-            Label(
-                isRead ? "Mark as Unread" : "Mark as Read",
-                systemImage: isRead ? "circle" : "checkmark.circle.fill"
-            )
-        }
-
-        Button {
-            if isSaved {
-                savedStories.remove(article)
-            } else {
-                savedStories.save(article)
-            }
-        } label: {
-            Label(
-                isSaved ? "Remove from Saved" : "Save Story",
-                systemImage: isSaved ? "bookmark.slash" : "bookmark"
-            )
-        }
-
-        if let muting = sourceMuting {
-            Button(action: muting.apply) {
-                Label(muting.title, systemImage: "speaker.slash")
-            }
-        }
-
-        Divider()
-
-        Button {
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(article.link, forType: .string)
-        } label: {
-            Label("Copy Link", systemImage: "link")
-        }
-
-        if let url = URL(string: article.link) {
-            Button {
-                NSWorkspace.shared.open(url)
-            } label: {
-                Label("Open in Browser", systemImage: "safari")
-            }
-
-            ShareLink(item: url, subject: Text(article.title), message: Text(article.title)) {
-                Label("Share Story…", systemImage: "square.and.arrow.up")
-            }
-        }
-
+        StoryContextMenuItems(article: article)
     }
 
     // MARK: - Card surfaces
@@ -266,7 +213,7 @@ struct ArticleCardView: View {
             if !cleanDesc.isEmpty {
                 Text(cleanDesc)
                     .font(AppTypography.body)
-                    .foregroundColor(AppColor.secondaryText.opacity(0.85))
+                    .foregroundColor(AppColor.secondaryText)
                     .lineLimit(2)
                     .multilineTextAlignment(.leading)
             }
@@ -444,5 +391,82 @@ struct ArticleCardView: View {
         let savedState = isSaved ? ", saved in your library" : ""
         let dateFormatted = article.publicationDateText
         return "\(article.title), from \(displaySource), published \(dateFormatted). \(readState)\(savedState)."
+    }
+}
+
+/// The shared context menu items for a story per DESIGN.md §14.
+struct StoryContextMenuItems<TrailingContent: View>: View {
+    let article: FeedArticle
+    @ViewBuilder let trailingContent: TrailingContent
+
+    @EnvironmentObject private var readManager: ReadManager
+    @EnvironmentObject private var savedStories: SavedStoriesManager
+    @EnvironmentObject private var appSettings: AppSettings
+
+    private var isRead: Bool { readManager.isRead(article.id) }
+    private var isSaved: Bool { savedStories.isSaved(article) }
+
+    init(article: FeedArticle, @ViewBuilder trailingContent: () -> TrailingContent) {
+        self.article = article
+        self.trailingContent = trailingContent()
+    }
+
+    var body: some View {
+        Button {
+            readManager.toggleRead(article.id)
+        } label: {
+            Label(
+                isRead ? "Mark as Unread" : "Mark as Read",
+                systemImage: isRead ? "circle" : "checkmark.circle.fill"
+            )
+        }
+
+        Button {
+            if isSaved {
+                savedStories.remove(article)
+            } else {
+                savedStories.save(article)
+            }
+        } label: {
+            Label(
+                isSaved ? "Remove from Saved" : "Save Story",
+                systemImage: isSaved ? "bookmark.slash" : "bookmark"
+            )
+        }
+
+        if let muting = appSettings.sourceMuting(for: article.link) {
+            Button(action: muting.apply) {
+                Label(muting.title, systemImage: "speaker.slash")
+            }
+        }
+
+        Divider()
+
+        Button {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(article.link, forType: .string)
+        } label: {
+            Label("Copy Link", systemImage: "link")
+        }
+
+        if let url = URL(string: article.link) {
+            Button {
+                NSWorkspace.shared.open(url)
+            } label: {
+                Label("Open in Browser", systemImage: "safari")
+            }
+
+            ShareLink(item: url, subject: Text(article.title), message: Text(article.title)) {
+                Label("Share Story", systemImage: "square.and.arrow.up")
+            }
+        }
+
+        trailingContent
+    }
+}
+
+extension StoryContextMenuItems where TrailingContent == EmptyView {
+    init(article: FeedArticle) {
+        self.init(article: article, trailingContent: { EmptyView() })
     }
 }

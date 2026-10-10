@@ -1049,7 +1049,8 @@ public enum ArticleContentRedactor {
         "comments", "comment", "read full article", "read more", "continue reading",
         "view comments", "leave a comment", "share this article", "share this post",
         "related articles", "related topics", "more on this story", "source", "read original", "full article",
-        "full story",
+        "full story", "keywords for this article", "keywords for this story", "keywords",
+        "tags for this article", "tags for this story",
     ]
 
     private static let compiledBoilerplateRegexes: [(regex: NSRegularExpression, template: String)] = {
@@ -1145,8 +1146,19 @@ public enum ArticleContentRedactor {
         {
             return true
         }
-        // Tag strips, whose links run together as "Topics:ReformGiorgia MeloniItaly".
-        if rawLower.count < 200, ["topics:", "tags:", "related topics:"].contains(where: rawLower.hasPrefix) {
+        // Tag and keyword strips, whose links run together as "Topics:ReformGiorgia MeloniItaly" or "Keywords for this article".
+        if rawLower.count < 200,
+            ["topics:", "tags:", "related topics:", "keywords:", "keywords for this", "tags for this"].contains(
+                where: rawLower.hasPrefix)
+        {
+            return true
+        }
+        // Missing, expired or unavailable content placeholder notices (e.g. from failed embedded widgets or dead iframes).
+        if rawLower.contains("content you requested does not exist")
+            || rawLower.contains("is not available anymore")
+            || (rawLower.contains("content is no longer available") && rawLower.count < 150)
+            || (rawLower.contains("no longer available") && rawLower.count < 100)
+        {
             return true
         }
         return false

@@ -134,6 +134,7 @@ struct MainView: View {
             Text(token.expression)
         }
         .searchSuggestions { searchOperatorSuggestions }
+        .searchSuggestions(.hidden, for: .menu)
         .frame(minWidth: 900, minHeight: 600)
         .onAppear {
             if feedManager.articles.isEmpty {
@@ -233,29 +234,31 @@ struct MainView: View {
     /// words already typed.
     @ViewBuilder
     private var searchOperatorSuggestions: some View {
-        let word =
-            searchText.last?.isWhitespace == false
-            ? String(searchText.split(whereSeparator: \.isWhitespace).last ?? "") : ""
-        let typed = String(searchText.dropLast(word.count))
-        let lowered = word.lowercased()
-        ForEach(
-            Self.searchOperators.filter { lowered.isEmpty || ($0.token.hasPrefix(lowered) && $0.token != lowered) },
-            id: \.token
-        ) { option in
-            if let token = ArchiveSearchToken(completedExpression: option.token) {
-                operatorSuggestion(option)
-                    .searchCompletion(token)
-            } else {
-                // Source and category need values before becoming tokens.
-                operatorSuggestion(option)
-                    .searchCompletion(typed + option.token)
+        if !searchText.isEmpty {
+            let word =
+                searchText.last?.isWhitespace == false
+                ? String(searchText.split(whereSeparator: \.isWhitespace).last ?? "") : ""
+            let typed = String(searchText.dropLast(word.count))
+            let lowered = word.lowercased()
+            ForEach(
+                Self.searchOperators.filter { lowered.isEmpty || ($0.token.hasPrefix(lowered) && $0.token != lowered) },
+                id: \.token
+            ) { option in
+                if let token = ArchiveSearchToken(completedExpression: option.token) {
+                    operatorSuggestion(option)
+                        .searchCompletion(token)
+                } else {
+                    // Source and category need values before becoming tokens.
+                    operatorSuggestion(option)
+                        .searchCompletion(typed + option.token)
+                }
             }
-        }
-        if let token = ArchiveSearchToken(completedExpression: word),
-            lowered.hasPrefix("source:") || lowered.hasPrefix("category:")
-        {
-            Text("Filter: \(token.expression)")
-                .searchCompletion(token)
+            if let token = ArchiveSearchToken(completedExpression: word),
+                lowered.hasPrefix("source:") || lowered.hasPrefix("category:")
+            {
+                Text("Filter: \(token.expression)")
+                    .searchCompletion(token)
+            }
         }
     }
 
