@@ -3438,6 +3438,43 @@ struct NewsTests {
         assertEqual(TensionLevel(index: 100), .boiling, "100 reads as boiling")
         assertEqual(TensionLevel.degrees(43.6), 44, "Readings round to whole degrees")
         assertEqual(TensionLevel.degrees(104), 100, "Readings never exceed 100 degrees")
+
+        let brief = TensionBriefFacts(
+            day: Date(timeIntervalSince1970: 0), degrees: 44, level: .warm, change: 3, typicalDegrees: 38,
+            isProvisional: true,
+            drivers: [
+                .init(
+                    headline: "Airport hit again", type: .armedConflict, deaths: .tens, affected: .notReported,
+                    escalation: .escalating, reportingFeeds: 5),
+                .init(
+                    headline: "Quake strikes coast", type: .disaster, deaths: .notReported, affected: .hundreds,
+                    escalation: .noSignal, reportingFeeds: 1),
+            ])
+        let paragraph = brief.deterministicParagraph
+        assertTrue(
+            paragraph.hasPrefix("News tension reads 44° (warm), up 3° from the previous day, above its 30-day average of 38°."),
+            "The explanation opens with the reading, the daily change and the 30-day comparison")
+        assertTrue(
+            paragraph.contains("armed conflict with dozens of deaths reported and reports of escalation, covered by 5 panel feeds"),
+            "The largest driver is described from its classification")
+        assertTrue(paragraph.contains("a disaster with hundreds of people reported hurt or displaced"), "Further drivers are listed")
+        assertTrue(paragraph.hasSuffix("Today's reading is provisional and can still change."), "Provisional days say so")
+        assertTrue(
+            TensionExplainer.isFaithful(
+                "News tension stands at 44 degrees, a warm reading up 3 from yesterday and above its average of 38, driven mainly by escalating armed conflict.",
+                to: brief),
+            "A paraphrase that uses only given numbers is accepted")
+        assertFalse(
+            TensionExplainer.isFaithful(
+                "News tension stands at 44 degrees after 120 people were killed in fighting that escalated overnight.",
+                to: brief),
+            "A paraphrase that invents a number falls back to the deterministic text")
+        assertFalse(
+            TensionExplainer.isFaithful("I'm sorry, but I cannot help with that request about 44 degrees.", to: brief),
+            "A refusal is never shown")
+        assertTrue(
+            brief.promptFacts.contains(GenerationPromptDefense.sourceDataStartTag),
+            "Headlines reach the model only inside the untrusted-data frame")
         assertFalse(
             methodology.panelRegions.contains(.latinAmerica) || methodology.panelRegions.contains(.oceania),
             "Latin America and Oceania are stated v1 gaps")

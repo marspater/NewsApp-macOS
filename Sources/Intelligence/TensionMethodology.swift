@@ -1,5 +1,9 @@
 import Foundation
 
+#if canImport(FoundationModels)
+    import FoundationModels
+#endif
+
 // News tension (experiment, #99). The normative text is docs/methodology/tension-index-v1.md; change it and this file
 // together and bump `TensionMethodology.version`. Weights and smoothing come from calibration (#158); `TensionHistory`
 // feeds the separate view (#159). The rest of the app does not depend on it.
@@ -657,10 +661,12 @@ struct TensionHistoryDay: Sendable {
     let contributions: [TensionContribution]
 }
 
-/// An event's share of a day's score, with the headline of one of its panel stories.
+/// An event's share of a day's score, with the headline of one of its panel stories and what the classifier found.
 struct TensionContribution: Sendable {
     let score: TensionEventScore
     let title: String
+    var classification: TensionEventClassification?
+    var reportingFeeds = 0
 }
 
 enum TensionHistory {
@@ -687,12 +693,16 @@ enum TensionHistory {
         let scores = TensionCalibrator.scoreSeries(assessments: assessments, weights: weights)
         var history: [TensionHistoryDay] = []
         for (assessment, score) in zip(assessments, scores) {
-            var articleIDs: [String: [String]] = [:]
-            for event in assessment.events { articleIDs[event.key] = event.articleIDs }
+            var events: [String: TensionEventDay] = [:]
+            for event in assessment.events { events[event.key] = event }
             var contributions: [TensionContribution] = []
             for event in score.eventScores.sorted(by: { $0.rawScore > $1.rawScore }) where event.rawScore > 0 {
-                let title = articleIDs[event.key, default: []].lazy.compactMap { titles[$0] }.first ?? event.key
-                contributions.append(TensionContribution(score: event, title: title))
+                let day = events[event.key]
+                let title = (day?.articleIDs ?? []).lazy.compactMap { titles[$0] }.first ?? event.key
+                contributions.append(
+                    TensionContribution(
+                        score: event, title: title, classification: day?.classification,
+                        reportingFeeds: day?.reporting.count ?? 0))
             }
             history.append(TensionHistoryDay(score: score, coverage: assessment.coverage, contributions: contributions))
         }
@@ -731,5 +741,243 @@ enum TensionLevel: String, CaseIterable, Sendable {
     /// The index rounded to whole degrees, as the reading shows it.
     static func degrees(_ index: Double) -> Int {
         Int(min(100, max(0, index)).rounded())
+    }
+}
+
+// MARK: - Explanation (#159)
+
+/// Everything a tension explanation may say: findings scoring already made, nothing else. The paragraph is built from
+/// these facts deterministically, or phrased by the on-device model and checked against them.
+struct TensionBriefFacts: Hashable, Sendable {
+    struct Driver: Hashable, Sendable {
+        let headline: String
+        let type: TensionEventType?
+        let deaths: TensionMagnitude
+        let affected: TensionMagnitude
+        let escalation: TensionEscalation
+        let reportingFeeds: Int
+    }
+
+    let day: Date
+    let degrees: Int
+    let level: TensionLevel
+    /// Whole degrees since the previous scored day; nil when it is the first.
+    let change: Int?
+    /// Mean 7-day reading over the scored days shown; nil with fewer than three.
+    let typicalDegrees: Int?
+    let isProvisional: Bool
+    let drivers: [Driver]
+
+    /// The latest reading of a history, with up to three drivers; nil when no day is scored.
+    static func latest(in history: [TensionHistoryDay]) -> TensionBriefFacts? {
+        let scored = history.filter { $0.score.smoothedIndex != nil }
+        guard let day = scored.last, let index = day.score.smoothedIndex else { return nil }
+        let degrees = TensionLevel.degrees(index)
+        let previous = scored.dropLast().last?.score.smoothedIndex.map(TensionLevel.degrees)
+        let readings = scored.compactMap(\.score.smoothedIndex)
+        let typical = readings.count >= 3 ? TensionLevel.degrees(readings.reduce(0, +) / Double(readings.count)) : nil
+        let drivers = day.contributions.prefix(3).map { contribution in
+            Driver(
+                headline: contribution.title, type: contribution.classification?.type,
+                deaths: contribution.classification?.deaths ?? .notReported,
+                affected: contribution.classification?.affected ?? .notReported,
+                escalation: contribution.classification?.escalation ?? .noSignal,
+                reportingFeeds: contribution.reportingFeeds)
+        }
+        return TensionBriefFacts(
+            day: day.score.day.start, degrees: degrees, level: TensionLevel(index: index),
+            change: previous.map { degrees - $0 }, typicalDegrees: typical, isProvisional: day.score.isProvisional,
+            drivers: drivers)
+    }
+
+    // MARK: Plain-language parts
+
+    var readingSentence: String {
+        var parts = ["News tension reads \(degrees)° (\(level.rawValue.lowercased()))"]
+        if let change {
+            parts.append(
+                change == 0
+                    ? "unchanged from the previous day"
+                    : "\(change > 0 ? "up" : "down") \(abs(change))° from the previous day")
+        }
+        if let typicalDegrees {
+            let gap = degrees - typicalDegrees
+            parts.append(
+                abs(gap) <= 3
+                    ? "close to its 30-day average of \(typicalDegrees)°"
+                    : "\(gap > 0 ? "above" : "below") its 30-day average of \(typicalDegrees)°")
+        }
+        return parts.joined(separator: ", ") + "."
+    }
+
+    static func typePhrase(_ type: TensionEventType?) -> String {
+        switch type {
+        case .armedConflict: return "armed conflict"
+        case .terrorism: return "terrorism"
+        case .civilUnrest: return "civil unrest"
+        case .coercion: return "military or economic pressure"
+        case .disaster: return "a disaster"
+        case .healthEmergency: return "a health emergency"
+        case .cyberAttack: return "a cyberattack"
+        case nil: return "a reported incident"
+        }
+    }
+
+    /// "dozens of deaths reported": the order of magnitude the classifier recorded, never an exact figure.
+    static func magnitudePhrase(_ magnitude: TensionMagnitude, _ noun: String) -> String? {
+        switch magnitude {
+        case .notReported: return nil
+        case .units: return "fewer than ten \(noun)"
+        case .tens: return "dozens of \(noun)"
+        case .hundreds: return "hundreds of \(noun)"
+        case .thousands: return "thousands of \(noun)"
+        }
+    }
+
+    static func escalationPhrase(_ escalation: TensionEscalation) -> String? {
+        switch escalation {
+        case .noSignal: return nil
+        case .escalating: return "reports of escalation"
+        case .deescalating: return "signs of de-escalation"
+        case .mixed: return "mixed signs of escalation and de-escalation"
+        }
+    }
+
+    /// One driver as a phrase: its type, reported harm and escalation.
+    static func describe(_ driver: Driver) -> String {
+        var details: [String] = []
+        if let deaths = magnitudePhrase(driver.deaths, "deaths reported") { details.append(deaths) }
+        if let affected = magnitudePhrase(driver.affected, "people reported hurt or displaced") {
+            details.append(affected)
+        }
+        if let escalation = escalationPhrase(driver.escalation) { details.append(escalation) }
+        let base = typePhrase(driver.type)
+        return details.isEmpty ? base : "\(base) with \(details.joined(separator: " and "))"
+    }
+
+    /// The paragraph without a model: every clause comes from a scored finding.
+    var deterministicParagraph: String {
+        var sentences = [readingSentence]
+        if let first = drivers.first {
+            let feeds = first.reportingFeeds == 1 ? "1 panel feed" : "\(first.reportingFeeds) panel feeds"
+            sentences.append(
+                "The largest contribution is \(Self.describe(first)), covered by \(feeds): “\(first.headline)”.")
+        }
+        let others = drivers.dropFirst().map { "\(Self.describe($0)) (“\($0.headline)”)" }
+        if !others.isEmpty {
+            sentences.append("Also contributing: \(others.joined(separator: "; ")).")
+        }
+        if isProvisional {
+            sentences.append("Today's reading is provisional and can still change.")
+        }
+        return sentences.joined(separator: " ")
+    }
+
+    /// The facts as the model sees them. Headlines are publisher text and stay inside the untrusted-data frame.
+    var promptFacts: String {
+        var lines = [
+            "Reading: \(degrees) degrees, band \(level.rawValue).",
+            change.map { "Change since the previous day: \($0 > 0 ? "+" : "")\($0) degrees." }
+                ?? "No previous day to compare.",
+            typicalDegrees.map { "30-day average: \($0) degrees." } ?? "No 30-day average yet.",
+            isProvisional ? "Today's reading is provisional." : "Today's reading is final.",
+        ]
+        for (index, driver) in drivers.enumerated() {
+            lines.append(
+                "Driver \(index + 1): \(Self.describe(driver)); covered by \(driver.reportingFeeds) panel feeds; headline \(index + 1) below."
+            )
+        }
+        let headlines = drivers.enumerated().map { "<headline_\($0.offset + 1)>\(GenerationPromptDefense.sanitizeSourceText($0.element.headline))</headline_\($0.offset + 1)>" }
+        return lines.joined(separator: "\n") + "\n" + GenerationPromptDefense.sourceDataStartTag + "\n"
+            + headlines.joined(separator: "\n") + "\n" + GenerationPromptDefense.sourceDataEndTag
+    }
+}
+
+/// A tension explanation and whether the on-device model phrased it.
+struct TensionExplanation: Equatable, Sendable {
+    let text: String
+    let isGenerated: Bool
+}
+
+/// Phrases the latest tension facts as a short paragraph. The model never chooses a type, magnitude or score: it only
+/// rewords facts, and a draft that mentions a number the facts do not contain falls back to the deterministic text.
+actor TensionExplainer {
+    static let shared = TensionExplainer()
+    // ponytail: one entry per distinct set of facts; a day produces a handful.
+    private var cache: [TensionBriefFacts: TensionExplanation] = [:]
+
+    /// The same policy as overviews: AI on, not in Low Power Mode, not thermally constrained.
+    nonisolated static func modelAllowed(aiEnabled: Bool) -> Bool {
+        let info = ProcessInfo.processInfo
+        return aiEnabled && !info.isLowPowerModeEnabled
+            && info.thermalState.rawValue < ProcessInfo.ThermalState.serious.rawValue
+    }
+
+    func explanation(for facts: TensionBriefFacts, allowsModel: Bool) async -> TensionExplanation {
+        if let known = cache[facts] { return known }
+        let fallback = TensionExplanation(text: facts.deterministicParagraph, isGenerated: false)
+        guard allowsModel, let draft = await Self.modelParagraph(facts),
+            Self.isFaithful(draft, to: facts)
+        else { return fallback }
+        let explanation = TensionExplanation(text: draft, isGenerated: true)
+        if cache.count >= 64 { cache.removeAll() }
+        cache[facts] = explanation
+        return explanation
+    }
+
+    static func prompt(_ facts: TensionBriefFacts) -> String {
+        """
+        \(GenerationPromptDefense.untrustedDataSystemGuard)
+
+        Write two or three sentences for a news reader that explain today's news tension reading. Use only the facts \
+        below. Say the reading and its band, how it compares with the previous day and the 30-day average, and which \
+        stories drive it, naming their kind of event and what was reported. Refer to stories by their subject, not by \
+        quoting headlines. Do not add events, places, numbers, causes or predictions that are not in the facts. The \
+        reading describes what a panel of news outlets reported, not how dangerous the world is. Plain prose only: no \
+        lists, headings or quotation marks around the whole answer.
+
+        \(facts.promptFacts)
+        """
+    }
+
+    static func modelParagraph(_ facts: TensionBriefFacts) async -> String? {
+        #if canImport(FoundationModels)
+            guard #available(macOS 26.0, *), case .available = SystemLanguageModel.default.availability else {
+                return nil
+            }
+            do {
+                let session = LanguageModelSession(
+                    model: SystemLanguageModel(guardrails: .permissiveContentTransformations))
+                let response = try await session.respond(
+                    to: prompt(facts),
+                    options: GenerationOptions(samplingMode: .greedy, maximumResponseTokens: 220))
+                return response.content.trimmingCharacters(in: .whitespacesAndNewlines)
+            } catch {
+                return nil
+            }
+        #else
+            return nil
+        #endif
+    }
+
+    /// A draft is used only when it is a short paragraph that states the reading and every number in it also appears
+    /// in the facts the model was given.
+    static func isFaithful(_ draft: String, to facts: TensionBriefFacts) -> Bool {
+        let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard (60...900).contains(text.count), !text.contains("\n\n"), !text.hasPrefix("-"), !text.hasPrefix("#")
+        else { return false }
+        let lowered = text.lowercased()
+        for refusal in ["i'm sorry", "i am sorry", "i cannot", "i can't", "as an ai", "language model"]
+        where lowered.contains(refusal) {
+            return false
+        }
+        let allowed = Set(numbers(in: facts.promptFacts))
+        let used = numbers(in: text)
+        guard used.contains(String(facts.degrees)) else { return false }
+        return used.allSatisfy { allowed.contains($0) }
+    }
+
+    static func numbers(in text: String) -> [String] {
+        text.split(whereSeparator: { !$0.isNumber }).map(String.init)
     }
 }

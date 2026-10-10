@@ -141,6 +141,8 @@ enum AppTypography {
     static let tensionReading = Font.system(size: 44, weight: .bold, design: .rounded)
     static let sectionTitle = Font.title3.weight(.semibold)
     static let callout = Font.callout
+    /// A summary paragraph that leads a sheet or panel, such as the news tension explanation.
+    static let lede = Font.title3
     /// Publisher and kicker; pair with `eyebrowTracking` and `.textCase(.uppercase)`.
     static let eyebrow = Font.caption2.weight(.semibold)
 

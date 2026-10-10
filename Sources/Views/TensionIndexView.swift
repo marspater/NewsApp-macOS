@@ -38,15 +38,18 @@ struct TensionIndexView: View {
     @State private var loading: Bool
     @State private var loadFailed = false
     @State private var selectedDay: Date?
+    @State private var updatedAt: Date?
+    @State private var explanation: TensionExplanation?
 
     private static let methodologyURL = URL(
         string: "https://github.com/marspater/NewsApp-macOS/blob/main/docs/methodology/tension-index-v1.md")!
     private let methodology = TensionMethodology.v1
 
     /// `history` is the series the sidebar already loaded, so the sheet opens without a spinner.
-    init(history: [TensionHistoryDay] = []) {
+    init(history: [TensionHistoryDay] = [], updatedAt: Date? = nil) {
         _history = State(initialValue: history)
         _loading = State(initialValue: history.isEmpty)
+        _updatedAt = State(initialValue: updatedAt)
     }
 
     var body: some View {
@@ -64,8 +67,9 @@ struct TensionIndexView: View {
                             .foregroundStyle(AppColor.secondaryText)
                     } else if let latest = TensionHistory.latestReading(in: history) {
                         reading(latest)
-                        drivers
+                        summary
                         trend
+                        drivers
                     } else {
                         insufficientData
                     }
@@ -78,6 +82,43 @@ struct TensionIndexView: View {
         .task {
             if history.isEmpty { await load() }
         }
+        .task(id: TensionBriefFacts.latest(in: history)) {
+            guard let facts = TensionBriefFacts.latest(in: history) else {
+                explanation = nil
+                return
+            }
+            let allowsModel = TensionExplainer.modelAllowed(aiEnabled: appSettings.aiEnabled)
+            if !allowsModel {
+                explanation = TensionExplanation(text: facts.deterministicParagraph, isGenerated: false)
+            }
+            explanation = await TensionExplainer.shared.explanation(for: facts, allowsModel: allowsModel)
+        }
+    }
+
+    // MARK: - Summary
+
+    /// The reading explained in prose: phrased on device when allowed and checked against the scored facts, otherwise
+    /// built from them directly.
+    private var summary: some View {
+        VStack(alignment: .leading, spacing: AppSpacing.sm) {
+            if let explanation {
+                Text(explanation.text)
+                    .font(AppTypography.lede)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
+                if explanation.isGenerated {
+                    TagView.intelligence("Written on device")
+                        .help("Phrased by the on-device model from the scored facts above; it cannot change the reading.")
+                }
+            } else {
+                ProgressView("Summarizing the reading…")
+                    .controlSize(.small)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(AppSpacing.md)
+        .background(AppColor.surface, in: RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous))
+        .animation(reduceMotion ? nil : AppMotion.state, value: explanation)
     }
 
     private var header: some View {
@@ -116,7 +157,7 @@ struct TensionIndexView: View {
                             .font(AppTypography.sectionTitle)
                             .foregroundStyle(AppColor.secondaryText)
                     }
-                    Text("7-day index · \(Self.dateText(day))\(day.score.isProvisional ? " · provisional" : "")")
+                    Text(readingCaption(day))
                         .font(AppTypography.caption)
                         .foregroundStyle(AppColor.secondaryText)
                 }
@@ -152,8 +193,7 @@ struct TensionIndexView: View {
         let day = selected
         return VStack(alignment: .leading, spacing: AppSpacing.sm) {
             if let day {
-                Text(day.score.day.start == TensionHistory.latestReading(in: history)?.score.day.start
-                    ? "What drives it" : "What drove \(Self.dateText(day))")
+                Text("Largest contributions · \(Self.dateText(day))")
                     .font(AppTypography.headline)
                     .accessibilityAddTraits(.isHeader)
                 if day.contributions.isEmpty {
@@ -199,7 +239,7 @@ struct TensionIndexView: View {
                 .font(AppTypography.headline)
                 .accessibilityAddTraits(.isHeader)
             chart
-            Text("Select a day to see what drove it.")
+            Text("Select a day to see its largest contributions below.")
                 .font(AppTypography.caption)
                 .foregroundStyle(AppColor.secondaryText)
         }
@@ -307,6 +347,7 @@ struct TensionIndexView: View {
         defer { loading = false }
         do {
             history = try await TensionHistory.load(from: articleStore.database, now: Date())
+            updatedAt = Date()
             loadFailed = false
         } catch {
             if !Task.isCancelled { loadFailed = true }
@@ -314,6 +355,15 @@ struct TensionIndexView: View {
     }
 
     // MARK: - Formatting
+
+    private func readingCaption(_ day: TensionHistoryDay) -> String {
+        var parts = ["7-day index", Self.dateText(day)]
+        if day.score.isProvisional { parts.append("provisional") }
+        if let updatedAt {
+            parts.append("updated \(updatedAt.formatted(date: .omitted, time: .shortened))")
+        }
+        return parts.joined(separator: " · ")
+    }
 
     /// Each gap starts a new line segment, so the line never bridges a day without data.
     private func segment(of index: Int) -> Int {

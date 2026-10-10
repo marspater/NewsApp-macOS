@@ -75,6 +75,12 @@ Calibrated parameters (`TensionWeights.calibratedV1`):
 - Opt-in collection ([#160](https://github.com/marspater/NewsApp-macOS/issues/160)): fetching the 12 panel feeds beyond user subscriptions requires an explicit toggle in Settings (`tensionCollectionOptIn`, default `false`). Unread notifications are strictly isolated to user-subscribed feeds.
 - Retention: history is rebuilt from stored articles, so while collection is on, stories delivered by panel feeds are exempt from the 24-hour expiry of waiting minor stories ([#310](https://github.com/marspater/NewsApp-macOS/issues/310)). They still wait out of the reading views. Saved/read rules and the other cleanup paths are unchanged.
 
+## 6a. Presentation and explanation (#159)
+
+The app shows the latest 7-day reading as whole degrees and names its range: Calm below 20, Mild from 20, Warm from 40, Hot from 60 and Boiling from 80 (`TensionLevel`). The bands are labels for display; they never feed back into scoring. The reading is rescored after every feed refresh and when a new UTC day begins.
+
+The explanation paragraph is built from `TensionBriefFacts`: the reading and band, the change since the previous scored day, the mean of the scored days shown (with at least three), whether the day is provisional, and up to three largest contributions with their classified type, magnitude bins, escalation, panel-feed count and one panel headline. Without the on-device model (AI off, Low Power Mode, thermal pressure or no Apple Intelligence) the paragraph is assembled from those facts directly. With it, the model rewords the same facts; headlines are framed as untrusted data, and a draft is discarded for the deterministic text when it does not state the reading, contains a number absent from the facts, is not a single short paragraph or reads as a refusal. Generated text is labelled as written on device and cannot change the score.
+
 ## 7. Versioning
 
 `TensionMethodology.version` changes with any change to the panel, windows, coverage rule, evidence or fact rules, cue lists, figure rules or classification logic. Values from different versions are never drawn on one series; history is recomputed from stored text under the new version or the series restarts. This document and the code are changed in the same commit.

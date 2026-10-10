@@ -35,6 +35,9 @@ struct MainView: View {
     /// The tension series behind the sidebar reading; the sheet opens with it.
     @State private var tensionHistory: [TensionHistoryDay] = []
     @State private var showsTension = false
+    @State private var tensionUpdatedAt: Date?
+    /// The UTC day the reading belongs to; it advances at midnight UTC so the sidebar moves to the new day's reading.
+    @State private var tensionDayStart = TensionMethodology.day(containing: Date()).start
     @State private var isWindowDropTargeted = false
 
     var body: some View {
@@ -102,7 +105,7 @@ struct MainView: View {
         .navigationSplitViewStyle(.balanced)
         // A sheet, so the rest of the window waits until the reader closes it.
         .sheet(isPresented: $showsTension) {
-            TensionIndexView(history: tensionHistory)
+            TensionIndexView(history: tensionHistory, updatedAt: tensionUpdatedAt)
                 .environmentObject(articleStore)
                 .environmentObject(appSettings)
         }
@@ -114,11 +117,23 @@ struct MainView: View {
                 tensionHistory = []
                 return
             }
-            if let loaded = try? await TensionHistory.load(from: articleStore.database, now: Date()),
+            guard let loaded = try? await TensionHistory.load(from: articleStore.database, now: Date()),
                 !Task.isCancelled
+            else { return }
+            tensionHistory = loaded
+            tensionUpdatedAt = Date()
+            // Phrase the new reading now, so the sheet opens with its explanation.
+            if let facts = TensionBriefFacts.latest(in: loaded),
+                TensionExplainer.modelAllowed(aiEnabled: appSettings.aiEnabled)
             {
-                tensionHistory = loaded
+                _ = await TensionExplainer.shared.explanation(for: facts, allowsModel: true)
             }
+        }
+        .task(id: tensionDayStart) {
+            let nextDay = TensionMethodology.day(containing: Date()).end
+            try? await Task.sleep(for: .seconds(max(1, nextDay.timeIntervalSinceNow + 1)))
+            guard !Task.isCancelled else { return }
+            tensionDayStart = TensionMethodology.day(containing: Date()).start
         }
         // One archive search in the trailing toolbar, shared by list and reader.
         .searchable(text: $searchText, tokens: $searchTokens, placement: .toolbar, prompt: "Search archive") { token in
@@ -201,9 +216,9 @@ struct MainView: View {
         }
     }
 
-    /// The sidebar reading is rescored when collection is turned on and after each refresh.
+    /// The sidebar reading is rescored when collection is turned on, after each refresh and when a new UTC day begins.
     private var tensionReloadKey: String {
-        "\(appSettings.tensionCollectionOptIn):\(articleStore.isReady):\(feedManager.lastRefreshCompletedAt?.timeIntervalSince1970 ?? 0)"
+        "\(appSettings.tensionCollectionOptIn):\(articleStore.isReady):\(feedManager.lastRefreshCompletedAt?.timeIntervalSince1970 ?? 0):\(tensionDayStart.timeIntervalSince1970)"
     }
 
     // MARK: - Search Operators
