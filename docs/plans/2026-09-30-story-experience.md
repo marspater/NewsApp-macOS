@@ -38,7 +38,7 @@ Follow-up status as of this update:
 | #314 | In progress · P2 · idea | Reader links and a reviewed wrong-link measurement; not a release dependency |
 | #334 | Backlog · P1 · deferred | Actual notification delivery and timing in the real compiled app |
 | #350 | In progress | Design language: phases 1 and 5–7 are Done; phases 2–4 (#352–#354) await the acceptance items above |
-| #305, #311, #312, #315, #330, #331, #338 | Done | Merged through #332, #328, #339/#340, #329, #337, #342 and #340 |
+| #305, #311, #312, #315, #330, #331, #338 | Done | #305 by #332; #311 by #328; #312 by #339 and #340; #315 by #329; #330 by #337; #331 by #342; #338 by #340 |
 | #264/#268 | Parked | Non-English event matching and spoken VoiceOver; resume only at Mars's request |
 | #99/#235/#244 | Optional / outside core release | Tension experiment/calibration and source discovery |
 
