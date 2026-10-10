@@ -199,18 +199,12 @@ struct MainView: View {
             id: \.token
         ) { option in
             if let token = ArchiveSearchToken(completedExpression: option.token) {
-                HStack(spacing: AppSpacing.sm) {
-                    Text(option.token).font(.system(.body, design: .monospaced))
-                    Text(option.summary).foregroundStyle(AppColor.secondaryText)
-                }
-                .searchCompletion(token)
+                operatorSuggestion(option)
+                    .searchCompletion(token)
             } else {
                 // Source and category need values before becoming tokens.
-                HStack(spacing: AppSpacing.sm) {
-                    Text(option.token).font(.system(.body, design: .monospaced))
-                    Text(option.summary).foregroundStyle(AppColor.secondaryText)
-                }
-                .searchCompletion(typed + option.token)
+                operatorSuggestion(option)
+                    .searchCompletion(typed + option.token)
             }
         }
         if let token = ArchiveSearchToken(completedExpression: word),
@@ -220,6 +214,22 @@ struct MainView: View {
                 .searchCompletion(token)
         }
     }
+
+    /// One suggestion row. The operator column is as wide as the longest operator, so every description starts at
+    /// the same position.
+    private func operatorSuggestion(_ option: (token: String, summary: String)) -> some View {
+        HStack(spacing: AppSpacing.sm) {
+            ZStack(alignment: .leading) {
+                Text(Self.longestSearchOperator).hidden().accessibilityHidden(true)
+                Text(option.token)
+            }
+            .font(.system(.body, design: .monospaced))
+            Text(option.summary).foregroundStyle(AppColor.secondaryText)
+        }
+    }
+
+    private static let longestSearchOperator =
+        searchOperators.map(\.token).max { $0.count < $1.count } ?? ""
 
     // MARK: - Window-Level OPML Drop
 
