@@ -324,6 +324,11 @@ struct NewsTests {
                 path: CommandLine.arguments[index + 1], output: CommandLine.arguments[index + 2])
             return
         }
+        if let index = CommandLine.arguments.firstIndex(of: "--related-live"), CommandLine.arguments.count > index + 2 {
+            try await measureLiveRelations(
+                path: CommandLine.arguments[index + 1], output: CommandLine.arguments[index + 2])
+            return
+        }
         if let index = CommandLine.arguments.firstIndex(of: "--images-live"), CommandLine.arguments.count > index + 2 {
             try await measureLiveImages(
                 path: CommandLine.arguments[index + 1], output: CommandLine.arguments[index + 2])
@@ -6100,6 +6105,44 @@ struct NewsTests {
             assertTrue(false, "Cancelled relation work must stop")
         } catch is CancellationError {}
         await db.close()
+
+        // The live harness writes each link with a hard near-miss control and refuses unsafe or reused outputs.
+        let run = URL(fileURLWithPath: "/private/tmp/news-relation-test-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: run, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: run) }
+        let copy = DatabaseEngine(path: run.appendingPathComponent("library.sqlite3").path)
+        try await copy.open()
+        let near = FeedArticle(
+            storedID: "near", title: "Volodymyr Zelenskyy congratulates football fans",
+            link: fixtureRoot.appendingPathComponent("relations/near").absoluteString, guid: "near",
+            description: "Volodymyr Zelenskyy congratulated football fans after the national team won a league match.",
+            pubDate: now.addingTimeInterval(-3 * 3600), source: "Publisher near")
+        try await copy.upsertArticles([articles[0], articles[1], near])
+        _ = try await copy.createEvent(memberArticleIDs: ["current"], at: now)
+        let linkedEvent = try await copy.createEvent(memberArticleIDs: ["earlier"], at: now)
+        let nearEvent = try await copy.createEvent(memberArticleIDs: ["near"], at: now)
+        await copy.close()
+        let output = run.appendingPathComponent("report").path
+        try await measureLiveRelations(path: run.appendingPathComponent("library.sqlite3").path, output: output)
+        let rows =
+            try JSONSerialization.jsonObject(
+                with: Data(contentsOf: URL(fileURLWithPath: output).appendingPathComponent("relations-private.json")))
+            as? [[String: String]] ?? []
+        assertEqual(
+            rows.filter { $0["kind"] == "link" }.map { $0["earlierEvent"] }, [linkedEvent.id],
+            "The harness records the proposed link")
+        assertEqual(
+            rows.filter { $0["kind"] == "control" }.map { $0["earlierEvent"] }, [nearEvent.id],
+            "A rejected earlier event sharing an actor is the control")
+        assertTrue(rows.allSatisfy { $0["later"]?.isEmpty == false }, "Pairs carry reviewable text")
+        do {
+            try await measureLiveRelations(path: run.appendingPathComponent("library.sqlite3").path, output: output)
+            assertTrue(false, "A second run must not replace the first run's pairs")
+        } catch {}
+        do {
+            try await measureLiveRelations(path: NSHomeDirectory() + "/library.sqlite3", output: output)
+            assertTrue(false, "Only temporary copies are measured")
+        } catch {}
     }
 
     static func testEventMatcherRules() async throws {
@@ -6608,6 +6651,143 @@ struct NewsTests {
         )
         .write(to: directory.appendingPathComponent("placeholders-private.json"))
         print("IMAGE_REPORT \(String(decoding: try encoder.encode(report), as: UTF8.self))")
+        await db.close()
+    }
+
+    /// Opt-in #314 measurement on a copied library: every event's related-story links, each mixed with a hard near-miss
+    /// control (an earlier candidate sharing a person, organization or place that the rule rejected). Private text stays
+    /// in the temporary audit directory; `script/evaluation/relation_review.py` builds the blind sheet and the report.
+    static func measureLiveRelations(path: String, output: String) async throws {
+        let url = URL(fileURLWithPath: path).resolvingSymlinksInPath()
+        guard url.path.hasPrefix("/private/tmp/") || url.path.hasPrefix("/tmp/"), output.hasPrefix("/private/tmp/")
+        else {
+            throw NSError(domain: "LiveRelations", code: 1)
+        }
+        let db = DatabaseEngine(path: url.path)
+        try await db.open()
+        var report: [String: Int] = ["eventsWithLinks": 0, "links": 0, "controls": 0]
+        // `NEWS_RELATED_RECLUSTER=1` first runs the production clustering pass on the copy, with the clock at its last
+        // refresh, so an older library gets the events the current matcher would build.
+        if ProcessInfo.processInfo.environment["NEWS_RELATED_RECLUSTER"] == "1",
+            let newest = try await db.fetchArticles(limit: nil).map(\.pubDate).max()
+        {
+            var converged = false
+            for pass in 1...5 where !converged {
+                let clustering = try await EventClusterer.run(
+                    in: db, judge: .onDevice, now: newest.addingTimeInterval(3600))
+                report["reclusterPasses"] = pass
+                report["reclusterChangedEvents", default: 0] += clustering.changedEvents.count
+                converged = clustering.changedEvents.isEmpty
+            }
+            // A pass that still changes events leaves a partial re-cluster; measuring it would mislead.
+            guard converged else {
+                await db.close()
+                throw NSError(
+                    domain: "LiveRelations", code: 3,
+                    userInfo: [NSLocalizedDescriptionKey: "Re-clustering still changed events after five passes"])
+            }
+        }
+        let articles = try await db.fetchArticles(limit: nil)
+        let events = try await db.eventFeedSummaries(forArticles: articles.map(\.id))
+        report["events"] = events.count
+        struct Pair {
+            let kind: String
+            let earlierID: String
+            let laterID: String
+            let earlier: [EventMatchRow]
+            let later: [EventMatchRow]
+        }
+        var pairs: [Pair] = []
+        for event in events {
+            let snapshot = try await db.relatedStoryEventRows(eventID: event.eventID)
+            let links = try EventStoryRelation.links(target: snapshot.target, candidates: snapshot.candidates)
+            guard let start = snapshot.target.map(\.date).min() else { continue }
+            report["linksPerEvent_\(links.count)", default: 0] += 1
+            let linked = Set(links.map(\.eventID))
+            if !links.isEmpty { report["eventsWithLinks", default: 0] += 1 }
+            for candidate in snapshot.candidates where linked.contains(candidate.id) {
+                pairs.append(
+                    Pair(
+                        kind: "link", earlierID: candidate.id, laterID: event.eventID, earlier: candidate.members,
+                        later: snapshot.target))
+            }
+            let later = snapshot.target.map {
+                EventFeatures(title: $0.title, description: $0.description, date: $0.date)
+            }
+            // Aggregate rejection stages over earlier candidates within the window: the first condition no pair meets.
+            for candidate in snapshot.candidates
+            where !candidate.members.isEmpty
+                && candidate.members.allSatisfy({
+                    $0.date < start && start.timeIntervalSince($0.date) <= EventStoryRelation.window
+                })
+            {
+                let earlier = candidate.members.map {
+                    EventFeatures(title: $0.title, description: $0.description, date: $0.date)
+                }
+                let pairs = earlier.flatMap { e in later.map { (e, $0) } }
+                let stage =
+                    if !pairs.contains(where: {
+                        !$0.people.isDisjoint(with: $1.people)
+                            || !$0.organizations.isDisjoint(with: $1.organizations)
+                    }) {
+                        earlier.allSatisfy { $0.people.isEmpty && $0.organizations.isEmpty }
+                            || later.allSatisfy { $0.people.isEmpty && $0.organizations.isEmpty }
+                            ? "noActorOnOneSide" : "differentActors"
+                    } else if !pairs.contains(where: { !$0.localPlaces.isDisjoint(with: $1.localPlaces) }) {
+                        "noSharedLocalPlace"
+                    } else if !pairs.contains(where: { EventStoryRelation.supports($0, $1) }) {
+                        "noPairMeetsAll"
+                    } else if linked.contains(candidate.id) { "linked" } else { "belowTwoThirdsSupport" }
+                report["candidateStage_\(stage)", default: 0] += 1
+            }
+            // The hardest rejected candidate: earlier, within the window, sharing an actor or a local place.
+            let control = snapshot.candidates.first { candidate in
+                !linked.contains(candidate.id) && !candidate.members.isEmpty
+                    && candidate.members.allSatisfy {
+                        $0.date < start && start.timeIntervalSince($0.date) <= EventStoryRelation.window
+                    }
+                    && candidate.members.contains { row in
+                        let earlier = EventFeatures(title: row.title, description: row.description, date: row.date)
+                        return later.contains {
+                            !earlier.people.isDisjoint(with: $0.people)
+                                || !earlier.organizations.isDisjoint(with: $0.organizations)
+                                || !earlier.localPlaces.isDisjoint(with: $0.localPlaces)
+                        }
+                    }
+            }
+            if !links.isEmpty, let control {
+                pairs.append(
+                    Pair(
+                        kind: "control", earlierID: control.id, laterID: event.eventID, earlier: control.members,
+                        later: snapshot.target))
+            }
+        }
+        report["links"] = pairs.filter { $0.kind == "link" }.count
+        report["controls"] = pairs.filter { $0.kind == "control" }.count
+        func describe(_ rows: [EventMatchRow]) -> (titles: String, summary: String, first: Date) {
+            let titles = rows.prefix(3).map { "\($0.title) (\($0.source))" }.joined(separator: " | ")
+            return (titles, String((rows.first?.description ?? "").prefix(300)), rows.map(\.date).min() ?? .distantPast)
+        }
+        // Pairs sorted by a hash, so links and controls interleave; `relation_review.py sheet` hides their kind.
+        let rows = pairs.map { pair -> (String, [String: Any]) in
+            let (earlier, later) = (describe(pair.earlier), describe(pair.later))
+            let hash = ArticleIdentity.sha256Hex(pair.earlierID + ">" + pair.laterID)
+            return (
+                hash,
+                [
+                    "hash": hash, "kind": pair.kind,
+                    "earlierEvent": pair.earlierID, "laterEvent": pair.laterID, "earlier": earlier.titles,
+                    "earlier_summary": earlier.summary, "later": later.titles, "later_summary": later.summary,
+                    "gap_hours": String(format: "%.1f", later.first.timeIntervalSince(earlier.first) / 3600),
+                ]
+            )
+        }.sorted { $0.0 < $1.0 }.map(\.1)
+        let directory = URL(fileURLWithPath: output)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try JSONSerialization.data(withJSONObject: rows, options: [.prettyPrinted, .sortedKeys]).write(
+            to: directory.appendingPathComponent("relations-private.json"), options: .withoutOverwriting)
+        let encoded = try JSONSerialization.data(withJSONObject: report, options: [.sortedKeys])
+        print("RELATION_REPORT \(String(decoding: encoded, as: UTF8.self))")
         await db.close()
     }
 
