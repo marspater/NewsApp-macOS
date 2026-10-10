@@ -11351,7 +11351,7 @@ struct NewsTests {
             "<article><p>\(first)</p><figure><img data-src='/photo.jpg' width=1200 height=800 alt='Publisher reporting'><figcaption>Actual scene <span class='photo-credit'>Agency / Photographer</span></figcaption></figure><p>\(second)</p></article>",
             "<article><p>\(first)</p><picture><source srcset='/small.jpg 400w, /large.jpg 1200w'><img src='/fallback.jpg' width=1200 height=800></picture><noscript><img src='/backup.jpg'></noscript><p>\(second)</p></article>",
             // The Guardian repeats the figcaption per breakpoint and its credit sits inside the caption text.
-            "<article><p>\(first)</p><figure data-credit='Jen Golbeck/SOPA Images/Shutterstock'><picture><img src='/beach.jpg' width=1200 height=800 alt='A young girl runs on a beach'></picture><span><figcaption><span><svg></svg></span><span>A girl runs on Orange Beach.</span> Photograph: Jen Golbeck/SOPA Images/Shutterstock</figcaption></span><span><figcaption><span></span><span>A girl runs on Orange Beach.</span> Photograph: Jen Golbeck/SOPA Images/Shutterstock</figcaption></span></figure><p>\(second)</p></article>",
+            "<article><p>\(first)</p><figure data-credit='Jen Golbeck/SOPA\n  Images/Shutterstock'><picture><img src='/beach.jpg' width=1200 height=800 alt='A young girl runs on a beach'></picture><span><figcaption><span><svg></svg></span><span>A girl runs on Orange Beach.</span> Photograph: Jen Golbeck/SOPA Images/Shutterstock</figcaption></span><span><figcaption><span></span><span>A girl runs on Orange Beach.</span> Photograph: Jen Golbeck/SOPA Images/Shutterstock</figcaption></span></figure><p>\(second)</p></article>",
         ]
         var documents = [ReaderDocument]()
         for (index, html) in shapes.enumerated() {

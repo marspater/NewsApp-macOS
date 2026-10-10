@@ -346,7 +346,12 @@ final class DOMElementNode: Sendable {
                     String($0.prefix(500))
                 },
                 // A credit already printed inside the caption is not repeated below it.
-                imageCredit: credit.flatMap { $0.isEmpty || caption.contains($0) ? nil : $0 },
+                imageCredit: credit.flatMap {
+                    $0.isEmpty
+                        || caption.contains(
+                            $0.replacingOccurrences(of: "[ \t\r\n]+", with: " ", options: .regularExpression))
+                        ? nil : $0
+                },
                 imageWidth: (image.attributes["width"] ?? findNodes(tag: "img").first?.attributes["width"]).flatMap(
                     Int.init),
                 imageHeight: (image.attributes["height"] ?? findNodes(tag: "img").first?.attributes["height"]).flatMap(
