@@ -140,6 +140,31 @@ enum EventFeedGrouping {
         }
         return entries
     }
+
+    /// Identical to `entries(for:events:mode:).map(\.id)` but avoids allocating groupings and FeedEntry values.
+    static func entryIDs(for articles: [FeedArticle], events: [EventFeedSummary], mode: FeedGroupingMode) -> [String] {
+        var seenArticles = Set<String>()
+        var uniqueArticles: [FeedArticle] = []
+        for article in articles {
+            if seenArticles.insert(article.id).inserted { uniqueArticles.append(article) }
+        }
+        guard mode == .events else { return uniqueArticles.map(\.id) }
+        var eventOf: [String: String] = [:]
+        for summary in events where summary.isConfirmed {
+            for member in summary.members { eventOf[member.articleID] = summary.eventID }
+        }
+        var emitted = Set<String>()
+        var ids: [String] = []
+        ids.reserveCapacity(uniqueArticles.count)
+        for article in uniqueArticles {
+            if let eventID = eventOf[article.id] {
+                if emitted.insert(eventID).inserted { ids.append(article.id) }
+            } else {
+                ids.append(article.id)
+            }
+        }
+        return ids
+    }
 }
 
 struct FeedSnapshot: Equatable, Sendable {
@@ -148,6 +173,10 @@ struct FeedSnapshot: Equatable, Sendable {
 
     func entries(_ mode: FeedGroupingMode) -> [FeedEntry] {
         EventFeedGrouping.entries(for: articles, events: events, mode: mode)
+    }
+
+    func entryIDs(_ mode: FeedGroupingMode) -> [String] {
+        EventFeedGrouping.entryIDs(for: articles, events: events, mode: mode)
     }
 }
 
@@ -192,8 +221,8 @@ struct FeedUpdateBuffer: Equatable, Sendable {
             replace(with: snapshot)
             return .replaced
         }
-        let currentIDs = displayed.entries(mode).map(\.id)
-        let incomingIDs = snapshot.entries(mode).map(\.id)
+        let currentIDs = displayed.entryIDs(mode)
+        let incomingIDs = snapshot.entryIDs(mode)
         let fresh = Dictionary(snapshot.articles.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         var refreshed = displayed
         refreshed.articles = displayed.articles.map { fresh[$0.id] ?? $0 }
@@ -201,7 +230,7 @@ struct FeedUpdateBuffer: Equatable, Sendable {
         let incomingEvents = Set(snapshot.events.map(\.eventID))
         var adopted = refreshed
         adopted.events = snapshot.events + displayed.events.filter { !incomingEvents.contains($0.eventID) }
-        let groupingStays = adopted.entries(mode).map(\.id) == currentIDs
+        let groupingStays = adopted.entryIDs(mode) == currentIDs
 
         let samePage = hasMore ? Array(currentIDs.prefix(incomingIDs.count)) == incomingIDs : currentIDs == incomingIDs
         if samePage && groupingStays {

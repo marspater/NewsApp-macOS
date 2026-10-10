@@ -388,6 +388,7 @@ struct NewsTests {
         try await testEventClustering(fixtureRoot: fixtureRoot)
         try await testEventReadingState(fixtureRoot: fixtureRoot)
         await testEventFeedGroupingAndStability()
+        testEventFeedGroupingOptimization()
         try await testFiniteBriefing()
         try await testRefreshClustersEvents(fixtureRoot: fixtureRoot)
         try await testEventCorpusHarness(fixtureRoot: fixtureRoot)
@@ -4311,6 +4312,34 @@ struct NewsTests {
         assertEqual(value(copy, "SELECT count(*) FROM pragma_table_info('event_exclusions') WHERE name IN ('title','description','content');"), "0", "Exclusions store no source text")
         assertEqual(value(copy, "PRAGMA quick_check;"), "ok", "Migrated library passes quick_check")
         await migrated.close()
+    }
+
+    static func testEventFeedGroupingOptimization() {
+        print("  - Testing FeedEntry array allocation avoidance logic for ID derivation...")
+        func article(_ id: String, source: String, minutesAgo: Double) -> FeedArticle {
+            FeedArticle(storedID: id, title: "Story \(id)", link: "https://example.com/\(id)", guid: id, pubDate: Date().addingTimeInterval(-minutesAgo * 60), description: "", source: source, content: nil, imageUrl: nil)
+        }
+        let a = article("a", source: "Wire One", minutesAgo: 30)
+        let b = article("b", source: "Daily Two", minutesAgo: 45)
+        let c = article("c", source: "Solo", minutesAgo: 60)
+        let d = article("d", source: "Another", minutesAgo: 70)
+        let membersAB = [EventFeedMember(articleID: "a", source: a.source, title: "Title", date: a.pubDate, joinedVersion: 1, isRead: false, isSaved: false),
+                         EventFeedMember(articleID: "b", source: b.source, title: "Title", date: b.pubDate, joinedVersion: 1, isRead: false, isSaved: false)]
+        let eventAB = EventFeedSummary(eventID: "e1", membershipVersion: 1, seenVersion: nil, members: membersAB)
+
+        let articles = [a, a, b, c, c, d]
+        let events = [eventAB]
+
+        assertEqual(
+            EventFeedGrouping.entryIDs(for: articles, events: events, mode: .events),
+            EventFeedGrouping.entries(for: articles, events: events, mode: .events).map(\.id),
+            "Optimized entryIDs exactly matches entries().map(\\.id) for events"
+        )
+        assertEqual(
+            EventFeedGrouping.entryIDs(for: articles, events: events, mode: .articles),
+            EventFeedGrouping.entries(for: articles, events: events, mode: .articles).map(\.id),
+            "Optimized entryIDs exactly matches entries().map(\\.id) for articles"
+        )
     }
 
     static func testEventFeedGroupingAndStability() async {

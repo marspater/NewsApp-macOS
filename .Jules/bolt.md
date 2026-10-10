@@ -9,3 +9,9 @@
 **Learning:** Compiling `NSRegularExpression` is computationally expensive. In `FeedXMLParser.swift`, the `extractImageFromHTML` method was repeatedly compiling a regular expression for image extraction up to twice per parsed article. When a feed has many items, this caused hundreds of unnecessary regex compilation cycles during background feed refresh.
 
 **Action:** Future Bolt runs should statically compile and store `NSRegularExpression` instances using `static let` (or statically initialized arrays for multiple patterns) when they are used inside loops or frequently called methods like XML element parsers or UI render passes, instead of instantiating them on demand.
+
+## 2026-10-10 - Avoid intermediate map/grouping allocations during pure ID extraction
+
+**Learning:** When `FeedUpdateBuffer` checks grouping stability across feed refreshes, it historically relied on `displayed.entries(mode).map(\.id)` multiple times. This operation mapped arrays, allocated dictionaries of grouped articles, created nested `FeedEntry` types, only to discard everything but the `id` strings. This repeated computation and allocation was executed up to three times per refresh frame.
+
+**Action:** If array output (like view models or nested types) is only queried for IDs to assess stability or membership, introduce a dedicated, fast-path `entryIDs()` method that loops and constructs `[String]` identifiers directly, entirely avoiding the nested allocations.
