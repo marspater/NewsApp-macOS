@@ -76,6 +76,9 @@ struct ArticleListView: View {
     @State private var appliesNextUpdate = false
     /// Reloads the list once a refresh the reader asked for has finished.
     @State private var refreshReloads = 0
+    /// A refresh the reader started: its results replace the list as they arrive instead of queueing behind
+    /// the updates button.
+    @State private var isReaderRefreshing = false
     /// Stories the reader's muting removes from this list, across every page.
     @State private var mutedCount = 0
     @State private var showsMuted = false
@@ -112,9 +115,12 @@ struct ArticleListView: View {
 
     private var entries: [FeedEntry] { buffer.displayed.entries(groupingMode) }
 
-    /// The reader is looking at the list or an article from it, so cards must not move underneath.
+    /// The reader is looking at the list or an article from it, so cards must not move underneath. A refresh the
+    /// reader started is the exception while the list is showing: they asked for the new stories.
     private var isHoldingList: Bool {
-        !appliesNextUpdate && (!articlePath.isEmpty || isScrolledAway || isPointerInList || focusedArticleID != nil)
+        guard !appliesNextUpdate else { return false }
+        if !articlePath.isEmpty { return true }
+        return !isReaderRefreshing && (isScrolledAway || isPointerInList || focusedArticleID != nil)
     }
 
     private var queuedUpdateCount: Int {
@@ -458,11 +464,7 @@ struct ArticleListView: View {
 
     private func applyPendingUpdates(proxy: ScrollViewProxy) {
         guard buffer.pending != nil else { return }
-        withAnimation(reduceMotion ? nil : AppMotion.state) {
-            buffer.applyPending()
-        }
-        cursor = buffer.displayed.articles.last.map(ArticleQueryCursor.init)
-        hasMoreResults = pendingHasMore
+        showPendingUpdates()
         if let first = entries.first {
             withAnimation(reduceMotion ? nil : AppMotion.quick) {
                 proxy.scrollTo(first.id, anchor: .top)
@@ -545,6 +547,11 @@ struct ArticleListView: View {
 
     @ToolbarContentBuilder
     private var listToolbar: some ToolbarContent {
+        // With the duplicate title removed nothing fills the toolbar, so macOS 26 and later would lay the list
+        // controls out from the leading edge. A flexible spacer keeps them, and search, at the trailing edge.
+        if #available(macOS 26.0, *) {
+            ToolbarSpacer(.flexible, placement: .primaryAction)
+        }
         ToolbarItemGroup(placement: .primaryAction) {
             Toggle(isOn: $groupsEvents.animation(reduceMotion ? nil : AppMotion.state)) {
                 Label(
@@ -973,8 +980,22 @@ struct ArticleListView: View {
 
     /// The reader asked for these stories, so they are shown when the refresh ends instead of waiting behind
     /// the update button.
+    private func showPendingUpdates() {
+        guard buffer.pending != nil else { return }
+        withAnimation(reduceMotion ? nil : AppMotion.state) {
+            buffer.applyPending()
+        }
+        cursor = buffer.displayed.articles.last.map(ArticleQueryCursor.init)
+        hasMoreResults = pendingHasMore
+    }
+
+    /// Refresh means "show me what's new": queued updates appear at once, and results arriving during the refresh
+    /// (collection, event grouping, rating) replace the list instead of waiting behind the updates button.
     private func refreshFeeds() {
         Task {
+            if articlePath.isEmpty { showPendingUpdates() }
+            isReaderRefreshing = true
+            defer { isReaderRefreshing = false }
             await feedManager.fetchFeedsAsync()
             // An open article keeps the list still; its updates wait as usual.
             guard articlePath.isEmpty else { return }
