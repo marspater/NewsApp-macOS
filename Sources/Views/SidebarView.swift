@@ -16,6 +16,7 @@ extension FocusedValues {
 
 struct SidebarView: View {
     @Binding var selectedTopic: String?
+    @Binding var mastheadNotice: String?
 
     @EnvironmentObject private var appSettings: AppSettings
     @EnvironmentObject private var feedManager: FeedManager
@@ -26,7 +27,6 @@ struct SidebarView: View {
     @State private var isSubscribePopoverPresented = false
     @State private var newFeedURL: String = ""
     @State private var isDropTargeted = false
-    @State private var dropConfirmationMessage: String? = nil
 
     private let suggestedTopics: [(String, String)] = [
         ("Entertainment", "tv"), ("Science", "atom"),
@@ -47,10 +47,6 @@ struct SidebarView: View {
                 }
             )
         ) {
-            if let confirmation = dropConfirmationMessage {
-                dropConfirmationBanner(confirmation)
-            }
-
             inboxSection
             librarySection
             userSectionsSection
@@ -83,24 +79,6 @@ struct SidebarView: View {
                 .padding(AppSpacing.xxs)
                 .animation(reduceMotion ? nil : AppMotion.quick, value: isDropTargeted)
         )
-    }
-
-    // MARK: - Drop Confirmation Banner
-
-    private func dropConfirmationBanner(_ text: String) -> some View {
-        HStack(spacing: 6) {
-            Image(systemName: "checkmark.circle.fill")
-                .foregroundColor(AppColor.success)
-            Text(text)
-                .font(AppTypography.caption)
-                .foregroundColor(AppColor.primaryText)
-                .lineLimit(1)
-        }
-        .padding(AppSpacing.xs)
-        .background(AppColor.success.opacity(0.12))
-        .clipShape(RoundedRectangle(cornerRadius: AppRadius.control))
-        .listRowBackground(Color.clear)
-        .listRowSeparator(.hidden)
     }
 
     // MARK: - Sidebar Sections
@@ -214,7 +192,7 @@ struct SidebarView: View {
                 Button("Add") {
                     let trimmed = newFeedURL.trimmingCharacters(in: .whitespacesAndNewlines)
                     if !trimmed.isEmpty {
-                        feedManager.addFeed(url: trimmed)
+                        subscribe(to: trimmed)
                         newFeedURL = ""
                         isSubscribePopoverPresented = false
                     }
@@ -240,14 +218,16 @@ struct SidebarView: View {
                     {
                         Task { @MainActor in
                             let added = await self.feedManager.importFeeds(fromFile: url)
-                            self.showConfirmation(
-                                added > 0 ? "Imported \(added) feed(s) from OPML" : "No new feeds imported")
+                            if added > 0 {
+                                self.showConfirmation("Imported \(added) feed\(added == 1 ? "" : "s") from OPML")
+                            } else if self.feedManager.articleStore.operationError == nil {
+                                self.showConfirmation("No new feeds imported")
+                            }
                         }
                     } else if !url.isFileURL && (url.scheme == "http" || url.scheme == "https") {
                         let urlString = url.absoluteString
                         Task { @MainActor in
-                            self.feedManager.addFeed(url: urlString)
-                            self.showConfirmation("Subscribed to \(url.host ?? urlString)")
+                            self.subscribe(to: urlString)
                         }
                     }
                 }
@@ -261,8 +241,7 @@ struct SidebarView: View {
                     let text = String(nsString).trimmingCharacters(in: .whitespacesAndNewlines)
                     if text.hasPrefix("http://") || text.hasPrefix("https://") {
                         Task { @MainActor in
-                            self.feedManager.addFeed(url: text)
-                            self.showConfirmation("Subscribed to feed")
+                            self.subscribe(to: text)
                         }
                     }
                 }
@@ -272,15 +251,18 @@ struct SidebarView: View {
         return false
     }
 
+    private func subscribe(to urlString: String) {
+        let previousCount = feedManager.feedURLs.count
+        feedManager.addFeed(url: urlString)
+        if feedManager.feedURLs.count > previousCount {
+            showConfirmation("Subscribed to \(URL(string: urlString)?.host ?? "feed")")
+        } else {
+            feedManager.articleStore.operationError = "Feed not added. Check the URL or whether you already subscribe."
+        }
+    }
+
     private func showConfirmation(_ message: String) {
-        withAnimation(reduceMotion ? nil : AppMotion.responsive) {
-            dropConfirmationMessage = message
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 4) {
-            withAnimation(reduceMotion ? nil : AppMotion.responsive) {
-                self.dropConfirmationMessage = nil
-            }
-        }
+        mastheadNotice = message
     }
 
     private func iconForSection(_ section: String) -> String {

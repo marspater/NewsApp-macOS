@@ -35,6 +35,7 @@ enum LeadStoryPresentation {
 struct ArticleListView: View {
     @Binding var selectedTopic: String?
     @Binding var searchText: String
+    @Binding var mastheadNotice: String?
     @Binding var articlePath: NavigationPath
 
     @EnvironmentObject private var appSettings: AppSettings
@@ -462,6 +463,15 @@ struct ArticleListView: View {
                     .font(AppTypography.caption)
                     .foregroundStyle(AppColor.secondaryText)
                     .monospacedDigit()
+                if let mastheadNotice {
+                    Text("·")
+                        .font(AppTypography.caption)
+                        .foregroundStyle(AppColor.secondaryText)
+                        .accessibilityHidden(true)
+                    Text(mastheadNotice)
+                        .font(AppTypography.caption)
+                        .foregroundStyle(AppColor.secondaryText)
+                }
                 if waitingCount > 0 && !isBriefing {
                     Text("·")
                         .font(AppTypography.caption)

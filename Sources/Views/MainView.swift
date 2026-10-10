@@ -20,6 +20,7 @@ extension Notification.Name {
 struct MainView: View {
     @State private var selectedTopic: String? = "Today"
     @State private var searchText: String = ""
+    @State private var mastheadNotice: String?
     @State private var articlePath = NavigationPath()
 
     @EnvironmentObject private var appSettings: AppSettings
@@ -34,7 +35,7 @@ struct MainView: View {
 
     var body: some View {
         NavigationSplitView(columnVisibility: $columnVisibility) {
-            SidebarView(selectedTopic: $selectedTopic)
+            SidebarView(selectedTopic: $selectedTopic, mastheadNotice: $mastheadNotice)
                 .environmentObject(appSettings)
                 .environmentObject(feedManager)
                 .environmentObject(savedStories)
@@ -47,6 +48,7 @@ struct MainView: View {
                     ArticleListView(
                         selectedTopic: $selectedTopic,
                         searchText: $searchText,
+                        mastheadNotice: $mastheadNotice,
                         articlePath: $articlePath
                     )
                     .environmentObject(appSettings)
@@ -97,6 +99,20 @@ struct MainView: View {
         }
         .onDrop(of: [.fileURL], isTargeted: $isWindowDropTargeted) { providers in
             handleWindowOPMLDrop(providers: providers)
+        }
+        .onChange(of: mastheadNotice) { _, notice in
+            guard let notice, let application = NSApp else { return }
+            NSAccessibility.post(
+                element: application, notification: .announcementRequested,
+                userInfo: [
+                    .announcement: notice,
+                    .priority: NSAccessibilityPriorityLevel.medium.rawValue,
+                ])
+        }
+        .task(id: mastheadNotice) {
+            guard let current = mastheadNotice else { return }
+            try? await Task.sleep(for: .seconds(5))
+            if !Task.isCancelled && mastheadNotice == current { mastheadNotice = nil }
         }
         .onChange(of: selectedTopic) { _, _ in
             articlePath = NavigationPath()
@@ -179,7 +195,12 @@ struct MainView: View {
                     && (url.pathExtension.lowercased() == "opml" || url.pathExtension.lowercased() == "xml")
                 {
                     Task { @MainActor in
-                        await self.feedManager.importFeeds(fromFile: url)
+                        let count = await self.feedManager.importFeeds(fromFile: url)
+                        if count > 0 {
+                            mastheadNotice = "Imported \(count) feed\(count == 1 ? "" : "s") from OPML"
+                        } else if articleStore.operationError == nil {
+                            mastheadNotice = "No new feeds imported"
+                        }
                     }
                 }
             }
