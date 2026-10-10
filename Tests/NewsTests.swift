@@ -15402,6 +15402,84 @@ struct NewsTests {
                     passages: [passage], articles: [article1], existingCitations: ["c_typo": typographicCitation]
                 ).isEmpty, "Mismatched delimiters, unattributed quotes and vague speakers stay excluded")
         }
+        // Reported speech without an adjacent "that" (#313).
+        func reported(_ text: String) -> [OverviewPerspective] {
+            let passage = EvidencePassage(id: "pass_reported", articleID: "art_persp_1", text: text)
+            let citation = OverviewCitation(
+                id: "c_reported", articleID: "art_persp_1", passageID: passage.id,
+                passageFingerprint: passage.fingerprint, quote: text)
+            return OverviewPerspectivesExtractor.extractPerspectives(
+                passages: [passage], articles: [article1], existingCitations: ["c_reported": citation])
+        }
+        for (text, participant, position) in [
+            (
+                "Foreign Secretary Ed Miliband said his country does not accept the expulsion of its diplomats.",
+                "Foreign Secretary Ed Miliband", "his country does not accept the expulsion of its diplomats"
+            ),
+            (
+                "Minister Édouard Geffray told TF1 television on Thursday night that 3,000 substitute teachers would be hired.",
+                "Minister Édouard Geffray", "3,000 substitute teachers would be hired"
+            ),
+            (
+                "Foreign Secretary Ed Miliband told the BBC that his country does not accept the expulsion of its diplomats.",
+                "Foreign Secretary Ed Miliband", "his country does not accept the expulsion of its diplomats"
+            ),
+            (
+                "Spokesperson John Smith told a news conference that negotiations are scheduled to resume next week.",
+                "Spokesperson John Smith", "negotiations are scheduled to resume next week"
+            ),
+            (
+                "Ambassador Marco Rossi told an Italian news agency that bilateral trade had increased sharply.",
+                "Ambassador Marco Rossi", "bilateral trade had increased sharply"
+            ),
+            (
+                "The figures were published at noon. Mayor Elena Rostova says the evacuation routes are open again.",
+                "Mayor Elena Rostova", "the evacuation routes are open again"
+            ),
+        ] {
+            let extracted = reported(text)
+            assertEqual(extracted.map(\.participant), [participant], "Reported speech names its speaker")
+            assertEqual(extracted.first?.position, position, "The reported statement is verbatim")
+        }
+        for (text, participant) in [
+            ("Last month, Germany said it had concluded Russia was responsible for the drone attack.", "Germany"),
+            ("Later Thursday, Zelenskyy said negotiators were headed to the United States for talks.", "Zelenskyy"),
+            (
+                "Thursday, the Coalition to Restore Legitimacy said it intercepted two ballistic missiles.",
+                "Coalition to Restore Legitimacy"
+            ),
+            (
+                "Kremlin spokesman Dmitry Peskov also said Russia welcomed the offer of assistance.",
+                "Kremlin spokesman Dmitry Peskov"
+            ),
+            (
+                "Judge Hilliard, sitting at the high court in London, said the police had conceded the error.",
+                "Judge Hilliard"
+            ),
+            (
+                "US President Donald Trump said Tuesday that he had scheduled a call with Vladimir Putin.",
+                "US President Donald Trump"
+            ),
+        ] {
+            assertEqual(
+                reported(text).map(\.participant), [participant], "Adverbials and descriptions leave the speaker")
+        }
+        assertEqual(
+            reported("US President Donald Trump said Tuesday that he had scheduled a call with Vladimir Putin.").first?
+                .position, "he had scheduled a call with Vladimir Putin", "The day is not part of the statement")
+        for text in [
+            "Seoul, which said it had placed their families in North Korea at risk of reprisals.",
+            "In Liege, where police said almost 200 arrests had been made in connection with protests.",
+            "Human Rights Watch said in a report Thursday.",
+            "The Venezuelan government said was an attempt to assassinate the president of the country.",
+            "Investigator Randy Spivey said adding that the inmate is now aware of what was done.",
+            "A father of four said it would cost about 500 shekels to feed his family breakfast.",
+            "He said Israel would also expel British representatives from the consulate.",
+            "It said 224 schools were closed in the morning, down to 157 by lunchtime.",
+            "Officials said the bridge would reopen to traffic next week.",
+        ] {
+            assertTrue(reported(text).isEmpty, "Pronouns and generic officials are not named participants")
+        }
     }
 
     static func testThematicAngleFromExistingFacts(fixtureHost: String = "example.com") async throws {
