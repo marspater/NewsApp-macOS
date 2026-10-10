@@ -189,6 +189,27 @@ actor ExtractionLog {
     var isIdle: Bool { active == 0 }
 }
 
+extension ExtractionOutcome {
+    /// The case name, for aggregate audit counts without page text.
+    var kindName: String {
+        switch self {
+        case .success: "success"
+        case .networkError: "networkError"
+        case .httpError: "httpError"
+        case .securityBlocked: "securityBlocked"
+        case .emptyContent: "emptyContent"
+        case .contentParsingFailed: "contentParsingFailed"
+        case .qualityValidationFailed: "qualityRejected"
+        }
+    }
+}
+
+/// Outcomes of live publisher-text fetches in the overview audit (#308 step 2).
+actor EvidenceFetchTally {
+    private(set) var counts: [String: Int] = [:]
+    func add(_ kind: String) { counts[kind, default: 0] += 1 }
+}
+
 /// Scripted publisher pages for overview evidence tests.
 actor TestPages {
     struct Reply: Sendable {
@@ -6861,7 +6882,8 @@ struct NewsTests {
         }
         func measure(
             id: String, title: String, passages: [EvidencePassage], articles: [FeedArticle], live: Bool,
-            membership: Int = 1, sources: Int = 0, perspectives: OverviewPerspectivesDiagnosis? = nil
+            membership: Int = 1, sources: Int = 0, perspectives: OverviewPerspectivesDiagnosis? = nil,
+            evidence: [String: Any]? = nil
         ) async throws {
             let fallback = OverviewComposer.composeOverview(
                 eventID: id, eventTitle: title,
@@ -6896,6 +6918,7 @@ struct NewsTests {
             if let perspectives {
                 privateJSON["perspectives"] = try JSONSerialization.jsonObject(with: encoder.encode(perspectives))
             }
+            if let evidence { privateJSON["evidence"] = evidence }
             try JSONSerialization.data(withJSONObject: privateJSON, options: [.prettyPrinted, .sortedKeys]).write(
                 to: directory.appendingPathComponent(
                     "overview-private-\(prefix)-\(report[live ? "liveEvents" : "controls"]!).json"))
@@ -6910,9 +6933,45 @@ struct NewsTests {
                 id: sample.eventID, title: sample.title, passages: sample.passages, articles: sample.articles,
                 live: false)
         }
+        // `NEWS_OVERVIEWS_EXTRACT=1` (#308 step 2): before each measured event, the production coordinator stores
+        // publisher text for its representatives, with its deadline and fetch limit, and the run records the step.
+        let fetches = EvidenceFetchTally()
+        let evidenceStore = ArticleStore(database: db)
+        let evidenceCoordinator: OverviewGenerationCoordinator? =
+            environment["NEWS_OVERVIEWS_EXTRACT"] == "1"
+            ? OverviewGenerationCoordinator(
+                store: evidenceStore, allowsModel: { true },
+                extractText: { link in
+                    let outcome = await ContentExtractionPipeline.shared.extractArticleWithIdentity(from: link).outcome
+                    await fetches.add(Task.isCancelled ? "cutAtDeadline" : outcome.kindName)
+                    return outcome
+                }) : nil
         for event in events {
-            let members = try await db.fetchArticles(limit: nil, eventID: event.eventID)
+            var members = try await db.fetchArticles(limit: nil, eventID: event.eventID)
             guard let first = members.first else { continue }
+            let measured =
+                !excluded.contains(event.eventID) && report["liveGenerated", default: 0] < target
+                && report["liveEvents", default: 0] < maxAttempts
+            var evidence: [String: Any]?
+            if measured, let evidenceCoordinator, Set(members.map { $0.source.lowercased() }).count > 1 {
+                let before = await fetches.counts
+                let lacking = Set(members.filter { !OverviewGenerationCoordinator.hasPublisherText($0) }.map(\.id))
+                let start = Date()
+                members = await evidenceCoordinator.articlesWithPublisherText(
+                    members, excluding: [], store: evidenceStore)
+                let after = await fetches.counts
+                let outcomes = after.reduce(into: [String: Int]()) { result, entry in
+                    let added = entry.value - (before[entry.key] ?? 0)
+                    if added > 0 { result[entry.key] = added }
+                }
+                evidence = [
+                    "seconds": Date().timeIntervalSince(start), "pageRequests": outcomes.values.reduce(0, +),
+                    "storedTexts": members.filter {
+                        lacking.contains($0.id) && OverviewGenerationCoordinator.hasPublisherText($0)
+                    }.count,
+                    "outcomes": outcomes,
+                ]
+            }
             let passages = OverviewPassageSelector().selectPassages(from: members, budget: OverviewTokenBudget())
                 .passages
             // Every passage is citable, as in a synthesized overview, so the diagnosis sees what the extractor would.
@@ -6946,12 +7005,11 @@ struct NewsTests {
                 coverage[key, default: 0] += value
             }
             for (rule, count) in diagnosis.rejections { coverage["rejected_\(rule)", default: 0] += count }
-            guard !excluded.contains(event.eventID), report["liveGenerated", default: 0] < target,
-                report["liveEvents", default: 0] < maxAttempts
-            else { continue }
+            guard measured else { continue }
             try await measure(
                 id: event.eventID, title: first.title, passages: passages, articles: members, live: true,
-                membership: event.membershipVersion, sources: event.sources.count, perspectives: diagnosis)
+                membership: event.membershipVersion, sources: event.sources.count, perspectives: diagnosis,
+                evidence: evidence)
         }
         if let harsh = active.first(where: { ($0.title + $0.description).lowercased().contains("killed") }) {
             let classification = await ArticleClassifier(textModel: measuredModel).classify(

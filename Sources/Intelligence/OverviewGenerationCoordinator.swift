@@ -295,7 +295,7 @@ actor OverviewGenerationCoordinator {
         let task = Task {
             let work = Task { await self.extractAndStore(article, store: store) }
             let stored = await Self.result(of: work, cancellingAt: deadline)
-            await self.finishExtraction(article, stored: stored)
+            self.finishExtraction(article, stored: stored)
         }
         extractionTasks[article.id] = task
     }
