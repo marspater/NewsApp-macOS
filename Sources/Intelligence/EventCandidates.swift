@@ -152,8 +152,8 @@ enum EventStoryRelation {
         guard earlier.language == "en", later.language == "en",
             earlier.date != DateParser.unknownDate, later.date != DateParser.unknownDate,
             gap > 0, gap <= window,
-            !earlier.people.union(earlier.organizations)
-                .isDisjoint(with: later.people.union(later.organizations)),
+            !earlier.people.isDisjoint(with: later.people)
+                || !earlier.organizations.isDisjoint(with: later.organizations),
             !earlier.localPlaces.isDisjoint(with: later.localPlaces),
             earlier.keywords.intersection(later.keywords)
                 .subtracting(earlier.anchors.union(later.anchors)).count >= 2

@@ -29,3 +29,9 @@ The regression checks actor/place/topic requirements, language and factual confl
 This does not close #314. Reader links are intentionally absent in this backend slice. Reviewed timeline notes retain their `different` clustering labels; those notes are not automatically relation-negative labels. A separate relation review needs both related positives and hard unrelated controls, followed by a measured wrong-link rate before reader exposure. No private corpus, sealed holdout, production library, installed application or design changes were modified or evaluated. #307's clustering release gate is still open.
 
 This conservative rule misses events without a typed actor/local place, overlapping reporting windows and unknown dates. The first target publication seeds FTS; repeated coverage can exhaust the bounded candidate rows. The results describe a snapshot: future navigation must resolve its IDs again after membership changes or retention. Synthetic regression success establishes mechanics, not real relation precision.
+
+## Progress and review follow-up
+
+PR #403 publishes commit `c370de9` for review. The full commit-hook regressions passed; the isolated arm64 app built and passed signing verification. The implementation remains a backend-only slice and does not complete the issue.
+
+Review identified a cross-type actor collision: intersecting the combined person/organization sets lost entity type. The follow-up checks people against people and organizations against organizations, with regressions for both collision directions and valid organization matches. Revalidation is pending. Hosted checks are recorded separately from local proof; neutral CodeQL infrastructure status is not a vulnerability finding.

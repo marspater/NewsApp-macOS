@@ -5953,6 +5953,19 @@ struct NewsTests {
             keywords: ["bridge", "river", "rebuild"], date: now)
         assertTrue(EventStoryRelation.supports(earlier, later), "Distinct acts may be related without matching")
         assertFalse(EventStoryRelation.supports(later, earlier), "Earlier links cannot point forward")
+        var organization = later
+        organization.people = []
+        organization.organizations = earlier.people
+        assertFalse(
+            EventStoryRelation.supports(earlier, organization), "Person-to-organization name collisions never link")
+        var earlierOrganization = earlier
+        earlierOrganization.people = []
+        earlierOrganization.organizations = organization.organizations
+        assertFalse(
+            EventStoryRelation.supports(earlierOrganization, later), "Organization-to-person name collisions never link"
+        )
+        assertTrue(
+            EventStoryRelation.supports(earlierOrganization, organization), "Shared typed organizations can link")
         for field in ["actor", "place", "country", "language", "topic", "date", "period"] {
             var other = later
             switch field {
