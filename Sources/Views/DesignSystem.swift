@@ -174,6 +174,9 @@ enum AppTypography {
         .system(size: 11 * scale)
     }
 
+    /// A cited publisher passage, distinct from generated summaries.
+    static let readerCitation = Font.system(size: 13, weight: .medium, design: .serif)
+
     static func readerCodeFont() -> Font {
         .system(.body, design: .monospaced)
     }
@@ -277,5 +280,54 @@ extension TagView {
     /// Marks generated content; the only use of the intelligence color besides its glyphs.
     static func intelligence(_ title: String = "AI") -> TagView {
         TagView(title: title, systemImage: "sparkles", tint: AppColor.intelligence)
+    }
+}
+
+
+// MARK: - Shared content labels and notices
+
+/// Generated content is always identified by a sparkles glyph, not by gold body text.
+struct IntelligenceLabel: View {
+    let title: String
+
+    init(_ title: String) {
+        self.title = title
+    }
+
+    var body: some View {
+        HStack(spacing: AppSpacing.eyebrowGap) {
+            Image(systemName: "sparkles")
+                .foregroundStyle(AppColor.intelligence)
+                .accessibilityHidden(true)
+            Text(title)
+                .foregroundStyle(AppColor.primaryText)
+        }
+        .font(AppTypography.headline)
+        .accessibilityElement(children: .combine)
+    }
+}
+
+/// Consistent in-content notice, never a floating glass control.
+struct NoticeView<Content: View>: View {
+    var tint: Color = AppColor.secondaryLabel
+    @ViewBuilder let content: Content
+    @Environment(\.effectiveContrast) private var contrast
+
+    init(tint: Color = AppColor.secondaryLabel, @ViewBuilder content: () -> Content) {
+        self.tint = tint
+        self.content = content()
+    }
+
+    var body: some View {
+        content
+            .padding(AppSpacing.sm)
+            .background(
+                tint.opacity(contrast == .increased ? 0.18 : 0.10),
+                in: RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous)
+                    .stroke(tint.opacity(contrast == .increased ? 1 : 0.30), lineWidth: 1)
+            }
     }
 }

@@ -255,26 +255,27 @@ struct ArticleDetailView: View {
         ScrollView {
             VStack(spacing: 0) {
                 // 2. Editorial Content Hierarchy: Eyebrow -> Title -> AI Summary -> Body -> Terminal Affordance
-                VStack(alignment: .leading, spacing: 18) {
+                VStack(alignment: .leading, spacing: AppSpacing.md) {
                     // Highlighted passage cited in Event Overview
                     if let passage = highlightedPassage {
-                        HStack(alignment: .top, spacing: 10) {
-                            HStack(alignment: .top, spacing: 10) {
+                        NoticeView(tint: AppColor.accent) {
+                            HStack(alignment: .top, spacing: AppSpacing.xs) {
+                            HStack(alignment: .top, spacing: AppSpacing.xs) {
                                 Image(systemName: "quote.bubble.fill")
-                                    .font(.system(size: 14))
+                                    .font(AppTypography.body)
                                     .foregroundColor(AppColor.accent)
-                                    .padding(.top, 2)
+                                    .padding(.top, AppSpacing.textStack)
                                     .accessibilityHidden(true)
 
-                                VStack(alignment: .leading, spacing: 4) {
+                                VStack(alignment: .leading, spacing: AppSpacing.xxs) {
                                     Text("Cited in Event Overview")
-                                        .font(.system(size: 11, weight: .bold))
+                                        .font(AppTypography.eyebrow)
                                         .foregroundColor(AppColor.accent)
 
                                     Text("“\(passage)”")
-                                        .font(.system(size: 13, weight: .medium, design: .serif))
+                                        .font(AppTypography.readerCitation)
                                         .foregroundColor(AppColor.primaryText)
-                                        .lineSpacing(2)
+                                        .lineSpacing(AppSpacing.textStack)
                                         .textSelection(.enabled)
                                 }
                             }
@@ -293,7 +294,7 @@ struct ArticleDetailView: View {
                                 }
                             } label: {
                                 Image(systemName: "xmark.circle.fill")
-                                    .font(.system(size: 13))
+                                    .font(AppTypography.body)
                                     .foregroundColor(AppColor.secondaryText)
                             }
                             .buttonStyle(.plain)
@@ -301,34 +302,25 @@ struct ArticleDetailView: View {
                             .help("Dismiss citation highlight")
                             .accessibilityLabel("Dismiss citation highlight")
                         }
-                        .padding(12)
-                        .background(AppColor.accent.opacity(0.1))
-                        .clipShape(RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous)
-                                .stroke(AppColor.accent.opacity(contrast == .increased ? 1 : 0.3), lineWidth: 1)
-                        )
+                        }
                     }
 
                     // Eyebrow: Source, Date, Reading Time
-                    HStack(spacing: 6) {
-                        Text(displaySource.uppercased())
-                            .font(.system(size: 11, weight: .bold))
-                            .tracking(1.1)
-                            .foregroundColor(AppColor.accent)
+                    HStack(spacing: AppSpacing.eyebrowGap) {
+                        EyebrowText(displaySource, color: AppColor.accent)
 
                         Text("·")
                             .foregroundColor(tertiaryText)
 
                         Text(currentArticle.publicationDateText)
-                            .font(.system(size: 12, weight: .medium))
+                            .font(AppTypography.label)
                             .foregroundColor(AppColor.secondaryText)
 
                         Text("·")
                             .foregroundColor(tertiaryText)
 
                         Text(readingTimeEstimate)
-                            .font(.system(size: 12, weight: .medium))
+                            .font(AppTypography.label)
                             .foregroundColor(AppColor.secondaryText)
                     }
                     .accessibilityElement(children: .ignore)
@@ -445,7 +437,7 @@ struct ArticleDetailView: View {
             ProgressView()
                 .controlSize(.small)
             Text("Loading full article…")
-                .font(.system(size: 13, weight: .medium))
+                .font(AppTypography.label)
                 .foregroundColor(AppColor.secondaryText)
         }
         .accessibilityElement(children: .combine)
@@ -455,25 +447,25 @@ struct ArticleDetailView: View {
     }
 
     private func fallbackStateView(reason: String) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 8) {
+        VStack(alignment: .leading, spacing: AppSpacing.sm) {
+            HStack(spacing: AppSpacing.xs) {
                 Image(systemName: "doc.text.magnifyingglass")
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(AppTypography.sectionTitle)
                     .foregroundColor(AppColor.secondaryText)
                     .accessibilityHidden(true)
                 Text("Full article unavailable in reader")
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(AppTypography.headline)
                     .foregroundColor(AppColor.primaryText)
                 Spacer()
                 Button {
                     reloadGeneration += 1
                 } label: {
-                    HStack(spacing: 4) {
+                    HStack(spacing: AppSpacing.xxs) {
                         Image(systemName: "arrow.clockwise")
                             .accessibilityHidden(true)
                         Text("Retry")
                     }
-                    .font(.system(size: 11, weight: .medium))
+                    .font(AppTypography.caption)
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
@@ -481,12 +473,12 @@ struct ArticleDetailView: View {
                 Button {
                     viewMode = .web
                 } label: {
-                    HStack(spacing: 4) {
+                    HStack(spacing: AppSpacing.xxs) {
                         Image(systemName: "safari")
                             .accessibilityHidden(true)
                         Text("Open Web View (W)")
                     }
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(AppTypography.eyebrow)
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
@@ -494,19 +486,19 @@ struct ArticleDetailView: View {
             }
 
             Text(reason)
-                .font(.system(size: 12))
+                .font(AppTypography.callout)
                 .foregroundColor(AppColor.secondaryText)
 
             Divider().opacity(Self.dividerOpacity(for: contrast))
 
             Text(currentArticle.fullContent == nil ? "FEED SUMMARY PREVIEW" : "PREVIOUSLY SAVED TEXT")
-                .font(.system(size: 10, weight: .bold))
+                .font(AppTypography.eyebrow)
                 .tracking(1.0)
                 .foregroundColor(tertiaryText)
 
             articleDescriptionParagraphs
         }
-        .padding(16)
+        .padding(AppSpacing.md)
         .background(AppColor.surface.opacity(0.55), in: RoundedRectangle(cornerRadius: AppRadius.card))
         .overlay(
             RoundedRectangle(cornerRadius: AppRadius.card).stroke(borderColor(AppColor.borderSubtle), lineWidth: 1))
@@ -515,7 +507,7 @@ struct ArticleDetailView: View {
     @ViewBuilder
     private var articleDescriptionParagraphs: some View {
         let paragraphs = displayParagraphs
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: AppSpacing.sm) {
             ForEach(Array(paragraphs.enumerated()), id: \.offset) { _, paragraph in
                 Text(paragraph)
                     .font(AppTypography.bodyFont(for: themeManager.articleTheme, scale: readerTextScale))
@@ -619,15 +611,7 @@ struct ArticleDetailView: View {
     }
 
     private func summaryTag(_ text: String, emphasized: Bool = false) -> some View {
-        Text(text)
-            .font(AppTypography.label)
-            .foregroundStyle(emphasized ? AppColor.accent : AppColor.secondaryText)
-            .padding(.horizontal, AppSpacing.sm)
-            .padding(.vertical, 6)
-            .background(
-                emphasized ? AppColor.accent.opacity(0.10) : AppColor.badgeBackground,
-                in: RoundedRectangle(cornerRadius: AppRadius.control)
-            )
+        TagView(title: text, tint: emphasized ? AppColor.accent : AppColor.secondaryLabel)
             .fixedSize(horizontal: false, vertical: true)
     }
 
@@ -638,13 +622,13 @@ struct ArticleDetailView: View {
                 .padding(.vertical, AppSpacing.sm)
 
             HStack(spacing: AppSpacing.md) {
-                VStack(alignment: .leading, spacing: 3) {
+                VStack(alignment: .leading, spacing: AppSpacing.textStack) {
                     Text("Read original article on \(displaySource)")
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(AppTypography.headline)
                         .foregroundColor(AppColor.primaryText)
                     if let host = URL(string: currentArticle.link)?.host {
                         Text(host)
-                            .font(.system(size: 11, design: .monospaced))
+                            .font(AppTypography.caption.monospaced())
                             .foregroundColor(AppColor.secondaryText)
                     }
                 }
@@ -654,15 +638,15 @@ struct ArticleDetailView: View {
                 Button {
                     viewMode = .web
                 } label: {
-                    HStack(spacing: 6) {
+                    HStack(spacing: AppSpacing.eyebrowGap) {
                         Image(systemName: "safari")
                             .accessibilityHidden(true)
                         Text("Open Web View (W)")
                     }
-                    .font(.system(size: 12, weight: .medium))
+                    .font(AppTypography.label)
                     .foregroundColor(AppColor.primaryText)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 8)
+                    .padding(.horizontal, AppSpacing.sm)
+                    .padding(.vertical, AppSpacing.xs)
                     .background(AppColor.surface.opacity(0.85))
                     .clipShape(Capsule())
                     .overlay(
@@ -679,15 +663,15 @@ struct ArticleDetailView: View {
                     Button {
                         openInBrowser()
                     } label: {
-                        HStack(spacing: 5) {
+                        HStack(spacing: AppSpacing.eyebrowGap) {
                             Image(systemName: "arrow.up.right")
                                 .accessibilityHidden(true)
                             Text("External")
                         }
-                        .font(.system(size: 12, weight: .medium))
+                        .font(AppTypography.label)
                         .foregroundColor(AppColor.secondaryText)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 8)
+                        .padding(.horizontal, AppSpacing.sm)
+                        .padding(.vertical, AppSpacing.xs)
                         .background(AppColor.surface.opacity(0.6))
                         .clipShape(Capsule())
                         .overlay(
@@ -748,7 +732,7 @@ struct ArticleDetailView: View {
                 VStack(spacing: AppSpacing.sm) {
                     Spacer()
                     Image(systemName: "exclamationmark.triangle")
-                        .font(.system(size: 32))
+                        .imageScale(.large)
                         .foregroundColor(AppColor.secondaryText)
                     Text("Invalid article URL")
                         .font(AppTypography.headline)
@@ -805,7 +789,7 @@ struct ArticleDetailView: View {
             .accessibilityLabel("Reading mode")
 
             if isOverviewLoading && currentOverview == nil {
-                HStack(spacing: 6) {
+                HStack(spacing: AppSpacing.eyebrowGap) {
                     ProgressView()
                         .controlSize(.small)
                     Text("Loading event overview…")
@@ -1066,52 +1050,44 @@ struct ArticleDetailView: View {
                     .controlSize(.small)
                     .scaleEffect(0.8)
                 Text("Analyzing article with on-device AI...")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundColor(AppColor.intelligence)
+                    .font(AppTypography.label)
+                    .foregroundColor(AppColor.secondaryText)
             }
             .accessibilityElement(children: .combine)
             .accessibilityLabel("Analyzing article with on-device AI")
-            .padding(12)
+            .padding(AppSpacing.sm)
             .background(AppColor.surface, in: RoundedRectangle(cornerRadius: AppRadius.card))
         } else if let analysis = analysis {
-            VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: AppSpacing.sm) {
                 // Section Header: Restrained Summary
-                HStack(spacing: 6) {
-                    Image(systemName: "sparkles")
-                        .font(.system(size: 12))
-                        .foregroundColor(AppColor.intelligence)
-                        .accessibilityHidden(true)
-                    Text(
-                        analysis.modelIdentifier == "apple.natural-language.fallback"
-                            ? "Extractive summary" : "AI-generated summary"
-                    )
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundColor(AppColor.primaryText)
-                }
+                IntelligenceLabel(
+                    analysis.modelIdentifier == "apple.natural-language.fallback"
+                        ? "Extractive summary" : "AI-generated summary"
+                )
 
                 Text(analysis.summary)
-                    .font(.system(size: 14, weight: .regular))
+                    .font(AppTypography.body)
                     .foregroundColor(readableText(0.92))
                     .lineSpacing(AppTypography.bodyLineSpacing(for: themeManager.articleTheme))
                     .textSelection(.enabled)
 
                 // Key Takeaways
                 if !analysis.keyPoints.isEmpty {
-                    VStack(alignment: .leading, spacing: 8) {
+                    VStack(alignment: .leading, spacing: AppSpacing.xs) {
                         Text("Key Takeaways")
-                            .font(.system(size: 12, weight: .semibold))
+                            .font(AppTypography.label)
                             .foregroundColor(AppColor.secondaryText)
-                            .padding(.top, 2)
+                            .padding(.top, AppSpacing.textStack)
 
                         ForEach(analysis.keyPoints, id: \.self) { point in
-                            HStack(alignment: .top, spacing: 8) {
+                            HStack(alignment: .top, spacing: AppSpacing.xs) {
                                 Circle()
                                     .fill(AppColor.intelligence.opacity(0.8))
                                     .frame(width: 5, height: 5)
-                                    .padding(.top, 6)
+                                    .padding(.top, AppSpacing.eyebrowGap)
                                     .accessibilityHidden(true)
                                 Text(point)
-                                    .font(.system(size: 13))
+                                    .font(AppTypography.body)
                                     .foregroundColor(readableText(0.88))
                                     .textSelection(.enabled)
                             }
@@ -1133,14 +1109,14 @@ struct ArticleDetailView: View {
                         .foregroundStyle(AppColor.secondaryText)
                 }
             }
-            .padding(14)
+            .padding(AppSpacing.sm)
             .background(AppColor.surface, in: RoundedRectangle(cornerRadius: AppRadius.card))
         } else if let error = analysisError {
-            HStack(spacing: 10) {
+            HStack(spacing: AppSpacing.xs) {
                 Image(systemName: "exclamationmark.triangle")
                     .foregroundColor(AppColor.warning)
                 Text("AI analysis unavailable: \(error)")
-                    .font(.system(size: 12))
+                    .font(AppTypography.callout)
                     .foregroundColor(AppColor.secondaryText)
                 Spacer()
                 Button("Close summary") {
@@ -1155,27 +1131,19 @@ struct ArticleDetailView: View {
                 .buttonStyle(.bordered)
                 .controlSize(.small)
             }
-            .padding(12)
+            .padding(AppSpacing.sm)
             .background(AppColor.surface, in: RoundedRectangle(cornerRadius: AppRadius.card))
         } else if let ai = currentArticle.aiSummary {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 6) {
-                    Image(systemName: "sparkles")
-                        .font(.system(size: 12))
-                        .foregroundColor(AppColor.intelligence)
-                        .accessibilityHidden(true)
-                    Text("AI-generated summary")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(AppColor.primaryText)
-                }
+            VStack(alignment: .leading, spacing: AppSpacing.xs) {
+                IntelligenceLabel("AI-generated summary")
 
                 Text(ai)
-                    .font(.system(size: 14, weight: .regular))
+                    .font(AppTypography.body)
                     .foregroundColor(readableText(0.92))
                     .lineSpacing(AppTypography.bodyLineSpacing(for: themeManager.articleTheme))
                     .textSelection(.enabled)
             }
-            .padding(14)
+            .padding(AppSpacing.sm)
             .background(AppColor.surface, in: RoundedRectangle(cornerRadius: AppRadius.card))
         }
     }
@@ -1493,17 +1461,17 @@ struct ReaderFigureView: View {
                 .clipShape(RoundedRectangle(cornerRadius: AppRadius.card))
             }
             if !block.text.isEmpty {
-                Text(block.text).font(.system(size: 11 * textScale)).foregroundStyle(AppColor.secondaryText)
+                Text(block.text).font(AppTypography.readerCaptionFont(scale: textScale)).foregroundStyle(AppColor.secondaryText)
                     .textSelection(.enabled)
             }
             if let credit = block.imageCredit, !credit.isEmpty {
-                Text(credit).font(.system(size: 11 * textScale)).foregroundStyle(AppColor.secondaryText).textSelection(
+                Text(credit).font(AppTypography.readerCaptionFont(scale: textScale)).foregroundStyle(AppColor.secondaryText).textSelection(
                     .enabled
                 )
                 .accessibilityLabel("Image credit: " + credit)
             }
             Text("Image source: " + (url.host ?? "Publisher"))
-                .font(.system(size: 11 * textScale)).foregroundStyle(AppColor.secondaryText).textSelection(.enabled)
+                .font(AppTypography.readerCaptionFont(scale: textScale)).foregroundStyle(AppColor.secondaryText).textSelection(.enabled)
         }
     }
 
