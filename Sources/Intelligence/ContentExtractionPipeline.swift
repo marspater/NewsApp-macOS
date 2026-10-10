@@ -326,22 +326,32 @@ final class DOMElementNode: Sendable {
                 let source = image.readerImageSource,
                 image.attributes["alt"]?.range(of: #"\blogo\b"#, options: [.regularExpression, .caseInsensitive]) == nil
             else { return nil }
+            // Responsive layouts (The Guardian) repeat one figcaption per breakpoint; each distinct caption appears once.
+            var seenCaptions = Set<String>()
             let caption = findNodes(tag: "figcaption").map { node in
                 node.children.filter { !$0.className.contains("credit") && !$0.className.contains("attribution") }.map {
                     $0.combinedText()
                 }.joined()
-            }.joined(separator: " ")
-                .replacingOccurrences(of: "[ \t\r\n]+", with: " ", options: .regularExpression)
-                .trimmingCharacters(in: .whitespacesAndNewlines)
+                    .replacingOccurrences(of: "[ \t\r\n]+", with: " ", options: .regularExpression)
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+            }.filter { !$0.isEmpty && seenCaptions.insert($0).inserted }.joined(separator: " ")
+            let credit =
+                (image.attributes["data-credit"] ?? attributes["data-credit"]
+                ?? findNodes(tag: "figcaption").flatMap { $0.children }.first(where: {
+                    $0.className.contains("credit") || $0.className.contains("attribution")
+                })?.combinedText())?.trimmingCharacters(in: .whitespacesAndNewlines)
             return ReaderBlock(
                 kind: .figure, text: String(caption.prefix(2000)), imageURL: source,
                 imageAlt: (image.attributes["alt"] ?? findNodes(tag: "img").first?.attributes["alt"]).map {
                     String($0.prefix(500))
                 },
-                imageCredit: image.attributes["data-credit"] ?? attributes["data-credit"]
-                    ?? findNodes(tag: "figcaption").flatMap { $0.children }.first(where: {
-                        $0.className.contains("credit") || $0.className.contains("attribution")
-                    })?.combinedText(),
+                // A credit already printed inside the caption is not repeated below it.
+                imageCredit: credit.flatMap {
+                    $0.isEmpty
+                        || caption.contains(
+                            $0.replacingOccurrences(of: "[ \t\r\n]+", with: " ", options: .regularExpression))
+                        ? nil : $0
+                },
                 imageWidth: (image.attributes["width"] ?? findNodes(tag: "img").first?.attributes["width"]).flatMap(
                     Int.init),
                 imageHeight: (image.attributes["height"] ?? findNodes(tag: "img").first?.attributes["height"]).flatMap(

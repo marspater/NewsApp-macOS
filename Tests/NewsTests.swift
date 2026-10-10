@@ -11363,6 +11363,8 @@ struct NewsTests {
             "<article><p style='display:none'>HIDDEN PROSE</p><p>\(first)</p><p>\(second)</p></article>",
             "<article><p>\(first)</p><figure><img data-src='/photo.jpg' width=1200 height=800 alt='Publisher reporting'><figcaption>Actual scene <span class='photo-credit'>Agency / Photographer</span></figcaption></figure><p>\(second)</p></article>",
             "<article><p>\(first)</p><picture><source srcset='/small.jpg 400w, /large.jpg 1200w'><img src='/fallback.jpg' width=1200 height=800></picture><noscript><img src='/backup.jpg'></noscript><p>\(second)</p></article>",
+            // The Guardian repeats the figcaption per breakpoint and its credit sits inside the caption text.
+            "<article><p>\(first)</p><figure data-credit='Jen Golbeck/SOPA\n  Images/Shutterstock'><picture><img src='/beach.jpg' width=1200 height=800 alt='A young girl runs on a beach'></picture><span><figcaption><span><svg></svg></span><span>A girl runs on Orange Beach.</span> Photograph: Jen Golbeck/SOPA Images/Shutterstock</figcaption></span><span><figcaption><span></span><span>A girl runs on Orange Beach.</span> Photograph: Jen Golbeck/SOPA Images/Shutterstock</figcaption></span></figure><p>\(second)</p></article>",
         ]
         var documents = [ReaderDocument]()
         for (index, html) in shapes.enumerated() {
@@ -11396,6 +11398,11 @@ struct NewsTests {
         assertEqual(figure.text, "Actual scene", "Credit stays out of caption")
         assertEqual(figure.imageCredit, "Agency / Photographer", "Credit retained separately")
         assertEqual(figure.imageWidth, 1200, "Unquoted dimensions retained")
+        let responsiveFigure = documents[12].blocks.first { $0.kind == .figure }!
+        assertEqual(
+            responsiveFigure.text, "A girl runs on Orange Beach. Photograph: Jen Golbeck/SOPA Images/Shutterstock",
+            "Breakpoint copies of one figcaption render once")
+        assertEqual(responsiveFigure.imageCredit, nil, "Credit already inside the caption is not repeated")
         assertTrue(
             documents[11].images?.contains { $0.url.hasSuffix("/large.jpg") } == true,
             "Suitable responsive source chosen")
