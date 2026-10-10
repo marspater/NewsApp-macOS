@@ -683,7 +683,7 @@ struct NativeUIQAChecks {
         assertEqual(SettingsPane.storage.rawValue, "storage", "Storage pane raw value")
         assertEqual(SettingsPane.updates.rawValue, "updates", "Updates pane raw value")
         assertEqual(SettingsView.lastPaneStorageKey, "lastSettingsPane", "Last pane storage key matches standard")
-        assertEqual(SettingsView.paneWidth, 500, "Settings pane width is 500pt")
+        assertEqual(SettingsView.paneWidth, 720, "Settings pane width fits all nine tabs")
     }
 
     static func testSecondaryWindowAndSheetChrome() {

@@ -17,7 +17,8 @@ enum SettingsPane: String, CaseIterable, Identifiable {
 
 struct SettingsView: View {
     static let lastPaneStorageKey = "lastSettingsPane"
-    static let paneWidth: CGFloat = 500
+    /// Wide enough for all nine tabs in the toolbar, so none overflow into a menu.
+    static let paneWidth: CGFloat = 720
 
     @EnvironmentObject var appSettings: AppSettings
     @EnvironmentObject var articleStore: ArticleStore
