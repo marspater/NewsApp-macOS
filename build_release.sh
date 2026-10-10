@@ -32,6 +32,7 @@ SWIFT_SOURCES=(
     Sources/Models/FeedError.swift
     Sources/Models/FeedFetchState.swift
     Sources/Models/FeedCatalog.swift
+    Sources/Models/FeedAdvisory.swift
     Sources/Models/MuteRules.swift
     Sources/Services/IPAddressValidator.swift
     Sources/Models/ArticleIdentity.swift

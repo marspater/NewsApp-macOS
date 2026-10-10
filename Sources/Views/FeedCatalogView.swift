@@ -148,7 +148,7 @@ struct FeedCatalogView: View {
                 if subscribed {
                     FeedHealthLine(health: feedManager.feedHealth[feed.url])
                 }
-                if let advisory = FeedCatalog.advisory(for: feed.url) {
+                if let advisory = appSettings.visibleAdvisory(for: feed.url) {
                     Text("Review note (\(advisory.date)): \(advisory.summary)")
                         .font(AppTypography.caption)
                         .foregroundColor(AppColor.warning)

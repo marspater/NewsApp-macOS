@@ -266,6 +266,14 @@ final class AppSettings: ObservableObject {
         return dismissedDate >= date
     }
 
+    /// The maintainer advisory to show for a feed URL unless the reader dismissed it; every view shows advisories through this.
+    func visibleAdvisory(for url: String) -> FeedAdvisory? {
+        guard let advisory = FeedCatalog.advisory(for: url), !isAdvisoryDismissed(for: url, date: advisory.date) else {
+            return nil
+        }
+        return advisory
+    }
+
     func addSection(_ name: String) {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, !userSections.contains(trimmed) else { return }

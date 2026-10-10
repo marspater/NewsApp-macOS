@@ -231,9 +231,9 @@ struct SettingsView: View {
                                 .lineLimit(1)
                                 .foregroundColor(AppColor.primaryText)
                             FeedHealthLine(health: feedManager.feedHealth[urlString])
-                            if let advisory = FeedCatalog.advisory(for: urlString),
-                                !appSettings.isAdvisoryDismissed(for: urlString, date: advisory.date)
-                            {
+                            if let advisory = appSettings.visibleAdvisory(for: urlString) {
+                                let alternatives = FeedCatalog.alternatives(for: urlString)
+                                    .filter { !appSettings.isSubscribed($0) }
                                 NoticeView(tint: AppColor.warning) {
                                     VStack(alignment: .leading, spacing: AppSpacing.xxs) {
                                         Text("Review note (\(advisory.date)): \(advisory.summary)")
@@ -241,12 +241,19 @@ struct SettingsView: View {
                                             .foregroundColor(AppColor.primaryText)
                                             .fixedSize(horizontal: false, vertical: true)
                                         HStack(spacing: AppSpacing.sm) {
-                                            Button("View Alternatives") {
-                                                showsCatalog = true
+                                            if !alternatives.isEmpty {
+                                                Menu("Alternatives") {
+                                                    ForEach(alternatives) { feed in
+                                                        Button("Subscribe to \(feed.title)") {
+                                                            feedManager.addCatalogFeeds([feed])
+                                                        }
+                                                    }
+                                                }
+                                                .font(AppTypography.caption)
+                                                .controlSize(.small)
+                                                .fixedSize()
+                                                .accessibilityLabel("Alternatives to \(urlString)")
                                             }
-                                            .font(AppTypography.caption)
-                                            .controlSize(.small)
-                                            .accessibilityLabel("View alternatives for \(urlString)")
 
                                             Button("Dismiss") {
                                                 appSettings.dismissAdvisory(for: urlString, date: advisory.date)

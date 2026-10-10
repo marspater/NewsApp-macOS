@@ -3137,6 +3137,13 @@ struct NewsTests {
         let altIDs = Set(f24Alternatives.map(\.id))
         assertTrue(altIDs.contains("bbc-world") || altIDs.contains("dw-english"), "Contains expected alternatives")
         assertFalse(altIDs.contains("france-24"), "Feed never recommends itself as an alternative")
+        assertTrue(
+            f24Alternatives.allSatisfy(FeedCatalog.feeds.contains), "Alternatives are offered, never parked, feeds")
+        let retiredAlternatives = FeedCatalog.alternatives(
+            for: "https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml")
+        assertEqual(
+            Set(retiredAlternatives.map(\.id)), ["guardian-world", "bbc-world"],
+            "A retired feed outside the catalog still gets its suggested alternatives")
 
         // 4. Fallback alternative lookup for feeds without explicit alternative list
         let techCrunch = "https://techcrunch.com/feed"
@@ -3183,6 +3190,10 @@ struct NewsTests {
         assertFalse(testSettings.isAdvisoryDismissed(for: targetFeed, date: "2026-10-08"), "Not dismissed initially")
 
         testSettings.dismissAdvisory(for: targetFeed + "/", date: "2026-10-08")
+        assertTrue(testSettings.visibleAdvisory(for: targetFeed) == nil, "A dismissed advisory is hidden in every view")
+        assertTrue(
+            testSettings.visibleAdvisory(for: "https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml") != nil,
+            "Dismissing one feed's advisory leaves other advisories visible")
         assertTrue(
             testSettings.isAdvisoryDismissed(for: targetFeed, date: "2026-10-08"), "Dismissal persists normalized")
         assertTrue(
@@ -3196,12 +3207,14 @@ struct NewsTests {
             reloadedSettings.isAdvisoryDismissed(for: targetFeed, date: "2026-10-08"),
             "Reloaded settings retains dismissal")
 
-        // Invariant: Subscriptions are never silently removed when a feed has an advisory
-        testSettings.feedURLs = [targetFeed, "https://example.com/custom.xml"]
-        let currentSubs = testSettings.feedURLs
-        let advisory = FeedCatalog.advisory(for: targetFeed)
-        assertTrue(advisory != nil, "Advisory exists for target feed")
-        assertEqual(testSettings.feedURLs, currentSubs, "Feed with active advisory remains in user subscriptions")
+        // Invariant: subscriptions to advised or retired feeds survive a relaunch
+        let retiredFeed = "https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml"
+        _ = testSettings.addFeed(url: targetFeed)
+        _ = testSettings.addFeed(url: retiredFeed)
+        let relaunched = AppSettings(defaults: dismissDefaults)
+        assertTrue(
+            relaunched.feedURLs.contains(targetFeed) && relaunched.feedURLs.contains(retiredFeed),
+            "Feeds with advisories remain in user subscriptions after relaunch")
     }
 
     /// Fetches every catalog feed through the app's own protected networking and parsers. Needs the network.
