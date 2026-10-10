@@ -185,7 +185,7 @@ macOS has no Dynamic Type. Chrome uses system text styles so it matches system c
 ## 12. Shape, spacing and elevation
 
 - Spacing uses `AppSpacing` (4 pt grid: 4, 8, 12, 16, 24, 32, 48). Two micro steps exist for text clusters only: 2 pt between stacked text lines and 6 pt between an eyebrow's parts. No other literal padding or spacing.
-- Radii: `AppRadius.control` (6) for small rectangles, `card` (12), `container` (16), and `Capsule()` for tags and pills. Use continuous corners. On macOS 26 and later, a shape inside another rounded container or near the window corner is concentric: `ConcentricRectangle(corners: .concentric(minimum: AppRadius.card), isUniform: true)`.
+- Radii: `AppRadius.control` (6) for small rectangles, `card` (12), `container` (16), and `Capsule()` for tags and pills. Use continuous corners. On macOS 26 and later, a shape inside another rounded container or near the window corner is concentric: `ConcentricRectangle(corners: .concentric(minimum: .fixed(AppRadius.card)), isUniform: true)`.
 - Never hard-code control heights or toolbar heights; the system owns them and changed them in macOS 26.
 - Elevation: content cards use the resting, hover and focus shadow tokens only. Glass brings its own depth; never add shadows to glass or system controls.
 - Layout tokens: `pageInset` 24, `sectionGap` 24, `cardGap` 16, list maximum width 1000, grid columns adaptive 300–420, `readingMeasure` 720.
