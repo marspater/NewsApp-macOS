@@ -31,6 +31,9 @@ def instant(raw):
         return None
 
 
+TYPE_KEY = '@type'
+
+
 class Page(HTMLParser):
     def __init__(self, text, url):
         super().__init__(convert_charrefs=True)
@@ -39,56 +42,81 @@ class Page(HTMLParser):
         self.cms = []
         self.feed(text)
         self.close()
-        identities = {document_key(url)} | {document_key(link['url']) for link in self.links if link['rel'] == 'canonical' and document_key(link['url']) is not None and urlsplit(link['url']).netloc == urlsplit(url).netloc}
+        self._extract_jsonld()
+
+    def _canonical_identities(self):
+        return {document_key(self.url)} | {
+            document_key(link['url'])
+            for link in self.links
+            if link['rel'] == 'canonical'
+            and document_key(link['url']) is not None
+            and urlsplit(link['url']).netloc == urlsplit(self.url).netloc
+        }
+
+    def _jsonld_nodes(self, script):
+        try:
+            data = json.loads(script)
+        except ValueError:
+            return []
+        if isinstance(data, list):
+            nodes = data
+        elif isinstance(data, dict):
+            nodes = data.get('@graph', [data])
+        else:
+            nodes = []
+        return nodes if isinstance(nodes, list) else []
+
+    def _extract_jsonld_node(self, node, identities):
+        if not isinstance(node, dict):
+            return
+        types = node.get(TYPE_KEY, [])
+        types = [types] if isinstance(types, str) else types
+        if not isinstance(types, list):
+            return
+        if not any(t in ('Article', 'NewsArticle', 'ReportageNewsArticle', 'BlogPosting', 'WebPage', 'VideoObject') for t in types):
+            return
+        identity = node.get('url') or node.get('@id') or node.get('mainEntityOfPage')
+        if isinstance(identity, dict):
+            identity = identity.get('@id') or identity.get('url')
+        if not isinstance(identity, str) or len(identity) > 8192:
+            return
+        try:
+            key = document_key(urljoin(self.url, identity))
+        except ValueError:
+            return
+        if key is None or key not in identities:
+            return
+        for field in ('datePublished', 'dateModified'):
+            self.add(field, node.get(field), 'jsonld:' + field)
+
+    def _extract_jsonld(self):
+        identities = self._canonical_identities()
         for script in self.scripts:
-            try:
-                data = json.loads(script)
-            except ValueError:
-                continue
-            # Only top-level objects/@graph: nested recommendations are unrelated documents.
-            nodes = data if isinstance(data, list) else data.get('@graph', [data]) if isinstance(data, dict) else []
-            if not isinstance(nodes, list):
-                continue
-            for node in nodes:
-                if not isinstance(node, dict):
-                    continue
-                types = node.get('@type', [])
-                types = [types] if isinstance(types, str) else types
-                if not isinstance(types, list):
-                    continue
-                if not any(t in ('Article', 'NewsArticle', 'ReportageNewsArticle', 'BlogPosting', 'WebPage', 'VideoObject') for t in types):
-                    continue
-                identity = node.get('url') or node.get('@id') or node.get('mainEntityOfPage')
-                if isinstance(identity, dict):
-                    identity = identity.get('@id') or identity.get('url')
-                if not isinstance(identity, str) or len(identity) > 8192:
-                    continue
-                try:
-                    key = document_key(urljoin(url, identity))
-                except ValueError:
-                    continue
-                if key is None or key not in identities:
-                    continue
-                for field in ('datePublished', 'dateModified'):
-                    self.add(field, node.get(field), 'jsonld:' + field)
+            for node in self._jsonld_nodes(script):
+                self._extract_jsonld_node(node, identities)
 
     def add(self, kind, value, field):
         if isinstance(value, str) and len(value) <= 128:
-            self.dates.append(dict(kind=kind, field=field, raw=value, epoch=instant(value)))
+            self.dates.append({'kind': kind, 'field': field, 'raw': value, 'epoch': instant(value)})
+
+    def _parse_africanews_cms(self, attributes):
+        if urlsplit(self.url).hostname not in ('africanews.com', 'www.africanews.com'):
+            return
+        raw = attributes.get('data-content') or ''
+        try:
+            data = json.loads(raw) if len(raw) <= 1_000_000 else None
+        except ValueError:
+            data = None
+        if isinstance(data, dict) and isinstance(data.get('canonical'), str) and document_key(data['canonical']) == document_key(self.url):
+            for field in ('createdAt', 'publishedAt', 'firstPublishedAt', 'lastPublishedAt', 'updatedAt'):
+                value = data.get(field)
+                if isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= 4_102_444_800:
+                    self.cms.append({'field': 'cms:' + field, 'epoch': value})
 
     def handle_starttag(self, tag, attributes):
         a = dict(attributes)
-        if tag == 'div' and a.get('id') == 'jsMainMediaArticle' and urlsplit(self.url).hostname in ('africanews.com', 'www.africanews.com'):
-            raw = a.get('data-content') or ''
-            try:
-                data = json.loads(raw) if len(raw) <= 1_000_000 else None
-            except ValueError:
-                data = None
-            if isinstance(data, dict) and isinstance(data.get('canonical'), str) and document_key(data['canonical']) == document_key(self.url):
-                for field in ('createdAt', 'publishedAt', 'firstPublishedAt', 'lastPublishedAt', 'updatedAt'):
-                    value = data.get(field)
-                    if type(value) is int and 0 <= value <= 4_102_444_800:
-                        self.cms.append(dict(field='cms:' + field, epoch=value))
+        if tag == 'div' and a.get('id') == 'jsMainMediaArticle':
+            self._parse_africanews_cms(a)
         if tag == 'meta':
             key = (a.get('property') or a.get('name') or a.get('itemprop') or '').lower()
             if key in ('article:published_time', 'og:article:published_time', 'datepublished'):
@@ -104,7 +132,7 @@ class Page(HTMLParser):
                         resolved = urljoin(self.url, a['href'])
                     except ValueError:
                         continue
-                    self.links.append(dict(rel=rel, url=resolved, type=a.get('type', ''), language=a.get('hreflang', '')))
+                    self.links.append({'rel': rel, 'url': resolved, 'type': a.get('type', ''), 'language': a.get('hreflang', '')})
         if tag == 'script' and a.get('type', '').lower() == 'application/ld+json':
             self.script = []
 
@@ -119,7 +147,7 @@ class Page(HTMLParser):
 
 
 def verify(document, record, directory):
-    result = dict(id=document['id'], url=document['url'], feedPublished=document.get('published'), status='fetch-failed')
+    result = {'id': document['id'], 'url': document['url'], 'feedPublished': document.get('published'), 'status': 'fetch-failed'}
     if not record.get('file'):
         return result
     file = Path(record['file'])
@@ -140,7 +168,12 @@ def verify(document, record, directory):
         result['status'] = 'publisher-time-only'
         if feed is not None:
             result['deltaSeconds'] = value - feed
-            result['status'] = 'feed-matches-publication' if abs(value - feed) < 1 else 'feed-matches-modification' if any(abs(m - feed) < 1 for m in modified) else 'feed-publication-differs'
+            if abs(value - feed) < 1:
+                result['status'] = 'feed-matches-publication'
+            elif any(abs(m - feed) < 1 for m in modified):
+                result['status'] = 'feed-matches-modification'
+            else:
+                result['status'] = 'feed-publication-differs'
     return result
 
 
@@ -166,7 +199,12 @@ def check_frozen_evidence(root):
         if name == 'publisher-review-v3':
             expected = json.loads(base_raw)
             expected['supersedesSHA256'] = hashlib.sha256(base_raw).hexdigest()
-            expected['assignmentCorrections'] = [dict(document='doc-0305', previousEvent='occurrence-0305', event='occurrence-0091', basis='User-accepted pair review identifies the same terror-charge occurrence in two singleton reports; existing sampled pair labels are unchanged.')]
+            expected['assignmentCorrections'] = [{
+                'document': 'doc-0305',
+                'previousEvent': 'occurrence-0305',
+                'event': 'occurrence-0091',
+                'basis': 'User-accepted pair review identifies the same terror-charge occurrence in two singleton reports; existing sampled pair labels are unchanged.',
+            }]
             next(d for d in expected['documents'] if d['id'] == 'doc-0305')['event'] = 'occurrence-0091'
             expected['events'] = [e for e in expected['events'] if e['id'] != 'occurrence-0305']
             next(e for e in expected['events'] if e['id'] == 'occurrence-0091')['reason'] = 'Both selected reports cover the same October 2 charge for preparing terrorist acts against Nigel Farage; later reactions remain context for this occurrence.'
@@ -246,7 +284,14 @@ def check_frozen_evidence(root):
                 original_raw = (root / 'publisher-diversity-v1.json').read_bytes()
                 expected = json.loads(original_raw)
                 expected['supersedesSHA256'] = hashlib.sha256(original_raw).hexdigest()
-                expected['assignmentCorrections'] = [dict(pair='diversity-024', document='doc-0931', previousEvent='trump-diesel-ban-reversal', event='g7-reserve-release', label='same_event', basis='Independent reviewer clarification after submitted pair sheet; broader fuel-policy grouping is a scoped exception to the separate-action rule.')]
+                expected['assignmentCorrections'] = [{
+                    'pair': 'diversity-024',
+                    'document': 'doc-0931',
+                    'previousEvent': 'trump-diesel-ban-reversal',
+                    'event': 'g7-reserve-release',
+                    'label': 'same_event',
+                    'basis': 'Independent reviewer clarification after submitted pair sheet; broader fuel-policy grouping is a scoped exception to the separate-action rule.',
+                }]
                 next(d for d in expected['documents'] if d['id'] == 'doc-0931')['event'] = 'g7-reserve-release'
                 expected['events'] = [e for e in expected['events'] if e['id'] != 'trump-diesel-ban-reversal']
                 next(e for e in expected['events'] if e['id'] == 'g7-reserve-release')['reason'] = 'Reviewer groups the G7 reserve release and Trump export-ban reversal as one fuel-policy event for clustering; possible timeline context. This scoped exception does not redefine other event boundaries.'
@@ -271,37 +316,44 @@ def check_frozen_evidence(root):
             require(report['tuning']['precision'] is None and report['tuning']['releaseGatePassed'] is False, 'Empty candidate pool cannot pass')
 
 
+def check(condition, message="Assertion failed"):
+    if not condition:
+        raise AssertionError(message)
+
+
 def self_check():
-    html = '<meta property="article:modified_time" content="2026-10-03T12:00:00Z"><script type="application/ld+json">' + json.dumps({'@type': 'NewsArticle', 'url': 'https://example.com/a', 'datePublished': '2026-10-02T12:00:00+02:00', 'related': {'datePublished': '2020-01-01T00:00:00Z'}}) + '</script>'
-    page = Page(html, 'https://example.com/a?utm_source=rss')
-    assert len(page.dates) == 2 and page.dates[1]['epoch'] == instant('2026-10-02T10:00:00Z')
-    assert instant('2026-10-02') is None and instant('2026-10-02T12:00:00') is None
-    assert not Page(html, 'https://example.com/b').dates[1:]
-    assert document_key('https://example.com/a?id=1') != document_key('https://example.com/a?id=2')
-    for malformed in ({'@graph': None}, {'@type': None}, {'@type': 'NewsArticle', 'url': 'https://[bad', 'datePublished': '2026-10-02T10:00:00Z'}):
+    example_a = 'https://example.com/a'
+    published_a = '2026-10-02T10:00:00Z'
+    html = '<meta property="article:modified_time" content="2026-10-03T12:00:00Z"><script type="application/ld+json">' + json.dumps({TYPE_KEY: 'NewsArticle', 'url': example_a, 'datePublished': '2026-10-02T12:00:00+02:00', 'related': {'datePublished': '2020-01-01T00:00:00Z'}}) + '</script>'
+    page = Page(html, example_a + '?utm_source=rss')
+    check(len(page.dates) == 2 and page.dates[1]['epoch'] == instant(published_a))
+    check(instant('2026-10-02') is None and instant('2026-10-02T12:00:00') is None)
+    check(not Page(html, 'https://example.com/b').dates[1:])
+    check(document_key(example_a + '?id=1') != document_key(example_a + '?id=2'))
+    for malformed in ({'@graph': None}, {TYPE_KEY: None}, {TYPE_KEY: 'NewsArticle', 'url': 'https://[bad', 'datePublished': published_a}):
         bad = '<script type="application/ld+json">' + json.dumps(malformed) + '</script>'
-        assert Page(bad, 'https://example.com/a').dates == []
-    cms = dict(canonical='https://www.africanews.com/article/', createdAt=100, publishedAt=200, firstPublishedAt=200, lastPublishedAt=200, updatedAt=300)
+        check(Page(bad, example_a).dates == [])
+    cms = {'canonical': 'https://www.africanews.com/article/', 'createdAt': 100, 'publishedAt': 200, 'firstPublishedAt': 200, 'lastPublishedAt': 200, 'updatedAt': 300}
     from html import escape
     def cms_html(data, identifier='jsMainMediaArticle'):
         return '<div id="' + identifier + '" data-content="' + escape(json.dumps(data), quote=True) + '"></div>'
-    assert len(Page(cms_html(cms), cms['canonical']).cms) == 5
-    assert not Page(cms_html(cms), 'https://www.africanews.com/other/').cms
-    assert not Page(cms_html(cms), 'https://example.com/article/').cms
-    assert not Page(cms_html(cms, 'related'), cms['canonical']).cms
-    assert not Page('<div id="jsMainMediaArticle" data-content>', cms['canonical']).cms
-    assert not Page('<div id="jsMainMediaArticle" data-content="{bad">', cms['canonical']).cms
-    assert not Page(cms_html(dict(cms, publishedAt=True, createdAt=-1, updatedAt=9_999_999_999, firstPublishedAt=None, lastPublishedAt='200')), cms['canonical']).cms
+    check(len(Page(cms_html(cms), cms['canonical']).cms) == 5)
+    check(not Page(cms_html(cms), 'https://www.africanews.com/other/').cms)
+    check(not Page(cms_html(cms), 'https://example.com/article/').cms)
+    check(not Page(cms_html(cms, 'related'), cms['canonical']).cms)
+    check(not Page('<div id="jsMainMediaArticle" data-content>', cms['canonical']).cms)
+    check(not Page('<div id="jsMainMediaArticle" data-content="{bad">', cms['canonical']).cms)
+    check(not Page(cms_html(dict(cms, publishedAt=True, createdAt=-1, updatedAt=9_999_999_999, firstPublishedAt=None, lastPublishedAt='200')), cms['canonical']).cms)
     with tempfile.TemporaryDirectory() as path:
         directory = Path(path)
         raw = html.encode()
         (directory / 'page.html').write_bytes(raw)
-        record = dict(file='page.html', finalURL='https://example.com/a', sha256=hashlib.sha256(raw).hexdigest(), fetchedAt=0)
-        report = verify(dict(id='a', url='https://example.com/a', published=instant('2026-10-03T12:00:00Z')), record, directory)
-        assert report['status'] == 'feed-matches-modification' and report['publisherPublished'] == '2026-10-02T10:00:00Z'
+        record = {'file': 'page.html', 'finalURL': example_a, 'sha256': hashlib.sha256(raw).hexdigest(), 'fetchedAt': 0}
+        report = verify({'id': 'a', 'url': example_a, 'published': instant('2026-10-03T12:00:00Z')}, record, directory)
+        check(report['status'] == 'feed-matches-modification' and report['publisherPublished'] == published_a)
         (directory / 'page.html').write_text('changed')
         try:
-            verify(dict(id='a', url='https://example.com/a'), record, directory)
+            verify({'id': 'a', 'url': example_a}, record, directory)
         except ValueError:
             pass
         else:

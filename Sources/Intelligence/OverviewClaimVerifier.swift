@@ -343,12 +343,15 @@ public struct OverviewClaimVerifier: Sendable {
 
     // MARK: - Text Extraction Helpers
 
-    private static let numbersRegex = try! NSRegularExpression(pattern: #"\b\d+([.,]\d+)?\b"#)
-    private static let unitsRegex = try! NSRegularExpression(
-        pattern: #"\b(km/h|mph|km|miles|kg|lbs|GB|MB|TB|percent|відсотків|відсотки|відсотка)\b|%"#,
-        options: .caseInsensitive
-    )
-    private static let datesYearRegex = try! NSRegularExpression(pattern: #"\b(19\d\d|20\d\d)\b"#)
+    private static let numbersRegex =
+        (try? NSRegularExpression(pattern: #"\b\d+([.,]\d+)?\b"#)) ?? NSRegularExpression()
+    private static let unitsRegex =
+        (try? NSRegularExpression(
+            pattern: #"\b(km/h|mph|km|miles|kg|lbs|GB|MB|TB|percent|відсотків|відсотки|відсотка)\b|%"#,
+            options: .caseInsensitive
+        )) ?? NSRegularExpression()
+    private static let datesYearRegex =
+        (try? NSRegularExpression(pattern: #"\b(19\d\d|20\d\d)\b"#)) ?? NSRegularExpression()
 
     private static func extractNumbers(from text: String) -> [String] {
         let regex = numbersRegex

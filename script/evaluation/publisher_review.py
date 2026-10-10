@@ -177,17 +177,18 @@ def self_check(manifest):
         assert link.is_symlink() and file.read_text() == 'original'
 
     # A label file cannot turn an undated captured input into a replay timestamp.
+    synthetic_control = 'Synthetic control'
     with tempfile.TemporaryDirectory(prefix='news-undated-check-') as path:
         directory = pathlib.Path(path)
         event = dict(manifest['events'][0])
-        items = [dict(link='https://example.test/' + name, feed='https://example.test/feed', source='Control', language='en', published=date, title='Synthetic control', description='Synthetic control') for name, date in (('a', None), ('b', 1))]
-        raw = json.dumps(dict(version=1, items=items))
+        items = [{'link': 'https://example.test/' + name, 'feed': 'https://example.test/feed', 'source': 'Control', 'language': 'en', 'published': date, 'title': synthetic_control, 'description': synthetic_control} for name, date in (('a', None), ('b', 1))]
+        raw = json.dumps({'version': 1, 'items': items})
         capture = directory / 'capture.json'
         write_private(capture, raw)
-        documents = [dict(id=name, captureIndex=i, event=event['id'], url=item['link'], **{k: item[k] for k in ('feed', 'source', 'language', 'published')}) for i, (name, item) in enumerate(zip(('a', 'b'), items))]
-        proposal = dict(version=2, releaseEligible=False, captureSHA256=hashlib.sha256(raw.encode()).hexdigest(), events=[event], documents=documents, pairs=[dict(id='control', left='a', right='b', split=event['split'], proposedLabel='same_event', reviewStatus='pending', reason='Synthetic control')])
+        documents = [{'id': name, 'captureIndex': i, 'event': event['id'], 'url': item['link'], **{k: item[k] for k in ('feed', 'source', 'language', 'published')}} for i, (name, item) in enumerate(zip(('a', 'b'), items))]
+        proposal = {'version': 2, 'releaseEligible': False, 'captureSHA256': hashlib.sha256(raw.encode()).hexdigest(), 'events': [event], 'documents': documents, 'pairs': [{'id': 'control', 'left': 'a', 'right': 'b', 'split': event['split'], 'proposedLabel': 'same_event', 'reviewStatus': 'pending', 'reason': synthetic_control}]}
         labels = directory / 'labels.json'
-        write_private(labels, json.dumps(dict(reviewer='Synthetic self-check', reviewedAt='2026-10-04', labels={'control': 'same_event'}, verifiedTimestampIDs=['a', 'b'], allEventAssignmentsReviewed=True)))
+        write_private(labels, json.dumps({'reviewer': 'Synthetic self-check', 'reviewedAt': '2026-10-04', 'labels': {'control': 'same_event'}, 'verifiedTimestampIDs': ['a', 'b'], 'allEventAssignmentsReviewed': True}))
         packet = directory / 'packet'
         packet.mkdir(mode=0o700)
         from contextlib import redirect_stdout

@@ -409,10 +409,8 @@ struct OverviewPerspectivesExtractor: Sendable {
             if lowerSource.contains(wire.name.lowercased()) {
                 return wire.name
             }
-            for marker in wire.markers {
-                if lowerText.contains(marker) {
-                    return wire.name
-                }
+            for marker in wire.markers where lowerText.contains(marker) {
+                return wire.name
             }
         }
         return nil

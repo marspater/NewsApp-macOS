@@ -17,19 +17,33 @@ enum WebPreviewPolicy {
                 #"^https?://([^/]*@)?[a-z0-9-]+[.]?(:[0-9]+)?/"#,
                 #"^https?://([^/]*@)?([^/]+[.])?localhost[.]?(:[0-9]+)?/"#,
                 #"^https?://([^/]*@)?([^/]+[.])?local[.]?(:[0-9]+)?/"#,
-                #"^file:"#, #"^ftp:"#, #"^ws:"#, #"^wss:"#
+                #"^file:"#, #"^ftp:"#, #"^ws:"#, #"^wss:"#,
             ]
-            let rules = filters.map { ["trigger": ["url-filter": $0, "url-filter-is-case-sensitive": false], "action": ["type": "block"]] as [String: Any] }
+            let rules = filters.map {
+                ["trigger": ["url-filter": $0, "url-filter-is-case-sensitive": false], "action": ["type": "block"]]
+                    as [String: Any]
+            }
             let data = try JSONSerialization.data(withJSONObject: rules)
+            guard let jsonString = String(data: data, encoding: .utf8) else {
+                throw FeedError.network("Preview policy encoding failed")
+            }
             return try await withCheckedThrowingContinuation { continuation in
-                WKContentRuleListStore.default().compileContentRuleList(forIdentifier: "NewsProtectedPreview-v1", encodedContentRuleList: String(decoding: data, as: UTF8.self)) { list, error in
-                    if let list { continuation.resume(returning: list) }
-                    else { continuation.resume(throwing: error ?? FeedError.network("Preview policy unavailable")) }
+                WKContentRuleListStore.default().compileContentRuleList(
+                    forIdentifier: "NewsProtectedPreview-v1",
+                    encodedContentRuleList: jsonString
+                ) { list, error in
+                    if let list {
+                        continuation.resume(returning: list)
+                    } else {
+                        continuation.resume(throwing: error ?? FeedError.network("Preview policy unavailable"))
+                    }
                 }
             }
         }
         compiled = task
-        do { return try await task.value }
-        catch { compiled = nil; throw error }
+        do { return try await task.value } catch {
+            compiled = nil
+            throw error
+        }
     }
 }

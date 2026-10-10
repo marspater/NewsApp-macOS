@@ -31,7 +31,7 @@ xcrun actool "$(pwd)/Assets/AppIcon.icon" --compile "$(pwd)/${RESOURCES_DIR}" \
     --app-icon AppIcon --output-partial-info-plist "$(pwd)/${CONTENTS_DIR}/IconInfo.plist"
 
 # Compile Swift files (exclude any standalone scripts)
-swiftc -swift-version 6 -O -parse-as-library -target arm64-apple-macos${TARGET_MACOS} \
+swiftc -swift-version 6 -O -parse-as-library -target "arm64-apple-macos${TARGET_MACOS}" \
     Sources/Services/DateParser.swift \
     Sources/Models/FeedError.swift \
     Sources/Models/FeedFetchState.swift \

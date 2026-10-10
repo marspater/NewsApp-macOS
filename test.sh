@@ -24,7 +24,7 @@ python3 script/evaluation/overview_review.py
 python3 script/evaluation/importance_review.py
 
 echo "Compiling tests for macOS ${TARGET_MACOS} ($(uname -m))..."
-swiftc "${TEST_OPT_FLAGS[@]}" -target $(uname -m)-apple-macos${TARGET_MACOS} \
+swiftc "${TEST_OPT_FLAGS[@]}" -target "$(uname -m)-apple-macos${TARGET_MACOS}" \
     Sources/Services/DateParser.swift \
     Sources/Models/FeedError.swift \
     Sources/Models/FeedFetchState.swift \

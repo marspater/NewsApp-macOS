@@ -118,11 +118,15 @@ extension EventFeatures {
     ]
     /// Languages where capitalization does not mark proper nouns.
     private static let capitalizedNounLanguages: Set<String> = ["de", "lb"]
-    private static let quarterPattern = try! NSRegularExpression(
-        pattern: #"\b(first|second|third|fourth|1st|2nd|3rd|4th)[\s-]+quarter\b"#, options: [.caseInsensitive])
-    private static let halfPattern = try! NSRegularExpression(
-        pattern: #"\b(first|second|1st|2nd)[\s-]+half\b"#, options: [.caseInsensitive])
-    private static let markupPattern = try! NSRegularExpression(pattern: #"<[^>]*>"#)
+    private static let quarterPattern =
+        (try? NSRegularExpression(
+            pattern: #"\b(first|second|third|fourth|1st|2nd|3rd|4th)[\s-]+quarter\b"#, options: [.caseInsensitive]
+        )) ?? NSRegularExpression()
+    private static let halfPattern =
+        (try? NSRegularExpression(
+            pattern: #"\b(first|second|1st|2nd)[\s-]+half\b"#, options: [.caseInsensitive]
+        )) ?? NSRegularExpression()
+    private static let markupPattern = (try? NSRegularExpression(pattern: #"<[^>]*>"#)) ?? NSRegularExpression()
 
     static func normalized(_ value: String) -> String {
         var text = value.folding(options: [.caseInsensitive, .diacriticInsensitive, .widthInsensitive], locale: nil)

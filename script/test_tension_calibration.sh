@@ -9,7 +9,7 @@ echo "=== 1. Running Python Calibration and Dataset Verification ==="
 python3 script/evaluation/calibrate_tension.py
 
 echo "=== 2. Compiling Native Tension Calibration Test Suite for macOS ${TARGET_MACOS} ($(uname -m)) ==="
-swiftc -target $(uname -m)-apple-macos${TARGET_MACOS} \
+swiftc -target "$(uname -m)-apple-macos${TARGET_MACOS}" \
     Sources/Services/DateParser.swift \
     Sources/Models/FeedError.swift \
     Sources/Models/FeedFetchState.swift \

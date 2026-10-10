@@ -237,10 +237,11 @@ final class DOMElementNode: Sendable {
     }
 
     // Token boundaries keep editorial "commentary" distinct from comment widgets.
-    private static let auxiliaryPattern = try! NSRegularExpression(
-        pattern:
-            #"(?i)(?:^|[^a-z0-9])(?:comments?|comment-thread|disqus|related(?:-content|-stories|-articles)?|links-block|newsletter|byline|timestamp-block|recommendations?|social-share|share-tools|promo|advertisement|outbrain|taboola|eventpromo|promolist|topiclist|uploaderembed)(?:$|[^a-z0-9])"#
-    )
+    private static let auxiliaryPattern =
+        (try? NSRegularExpression(
+            pattern:
+                #"(?i)(?:^|[^a-z0-9])(?:comments?|comment-thread|disqus|related(?:-content|-stories|-articles)?|links-block|newsletter|byline|timestamp-block|recommendations?|social-share|share-tools|promo|advertisement|outbrain|taboola|eventpromo|promolist|topiclist|uploaderembed)(?:$|[^a-z0-9])"#
+        )) ?? NSRegularExpression()
 
     func readingBlocks(allowDivFallback: Bool = true) -> [DOMElementNode] {
         guard !isReaderExcluded else { return [] }
@@ -472,8 +473,10 @@ final class DOMElementNode: Sendable {
 // MARK: - HTML DOM Tree Builder
 
 enum HTMLDOMBuilder {
-    private static let attrRegex = try! NSRegularExpression(
-        pattern: #"([a-zA-Z0-9_-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))"#)
+    private static let attrRegex =
+        (try? NSRegularExpression(
+            pattern: #"([a-zA-Z0-9_-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))"#
+        )) ?? NSRegularExpression()
     private static let voidTags: Set<String> = [
         "area", "base", "br", "col", "embed", "hr", "img", "input",
         "link", "meta", "param", "source", "track", "wbr",
@@ -1037,10 +1040,8 @@ final class ContentExtractionPipeline: Sendable {
             "main-content", "article-text", "article-content", "story-content",
             "text-block",
         ]
-        for term in positiveMatches {
-            if identifier.contains(term) {
-                score += 45.0
-            }
+        for term in positiveMatches where identifier.contains(term) {
+            score += 45.0
         }
 
         // Heavy Negative Penalties for Widgets, Comments & Navigation
@@ -1049,10 +1050,8 @@ final class ContentExtractionPipeline: Sendable {
             "advertisement", "newsletter", "promo", "cookie", "banner",
             "footer", "nav", "menu", "trending", "more-stories", "recommend",
         ]
-        for term in negativeMatches {
-            if identifier.contains(term) {
-                score -= 160.0
-            }
+        for term in negativeMatches where identifier.contains(term) {
+            score -= 160.0
         }
 
         // Link Density Penalty
@@ -1229,8 +1228,9 @@ final class ContentExtractionPipeline: Sendable {
 
     // MARK: - HTML Entity Decoding
 
-    private static let decEntityRegex = try! NSRegularExpression(pattern: "&#([0-9]{2,7});")
-    private static let hexEntityRegex = try! NSRegularExpression(pattern: "&#x([0-9a-fA-F]{2,6});")
+    private static let decEntityRegex = (try? NSRegularExpression(pattern: "&#([0-9]{2,7});")) ?? NSRegularExpression()
+    private static let hexEntityRegex =
+        (try? NSRegularExpression(pattern: "&#x([0-9a-fA-F]{2,6});")) ?? NSRegularExpression()
 
     func decodeHTMLEntities(_ text: String) -> String {
         var result = text
