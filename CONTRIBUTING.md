@@ -22,6 +22,9 @@ python3 script/evaluation/importance_review.py report /private/tmp/curation-repo
 python3 script/evaluation/overview_review.py sheet /private/tmp/overview-report  # #308: private claim sheet for an independent reviewer (never overwrites a sheet)
 python3 script/evaluation/overview_review.py report /private/tmp/overview-report # #308/#313: aggregate-only rates, Wilson bounds, latency, fallback causes, perspective coverage
 ./test.sh --images-live /private/tmp/library-backup.sqlite3 /private/tmp/curation-report # Opt-in protected page-prefix lookups and card-image coverage on the backup; NEWS_IMAGES_NOW=<epoch> repeats an earlier 72-hour denominator
+NEWS_RELATED_RECLUSTER=1 ./test.sh --related-live /private/tmp/library-backup.sqlite3 /private/tmp/relation-report # #314: related-story links plus hard controls on the backup; optional current-matcher re-clustering first
+python3 script/evaluation/relation_review.py sheet /private/tmp/relation-report  # #314: blind private sheet of links and controls (never overwrites a sheet)
+python3 script/evaluation/relation_review.py report /private/tmp/relation-report # #314: aggregate-only wrong-link rate and related controls with Wilson bounds
 ./test.sh --performance-baseline --active-work-cancellation # Active clustering, ingestion and feed parsing cancellation; temporary stress fixtures
 ./script/native_performance_baseline.sh # Isolated MainView window, rendered-card samples and process memory
 NEWS_NATIVE_HARNESS=Tests/NativeReadingMemory.swift ./script/native_performance_baseline.sh # Live: read 20 stories twice in the production reader, isolated; waits until each image is decoded
