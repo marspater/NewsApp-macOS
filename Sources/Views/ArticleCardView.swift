@@ -167,7 +167,7 @@ struct ArticleCardView: View {
             }
 
             ShareLink(item: url, subject: Text(article.title), message: Text(article.title)) {
-                Label("Share Story…", systemImage: "square.and.arrow.up")
+                Label("Share Story", systemImage: "square.and.arrow.up")
             }
         }
 
@@ -266,7 +266,7 @@ struct ArticleCardView: View {
             if !cleanDesc.isEmpty {
                 Text(cleanDesc)
                     .font(AppTypography.body)
-                    .foregroundColor(AppColor.secondaryText.opacity(0.85))
+                    .foregroundColor(AppColor.secondaryText)
                     .lineLimit(2)
                     .multilineTextAlignment(.leading)
             }

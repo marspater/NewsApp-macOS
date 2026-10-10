@@ -464,12 +464,12 @@ struct ArticleDetailView: View {
         HStack(spacing: AppSpacing.sm) {
             ProgressView()
                 .controlSize(.small)
-            Text("Loading full article…")
+            Text("Loading full story…")
                 .font(AppTypography.label)
                 .foregroundColor(AppColor.secondaryText)
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("Loading full article")
+        .accessibilityLabel("Loading full story")
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.vertical, AppSpacing.lg)
     }
@@ -482,7 +482,7 @@ struct ArticleDetailView: View {
                         .font(AppTypography.sectionTitle)
                         .foregroundColor(AppColor.secondaryText)
                         .accessibilityHidden(true)
-                    Text("Full article unavailable in reader")
+                    Text("Full story unavailable in reader")
                         .font(AppTypography.headline)
                         .foregroundColor(AppColor.primaryText)
                     Spacer()
@@ -706,7 +706,7 @@ struct ArticleDetailView: View {
                     Image(systemName: "exclamationmark.triangle")
                         .imageScale(.large)
                         .foregroundColor(AppColor.secondaryText)
-                    Text("Invalid article URL")
+                    Text("Invalid story link")
                         .font(AppTypography.headline)
                         .foregroundColor(AppColor.secondaryText)
                     Spacer()
@@ -1061,7 +1061,7 @@ struct ArticleDetailView: View {
                     .foregroundColor(AppColor.secondaryText)
             }
             .accessibilityElement(children: .combine)
-            .accessibilityLabel("Analyzing article with on-device AI")
+            .accessibilityLabel("Analyzing story with on-device AI")
             .padding(AppSpacing.sm)
             .background(AppColor.surface, in: RoundedRectangle(cornerRadius: AppRadius.card))
         } else if let analysis = analysis {

@@ -373,7 +373,7 @@ struct ArticleListView: View {
             } catch is CancellationError {
                 // A newer query owns the results.
             } catch {
-                if queryRunID == runID { queryError = "Could not load articles. Please try again." }
+                if queryRunID == runID { queryError = "Could not load stories. Please try again." }
             }
         }
     }
@@ -597,7 +597,7 @@ struct ArticleListView: View {
             .disabled(isBriefing)
             .accessibilityLabel("Group Coverage by Event")
 
-            Picker("Article layout", selection: $gridLayout) {
+            Picker("Story Layout", selection: $gridLayout) {
                 Image(systemName: "list.bullet").tag(false)
                     .accessibilityLabel("List")
                 Image(systemName: "square.grid.2x2").tag(true)
@@ -879,7 +879,7 @@ struct ArticleListView: View {
         case "Saved Stories": return "Stories you bookmark will be kept here for easy reading."
         case "History": return "Stories you have opened will appear here."
         default:
-            return "New articles matching \(selectedTopic ?? "this section") will appear here once your feeds refresh."
+            return "New stories matching \(selectedTopic ?? "this section") will appear here once your feeds refresh."
         }
     }
 

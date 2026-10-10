@@ -145,11 +145,22 @@ private struct EventSourceRow: View {
 
     @EnvironmentObject private var readManager: ReadManager
     @EnvironmentObject private var savedStories: SavedStoriesManager
+    @EnvironmentObject private var appSettings: AppSettings
     @Environment(\.effectiveContrast) private var contrast
 
     private var isRead: Bool { readManager.isRead(article.id) }
     private var isSaved: Bool { savedStories.isSaved(article) }
     private var source: String { article.publisherName }
+
+    /// The muting action for this story's publisher host: unmute the rules covering it, or mute the host.
+    private var sourceMuting: (title: String, apply: () -> Void)? {
+        let covering = appSettings.muteRules.matchedSources(link: article.link)
+        if let rule = covering.first {
+            return ("Unmute \(rule)", { for source in covering { appSettings.unmuteSource(source) } })
+        }
+        guard let host = MuteRules.host(article.link) else { return nil }
+        return ("Mute \(host)", { _ = appSettings.muteSource(host) })
+    }
 
     var body: some View {
         Button(action: open) {
@@ -195,12 +206,9 @@ private struct EventSourceRow: View {
                 Label(
                     isSaved ? "Remove from Saved" : "Save Story", systemImage: isSaved ? "bookmark.slash" : "bookmark")
             }
-            if canSeparate {
-                Divider()
-                Button {
-                    separate()
-                } label: {
-                    Label("Not the Same Event", systemImage: "rectangle.split.2x1")
+            if let muting = sourceMuting {
+                Button(action: muting.apply) {
+                    Label(muting.title, systemImage: "speaker.slash")
                 }
             }
             Divider()
@@ -215,6 +223,17 @@ private struct EventSourceRow: View {
                     NSWorkspace.shared.open(url)
                 } label: {
                     Label("Open in Browser", systemImage: "safari")
+                }
+                ShareLink(item: url, subject: Text(article.title), message: Text(article.title)) {
+                    Label("Share Story", systemImage: "square.and.arrow.up")
+                }
+            }
+            if canSeparate {
+                Divider()
+                Button {
+                    separate()
+                } label: {
+                    Label("Not the Same Event", systemImage: "rectangle.split.2x1")
                 }
             }
         }
@@ -231,6 +250,9 @@ private struct EventSourceRow: View {
         .accessibilityActions {
             Button(isRead ? "Mark as Unread" : "Mark as Read") { readManager.toggleRead(article.id) }
             Button(isSaved ? "Remove from Saved" : "Save Story") { toggleSaved() }
+            if let muting = sourceMuting {
+                Button(muting.title, action: muting.apply)
+            }
             if canSeparate {
                 Button("Not the Same Event") { separate() }
             }

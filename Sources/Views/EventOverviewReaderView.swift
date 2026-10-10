@@ -573,7 +573,7 @@ struct EventOverviewReaderView: View {
                         }
                         .buttonStyle(.bordered)
                         .controlSize(.small)
-                        .help("Read this article in Source publication mode")
+                        .help("Read this story in Source publication mode")
                         .accessibilityLabel(
                             Self.readArticleAccessibilityLabel(title: article.title, source: article.publisherName))
 
@@ -581,7 +581,7 @@ struct EventOverviewReaderView: View {
                             Button {
                                 NSWorkspace.shared.open(url)
                             } label: {
-                                Image(systemName: "arrow.up.right.square")
+                                Image(systemName: "safari")
                                     .imageScale(.small)
                                     .accessibilityHidden(true)
                             }
@@ -924,7 +924,7 @@ struct EventOverviewReaderView: View {
                             NSWorkspace.shared.open(url)
                         } label: {
                             HStack(spacing: AppSpacing.xs) {
-                                Image(systemName: "arrow.up.forward.square")
+                                Image(systemName: "safari")
                                     .imageScale(.small)
                                     .foregroundColor(AppColor.accent)
                                     .accessibilityHidden(true)
@@ -948,7 +948,7 @@ struct EventOverviewReaderView: View {
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
-                        .help("Open original article on \(article.publisherName)")
+                        .help("Open original story on \(article.publisherName)")
                         .accessibilityLabel(
                             Self.openWebArticleAccessibilityLabel(title: article.title, source: article.publisherName))
                     }
