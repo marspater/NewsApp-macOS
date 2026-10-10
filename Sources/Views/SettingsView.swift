@@ -591,7 +591,7 @@ struct SettingsView: View {
                 // Typography Preview
                 VStack(alignment: .leading, spacing: AppSpacing.eyebrowGap) {
                     Text("The quick brown fox jumps over the lazy dog.")
-                        .font(AppTypography.sectionTitleFont(for: themeManager.articleTheme))
+                        .font(AppTypography.headlineFont(for: themeManager.articleTheme))
                         .foregroundColor(AppColor.primaryText)
                     Text(
                         "Editorial typography determines the headline and body font families, line spacing, and tracking used in reader mode."
