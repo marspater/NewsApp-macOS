@@ -1,0 +1,889 @@
+{
+  "frozenInputs": {
+    "articles": 88,
+    "binarySHA256": "cda85baac460f172982cef21d5b6ed2a9d58a25a93efb615bbf33bb6e99cf173",
+    "captureSHA256": "a52d2d691fbb1cd24b9a99872732390c07508b9a414f7c7deb7a11de84dfe9d1",
+    "corpusSHA256": "4459479f1b9bd279af2054370309a335fde08fbc3aa5dee941137fe6ae40143d",
+    "labelsSHA256": "78836386ab592e2f31c6bd9983fcf7b94ecc8e27dc6f90c2799938f6eae7d63b",
+    "occurrences": 17,
+    "positivePairs": 638,
+    "publisherFamilies": 18
+  },
+  "limitations": [
+    "Selected by coverage families before predictions, not representative random sampling.",
+    "Pairs within occurrences are correlated; Wilson intervals are descriptive pair-level intervals.",
+    "Judge-on used 497 settled judgments in one pass, exceeding production cap 150.",
+    "Historical sealed corpus was neither read nor replayed.",
+    "No post-fix rescoring of this sample; future acceptance requires a new frozen sample."
+  ],
+  "matcherVersion": 3,
+  "modes": {
+    "judge-off": {
+      "articles": 88,
+      "byPublisherFamily": {
+        "BBC": {
+          "falseMergeRate": 0.09090909090909091,
+          "falseMergeWilson95": [
+            0.03140337104926305,
+            0.23572943534351032
+          ],
+          "fn": 55,
+          "fp": 3,
+          "precision": 0.9090909090909091,
+          "precisionWilson95": [
+            0.7642705646564897,
+            0.968596628950737
+          ],
+          "recall": 0.35294117647058826,
+          "recallWilson95": [
+            0.2597233193313943,
+            0.4588769760257358
+          ],
+          "tp": 30
+        },
+        "africanews.com": {
+          "falseMergeRate": 0.0,
+          "falseMergeWilson95": [
+            0.0,
+            0.18432366037156456
+          ],
+          "fn": 58,
+          "fp": 0,
+          "precision": 1.0,
+          "precisionWilson95": [
+            0.8156763396284354,
+            1.0
+          ],
+          "recall": 0.22666666666666666,
+          "recallWilson95": [
+            0.14661247942117506,
+            0.33335748567339424
+          ],
+          "tp": 17
+        },
+        "aljazeera.com": {
+          "falseMergeRate": 0.4666666666666667,
+          "falseMergeWilson95": [
+            0.3293490394201473,
+            0.6092279113758954
+          ],
+          "fn": 45,
+          "fp": 21,
+          "precision": 0.5333333333333333,
+          "precisionWilson95": [
+            0.3907720886241046,
+            0.6706509605798527
+          ],
+          "recall": 0.34782608695652173,
+          "recallWilson95": [
+            0.24617977948252023,
+            0.46552342308304673
+          ],
+          "tp": 24
+        },
+        "arabnews.com": {
+          "falseMergeRate": 0.0967741935483871,
+          "falseMergeWilson95": [
+            0.0451112577973332,
+            0.1954904286744415
+          ],
+          "fn": 73,
+          "fp": 6,
+          "precision": 0.9032258064516129,
+          "precisionWilson95": [
+            0.8045095713255586,
+            0.9548887422026668
+          ],
+          "recall": 0.43410852713178294,
+          "recallWilson95": [
+            0.35170661678587767,
+            0.5203214226234639
+          ],
+          "tp": 56
+        },
+        "arstechnica.com": {
+          "falseMergeRate": null,
+          "falseMergeWilson95": null,
+          "fn": 1,
+          "fp": 0,
+          "precision": null,
+          "precisionWilson95": null,
+          "recall": 0.0,
+          "recallWilson95": [
+            0.0,
+            0.7934567085261071
+          ],
+          "tp": 0
+        },
+        "cbc.ca": {
+          "falseMergeRate": 0.0,
+          "falseMergeWilson95": [
+            0.0,
+            0.6576280471103807
+          ],
+          "fn": 34,
+          "fp": 0,
+          "precision": 1.0,
+          "precisionWilson95": [
+            0.34237195288961925,
+            1.0
+          ],
+          "recall": 0.05555555555555555,
+          "recallWilson95": [
+            0.015369663767066846,
+            0.18144974107611211
+          ],
+          "tp": 2
+        },
+        "channelnewsasia.com": {
+          "falseMergeRate": 0.10714285714285714,
+          "falseMergeWilson95": [
+            0.03711769205479949,
+            0.2719622536765708
+          ],
+          "fn": 51,
+          "fp": 3,
+          "precision": 0.8928571428571429,
+          "precisionWilson95": [
+            0.7280377463234293,
+            0.9628823079452005
+          ],
+          "recall": 0.32894736842105265,
+          "recallWilson95": [
+            0.2337912044636209,
+            0.44056401887859675
+          ],
+          "tp": 25
+        },
+        "cnbc.com": {
+          "falseMergeRate": 0.0,
+          "falseMergeWilson95": [
+            0.0,
+            0.22810184305529166
+          ],
+          "fn": 37,
+          "fp": 0,
+          "precision": 1.0,
+          "precisionWilson95": [
+            0.7718981569447083,
+            1.0
+          ],
+          "recall": 0.26,
+          "recallWilson95": [
+            0.15871379651367384,
+            0.3955342198899992
+          ],
+          "tp": 13
+        },
+        "dawn.com": {
+          "falseMergeRate": 0.0,
+          "falseMergeWilson95": [
+            0.0,
+            0.6576280471103807
+          ],
+          "fn": 30,
+          "fp": 0,
+          "precision": 1.0,
+          "precisionWilson95": [
+            0.34237195288961925,
+            1.0
+          ],
+          "recall": 0.0625,
+          "recallWilson95": [
+            0.017310203195157234,
+            0.2014746724800358
+          ],
+          "tp": 2
+        },
+        "dw.com": {
+          "falseMergeRate": 0.125,
+          "falseMergeWilson95": [
+            0.04344255039315584,
+            0.3100428814785757
+          ],
+          "fn": 8,
+          "fp": 3,
+          "precision": 0.875,
+          "precisionWilson95": [
+            0.6899571185214243,
+            0.9565574496068442
+          ],
+          "recall": 0.7241379310344828,
+          "recallWilson95": [
+            0.5428252365556403,
+            0.8530141866149725
+          ],
+          "tp": 21
+        },
+        "euronews.com": {
+          "falseMergeRate": 0.15789473684210525,
+          "falseMergeWilson95": [
+            0.055203710399278266,
+            0.3756592764317668
+          ],
+          "fn": 40,
+          "fp": 3,
+          "precision": 0.8421052631578947,
+          "precisionWilson95": [
+            0.6243407235682331,
+            0.9447962896007217
+          ],
+          "recall": 0.2857142857142857,
+          "recallWilson95": [
+            0.18418621391703333,
+            0.4147549908635875
+          ],
+          "tp": 16
+        },
+        "france24.com": {
+          "falseMergeRate": 0.09090909090909091,
+          "falseMergeWilson95": [
+            0.03140337104926305,
+            0.23572943534351032
+          ],
+          "fn": 97,
+          "fp": 3,
+          "precision": 0.9090909090909091,
+          "precisionWilson95": [
+            0.7642705646564897,
+            0.968596628950737
+          ],
+          "recall": 0.23622047244094488,
+          "recallWilson95": [
+            0.17077199899216422,
+            0.3171584451479258
+          ],
+          "tp": 30
+        },
+        "kyivindependent.com": {
+          "falseMergeRate": 0.15789473684210525,
+          "falseMergeWilson95": [
+            0.055203710399278266,
+            0.3756592764317668
+          ],
+          "fn": 3,
+          "fp": 3,
+          "precision": 0.8421052631578947,
+          "precisionWilson95": [
+            0.6243407235682331,
+            0.9447962896007217
+          ],
+          "recall": 0.8421052631578947,
+          "recallWilson95": [
+            0.6243407235682331,
+            0.9447962896007217
+          ],
+          "tp": 16
+        },
+        "pravda.com.ua": {
+          "falseMergeRate": 0.16666666666666666,
+          "falseMergeWilson95": [
+            0.0902428998661039,
+            0.28736767798789736
+          ],
+          "fn": 25,
+          "fp": 9,
+          "precision": 0.8333333333333334,
+          "precisionWilson95": [
+            0.7126323220121027,
+            0.9097571001338962
+          ],
+          "recall": 0.6428571428571429,
+          "recallWilson95": [
+            0.5258817704420135,
+            0.7449682653101913
+          ],
+          "tp": 45
+        },
+        "theguardian.com": {
+          "falseMergeRate": 0.1,
+          "falseMergeWilson95": [
+            0.03459925995971615,
+            0.25621441315266624
+          ],
+          "fn": 59,
+          "fp": 3,
+          "precision": 0.9,
+          "precisionWilson95": [
+            0.7437855868473339,
+            0.9654007400402839
+          ],
+          "recall": 0.313953488372093,
+          "recallWilson95": [
+            0.22561154650050072,
+            0.4182060168554501
+          ],
+          "tp": 27
+        },
+        "thehill.com": {
+          "falseMergeRate": 0.125,
+          "falseMergeWilson95": [
+            0.05856971750400844,
+            0.24700727086054822
+          ],
+          "fn": 71,
+          "fp": 6,
+          "precision": 0.875,
+          "precisionWilson95": [
+            0.7529927291394518,
+            0.9414302824959915
+          ],
+          "recall": 0.37168141592920356,
+          "recallWilson95": [
+            0.28817291567663905,
+            0.46362781283101584
+          ],
+          "tp": 42
+        },
+        "thehindu.com": {
+          "falseMergeRate": 0.5205479452054794,
+          "falseMergeWilson95": [
+            0.4078139828476829,
+            0.6312273697529917
+          ],
+          "fn": 99,
+          "fp": 38,
+          "precision": 0.4794520547945205,
+          "precisionWilson95": [
+            0.36877263024700824,
+            0.592186017152317
+          ],
+          "recall": 0.26119402985074625,
+          "recallWilson95": [
+            0.19421284613583467,
+            0.3414861010615281
+          ],
+          "tp": 35
+        },
+        "timesofindia.indiatimes.com": {
+          "falseMergeRate": 0.125,
+          "falseMergeWilson95": [
+            0.04344255039315584,
+            0.3100428814785757
+          ],
+          "fn": 35,
+          "fp": 3,
+          "precision": 0.875,
+          "precisionWilson95": [
+            0.6899571185214243,
+            0.9565574496068442
+          ],
+          "recall": 0.375,
+          "recallWilson95": [
+            0.26010029646692184,
+            0.505948739655107
+          ],
+          "tp": 21
+        }
+      },
+      "falseMergeRate": 0.20074349442379183,
+      "falseMergeWilson95": [
+        0.15724096673441532,
+        0.25267306397057976
+      ],
+      "falsePairBoundaries": [
+        {
+          "occurrences": [
+            "diesel-agreement",
+            "diesel-license"
+          ],
+          "pairs": 17
+        },
+        {
+          "occurrences": [
+            "diesel-agreement",
+            "fuel-site-strike"
+          ],
+          "pairs": 17
+        },
+        {
+          "occurrences": [
+            "diesel-agreement",
+            "miami-negotiations"
+          ],
+          "pairs": 17
+        },
+        {
+          "occurrences": [
+            "diesel-license",
+            "fuel-site-strike"
+          ],
+          "pairs": 1
+        },
+        {
+          "occurrences": [
+            "diesel-license",
+            "miami-negotiations"
+          ],
+          "pairs": 1
+        },
+        {
+          "occurrences": [
+            "fuel-site-strike",
+            "miami-negotiations"
+          ],
+          "pairs": 1
+        }
+      ],
+      "fn": 423,
+      "fp": 54,
+      "fragmentMerges": 0,
+      "impureEvents": 1,
+      "judgements": 0,
+      "maximumJudgementsPerPass": 0,
+      "maximumProcessedPerPass": 48,
+      "precision": 0.7992565055762082,
+      "precisionWilson95": [
+        0.7473269360294202,
+        0.8427590332655847
+      ],
+      "recall": 0.33699059561128525,
+      "recallWilson95": [
+        0.3013844251728403,
+        0.37454807904626913
+      ],
+      "tp": 215
+    },
+    "judge-on": {
+      "articles": 88,
+      "byPublisherFamily": {
+        "BBC": {
+          "falseMergeRate": 0.1111111111111111,
+          "falseMergeWilson95": [
+            0.03851964789498724,
+            0.2805818254397295
+          ],
+          "fn": 61,
+          "fp": 3,
+          "precision": 0.8888888888888888,
+          "precisionWilson95": [
+            0.7194181745602705,
+            0.9614803521050127
+          ],
+          "recall": 0.2823529411764706,
+          "recallWilson95": [
+            0.19768719505480054,
+            0.38584124207375187
+          ],
+          "tp": 24
+        },
+        "africanews.com": {
+          "falseMergeRate": 0.0,
+          "falseMergeWilson95": [
+            0.0,
+            0.22810184305529166
+          ],
+          "fn": 62,
+          "fp": 0,
+          "precision": 1.0,
+          "precisionWilson95": [
+            0.7718981569447083,
+            1.0
+          ],
+          "recall": 0.17333333333333334,
+          "recallWilson95": [
+            0.10419048023286545,
+            0.2743102097582053
+          ],
+          "tp": 13
+        },
+        "aljazeera.com": {
+          "falseMergeRate": 0.3023255813953488,
+          "falseMergeWilson95": [
+            0.18601827946182872,
+            0.4510564575240983
+          ],
+          "fn": 39,
+          "fp": 13,
+          "precision": 0.6976744186046512,
+          "precisionWilson95": [
+            0.5489435424759017,
+            0.8139817205381712
+          ],
+          "recall": 0.43478260869565216,
+          "recallWilson95": [
+            0.32432616178765283,
+            0.5521180678833044
+          ],
+          "tp": 30
+        },
+        "arabnews.com": {
+          "falseMergeRate": 0.10638297872340426,
+          "falseMergeWilson95": [
+            0.046304099555199416,
+            0.22594539692012788
+          ],
+          "fn": 87,
+          "fp": 5,
+          "precision": 0.8936170212765957,
+          "precisionWilson95": [
+            0.7740546030798721,
+            0.9536959004448007
+          ],
+          "recall": 0.32558139534883723,
+          "recallWilson95": [
+            0.25077958524200566,
+            0.41047110731213404
+          ],
+          "tp": 42
+        },
+        "arstechnica.com": {
+          "falseMergeRate": 0.6666666666666666,
+          "falseMergeWilson95": [
+            0.2076549551264879,
+            0.9385096847238394
+          ],
+          "fn": 0,
+          "fp": 2,
+          "precision": 0.3333333333333333,
+          "precisionWilson95": [
+            0.0614903152761605,
+            0.7923450448735121
+          ],
+          "recall": 1.0,
+          "recallWilson95": [
+            0.20654329147389294,
+            1.0
+          ],
+          "tp": 1
+        },
+        "cbc.ca": {
+          "falseMergeRate": 0.0,
+          "falseMergeWilson95": [
+            0.0,
+            0.5615060804490177
+          ],
+          "fn": 33,
+          "fp": 0,
+          "precision": 1.0,
+          "precisionWilson95": [
+            0.43849391955098227,
+            1.0
+          ],
+          "recall": 0.08333333333333333,
+          "recallWilson95": [
+            0.0287480892712918,
+            0.21827010276918848
+          ],
+          "tp": 3
+        },
+        "channelnewsasia.com": {
+          "falseMergeRate": 0.13043478260869565,
+          "falseMergeWilson95": [
+            0.04537576514344702,
+            0.32127897973018194
+          ],
+          "fn": 56,
+          "fp": 3,
+          "precision": 0.8695652173913043,
+          "precisionWilson95": [
+            0.678721020269818,
+            0.954624234856553
+          ],
+          "recall": 0.2631578947368421,
+          "recallWilson95": [
+            0.1772926637089946,
+            0.371814568610999
+          ],
+          "tp": 20
+        },
+        "cnbc.com": {
+          "falseMergeRate": 0.0,
+          "falseMergeWilson95": [
+            -1.3877787807814457e-17,
+            0.20388926630434784
+          ],
+          "fn": 35,
+          "fp": 0,
+          "precision": 1.0,
+          "precisionWilson95": [
+            0.7961107336956521,
+            1.0
+          ],
+          "recall": 0.3,
+          "recallWilson95": [
+            0.1910338908960936,
+            0.4375061227736339
+          ],
+          "tp": 15
+        },
+        "dawn.com": {
+          "falseMergeRate": 0.6,
+          "falseMergeWilson95": [
+            0.357464427565077,
+            0.8017577191740534
+          ],
+          "fn": 26,
+          "fp": 9,
+          "precision": 0.4,
+          "precisionWilson95": [
+            0.19824228082594664,
+            0.642535572434923
+          ],
+          "recall": 0.1875,
+          "recallWilson95": [
+            0.08889423936162782,
+            0.3530949575492244
+          ],
+          "tp": 6
+        },
+        "dw.com": {
+          "falseMergeRate": 0.1,
+          "falseMergeWilson95": [
+            0.027865893984153206,
+            0.30103820641179335
+          ],
+          "fn": 11,
+          "fp": 2,
+          "precision": 0.9,
+          "precisionWilson95": [
+            0.6989617935882066,
+            0.9721341060158468
+          ],
+          "recall": 0.6206896551724138,
+          "recallWilson95": [
+            0.4400222620928496,
+            0.7731220426913266
+          ],
+          "tp": 18
+        },
+        "euronews.com": {
+          "falseMergeRate": 0.11764705882352941,
+          "falseMergeWilson95": [
+            0.03287908001292092,
+            0.3433684249770991
+          ],
+          "fn": 41,
+          "fp": 2,
+          "precision": 0.8823529411764706,
+          "precisionWilson95": [
+            0.6566315750229009,
+            0.967120919987079
+          ],
+          "recall": 0.26785714285714285,
+          "recallWilson95": [
+            0.1695715866189496,
+            0.3959480518933896
+          ],
+          "tp": 15
+        },
+        "france24.com": {
+          "falseMergeRate": 0.09523809523809523,
+          "falseMergeWilson95": [
+            0.0376616388283121,
+            0.2206539522505333
+          ],
+          "fn": 89,
+          "fp": 4,
+          "precision": 0.9047619047619048,
+          "precisionWilson95": [
+            0.7793460477494668,
+            0.9623383611716879
+          ],
+          "recall": 0.2992125984251969,
+          "recallWilson95": [
+            0.22642346171260533,
+            0.383792249498508
+          ],
+          "tp": 38
+        },
+        "kyivindependent.com": {
+          "falseMergeRate": 0.16666666666666666,
+          "falseMergeWilson95": [
+            0.04696414761482223,
+            0.44803635738467273
+          ],
+          "fn": 9,
+          "fp": 2,
+          "precision": 0.8333333333333334,
+          "precisionWilson95": [
+            0.5519636426153274,
+            0.9530358523851776
+          ],
+          "recall": 0.5263157894736842,
+          "recallWilson95": [
+            0.31707482511825114,
+            0.7267049451255145
+          ],
+          "tp": 10
+        },
+        "pravda.com.ua": {
+          "falseMergeRate": 0.13333333333333333,
+          "falseMergeWilson95": [
+            0.05309569424218104,
+            0.2968168394441695
+          ],
+          "fn": 44,
+          "fp": 4,
+          "precision": 0.8666666666666667,
+          "precisionWilson95": [
+            0.7031831605558306,
+            0.9469043057578189
+          ],
+          "recall": 0.37142857142857144,
+          "recallWilson95": [
+            0.2677048160082965,
+            0.4885301518147193
+          ],
+          "tp": 26
+        },
+        "theguardian.com": {
+          "falseMergeRate": 0.125,
+          "falseMergeWilson95": [
+            0.04970053844474301,
+            0.2806864978482796
+          ],
+          "fn": 58,
+          "fp": 4,
+          "precision": 0.875,
+          "precisionWilson95": [
+            0.7193135021517204,
+            0.950299461555257
+          ],
+          "recall": 0.32558139534883723,
+          "recallWilson95": [
+            0.23585553745183332,
+            0.43022342819437065
+          ],
+          "tp": 28
+        },
+        "thehill.com": {
+          "falseMergeRate": 0.1276595744680851,
+          "falseMergeWilson95": [
+            0.059845227802024795,
+            0.25174213372869025
+          ],
+          "fn": 72,
+          "fp": 6,
+          "precision": 0.8723404255319149,
+          "precisionWilson95": [
+            0.7482578662713097,
+            0.9401547721979753
+          ],
+          "recall": 0.36283185840707965,
+          "recallWilson95": [
+            0.2800411474771035,
+            0.4546423898931482
+          ],
+          "tp": 41
+        },
+        "thehindu.com": {
+          "falseMergeRate": 0.25925925925925924,
+          "falseMergeWilson95": [
+            0.16118507964793902,
+            0.38931144880217294
+          ],
+          "fn": 94,
+          "fp": 14,
+          "precision": 0.7407407407407407,
+          "precisionWilson95": [
+            0.610688551197827,
+            0.8388149203520608
+          ],
+          "recall": 0.29850746268656714,
+          "recallWilson95": [
+            0.22752361778533114,
+            0.3807223689124437
+          ],
+          "tp": 40
+        },
+        "timesofindia.indiatimes.com": {
+          "falseMergeRate": 0.0,
+          "falseMergeWilson95": [
+            0.0,
+            0.2991527535509594
+          ],
+          "fn": 47,
+          "fp": 0,
+          "precision": 1.0,
+          "precisionWilson95": [
+            0.7008472464490407,
+            1.0
+          ],
+          "recall": 0.16071428571428573,
+          "recallWilson95": [
+            0.08692569640589272,
+            0.278064544496757
+          ],
+          "tp": 9
+        }
+      },
+      "falseMergeRate": 0.1645021645021645,
+      "falseMergeWilson95": [
+        0.1222575393712655,
+        0.21772311141632927
+      ],
+      "falsePairBoundaries": [
+        {
+          "occurrences": [
+            "court-sanctions",
+            "peace-award"
+          ],
+          "pairs": 12
+        },
+        {
+          "occurrences": [
+            "diesel-agreement",
+            "diesel-license"
+          ],
+          "pairs": 11
+        },
+        {
+          "occurrences": [
+            "diesel-agreement",
+            "fuel-site-strike"
+          ],
+          "pairs": 11
+        },
+        {
+          "occurrences": [
+            "diesel-license",
+            "fuel-site-strike"
+          ],
+          "pairs": 1
+        },
+        {
+          "occurrences": [
+            "yandex-first-strike",
+            "yandex-multi-strike-summary"
+          ],
+          "pairs": 1
+        },
+        {
+          "occurrences": [
+            "yandex-first-strike",
+            "yandex-service-disruption"
+          ],
+          "pairs": 1
+        },
+        {
+          "occurrences": [
+            "yandex-multi-strike-summary",
+            "yandex-service-disruption"
+          ],
+          "pairs": 1
+        }
+      ],
+      "fn": 445,
+      "fp": 38,
+      "fragmentMerges": 0,
+      "impureEvents": 4,
+      "judgements": 1307,
+      "maximumJudgementsPerPass": 497,
+      "maximumProcessedPerPass": 49,
+      "precision": 0.8354978354978355,
+      "precisionWilson95": [
+        0.7822768885836708,
+        0.8777424606287345
+      ],
+      "recall": 0.30250783699059564,
+      "recallWilson95": [
+        0.2681332813604554,
+        0.3392464833665427
+      ],
+      "tp": 193
+    }
+  },
+  "source": "ade184a4f0cb8eb5f4636be4758a9bee878bde0a",
+  "status": "Diagnostic targeted sample with provisional copilot labels; below precision target; not release acceptance."
+}

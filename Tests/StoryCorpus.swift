@@ -142,11 +142,10 @@ enum StoryCorpus {
                 }
                 if !batch.isEmpty {
                     try await db.upsertArticles(batch)
-                    // NEWS_EVENT_JUDGE=1 replays with the on-device judge and no per-pass budget.
+                    // Keep production's per-pass article and judge limits in evaluation too.
                     let judged = ProcessInfo.processInfo.environment["NEWS_EVENT_JUDGE"] == "1"
                     let report = try await EventClusterer.run(
-                        in: db, judge: judged ? .onDevice : .unavailable,
-                        judgeBudget: judged ? .max : 0, now: clock, limit: .max)
+                        in: db, judge: judged ? .onDevice : .unavailable, now: clock)
                     onPass?(report)
                 }
                 clock = clock.addingTimeInterval(6 * 3600)

@@ -8375,6 +8375,19 @@ struct NewsTests {
     }
 
     static func testEventCorpusHarness(fixtureRoot: URL) async throws {
+        // One refresh-sized batch must not bypass production's article budget in the evaluator.
+        let batchDate = Date(timeIntervalSince1970: 1_700_000_000)
+        let oversized = (0..<2_001).map { index in
+            FeedArticle(
+                storedID: "budget-\(index)", title: "", link: "https://corpus.invalid/budget-\(index)",
+                guid: "budget-\(index)", description: "", pubDate: batchDate, source: "Corpus")
+        }
+        var processed: [Int] = []
+        let boundedMemberships = try await StoryCorpus.eventMemberships(articles: oversized) {
+            processed.append($0.processed)
+        }
+        assertEqual(processed, [2_000], "Corpus replay uses the production per-pass article limit")
+        assertEqual(boundedMemberships.count, 2_001, "Budget-deferred articles remain observable as singletons")
         print("  - Testing the labeled event corpus harness on the synthetic control set...")
         assertTrue(EventCorpusMetrics().precision == nil, "No predicted positives cannot establish precision")
         assertTrue(EventCorpusMetrics().recall == nil, "No labeled positives cannot establish recall")
