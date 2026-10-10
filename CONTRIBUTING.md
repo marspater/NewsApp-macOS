@@ -27,6 +27,7 @@ python3 script/evaluation/relation_review.py sheet /private/tmp/relation-report 
 python3 script/evaluation/relation_review.py report /private/tmp/relation-report # #314: aggregate-only wrong-link rate and related controls with Wilson bounds
 ./test.sh --performance-baseline --active-work-cancellation # Active clustering, ingestion and feed parsing cancellation; temporary stress fixtures
 ./script/native_performance_baseline.sh # Isolated MainView window, rendered-card samples and process memory
+NEWS_NATIVE_HARNESS=Tests/NativeWorldTensionQA.swift ./script/native_performance_baseline.sh # Live on-device synthetic-headline assessment, Settings tab bounds and display callback cadence
 NEWS_NATIVE_HARNESS=Tests/NativeReadingMemory.swift ./script/native_performance_baseline.sh # Live: read 20 stories twice in the production reader, isolated; waits until each image is decoded
 NEWS_READING_FULL_APP=1 ./script/native_performance_baseline.sh # Live: sandboxed bundle, production cache, same reading plus ten overviews and five publisher Web views
 ./script/test_voiceover_live_qa.sh --self-test # Parked (#268): bounded command-protocol regressions, no AX permission required

@@ -18,7 +18,23 @@ enum SettingsPane: String, CaseIterable, Identifiable {
 struct SettingsView: View {
     static let lastPaneStorageKey = "lastSettingsPane"
     /// Wide enough for all nine tabs in the toolbar, so none overflow into a menu.
-    static let paneWidth: CGFloat = 720
+    static let paneWidth = AppLayout.settingsPaneWidth
+    static let paneHeight = AppLayout.settingsPaneHeight
+
+    static func predefinedCategory(for section: String) -> NewsCategory? {
+        let name = section.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let category = NewsCategory.allCases.first(where: {
+            $0.rawValue.caseInsensitiveCompare(name) == .orderedSame
+        }) {
+            return category
+        }
+        switch name.lowercased() {
+        case "tech": return .technology
+        case "u.s. politics": return .politics
+        case "health & wellness": return .health
+        default: return nil
+        }
+    }
 
     @EnvironmentObject var appSettings: AppSettings
     @EnvironmentObject var articleStore: ArticleStore
@@ -81,6 +97,7 @@ struct SettingsView: View {
                 .tabItem { Label("Updates", systemImage: "arrow.triangle.2.circlepath") }
                 .tag(SettingsPane.updates)
         }
+        .frame(width: Self.paneWidth, height: Self.paneHeight)
         .onAppear { calculateStorageSizes() }
     }
 
@@ -106,6 +123,27 @@ struct SettingsView: View {
                 Text("Periodic feed updates occur in the background when News is running.")
                     .font(AppTypography.caption)
                     .foregroundColor(AppColor.secondaryText)
+            }
+
+            Section("Predefined Categories") {
+                ForEach(NewsCategory.allCases, id: \.self) { category in
+                    Toggle(
+                        category.rawValue,
+                        isOn: Binding(
+                            get: { feedManager.userSections.contains { Self.predefinedCategory(for: $0) == category } },
+                            set: { enabled in
+                                if enabled {
+                                    feedManager.addSection(category.rawValue)
+                                } else {
+                                    for section in feedManager.userSections
+                                    where Self.predefinedCategory(for: section) == category {
+                                        feedManager.removeSection(section)
+                                    }
+                                }
+                            }))
+                }
+                Text("Choose the categories shown in the sidebar. Your existing sections stay available.")
+                    .font(AppTypography.caption).foregroundStyle(AppColor.secondaryText)
             }
 
             Section("Reading Behavior") {
@@ -479,7 +517,7 @@ struct SettingsView: View {
                                 .font(AppTypography.label)
                                 .foregroundColor(AppColor.primaryText)
                             Text(
-                                "Analysis runs lazily only when you open a story for reading, preserving battery, CPU, and Neural Engine resources."
+                                "Analysis runs on demand and after feed refreshes. World Tension assessments pause in Low Power Mode or under thermal pressure."
                             )
                             .font(AppTypography.caption)
                             .foregroundColor(AppColor.secondaryText)
@@ -505,7 +543,7 @@ struct SettingsView: View {
                 .padding(.vertical, AppSpacing.xxs)
             }
 
-            Section("News Tension Index (Experiment)") {
+            Section("World Tension Index (Experiment)") {
                 Toggle(
                     "Collect Panel Feeds for Tension Indicator",
                     isOn: Binding(
@@ -513,11 +551,11 @@ struct SettingsView: View {
                         set: { feedManager.setTensionCollectionOptIn($0) }
                     ))
                 Text(
-                    "Fetches stories from the 12 international panel feeds to calculate the news tension indicator. These stories are stored locally for tension analysis and will not generate unread notifications unless you subscribe to the feeds directly."
+                    "Fetches stories from the 12 international panel feeds to calculate the AI World Tension assessment. These stories are stored locally for tension analysis and will not generate unread notifications unless you subscribe to the feeds directly."
                 )
                 .font(AppTypography.caption)
                 .foregroundColor(AppColor.secondaryText)
-                Button("Show News Tension…") {
+                Button("Show World Tension…") {
                     NewsTensionRequest.post()
                     openWindow(id: "main")
                 }

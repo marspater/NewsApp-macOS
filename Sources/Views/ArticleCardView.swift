@@ -136,7 +136,8 @@ struct ArticleCardView: View {
                 .stroke(appearance.border, lineWidth: appearance.width)
         )
         .shadow(color: appearance.shadow, radius: appearance.radius, x: 0, y: appearance.y)
-        .animation(reduceMotion ? nil : AppMotion.state, value: isHovered || isSelected)
+        .animation(reduceMotion ? nil : AppMotion.hover, value: isHovered)
+        .animation(reduceMotion ? nil : AppMotion.state, value: isSelected)
         .opacity(isRead ? 0.90 : 1.0)
         .onHover { hovering in
             isHovered = hovering
@@ -278,7 +279,8 @@ struct ArticleCardView: View {
                 .stroke(appearance.border, lineWidth: appearance.width)
         }
         .shadow(color: appearance.shadow, radius: appearance.radius, x: 0, y: appearance.y)
-        .animation(reduceMotion ? nil : AppMotion.state, value: isHovered || isSelected)
+        .animation(reduceMotion ? nil : AppMotion.hover, value: isHovered)
+        .animation(reduceMotion ? nil : AppMotion.state, value: isSelected)
         .onHover { isHovered = $0 }
     }
 

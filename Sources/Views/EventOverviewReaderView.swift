@@ -90,7 +90,7 @@ struct EventOverviewReaderView: View {
 
     // MARK: - Animation Policy
     static func readerAnimation(reduceMotion: Bool) -> Animation? {
-        reduceMotion ? nil : .easeInOut(duration: 0.2)
+        reduceMotion ? nil : AppMotion.navigation
     }
 
     // MARK: - Citation Resolution Helper

@@ -19,7 +19,8 @@ struct SidebarView: View {
     @Binding var mastheadNotice: MastheadNotice?
     /// Panel collection is on, so the sidebar foot shows the news tension reading.
     var showsTensionReading = false
-    var tensionReading: TensionHistoryDay?
+    var tensionReading: WorldTensionReading?
+    var tensionStatus = "Not assessed"
     var openTension: () -> Void = {}
 
     @EnvironmentObject private var appSettings: AppSettings
@@ -34,14 +35,6 @@ struct SidebarView: View {
     /// On macOS 27 a row click does not keep keyboard focus in the sidebar once the window title and toolbar
     /// search update for the new section, so arrow keys reached the story list instead.
     @FocusState private var isListFocused: Bool
-
-    private let suggestedTopics: [(String, String)] = [
-        ("Entertainment", "tv"), ("Science", "atom"),
-        ("U.S. Politics", "building.columns"), ("Tech", "cpu"),
-        ("Business", "briefcase"), ("Health & Wellness", "leaf"),
-        ("Fashion", "tshirt"), ("Travel", "airplane"),
-        ("Sports", "sportscourt"), ("World", "globe.americas"),
-    ]
 
     var body: some View {
         List(
@@ -59,12 +52,11 @@ struct SidebarView: View {
             inboxSection
             librarySection
             userSectionsSection
-            suggestedSection
         }
         .focused($isListFocused)
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if showsTensionReading {
-                TensionSidebarButton(reading: tensionReading, open: openTension)
+                TensionSidebarButton(reading: tensionReading, open: openTension, status: tensionStatus)
                     .padding(.horizontal, AppLayout.sidebarInset)
                     .padding(.vertical, AppSpacing.sm)
             }
@@ -108,22 +100,16 @@ struct SidebarView: View {
     ) -> some View {
         let count = badge ?? 0
         let badgeValue = count > 0 ? String(count) : ""
-        Group {
-            if isLoading {
-                HStack {
-                    Label(title, systemImage: icon)
-                    Spacer()
-                    ProgressView()
-                        .controlSize(.mini)
-                }
-            } else {
-                Label(title, systemImage: icon)
-                    .badge(badge ?? 0)
+        Label(title, systemImage: icon)
+            .badge(badge ?? 0)
+            .overlay(alignment: .trailing) {
+                if isLoading { ProgressView().controlSize(.mini) }
             }
-        }
-        .tag(title)
-        .accessibilityLabel(accessibility ?? title)
-        .accessibilityValue(isLoading ? "Refreshing" : badgeValue)
+            .symbolRenderingMode(.monochrome)
+            .transaction { $0.animation = nil }
+            .tag(title)
+            .accessibilityLabel(accessibility ?? title)
+            .accessibilityValue(isLoading ? "Refreshing" : badgeValue)
     }
 
     private var inboxSection: some View {
@@ -162,39 +148,6 @@ struct SidebarView: View {
                             Label("Remove Section", systemImage: "minus.circle")
                         }
                     }
-            }
-        }
-    }
-
-    private var suggestedSection: some View {
-        Section("Suggested") {
-            ForEach(suggestedTopics, id: \.0) { topic, icon in
-                if !feedManager.userSections.contains(topic) {
-                    HStack {
-                        Label(topic, systemImage: icon)
-                            .foregroundStyle(AppColor.secondaryText)
-                        Spacer()
-                        Button {
-                            feedManager.addSection(topic)
-                        } label: {
-                            Image(systemName: "plus")
-                                .imageScale(.small)
-                                .foregroundStyle(AppColor.tertiaryText)
-                        }
-                        .buttonStyle(.plain)
-                        .help("Add \(topic) to sections")
-                        .accessibilityLabel("Add \(topic) to sections")
-                    }
-                    .tag(topic)
-                    .contextMenu {
-                        Button {
-                            feedManager.addSection(topic)
-                        } label: {
-                            Label("Add to Sections", systemImage: "plus.circle")
-                        }
-                    }
-                    .accessibilityLabel("Suggested topic \(topic)")
-                }
             }
         }
     }

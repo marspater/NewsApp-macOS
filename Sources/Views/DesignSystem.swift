@@ -32,16 +32,19 @@ enum AppColor {
     static let warning = Color(NSColor.systemYellow)
     static let danger = Color(NSColor.systemRed)
     static let caution = Color(NSColor.systemOrange)
+    static let flameCore = Color(.displayP3, red: 1, green: 0.97, blue: 0.72)
+    static let critical = Color(NSColor.systemPurple)
 
     /// The news tension scale from calm to boiling, for the gauge, glyph and trend points.
-    static let tensionScale = Gradient(colors: [success, warning, caution, danger])
+    static let tensionScale = Gradient(colors: [success, warning, caution, danger, critical])
 
     static func tension(_ level: TensionLevel) -> Color {
         switch level {
         case .calm: return success
         case .mild: return warning
         case .warm: return caution
-        case .hot, .boiling: return danger
+        case .hot: return danger
+        case .boiling: return critical
         }
     }
 
@@ -72,6 +75,14 @@ enum AppColor {
 // MARK: - App Layout
 
 enum AppLayout {
+    static let settingsPaneWidth: CGFloat = 720
+    static let settingsPaneHeight: CGFloat = 560
+    static let tensionIllustrationSize: CGFloat = 88
+    static let tensionDotSize: CGFloat = 10
+    static let tensionStrokeWidth: CGFloat = 3
+    static let tensionSheetWidth: CGFloat = 580
+    static let tensionSheetHeight: CGFloat = 660
+    static let tensionChartHeight: CGFloat = 160
     static let pageInset: CGFloat = 24.0
     static let sidebarInset: CGFloat = 12.0
     static let sectionGap: CGFloat = 24.0
@@ -283,8 +294,8 @@ enum AppShadow {
 
 enum AppMotion {
     static let hover = Animation.easeOut(duration: 0.12)
-    static let state = Animation.spring(response: 0.28, dampingFraction: 0.8)
-    static let navigation = Animation.spring(response: 0.38, dampingFraction: 0.82)
+    static let state = Animation.smooth(duration: 0.24)
+    static let navigation = Animation.smooth(duration: 0.3)
     static let modal = Animation.easeOut(duration: 0.2)
 
     // Aliases for backward compatibility

@@ -989,7 +989,7 @@ struct ArticleDetailView: View {
     }
 
     static func readerAnimation(reduceMotion: Bool) -> Animation? {
-        reduceMotion ? nil : .easeInOut(duration: 0.2)
+        reduceMotion ? nil : AppMotion.navigation
     }
 
     static func sourceLineAccessibilityLabel(source: String, publicationDateText: String, readingTimeEstimate: String)
