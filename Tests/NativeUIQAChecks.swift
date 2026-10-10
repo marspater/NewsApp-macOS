@@ -61,6 +61,7 @@ struct NativeUIQAChecks {
         testIncreaseContrastScalers()
         testReduceMotionPolicies()
         testLightAndDarkAppearanceTokens()
+        testContentConsistencyComponents()
         testFeedStabilityAndQueuedUpdatesBuffer()
         testEventOverviewGenerationAndCachingLifecycle()
         testCitationRoutingAndBanner()
@@ -461,6 +462,26 @@ struct NativeUIQAChecks {
         _ = AppColor.secondaryText
         _ = AppColor.accent
         assertTrue(true, "AppColor semantic design tokens resolve without error")
+    }
+
+    // MARK: - Phase 4 Shared Components
+    static func testContentConsistencyComponents() {
+        print("  - Testing shared content typography and notices...")
+        _ = EyebrowText("Publisher")
+        _ = TagView(title: "Updated", tint: AppColor.accent)
+        _ = TagView.intelligence()
+        _ = IntelligenceLabel("AI-generated summary")
+        _ = NoticeView(tint: AppColor.warning) { Text("Notice") }
+        for scale: CGFloat in [1.0, 1.3, 1.5] {
+            _ = AppTypography.overviewFont(.title, scale: scale)
+            _ = AppTypography.overviewFont(.section, scale: scale)
+            _ = AppTypography.overviewFont(.body, scale: scale)
+            _ = AppTypography.overviewFont(.eyebrow, scale: scale)
+            _ = AppTypography.readerCaptionFont(scale: scale)
+        }
+        _ = AppColor.separator
+        _ = AppColor.borderSubtle
+        assertTrue(true, "Shared content tokens and components construct")
     }
 
     // MARK: - 9. Feed Stability and Queued Updates Buffer

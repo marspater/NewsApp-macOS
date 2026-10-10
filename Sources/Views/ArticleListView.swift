@@ -127,7 +127,7 @@ struct ArticleListView: View {
             ContentUnavailableView("Couldn’t Load Articles", systemImage: "exclamationmark.triangle")
         } else if filteredArticles.isEmpty && isSearching && mutedCount == 0 {
             ContentUnavailableView.search(text: searchText)
-                .padding(.top, 80)
+                .padding(.top, AppSpacing.xxl)
         } else if filteredArticles.isEmpty {
             emptyStateView
         } else {
@@ -592,7 +592,7 @@ struct ArticleListView: View {
                         ? "Briefing complete"
                         : "\(briefing.readCount(readManager.readArticles)) of \(briefing.articles.count) stories read"
                 )
-                .font(AppTypography.headline)
+                .font(AppTypography.sectionTitle)
                 Text(
                     "Selection frozen at \(briefing.startedAt.formatted(date: .omitted, time: .shortened)). New stories stay in your regular feed."
                 )
@@ -717,32 +717,32 @@ struct ArticleListView: View {
             if !isBriefing && feedManager.isAnyFeedLoading {
                 ProgressView()
                     .controlSize(.regular)
-                    .padding(.bottom, 4)
+                    .padding(.bottom, AppSpacing.xxs)
                 Text("Refreshing news feeds...")
                     .font(AppTypography.body)
                     .foregroundColor(AppColor.secondaryText)
             } else if !isBriefing && (selectedTopic != "Saved Stories" && selectedTopic != "History")
                 && !failedFeeds.isEmpty && filteredArticles.isEmpty
             {
-                VStack(spacing: 12) {
+                VStack(spacing: AppSpacing.sm) {
                     Image(systemName: "exclamationmark.triangle")
-                        .font(.system(size: 32))
+                        .imageScale(.large)
                         .foregroundColor(AppColor.warning)
 
                     Text("\(failedFeeds.count) feeds couldn't be refreshed")
-                        .font(AppTypography.headline)
+                        .font(AppTypography.sectionTitle)
                         .foregroundColor(AppColor.primaryText)
 
-                    VStack(spacing: 4) {
+                    VStack(spacing: AppSpacing.xxs) {
                         ForEach(Array(failedFeeds.keys.prefix(4)), id: \.self) { urlString in
                             let host = URL(string: urlString)?.host ?? urlString
                             Text(host)
-                                .font(AppTypography.bodySmall)
+                                .font(AppTypography.body)
                                 .foregroundColor(AppColor.secondaryText)
                         }
                     }
 
-                    HStack(spacing: 10) {
+                    HStack(spacing: AppSpacing.xs) {
                         Button("Retry Feeds") {
                             refreshFeeds()
                         }
@@ -750,26 +750,26 @@ struct ArticleListView: View {
                         .tint(AppColor.accent)
                         .controlSize(.small)
                     }
-                    .padding(.top, 4)
+                    .padding(.top, AppSpacing.xxs)
 
                     DisclosureGroup("Technical Details") {
-                        VStack(alignment: .leading, spacing: 6) {
+                        VStack(alignment: .leading, spacing: AppSpacing.eyebrowGap) {
                             ForEach(Array(failedFeeds.keys), id: \.self) { urlString in
                                 if case .failed(let err) = feedManager.feedStatuses[urlString] {
                                     Text("\(urlString): \(err.localizedDescription)")
-                                        .font(.system(size: 10, design: .monospaced))
+                                        .font(AppTypography.caption.monospaced())
                                         .foregroundColor(AppColor.secondaryText)
                                         .lineLimit(2)
                                 }
                             }
                         }
-                        .padding(.top, 6)
+                        .padding(.top, AppSpacing.eyebrowGap)
                     }
                     .font(AppTypography.caption)
                     .foregroundColor(AppColor.tertiaryText)
                     .frame(maxWidth: 360)
                 }
-                .padding(20)
+                .padding(AppSpacing.lg)
                 .background(
                     RoundedRectangle(cornerRadius: AppRadius.container)
                         .fill(AppColor.surface)
@@ -778,18 +778,18 @@ struct ArticleListView: View {
                                 .stroke(AppColor.borderSubtle, lineWidth: 1)
                         )
                 )
-                .frame(maxWidth: 420)
+                .frame(maxWidth: AppLayout.gridColumnMaximum)
             } else {
                 Image(systemName: emptyStateIcon)
-                    .font(.system(size: 36))
+                    .imageScale(.large)
                     .foregroundColor(AppColor.tertiaryText)
 
                 Text(emptyStateTitle)
-                    .font(AppTypography.headline)
+                    .font(AppTypography.sectionTitle)
                     .foregroundColor(AppColor.primaryText)
 
                 Text(emptyStateText)
-                    .font(AppTypography.bodySmall)
+                    .font(AppTypography.body)
                     .foregroundColor(AppColor.secondaryText)
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: 340)
@@ -808,12 +808,12 @@ struct ArticleListView: View {
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
-                    .padding(.top, 4)
+                    .padding(.top, AppSpacing.xxs)
                 }
             }
         }
         .frame(maxWidth: .infinity)
-        .padding(.top, 80)
+        .padding(.top, AppSpacing.xxl)
     }
 
     private var emptyStateIcon: String {

@@ -122,7 +122,7 @@ struct SettingsView: View {
     private var feedsTab: some View {
         VStack(spacing: 0) {
             // Add feed row
-            HStack(spacing: 10) {
+            HStack(spacing: AppSpacing.xs) {
                 Image(systemName: "plus.circle.fill")
                     .foregroundColor(AppColor.accent)
                     .imageScale(.large)
@@ -141,11 +141,11 @@ struct SettingsView: View {
                 .disabled(newFeedURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
             .padding(.horizontal, AppLayout.pageInset)
-            .padding(.top, 16)
-            .padding(.bottom, 10)
+            .padding(.top, AppSpacing.md)
+            .padding(.bottom, AppSpacing.xs)
 
             // OPML actions bar
-            HStack(spacing: 10) {
+            HStack(spacing: AppSpacing.xs) {
                 Button {
                     showsCatalog = true
                 } label: {
@@ -189,14 +189,14 @@ struct SettingsView: View {
                     .foregroundColor(AppColor.secondaryText)
             }
             .padding(.horizontal, AppLayout.pageInset)
-            .padding(.bottom, 10)
+            .padding(.bottom, AppSpacing.xs)
 
             Divider()
 
             // Feed list
             List {
                 ForEach(feedManager.feedURLs, id: \.self) { urlString in
-                    HStack(spacing: 12) {
+                    HStack(spacing: AppSpacing.sm) {
                         let status = feedManager.feedStatuses[urlString]
                         switch status {
                         case nil:
@@ -225,7 +225,7 @@ struct SettingsView: View {
                                 .help(err.localizedDescription)
                                 .accessibilityLabel(err.localizedDescription)
                         }
-                        VStack(alignment: .leading, spacing: 2) {
+                        VStack(alignment: .leading, spacing: AppSpacing.textStack) {
                             Text(urlString)
                                 .font(AppTypography.label.monospaced())
                                 .lineLimit(1)
@@ -244,7 +244,7 @@ struct SettingsView: View {
                         .help("Unsubscribe from feed")
                         .accessibilityLabel("Unsubscribe from feed")
                     }
-                    .padding(.vertical, 4)
+                    .padding(.vertical, AppSpacing.xxs)
                 }
             }
             .listStyle(.plain)
@@ -254,7 +254,7 @@ struct SettingsView: View {
                 .foregroundColor(AppColor.tertiaryText)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, AppLayout.pageInset)
-                .padding(.vertical, 8)
+                .padding(.vertical, AppSpacing.xs)
         }
         .frame(width: Self.paneWidth, height: 440)
         .task { await feedManager.reloadFeedHealth() }
@@ -276,7 +276,7 @@ struct SettingsView: View {
             }
 
             Section("Sources") {
-                HStack(spacing: 10) {
+                HStack(spacing: AppSpacing.xs) {
                     TextField("Publisher hostname, such as example.com", text: $newMutedSource)
                         .textFieldStyle(.roundedBorder)
                         .onSubmit(muteNewSource)
@@ -293,7 +293,7 @@ struct SettingsView: View {
             }
 
             Section("Topics") {
-                HStack(spacing: 10) {
+                HStack(spacing: AppSpacing.xs) {
                     TextField("Word or phrase", text: $newMutedTopic)
                         .textFieldStyle(.roundedBorder)
                         .onSubmit(muteNewTopic)
@@ -331,7 +331,7 @@ struct SettingsView: View {
     }
 
     private func mutingRow(_ rule: String, count: Int, unmute: @escaping () -> Void) -> some View {
-        HStack(spacing: 12) {
+        HStack(spacing: AppSpacing.sm) {
             Text(rule)
                 .lineLimit(1)
                 .foregroundColor(AppColor.primaryText)
@@ -389,7 +389,7 @@ struct SettingsView: View {
                     }
                     .pickerStyle(.radioGroup)
 
-                    HStack(spacing: 8) {
+                    HStack(spacing: AppSpacing.xs) {
                         Image(systemName: appSettings.notificationMode == .privacy ? "lock.fill" : "info.circle")
                             .foregroundColor(
                                 appSettings.notificationMode == .privacy ? AppColor.success : AppColor.accent)
@@ -397,7 +397,7 @@ struct SettingsView: View {
                             .font(AppTypography.caption)
                             .foregroundColor(AppColor.secondaryText)
                     }
-                    .padding(.top, 4)
+                    .padding(.top, AppSpacing.xxs)
                 }
             }
         }
@@ -422,12 +422,12 @@ struct SettingsView: View {
             }
 
             Section("Architecture & Privacy Guarantees") {
-                VStack(alignment: .leading, spacing: 10) {
-                    HStack(alignment: .top, spacing: 8) {
+                VStack(alignment: .leading, spacing: AppSpacing.xs) {
+                    HStack(alignment: .top, spacing: AppSpacing.xs) {
                         Image(systemName: "sparkles")
                             .foregroundColor(AppColor.intelligence)
-                            .padding(.top, 2)
-                        VStack(alignment: .leading, spacing: 2) {
+                            .padding(.top, AppSpacing.textStack)
+                        VStack(alignment: .leading, spacing: AppSpacing.textStack) {
                             Text("Apple-Native On-Device Models")
                                 .font(AppTypography.label)
                                 .foregroundColor(AppColor.primaryText)
@@ -439,11 +439,11 @@ struct SettingsView: View {
                         }
                     }
 
-                    HStack(alignment: .top, spacing: 8) {
+                    HStack(alignment: .top, spacing: AppSpacing.xs) {
                         Image(systemName: "bolt.shield")
                             .foregroundColor(AppColor.accent)
-                            .padding(.top, 2)
-                        VStack(alignment: .leading, spacing: 2) {
+                            .padding(.top, AppSpacing.textStack)
+                        VStack(alignment: .leading, spacing: AppSpacing.textStack) {
                             Text("On-Demand Execution")
                                 .font(AppTypography.label)
                                 .foregroundColor(AppColor.primaryText)
@@ -455,11 +455,11 @@ struct SettingsView: View {
                         }
                     }
 
-                    HStack(alignment: .top, spacing: 8) {
+                    HStack(alignment: .top, spacing: AppSpacing.xs) {
                         Image(systemName: "hand.raised.fill")
                             .foregroundColor(AppColor.success)
-                            .padding(.top, 2)
-                        VStack(alignment: .leading, spacing: 2) {
+                            .padding(.top, AppSpacing.textStack)
+                        VStack(alignment: .leading, spacing: AppSpacing.textStack) {
                             Text("Zero Cloud Telemetry")
                                 .font(AppTypography.label)
                                 .foregroundColor(AppColor.primaryText)
@@ -471,7 +471,7 @@ struct SettingsView: View {
                         }
                     }
                 }
-                .padding(.vertical, 4)
+                .padding(.vertical, AppSpacing.xxs)
             }
 
             Section("News Tension Index (Experiment)") {
@@ -506,7 +506,7 @@ struct SettingsView: View {
                     ))
 
                 if appSettings.allowInsecureHTTP {
-                    HStack(spacing: 6) {
+                    HStack(spacing: AppSpacing.eyebrowGap) {
                         Image(systemName: "exclamationmark.triangle.fill")
                             .foregroundColor(AppColor.warning)
                         Text(
@@ -523,12 +523,12 @@ struct SettingsView: View {
             }
 
             Section("Security Standards") {
-                VStack(alignment: .leading, spacing: 10) {
-                    HStack(alignment: .top, spacing: 8) {
+                VStack(alignment: .leading, spacing: AppSpacing.xs) {
+                    HStack(alignment: .top, spacing: AppSpacing.xs) {
                         Image(systemName: "shield.lefthalf.filled")
                             .foregroundColor(AppColor.accent)
-                            .padding(.top, 2)
-                        VStack(alignment: .leading, spacing: 2) {
+                            .padding(.top, AppSpacing.textStack)
+                        VStack(alignment: .leading, spacing: AppSpacing.textStack) {
                             Text("Hardened Runtime & App Sandbox")
                                 .font(AppTypography.label)
                                 .foregroundColor(AppColor.primaryText)
@@ -538,11 +538,11 @@ struct SettingsView: View {
                         }
                     }
 
-                    HStack(alignment: .top, spacing: 8) {
+                    HStack(alignment: .top, spacing: AppSpacing.xs) {
                         Image(systemName: "network.badge.shield.half.filled")
                             .foregroundColor(AppColor.success)
-                            .padding(.top, 2)
-                        VStack(alignment: .leading, spacing: 2) {
+                            .padding(.top, AppSpacing.textStack)
+                        VStack(alignment: .leading, spacing: AppSpacing.textStack) {
                             Text("Direct Connection")
                                 .font(AppTypography.label)
                                 .foregroundColor(AppColor.primaryText)
@@ -554,7 +554,7 @@ struct SettingsView: View {
                         }
                     }
                 }
-                .padding(.vertical, 4)
+                .padding(.vertical, AppSpacing.xxs)
             }
         }
         .formStyle(.grouped)
@@ -589,9 +589,9 @@ struct SettingsView: View {
                 .pickerStyle(.radioGroup)
 
                 // Typography Preview
-                VStack(alignment: .leading, spacing: 6) {
+                VStack(alignment: .leading, spacing: AppSpacing.eyebrowGap) {
                     Text("The quick brown fox jumps over the lazy dog.")
-                        .font(AppTypography.headlineFont(for: themeManager.articleTheme))
+                        .font(AppTypography.sectionTitleFont(for: themeManager.articleTheme))
                         .foregroundColor(AppColor.primaryText)
                     Text(
                         "Editorial typography determines the headline and body font families, line spacing, and tracking used in reader mode."
@@ -600,7 +600,7 @@ struct SettingsView: View {
                     .foregroundColor(AppColor.secondaryText)
                     .lineSpacing(AppTypography.bodyLineSpacing(for: themeManager.articleTheme))
                 }
-                .padding(12)
+                .padding(AppSpacing.sm)
                 .background(RoundedRectangle(cornerRadius: AppRadius.control).fill(AppColor.surface))
             }
         }
@@ -611,14 +611,14 @@ struct SettingsView: View {
     // MARK: - 7. Storage Tab
 
     private var storageTab: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: AppSpacing.md) {
             // Header stats
-            HStack(spacing: 16) {
+            HStack(spacing: AppSpacing.md) {
                 Image(systemName: "externaldrive.fill")
                     .font(AppTypography.masthead)
                     .foregroundColor(AppColor.secondaryText)
 
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: AppSpacing.textStack) {
                     Text("Total Storage Usage")
                         .font(AppTypography.callout)
                         .foregroundColor(AppColor.secondaryText)
@@ -633,8 +633,8 @@ struct SettingsView: View {
                     Text(message)
                         .font(AppTypography.label)
                         .foregroundColor(AppColor.success)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 4)
+                        .padding(.horizontal, AppSpacing.xs)
+                        .padding(.vertical, AppSpacing.xxs)
                         .background(
                             RoundedRectangle(cornerRadius: AppRadius.control).fill(AppColor.success.opacity(0.12))
                         )
@@ -642,18 +642,18 @@ struct SettingsView: View {
                 }
             }
             .padding(.horizontal, AppLayout.pageInset)
-            .padding(.top, 16)
+            .padding(.top, AppSpacing.md)
 
             Divider()
 
             // Itemized breakdown table
-            VStack(spacing: 12) {
+            VStack(spacing: AppSpacing.sm) {
                 // Row 1: Web & Media Cache
                 HStack {
-                    VStack(alignment: .leading, spacing: 2) {
-                        HStack(spacing: 6) {
+                    VStack(alignment: .leading, spacing: AppSpacing.textStack) {
+                        HStack(spacing: AppSpacing.eyebrowGap) {
                             Text("Web & Media Cache")
-                                .font(AppTypography.headline)
+                                .font(AppTypography.sectionTitle)
                                 .foregroundColor(AppColor.primaryText)
                             Text(webCacheSize)
                                 .font(AppTypography.label.monospaced())
@@ -673,10 +673,10 @@ struct SettingsView: View {
 
                 // Row 2: Article Bodies
                 HStack {
-                    VStack(alignment: .leading, spacing: 2) {
-                        HStack(spacing: 6) {
+                    VStack(alignment: .leading, spacing: AppSpacing.textStack) {
+                        HStack(spacing: AppSpacing.eyebrowGap) {
                             Text("Article Content Cache")
-                                .font(AppTypography.headline)
+                                .font(AppTypography.sectionTitle)
                                 .foregroundColor(AppColor.primaryText)
                             Text("\(articleStore.articles.count) articles")
                                 .font(AppTypography.label.monospacedDigit())
@@ -696,10 +696,10 @@ struct SettingsView: View {
 
                 // Row 3: AI Analysis Data
                 HStack {
-                    VStack(alignment: .leading, spacing: 2) {
-                        HStack(spacing: 6) {
+                    VStack(alignment: .leading, spacing: AppSpacing.textStack) {
+                        HStack(spacing: AppSpacing.eyebrowGap) {
                             Text("AI Analysis Data")
-                                .font(AppTypography.headline)
+                                .font(AppTypography.sectionTitle)
                                 .foregroundColor(AppColor.primaryText)
                             let aiCount = articleStore.articles.filter { $0.aiSummary != nil }.count
                             Text("\(aiCount) enriched")
@@ -720,10 +720,10 @@ struct SettingsView: View {
 
                 // Row 4: Database Storage
                 HStack {
-                    VStack(alignment: .leading, spacing: 2) {
-                        HStack(spacing: 6) {
+                    VStack(alignment: .leading, spacing: AppSpacing.textStack) {
+                        HStack(spacing: AppSpacing.eyebrowGap) {
                             Text("Local SQLite & FTS5 Index")
-                                .font(AppTypography.headline)
+                                .font(AppTypography.sectionTitle)
                                 .foregroundColor(AppColor.primaryText)
                             Text(databaseSize)
                                 .font(AppTypography.label.monospaced())
@@ -737,18 +737,18 @@ struct SettingsView: View {
                     Text("Active")
                         .font(AppTypography.caption.bold())
                         .foregroundColor(AppColor.secondaryText)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 3)
+                        .padding(.horizontal, AppSpacing.xs)
+                        .padding(.vertical, AppSpacing.textStack)
                         .background(RoundedRectangle(cornerRadius: AppRadius.control).fill(AppColor.surface))
                 }
 
-                Divider().padding(.vertical, 4)
+                Divider().padding(.vertical, AppSpacing.xxs)
 
                 // Clear everything
                 HStack {
-                    VStack(alignment: .leading, spacing: 2) {
+                    VStack(alignment: .leading, spacing: AppSpacing.textStack) {
                         Text("Purge All Caches")
-                            .font(AppTypography.headline)
+                            .font(AppTypography.sectionTitle)
                             .foregroundColor(AppColor.danger)
                         Text(
                             "Purges web cache, article content, and AI analysis. Preserves subscriptions, saved stories, and read history."
@@ -775,16 +775,16 @@ struct SettingsView: View {
     // MARK: - 8. Updates Tab
 
     private var updatesTab: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: AppSpacing.md) {
             Image(systemName: "arrow.triangle.2.circlepath.circle.fill")
                 .font(AppTypography.masthead)
                 .imageScale(.large)
                 .foregroundColor(AppColor.accent)
-                .padding(.top, 24)
+                .padding(.top, AppSpacing.lg)
 
-            VStack(spacing: 4) {
+            VStack(spacing: AppSpacing.xxs) {
                 Text("NewsApp for macOS")
-                    .font(AppTypography.headline.bold())
+                    .font(AppTypography.sectionTitle.bold())
                     .foregroundColor(AppColor.primaryText)
                 Text("Version \(updateChecker.currentAppVersion)")
                     .font(AppTypography.callout)
@@ -795,12 +795,12 @@ struct SettingsView: View {
                 Text(status)
                     .font(AppTypography.callout)
                     .foregroundColor(updateChecker.updateAvailable ? AppColor.accent : AppColor.secondaryText)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 6)
+                    .padding(.horizontal, AppSpacing.md)
+                    .padding(.vertical, AppSpacing.eyebrowGap)
                     .background(RoundedRectangle(cornerRadius: AppRadius.control).fill(AppColor.surface))
             }
 
-            HStack(spacing: 12) {
+            HStack(spacing: AppSpacing.sm) {
                 if updateChecker.isChecking {
                     ProgressView()
                         .controlSize(.small)
@@ -822,10 +822,10 @@ struct SettingsView: View {
                     .buttonStyle(.bordered)
                 }
             }
-            .padding(.top, 8)
-            .padding(.bottom, 16)
+            .padding(.top, AppSpacing.xs)
+            .padding(.bottom, AppSpacing.md)
 
-            VStack(spacing: 4) {
+            VStack(spacing: AppSpacing.xxs) {
                 Text("Direct release channel via GitHub Releases.")
                     .font(AppTypography.caption)
                     .foregroundColor(AppColor.secondaryText)
@@ -833,7 +833,7 @@ struct SettingsView: View {
                     .font(AppTypography.caption)
                     .foregroundColor(AppColor.tertiaryText)
             }
-            .padding(.bottom, 16)
+            .padding(.bottom, AppSpacing.md)
         }
         .frame(width: Self.paneWidth)
     }

@@ -349,7 +349,7 @@ struct ArticleDetailView: View {
                         DisclosureGroup("On-device summary", isExpanded: summaryExpandedBinding) {
                             aiAnalysisSection.padding(.top, AppSpacing.sm)
                         }
-                        .font(AppTypography.bodySmall)
+                        .font(AppTypography.body)
                         .foregroundStyle(AppColor.secondaryText)
                         .disabled(contentState == .loading)
                     }
@@ -397,7 +397,7 @@ struct ArticleDetailView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.top, AppSpacing.sm)
             }
-            .font(AppTypography.bodySmall)
+            .font(AppTypography.body)
             .foregroundStyle(AppColor.secondaryText)
         }
     }
@@ -705,7 +705,7 @@ struct ArticleDetailView: View {
                     Label(webLoadError, systemImage: "exclamationmark.triangle")
                     Button("Reload") { webAction = .reload }
                 }
-                .font(AppTypography.bodySmall)
+                .font(AppTypography.body)
                 .padding(AppSpacing.sm)
             }
             if isWebLoading {

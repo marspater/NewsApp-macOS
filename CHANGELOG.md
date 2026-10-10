@@ -4,6 +4,8 @@
 
 ### Changed
 
+- Phase 4 content consistency: reader and event overview use shared typography tokens and scaled editorial styles; publisher eyebrows, AI labels, citation tags and in-content notices share components. Semantic system label/separator colors replace faded text and custom borders, and the design lint requires zero literal fonts, colors and code uppercasing in feature views.
+
 - Story and event cards use the shared design tokens and components: publisher eyebrows uppercase for display only (VoiceOver reads the name), headlines use the card headline token, and the AI and Updated tags are one tag component with the sparkles symbol instead of a "✦" character; tag fills strengthen with Increase Contrast.
 - Sidebar rows are native list rows: the system draws selection and unread/saved count badges, rows follow the System Settings sidebar size, and arrow keys move through them. The refresh indicator on Today uses the mini progress control instead of a scaled one.
 - Complete the native window chrome: Refresh stays visible during toolbar overflow on macOS 26.1+, New Briefing has a separate toolbar group and menu command, and queued updates dim in inactive windows. The reader window title names its publisher. Story sharing, reading mode/options, browser navigation and Add Feed are available from menu commands bound to the active window. ⇧⌘R switches Story/Web even when an overview is open; single-key W keeps its existing overview behavior.
