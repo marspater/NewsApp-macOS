@@ -38,20 +38,27 @@ struct ArticleWebView: NSViewRepresentable {
         Coordinator(self)
     }
 
-    func makeNSView(context: Context) -> WKWebView {
-        let configuration = WKWebViewConfiguration()
-        // Do not inherit publisher service workers or cookies from earlier previews.
-        let dataStore = WKWebsiteDataStore.nonPersistent()
-        guard !dataStore.isPersistent else {
+    static func isValidDataStore(_ dataStore: WKWebsiteDataStore) -> Bool {
+        !dataStore.isPersistent
+    }
+
+    static func makeConfiguration(dataStore: WKWebsiteDataStore = .nonPersistent()) -> WKWebViewConfiguration {
+        guard isValidDataStore(dataStore) else {
             preconditionFailure("Article web view must use a non-persistent website data store for origin isolation")
         }
+        let configuration = WKWebViewConfiguration()
+        // Do not inherit publisher service workers or cookies from earlier previews.
         configuration.websiteDataStore = dataStore
         let preferences = WKWebpagePreferences()
         // Public WebKit proxies do not constrain WebRTC sockets created by publisher scripts.
         preferences.allowsContentJavaScript = false
         configuration.defaultWebpagePreferences = preferences
         configuration.preferences.isFraudulentWebsiteWarningEnabled = true
+        return configuration
+    }
 
+    func makeNSView(context: Context) -> WKWebView {
+        let configuration = Self.makeConfiguration()
         let webView = WKWebView(frame: .zero, configuration: configuration)
         webView.allowsBackForwardNavigationGestures = true
         webView.navigationDelegate = context.coordinator
@@ -79,8 +86,11 @@ struct ArticleWebView: NSViewRepresentable {
             case .goForward:
                 if nsView.canGoForward { nsView.goForward() }
             case .reload:
-                if context.coordinator.gatewayReady { nsView.reload() }
-                else { context.coordinator.prepareGateway(nsView) }
+                if context.coordinator.gatewayReady {
+                    nsView.reload()
+                } else {
+                    context.coordinator.prepareGateway(nsView)
+                }
             }
             DispatchQueue.main.async {
                 self.action = nil
@@ -131,8 +141,10 @@ struct ArticleWebView: NSViewRepresentable {
             self.parent = parent
         }
 
-        func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
-                     decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void) {
+        func webView(
+            _ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
+            decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void
+        ) {
             guard let requestURL = navigationAction.request.url else {
                 decisionHandler(.cancel)
                 return
@@ -145,7 +157,8 @@ struct ArticleWebView: NSViewRepresentable {
                     // Navigation delegates cover documents, not WebKit subresource traffic.
                     try await SecureHTTPClient.shared.validateDestination(requestURL, allowHTTP: allowHTTP)
                     guard !Task.isCancelled, let self, let webView, self.webView === webView,
-                          self.requestGeneration == generation else {
+                        self.requestGeneration == generation
+                    else {
                         decisionHandler(.cancel)
                         return
                     }
@@ -157,7 +170,8 @@ struct ArticleWebView: NSViewRepresentable {
                     decisionHandler(.allow)
                 } catch {
                     if let self, let webView, self.webView === webView, self.requestGeneration == generation {
-                        self.parent.loadError = "This address was blocked by the app’s network policy. Open the publisher in your browser if needed."
+                        self.parent.loadError =
+                            "This address was blocked by the app’s network policy. Open the publisher in your browser if needed."
                         self.parent.isLoading = false
                     }
                     decisionHandler(.cancel)
@@ -196,7 +210,9 @@ struct ArticleWebView: NSViewRepresentable {
             didFail(webView, navigation: navigation, error: error)
         }
 
-        func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+        func webView(
+            _ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error
+        ) {
             didFail(webView, navigation: navigation, error: error)
         }
     }
