@@ -115,6 +115,37 @@ enum FeedCatalog {
     /// Entries kept for later; earlier subscriptions to them end at launch (`AppSettings`).
     static let parkedFeeds = allFeeds.filter { !supportedLanguages.contains($0.language) }
 
+    /// Dated maintainer review advisories for feeds, keyed by normalized feed URL.
+    static let advisoriesByURL: [String: FeedAdvisory] = [
+        "https://www.france24.com/en/rss": FeedAdvisory(
+            date: "2026-10-08",
+            reason: .readerInaccessible,
+            summary: "Story pages refuse automated reader extraction; in-app reader shows feed preview instead.",
+            evidenceLinks: ["https://www.france24.com/en/rss"],
+            uncertainty: .known,
+            suggestedAlternativeFeedIDs: ["bbc-world", "dw-english", "euronews"]
+        ),
+        "https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml": FeedAdvisory(
+            date: "2026-10-01",
+            reason: .paywallIntroduced,
+            summary: "Story pages answer HTTP 403 to automated readers, requiring web browser view.",
+            evidenceLinks: ["https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml"],
+            uncertainty: .known,
+            suggestedAlternativeFeedIDs: ["guardian-world", "bbc-world"]
+        ),
+    ]
+
+    /// The active maintainer advisory for a feed URL, if one is registered.
+    static func advisory(for url: String) -> FeedAdvisory? {
+        guard let normalized = AppSettings.normalizeFeedURL(url) else { return nil }
+        return advisoriesByURL[normalized]
+    }
+
+    /// Alternative catalog feeds for a subscription or catalog source.
+    static func alternatives(for url: String) -> [CatalogFeed] {
+        CatalogReviewEngine.alternatives(for: url, advisory: advisory(for: url), catalog: feeds)
+    }
+
     static let allFeeds: [CatalogFeed] = [
         CatalogFeed(
             id: "bbc-world", title: "BBC News · World", publisher: "BBC News",

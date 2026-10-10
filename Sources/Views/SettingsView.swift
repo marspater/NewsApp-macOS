@@ -193,8 +193,8 @@ struct SettingsView: View {
 
             Divider()
 
-            // Feed list
-            List {
+            // Form keeps subscription actions reachable through system keyboard navigation.
+            Form {
                 ForEach(feedManager.feedURLs, id: \.self) { urlString in
                     HStack(spacing: AppSpacing.sm) {
                         let status = feedManager.feedStatuses[urlString]
@@ -231,6 +231,40 @@ struct SettingsView: View {
                                 .lineLimit(1)
                                 .foregroundColor(AppColor.primaryText)
                             FeedHealthLine(health: feedManager.feedHealth[urlString])
+                            if let advisory = appSettings.visibleAdvisory(for: urlString) {
+                                let alternatives = FeedCatalog.alternatives(for: urlString)
+                                    .filter { !appSettings.isSubscribed($0) }
+                                NoticeView(tint: AppColor.warning) {
+                                    VStack(alignment: .leading, spacing: AppSpacing.xxs) {
+                                        Text("Review note (\(advisory.date)): \(advisory.summary)")
+                                            .font(AppTypography.caption)
+                                            .foregroundColor(AppColor.primaryText)
+                                            .fixedSize(horizontal: false, vertical: true)
+                                        HStack(spacing: AppSpacing.sm) {
+                                            if !alternatives.isEmpty {
+                                                Menu("Alternatives") {
+                                                    ForEach(alternatives) { feed in
+                                                        Button("Subscribe to \(feed.title)") {
+                                                            feedManager.addCatalogFeeds([feed])
+                                                        }
+                                                    }
+                                                }
+                                                .font(AppTypography.caption)
+                                                .controlSize(.small)
+                                                .fixedSize()
+                                                .accessibilityLabel("Alternatives to \(urlString)")
+                                            }
+
+                                            Button("Dismiss") {
+                                                appSettings.dismissAdvisory(for: urlString, date: advisory.date)
+                                            }
+                                            .font(AppTypography.caption)
+                                            .controlSize(.small)
+                                            .accessibilityLabel("Dismiss review note for \(urlString)")
+                                        }
+                                    }
+                                }
+                            }
                         }
                         Spacer()
                         Button(role: .destructive) {
@@ -245,9 +279,10 @@ struct SettingsView: View {
                         .accessibilityLabel("Unsubscribe from feed")
                     }
                     .padding(.vertical, AppSpacing.xxs)
+                    .accessibilityElement(children: .contain)
                 }
             }
-            .listStyle(.plain)
+            .formStyle(.grouped)
 
             Text(FeedHealth.disclaimer)
                 .font(AppTypography.caption)

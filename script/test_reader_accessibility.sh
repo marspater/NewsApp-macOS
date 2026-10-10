@@ -11,6 +11,7 @@ swiftc -swift-version 6 -O -parse-as-library -target "$(uname -m)-apple-macos${T
     Sources/Models/FeedError.swift \
     Sources/Models/FeedFetchState.swift \
     Sources/Models/FeedCatalog.swift \
+    Sources/Models/FeedAdvisory.swift \
     Sources/Models/MuteRules.swift \
     Sources/Services/IPAddressValidator.swift \
     Sources/Models/ArticleIdentity.swift \

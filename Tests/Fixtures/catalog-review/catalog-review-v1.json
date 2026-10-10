@@ -1,0 +1,44 @@
+{
+  "version": 1,
+  "reviewedOn": "2026-10-10",
+  "reviewer": "maintainer",
+  "feeds": [
+    {
+      "id": "france-24",
+      "url": "https://www.france24.com/en/rss",
+      "status": "advisory",
+      "advisory": {
+        "date": "2026-10-08",
+        "reason": "reader_inaccessible",
+        "summary": "Story pages refuse automated reader extraction; in-app reader shows feed preview instead.",
+        "evidenceLinks": [
+          "https://www.france24.com/en/rss"
+        ],
+        "uncertainty": "known",
+        "suggestedAlternativeFeedIDs": [
+          "bbc-world",
+          "dw-english",
+          "euronews"
+        ]
+      }
+    },
+    {
+      "id": "nyt-homepage",
+      "url": "https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml",
+      "status": "retired",
+      "advisory": {
+        "date": "2026-10-01",
+        "reason": "paywall_introduced",
+        "summary": "Story pages answer HTTP 403 to automated readers, requiring web browser view.",
+        "evidenceLinks": [
+          "https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml"
+        ],
+        "uncertainty": "known",
+        "suggestedAlternativeFeedIDs": [
+          "guardian-world",
+          "bbc-world"
+        ]
+      }
+    }
+  ]
+}

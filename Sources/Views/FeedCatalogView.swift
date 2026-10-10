@@ -31,6 +31,17 @@ struct FeedCatalogView: View {
             Divider()
 
             List {
+                let gaps = CatalogReviewEngine.detectTopicGaps(subscribedURLs: appSettings.feedURLs)
+                if !gaps.isEmpty {
+                    Section {
+                        ForEach(gaps) { gap in
+                            gapRow(gap)
+                        }
+                    } header: {
+                        gapsHeader
+                    }
+                }
+
                 ForEach(CatalogSet.offered) { set in
                     Section {
                         ForEach(FeedCatalog.feeds(in: set)) { feed in
@@ -53,6 +64,41 @@ struct FeedCatalogView: View {
             }
         }
         .task { await feedManager.reloadFeedHealth() }
+    }
+
+    private var gapsHeader: some View {
+        VStack(alignment: .leading, spacing: AppSpacing.xxs) {
+            Text("Suggested Topics & Gaps")
+                .font(AppTypography.sectionTitle)
+                .foregroundColor(AppColor.primaryText)
+                .accessibilityAddTraits(.isHeader)
+            Text("Explore areas not yet covered by your subscriptions.")
+                .font(AppTypography.caption)
+                .foregroundColor(AppColor.secondaryText)
+        }
+        .controlSize(.small)
+        .textCase(nil)
+        .padding(.vertical, AppSpacing.xs)
+    }
+
+    private func gapRow(_ gap: TopicGap) -> some View {
+        HStack(spacing: AppSpacing.sm) {
+            VStack(alignment: .leading, spacing: AppSpacing.xxs) {
+                Text(gap.title)
+                    .font(AppTypography.body)
+                    .foregroundColor(AppColor.primaryText)
+                Text(gap.rationale)
+                    .font(AppTypography.caption)
+                    .foregroundColor(AppColor.secondaryText)
+            }
+            Spacer()
+            Button("Subscribe to Set (\(gap.candidateFeeds.count))") {
+                feedManager.addCatalogFeeds(gap.candidateFeeds)
+            }
+            .controlSize(.small)
+            .accessibilityLabel("Subscribe to \(gap.title), \(gap.candidateFeeds.count) feeds")
+        }
+        .padding(.vertical, AppSpacing.xxs)
     }
 
     private func header(for set: CatalogSet) -> some View {
@@ -102,8 +148,13 @@ struct FeedCatalogView: View {
                 if subscribed {
                     FeedHealthLine(health: feedManager.feedHealth[feed.url])
                 }
+                if let advisory = appSettings.visibleAdvisory(for: feed.url) {
+                    Text("Review note (\(advisory.date)): \(advisory.summary)")
+                        .font(AppTypography.caption)
+                        .foregroundColor(AppColor.primaryText)
+                }
                 if feed.availability == .previewOnly {
-                    Text("Article pages may refuse the in-app reader; the feed preview still works.")
+                    Text("Story pages may refuse the in-app reader; the feed preview still works.")
                         .font(AppTypography.caption)
                         .foregroundColor(AppColor.tertiaryText)
                 }

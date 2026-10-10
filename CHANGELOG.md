@@ -2,6 +2,7 @@
 
 ## Unreleased — 10 October 2026
 
+- Source review notices use readable label colors and story terminology; subscription-row advisory actions remain separate controls for keyboard and accessibility navigation.
 - Overview perspectives recognize reported speech from a named speaker without a direct quotation, such as "Foreign Secretary Ed Miliband said his country does not accept…" or "…told TF1 television on Thursday night that…". Leading time phrases and descriptive clauses are trimmed from the speaker; pronouns, generic "officials" and cut-off speakers are excluded. Overview analysis version 6 regenerates cached overviews on request (#313).
 - Event overviews are written from publisher article text instead of feed summaries. Before generating, the app extracts up to four representative articles that have no text yet: at most two at a time, each cut off after four seconds, never twice for the same page. When the evidence is still too thin for a five-sentence draft, the deterministic overview is kept without asking the model (#308).
 - Reader figure captions appear once: publishers that repeat a figcaption per breakpoint (The Guardian) no longer show the caption twice, and an image credit the caption already prints is not repeated beneath it.

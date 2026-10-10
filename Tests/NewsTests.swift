@@ -545,6 +545,7 @@ struct NewsTests {
         try await testFeedBackoffAndHostLimits()
         try await testRefreshEndsAtCollection()
         try await testFeedCatalog()
+        try await testCatalogReviewAndAlternatives()
         try await testFeedHealth()
         try await testUserMuting()
         try await testTensionMethodology()
@@ -3114,6 +3115,106 @@ struct NewsTests {
         await manager.fetchFeedsAsync()
         assertEqual(await requested.batches.count, batches + 1, "Re-adding subscribed feeds triggers no extra refresh")
         manager.stopBackgroundWork()
+    }
+
+    @MainActor
+    static func testCatalogReviewAndAlternatives() async throws {
+        print("  - Testing catalog reviews, advisories, topic gaps and alternatives (#244)...")
+        // 1. Advisory lookup
+        let f24Advisory = FeedCatalog.advisory(for: "https://www.france24.com/en/rss")
+        assertTrue(f24Advisory != nil, "France 24 has a registered maintainer advisory")
+        assertEqual(f24Advisory?.reason, .readerInaccessible, "France 24 advisory reason matches")
+        assertEqual(f24Advisory?.uncertainty, .known, "France 24 uncertainty is known")
+        assertTrue(f24Advisory?.evidenceLinks.isEmpty == false, "Evidence links exist")
+
+        // 2. Trailing slashes / normalization in advisory lookup
+        let f24Normalized = FeedCatalog.advisory(for: "https://www.france24.com/en/rss/")
+        assertEqual(f24Normalized, f24Advisory, "Normalized URL matches advisory")
+
+        // 3. Alternative source lookup
+        let f24Alternatives = FeedCatalog.alternatives(for: "https://www.france24.com/en/rss")
+        assertFalse(f24Alternatives.isEmpty, "France 24 provides alternatives")
+        let altIDs = Set(f24Alternatives.map(\.id))
+        assertTrue(altIDs.contains("bbc-world") || altIDs.contains("dw-english"), "Contains expected alternatives")
+        assertFalse(altIDs.contains("france-24"), "Feed never recommends itself as an alternative")
+        assertTrue(
+            f24Alternatives.allSatisfy(FeedCatalog.feeds.contains), "Alternatives are offered, never parked, feeds")
+        let retiredAlternatives = FeedCatalog.alternatives(
+            for: "https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml")
+        assertEqual(
+            Set(retiredAlternatives.map(\.id)), ["guardian-world", "bbc-world"],
+            "A retired feed outside the catalog still gets its suggested alternatives")
+
+        // 4. Fallback alternative lookup for feeds without explicit alternative list
+        let techCrunch = "https://techcrunch.com/feed"
+        let techAlternatives = CatalogReviewEngine.alternatives(for: techCrunch)
+        assertFalse(techAlternatives.isEmpty, "Fallback alternatives exist for catalog topic")
+        assertFalse(techAlternatives.contains { $0.url == techCrunch }, "Does not include itself")
+        assertTrue(techAlternatives.allSatisfy { $0.set == .technology }, "All alternatives share topic set")
+
+        // 5. Topic gap detection
+        let allFeeds = FeedCatalog.feeds
+        let zeroSubscribedGaps = CatalogReviewEngine.detectTopicGaps(subscribedURLs: [], catalog: allFeeds)
+        assertEqual(
+            zeroSubscribedGaps.count, CatalogSet.offered.count, "0 subscriptions has gaps for every offered set")
+
+        // Subscribing to World and Tech removes those gaps
+        let partialURLs = [
+            "https://feeds.bbci.co.uk/news/world/rss.xml",
+            "https://feeds.arstechnica.com/arstechnica/index",
+        ]
+        let partialGaps = CatalogReviewEngine.detectTopicGaps(subscribedURLs: partialURLs, catalog: allFeeds)
+        let gapSets = Set(partialGaps.map(\.catalogSet))
+        assertFalse(gapSets.contains(.world), "World news is no longer a gap")
+        assertFalse(gapSets.contains(.technology), "Technology is no longer a gap")
+        assertTrue(gapSets.contains(.politics), "Politics remains an uncovered gap")
+        assertTrue(gapSets.contains(.scienceHealth), "Science & health remains an uncovered gap")
+        for gap in partialGaps {
+            assertFalse(gap.candidateFeeds.isEmpty, "Each gap offers candidate feeds")
+            assertTrue(gap.candidateFeeds.allSatisfy { $0.set == gap.catalogSet }, "Candidates belong to gap set")
+            assertFalse(gap.rationale.isEmpty, "Gap provides human rationale")
+        }
+
+        // Subscribing to all catalog feeds leaves 0 gaps
+        let allSubscribedGaps = CatalogReviewEngine.detectTopicGaps(
+            subscribedURLs: allFeeds.map(\.url), catalog: allFeeds)
+        assertTrue(allSubscribedGaps.isEmpty, "Fully covered reading diet has 0 gaps")
+
+        // 6. Advisory dismissal persistence and invariant checks
+        let dismissSuite = "test.catalog.dismissal.\(UUID().uuidString)"
+        let dismissDefaults = UserDefaults(suiteName: dismissSuite)!
+        defer { dismissDefaults.removePersistentDomain(forName: dismissSuite) }
+
+        let testSettings = AppSettings(defaults: dismissDefaults)
+        let targetFeed = "https://www.france24.com/en/rss"
+        assertFalse(testSettings.isAdvisoryDismissed(for: targetFeed, date: "2026-10-08"), "Not dismissed initially")
+
+        testSettings.dismissAdvisory(for: targetFeed + "/", date: "2026-10-08")
+        assertTrue(testSettings.visibleAdvisory(for: targetFeed) == nil, "A dismissed advisory is hidden in every view")
+        assertTrue(
+            testSettings.visibleAdvisory(for: "https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml") != nil,
+            "Dismissing one feed's advisory leaves other advisories visible")
+        assertTrue(
+            testSettings.isAdvisoryDismissed(for: targetFeed, date: "2026-10-08"), "Dismissal persists normalized")
+        assertTrue(
+            testSettings.isAdvisoryDismissed(for: targetFeed, date: "2026-10-01"), "Earlier advisory is also covered")
+        assertFalse(
+            testSettings.isAdvisoryDismissed(for: targetFeed, date: "2026-10-09"), "Future advisory is not dismissed")
+
+        // Reloading settings preserves dismissed state
+        let reloadedSettings = AppSettings(defaults: dismissDefaults)
+        assertTrue(
+            reloadedSettings.isAdvisoryDismissed(for: targetFeed, date: "2026-10-08"),
+            "Reloaded settings retains dismissal")
+
+        // Invariant: subscriptions to advised or retired feeds survive a relaunch
+        let retiredFeed = "https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml"
+        _ = testSettings.addFeed(url: targetFeed)
+        _ = testSettings.addFeed(url: retiredFeed)
+        let relaunched = AppSettings(defaults: dismissDefaults)
+        assertTrue(
+            relaunched.feedURLs.contains(targetFeed) && relaunched.feedURLs.contains(retiredFeed),
+            "Feeds with advisories remain in user subscriptions after relaunch")
     }
 
     /// Fetches every catalog feed through the app's own protected networking and parsers. Needs the network.
