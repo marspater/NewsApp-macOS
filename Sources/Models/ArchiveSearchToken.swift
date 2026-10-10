@@ -53,6 +53,8 @@ struct ArchiveSearchToken: Hashable, Identifiable {
                 remaining.append(word)
             }
         }
-        return (remaining.joined(separator: " "), tokens)
+        // Keep the separator after free text, so the next typed word does not join the previous one.
+        let separator = endsWithSpace && !remaining.isEmpty ? " " : ""
+        return (remaining.joined(separator: " ") + separator, tokens)
     }
 }

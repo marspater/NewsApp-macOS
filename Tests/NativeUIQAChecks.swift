@@ -80,7 +80,9 @@ struct NativeUIQAChecks {
     static func testArchiveSearchTokens() {
         print("  - Testing tokenized archive search operators...")
         let promoted = ArchiveSearchToken.promoteCompleted(in: "climate is:unread source:bbc category:science ")
-        assertEqual(promoted.text, "climate", "Full-text search survives tokenization")
+        assertEqual(promoted.text, "climate ", "Full-text search and its trailing separator survive tokenization")
+        assertEqual(
+            ArchiveSearchToken.promoteCompleted(in: "is:unread ").text, "", "A lone operator leaves an empty field")
         assertEqual(
             promoted.tokens.map(\.expression),
             ["is:unread", "source:bbc", "category:science"], "Completed operators become tokens")
