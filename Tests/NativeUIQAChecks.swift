@@ -70,6 +70,7 @@ struct NativeUIQAChecks {
         testSettingsPanePersistenceAndSizing()
         testSecondaryWindowAndSheetChrome()
         await testRemoteImageReuse()
+        await testOverviewLeadImageUsesProtectedLoader()
 
         print("Finished \(testsRun) Native UI QA checks with \(failures) failures.")
         if failures > 0 {
@@ -165,6 +166,35 @@ struct NativeUIQAChecks {
             await waitUntil { rendered.contains { $0.url == second && $0.success } },
             "New image appears after its own load completes")
         assertEqual(probe.requests.count, 2, "Each distinct source loads once")
+    }
+
+    static func testOverviewLeadImageUsesProtectedLoader() async {
+        print("  - Testing that the overview lead image loads through the protected reader image path...")
+        let url = URL(string: "https://images.example/\(UUID().uuidString)/lead.jpg")!
+        let probe = RemoteImageProbe()
+        let overview = EventOverviewDocument(
+            id: "lead-image", eventID: "evt_lead",
+            version: OverviewVersionContext(
+                membershipVersion: 1, inputTextHash: "hash", schemaVersion: 1,
+                analysisVersion: EventOverviewDocument.currentAnalysisVersion),
+            content: OverviewContent(
+                title: "Summit", summary: "Delegates met.",
+                leadImage: OverviewLeadImage(url: url.absoluteString, caption: "Caption", credit: "Credit")),
+            provenance: OverviewProvenance(memberArticleIDs: [], kind: .synthesized))
+        let host = NSHostingView(
+            rootView: EventOverviewReaderView(
+                overview: overview, memberArticles: [], onSelectArticle: { _ in }, onSelectCitation: { _, _ in }
+            ).environment(\.readerImageLoader) { url in await probe.load(url) })
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 800, height: 900),
+            styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = host
+        window.orderFront(nil)
+        defer { window.close() }
+        let deadline = Date().addingTimeInterval(5)
+        while probe.requests.isEmpty, Date() < deadline { await Task.yield() }
+        assertEqual(probe.requests, [url], "Overview lead image is requested through the reader image loader")
     }
 
     @MainActor private final class RemoteImageProbe {
