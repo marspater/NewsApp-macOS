@@ -1488,6 +1488,18 @@ struct NewsTests {
             _ = try OPMLParser.parseValidated(data: Data(repeating: 32, count: OPMLFileReader.maximumBytes + 1))
             assertTrue(false, "In-memory OPML imports must enforce the same size bound")
         } catch { /* Expected validation failure. */ }
+
+        // OPML Import Performance Regression Test
+        let manySettings = AppSettings(defaults: defaults)
+        var largeOPML = "<opml><body>\n"
+        for i in 0..<10000 {
+            largeOPML += "<outline text=\"Feed \\(i)\" xmlUrl=\"https://example.com/feed\\(i).xml\"/>\n"
+        }
+        largeOPML += "</body></opml>"
+        let start = CFAbsoluteTimeGetCurrent()
+        assertEqual(manySettings.importFeeds(from: Data(largeOPML.utf8)), 10000, "Large OPML import adds all feeds")
+        let duration = CFAbsoluteTimeGetCurrent() - start
+        assertTrue(duration < 2.0, "Large OPML import completes within responsive UI threshold (took \\(duration)s)")
     }
 
     @MainActor

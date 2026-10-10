@@ -308,16 +308,22 @@ final class AppSettings: ObservableObject {
         let items = OPMLParser.parse(data: opmlData)
         var addedCount = 0
         var sectionsChanged = false
+
+        var knownFeeds = Set(feedURLs)
+        var knownSections = Set(userSections)
+
         for item in items {
             guard let normalized = Self.normalizeFeedURL(item.url, allowInsecureHTTP: allowInsecureHTTP) else {
                 continue
             }
 
-            if !feedURLs.contains(normalized) {
+            if !knownFeeds.contains(normalized) {
+                knownFeeds.insert(normalized)
                 feedURLs.append(normalized)
                 addedCount += 1
             }
-            if let folder = item.folder, !folder.isEmpty, !userSections.contains(folder) {
+            if let folder = item.folder, !folder.isEmpty, !knownSections.contains(folder) {
+                knownSections.insert(folder)
                 userSections.append(folder)
                 sectionsChanged = true
             }
