@@ -10,9 +10,16 @@ A DIFFERENT verdict now records an incompatible `differentEvent` conflict. Both 
 
 ## Controlled verification
 
-Synthetic regressions cover an explicit rejected minority, every hard conflict category, permitted weak minorities and soft-conflict confirmation. An in-memory two-fragment fixture forces pair confirmation and supplies one DIFFERENT verdict among otherwise matching pairs; the events must remain separate even when the judge would answer SAME to whole coverage. Existing fragment, exclusion, majority and cancellation coverage stays in the suite. The earlier majority test with contradictory weekdays now asserts rejection, since that was the unsafe behavior being corrected.
+Synthetic regressions cover an explicit rejected minority, hard temporal/language/exclusion conflicts, permitted weak minorities and soft-conflict confirmation. An in-memory two-fragment fixture forces pair confirmation and supplies one DIFFERENT verdict among otherwise matching pairs; the events must remain separate even when the judge would answer SAME to whole coverage. Existing fragment, exclusion, majority and cancellation coverage stays in the suite. The earlier majority test with contradictory weekdays now asserts rejection, since that was the unsafe behavior being corrected.
 
-Native checks and publication state will be recorded after completion. No private holdout, corpus labels, production library, installed app or design files are touched.
+- `./test.sh --story-regressions`: passed.
+- Full commit-hook `./test.sh`: passed on implementation commit `a3174a4`.
+- Isolated `./build.sh`: passed, including optimized Swift 6 arm64 compilation, ad-hoc signing and strict signature verification.
+- Strict `swift-format` lint: changed production files passed.
+- `git diff --check`: passed.
+- Toolchain: Xcode 27.0 / Swift 6.4; macOS 15 deployment target.
+- Existing FoundationModels sampling deprecation warnings remain unchanged.
+- Publication is recorded in the linked issue/PR progress log. Hosted CI is a separate check; no installed-app or live-network result is claimed. No private holdout, corpus labels, production library, installed app or design files are touched.
 
 ## Remaining gate
 
