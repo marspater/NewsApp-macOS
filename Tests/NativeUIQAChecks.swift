@@ -53,6 +53,7 @@ struct NativeUIQAChecks {
 
         testSystemSettingsOverridesParsing()
         testKeyboardShortcutsAndKeyHandling()
+        testArchiveSearchTokens()
         testVoiceOverStructureAndAnnouncements()
         testWindowWidthsAndLayoutMetrics()
         testLeadStorySelection()
@@ -74,6 +75,46 @@ struct NativeUIQAChecks {
         } else {
             print("✅ ALL NATIVE UI QA CHECKS PASSED (#155, #123)")
         }
+    }
+
+    static func testArchiveSearchTokens() {
+        print("  - Testing tokenized archive search operators...")
+        let promoted = ArchiveSearchToken.promoteCompleted(in: "climate is:unread source:bbc category:science ")
+        assertEqual(promoted.text, "climate ", "Full-text search and its trailing separator survive tokenization")
+        assertEqual(
+            ArchiveSearchToken.promoteCompleted(in: "is:unread ").text, "", "A lone operator leaves an empty field")
+        assertEqual(
+            promoted.tokens.map(\.expression),
+            ["is:unread", "source:bbc", "category:science"], "Completed operators become tokens")
+        let parsed = ArticleFilterQuery.parse(ArchiveSearchToken.query(text: promoted.text, tokens: promoted.tokens))
+        assertEqual(parsed.terms, ["climate"], "Archive still searches full text")
+        assertEqual(parsed.isReadFilter, false, "Unread operator remains active")
+        assertEqual(parsed.sourceFilter, "bbc", "Source operator remains active")
+        assertEqual(parsed.categoryFilter, "science", "Category operator remains active")
+        assertEqual(
+            ArticleFilterQuery.parse(
+                ArchiveSearchToken.query(
+                    text: "", tokens: [ArchiveSearchToken(completedExpression: "is:read")!]
+                )
+            ).isReadFilter, true, "Read filter works without free text")
+        assertEqual(
+            ArticleFilterQuery.parse(
+                ArchiveSearchToken.query(
+                    text: "", tokens: [ArchiveSearchToken(completedExpression: "is:saved")!]
+                )
+            ).isSavedFilter, true, "Saved filter works without free text")
+        assertEqual(ArchiveSearchToken.promoteCompleted(in: "source:").tokens.count, 0, "Prefix waits for a value")
+        assertEqual(
+            ArchiveSearchToken.promoteCompleted(in: "economy is:re").tokens.count, 0, "Incomplete status stays editable"
+        )
+        assertEqual(ArchiveSearchToken(completedExpression: "category:"), nil, "Empty category is not a token")
+        let replaced = ArchiveSearchToken.latestPerField(
+            ["source:bbc", "is:unread", "is:saved", "source:npr", "is:read"].compactMap {
+                ArchiveSearchToken(completedExpression: $0)
+            })
+        assertEqual(
+            replaced.map(\.expression), ["is:saved", "source:npr", "is:read"],
+            "A newer chip replaces the one the parser would ignore")
     }
 
     static func testRemoteImageReuse() async {

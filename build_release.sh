@@ -73,6 +73,7 @@ SWIFT_SOURCES=(
     Sources/Storage/ReadManager.swift
     Sources/App/ThemeManager.swift
     Sources/Models/FeedArticle.swift
+    Sources/Models/ArchiveSearchToken.swift
     Sources/Storage/CacheManager.swift
     Sources/Coordinators/FeedManager.swift
     Sources/App/AppContainer.swift

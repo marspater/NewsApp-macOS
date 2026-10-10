@@ -1,0 +1,60 @@
+import Foundation
+
+/// One search-field chip. ArticleFilterQuery remains the authority for archive filtering.
+struct ArchiveSearchToken: Hashable, Identifiable {
+    let expression: String
+    var id: String { expression }
+
+    /// Prefix-only source/category expressions remain editable until their value is supplied.
+    init?(completedExpression: String) {
+        let candidate = completedExpression.lowercased()
+        if ["is:unread", "is:read", "is:saved"].contains(candidate) {
+            expression = candidate
+        } else if (candidate.hasPrefix("source:") && candidate.count > "source:".count)
+            || (candidate.hasPrefix("category:") && candidate.count > "category:".count)
+        {
+            guard !candidate.contains(where: \.isWhitespace) else { return nil }
+            expression = candidate
+        } else {
+            return nil
+        }
+    }
+
+    /// The ArticleFilterQuery field this chip sets; is:read and is:unread share one.
+    private var field: Substring {
+        expression.hasPrefix("is:") && expression != "is:saved" ? "is:read" : expression.prefix { $0 != ":" }
+    }
+
+    /// The parser keeps the last value per field, so only that chip stays visible.
+    static func latestPerField(_ tokens: [ArchiveSearchToken]) -> [ArchiveSearchToken] {
+        tokens.enumerated()
+            .filter { index, token in !tokens[(index + 1)...].contains { $0.field == token.field } }
+            .map(\.element)
+    }
+
+    static func query(text: String, tokens: [ArchiveSearchToken]) -> String {
+        (tokens.map(\.expression) + [text.trimmingCharacters(in: .whitespacesAndNewlines)])
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+    }
+
+    /// Promote only finished operator words; preserve free text and unfinished filters.
+    static func promoteCompleted(in text: String) -> (text: String, tokens: [ArchiveSearchToken]) {
+        let words = text.split(whereSeparator: \.isWhitespace).map(String.init)
+        let endsWithSpace = text.last?.isWhitespace == true
+        var remaining: [String] = []
+        var tokens: [ArchiveSearchToken] = []
+        for (index, word) in words.enumerated() {
+            if index < words.count - 1 || endsWithSpace,
+                let token = ArchiveSearchToken(completedExpression: word)
+            {
+                tokens.append(token)
+            } else {
+                remaining.append(word)
+            }
+        }
+        // Keep the separator after free text, so the next typed word does not join the previous one.
+        let separator = endsWithSpace && !remaining.isEmpty ? " " : ""
+        return (remaining.joined(separator: " ") + separator, tokens)
+    }
+}
