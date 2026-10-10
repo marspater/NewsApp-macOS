@@ -240,6 +240,10 @@ struct MainView: View {
                             mastheadNotice = MastheadNotice(message: "No new feeds imported")
                         }
                     }
+                } else {
+                    Task { @MainActor in
+                        articleStore.operationError = "Only OPML or XML subscription files can be imported."
+                    }
                 }
             }
             return true
