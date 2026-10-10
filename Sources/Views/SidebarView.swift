@@ -211,7 +211,12 @@ struct SidebarView: View {
             // Check for File URL (e.g. OPML / XML file)
             if provider.canLoadObject(ofClass: URL.self) {
                 _ = provider.loadObject(ofClass: URL.self) { item, _ in
-                    guard let url = item else { return }
+                    guard let url = item else {
+                        Task { @MainActor in
+                            self.feedManager.articleStore.operationError = "The dropped item could not be read."
+                        }
+                        return
+                    }
 
                     if url.isFileURL
                         && (url.pathExtension.lowercased() == "opml" || url.pathExtension.lowercased() == "xml")
@@ -229,6 +234,10 @@ struct SidebarView: View {
                         Task { @MainActor in
                             self.subscribe(to: urlString)
                         }
+                    } else {
+                        Task { @MainActor in
+                            self.feedManager.articleStore.operationError = "Drop an OPML file or an HTTP(S) feed URL."
+                        }
                     }
                 }
                 return true
@@ -237,11 +246,21 @@ struct SidebarView: View {
             // Check for Plain Text URL
             if provider.canLoadObject(ofClass: NSString.self) {
                 _ = provider.loadObject(ofClass: NSString.self) { item, _ in
-                    guard let nsString = item as? NSString else { return }
+                    guard let nsString = item as? NSString else {
+                        Task { @MainActor in
+                            self.feedManager.articleStore.operationError = "The dropped text could not be read."
+                        }
+                        return
+                    }
                     let text = String(nsString).trimmingCharacters(in: .whitespacesAndNewlines)
                     if text.hasPrefix("http://") || text.hasPrefix("https://") {
                         Task { @MainActor in
                             self.subscribe(to: text)
+                        }
+                    } else {
+                        Task { @MainActor in
+                            self.feedManager.articleStore.operationError =
+                                "The dropped text is not an HTTP(S) feed URL."
                         }
                     }
                 }
