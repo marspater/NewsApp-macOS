@@ -246,7 +246,9 @@ struct SidebarView: View {
                     if text.hasPrefix("http://") || text.hasPrefix("https://") {
                         Task { @MainActor in
                             self.subscribe(to: text)
-                        } else {
+                        }
+                    } else {
+                        Task { @MainActor in
                             self.feedManager.articleStore.operationError = "The dropped text is not an HTTP(S) feed URL."
                         }
                     }
