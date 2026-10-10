@@ -1000,7 +1000,7 @@ struct ArticleDetailView: View {
     }
 
     private var tertiaryText: Color {
-        contrast == .increased ? AppColor.secondaryText : AppColor.tertiaryText
+        AppColor.tertiaryText(for: contrast)
     }
 
     /// Increase Contrast restores full-strength text that is otherwise slightly softened.

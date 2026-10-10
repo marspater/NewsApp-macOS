@@ -51,7 +51,7 @@ struct EventOverviewReaderView: View {
 
     // MARK: - Contrast & Color Scalers
     static func borderStrokeColor(for contrast: ColorSchemeContrast) -> Color {
-        contrast == .increased ? AppColor.primaryText.opacity(0.50) : AppColor.borderSubtle
+        AppColor.border(for: contrast)
     }
 
     static func dividerOpacity(for contrast: ColorSchemeContrast) -> Double {
@@ -71,7 +71,7 @@ struct EventOverviewReaderView: View {
     }
 
     static func tertiaryTextColor(for contrast: ColorSchemeContrast) -> Color {
-        contrast == .increased ? AppColor.secondaryText : AppColor.tertiaryText
+        AppColor.tertiaryText(for: contrast)
     }
 
     private var currentBorderStrokeColor: Color {

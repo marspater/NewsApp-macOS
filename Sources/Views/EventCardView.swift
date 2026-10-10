@@ -21,6 +21,7 @@ struct EventCardView: View {
 
     @EnvironmentObject private var articleStore: ArticleStore
     @Environment(\.effectiveReduceMotion) private var reduceMotion
+    @Environment(\.effectiveContrast) private var contrast
     @State private var members: [FeedArticle] = []
     @State private var loadFailed = false
 
@@ -66,7 +67,7 @@ struct EventCardView: View {
                 if let latest = summary.latestDate {
                     Text("· updated \(latest, format: .relative(presentation: .named))")
                         .font(AppTypography.caption)
-                        .foregroundStyle(AppColor.tertiaryText)
+                        .foregroundStyle(AppColor.tertiaryText(for: contrast))
                 }
                 if summary.hasSubstantiveUpdate {
                     TagView(title: "Updated", tint: AppColor.accent)
@@ -128,7 +129,7 @@ struct EventCardView: View {
         }
         .padding(.vertical, AppSpacing.xxs)
         .background(RoundedRectangle(cornerRadius: AppRadius.card).fill(AppColor.surface))
-        .overlay(RoundedRectangle(cornerRadius: AppRadius.card).stroke(AppColor.borderSubtle, lineWidth: 0.5))
+        .overlay(RoundedRectangle(cornerRadius: AppRadius.card).stroke(AppColor.border(for: contrast), lineWidth: 0.5))
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Sources covering this event")
     }
@@ -144,6 +145,7 @@ private struct EventSourceRow: View {
 
     @EnvironmentObject private var readManager: ReadManager
     @EnvironmentObject private var savedStories: SavedStoriesManager
+    @Environment(\.effectiveContrast) private var contrast
 
     private var isRead: Bool { readManager.isRead(article.id) }
     private var isSaved: Bool { savedStories.isSaved(article) }
@@ -171,7 +173,7 @@ private struct EventSourceRow: View {
                 }
                 Text(article.publicationDateText)
                     .font(AppTypography.caption)
-                    .foregroundStyle(AppColor.tertiaryText)
+                    .foregroundStyle(AppColor.tertiaryText(for: contrast))
             }
             .padding(.horizontal, AppSpacing.sm)
             .padding(.vertical, AppSpacing.xs)

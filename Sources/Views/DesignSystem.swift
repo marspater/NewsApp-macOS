@@ -11,7 +11,8 @@ enum AppColor {
     static let background = Color(NSColor.windowBackgroundColor)
     static let surface = Color(NSColor.controlBackgroundColor)
     static let elevatedSurface = Color(NSColor.underPageBackgroundColor)
-    static let cardBackground = Color(NSColor.controlBackgroundColor.withAlphaComponent(0.6))
+    // NSColor.withAlphaComponent freezes the appearance at first use; SwiftUI opacity stays dynamic.
+    static let cardBackground = Color(NSColor.controlBackgroundColor).opacity(0.6)
 
     // Semantic Typography Text Colors
     static let primaryText = Color(NSColor.labelColor)
@@ -37,6 +38,16 @@ enum AppColor {
     static let focusRing = Color.accentColor.opacity(0.65)
     static let badgeBackground = Color(NSColor.quaternaryLabelColor).opacity(0.12)
     static let unreadDot = Color.accentColor
+
+    /// Card and container strokes: the separator, or a stronger stroke with Increase Contrast (DESIGN.md 11).
+    static func border(for contrast: ColorSchemeContrast) -> Color {
+        contrast == .increased ? primaryText.opacity(0.50) : borderSubtle
+    }
+
+    /// Dates and other metadata move one label level up with Increase Contrast.
+    static func tertiaryText(for contrast: ColorSchemeContrast) -> Color {
+        contrast == .increased ? secondaryText : tertiaryText
+    }
 
     // Image-caption contrast remains independent of Liquid Glass transparency.
     static let leadPlaceholder = Color(NSColor.darkGray)
