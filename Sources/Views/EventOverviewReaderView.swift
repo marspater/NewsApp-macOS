@@ -43,10 +43,10 @@ struct EventOverviewReaderView: View {
     @State private var activeCitationPreview: OverviewCitation? = nil
 
     // MARK: - Layout Metrics & Bounds
-    static let horizontalPageInset: CGFloat = 24.0
+    static let horizontalPageInset = AppLayout.pageInset
 
     static func readingColumnMaxWidth(for scale: CGFloat) -> CGFloat {
-        720.0 * min(scale, 1.3)
+        AppLayout.readingColumnMaxWidth(for: scale)
     }
 
     // MARK: - Contrast & Color Scalers
@@ -298,9 +298,7 @@ struct EventOverviewReaderView: View {
                         originalPublicationsSection
                     }
                 }
-                .padding(.horizontal, Self.horizontalPageInset)
-                .padding(.vertical, AppSpacing.lg)
-                .frame(maxWidth: Self.readingColumnMaxWidth(for: textScale), alignment: .leading)
+                .modifier(ReadingColumn(textScale: textScale))
             }
             .frame(maxWidth: .infinity)
         }

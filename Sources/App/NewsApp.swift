@@ -221,15 +221,28 @@ struct ListViewCommands: Commands {
             Toggle("Group Stories by Event", isOn: $groupsEvents)
                 .disabled(listActions?.canGroupStories != true)
 
+            Button("Make Text Bigger") {
+                if let actions = readerActions {
+                    actions.textScale.wrappedValue = ReaderTextSize.adjusted(actions.textScale.wrappedValue, by: 1)
+                }
+            }
+            .keyboardShortcut("+", modifiers: .command)
+            .disabled(readerActions == nil || (readerActions?.textScale.wrappedValue ?? 1) >= ReaderTextSize.maximum)
+            Button("Make Text Smaller") {
+                if let actions = readerActions {
+                    actions.textScale.wrappedValue = ReaderTextSize.adjusted(actions.textScale.wrappedValue, by: -1)
+                }
+            }
+            .keyboardShortcut("-", modifiers: .command)
+            .disabled(readerActions == nil || (readerActions?.textScale.wrappedValue ?? 1) <= ReaderTextSize.minimum)
+            Button("Actual Size") { readerActions?.textScale.wrappedValue = 1 }
+                .keyboardShortcut("0", modifiers: .command)
+                .disabled(readerActions == nil)
             if let actions = readerActions {
-                Picker("Text Size", selection: actions.textScale) {
-                    Text("Standard").tag(CGFloat(1))
-                    Text("Large").tag(CGFloat(1.25))
-                    Text("Extra Large").tag(CGFloat(1.5))
-                }
                 Picker("Reading Style", selection: $themeManager.articleTheme) {
-                    ForEach(ArticleThemeType.allCases) { Text($0.rawValue).tag($0) }
+                    ForEach(ArticleThemeType.allCases) { Text($0.displayName).tag($0) }
                 }
+                Button("Reading Options…", action: actions.showReadingOptions)
             }
 
             Divider()
