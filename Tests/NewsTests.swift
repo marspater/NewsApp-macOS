@@ -436,6 +436,7 @@ struct NewsTests {
             try await testHistoricalReconciliation(fixtureRoot: fixtureRoot)
             try await testEventDataModel(fixtureRoot: fixtureRoot)
             try await testEventCandidateGeneration(fixtureRoot: fixtureRoot)
+            try await testRelatedStoryEvents(fixtureRoot: fixtureRoot)
             try await testEventMatcherRules()
             try await testEventClustering(fixtureRoot: fixtureRoot)
             try await testEventFragmentMergingAndJudge(fixtureRoot: fixtureRoot)
@@ -529,6 +530,7 @@ struct NewsTests {
         try await testHistoricalReconciliation(fixtureRoot: fixtureRoot)
         try await testEventDataModel(fixtureRoot: fixtureRoot)
         try await testEventCandidateGeneration(fixtureRoot: fixtureRoot)
+        try await testRelatedStoryEvents(fixtureRoot: fixtureRoot)
         try await testEventMatcherRules()
         try await testEventClustering(fixtureRoot: fixtureRoot)
         try await testEventFragmentMergingAndJudge(fixtureRoot: fixtureRoot)
@@ -5937,6 +5939,130 @@ struct NewsTests {
             "A zero limit reads nothing")
         _ = try await EventCandidateFinder.candidates(
             for: article("hostile", hostile.terms.joined(separator: " "), "", hoursAgo: 0), in: db, now: now)
+        await db.close()
+    }
+
+    static func testRelatedStoryEvents(fixtureRoot: URL) async throws {
+        print("  - Testing read-only developing-story relations (#314)...")
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let earlier = EventFeatures(
+            language: "en", people: ["alex morgan"], places: ["riverside", "@US"],
+            keywords: ["bridge", "river", "close"], date: now.addingTimeInterval(-3600))
+        let later = EventFeatures(
+            language: "en", people: ["alex morgan"], places: ["riverside", "@US"],
+            keywords: ["bridge", "river", "rebuild"], date: now)
+        assertTrue(EventStoryRelation.supports(earlier, later), "Distinct acts may be related without matching")
+        assertFalse(EventStoryRelation.supports(later, earlier), "Earlier links cannot point forward")
+        var organization = later
+        organization.people = []
+        organization.organizations = earlier.people
+        assertFalse(
+            EventStoryRelation.supports(earlier, organization), "Person-to-organization name collisions never link")
+        var earlierOrganization = earlier
+        earlierOrganization.people = []
+        earlierOrganization.organizations = organization.organizations
+        assertFalse(
+            EventStoryRelation.supports(earlierOrganization, later), "Organization-to-person name collisions never link"
+        )
+        assertTrue(
+            EventStoryRelation.supports(earlierOrganization, organization), "Shared typed organizations can link")
+        for field in ["actor", "place", "country", "language", "topic", "date", "period"] {
+            var other = later
+            switch field {
+            case "actor": other.people = ["another person"]
+            case "place": other.places = ["@US"]
+            case "country": other.places = ["riverside", "@CA"]
+            case "language": other.language = nil
+            case "topic": other.keywords = ["football", "score"]
+            case "date": other.date = DateParser.unknownDate
+            default: other.periods = ["q2"]
+            }
+            var first = earlier
+            if field == "period" { first.periods = ["q1"] }
+            assertFalse(
+                EventStoryRelation.supports(first, other), "Weak or conflicting \(field) evidence rejects a link")
+        }
+        var boundary = earlier
+        boundary.date = now.addingTimeInterval(-EventStoryRelation.window)
+        assertTrue(EventStoryRelation.supports(boundary, later), "The 72-hour boundary is inclusive")
+        boundary.date = boundary.date.addingTimeInterval(-1)
+        assertFalse(EventStoryRelation.supports(boundary, later), "Older pairs are excluded")
+
+        let db = DatabaseEngine(path: ":memory:")
+        try await db.open()
+        func article(_ id: String, hours: Double, unrelated: Bool = false) -> FeedArticle {
+            FeedArticle(
+                storedID: id,
+                title: unrelated
+                    ? "Football fans celebrate a match" : "Volodymyr Zelenskyy discusses the Kherson bridge",
+                link: fixtureRoot.appendingPathComponent("relations/\(id)").absoluteString,
+                guid: id,
+                description: unrelated
+                    ? "Football fans watched the team win a league match."
+                    : "Volodymyr Zelenskyy discussed the bridge across the river in Kherson, Ukraine. The bridge and river transport project will serve residents of the city.",
+                pubDate: now.addingTimeInterval(hours * 3600), source: "Publisher \(id)")
+        }
+        let articles = [
+            article("current", hours: 0), article("earlier", hours: -1),
+            article("old", hours: -73), article("future", hours: 1),
+            article("mixed-1", hours: -2), article("mixed-2", hours: -2, unrelated: true),
+            article("mixed-3", hours: -2, unrelated: true),
+        ]
+        try await db.upsertArticles(articles)
+        let current = try await db.createEvent(memberArticleIDs: ["current"], at: now)
+        let previous = try await db.createEvent(memberArticleIDs: ["earlier"], at: now.addingTimeInterval(-10 * 86400))
+        _ = try await db.createEvent(memberArticleIDs: ["old"], at: now)
+        _ = try await db.createEvent(memberArticleIDs: ["future"], at: now)
+        _ = try await db.createEvent(memberArticleIDs: ["mixed-1", "mixed-2", "mixed-3"], at: now)
+        try await db.markRead(articleId: "earlier", isRead: true)
+        try await db.setSaved(articleId: "current", isSaved: true)
+        let links = try await EventStoryRelation.find(eventID: current.id, in: db)
+        assertEqual(links.map(\.eventID), [previous.id], "Only directly supported, wholly earlier events link")
+        assertEqual(links.first?.articleID, "earlier", "Navigation carries a stored member ID")
+        assertEqual(try await db.fetchEvent(id: current.id), current, "Lookup does not change the target event")
+        assertEqual(try await db.fetchEvent(id: previous.id), previous, "Lookup does not change earlier membership")
+        assertTrue(try await db.isRead(articleId: "earlier"), "Lookup preserves read state")
+        assertTrue(try await db.isSaved(articleId: "current"), "Lookup preserves saved state")
+        assertTrue(
+            try await EventStoryRelation.find(eventID: "missing", in: db).isEmpty, "Deleted events have no links")
+        try await db.upsertArticles([article("forward", hours: 0)])
+        let forward = try await db.createEvent(memberArticleIDs: ["forward"], at: now)
+        _ = try await db.mergeEvents(forward.id, into: current.id, at: now)
+        assertEqual(
+            try await EventStoryRelation.find(eventID: forward.id, in: db), links,
+            "Merge forwards resolve to live events")
+        var extraIDs: [String] = []
+        for i in 0..<5 {
+            let id = "extra-\(i)"
+            try await db.upsertArticles([article(id, hours: -0.5)])
+            extraIDs.append(try await db.createEvent(memberArticleIDs: [id], at: now).id)
+        }
+        let capped = try await EventStoryRelation.find(eventID: current.id, in: db)
+        assertEqual(
+            capped.map(\.eventID), Array(extraIDs.sorted().prefix(3)), "Newest links are capped with stable ID ties")
+        assertEqual(
+            try await EventStoryRelation.find(eventID: current.id, in: db), capped,
+            "Unchanged input gives stable link ordering")
+        let undated = FeedArticle(
+            storedID: "undated", title: articles[0].title, link: articles[0].link + "/undated", guid: "undated",
+            description: articles[0].description, pubDate: DateParser.unknownDate, source: "Other publisher")
+        try await db.upsertArticles([undated])
+        _ = try await db.addArticles(["undated"], toEvent: current.id, at: now)
+        assertTrue(
+            try await EventStoryRelation.find(eventID: current.id, in: db).isEmpty,
+            "Ingestion dates cannot order a story")
+        let cancelled = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            return try EventStoryRelation.links(
+                target: [
+                    EventMatchRow(id: "current", title: "", description: "", source: "", date: now, eventID: "target")
+                ],
+                candidates: [("earlier", [])])
+        }
+        do {
+            _ = try await cancelled.value
+            assertTrue(false, "Cancelled relation work must stop")
+        } catch is CancellationError {}
         await db.close()
     }
 

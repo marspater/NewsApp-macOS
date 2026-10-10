@@ -3922,6 +3922,56 @@ actor DatabaseEngine {
         }
     }
 
+    /// One actor-isolated snapshot; no memberships, analysis, read or saved state are written.
+    /// Publication time stays unknown here rather than falling back to ingestion time.
+    func relatedStoryEventRows(eventID: String) throws
+        -> (target: [EventMatchRow], candidates: [(id: String, members: [EventMatchRow])])
+    {
+        try Task.checkCancellation()
+        guard let live = try resolvedEventID(eventID) else { return ([], []) }
+        func members(_ id: String) throws -> [EventMatchRow] {
+            try eventMatchRows(
+                """
+                SELECT a.id, a.title, coalesce(a.description, ''), a.source, a.published_at, m.event_id, 0
+                FROM event_members m JOIN articles a ON a.id = m.article_id
+                WHERE m.event_id = ? AND \(Self.visibleArticle)
+                ORDER BY a.published_at, a.id LIMIT ?;
+                """, [.text(id), .integer(EventStoryRelation.memberLimit + 1)])
+        }
+        let target = try members(live)
+        guard !target.isEmpty, target.count <= EventStoryRelation.memberLimit,
+            target.allSatisfy({ $0.date != DateParser.unknownDate }), let first = target.first,
+            let query = EventMatchKey(title: first.title, description: first.description).ftsQuery
+        else { return ([], []) }
+        // Search only the preceding window and return at most 80 ranked FTS rows. Repeated
+        // coverage can crowd out candidates, an accepted recall limit for this experiment.
+        let rows = try eventRows(
+            """
+            SELECT m.event_id FROM articles_fts fts
+            JOIN article_fts_rows f ON f.fts_rowid = fts.rowid
+            JOIN articles a ON a.id = f.article_id
+            JOIN event_members m ON m.article_id = a.id
+            JOIN events e ON e.id = m.event_id
+            WHERE articles_fts MATCH ? AND m.event_id != ? AND e.merged_into IS NULL
+                AND a.published_at >= ? AND a.published_at < ? AND \(Self.visibleArticle)
+            ORDER BY fts.rank, a.id LIMIT ?;
+            """,
+            [
+                .text(query), .text(live),
+                .real(first.date.addingTimeInterval(-EventStoryRelation.window).timeIntervalSince1970),
+                .real(first.date.timeIntervalSince1970), .integer(EventStoryRelation.candidateLimit * 2),
+            ])
+        var seen = Set<String>()
+        var candidates: [(id: String, members: [EventMatchRow])] = []
+        for row in rows {
+            try Task.checkCancellation()
+            guard let id = row[0], seen.insert(id).inserted else { continue }
+            candidates.append((id, try members(id)))
+            if candidates.count == EventStoryRelation.candidateLimit { break }
+        }
+        return (target, candidates)
+    }
+
     // MARK: - Event Matching
 
     private static let eventMatchColumns = """
