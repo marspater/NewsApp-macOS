@@ -1,6 +1,6 @@
-import Foundation
 import AppKit
 import Combine
+import Foundation
 import NaturalLanguage
 import UserNotifications
 import os
@@ -70,28 +70,32 @@ class FeedManager: NSObject, ObservableObject {
     var notificationsEnabled: Bool { appSettings.notificationsEnabled }
     var aiEnabled: Bool { appSettings.aiEnabled }
 
-    init(settings: AppSettings? = nil, store: ArticleStore? = nil, schedulesRefresh: Bool = true,
-         fetchBatch: (@Sendable ([String], Bool) async -> FeedBatch)? = nil,
-         notifyBatch: @escaping @MainActor ([FeedArticle], AppSettings.NotificationMode) async -> Void = { articles, mode in
-             await NotificationService.shared.triageAndNotify(newArticles: articles, mode: mode)
-         },
-         enrichmentQueue: EnrichmentQueue? = nil,
-         importanceJudge: StoryImportanceJudge = .onDevice,
-         imageFinder: StoryImageFinder = .publisherPages,
-         allowsBackgroundWork: @escaping @MainActor () -> Bool = {
-             let info = ProcessInfo.processInfo
-             return !info.isLowPowerModeEnabled && info.thermalState.rawValue < ProcessInfo.ThermalState.serious.rawValue
-         },
-         powerEvents: NotificationCenter? = nil,
-         wakeRefreshDelay: Duration = .seconds(10),
-         now: @escaping () -> Date = { Date() }) {
+    init(
+        settings: AppSettings? = nil, store: ArticleStore? = nil, schedulesRefresh: Bool = true,
+        fetchBatch: (@Sendable ([String], Bool) async -> FeedBatch)? = nil,
+        notifyBatch: @escaping @MainActor ([FeedArticle], AppSettings.NotificationMode) async -> Void = {
+            articles, mode in
+            await NotificationService.shared.triageAndNotify(newArticles: articles, mode: mode)
+        },
+        enrichmentQueue: EnrichmentQueue? = nil,
+        importanceJudge: StoryImportanceJudge = .onDevice,
+        imageFinder: StoryImageFinder = .publisherPages,
+        allowsBackgroundWork: @escaping @MainActor () -> Bool = {
+            let info = ProcessInfo.processInfo
+            return !info.isLowPowerModeEnabled && info.thermalState.rawValue < ProcessInfo.ThermalState.serious.rawValue
+        },
+        powerEvents: NotificationCenter? = nil,
+        wakeRefreshDelay: Duration = .seconds(10),
+        now: @escaping () -> Date = { Date() }
+    ) {
         let store = store ?? ArticleStore.shared
         let state = store.database
         self.appSettings = settings ?? AppSettings.shared
         self.articleStore = store
-        self.fetchBatch = fetchBatch ?? { urls, allowHTTP in
-            await FeedFetcher.shared.fetchAllFeeds(urls: urls, allowHTTP: allowHTTP, state: state)
-        }
+        self.fetchBatch =
+            fetchBatch ?? { urls, allowHTTP in
+                await FeedFetcher.shared.fetchAllFeeds(urls: urls, allowHTTP: allowHTTP, state: state)
+            }
         self.notifyBatch = notifyBatch
         self.enrichmentQueue = enrichmentQueue ?? EnrichmentQueue(store: store)
         self.importanceJudge = importanceJudge
@@ -115,7 +119,7 @@ class FeedManager: NSObject, ObservableObject {
                 },
                 center.publisher(for: NSWorkspace.didWakeNotification).sink { [weak self] _ in
                     MainActor.assumeIsolated { self?.systemDidWake() }
-                }
+                },
             ]
         }
         loadCachedArticles()
@@ -150,9 +154,9 @@ class FeedManager: NSObject, ObservableObject {
 
     @discardableResult
     func importFeeds(from opmlData: Data) -> Int {
-        do { _ = try OPMLParser.parseValidated(data: opmlData) }
-        catch {
-            articleStore.operationError = "The OPML file could not be imported because it is incomplete or malformed. No subscriptions were changed."
+        do { _ = try OPMLParser.parseValidated(data: opmlData) } catch {
+            articleStore.operationError =
+                "The OPML file could not be imported because it is incomplete or malformed. No subscriptions were changed."
             return 0
         }
         let count = appSettings.importFeeds(from: opmlData)
@@ -168,7 +172,8 @@ class FeedManager: NSObject, ObservableObject {
         do {
             return importFeeds(from: try await OPMLFileReader.read(url))
         } catch {
-            articleStore.operationError = "The OPML file could not be read. Please choose a readable file no larger than 5 MB."
+            articleStore.operationError =
+                "The OPML file could not be read. Please choose a readable file no larger than 5 MB."
             return 0
         }
     }
@@ -231,7 +236,9 @@ class FeedManager: NSObject, ObservableObject {
     func reloadFeedHealth() async {
         guard let states = try? await articleStore.database.feedFetchStates() else { return }
         let now = Date()
-        feedHealth = Dictionary(appSettings.feedURLs.map { ($0, FeedHealth(states[$0], now: now)) }, uniquingKeysWith: { first, _ in first })
+        feedHealth = Dictionary(
+            appSettings.feedURLs.map { ($0, FeedHealth(states[$0], now: now)) }, uniquingKeysWith: { first, _ in first }
+        )
     }
 
     // MARK: - Caching & Persistence
@@ -293,7 +300,8 @@ class FeedManager: NSObject, ObservableObject {
 
     private func scheduleForegroundTimer() {
         backgroundTimer?.invalidate()
-        backgroundTimer = Timer.scheduledTimer(withTimeInterval: appSettings.fetchIntervalMinutes * 60, repeats: true) { [weak self] _ in
+        backgroundTimer = Timer.scheduledTimer(withTimeInterval: appSettings.fetchIntervalMinutes * 60, repeats: true) {
+            [weak self] _ in
             Task { @MainActor [weak self] in
                 await self?.fetchFeedsAsync()
             }
@@ -400,7 +408,9 @@ class FeedManager: NSObject, ObservableObject {
         // Rate before triage. Collection and its spinner have ended; another refresh can proceed.
         await waitForEventClustering()
         guard !Task.isCancelled, !isStopped else { return }
-        guard let eligible = try? await articleStore.database.notificationStoryIDs(newArticles.map(\.id)) else { return }
+        guard let eligible = try? await articleStore.database.notificationStoryIDs(newArticles.map(\.id)) else {
+            return
+        }
         // Muted and waiting stories never notify, in any privacy mode.
         let muting = appSettings.muteRules
         let notifiable = newArticles.filter { eligible.contains($0.id) && !muting.mutes($0) }
@@ -413,7 +423,8 @@ class FeedManager: NSObject, ObservableObject {
 
     private func performRefreshPipeline() async -> [FeedArticle] {
         let targetURLs = appSettings.effectiveFeedURLs
-        let signpostState = NewsSignposts.begin(NewsSignposts.feeds, name: "RefreshFeeds", metadata: "feeds=\(targetURLs.count)")
+        let signpostState = NewsSignposts.begin(
+            NewsSignposts.feeds, name: "RefreshFeeds", metadata: "feeds=\(targetURLs.count)")
         defer { NewsSignposts.end(NewsSignposts.feeds, name: "RefreshFeeds", state: signpostState) }
 
         for url in targetURLs {
@@ -423,7 +434,6 @@ class FeedManager: NSObject, ObservableObject {
             feedStatuses[url] = .loading
         }
         isAnyFeedLoading = true
-
 
         let results = await fetchBatch(targetURLs, appSettings.allowInsecureHTTP)
 
@@ -443,7 +453,9 @@ class FeedManager: NSObject, ObservableObject {
                         return article
                     }
                     allParsed.append(contentsOf: arts)
-                    insertedIDs.formUnion(await articleStore.batchUpsert(articles: arts, feedUrl: res.urlString, validators: res.validators))
+                    insertedIDs.formUnion(
+                        await articleStore.batchUpsert(
+                            articles: arts, feedUrl: res.urlString, validators: res.validators))
                 }
             }
         }
@@ -454,9 +466,8 @@ class FeedManager: NSObject, ObservableObject {
         var notifiedIDs = Set<String>()
         let userSubscribed = Set(appSettings.feedURLs)
         let newArticles = allParsed.filter {
-            insertedIDs.contains($0.id) &&
-            userSubscribed.contains($0.identityFeedURL ?? "") &&
-            notifiedIDs.insert($0.id).inserted
+            insertedIDs.contains($0.id) && userSubscribed.contains($0.identityFeedURL ?? "")
+                && notifiedIDs.insert($0.id).inserted
         }
 
         do {
@@ -496,9 +507,11 @@ class FeedManager: NSObject, ObservableObject {
                 let muting = self?.appSettings.muteRules ?? MuteRules()
                 let retained = self?.appSettings.tensionRetainedFeedURLs ?? []
                 let work = Task.detached(priority: .utility) { () throws -> Bool in
-                    let clustering = try await EventClusterer.run(in: database, judge: modelAllowed ? .onDevice : .unavailable)
+                    let clustering = try await EventClusterer.run(
+                        in: database, judge: modelAllowed ? .onDevice : .unavailable)
                     // Importance is rated once clusters are known; waiting stories expire after their lifetime.
-                    let curation = try await StoryCurator.run(in: database, judge: importanceJudge, muting: muting, keepingFeedURLs: retained)
+                    let curation = try await StoryCurator.run(
+                        in: database, judge: importanceJudge, muting: muting, keepingFeedURLs: retained)
                     return !clustering.changedEvents.isEmpty || curation.changed
                 }
                 let result = await withTaskCancellationHandler {
@@ -543,8 +556,9 @@ class FeedManager: NSObject, ObservableObject {
         let retained = appSettings.tensionRetainedFeedURLs
         imageLookupTask = Task { [weak self] in
             let work = Task.detached(priority: .utility) {
-                try await StoryCurator.run(in: database, judge: .unavailable, imageFinder: finder, muting: muting,
-                                           keepingFeedURLs: retained)
+                try await StoryCurator.run(
+                    in: database, judge: .unavailable, imageFinder: finder, muting: muting,
+                    keepingFeedURLs: retained)
             }
             let result = await withTaskCancellationHandler {
                 await work.result

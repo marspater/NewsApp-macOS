@@ -4,7 +4,9 @@ import os
 /// Outcome of one feed request. `articles == nil && error == nil` means the server answered 304 Not Modified.
 /// `validators` is set only for a fresh 200 (possibly empty, which clears stored ones) and must be persisted
 /// together with the ingested articles so an interrupted ingest cannot hide them behind a later 304.
-typealias FeedFetchResult = (urlString: String, articles: [FeedArticle]?, error: FeedError?, validators: FeedValidators?)
+typealias FeedFetchResult = (
+    urlString: String, articles: [FeedArticle]?, error: FeedError?, validators: FeedValidators?
+)
 
 /// Fetches and parses RSS, Atom, and JSON feeds using SecureHTTPClient.
 actor FeedFetcher {
@@ -23,7 +25,9 @@ actor FeedFetcher {
         self.now = now
     }
 
-    func fetchSingleFeed(urlString: String, allowHTTP: Bool = false, validators: FeedValidators? = nil) async -> FeedFetchResult {
+    func fetchSingleFeed(urlString: String, allowHTTP: Bool = false, validators: FeedValidators? = nil) async
+        -> FeedFetchResult
+    {
         guard let url = URL(string: urlString) else {
             return (urlString, nil, .malformedURL(urlString), nil)
         }
@@ -33,7 +37,8 @@ actor FeedFetcher {
             if response.statusCode == 304 { return (urlString, nil, nil, nil) }
             let fresh = FeedValidators(response: response)
 
-            let sniffer = String(data: data.prefix(30), encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let sniffer =
+                String(data: data.prefix(30), encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             if sniffer.hasPrefix("{") || sniffer.hasPrefix("[") {
                 let parsed = JSONFeedParser.parse(data: data, feedURL: urlString)
                 try Task.checkCancellation()
@@ -45,7 +50,7 @@ actor FeedFetcher {
             } else {
                 let xmlParser = FeedXMLParser(data: data, feedURL: urlString)
                 let parsed = xmlParser.parse()
-                try Task.checkCancellation() // an aborted parse is not a malformed feed
+                try Task.checkCancellation()  // an aborted parse is not a malformed feed
                 if let error = xmlParser.parseError {
                     return (urlString, nil, .parseFailed(error), nil)
                 }
@@ -60,7 +65,8 @@ actor FeedFetcher {
 
     /// With `state`, known feeds are requested conditionally and paused ones are skipped; outcomes are recorded for the next run.
     /// Scheduled and manual refreshes take this same path, so neither can bypass a server's wait.
-    func fetchAllFeeds(urls: [String], allowHTTP: Bool = false, state: DatabaseEngine? = nil) async -> [FeedFetchResult] {
+    func fetchAllFeeds(urls: [String], allowHTTP: Bool = false, state: DatabaseEngine? = nil) async -> [FeedFetchResult]
+    {
         let stored = (try? await state?.feedFetchStates()) ?? [:]
         let started = now()
         var results = [FeedFetchResult]()
@@ -72,14 +78,19 @@ actor FeedFetcher {
                 due.append(url)
             }
         }
-        let attempted = await fetchWindowed(due, allowHTTP: allowHTTP, validators: stored.compactMapValues(\.validators))
-        if let state, !Task.isCancelled { await recordOutcomes(attempted.filter { $0.error.map(\.isScheduledPause) != true }, in: state) }
+        let attempted = await fetchWindowed(
+            due, allowHTTP: allowHTTP, validators: stored.compactMapValues(\.validators))
+        if let state, !Task.isCancelled {
+            await recordOutcomes(attempted.filter { $0.error.map(\.isScheduledPause) != true }, in: state)
+        }
         return results + attempted
     }
 
     /// At most `maximumConcurrentFeeds` requests overall and `maximumConcurrentFeedsPerHost` per host. A host that
     /// answered 429/503 is left alone until its wait ends, including feeds queued behind the one that was refused.
-    private func fetchWindowed(_ urls: [String], allowHTTP: Bool, validators: [String: FeedValidators]) async -> [FeedFetchResult] {
+    private func fetchWindowed(_ urls: [String], allowHTTP: Bool, validators: [String: FeedValidators]) async
+        -> [FeedFetchResult]
+    {
         await withTaskGroup(of: FeedFetchResult.self) { group in
             var queue = urls
             var results = [FeedFetchResult]()
@@ -87,7 +98,11 @@ actor FeedFetcher {
             var running = 0
 
             func dequeueNextEligible() -> String? {
-                guard let index = queue.firstIndex(where: { active[Self.host($0), default: 0] < Self.maximumConcurrentFeedsPerHost }) else {
+                guard
+                    let index = queue.firstIndex(where: {
+                        active[Self.host($0), default: 0] < Self.maximumConcurrentFeedsPerHost
+                    })
+                else {
                     return nil
                 }
                 return queue.remove(at: index)
@@ -107,7 +122,8 @@ actor FeedFetcher {
 
             func launchEligible(_ group: inout TaskGroup<FeedFetchResult>) {
                 while running < Self.maximumConcurrentFeeds, !Task.isCancelled,
-                      let url = dequeueNextEligible() {
+                    let url = dequeueNextEligible()
+                {
                     schedule(url: url, in: &group)
                 }
             }
@@ -118,8 +134,9 @@ actor FeedFetcher {
                 active[host, default: 1] -= 1
                 running -= 1
                 if case .serverBusy(_, let retryAfter)? = result.error {
-                    let until = now().addingTimeInterval(FeedRetryPolicy.delay(afterFailures: 1, retryAfter: retryAfter))
-                    hostCooldowns[host] = max(until, hostCooldowns[host] ?? .distantPast) // a later, shorter ask never shortens the wait
+                    let until = now().addingTimeInterval(
+                        FeedRetryPolicy.delay(afterFailures: 1, retryAfter: retryAfter))
+                    hostCooldowns[host] = max(until, hostCooldowns[host] ?? .distantPast)  // a later, shorter ask never shortens the wait
                 }
                 results.append(result)
                 launchEligible(&group)

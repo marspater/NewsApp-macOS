@@ -1,5 +1,5 @@
-import Foundation
 import Combine
+import Foundation
 
 /// Manages bookmarked / saved articles in memory for instant reactive UI updates,
 /// backed asynchronously by ArticleStore and SQLite persistence.
@@ -21,7 +21,7 @@ final class SavedStoriesManager: ObservableObject {
         self.savedArticles = store.savedArticles
         self.savedArticleIDs = Set(store.savedArticles.map { $0.id })
         self.savedArticleLinks = Set(store.savedArticles.map { $0.normalizedLink }.filter(DatabaseEngine.isDocumentURL))
-        
+
         // Keep savedArticles in sync with ArticleStore changes
         store.$savedArticles
             .receive(on: RunLoop.main)
@@ -47,7 +47,8 @@ final class SavedStoriesManager: ObservableObject {
         // Only document URLs can alias bookmarks; homepage/malformed links stay keyed by article ID.
         // Persist against the actual saved IDs.
         let matching = savedArticles.filter {
-            $0.id == article.id || (DatabaseEngine.isDocumentURL(article.normalizedLink) && $0.normalizedLink == article.normalizedLink)
+            $0.id == article.id
+                || (DatabaseEngine.isDocumentURL(article.normalizedLink) && $0.normalizedLink == article.normalizedLink)
         }
         let matchingIDs = Set(matching.map { $0.id })
         savedArticles.removeAll { matchingIDs.contains($0.id) }
@@ -57,7 +58,9 @@ final class SavedStoriesManager: ObservableObject {
     }
 
     func isSaved(_ article: FeedArticle) -> Bool {
-        savedArticleIDs.contains(article.id) || (DatabaseEngine.isDocumentURL(article.normalizedLink) && savedArticleLinks.contains(article.normalizedLink))
+        savedArticleIDs.contains(article.id)
+            || (DatabaseEngine.isDocumentURL(article.normalizedLink)
+                && savedArticleLinks.contains(article.normalizedLink))
     }
     private func persistSaved(_ articles: [FeedArticle], isSaved: Bool) {
         let previous = mutationTask

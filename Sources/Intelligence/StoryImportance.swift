@@ -1,11 +1,14 @@
 import Foundation
+
 #if canImport(FoundationModels)
-import FoundationModels
+    import FoundationModels
 #endif
 
 /// How much a story matters to a general reader following the news, decided on device from its headline and summary.
 enum StoryImportance: Int, Sendable, Comparable {
-    case minor = 0, notable = 1, major = 2
+    case minor = 0
+    case notable = 1
+    case major = 2
 
     static func < (lhs: Self, rhs: Self) -> Bool { lhs.rawValue < rhs.rawValue }
 }
@@ -51,19 +54,24 @@ actor OnDeviceImportanceJudge {
     /// which shows how close a rating sits to the boundary between levels.
     static func modelRating(_ report: EventJudgeReport, sampled: Bool = false) async -> StoryImportance? {
         #if canImport(FoundationModels)
-        guard #available(macOS 26.0, *), case .available = SystemLanguageModel.default.availability else { return nil }
-        do {
-            // Like the event judge: news text needs the content-transformation guardrails and a plain-text answer.
-            let session = LanguageModelSession(model: SystemLanguageModel(guardrails: .permissiveContentTransformations))
-            let response = try await session.respond(
-                to: prompt(report), options: GenerationOptions(sampling: sampled ? .random(probabilityThreshold: 0.9) : .greedy,
-                                                               maximumResponseTokens: 8))
-            return level(response.content)
-        } catch {
-            return nil
-        }
+            guard #available(macOS 26.0, *), case .available = SystemLanguageModel.default.availability else {
+                return nil
+            }
+            do {
+                // Like the event judge: news text needs the content-transformation guardrails and a plain-text answer.
+                let session = LanguageModelSession(
+                    model: SystemLanguageModel(guardrails: .permissiveContentTransformations))
+                let response = try await session.respond(
+                    to: prompt(report),
+                    options: GenerationOptions(
+                        sampling: sampled ? .random(probabilityThreshold: 0.9) : .greedy,
+                        maximumResponseTokens: 8))
+                return level(response.content)
+            } catch {
+                return nil
+            }
         #else
-        return nil
+            return nil
         #endif
     }
 
@@ -124,11 +132,15 @@ enum StoryCurator {
     ) async throws -> Report {
         var report = Report()
         if judge.isAvailable, budget > 0 {
-            for row in try await database.pendingImportanceRows(activeSince: now.addingTimeInterval(-activeLifetime), limit: budget) {
+            for row in try await database.pendingImportanceRows(
+                activeSince: now.addingTimeInterval(-activeLifetime), limit: budget)
+            {
                 try Task.checkCancellation()
                 guard let level = await judge.rate(EventClusterer.report(row)) else { continue }
                 try Task.checkCancellation()
-                if try await database.recordImportance(row.id, level, at: now, expectedTitle: row.title, expectedDescription: row.description) {
+                if try await database.recordImportance(
+                    row.id, level, at: now, expectedTitle: row.title, expectedDescription: row.description)
+                {
                     report.rated += 1
                 }
             }
@@ -137,7 +149,8 @@ enum StoryCurator {
         if imageFinder.isAvailable, imageBudget > 0 {
             // ponytail: rows read once per pass; one lookup per event, the rest of an event waits for the next pass.
             var lookedUp = Set<String>()
-            for row in try await database.imagelessStoryRows(activeSince: now.addingTimeInterval(-activeLifetime), limit: imageBudget * 3, muting: muting)
+            for row in try await database.imagelessStoryRows(
+                activeSince: now.addingTimeInterval(-activeLifetime), limit: imageBudget * 3, muting: muting)
             where lookedUp.count < imageBudget {
                 try Task.checkCancellation()
                 if let event = row.eventID, lookedUp.contains(event) { continue }
@@ -145,7 +158,9 @@ enum StoryCurator {
                 switch await imageFinder.find(row.link) {
                 case .found(let url):
                     try Task.checkCancellation()
-                    if try await database.recordStoryImage(row.id, imageURL: url, at: now, expectedLink: row.link) { report.imagesFound += 1 }
+                    if try await database.recordStoryImage(row.id, imageURL: url, at: now, expectedLink: row.link) {
+                        report.imagesFound += 1
+                    }
                     report.imagesChecked += 1
                 case .none:
                     try Task.checkCancellation()
@@ -180,14 +195,16 @@ struct StoryImageFinder: Sendable {
 
     static func publisherPages(using client: SecureHTTPClient) -> StoryImageFinder {
         StoryImageFinder { link in
-        guard var components = URLComponents(string: link) else { return .none }
-        if components.scheme?.lowercased() == "http" { components.scheme = "https" }
-        guard let url = components.url,
-              let (data, response) = try? await client.fetchArticleHead(from: url),
-              response.statusCode < 400 else { return .unreachable }
-        guard !Task.isCancelled else { return .unreachable }
-        return leadImage(in: ContentExtractionPipeline.shared.decodeHTML(data: data, response: response),
-                         pageURL: response.url?.absoluteString ?? url.absoluteString)
+            guard var components = URLComponents(string: link) else { return .none }
+            if components.scheme?.lowercased() == "http" { components.scheme = "https" }
+            guard let url = components.url,
+                let (data, response) = try? await client.fetchArticleHead(from: url),
+                response.statusCode < 400
+            else { return .unreachable }
+            guard !Task.isCancelled else { return .unreachable }
+            return leadImage(
+                in: ContentExtractionPipeline.shared.decodeHTML(data: data, response: response),
+                pageURL: response.url?.absoluteString ?? url.absoluteString)
         }
     }
 
@@ -195,13 +212,20 @@ struct StoryImageFinder: Sendable {
     static func leadImage(in html: String, pageURL: String) -> StoryImageLookup {
         let pipeline = ContentExtractionPipeline.shared
         for declared in pipeline.extractLeadImages(from: html) {
-            if let url = ContentExtractionPipeline.readerImageURL(pipeline.decodeHTMLEntities(declared), baseURL: pageURL),
-               ReaderImageCandidate.usable(url: url) { return .found(url) }
+            if let url = ContentExtractionPipeline.readerImageURL(
+                pipeline.decodeHTMLEntities(declared), baseURL: pageURL),
+                ReaderImageCandidate.usable(url: url)
+            {
+                return .found(url)
+            }
         }
         // No declaration (#312): the first qualifying figure of the article body in the page prefix. Reader extraction
         // already drops logos, banners, hidden and tiny images; recordStoryImage clears figures another story shares.
         if case .success(_, _, let document?) = pipeline.extractFromHTML(html, baseUrl: pageURL),
-           let figure = document.images?.first(where: { $0.origin == .body && $0.aspectRatio.map { (0.25...4).contains($0) } ?? true }) {
+            let figure = document.images?.first(where: {
+                $0.origin == .body && $0.aspectRatio.map { (0.25...4).contains($0) } ?? true
+            })
+        {
             return .found(figure.url)
         }
         return .none

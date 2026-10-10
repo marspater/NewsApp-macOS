@@ -8,7 +8,8 @@ import Foundation
 
 /// World regions of panel publishers. A region without a panel member is a stated gap of that methodology version.
 enum TensionMacroRegion: String, CaseIterable, Codable, Sendable {
-    case europe, northAmerica, latinAmerica, middleEastNorthAfrica, subSaharanAfrica, southAsia, eastSoutheastAsia, oceania
+    case europe, northAmerica, latinAmerica, middleEastNorthAfrica, subSaharanAfrica, southAsia, eastSoutheastAsia,
+        oceania
 }
 
 /// A fixed panel feed, recorded as the catalog verified it. A changed catalog entry is a methodology change.
@@ -47,24 +48,36 @@ struct TensionMethodology: Equatable, Sendable {
     /// Late feed items and event clustering can still change a day until this long after it ends.
     let provisionalPeriod: TimeInterval
 
-    static let disclaimer = "News tension describes what a fixed panel of international news feeds reported, not how dangerous the world is. It depends on which outlets are in the panel, what they chose to cover and the language they publish in."
+    static let disclaimer =
+        "News tension describes what a fixed panel of international news feeds reported, not how dangerous the world is. It depends on which outlets are in the panel, what they chose to cover and the language they publish in."
 
     static let v1 = TensionMethodology(
         version: 1,
         language: "en",
         panel: [
-            TensionPanelMember(catalogID: "bbc-world", url: "https://feeds.bbci.co.uk/news/world/rss.xml", region: .europe),
-            TensionPanelMember(catalogID: "guardian-world", url: "https://www.theguardian.com/world/rss", region: .europe),
+            TensionPanelMember(
+                catalogID: "bbc-world", url: "https://feeds.bbci.co.uk/news/world/rss.xml", region: .europe),
+            TensionPanelMember(
+                catalogID: "guardian-world", url: "https://www.theguardian.com/world/rss", region: .europe),
             TensionPanelMember(catalogID: "dw-english", url: "https://rss.dw.com/xml/rss-en-top", region: .europe),
             TensionPanelMember(catalogID: "france-24", url: "https://www.france24.com/en/rss", region: .europe),
-            TensionPanelMember(catalogID: "euronews", url: "https://www.euronews.com/rss?level=theme&name=news", region: .europe),
-            TensionPanelMember(catalogID: "cbc-world", url: "https://www.cbc.ca/webfeed/rss/rss-world", region: .northAmerica),
-            TensionPanelMember(catalogID: "al-jazeera", url: "https://www.aljazeera.com/xml/rss/all.xml", region: .middleEastNorthAfrica),
-            TensionPanelMember(catalogID: "arab-news", url: "https://www.arabnews.com/rss.xml", region: .middleEastNorthAfrica),
-            TensionPanelMember(catalogID: "the-hindu", url: "https://www.thehindu.com/news/international/feeder/default.rss", region: .southAsia),
+            TensionPanelMember(
+                catalogID: "euronews", url: "https://www.euronews.com/rss?level=theme&name=news", region: .europe),
+            TensionPanelMember(
+                catalogID: "cbc-world", url: "https://www.cbc.ca/webfeed/rss/rss-world", region: .northAmerica),
+            TensionPanelMember(
+                catalogID: "al-jazeera", url: "https://www.aljazeera.com/xml/rss/all.xml",
+                region: .middleEastNorthAfrica),
+            TensionPanelMember(
+                catalogID: "arab-news", url: "https://www.arabnews.com/rss.xml", region: .middleEastNorthAfrica),
+            TensionPanelMember(
+                catalogID: "the-hindu", url: "https://www.thehindu.com/news/international/feeder/default.rss",
+                region: .southAsia),
             TensionPanelMember(catalogID: "dawn", url: "https://www.dawn.com/feeds/home", region: .southAsia),
-            TensionPanelMember(catalogID: "cna", url: "https://www.channelnewsasia.com/rssfeeds/8395884", region: .eastSoutheastAsia),
-            TensionPanelMember(catalogID: "africanews", url: "https://www.africanews.com/feed/rss", region: .subSaharanAfrica)
+            TensionPanelMember(
+                catalogID: "cna", url: "https://www.channelnewsasia.com/rssfeeds/8395884", region: .eastSoutheastAsia),
+            TensionPanelMember(
+                catalogID: "africanews", url: "https://www.africanews.com/feed/rss", region: .subSaharanAfrica),
         ],
         minimumReportingFeeds: 7,
         minimumReportingRegions: 4,
@@ -156,53 +169,63 @@ enum TensionEventClassifier {
             "airstrike", "airstrikes", "air strike", "air strikes", "missile strike", "missile strikes", "drone strike",
             "drone strikes", "drone attack", "drone attacks", "shelling", "shelled", "artillery", "bombardment",
             "offensive", "invasion", "invaded", "troops", "front line", "frontline", "fighting", "military operation",
-            "ceasefire", "cease fire", "insurgents"
+            "ceasefire", "cease fire", "insurgents",
         ],
         .terrorism: [
             "terrorist", "terrorists", "terrorism", "terror attack", "suicide bomber", "suicide bombing", "car bomb",
-            "gunman", "gunmen", "mass shooting", "hostage", "hostages", "kidnapped", "abducted", "explosive device"
+            "gunman", "gunmen", "mass shooting", "hostage", "hostages", "kidnapped", "abducted", "explosive device",
         ],
         .civilUnrest: [
             "protest", "protests", "protesters", "protestors", "demonstrators", "riot", "riots", "rioting", "unrest",
-            "curfew", "tear gas", "crackdown", "coup", "uprising", "martial law"
+            "curfew", "tear gas", "crackdown", "coup", "uprising", "martial law",
         ],
         .coercion: [
             "sanctions", "embargo", "blockade", "ultimatum", "mobilization", "mobilisation", "military drills",
-            "nuclear test", "missile test", "ballistic missile", "expelled diplomats", "troop buildup"
+            "nuclear test", "missile test", "ballistic missile", "expelled diplomats", "troop buildup",
         ],
         .disaster: [
             "earthquake", "tsunami", "hurricane", "typhoon", "cyclone", "flood", "floods", "flooding", "wildfire",
-            "wildfires", "landslide", "eruption", "drought", "heatwave", "heat wave", "famine", "derailment"
+            "wildfires", "landslide", "eruption", "drought", "heatwave", "heat wave", "famine", "derailment",
         ],
         .healthEmergency: [
-            "outbreak", "epidemic", "pandemic", "cholera", "ebola", "mpox", "public health emergency"
+            "outbreak", "epidemic", "pandemic", "cholera", "ebola", "mpox", "public health emergency",
         ],
         .cyberAttack: [
-            "cyberattack", "cyberattacks", "cyber attack", "cyber attacks", "ransomware", "data breach", "ddos"
-        ]
+            "cyberattack", "cyberattacks", "cyber attack", "cyber attacks", "ransomware", "data breach", "ddos",
+        ],
     ]
 
     static let escalatingCues = [
         "escalate", "escalated", "escalates", "escalating", "escalation", "intensified", "intensifies", "intensifying",
         "stepped up", "new offensive", "launched an offensive", "renewed fighting", "renewed attacks", "declared war",
-        "retaliated", "retaliatory", "mobilized", "mobilised", "deployed additional", "state of emergency"
+        "retaliated", "retaliatory", "mobilized", "mobilised", "deployed additional", "state of emergency",
     ]
 
     static let deescalatingCues = [
-        "ceasefire", "cease fire", "truce", "armistice", "peace talks", "peace deal", "peace agreement", "de escalation",
+        "ceasefire", "cease fire", "truce", "armistice", "peace talks", "peace deal", "peace agreement",
+        "de escalation",
         "de escalate", "deescalation", "withdrew", "withdrawal", "pulled back", "prisoner exchange", "prisoner swap",
-        "released hostages", "hostages were released", "lifted the curfew", "lifted sanctions", "resumed talks"
+        "released hostages", "hostages were released", "lifted the curfew", "lifted sanctions", "resumed talks",
     ]
 
     /// Words up to three places before a cue that cancel it.
-    static let negations: Set<String> = ["no", "not", "never", "without", "rejected", "rejects", "refused", "refuses", "denied", "denies", "ruled"]
+    static let negations: Set<String> = [
+        "no", "not", "never", "without", "rejected", "rejects", "refused", "refuses", "denied", "denies", "ruled",
+    ]
     /// Words up to three places after a de-escalation cue that cancel it ("ceasefire collapsed").
-    static let reversals: Set<String> = ["collapsed", "collapses", "failed", "fails", "broke", "violated", "ended", "stalled", "faltered"]
+    static let reversals: Set<String> = [
+        "collapsed", "collapses", "failed", "fails", "broke", "violated", "ended", "stalled", "faltered",
+    ]
 
-    static func classify(_ facts: [PassageAnchoredFact], methodology: TensionMethodology = .v1) -> TensionEventClassification {
+    static func classify(_ facts: [PassageAnchoredFact], methodology: TensionMethodology = .v1)
+        -> TensionEventClassification
+    {
         var support: [TensionEventType: [String]] = [:]
-        var deaths = 0, affected = 0
-        var magnitudeEvidence: [String] = [], escalating: [String] = [], deescalating: [String] = []
+        var deaths = 0
+        var affected = 0
+        var magnitudeEvidence: [String] = []
+        var escalating: [String] = []
+        var deescalating: [String] = []
         for fact in facts {
             let words = Self.words(fact.quote)
             for kind in TensionEventType.allCases where containsCue(words, typeCues[kind] ?? []) {
@@ -216,7 +239,8 @@ enum TensionEventClassifier {
             if containsCue(words, deescalatingCues, reversible: true) { deescalating.append(fact.id) }
         }
         var type: TensionEventType?
-        for candidate in TensionEventType.allCases where (support[candidate]?.count ?? 0) > (type.flatMap { support[$0]?.count } ?? 0) {
+        for candidate in TensionEventType.allCases
+        where (support[candidate]?.count ?? 0) > (type.flatMap { support[$0]?.count } ?? 0) {
             type = candidate
         }
         let escalation: TensionEscalation
@@ -249,7 +273,9 @@ enum TensionEventClassifier {
             for start in 0...(words.count - cue.count) where Array(words[start..<(start + cue.count)]) == cue {
                 let end = start + cue.count
                 if words[max(0, start - 3)..<start].contains(where: { negations.contains($0) }) { continue }
-                if reversible && words[end..<min(words.count, end + 3)].contains(where: { reversals.contains($0) }) { continue }
+                if reversible && words[end..<min(words.count, end + 3)].contains(where: { reversals.contains($0) }) {
+                    continue
+                }
                 return true
             }
         }
@@ -267,8 +293,10 @@ struct TensionFigures: Equatable, Sendable {
     private static let deathWords: Set<String> = ["killed", "dead", "died", "deaths", "fatalities", "killing", "kills"]
     private static let number = #"(?<n>\d{1,3}(?:,\d{3})+|\d+(?:\.\d+)?)(?:\s+(?<m>thousand|million))?"#
     private static let auxiliary = #"(?:(?:were|was|have|has|had|are|is|been|being|now|reportedly)\s+){0,3}"#
-    private static let harm = #"(?<h>killed|dead|died|deaths|fatalities|injured|wounded|hurt|displaced|evacuated|missing|hospitali[sz]ed|homeless)"#
-    private static let person = #"(?:people|persons|civilians|soldiers|troops|children|residents|others|migrants|workers|passengers|fighters|militants|police|officers|protesters|demonstrators|villagers|patients|refugees|students|journalists|members|adults|women|men)"#
+    private static let harm =
+        #"(?<h>killed|dead|died|deaths|fatalities|injured|wounded|hurt|displaced|evacuated|missing|hospitali[sz]ed|homeless)"#
+    private static let person =
+        #"(?:people|persons|civilians|soldiers|troops|children|residents|others|migrants|workers|passengers|fighters|militants|police|officers|protesters|demonstrators|villagers|patients|refugees|students|journalists|members|adults|women|men)"#
     private static let qualifier = #"(?:(?:at least|more than|over|about|around|nearly|almost|some|up to)\s+)?"#
     // Groups: n (number), m (thousand/million), h (harm word), q (quantity word). The toll pattern (3) has no h and
     // the quantity pattern (4) has only q and h.
@@ -277,9 +305,11 @@ struct TensionFigures: Equatable, Sendable {
         #"\b\#(number)\s+\#(auxiliary)\#(harm)\b"#,
         #"\b(?<h>killing|killed|kills|injuring|injured|wounding|wounded|displacing|displaced)\s+\#(qualifier)\#(number)\b"#,
         #"\b(?:death toll|toll)\b[^.;]{0,40}?\b(?:to|at|of|reached|hit|passed|surpassed|exceeded)\s+\#(qualifier)\#(number)\b"#,
-        #"\b(?<q>dozens|scores|hundreds|thousands|millions)\s+(?:of\s+)?(?:[a-z]+\s+){0,2}?\#(auxiliary)\#(harm)\b"#
+        #"\b(?<q>dozens|scores|hundreds|thousands|millions)\s+(?:of\s+)?(?:[a-z]+\s+){0,2}?\#(auxiliary)\#(harm)\b"#,
     ].map { try! NSRegularExpression(pattern: $0) }
-    private static let quantities = ["dozens": 24, "scores": 40, "hundreds": 200, "thousands": 2_000, "millions": 2_000_000]
+    private static let quantities = [
+        "dozens": 24, "scores": 40, "hundreds": 200, "thousands": 2_000, "millions": 2_000_000,
+    ]
 
     init(_ quote: String) {
         let text = quote.lowercased()
@@ -289,7 +319,10 @@ struct TensionFigures: Equatable, Sendable {
                 func group(_ name: String) -> String? {
                     Range(match.range(withName: name), in: text).map { String(text[$0]) }
                 }
-                let count = index == 4 ? group("q").flatMap { Self.quantities[$0] } : group("n").flatMap { Self.figure($0, multiplier: group("m")) }
+                let count =
+                    index == 4
+                    ? group("q").flatMap { Self.quantities[$0] }
+                    : group("n").flatMap { Self.figure($0, multiplier: group("m")) }
                 guard let count else { continue }
                 // The toll pattern has no harm word; a toll counts deaths.
                 if index == 3 || group("h").map({ Self.deathWords.contains($0) }) == true {
@@ -302,7 +335,9 @@ struct TensionFigures: Equatable, Sendable {
     }
 
     private static func figure(_ digits: String, multiplier: String?) -> Int? {
-        if multiplier == nil, !digits.contains(","), !digits.contains("."), let year = Int(digits), (1900...2099).contains(year) {
+        if multiplier == nil, !digits.contains(","), !digits.contains("."), let year = Int(digits),
+            (1900...2099).contains(year)
+        {
             return nil
         }
         guard let value = Double(digits.replacingOccurrences(of: ",", with: "")) else { return nil }
@@ -342,8 +377,13 @@ struct TensionDayAssessment: Equatable, Sendable {
 enum TensionDayAssessor {
     /// Classifies a day's unique events from the stored panel corpus. Articles outside the day or the panel are
     /// ignored, each event counts once however many outlets reported it, and no score is computed.
-    static func assess(day: DateInterval, rows: [TensionCorpusRow], now: Date, methodology: TensionMethodology = .v1) -> TensionDayAssessment {
-        let rows = rows.filter { methodology.member(feedURL: $0.feedURL) != nil && $0.article.pubDate >= day.start && $0.article.pubDate < day.end }
+    static func assess(day: DateInterval, rows: [TensionCorpusRow], now: Date, methodology: TensionMethodology = .v1)
+        -> TensionDayAssessment
+    {
+        let rows = rows.filter {
+            methodology.member(feedURL: $0.feedURL) != nil && $0.article.pubDate >= day.start
+                && $0.article.pubDate < day.end
+        }
         let coverage = methodology.coverage(reportingFeedURLs: Set(rows.map(\.feedURL)))
         var events: [TensionEventDay] = []
         if coverage.status == .sufficient {
@@ -352,17 +392,22 @@ enum TensionDayAssessor {
             for key in groups.keys.sorted() {
                 let members = groups[key] ?? []
                 var articles: [FeedArticle] = []
-                for row in members where !articles.contains(where: { $0.id == row.article.id }) { articles.append(row.article) }
+                for row in members where !articles.contains(where: { $0.id == row.article.id }) {
+                    articles.append(row.article)
+                }
                 articles.sort { $0.id < $1.id }
                 let passages = articles.flatMap { selector.extractRankedPassages(from: $0) }
                 let facts = PassageFactExtractor.deterministicExtract(passages: passages)
                 let reporting = methodology.panel.filter { member in members.contains { $0.feedURL == member.url } }
-                events.append(TensionEventDay(key: key, articleIDs: articles.map(\.id), reporting: reporting,
-                                              classification: TensionEventClassifier.classify(facts, methodology: methodology)))
+                events.append(
+                    TensionEventDay(
+                        key: key, articleIDs: articles.map(\.id), reporting: reporting,
+                        classification: TensionEventClassifier.classify(facts, methodology: methodology)))
             }
         }
-        return TensionDayAssessment(methodologyVersion: methodology.version, day: day, coverage: coverage,
-                                    isProvisional: methodology.isProvisional(day, now: now), events: events)
+        return TensionDayAssessment(
+            methodologyVersion: methodology.version, day: day, coverage: coverage,
+            isProvisional: methodology.isProvisional(day, now: now), events: events)
     }
 }
 
@@ -404,33 +449,33 @@ struct TensionWeights: Equatable, Codable, Sendable {
             .civilUnrest: 4.0,
             .coercion: 4.0,
             .healthEmergency: 4.0,
-            .cyberAttack: 3.0
+            .cyberAttack: 3.0,
         ],
         deathMultipliers: [
             .notReported: 1.0,
             .units: 1.2,
             .tens: 1.5,
             .hundreds: 2.0,
-            .thousands: 2.5
+            .thousands: 2.5,
         ],
         affectedMultipliers: [
             .notReported: 1.0,
             .units: 1.1,
             .tens: 1.25,
             .hundreds: 1.5,
-            .thousands: 2.0
+            .thousands: 2.0,
         ],
         escalationMultipliers: [
             .noSignal: 1.0,
             .escalating: 1.3,
             .deescalating: 0.7,
-            .mixed: 1.0
+            .mixed: 1.0,
         ],
         breadthMultipliers: [
             1: 0.85,
             2: 1.0,
             3: 1.15,
-            4: 1.30
+            4: 1.30,
         ],
         scaleFactor: 25.0,
         smoothingAlpha: 0.25
@@ -528,7 +573,8 @@ enum TensionCalibrator {
             )
         }
         let tWeight = weights.typeWeights[type] ?? 0.0
-        let mMult = weights.magnitudeMultiplier(deaths: event.classification.deaths, affected: event.classification.affected)
+        let mMult = weights.magnitudeMultiplier(
+            deaths: event.classification.deaths, affected: event.classification.affected)
         let eMult = weights.escalationMultipliers[event.classification.escalation] ?? 1.0
         let regions = Set(event.reporting.map(\.region))
         let bMult = weights.breadthMultiplier(regionCount: regions.count)
@@ -600,7 +646,6 @@ enum TensionCalibrator {
     }
 }
 
-
 // MARK: - History (#159)
 
 /// One observation day as the tension view shows it: its score, coverage and the stories behind its largest
@@ -622,8 +667,10 @@ enum TensionHistory {
     /// Scores the most recent `days` UTC days from the stored panel corpus. The series starts at the first day any
     /// panel feed reported, so without a historical corpus it starts on the day collection began; later days without
     /// enough coverage stay in the series as gaps, never zeros.
-    static func load(from database: DatabaseEngine, now: Date, days: Int = 30,
-                     methodology: TensionMethodology = .v1, weights: TensionWeights = .calibratedV1) async throws -> [TensionHistoryDay] {
+    static func load(
+        from database: DatabaseEngine, now: Date, days: Int = 30,
+        methodology: TensionMethodology = .v1, weights: TensionWeights = .calibratedV1
+    ) async throws -> [TensionHistoryDay] {
         let today = TensionMethodology.day(containing: now)
         var assessments: [TensionDayAssessment] = []
         var titles: [String: String] = [:]

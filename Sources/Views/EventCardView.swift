@@ -1,8 +1,8 @@
 // EventCardView.swift
 // NewsApp Event Card & Source List
 
-import SwiftUI
 import AppKit
+import SwiftUI
 
 /// One card for a confirmed event: the representative publication as an ordinary card, followed by
 /// the event's coverage and, on request, every member publication. Publisher text is never replaced.
@@ -13,6 +13,7 @@ struct EventCardView: View {
     var visibleMembers: [FeedArticle] = []
     var isSelected = false
     var compact = false
+    var isLead = false
     @Binding var isExpanded: Bool
     let openRepresentative: () -> Void
     let openMember: (FeedArticle, [FeedArticle]) -> Void
@@ -25,8 +26,10 @@ struct EventCardView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: AppSpacing.xs) {
-            ArticleCardView(article: representative, isSelected: isSelected, compact: compact,
-                            imageFallbacks: (members.isEmpty ? visibleMembers : members).filter { $0.id != representative.id }, action: openRepresentative)
+            ArticleCardView(
+                article: representative, isSelected: isSelected, compact: compact,
+                imageFallbacks: (members.isEmpty ? visibleMembers : members).filter { $0.id != representative.id },
+                isLead: isLead, action: openRepresentative)
             coverageToggle
             if isExpanded {
                 sourceList
@@ -177,15 +180,24 @@ private struct EventSourceRow: View {
         .buttonStyle(.plain)
         .buttonBorderShape(.roundedRectangle(radius: AppRadius.card))
         .contextMenu {
-            Button { readManager.toggleRead(article.id) } label: {
-                Label(isRead ? "Mark as Unread" : "Mark as Read", systemImage: isRead ? "circle" : "checkmark.circle.fill")
+            Button {
+                readManager.toggleRead(article.id)
+            } label: {
+                Label(
+                    isRead ? "Mark as Unread" : "Mark as Read", systemImage: isRead ? "circle" : "checkmark.circle.fill"
+                )
             }
-            Button { toggleSaved() } label: {
-                Label(isSaved ? "Remove from Saved" : "Save Story", systemImage: isSaved ? "bookmark.slash" : "bookmark")
+            Button {
+                toggleSaved()
+            } label: {
+                Label(
+                    isSaved ? "Remove from Saved" : "Save Story", systemImage: isSaved ? "bookmark.slash" : "bookmark")
             }
             if canSeparate {
                 Divider()
-                Button { separate() } label: {
+                Button {
+                    separate()
+                } label: {
                     Label("Not the Same Event", systemImage: "rectangle.split.2x1")
                 }
             }
@@ -197,14 +209,22 @@ private struct EventSourceRow: View {
                 Label("Copy Link", systemImage: "link")
             }
             if let url = URL(string: article.link) {
-                Button { NSWorkspace.shared.open(url) } label: {
+                Button {
+                    NSWorkspace.shared.open(url)
+                } label: {
                     Label("Open in Browser", systemImage: "safari")
                 }
             }
         }
-        .help(canSeparate ? "Open this publication. Use the context menu if it reports a different event." : "Open this publication")
+        .help(
+            canSeparate
+                ? "Open this publication. Use the context menu if it reports a different event."
+                : "Open this publication"
+        )
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(article.title), from \(source), published \(article.publicationDateText). \(isRead ? "Read" : "Unread")\(isSaved ? ", saved in your library" : "").")
+        .accessibilityLabel(
+            "\(article.title), from \(source), published \(article.publicationDateText). \(isRead ? "Read" : "Unread")\(isSaved ? ", saved in your library" : "")."
+        )
         .accessibilityAddTraits(.isButton)
         .accessibilityActions {
             Button(isRead ? "Mark as Unread" : "Mark as Read") { readManager.toggleRead(article.id) }

@@ -1,5 +1,5 @@
-import SwiftUI
 import AppKit
+import SwiftUI
 import UserNotifications
 
 /// Notification posted when the user clicks a notification banner or uses keyboard navigation.
@@ -28,7 +28,7 @@ struct NewsApp: App {
     @StateObject private var themeManager = ThemeManager.shared
     @StateObject private var readManager = AppContainer.shared.readManager
     @StateObject private var savedStories = AppContainer.shared.savedStories
-    
+
     var body: some Scene {
         Window("News", id: "main") {
             MainView()
@@ -171,7 +171,7 @@ struct NewsApp: App {
                 }
             }
         }
-        
+
         Window("Keyboard Shortcuts", id: KeyboardShortcutsCommands.windowID) {
             KeyboardShortcutsView()
                 .preferredColorScheme(themeManager.appearance.colorScheme)
@@ -261,14 +261,20 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
         }
         UNUserNotificationCenter.current().delegate = self
     }
-    
+
     // Force macOS to show alert even if app is focused
-    nonisolated func userNotificationCenter(_ _: UNUserNotificationCenter, willPresent _: UNNotification, withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
+    nonisolated func userNotificationCenter(
+        _ _: UNUserNotificationCenter, willPresent _: UNNotification,
+        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+    ) {
         completionHandler([.banner, .sound])
     }
-    
+
     // Handle notification click — deep link to the article
-    nonisolated func userNotificationCenter(_ _: UNUserNotificationCenter, didReceive response: UNNotificationResponse, withCompletionHandler completionHandler: @escaping () -> Void) {
+    nonisolated func userNotificationCenter(
+        _ _: UNUserNotificationCenter, didReceive response: UNNotificationResponse,
+        withCompletionHandler completionHandler: @escaping () -> Void
+    ) {
         let userInfo = response.notification.request.content.userInfo
         let articleID = userInfo["articleID"] as? String
         if let articleLink = userInfo["articleLink"] as? String {

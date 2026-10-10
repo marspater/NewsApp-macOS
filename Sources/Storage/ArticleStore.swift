@@ -8,10 +8,10 @@ import os
 final class ArticleStore: ObservableObject {
     static let shared = ArticleStore()
     private let logger = Logger(subsystem: "com.marspater.news", category: "ArticleStore")
-    
+
     let database: DatabaseEngine
     let migrationCoordinator: MigrationCoordinator?
-    
+
     @Published private(set) var articles: [FeedArticle] = []
     @Published private(set) var savedArticles: [FeedArticle] = []
     @Published private(set) var savedArticleIDs: Set<String> = []
@@ -19,7 +19,7 @@ final class ArticleStore: ObservableObject {
     @Published private(set) var unreadCount: Int = 0
     @Published private(set) var savedCount: Int = 0
     @Published private(set) var isReady: Bool = false
-    
+
     @Published private(set) var revision: UInt64 = 0
     /// Bumped when clustering or the reader changes events; the feed regroups on it.
     @Published private(set) var eventRevision: UInt64 = 0
@@ -29,12 +29,12 @@ final class ArticleStore: ObservableObject {
         let db = database ?? DatabaseEngine.shared
         self.database = db
         self.migrationCoordinator = migrationCoordinator ?? (database == nil ? MigrationCoordinator(database: db) : nil)
-        
+
         Task {
             await initialize()
         }
     }
-    
+
     func initialize() async {
         do {
             try await database.open()
@@ -56,7 +56,7 @@ final class ArticleStore: ObservableObject {
             logger.error("Failed to initialize ArticleStore: \(error.localizedDescription)")
         }
     }
-    
+
     @discardableResult
     func refreshState() async -> Bool {
         do {
@@ -64,7 +64,7 @@ final class ArticleStore: ObservableObject {
             let readIDs = try await database.getReadArticleIDs()
             let saved = try await database.getSavedArticles()
             let counts = try await database.counts()
-            
+
             self.articles = fetched
             self.readArticleIDs = readIDs
             self.savedArticles = saved
@@ -78,11 +78,13 @@ final class ArticleStore: ObservableObject {
             return false
         }
     }
-    
+
     // MARK: - Article Ingestion & Upsert
-    
+
     @discardableResult
-    func batchUpsert(articles newArticles: [FeedArticle], feedUrl: String? = nil, validators: FeedValidators? = nil) async -> Set<String> {
+    func batchUpsert(articles newArticles: [FeedArticle], feedUrl: String? = nil, validators: FeedValidators? = nil)
+        async -> Set<String>
+    {
         guard !newArticles.isEmpty else { return [] }
         do {
             let insertedIDs = try await database.upsertArticles(newArticles, feedUrl: feedUrl, validators: validators)
@@ -96,9 +98,9 @@ final class ArticleStore: ObservableObject {
         }
         return []
     }
-    
+
     // MARK: - Article Queries & Search
-    
+
     func fetchArticles(
         section: String? = nil,
         isRead: Bool? = nil,
@@ -118,7 +120,8 @@ final class ArticleStore: ObservableObject {
 
     func articleForNavigation(_ request: NavigationRequest) async throws -> FeedArticle? {
         if let id = request.articleID,
-           let article = try await database.fetchArticles(limit: 1, id: id).first {
+            let article = try await database.fetchArticles(limit: 1, id: id).first
+        {
             return article
         }
         let link = ArticleIdentity.canonicalizeURL(request.link)
@@ -140,23 +143,22 @@ final class ArticleStore: ObservableObject {
             // Fallback to in-memory filter
             let lower = query.lowercased()
             return articles.filter {
-                $0.title.lowercased().contains(lower) ||
-                $0.description.lowercased().contains(lower) ||
-                $0.source.lowercased().contains(lower)
+                $0.title.lowercased().contains(lower) || $0.description.lowercased().contains(lower)
+                    || $0.source.lowercased().contains(lower)
             }
         }
     }
-    
+
     // MARK: - Read & Saved State Management
-    
+
     func isRead(_ id: String) -> Bool {
         readArticleIDs.contains(id)
     }
-    
+
     func isSaved(_ article: FeedArticle) -> Bool {
         savedArticleIDs.contains(article.id)
     }
-    
+
     func markAsRead(id: String, isRead: Bool = true) async {
         do {
             let id = try await database.resolvedArticleID(id)
@@ -175,7 +177,7 @@ final class ArticleStore: ObservableObject {
             logger.error("Failed to mark article read: \(error.localizedDescription)")
         }
     }
-    
+
     func toggleRead(id: String) async {
         do {
             let id = try await database.resolvedArticleID(id)
@@ -185,7 +187,7 @@ final class ArticleStore: ObservableObject {
             logger.error("Failed to resolve article read state: \(error.localizedDescription)")
         }
     }
-    
+
     func markAllAsRead(feedUrl: String? = nil) async {
         do {
             try await database.markAllRead(feedUrl: feedUrl)
@@ -195,7 +197,7 @@ final class ArticleStore: ObservableObject {
             logger.error("Failed to mark all as read: \(error.localizedDescription)")
         }
     }
-    
+
     @discardableResult
     func toggleSave(article: FeedArticle) async -> Bool {
         do {
@@ -236,9 +238,9 @@ final class ArticleStore: ObservableObject {
             return false
         }
     }
-    
+
     // MARK: - Enrichment
-    
+
     @discardableResult
     func updateEnrichment(
         id: String,
@@ -255,15 +257,19 @@ final class ArticleStore: ObservableObject {
     ) async -> Bool {
         do {
             let id = try await database.resolvedArticleID(id)
-            guard try await database.updateEnrichment(
-                articleId: id,
-                update: .init(summary: summary, category: category, sentiment: sentiment,
-                              entities: entities, topics: topics, content: content,
-                              image: image, readerDocument: readerDocument, expectedInputHash: expectedInputHash)
-            ) else { return false }
+            guard
+                try await database.updateEnrichment(
+                    articleId: id,
+                    update: .init(
+                        summary: summary, category: category, sentiment: sentiment,
+                        entities: entities, topics: topics, content: content,
+                        image: image, readerDocument: readerDocument, expectedInputHash: expectedInputHash)
+                )
+            else { return false }
             if let identityEvidence {
-                do { try await database.recordDocumentIdentity(identityEvidence, articleID: id) }
-                catch { logger.error("Failed to record document identity: \(error.localizedDescription)") }
+                do { try await database.recordDocumentIdentity(identityEvidence, articleID: id) } catch {
+                    logger.error("Failed to record document identity: \(error.localizedDescription)")
+                }
             }
             try await publishStoredArticle(id)
             return true
@@ -287,10 +293,13 @@ final class ArticleStore: ObservableObject {
     // MARK: - Structured Article Analysis
 
     @discardableResult
-    func saveArticleAnalysis(_ analysis: ArticleAnalysis, for articleId: String, expectedInputHash: String? = nil) async -> Bool {
+    func saveArticleAnalysis(_ analysis: ArticleAnalysis, for articleId: String, expectedInputHash: String? = nil) async
+        -> Bool
+    {
         do {
             let articleId = try await database.resolvedArticleID(articleId)
-            guard try await database.saveArticleAnalysis(analysis, for: articleId, expectedInputHash: expectedInputHash) else { return false }
+            guard try await database.saveArticleAnalysis(analysis, for: articleId, expectedInputHash: expectedInputHash)
+            else { return false }
             try await publishStoredArticle(articleId)
             return true
         } catch {
@@ -322,9 +331,9 @@ final class ArticleStore: ObservableObject {
         try await database.clearAllDatabaseCache()
         await refreshState()
     }
-    
+
     // MARK: - Retention Pruning
-    
+
     @discardableResult
     func pruneOldArticles(keepReadDays: Int = 30) async -> Int {
         do {
@@ -389,7 +398,9 @@ final class ArticleStore: ObservableObject {
     }
 
     @discardableResult
-    func recordEventOverview(_ document: EventOverviewDocument, expectedArticleInputs: [String: String]? = nil) async throws -> Bool {
+    func recordEventOverview(_ document: EventOverviewDocument, expectedArticleInputs: [String: String]? = nil)
+        async throws -> Bool
+    {
         try await database.recordEventOverview(document, expectedArticleInputs: expectedArticleInputs)
     }
 
@@ -406,4 +417,3 @@ final class ArticleStore: ObservableObject {
         try await database.deleteEventOverview(eventID: eventID)
     }
 }
-

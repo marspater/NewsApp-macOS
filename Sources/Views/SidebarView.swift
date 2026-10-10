@@ -1,8 +1,8 @@
 // SidebarView.swift
 // NewsApp Sidebar Navigation & Subscription Management
 
-import SwiftUI
 import AppKit
+import SwiftUI
 import UniformTypeIdentifiers
 
 private struct AddFeedSubscriptionKey: FocusedValueKey { typealias Value = () -> Void }
@@ -16,39 +16,41 @@ extension FocusedValues {
 
 struct SidebarView: View {
     @Binding var selectedTopic: String?
-    
+
     @EnvironmentObject private var appSettings: AppSettings
     @EnvironmentObject private var feedManager: FeedManager
     @EnvironmentObject private var savedStories: SavedStoriesManager
     @EnvironmentObject private var readManager: ReadManager
     @Environment(\.effectiveReduceMotion) private var reduceMotion
-    
+
     @State private var isSubscribePopoverPresented = false
     @State private var newFeedURL: String = ""
     @State private var isDropTargeted = false
     @State private var dropConfirmationMessage: String? = nil
-    
+
     private let suggestedTopics: [(String, String)] = [
         ("Entertainment", "tv"), ("Science", "atom"),
         ("U.S. Politics", "building.columns"), ("Tech", "cpu"),
         ("Business", "briefcase"), ("Health & Wellness", "leaf"),
         ("Fashion", "tshirt"), ("Travel", "airplane"),
-        ("Sports", "sportscourt"), ("World", "globe.americas")
+        ("Sports", "sportscourt"), ("World", "globe.americas"),
     ]
-    
+
     var body: some View {
-        List(selection: Binding(
-            get: { selectedTopic ?? "Today" },
-            set: { newTopic in
-                if let newTopic = newTopic {
-                    selectedTopic = newTopic
+        List(
+            selection: Binding(
+                get: { selectedTopic ?? "Today" },
+                set: { newTopic in
+                    if let newTopic = newTopic {
+                        selectedTopic = newTopic
+                    }
                 }
-            }
-        )) {
+            )
+        ) {
             if let confirmation = dropConfirmationMessage {
                 dropConfirmationBanner(confirmation)
             }
-            
+
             inboxSection
             librarySection
             userSectionsSection
@@ -82,9 +84,9 @@ struct SidebarView: View {
                 .animation(reduceMotion ? nil : AppMotion.quick, value: isDropTargeted)
         )
     }
-    
+
     // MARK: - Drop Confirmation Banner
-    
+
     private func dropConfirmationBanner(_ text: String) -> some View {
         HStack(spacing: 6) {
             Image(systemName: "checkmark.circle.fill")
@@ -100,13 +102,15 @@ struct SidebarView: View {
         .listRowBackground(Color.clear)
         .listRowSeparator(.hidden)
     }
-    
+
     // MARK: - Sidebar Sections
-    
+
     /// A native sidebar row (DESIGN.md 6): the list's selection handles clicks and arrow keys, the system draws
     /// the badge, and row size follows the person's sidebar size setting.
     @ViewBuilder
-    private func topicRow(title: String, icon: String, badge: Int? = nil, isLoading: Bool = false, accessibility: String? = nil) -> some View {
+    private func topicRow(
+        title: String, icon: String, badge: Int? = nil, isLoading: Bool = false, accessibility: String? = nil
+    ) -> some View {
         let count = badge ?? 0
         let badgeValue = count > 0 ? String(count) : ""
         Group {
@@ -129,7 +133,9 @@ struct SidebarView: View {
 
     private var inboxSection: some View {
         Section("Inbox") {
-            topicRow(title: "Today", icon: "newspaper.fill", isLoading: feedManager.isAnyFeedLoading, accessibility: "Today's Articles")
+            topicRow(
+                title: "Today", icon: "newspaper.fill", isLoading: feedManager.isAnyFeedLoading,
+                accessibility: "Today's Articles")
             topicRow(title: "Unread", icon: "circle.circle.fill", badge: unreadBadge, accessibility: "Unread Articles")
             topicRow(title: "Briefing", icon: "text.book.closed", accessibility: "Finite Briefing")
         }
@@ -140,14 +146,16 @@ struct SidebarView: View {
         let muting = appSettings.muteRules
         return feedManager.articles.filter { !readManager.isRead($0.id) && (muting.isEmpty || !muting.mutes($0)) }.count
     }
-    
+
     private var librarySection: some View {
         Section("Library") {
-            topicRow(title: "Saved Stories", icon: "bookmark.fill", badge: savedStories.savedArticles.count, accessibility: "Saved Stories")
+            topicRow(
+                title: "Saved Stories", icon: "bookmark.fill", badge: savedStories.savedArticles.count,
+                accessibility: "Saved Stories")
             topicRow(title: "History", icon: "clock.fill", accessibility: "Reading History")
         }
     }
-    
+
     private var userSectionsSection: some View {
         Section("Sections") {
             ForEach(feedManager.userSections, id: \.self) { section in
@@ -162,7 +170,7 @@ struct SidebarView: View {
             }
         }
     }
-    
+
     private var suggestedSection: some View {
         Section("Suggested") {
             ForEach(suggestedTopics, id: \.0) { topic, icon in
@@ -185,24 +193,24 @@ struct SidebarView: View {
             }
         }
     }
-    
+
     // MARK: - Popover
-    
+
     private var subscribePopover: some View {
         VStack(alignment: .leading, spacing: AppSpacing.sm) {
             Text("Subscribe to RSS Feed")
                 .font(AppTypography.headline)
-            
+
             TextField("https://example.com/feed.xml", text: $newFeedURL)
                 .textFieldStyle(.roundedBorder)
                 .frame(width: 280)
-            
+
             HStack {
                 Spacer()
                 Button("Cancel") {
                     isSubscribePopoverPresented = false
                 }
-                
+
                 Button("Add") {
                     let trimmed = newFeedURL.trimmingCharacters(in: .whitespacesAndNewlines)
                     if !trimmed.isEmpty {
@@ -217,20 +225,23 @@ struct SidebarView: View {
         }
         .padding()
     }
-    
+
     // MARK: - Drag and Drop Handling
-    
+
     private func handleDrop(providers: [NSItemProvider]) -> Bool {
         for provider in providers {
             // Check for File URL (e.g. OPML / XML file)
             if provider.canLoadObject(ofClass: URL.self) {
                 _ = provider.loadObject(ofClass: URL.self) { item, _ in
                     guard let url = item else { return }
-                    
-                    if url.isFileURL && (url.pathExtension.lowercased() == "opml" || url.pathExtension.lowercased() == "xml") {
+
+                    if url.isFileURL
+                        && (url.pathExtension.lowercased() == "opml" || url.pathExtension.lowercased() == "xml")
+                    {
                         Task { @MainActor in
                             let added = await self.feedManager.importFeeds(fromFile: url)
-                            self.showConfirmation(added > 0 ? "Imported \(added) feed(s) from OPML" : "No new feeds imported")
+                            self.showConfirmation(
+                                added > 0 ? "Imported \(added) feed(s) from OPML" : "No new feeds imported")
                         }
                     } else if !url.isFileURL && (url.scheme == "http" || url.scheme == "https") {
                         let urlString = url.absoluteString
@@ -242,7 +253,7 @@ struct SidebarView: View {
                 }
                 return true
             }
-            
+
             // Check for Plain Text URL
             if provider.canLoadObject(ofClass: NSString.self) {
                 _ = provider.loadObject(ofClass: NSString.self) { item, _ in
@@ -260,7 +271,7 @@ struct SidebarView: View {
         }
         return false
     }
-    
+
     private func showConfirmation(_ message: String) {
         withAnimation(reduceMotion ? nil : AppMotion.responsive) {
             dropConfirmationMessage = message
@@ -271,7 +282,7 @@ struct SidebarView: View {
             }
         }
     }
-    
+
     private func iconForSection(_ section: String) -> String {
         let map: [String: String] = [
             "Entertainment": "tv", "Politics": "building.columns",
@@ -280,7 +291,7 @@ struct SidebarView: View {
             "Lifestyle": "chair.lounge", "Science": "atom",
             "U.S. Politics": "building.columns", "Fashion": "tshirt",
             "Travel": "airplane", "Sports": "sportscourt",
-            "World": "globe.americas"
+            "World": "globe.americas",
         ]
         return map[section] ?? "doc.text"
     }

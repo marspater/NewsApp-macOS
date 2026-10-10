@@ -31,7 +31,7 @@ public struct ClaimAuditResult: Sendable, Equatable, Identifiable {
     }
 
     public var criticalErrorKind: CriticalErrorKind? {
-        if case let .criticalError(kind, _) = status { return kind }
+        if case .criticalError(let kind, _) = status { return kind }
         return nil
     }
 
@@ -39,9 +39,9 @@ public struct ClaimAuditResult: Sendable, Equatable, Identifiable {
         switch status {
         case .supported:
             return nil
-        case let .unsupported(reason):
+        case .unsupported(let reason):
             return reason
-        case let .criticalError(_, detail):
+        case .criticalError(_, let detail):
             return detail
         }
     }
@@ -338,7 +338,8 @@ public struct OverviewControlSample: Sendable, Identifiable {
         let fundingPassage = EvidencePassage(
             id: "pass-fund-1",
             articleID: "art-fund-1",
-            text: "On October 1, 2026, SwiftCloud announced it has raised $50 million in Series B funding led by Horizon Ventures. CEO Jane Doe stated: 'This capital accelerates our distributed systems deployment across Europe.' The round values the company at $400 million.",
+            text:
+                "On October 1, 2026, SwiftCloud announced it has raised $50 million in Series B funding led by Horizon Ventures. CEO Jane Doe stated: 'This capital accelerates our distributed systems deployment across Europe.' The round values the company at $400 million.",
             ordinal: 1
         )
         let fundingArticle = FeedArticle(
@@ -347,7 +348,7 @@ public struct OverviewControlSample: Sendable, Identifiable {
             link: "feed://\(fixtureHost)/stories/fund-1",
             guid: "guid-fund-1",
             description: "Distributed infrastructure startup raises fresh growth capital.",
-            pubDate: Date(timeIntervalSince1970: 1790800000),
+            pubDate: Date(timeIntervalSince1970: 1_790_800_000),
             source: "Venture Journal"
         )
         let fundingFacts = [
@@ -360,7 +361,8 @@ public struct OverviewControlSample: Sendable, Identifiable {
             ),
             PassageAnchoredFact(
                 id: "fact-fund-2",
-                statement: "CEO Jane Doe announced the capital accelerates distributed systems deployment across Europe.",
+                statement:
+                    "CEO Jane Doe announced the capital accelerates distributed systems deployment across Europe.",
                 passageID: "pass-fund-1",
                 quote: "This capital accelerates our distributed systems deployment across Europe.",
                 articleID: "art-fund-1"
@@ -371,7 +373,7 @@ public struct OverviewControlSample: Sendable, Identifiable {
                 passageID: "pass-fund-1",
                 quote: "values the company at $400 million",
                 articleID: "art-fund-1"
-            )
+            ),
         ]
         let sample1 = OverviewControlSample(
             id: "ctrl-fund",
@@ -385,7 +387,8 @@ public struct OverviewControlSample: Sendable, Identifiable {
         let clinicalPassage = EvidencePassage(
             id: "pass-trial-1",
             articleID: "art-trial-1",
-            text: "A peer-reviewed study published on September 15, 2026 revealed that candidate vaccine VX-42 achieved 88% efficacy in a 12,000-patient trial. Lead investigator Dr. Marcus Vance reported zero severe adverse events during the observation period.",
+            text:
+                "A peer-reviewed study published on September 15, 2026 revealed that candidate vaccine VX-42 achieved 88% efficacy in a 12,000-patient trial. Lead investigator Dr. Marcus Vance reported zero severe adverse events during the observation period.",
             ordinal: 1
         )
         let clinicalArticle = FeedArticle(
@@ -394,7 +397,7 @@ public struct OverviewControlSample: Sendable, Identifiable {
             link: "feed://\(fixtureHost)/stories/trial-1",
             guid: "guid-trial-1",
             description: "Clinical milestone reached for new immunization platform.",
-            pubDate: Date(timeIntervalSince1970: 1789400000),
+            pubDate: Date(timeIntervalSince1970: 1_789_400_000),
             source: "Medical Gazette"
         )
         let clinicalFacts = [
@@ -418,7 +421,7 @@ public struct OverviewControlSample: Sendable, Identifiable {
                 passageID: "pass-trial-1",
                 quote: "published on September 15, 2026",
                 articleID: "art-trial-1"
-            )
+            ),
         ]
         let sample2 = OverviewControlSample(
             id: "ctrl-trial",
@@ -432,7 +435,8 @@ public struct OverviewControlSample: Sendable, Identifiable {
         let energyPassage = EvidencePassage(
             id: "pass-grid-1",
             articleID: "art-grid-1",
-            text: "On August 20, 2026, the Nordic Energy Commission connected 1.5 gigawatts of offshore wind capacity to the regional power network. Energy Commissioner Astrid Lind noted the project will supply power to 850,000 households.",
+            text:
+                "On August 20, 2026, the Nordic Energy Commission connected 1.5 gigawatts of offshore wind capacity to the regional power network. Energy Commissioner Astrid Lind noted the project will supply power to 850,000 households.",
             ordinal: 1
         )
         let energyArticle = FeedArticle(
@@ -441,7 +445,7 @@ public struct OverviewControlSample: Sendable, Identifiable {
             link: "feed://\(fixtureHost)/stories/grid-1",
             guid: "guid-grid-1",
             description: "Renewable capacity added to North Sea distribution network.",
-            pubDate: Date(timeIntervalSince1970: 1787100000),
+            pubDate: Date(timeIntervalSince1970: 1_787_100_000),
             source: "Nordic Energy Dispatch"
         )
         let energyFacts = [
@@ -465,7 +469,7 @@ public struct OverviewControlSample: Sendable, Identifiable {
                 passageID: "pass-grid-1",
                 quote: "On August 20, 2026, the Nordic Energy Commission connected",
                 articleID: "art-grid-1"
-            )
+            ),
         ]
         let sample3 = OverviewControlSample(
             id: "ctrl-grid",
@@ -487,7 +491,8 @@ public struct OverviewControlSample: Sendable, Identifiable {
 public struct OverviewQualityAuditor: Sendable {
 
     private static let numberPattern: NSRegularExpression = {
-        let pattern = #"(?:[\$€£¥])?\s*\b\d+(?:[.,]\d+)*(?:\s*(?:billion|million|trillion|thousand|gigawatts?|megawatts?|%|percent))?\b"#
+        let pattern =
+            #"(?:[\$€£¥])?\s*\b\d+(?:[.,]\d+)*(?:\s*(?:billion|million|trillion|thousand|gigawatts?|megawatts?|%|percent))?\b"#
         return try! NSRegularExpression(pattern: pattern, options: [.caseInsensitive])
     }()
 
@@ -545,7 +550,8 @@ public struct OverviewQualityAuditor: Sendable {
                     id: claim.id,
                     claimText: claim.text,
                     citationIDs: claim.citationIDs,
-                    status: .unsupported(reason: "Cited passage ID '\(citation.passageID)' not found in source passages"),
+                    status: .unsupported(
+                        reason: "Cited passage ID '\(citation.passageID)' not found in source passages"),
                     auditedPassageIDs: auditedPassageIDs
                 )
             }
@@ -554,7 +560,8 @@ public struct OverviewQualityAuditor: Sendable {
             resolvedPassages.append(passage)
 
             // Quote must be verbatim in the passage (case/diacritic insensitive)
-            let normPassage = passage.text.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+            let normPassage = passage.text.folding(
+                options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
             let normQuote = citation.quote.trimmingCharacters(in: .whitespacesAndNewlines)
                 .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
 
@@ -573,7 +580,8 @@ public struct OverviewQualityAuditor: Sendable {
         }
 
         let combinedPassageText = resolvedPassages.map(\.text).joined(separator: "\n")
-        let normalizedPassage = combinedPassageText.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+        let normalizedPassage = combinedPassageText.folding(
+            options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
 
         // 2. Check Number Fidelity (Critical Number Mismatch)
         if let numberError = checkNumberFidelity(claimText: claim.text, normalizedPassage: normalizedPassage) {
@@ -598,7 +606,8 @@ public struct OverviewQualityAuditor: Sendable {
         }
 
         // 4. Check Attribution Fidelity (Critical Attribution Error)
-        if let attributionError = checkAttributionFidelity(claimText: claim.text, normalizedPassage: normalizedPassage) {
+        if let attributionError = checkAttributionFidelity(claimText: claim.text, normalizedPassage: normalizedPassage)
+        {
             return ClaimAuditResult(
                 id: claim.id,
                 claimText: claim.text,
@@ -641,11 +650,11 @@ public struct OverviewQualityAuditor: Sendable {
             case .supported:
                 supportedCount += 1
                 statusKind = "supported"
-            case let .unsupported(reason):
+            case .unsupported(let reason):
                 unsupportedCount += 1
                 statusKind = "unsupported"
                 detail = reason
-            case let .criticalError(kind, errorDetail):
+            case .criticalError(let kind, let errorDetail):
                 detail = errorDetail
                 switch kind {
                 case .numberMismatch:
@@ -785,9 +794,13 @@ public struct OverviewQualityAuditor: Sendable {
             let matchedStr = nsClaim.substring(with: match.range).trimmingCharacters(in: .whitespacesAndNewlines)
 
             // Extract the core number token (preserving decimal points, removing currency symbols and suffix scale words)
-            let coreNumber = matchedStr
+            let coreNumber =
+                matchedStr
                 .replacingOccurrences(of: #"^[\$€£¥]\s*"#, with: "", options: .regularExpression)
-                .replacingOccurrences(of: #"\s*(?:billion|million|trillion|thousand|gigawatts?|megawatts?|%|percent)$"#, with: "", options: [.regularExpression, .caseInsensitive])
+                .replacingOccurrences(
+                    of: #"\s*(?:billion|million|trillion|thousand|gigawatts?|megawatts?|%|percent)$"#, with: "",
+                    options: [.regularExpression, .caseInsensitive]
+                )
                 .trimmingCharacters(in: .whitespacesAndNewlines)
 
             guard !coreNumber.isEmpty else { continue }
@@ -796,11 +809,13 @@ public struct OverviewQualityAuditor: Sendable {
 
             // Check if core number appears in passage directly (e.g. "12,000" or "1.5")
             // or in passage without commas (e.g. "12000")
-            let foundInPassage = normalizedPassage.contains(coreNumber)
+            let foundInPassage =
+                normalizedPassage.contains(coreNumber)
                 || passageWithoutThousandsCommas.contains(coreWithoutCommas)
 
             if !foundInPassage {
-                return "Claim asserts quantity '\(matchedStr)' with value '\(coreNumber)' not supported by cited passage"
+                return
+                    "Claim asserts quantity '\(matchedStr)' with value '\(coreNumber)' not supported by cited passage"
             }
 
             // If a scale unit is present (e.g. billion, million, gigawatt, %), verify it too
@@ -842,7 +857,8 @@ public struct OverviewQualityAuditor: Sendable {
         let nsClaim = claimText as NSString
 
         // Check explicit attribution phrases: "according to X", "reported by X", etc.
-        let phraseMatches = attributionPhrasePattern.matches(in: claimText, range: NSRange(location: 0, length: nsClaim.length))
+        let phraseMatches = attributionPhrasePattern.matches(
+            in: claimText, range: NSRange(location: 0, length: nsClaim.length))
         for match in phraseMatches {
             if match.numberOfRanges > 1 {
                 let entity = nsClaim.substring(with: match.range(at: 1)).trimmingCharacters(in: .whitespacesAndNewlines)
@@ -859,7 +875,9 @@ public struct OverviewQualityAuditor: Sendable {
         let options: NLTagger.Options = [.omitWhitespace, .omitPunctuation, .joinNames]
         var entityError: String? = nil
 
-        tagger.enumerateTags(in: claimText.startIndex..<claimText.endIndex, unit: .word, scheme: .nameType, options: options) { tag, tokenRange in
+        tagger.enumerateTags(
+            in: claimText.startIndex..<claimText.endIndex, unit: .word, scheme: .nameType, options: options
+        ) { tag, tokenRange in
             if let tag = tag, tag == .personalName || tag == .organizationName {
                 let entity = String(claimText[tokenRange]).trimmingCharacters(in: .whitespacesAndNewlines)
                 let normEntity = entity.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)

@@ -1,5 +1,5 @@
-import Foundation
 import Darwin
+import Foundation
 
 /// Validates IP addresses, hostnames, and socket endpoints to protect against
 /// SSRF (Server-Side Request Forgery), DNS rebinding, and private intranet probing.
@@ -19,14 +19,16 @@ struct IPAddressValidator: Sendable {
     ) -> ValidationResult {
         var host = rawHost.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         if host.hasSuffix(".") { host.removeLast() }
-        
+
         guard !host.contains("%"), !host.contains("\0") else { return .blocked(reason: "Scoped or malformed address") }
 
         // 1. Literal hostname checks
-        if host == "localhost" || host.hasSuffix(".localhost") || host.hasSuffix(".local") || host.hasSuffix(".internal") {
+        if host == "localhost" || host.hasSuffix(".localhost") || host.hasSuffix(".local")
+            || host.hasSuffix(".internal")
+        {
             return .blocked(reason: "Localhost or internal domain name")
         }
-        
+
         // Single-label names may implicitly bypass native proxy routing.
         guard host.contains(".") || host.contains(":") else {
             return .blocked(reason: "Single-label network host")
@@ -163,7 +165,9 @@ struct IPAddressValidator: Sendable {
         if b1 == 192 && b2 == 0 && (b3 == 0 || b3 == 2) { return "IPv4 protocol/documentation network" }
         if b1 == 192 && b2 == 88 && b3 == 99 { return "IPv4 transition network" }
         if b1 == 198 && (b2 == 18 || b2 == 19) { return "IPv4 benchmarking network" }
-        if (b1 == 198 && b2 == 51 && b3 == 100) || (b1 == 203 && b2 == 0 && b3 == 113) { return "IPv4 documentation network" }
+        if (b1 == 198 && b2 == 51 && b3 == 100) || (b1 == 203 && b2 == 0 && b3 == 113) {
+            return "IPv4 documentation network"
+        }
 
         // 224.0.0.0/4 — Multicast
         if b1 >= 224 && b1 <= 239 { return "Multicast address (224.0.0.0/4)" }
@@ -210,24 +214,24 @@ struct IPAddressValidator: Sendable {
         if isIPv4Mapped {
             var v4Sin = in_addr()
             let v4Bytes: [UInt8] = Array(bytes[12..<16])
-            v4Sin.s_addr = (UInt32(v4Bytes[0]) << 24 |
-                            UInt32(v4Bytes[1]) << 16 |
-                            UInt32(v4Bytes[2]) << 8  |
-                            UInt32(v4Bytes[3])).bigEndian
+            v4Sin.s_addr =
+                (UInt32(v4Bytes[0]) << 24 | UInt32(v4Bytes[1]) << 16 | UInt32(v4Bytes[2]) << 8 | UInt32(v4Bytes[3]))
+                .bigEndian
             if let reason = isBlockedIPv4(v4Sin) {
                 return "IPv4-mapped IPv6 (\(reason))"
             }
         }
 
         // 64:ff9b::/96 — NAT64 Prefix
-        let isNAT64 = bytes[0] == 0x00 && bytes[1] == 0x64 && bytes[2] == 0xff && bytes[3] == 0x9b && bytes[4..<12].allSatisfy({ $0 == 0 })
+        let isNAT64 =
+            bytes[0] == 0x00 && bytes[1] == 0x64 && bytes[2] == 0xff && bytes[3] == 0x9b
+            && bytes[4..<12].allSatisfy({ $0 == 0 })
         if isNAT64 {
             var v4Sin = in_addr()
             let v4Bytes: [UInt8] = Array(bytes[12..<16])
-            v4Sin.s_addr = (UInt32(v4Bytes[0]) << 24 |
-                            UInt32(v4Bytes[1]) << 16 |
-                            UInt32(v4Bytes[2]) << 8  |
-                            UInt32(v4Bytes[3])).bigEndian
+            v4Sin.s_addr =
+                (UInt32(v4Bytes[0]) << 24 | UInt32(v4Bytes[1]) << 16 | UInt32(v4Bytes[2]) << 8 | UInt32(v4Bytes[3]))
+                .bigEndian
             if let reason = isBlockedIPv4(v4Sin) {
                 return "NAT64 IPv6 (\(reason))"
             }
@@ -237,7 +241,9 @@ struct IPAddressValidator: Sendable {
         // Refuse transition mechanisms that can embed a separately routed IPv4 destination.
         if bytes[0] == 0x20 && bytes[1] == 0x02 { return "6to4 transition address" }
         if bytes[0] == 0x20 && bytes[1] == 0x01 && bytes[2] == 0 && bytes[3] == 0 { return "Teredo transition address" }
-        if bytes[0] == 0x20 && bytes[1] == 0x01 && bytes[2] == 0x0d && bytes[3] == 0xb8 { return "IPv6 documentation address" }
+        if bytes[0] == 0x20 && bytes[1] == 0x01 && bytes[2] == 0x0d && bytes[3] == 0xb8 {
+            return "IPv6 documentation address"
+        }
         if bytes[0] == 0x20 && bytes[1] == 0x01 && bytes[2] < 2 { return "IPv6 special-purpose network" }
         if bytes[0] == 0x3f && bytes[1] == 0xff && bytes[2] & 0xf0 == 0 { return "IPv6 documentation address" }
         guard bytes[0] & 0xe0 == 0x20 else { return "Non-global IPv6 address" }
