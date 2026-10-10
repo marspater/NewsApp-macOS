@@ -179,22 +179,31 @@ enum AppTypography {
 
     /// Event overview has its own editorial hierarchy, scaled with the shared reader preference.
     static func overviewFont(_ role: OverviewTextRole, scale: CGFloat = 1) -> Font {
+        .system(
+            size: overviewSize(role) * scale, weight: overviewWeight(role),
+            design: role == .title ? .serif : .default)
+    }
+
+    private static func overviewSize(_ role: OverviewTextRole) -> CGFloat {
         switch role {
-        case .title: return .system(size: 30 * scale, weight: .bold, design: .serif)
-        case .section: return .system(size: 18 * scale, weight: .bold)
-        case .subheading: return .system(size: 16 * scale, weight: .bold)
-        case .introduction: return .system(size: 16 * scale)
-        case .fact: return .system(size: 15 * scale)
-        case .body: return .system(size: 14 * scale)
-        case .bodyMedium: return .system(size: 14 * scale, weight: .medium)
-        case .detail: return .system(size: 13 * scale)
-        case .metadata: return .system(size: 13 * scale, weight: .medium)
-        case .emphasis: return .system(size: 13 * scale, weight: .semibold)
-        case .annotation: return .system(size: 12 * scale, weight: .medium)
-        case .eyebrow: return .system(size: 11 * scale, weight: .semibold)
-        case .caption: return .system(size: 11 * scale)
-        case .captionMedium: return .system(size: 11 * scale, weight: .medium)
-        case .micro: return .system(size: 10 * scale, weight: .semibold)
+        case .title: return 30
+        case .section: return 18
+        case .subheading, .introduction: return 16
+        case .fact: return 15
+        case .body, .bodyMedium: return 14
+        case .detail, .metadata, .emphasis: return 13
+        case .annotation: return 12
+        case .eyebrow, .caption, .captionMedium: return 11
+        case .micro: return 10
+        }
+    }
+
+    private static func overviewWeight(_ role: OverviewTextRole) -> Font.Weight {
+        switch role {
+        case .title, .section, .subheading: return .bold
+        case .emphasis, .eyebrow, .micro: return .semibold
+        case .bodyMedium, .metadata, .annotation, .captionMedium: return .medium
+        case .introduction, .fact, .body, .detail, .caption: return .regular
         }
     }
 
@@ -312,7 +321,6 @@ extension TagView {
         TagView(title: title, systemImage: "sparkles", tint: AppColor.intelligence)
     }
 }
-
 
 // MARK: - Shared content labels and notices
 
