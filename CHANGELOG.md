@@ -2,6 +2,7 @@
 
 ## Unreleased — 10 October 2026
 
+- Reader figure captions appear once: publishers that repeat a figcaption per breakpoint (The Guardian) no longer show the caption twice, and an image credit the caption already prints is not repeated beneath it.
 - Event matching treats explicit model `DIFFERENT` verdicts and hard factual conflicts as vetoes, including when most members agree. Fragment coverage judgments cannot override them (#307).
 - Add the experimental, read-only backend for earlier related-event candidates (#314), with bounded retrieval, direct actor/place/topic evidence, cancellation and stable ordering. Reader exposure remains pending reviewed wrong-link measurements.
 
