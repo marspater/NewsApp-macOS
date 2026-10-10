@@ -74,10 +74,7 @@ enum EventClusterer {
             else { return pair }
             judgementsLeft -= 1
             judged += 1
-            if pair.needsConfirmation {
-                return same ? EventMatcher.confirmed(pair, policy: matchPolicy) : EventMatcher.rejected(pair)
-            }
-            return same ? EventMatcher.confirmed(pair, policy: matchPolicy) : pair
+            return same ? EventMatcher.confirmed(pair, policy: matchPolicy) : EventMatcher.rejected(pair)
         }
 
         var remaining = limit
@@ -221,15 +218,15 @@ enum EventClusterer {
             }
             var pairs: [EventPairAssessment] = []
             for a in first { for b in second { pairs.append(await resolved(a, b)) } }
+            guard !pairs.contains(where: \.hasHardConflict) else { return false }
             let required = Int((Double(pairs.count) * matchPolicy.compatibleShare).rounded(.up))
             let mean = pairs.isEmpty ? 0 : pairs.map(\.score).reduce(0, +) / Double(pairs.count)
             let related = pairs.contains(where: \.isMatch)
             if related, pairs.filter(\.isCompatible).count >= required, mean >= matchPolicy.compatibilityScore {
                 return true
             }
-            // Half or more hard conflicts cannot be overruled; fewer can be angles naming different places or days.
-            let hardConflicts = pairs.filter { $0.conflict != nil && !$0.softConflict && $0.conflict != .timeGap }.count
-            guard related, Double(hardConflicts) < Double(pairs.count) / 2 else { return false }
+            // Whole-coverage judging may settle weak evidence, never an explicit contradiction.
+            guard related else { return false }
             return await sameStory(first, second)
         }
 

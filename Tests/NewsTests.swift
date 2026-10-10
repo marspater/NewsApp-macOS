@@ -6098,15 +6098,37 @@ struct NewsTests {
             canadian.countries.contains(EventPlaces.canonical("Canada")),
             "An untyped nationality adjective is a country")
 
-        // A judge's "same event" settles an open pair, and a larger event tolerates one dissenting member.
+        // A judge settles soft conflicts, but a compatible majority cannot override hard contradictions.
         assertTrue(EventMatcher.confirmed(EventMatcher.assess(odesa, gdansk)).isMatch, "A confirmed pair matches")
         let d = features(
             ["afad"], ["earthquake", "magnitude", "damage", "building", "aid"], hours: 1, places: ["malatya"])
         assertTrue(
-            EventMatcher.eventScore(for: c, members: [a, b, d]) != nil,
-            "Two of three compatible members admit a matching report")
+            EventMatcher.eventScore(for: c, members: [a, b, d]) == nil,
+            "A weekday conflict vetoes admission even with two of three compatible members")
         assertTrue(
             EventMatcher.eventScore(for: c, members: [a, b]) == nil, "Both members of a two-member event must agree")
+        var weak = pair
+        weak.isCompatible = false
+        weak.isMatch = false
+        weak.score = 0.5
+        assertTrue(
+            EventMatcher.eventScore(pairs: [pair, pair, weak]) != nil,
+            "A noncontradictory weak minority remains allowed")
+        let rejected = EventMatcher.rejected(pair)
+        assertTrue(rejected.hasHardConflict && !rejected.isCompatible, "DIFFERENT is an explicit contradiction")
+        assertTrue(
+            EventMatcher.eventScore(pairs: [pair, pair, rejected]) == nil, "A rejected minority vetoes admission")
+        for conflict in [EventConflict.language, .timeGap, .period, .year, .weekday, .excluded, .differentEvent] {
+            var hard = pair
+            hard.conflict = conflict
+            hard.softConflict = false
+            hard.isMatch = false
+            hard.isCompatible = false
+            assertEqual(EventMatcher.confirmed(hard), hard, "SAME cannot override a hard \(conflict) conflict")
+            assertTrue(
+                EventMatcher.eventScore(pairs: [pair, pair, hard]) == nil,
+                "A hard \(conflict) minority vetoes admission")
+        }
     }
 
     static func testEventFragmentMergingAndJudge(fixtureRoot: URL) async throws {
@@ -6156,6 +6178,22 @@ struct NewsTests {
             "The merged event holds both fragments")
         assertEqual(try await EventClusterer.run(in: db, now: now).merged, 0, "A merged story is not merged again")
         await db.close()
+
+        // One explicit DIFFERENT cross-pair vetoes a merge despite an otherwise compatible majority.
+        let vetoed = try await library()
+        var confirmingPolicy = EventMatchPolicy.standard
+        confirmingPolicy.strictWhat = 2  // Force thin-match confirmation without a live model.
+        let veto = EventJudge { a, b in
+            !Set([a.id, b.id]).isSuperset(of: ["m1", "m3"])
+        }
+        let vetoReport = try await EventClusterer.run(
+            in: vetoed, matchPolicy: confirmingPolicy, judge: veto, now: now, limit: 0)
+        assertTrue(vetoReport.judged > 0, "The controlled judge was exercised")
+        assertEqual(vetoReport.merged, 0, "A whole-coverage SAME cannot overrule an explicit pair DIFFERENT")
+        assertFalse(
+            try await vetoed.eventID(forArticle: "m1") == vetoed.eventID(forArticle: "m4"),
+            "Rejected fragments retain separate IDs")
+        await vetoed.close()
 
         // Newly merged members supply the terms needed to discover a third fragment.
         let chain = DatabaseEngine(path: ":memory:")

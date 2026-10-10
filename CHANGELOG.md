@@ -2,6 +2,8 @@
 
 ## Unreleased — 10 October 2026
 
+- Event matching treats explicit model `DIFFERENT` verdicts and hard factual conflicts as vetoes, including when most members agree. Fragment coverage judgments cannot override them (#307).
+
 - Reader text size persists across stories, with ⌘+/⌘−/⌘0 View commands and a Reading Options popover for text size and Casper, Edition or Alto. Reader and overview share the 720 pt column; citations and extraction fallbacks use shared notices, and original-page actions use standard buttons (#355).
 
 ### Changed

@@ -348,7 +348,7 @@ struct EventMatchPolicy: Sendable, Equatable {
 
 /// Facts that rule a pair out regardless of how similar the rest of the text is.
 enum EventConflict: String, Sendable, Equatable {
-    case language, timeGap, period, year, weekday, titleNumbers, places, excluded
+    case language, timeGap, period, year, weekday, titleNumbers, places, excluded, differentEvent
 }
 
 struct EventPairAssessment: Sendable, Equatable {
@@ -356,6 +356,8 @@ struct EventPairAssessment: Sendable, Equatable {
     /// The conflict rests on facts that do not decide alone (different local places, different headline figures) while
     /// the reports share specific names: an on-device judge may settle it.
     var softConflict = false
+    var hasHardConflict: Bool { conflict != nil && !softConflict }
+
     /// Open: not a match, but close enough that a judge's "same event" should make it one.
     var isBorderline = false
     /// A match on thin evidence (few shared words, or only a shared country): a judge's "different events" undoes it.
@@ -374,7 +376,7 @@ struct EventPairAssessment: Sendable, Equatable {
 enum EventMatcher {
     /// Bump when matching changes; recent articles are then matched again. Event members whose
     /// title and description are unchanged keep their events.
-    static let version = 2
+    static let version = 3
 
     /// Who, what, where and when for one pair. Headline similarity alone never passes: a match needs
     /// a shared name or place, shared action terms, closeness in time and no contradicting facts.
@@ -456,10 +458,13 @@ enum EventMatcher {
             isMatch: isMatch, isCompatible: isCompatible)
     }
 
-    /// A thin match the on-device judge called separate events stays compatible but no longer links the pair.
+    /// An explicit DIFFERENT verdict vetoes admission and fragment merging for this pair.
     static func rejected(_ pair: EventPairAssessment) -> EventPairAssessment {
         var pair = pair
+        pair.conflict = .differentEvent
+        pair.softConflict = false
         pair.isMatch = false
+        pair.isCompatible = false
         pair.needsConfirmation = false
         pair.isBorderline = false
         return pair
@@ -467,6 +472,7 @@ enum EventMatcher {
 
     /// A pair the on-device judge called one event counts as a match.
     static func confirmed(_ pair: EventPairAssessment, policy: EventMatchPolicy = .standard) -> EventPairAssessment {
+        guard !pair.hasHardConflict else { return pair }
         var pair = pair
         pair.conflict = nil
         pair.softConflict = false
@@ -488,9 +494,11 @@ enum EventMatcher {
     }
 
     /// The newcomer must strongly match one member and be compatible with at least `compatibleShare` of them (all of
-    /// them in a two-member event), so a chain A≈B≈C cannot pull a contradicting C into a small event.
+    /// them in a two-member event). Any hard conflict vetoes admission regardless of the compatible majority.
     static func eventScore(pairs: [EventPairAssessment], policy: EventMatchPolicy = .standard) -> Double? {
-        guard !pairs.isEmpty, pairs.count < policy.maximumEventSize, pairs.contains(where: \.isMatch) else {
+        guard !pairs.isEmpty, pairs.count < policy.maximumEventSize,
+            !pairs.contains(where: \.hasHardConflict), pairs.contains(where: \.isMatch)
+        else {
             return nil
         }
         let required = Int((Double(pairs.count) * policy.compatibleShare).rounded(.up))
