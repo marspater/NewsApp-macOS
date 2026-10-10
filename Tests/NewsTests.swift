@@ -12423,14 +12423,14 @@ struct NewsTests {
             "Video player notices are boilerplate")
         assertTrue(
             ArticleContentRedactor.isBoilerplateLine("Keywords for this article"),
-            "Keywords header is boilerplate")
+            "France 24 keyword footer header is boilerplate")
         assertTrue(
             ArticleContentRedactor.isBoilerplateLine("Keywords for this story"),
             "Keywords header variation is boilerplate")
         assertTrue(
             ArticleContentRedactor.isBoilerplateLine(
                 "The content you requested does not exist or is not available anymore."),
-            "Unavailable content notices are boilerplate")
+            "France 24 unavailable widget placeholder notice is boilerplate")
         assertTrue(
             documents[0].hasPublisherText && bodyOnly.readerDocument?.hasPublisherText == true,
             "Publisher text makes a reader document")

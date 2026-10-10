@@ -1146,14 +1146,14 @@ public enum ArticleContentRedactor {
         {
             return true
         }
-        // Tag and keyword strips, whose links run together as "Topics:ReformGiorgia MeloniItaly" or "Keywords for this article".
+        // Tag and keyword strips (e.g. France 24 footer "Keywords for this article" or "Topics:ReformGiorgia MeloniItaly").
         if rawLower.count < 200,
             ["topics:", "tags:", "related topics:", "keywords:", "keywords for this", "tags for this"].contains(
                 where: rawLower.hasPrefix)
         {
             return true
         }
-        // Missing, expired or unavailable content placeholder notices (e.g. from failed embedded widgets or dead iframes).
+        // Missing, expired or unavailable placeholder notices (e.g. France 24 "The content you requested does not exist or is not available anymore.").
         if rawLower.contains("content you requested does not exist")
             || rawLower.contains("is not available anymore")
             || (rawLower.contains("content is no longer available") && rawLower.count < 150)
