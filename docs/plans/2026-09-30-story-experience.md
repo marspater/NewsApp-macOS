@@ -2,42 +2,47 @@
 
 План від 30 вересня 2026. Статус: виконується; поточний стан наведено нижче та в [#90](https://github.com/marspater/NewsApp-macOS/issues/90). Основа: поточний код News на `codex/kite-practices`, дослідження Kite на коміті `08d15108f82fb8728832f55fc8c3799a2836bfd6` та чотири надані скриншоти. Незакомічені попередні зміни збережено.
 
-## Current release status — 9 October 2026
+## Current release status — 10 October 2026
 
 Core phases A–H (#90–#98) are closed for the earlier accepted English-only scope. Later behavior changes need their own acceptance; the 5 October event result does not validate the current matcher. The dated scope and progress snapshots below are historical, superseded by this section.
+
+`main` at `62e54ed` passes full `./test.sh` and a staged arm64 ad-hoc `./build.sh` with strict signature verification locally (Apple silicon, macOS 27). Hosted [CI](https://github.com/marspater/NewsApp-macOS/actions/runs/38030920977) passed on that commit; the Swift CodeQL job of Security was still running when this was written. The installed app and its library have not been upgraded.
 
 Merged follow-ups:
 
 | Work | Implementation and evidence | Remaining acceptance |
 | --- | --- | --- |
-| Event grouping (#286–#288) | Country aliases, casualty changes, whole-event compatibility, fragment merges and on-device judging; tune precision 0.957, recall 0.710 | [Current English regression replay](../audits/2026-10-09-current-matcher-replay.md) fails the ≥0.97 precision target: judge-off 0.955 / 0.553 precision/recall; judge-on 0.545 / 0.947. Narrowing and a fresh release sample remain in #307; the 5 October acceptance applies to the earlier matcher |
-| Importance / waiting (#289; #292 closed) | 667 active publications rated; 64 waiting; zero rated-major publications hidden | Independent labels and stability in #309; the predicate measurement does not validate model ratings |
-| Publisher images (#290; #293 closed) | 466 / 473 active cards had usable images (98.5%); all 128 added URLs decoded | Seven placeholders remain; in-article figure fallback in #312 |
-| Plain-text overviews (#291; #294 closed) | Five of eight live drafts accepted, 40 retained claims reviewed with zero detected critical errors; the three labelled controls fell back | Independent accepted-draft controls, error bounds and latency in #308 |
-| Reliability (#296/#297) | Parser/card/clustering corrections, image-URL index, provisional overview/summary retry and schema v20 model-generation invalidation after macOS updates | Copied-library v16 → v20 migration, preserved state and regeneration passed; #305 awaits audit PR #332 merge. OS notification delivery is deferred to the real compiled app in #334 |
+| Event grouping (#286–#288, #404, #409) | Country aliases, casualty changes, whole-event compatibility, fragment merges and on-device judging. Explicit DIFFERENT verdicts and hard factual conflicts now veto event admission and fragment merges ([guards](../audits/2026-10-10-event-hard-conflict-guards.md)); matcher replays use the production judgement and article budgets | Below the ≥0.97 precision target. [Historical replay](../audits/2026-10-09-current-matcher-replay.md): judge-off 0.955 / 0.553 precision/recall, judge-on 0.545 / 0.947. [Fresh diagnostic](../audits/2026-10-10-fresh-english-matcher-diagnostic.md) on proposed labels: judge-off 0.799 / 0.337, judge-on 0.835 / 0.303; judge-on exceeded production budgets, so it is diagnostic only. Mars's label review, narrowing and a fresh acceptance sample remain in #307 |
+| Importance / waiting (#289, #336, #346) | 667 active publications rated; 64 waiting; zero rated-major publications hidden. Mars's three borderline rules are implemented, and a review tool for minor ratings and their stability is merged | Independent labels and stability in #309 |
+| Publisher images (#290, #339, #340) | In-article figure fallback (#312) and remembered site defaults (schema v21, #338). On the 9 October denominator, 465 / 473 cards have a relevant image ([fallback audit](../audits/2026-10-09-card-image-figure-fallback.md)) | None. Eight single-story placeholders remain where pages offer no relevant image: five site-default-only pages and three bot challenges |
+| Plain-text overviews (#291, #345) | Five of eight live drafts accepted, 40 retained claims reviewed with zero detected critical errors; the three labelled controls fell back. The live audit now records outcomes, latency and perspective coverage | Independent accepted-draft controls, error bounds and latency in #308 |
+| Review integrity (#405) | Overview and importance reports reject labels whose reviewed inputs changed and keep the last valid report ([audit](../audits/2026-10-10-review-input-integrity.md)) | Measurement integrity only; not acceptance evidence for #308/#309 |
+| Perspectives (#406) | Attributed perspectives accept paired curly quotes and both post-quote speaker orders; overview analysis version 5 regenerates cached overviews on request ([audit](../audits/2026-10-10-perspective-attribution.md)) | Live coverage measurement and the model-proposal decision in #313 |
+| Related events (#403) | Read-only backend for earlier related-event candidates with bounded retrieval and direct actor, place and topic evidence ([audit](../audits/2026-10-10-related-event-backend.md)) | Reader links and a reviewed wrong-link measurement in #314 |
+| Reliability (#296/#297, #332, #342–#344) | Parser/card/clustering corrections, image-URL index, provisional overview/summary retry and schema v20 model-generation invalidation. Copied-library v16 → v20 migration, preserved state and regeneration passed (#305). The backup's orphan state row is not producible by the app, and a regression pins it (#331). The legacy cache import completes | OS notification delivery is deferred to the real compiled app in #334 |
+| Reader (#337, #408) | BBC newsletter banners and signup prose are removed (#330); responsive figure captions (The Guardian) appear once | Fixture regressions only; neither fix was rechecked on a live page in the app |
+| Design language (#347, #349, #358–#361, #363, #365–#368, #377–#379, #394–#396, #398–#400, #402, #407) | All seven phases of the [adoption plan](2026-10-09-design-language-adoption.md) are merged. The acceptance pass fixed a frozen adaptive overview color, card contrast with Increase Contrast and sidebar keyboard focus ([acceptance](../audits/2026-10-10-design-acceptance.md)) | None. Mars accepted phases 2–4 on 10 October; macOS 15/26 runtime, live OPML drops and the feed-failure view are out of scope |
 | Tension retention (#321; #310 closed) | Waiting-story expiry preserves panel history while collection is enabled | Real-panel calibration #235 remains outside the core release |
-| PR maintenance (#299–#303/#306, #325–#327) | Reviewed cleanup, bounded read/save alias resolution, synchronized completion-claim regression and reused cache size keys | No new release gate; this does not replace #305/#307/#308 |
+| PR maintenance (#299–#303/#306, #325–#327, #370–#376, #380, #382, #386–#392) | Reviewed cleanup, bounded read/save alias resolution, completion-claim regression and reused cache size keys; later automated PRs add tests, extract database and extraction helpers, batch enrichment enqueueing and keep WebKit data stores non-persistent | No new release gate |
 
-The [curation/image audit](../audits/2026-10-09-story-curation-images.md) and [overview audit](../audits/2026-10-09-plain-text-overviews.md) retain aggregate measurements and their limits; [Codacy corrections](../audits/2026-10-09-codacy-slices.md) and [Sonar corrections](../audits/2026-10-09-sonar-slices.md) record follow-up verification. Publisher passages and private evaluation data remain local. The installed app/library has not been upgraded by this documentation work.
+The [curation/image audit](../audits/2026-10-09-story-curation-images.md) and [overview audit](../audits/2026-10-09-plain-text-overviews.md) retain aggregate measurements and their limits; [Codacy corrections](../audits/2026-10-09-codacy-slices.md) and [Sonar corrections](../audits/2026-10-09-sonar-slices.md) record follow-up verification. Publisher passages and private evaluation data remain local.
 
 Follow-up status as of this update:
 
 | Issue | Status / scope | Work |
 | --- | --- | --- |
-| #305 | Done · P1 · [PR #332](https://github.com/marspater/NewsApp-macOS/pull/332) merged | Isolated copied-library migration, preservation, regeneration and live UI checks passed; real-app notification delivery is tracked separately in #334 |
-| #307 | In review · P1 · replay evidence | Frozen historical English replay completed once per judge mode; 30 judge-on false pairs in four mixed events. Narrowing, a fresh post-9-October release sample and Mars acceptance remain open |
-| #308 | Ready · P1 | Independent overview claim review, error bounds and latency |
-| #309 | Ready · P2 | Mars settled the three borderline importance cases; implement the rules, then measure independent labels and stability |
-| #311 | Done · P2 · [PR #328](https://github.com/marspater/NewsApp-macOS/pull/328) merged | Full suite leaves no new test plist; exact-run cleanup and narrow legacy instructions are merged |
-| #312 | Backlog · P2 | Figure fallback for card images, with furniture rejection and a coverage remeasurement |
-| #315 | Done · P2 · [PR #329](https://github.com/marspater/NewsApp-macOS/pull/329) merged | README, plan status and Unreleased date are updated; this audit reconciles the later status changes |
-| #330/#331 | Backlog · P2 | Live reader newsletter removal and diagnosis of the inherited saved-state orphan; no production-data repair yet |
-| #334 | Backlog · P1 · deferred | Validate actual notification delivery and timing in the real compiled app; Mars deferred this from the isolated migration check |
-| #313/#314 | Backlog · ideas | Perspective coverage and related-event timeline proposals; not release dependencies |
+| #307 | In progress · P1 | Guards and production-budget replays are merged; the fresh diagnostic is below target. Mars's label review, narrowing and a fresh acceptance sample remain |
+| #308 | In progress · P1 | Independent overview claim review, error bounds and latency |
+| #309 | In progress · P2 | Rules and review tooling are merged; independent labels and stability measurements remain |
+| #313 | In progress · P2 · idea | Live perspective coverage, then the model-proposal decision |
+| #314 | In progress · P2 · idea | Reader links and a reviewed wrong-link measurement; not a release dependency |
+| #334 | Backlog · P1 · deferred | Actual notification delivery and timing in the real compiled app |
+| #350 | Done | Design language: all seven phases (#351–#357) are Done |
+| #305, #311, #312, #315, #330, #331, #338 | Done | #305 by #332; #311 by #328; #312 by #339 and #340; #315 by #329; #330 by #337; #331 by #342; #338 by #340 |
 | #264/#268 | Parked | Non-English event matching and spoken VoiceOver; resume only at Mars's request |
 | #99/#235/#244 | Optional / outside core release | Tension experiment/calibration and source discovery |
 
-The [9 October work log and migration audit](../audits/2026-10-09-real-library-migration.md#work-log-and-remaining-queue--9-october-2026) records completed checks, the approved temporary-bundle retry, deferred real-app validation and current PR/issue states. PRs #328/#329 are merged; #332 is the remaining review PR. New-head and merged-main hosted checks must complete before claiming CI acceptance.
+Dated progress entries are in [#90](https://github.com/marspater/NewsApp-macOS/issues/90) and, for the design language, [#350](https://github.com/marspater/NewsApp-macOS/issues/350).
 
 ## Historical scope decision — 5 October 2026
 
