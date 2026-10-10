@@ -59,6 +59,7 @@ struct NativeUIQAChecks {
         testLeadStorySelection()
         testLeadStoryEventImageFallback()
         testTextScalingAdaptation()
+        testPersistedReaderTextSize()
         testIncreaseContrastScalers()
         testReduceMotionPolicies()
         testLightAndDarkAppearanceTokens()
@@ -437,6 +438,29 @@ struct NativeUIQAChecks {
         // Capped at 1.3x to prevent excessive line length at large type sizes
         let scale150 = EventOverviewReaderView.readingColumnMaxWidth(for: 1.5)
         assertEqual(scale150, 720.0 * 1.3, "1.5x scale reading column width is capped at 1.3x (936px)")
+    }
+
+    static func testPersistedReaderTextSize() {
+        let suite = "test.reader.options.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let first = ThemeManager(defaults: defaults)
+        assertEqual(first.readerTextScale, 1, "New reader uses actual size")
+        first.readerTextScale = ReaderTextSize.adjusted(first.readerTextScale, by: 1)
+        let nextStory = ThemeManager(defaults: defaults)
+        assertEqual(nextStory.readerTextScale, 1.05, "Another reader keeps the stored text size")
+        assertEqual(ReaderTextSize.adjusted(1.5, by: 1), 1.5, "Bigger stops at the upper bound")
+        assertEqual(ReaderTextSize.adjusted(0.85, by: -1), 0.85, "Smaller stops at the lower bound")
+        nextStory.readerTextScale = .nan
+        assertEqual(nextStory.readerTextScale, 1, "Invalid saved scale falls back to actual size")
+        for scale: CGFloat in [0.85, 1, 1.25, 1.5] {
+            assertEqual(
+                EventOverviewReaderView.readingColumnMaxWidth(for: scale),
+                AppLayout.readingColumnMaxWidth(for: scale), "Reader and overview use the same measure")
+        }
+        first.articleTheme = .alto
+        assertEqual(ThemeManager(defaults: defaults).articleTheme, .alto, "Reading style remains persisted")
+        assertEqual(ArticleThemeType.casper.rawValue, "Ghost Casper", "Existing style preference stays compatible")
     }
 
     // MARK: - 6. Increase Contrast Scalers

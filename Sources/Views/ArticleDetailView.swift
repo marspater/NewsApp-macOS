@@ -25,6 +25,7 @@ enum ReaderMode: Hashable {
 struct ReaderCommandActions {
     let mode: Binding<ReaderMode>
     let textScale: Binding<CGFloat>
+    let showReadingOptions: () -> Void
     let hasOverview: Bool
     let back: () -> Void
     let reload: (() -> Void)?
@@ -80,7 +81,22 @@ struct ArticleDetailView: View {
     @State private var analysisError: String? = nil
     @State private var summaryExpanded = false
     @State private var reloadGeneration = 0
-    @State private var readerTextScale: CGFloat = 1
+    @State private var showsReadingOptions = false
+    @State private var textScaleOverride: CGFloat?
+    @Namespace private var storyParagraphs
+
+    private var readerTextScale: CGFloat {
+        textScaleOverride ?? themeManager.readerTextScale
+    }
+    private var readerTextScaleBinding: Binding<CGFloat> {
+        Binding(
+            get: { readerTextScale },
+            set: {
+                themeManager.readerTextScale = $0
+                textScaleOverride = nil
+            }
+        )
+    }
     @State private var contentState: ArticleContentState = .loading
 
     @State private var experienceMode: ReaderExperienceMode = .sourcePublication
@@ -92,6 +108,7 @@ struct ArticleDetailView: View {
     @State private var overviewOwner = UUID()
 
     @FocusState private var isViewFocused: Bool
+    @FocusState private var readingOptionsFocused: Bool
 
     init(
         article: FeedArticle,
@@ -104,7 +121,8 @@ struct ArticleDetailView: View {
         self.allArticles = allArticles
         self._path = path
         self._currentOverview = State(initialValue: overview)
-        self._readerTextScale = State(initialValue: SystemSettingsOverrides.from().textScale ?? 1.0)
+        self._textScaleOverride = State(
+            initialValue: SystemSettingsOverrides.from().textScale.map(ReaderTextSize.normalized))
         if let mode = initialExperienceMode {
             self._experienceMode = State(initialValue: mode)
         } else if overview != nil {
@@ -140,7 +158,8 @@ struct ArticleDetailView: View {
 
     private var readerCommandActions: ReaderCommandActions {
         ReaderCommandActions(
-            mode: readerModeBinding, textScale: $readerTextScale, hasOverview: currentOverview != nil,
+            mode: readerModeBinding, textScale: readerTextScaleBinding,
+            showReadingOptions: { showsReadingOptions = true }, hasOverview: currentOverview != nil,
             back: { if !path.isEmpty { path.removeLast() } },
             reload: contentState == .loading ? nil : { reloadReaderContent() },
             copyLink: copyStoryLink,
@@ -260,48 +279,48 @@ struct ArticleDetailView: View {
                     if let passage = highlightedPassage {
                         NoticeView(tint: AppColor.accent) {
                             HStack(alignment: .top, spacing: AppSpacing.xs) {
-                            HStack(alignment: .top, spacing: AppSpacing.xs) {
-                                Image(systemName: "quote.bubble.fill")
-                                    .font(AppTypography.body)
-                                    .foregroundColor(AppColor.accent)
-                                    .padding(.top, AppSpacing.textStack)
-                                    .accessibilityHidden(true)
-
-                                VStack(alignment: .leading, spacing: AppSpacing.xxs) {
-                                    Text("Cited in Event Overview")
-                                        .font(AppTypography.eyebrow)
+                                HStack(alignment: .top, spacing: AppSpacing.xs) {
+                                    Image(systemName: "quote.bubble.fill")
+                                        .font(AppTypography.body)
                                         .foregroundColor(AppColor.accent)
+                                        .padding(.top, AppSpacing.textStack)
+                                        .accessibilityHidden(true)
 
-                                    Text("“\(passage)”")
-                                        .font(AppTypography.readerCitation)
-                                        .foregroundColor(AppColor.primaryText)
-                                        .lineSpacing(AppSpacing.textStack)
-                                        .textSelection(.enabled)
-                                }
-                            }
-                            .accessibilityElement(children: .combine)
-                            .accessibilityLabel("Cited passage in event overview: \(passage)")
+                                    VStack(alignment: .leading, spacing: AppSpacing.xxs) {
+                                        Text("Cited in Event Overview")
+                                            .font(AppTypography.eyebrow)
+                                            .foregroundColor(AppColor.accent)
 
-                            Spacer()
-
-                            Button {
-                                if reduceMotion {
-                                    highlightedPassage = nil
-                                } else {
-                                    withAnimation(Self.readerAnimation(reduceMotion: reduceMotion)) {
-                                        highlightedPassage = nil
+                                        Text("“\(passage)”")
+                                            .font(AppTypography.readerCitation)
+                                            .foregroundColor(AppColor.primaryText)
+                                            .lineSpacing(AppSpacing.textStack)
+                                            .textSelection(.enabled)
                                     }
                                 }
-                            } label: {
-                                Image(systemName: "xmark.circle.fill")
-                                    .font(AppTypography.body)
-                                    .foregroundColor(AppColor.secondaryText)
+                                .accessibilityElement(children: .combine)
+                                .accessibilityLabel("Cited passage in event overview: \(passage)")
+
+                                Spacer()
+
+                                Button {
+                                    if reduceMotion {
+                                        highlightedPassage = nil
+                                    } else {
+                                        withAnimation(Self.readerAnimation(reduceMotion: reduceMotion)) {
+                                            highlightedPassage = nil
+                                        }
+                                    }
+                                } label: {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .font(AppTypography.body)
+                                        .foregroundColor(AppColor.secondaryText)
+                                }
+                                .buttonStyle(.plain)
+                                .buttonBorderShape(.circle)
+                                .help("Dismiss citation highlight")
+                                .accessibilityLabel("Dismiss citation highlight")
                             }
-                            .buttonStyle(.plain)
-                            .buttonBorderShape(.circle)
-                            .help("Dismiss citation highlight")
-                            .accessibilityLabel("Dismiss citation highlight")
-                        }
                         }
                     }
 
@@ -371,10 +390,7 @@ struct ArticleDetailView: View {
                     terminalAffordance
 
                 }
-                .padding(.horizontal, AppLayout.pageInset)
-                .padding(.vertical, AppSpacing.xl)
-                .frame(maxWidth: 700 * min(readerTextScale, 1.3), alignment: .leading)
-                .frame(maxWidth: .infinity, alignment: .center)
+                .modifier(ReadingColumn(textScale: readerTextScale))
             }
         }
     }
@@ -449,55 +465,55 @@ struct ArticleDetailView: View {
     private func fallbackStateView(reason: String) -> some View {
         NoticeView {
             VStack(alignment: .leading, spacing: AppSpacing.sm) {
-            HStack(spacing: AppSpacing.xs) {
-                Image(systemName: "doc.text.magnifyingglass")
-                    .font(AppTypography.sectionTitle)
+                HStack(spacing: AppSpacing.xs) {
+                    Image(systemName: "doc.text.magnifyingglass")
+                        .font(AppTypography.sectionTitle)
+                        .foregroundColor(AppColor.secondaryText)
+                        .accessibilityHidden(true)
+                    Text("Full article unavailable in reader")
+                        .font(AppTypography.headline)
+                        .foregroundColor(AppColor.primaryText)
+                    Spacer()
+                    Button {
+                        reloadGeneration += 1
+                    } label: {
+                        HStack(spacing: AppSpacing.xxs) {
+                            Image(systemName: "arrow.clockwise")
+                                .accessibilityHidden(true)
+                            Text("Retry")
+                        }
+                        .font(AppTypography.caption)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+
+                    Button {
+                        viewMode = .web
+                    } label: {
+                        HStack(spacing: AppSpacing.xxs) {
+                            Image(systemName: "safari")
+                                .accessibilityHidden(true)
+                            Text("Open Web View (W)")
+                        }
+                        .font(AppTypography.eyebrow)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .accessibilityLabel("Open Web View")
+                }
+
+                Text(reason)
+                    .font(AppTypography.callout)
                     .foregroundColor(AppColor.secondaryText)
-                    .accessibilityHidden(true)
-                Text("Full article unavailable in reader")
-                    .font(AppTypography.headline)
-                    .foregroundColor(AppColor.primaryText)
-                Spacer()
-                Button {
-                    reloadGeneration += 1
-                } label: {
-                    HStack(spacing: AppSpacing.xxs) {
-                        Image(systemName: "arrow.clockwise")
-                            .accessibilityHidden(true)
-                        Text("Retry")
-                    }
-                    .font(AppTypography.caption)
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
 
-                Button {
-                    viewMode = .web
-                } label: {
-                    HStack(spacing: AppSpacing.xxs) {
-                        Image(systemName: "safari")
-                            .accessibilityHidden(true)
-                        Text("Open Web View (W)")
-                    }
+                Divider().opacity(Self.dividerOpacity(for: contrast))
+
+                Text(currentArticle.fullContent == nil ? "FEED SUMMARY PREVIEW" : "PREVIOUSLY SAVED TEXT")
                     .font(AppTypography.eyebrow)
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.small)
-                .accessibilityLabel("Open Web View")
-            }
+                    .tracking(1.0)
+                    .foregroundColor(tertiaryText)
 
-            Text(reason)
-                .font(AppTypography.callout)
-                .foregroundColor(AppColor.secondaryText)
-
-            Divider().opacity(Self.dividerOpacity(for: contrast))
-
-            Text(currentArticle.fullContent == nil ? "FEED SUMMARY PREVIEW" : "PREVIOUSLY SAVED TEXT")
-                .font(AppTypography.eyebrow)
-                .tracking(1.0)
-                .foregroundColor(tertiaryText)
-
-            articleDescriptionParagraphs
+                articleDescriptionParagraphs
             }
         }
     }
@@ -512,6 +528,7 @@ struct ArticleDetailView: View {
                     .foregroundColor(readableText(0.9))
                     .lineSpacing(AppTypography.bodyLineSpacing(for: themeManager.articleTheme))
                     .textSelection(.enabled)
+                    .accessibilityLinkedGroup(id: currentArticle.id, in: storyParagraphs)
             }
         }
     }
@@ -541,6 +558,7 @@ struct ArticleDetailView: View {
             // Positions are stable within the immutable, article-keyed reader document.
             ForEach(Array(blocks.enumerated()), id: \.offset) { index, block in
                 readerBlock(block, isLead: index == leadIndex)
+                    .accessibilityLinkedGroup(id: currentArticle.id, in: storyParagraphs)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -614,75 +632,22 @@ struct ArticleDetailView: View {
     }
 
     private var terminalAffordance: some View {
-        VStack(spacing: AppSpacing.md) {
+        VStack(alignment: .leading, spacing: AppSpacing.md) {
             Divider()
                 .opacity(Self.dividerOpacity(for: contrast))
                 .padding(.vertical, AppSpacing.sm)
-
-            HStack(spacing: AppSpacing.md) {
-                VStack(alignment: .leading, spacing: AppSpacing.textStack) {
-                    Text("Read original article on \(displaySource)")
-                        .font(AppTypography.headline)
-                        .foregroundColor(AppColor.primaryText)
-                    if let host = URL(string: currentArticle.link)?.host {
-                        Text(host)
-                            .font(AppTypography.caption.monospaced())
-                            .foregroundColor(AppColor.secondaryText)
-                    }
-                }
-
-                Spacer()
-
-                Button {
-                    viewMode = .web
-                } label: {
-                    HStack(spacing: AppSpacing.eyebrowGap) {
-                        Image(systemName: "safari")
-                            .accessibilityHidden(true)
-                        Text("Open Web View (W)")
-                    }
-                    .font(AppTypography.label)
-                    .foregroundColor(AppColor.primaryText)
-                    .padding(.horizontal, AppSpacing.sm)
-                    .padding(.vertical, AppSpacing.xs)
-                    .background(AppColor.surface.opacity(0.85))
-                    .clipShape(Capsule())
-                    .overlay(
-                        Capsule().stroke(
-                            borderColor(Color.primary.opacity(Self.capsuleBorderOpacity(for: contrast))), lineWidth: 0.5
-                        ))
-                }
-                .buttonStyle(.plain)
-                .buttonBorderShape(.capsule)
-                .help("Open Web View (W)")
-                .accessibilityLabel("Open Web View")
-
+            Text("Read the original story on \(displaySource)")
+                .font(AppTypography.body)
+                .foregroundStyle(AppColor.secondaryText)
+            HStack(spacing: AppSpacing.sm) {
+                Button("Open Web View", systemImage: "globe") { readerModeBinding.wrappedValue = .web }
+                    .help("Open Web View (W)")
                 if URL(string: currentArticle.link) != nil {
-                    Button {
-                        openInBrowser()
-                    } label: {
-                        HStack(spacing: AppSpacing.eyebrowGap) {
-                            Image(systemName: "arrow.up.right")
-                                .accessibilityHidden(true)
-                            Text("External")
-                        }
-                        .font(AppTypography.label)
-                        .foregroundColor(AppColor.secondaryText)
-                        .padding(.horizontal, AppSpacing.sm)
-                        .padding(.vertical, AppSpacing.xs)
-                        .background(AppColor.surface.opacity(0.6))
-                        .clipShape(Capsule())
-                        .overlay(
-                            Capsule().stroke(
-                                borderColor(Color.primary.opacity(Self.capsuleBorderOpacity(for: contrast))),
-                                lineWidth: 0.5))
-                    }
-                    .buttonStyle(.plain)
-                    .buttonBorderShape(.capsule)
-                    .help("Open in default web browser (O)")
-                    .accessibilityLabel("Open in default web browser")
+                    Button("Open in Browser", systemImage: "safari", action: openInBrowser)
+                        .help("Open in default browser (O or ⌘O)")
                 }
             }
+            .buttonStyle(.bordered)
         }
         .padding(.top, AppSpacing.sm)
     }
@@ -751,21 +716,21 @@ struct ArticleDetailView: View {
             Button {
                 if !path.isEmpty { path.removeLast() }
             } label: {
-                Label("Back to articles", systemImage: "chevron.left")
+                Label("Back to Stories", systemImage: "chevron.left")
             }
-            .help("Back to articles (Esc)")
+            .help("Back to stories (Esc)")
 
             Button(action: prevArticle) {
-                Label("Previous article", systemImage: "chevron.up")
+                Label("Previous Story", systemImage: "chevron.up")
             }
             .disabled(!hasPrevArticle)
-            .help("Previous article (K)")
+            .help("Previous story (K)")
 
             Button(action: nextArticle) {
-                Label("Next article", systemImage: "chevron.down")
+                Label("Next Story", systemImage: "chevron.down")
             }
             .disabled(!hasNextArticle)
-            .help("Next article (J)")
+            .help("Next story (J)")
         }
         ToolbarItemGroup(placement: .principal) {
             // One mode control; in the toolbar it takes the system Liquid Glass on macOS 26 and later.
@@ -830,31 +795,52 @@ struct ArticleDetailView: View {
                 .help("Share story")
                 .accessibilityLabel("Share story")
             }
-            Menu {
-                Picker("Text size", selection: $readerTextScale) {
-                    Text("Standard").tag(CGFloat(1))
-                    Text("Large").tag(CGFloat(1.25))
-                    Text("Extra large").tag(CGFloat(1.5))
-                }
-                Picker("Reading style", selection: $themeManager.articleTheme) {
-                    ForEach(ArticleThemeType.allCases) { theme in
-                        Text(theme.rawValue).tag(theme)
-                    }
-                }
-                Divider()
-                Button("Reload reader content", systemImage: "arrow.clockwise") {
-                    reloadReaderContent()
-                }
-                .disabled(contentState == .loading)
-                Button("Copy link", systemImage: "link") {
-                    copyStoryLink()
-                }
-                Button("Open in browser", systemImage: "safari", action: openInBrowser)
+        }
+        if #available(macOS 26, *) {
+            ToolbarSpacer(.fixed, placement: .primaryAction)
+        }
+        ToolbarItem(placement: .primaryAction) {
+            Button {
+                showsReadingOptions.toggle()
             } label: {
-                Label("Reading options", systemImage: "textformat.size")
+                Label("Reading Options", systemImage: "textformat.size")
             }
-            .help("Reading style and article actions")
-            .accessibilityLabel("Reading style and article actions")
+            .help("Reading options")
+            .popover(isPresented: $showsReadingOptions) { readingOptions }
+        }
+    }
+
+    private var readingOptions: some View {
+        VStack(alignment: .leading, spacing: AppSpacing.md) {
+            Text("Reading Options").font(AppTypography.headline)
+            HStack(spacing: AppSpacing.sm) {
+                Button("A−") { readerTextScaleBinding.wrappedValue = ReaderTextSize.adjusted(readerTextScale, by: -1) }
+                    .disabled(readerTextScale <= ReaderTextSize.minimum)
+                    .accessibilityLabel("Make Text Smaller")
+                    .help("Make text smaller (⌘−)")
+                Text(readerTextScale, format: .percent.precision(.fractionLength(0)))
+                    .monospacedDigit()
+                    .accessibilityLabel("Text size")
+                    .accessibilityValue(Text(readerTextScale, format: .percent.precision(.fractionLength(0))))
+                Button("A+") { readerTextScaleBinding.wrappedValue = ReaderTextSize.adjusted(readerTextScale, by: 1) }
+                    .disabled(readerTextScale >= ReaderTextSize.maximum)
+                    .accessibilityLabel("Make Text Bigger")
+                    .help("Make text bigger (⌘+)")
+            }
+            .buttonStyle(.bordered)
+            Picker("Reading Style", selection: $themeManager.articleTheme) {
+                ForEach(ArticleThemeType.allCases) { Text($0.displayName).tag($0) }
+            }
+            .pickerStyle(.radioGroup)
+        }
+        .padding(AppSpacing.md)
+        .focusable()
+        .focusEffectDisabled()
+        .focused($readingOptionsFocused)
+        .onAppear { readingOptionsFocused = true }
+        .onKeyPress(.escape) {
+            showsReadingOptions = false
+            return .handled
         }
     }
 
@@ -936,6 +922,10 @@ struct ArticleDetailView: View {
     private func handleKeyPress(press: KeyPress) -> KeyPress.Result {
         guard !Self.shouldPassThroughToSystem(modifiers: press.modifiers) else { return .ignored }
         if press.key == .escape {
+            if showsReadingOptions {
+                showsReadingOptions = false
+                return .handled
+            }
             if !path.isEmpty { path.removeLast() }
             return .handled
         }
@@ -1112,23 +1102,23 @@ struct ArticleDetailView: View {
         } else if let error = analysisError {
             NoticeView(tint: AppColor.warning) {
                 HStack(spacing: AppSpacing.xs) {
-                Image(systemName: "exclamationmark.triangle")
-                    .foregroundColor(AppColor.warning)
-                Text("AI analysis unavailable: \(error)")
-                    .font(AppTypography.callout)
-                    .foregroundColor(AppColor.secondaryText)
-                Spacer()
-                Button("Close summary") {
-                    if reduceMotion {
-                        summaryExpanded = false
-                    } else {
-                        withAnimation(Self.readerAnimation(reduceMotion: reduceMotion)) {
+                    Image(systemName: "exclamationmark.triangle")
+                        .foregroundColor(AppColor.warning)
+                    Text("AI analysis unavailable: \(error)")
+                        .font(AppTypography.callout)
+                        .foregroundColor(AppColor.secondaryText)
+                    Spacer()
+                    Button("Close summary") {
+                        if reduceMotion {
                             summaryExpanded = false
+                        } else {
+                            withAnimation(Self.readerAnimation(reduceMotion: reduceMotion)) {
+                                summaryExpanded = false
+                            }
                         }
                     }
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
                 }
             }
         } else if let ai = currentArticle.aiSummary {
@@ -1201,8 +1191,9 @@ struct ArticleDetailView: View {
                         try Task.checkCancellation()
                         guard activeArticle.id == targetId else { return }
                         document = document?.curated(feedImage: nil, title: currentArticle.title, excluding: repeated)
-                    } catch is CancellationError { return } catch
-                    { /* Recurrence is optional; protected images still use local filters. */  }
+                    } catch is CancellationError { return } catch {
+                        // Recurrence is optional; protected images still use local filters.
+                    }
                 }
                 let saved = await articleStore.updateEnrichment(
                     id: targetId,
@@ -1459,17 +1450,22 @@ struct ReaderFigureView: View {
                 .clipShape(RoundedRectangle(cornerRadius: AppRadius.card))
             }
             if !block.text.isEmpty {
-                Text(block.text).font(AppTypography.readerCaptionFont(scale: textScale)).foregroundStyle(AppColor.secondaryText)
-                    .textSelection(.enabled)
+                Text(block.text).font(AppTypography.readerCaptionFont(scale: textScale)).foregroundStyle(
+                    AppColor.secondaryText
+                )
+                .textSelection(.enabled)
             }
             if let credit = block.imageCredit, !credit.isEmpty {
-                Text(credit).font(AppTypography.readerCaptionFont(scale: textScale)).foregroundStyle(AppColor.secondaryText).textSelection(
+                Text(credit).font(AppTypography.readerCaptionFont(scale: textScale)).foregroundStyle(
+                    AppColor.secondaryText
+                ).textSelection(
                     .enabled
                 )
                 .accessibilityLabel("Image credit: " + credit)
             }
             Text("Image source: " + (url.host ?? "Publisher"))
-                .font(AppTypography.readerCaptionFont(scale: textScale)).foregroundStyle(AppColor.secondaryText).textSelection(.enabled)
+                .font(AppTypography.readerCaptionFont(scale: textScale)).foregroundStyle(AppColor.secondaryText)
+                .textSelection(.enabled)
         }
     }
 

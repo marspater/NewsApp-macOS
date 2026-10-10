@@ -54,6 +54,9 @@ enum AppLayout {
     static let cardGap: CGFloat = 16.0
     /// Reader and event-overview column width at text scale 1 (DESIGN.md 9).
     static let readingMeasure: CGFloat = 720.0
+    static func readingColumnMaxWidth(for scale: CGFloat) -> CGFloat {
+        readingMeasure * min(scale, 1.3)
+    }
     static let listMaxWidth: CGFloat = 1000.0
     static let leadStoryHeight: CGFloat = 360.0
     static let gridColumnMinimum: CGFloat = 300.0
@@ -364,5 +367,17 @@ struct NoticeView<Content: View>: View {
                 RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous)
                     .stroke(tint.opacity(contrast == .increased ? 1 : 0.30), lineWidth: 1)
             }
+    }
+}
+
+/// Reader and overview share both their measure and page insets.
+struct ReadingColumn: ViewModifier {
+    let textScale: CGFloat
+    func body(content: Content) -> some View {
+        content
+            .padding(.horizontal, AppLayout.pageInset)
+            .padding(.vertical, AppSpacing.xl)
+            .frame(maxWidth: AppLayout.readingColumnMaxWidth(for: textScale), alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .center)
     }
 }

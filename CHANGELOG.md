@@ -2,6 +2,8 @@
 
 ## Unreleased — 10 October 2026
 
+- Reader text size persists across stories, with ⌘+/⌘−/⌘0 View commands and a Reading Options popover for text size and Casper, Edition or Alto. Reader and overview share the 720 pt column; citations and extraction fallbacks use shared notices, and original-page actions use standard buttons (#355).
+
 ### Changed
 
 - Phase 4 content consistency: reader and event overview use shared typography tokens and scaled editorial styles; publisher eyebrows, AI labels, citation tags and in-content notices share components. Semantic system label/separator colors replace faded text and custom borders, and the design lint requires zero literal fonts, colors and code uppercasing in feature views.

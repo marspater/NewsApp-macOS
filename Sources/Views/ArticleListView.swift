@@ -1006,6 +1006,7 @@ struct KeyboardShortcutsView: View {
                 ("O", "Open in browser"),
                 ("E", "Show or hide event coverage"),
                 ("W or ⇧⌘R", "Switch between Story and Web"),
+                ("⌘+ / ⌘− / ⌘0", "Bigger text, smaller text, actual size"),
             ]
         ),
         (
