@@ -2,6 +2,8 @@
 
 ## Unreleased — 10 October 2026
 
+- Add the experimental, read-only backend for earlier related-event candidates (#314), with bounded retrieval, direct actor/place/topic evidence, cancellation and stable ordering. Reader exposure remains pending reviewed wrong-link measurements.
+
 - Reader text size persists across stories, with ⌘+/⌘−/⌘0 View commands and a Reading Options popover for text size and Casper, Edition or Alto. Reader and overview share the 720 pt column; citations and extraction fallbacks use shared notices, and original-page actions use standard buttons (#355).
 
 ### Changed
