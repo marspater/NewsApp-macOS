@@ -6,7 +6,7 @@
 
 Core phases A–H (#90–#98) are closed for the earlier accepted English-only scope. Later behavior changes need their own acceptance; the 5 October event result does not validate the current matcher. The dated scope and progress snapshots below are historical, superseded by this section.
 
-`main` at `62e54ed` passes full `./test.sh` and a staged arm64 ad-hoc `./build.sh` with strict signature verification locally (Apple silicon, macOS 27). Hosted CI and Security for that commit were still running when this was written. The installed app and its library have not been upgraded.
+`main` at `62e54ed` passes full `./test.sh` and a staged arm64 ad-hoc `./build.sh` with strict signature verification locally (Apple silicon, macOS 27). Hosted [CI](https://github.com/marspater/NewsApp-macOS/actions/runs/38030920977) passed on that commit; the Swift CodeQL job of Security was still running when this was written. The installed app and its library have not been upgraded.
 
 Merged follow-ups:
 
