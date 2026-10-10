@@ -4,6 +4,24 @@ import os
 
 #if canImport(FoundationModels)
     import FoundationModels
+
+    @available(macOS 26.0, *)
+    extension GenerationOptions {
+        #if compiler(<6.4)
+            // The stable SDK used by CodeQL (Xcode 26.3) requires `sampling:`; newer SDKs provide `samplingMode:`.
+            init(
+                samplingMode: SamplingMode,
+                temperature: Double? = nil,
+                maximumResponseTokens: Int? = nil
+            ) {
+                self.init(
+                    sampling: samplingMode,
+                    temperature: temperature,
+                    maximumResponseTokens: maximumResponseTokens
+                )
+            }
+        #endif
+    }
 #endif
 
 // MARK: - Fixed News Category Taxonomy (12 Standard Categories)
@@ -139,9 +157,8 @@ public struct NewsTextModel: Sendable {
                 case .available:
                     let session = LanguageModelSession(
                         model: SystemLanguageModel(guardrails: .permissiveContentTransformations))
-                    // The stable SDK used by CodeQL still requires `sampling:`; newer SDKs retain this initializer.
                     let response = try await session.respond(
-                        to: prompt, options: GenerationOptions(sampling: .greedy, maximumResponseTokens: tokens))
+                        to: prompt, options: GenerationOptions(samplingMode: .greedy, maximumResponseTokens: tokens))
                     try Task.checkCancellation()
                     return response.content
                 case .unavailable(.deviceNotEligible):

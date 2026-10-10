@@ -64,7 +64,7 @@ actor OnDeviceImportanceJudge {
                 let response = try await session.respond(
                     to: prompt(report),
                     options: GenerationOptions(
-                        sampling: sampled ? .random(probabilityThreshold: 0.9) : .greedy,
+                        samplingMode: sampled ? .random(probabilityThreshold: 0.9) : .greedy,
                         maximumResponseTokens: 8))
                 return level(response.content)
             } catch {
