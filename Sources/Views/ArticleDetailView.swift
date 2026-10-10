@@ -224,6 +224,9 @@ struct ArticleDetailView: View {
                 guard !Task.isCancelled, activeArticle.id == id else { return }
                 publisherRevisions = revisions ?? []
             }
+            .onChange(of: activeArticle.id) { _, _ in
+                publisherUpdatesExpanded = false
+            }
             .onChange(of: currentArticle.publisherInputHash) { _, _ in
                 analysis = nil
                 analysisError = nil
@@ -761,19 +764,7 @@ struct ArticleDetailView: View {
             .accessibilityLabel("Reading mode")
 
             if isOverviewLoading && currentOverview == nil {
-                HStack(alignment: .center, spacing: AppSpacing.xs) {
-                    ProgressView()
-                        .controlSize(.small)
-                    Text("Loading event overview…")
-                        .font(AppTypography.caption)
-                        .foregroundColor(AppColor.secondaryText)
-                }
-                .padding(.horizontal, AppSpacing.sm)
-                .padding(.vertical, AppSpacing.xxs)
-                .transition(.opacity)
-                .help("Generating evidence-backed event overview…")
-                .accessibilityElement(children: .combine)
-                .accessibilityLabel("Loading event overview")
+                ToolbarLoadingBubble()
             }
         }
         ToolbarItemGroup(placement: .primaryAction) {
@@ -1536,4 +1527,30 @@ func readerText(_ block: ReaderBlock) -> AttributedString {
         text.append(part)
     }
     return text
+}
+
+/// An isolated, fixed-height loading indicator bubble in the reader toolbar.
+private struct ToolbarLoadingBubble: View {
+    var body: some View {
+        HStack(alignment: .center, spacing: AppSpacing.xs) {
+            ProgressView()
+                .controlSize(.small)
+            Text("Loading event overview…")
+                .font(AppTypography.caption)
+                .foregroundColor(AppColor.secondaryText)
+        }
+        .frame(height: 24)
+        .padding(.horizontal, AppSpacing.sm)
+        .padding(.vertical, AppSpacing.xxs)
+        .transition(
+            .asymmetric(
+                insertion: .opacity.combined(with: .scale(scale: 0.95)),
+                removal: .opacity
+            )
+            .animation(.easeInOut(duration: 0.25))
+        )
+        .help("Generating evidence-backed event overview…")
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Loading event overview")
+    }
 }
