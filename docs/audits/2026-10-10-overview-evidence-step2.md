@@ -56,6 +56,21 @@ Perspectives: 2 of 58 events show two or more perspectives. 223 of 341 selected 
 
 The three labelled controls now stop at the thin-evidence guard, because their fixture passages are short. They no longer exercise the model and need longer fixtures.
 
+## After the verifier and format fixes
+
+Same copy and events, all 58 attempted (`NEWS_OVERVIEWS_TARGET=100`); aggregates: [overview-evidence-step2-fixed.json](../benchmarks/2026-10-10-overview-evidence-step2-fixed.json).
+
+| Change | Accepted |
+| --- | ---: |
+| Publisher text only (#414) | 17 / 58 |
+| Negation compares the matching sentence; attribution compares word sequences | 27 / 58 |
+| A pasted paragraph keeps its first complete sentence | 33 / 58 |
+| Four-line drafts with one introduction and three facts | **35 / 58 (60.3 %, Wilson 95 % 47.5–71.9 %)** |
+
+Final run: no line-count fallbacks, 18 weak drafts, 5 thin-evidence events. 20 sentences were rejected: 7 not one sentence, 6 negation, 4 numbers, 1 date, 1 attribution and 1 by the auditor. The auditor flags no unsupported or critical claim among the 167 retained claims. 84 % of retained claims copy a passage sentence whole, and 40 % of introductions repeat a key fact. End-to-end time is p50 6.9 s and p95 10.2 s. Accepted generation alone is p95 10.4 s, because more sentences reach the support check.
+
+Against the step-2 targets, format fallbacks (0 %), end-to-end time and requests per event now pass. Acceptance (60.3 %, upper bound 71.9 %) remains below 70 %, and independent claim labels (step 3) are open.
+
 ## Limits
 
 - One window, the same as the earlier audit, with no review labels.

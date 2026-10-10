@@ -11323,6 +11323,38 @@ struct NewsTests {
         let short = answer.split(separator: "\n").prefix(3).joined(separator: "\n")
         let truncated = try await outcome(NewsTextModel { _, _ in short }, passages: passages)
         assertEqual(truncated.result, .lineCount, "Too few protocol lines is a format fallback")
+        // A pasted paragraph keeps its first sentence only when that sentence stands alone (#308).
+        assertEqual(
+            OverviewComposer.firstCompleteSentence(
+                "The council approved the bridge repairs on Monday. Officials gave no reopening date."),
+            "The council approved the bridge repairs on Monday.", "A pasted paragraph keeps its first sentence")
+        assertEqual(
+            OverviewComposer.firstCompleteSentence("Traffic resumed. Officials gave no reopening date for the bridge."),
+            nil, "A fragment is not kept as a claim")
+        assertEqual(
+            OverviewComposer.firstCompleteSentence(
+                "The mayor said: \u{201C}We will go on with the work. Nobody will stop the repairs.\u{201D}"),
+            nil, "A sentence that breaks a quotation is not kept")
+        assertEqual(
+            OverviewComposer.firstCompleteSentence("The bridge reopened after repairs."),
+            "The bridge reopened after repairs.", "A single sentence is unchanged")
+        let pasted = answer.replacingOccurrences(
+            of: "FACT|P2|The council funded the repairs.",
+            with: "FACT|P2|Engineers inspected the bridge before traffic resumed. The council funded the repairs.")
+        let pastedOutcome = try await outcome(
+            NewsTextModel { prompt, _ in
+                if prompt.contains("Return plain text only:") { return pasted }
+                return prompt.contains("Engineers destroyed the bridge.") ? "NO" : "YES"
+            }, passages: passages)
+        assertEqual(
+            [pastedOutcome.keptFacts, pastedOutcome.rejectionReasons["notOneSentence"] ?? 0], [3, 0],
+            "The first sentence of a pasted paragraph is verified and kept")
+        let fourLines = answer.split(separator: "\n")
+            .filter { !$0.contains("INTRO|P2") && !$0.contains("destroyed") }.joined(separator: "\n")
+        let fourLineOutcome = try await outcome(
+            NewsTextModel { prompt, _ in prompt.contains("Return plain text only:") ? fourLines : "YES" },
+            passages: passages)
+        assertEqual(fourLineOutcome.result, .accepted, "One introduction and three facts in four lines are accepted")
         let weakDraft = try await outcome(
             NewsTextModel { prompt, _ in prompt.contains("Return plain text only:") ? answer : "NO" },
             passages: passages)
@@ -14288,6 +14320,49 @@ struct NewsTests {
                 if case .attributionMissing(let a, _) = $0 { return a.contains("White House") }
                 return false
             }), "Report flags attributionMissing for White House")
+
+        // 5d. Long passages (#308): checks read the matching sentence and the words around a verbatim quote.
+        let longPassage = EvidencePassage(
+            id: "pass-long", articleID: "art-gamma",
+            text: """
+                The council approved the bridge repairs on Monday. Officials did not give a reopening date. \
+                “We will go on with the work,” Kovalenko said after the vote.
+                """)
+        let longPassages = passages + [longPassage]
+        func failures(_ statement: String) -> [ClaimVerificationFailureReason] {
+            let fact = PassageAnchoredFact(
+                id: "f-long", statement: statement, passageID: longPassage.id, quote: longPassage.text,
+                articleID: "art-gamma")
+            let overview = OverviewComposer.composeOverview(
+                eventID: "event-long", eventTitle: "Long passage", verifiedFacts: [fact, validFact1, validFact2],
+                passages: longPassages, articles: articles)
+            return OverviewClaimVerifier.verifyOverview(overview, passages: longPassages, articles: articles)
+                .allFailureReasons
+        }
+        func flagged(_ reasons: [ClaimVerificationFailureReason], negation: Bool) -> Bool {
+            reasons.contains {
+                switch $0 {
+                case .negationFlipped: negation
+                case .attributionMissing: !negation
+                default: false
+                }
+            }
+        }
+        assertFalse(
+            flagged(failures("The council approved the bridge repairs on Monday."), negation: true),
+            "A negation elsewhere in the passage does not flag a faithful positive sentence")
+        assertTrue(
+            flagged(failures("Officials gave a reopening date."), negation: true),
+            "Dropping the negation of the matching sentence is still flagged")
+        assertTrue(
+            flagged(failures("The council didn't approve the bridge repairs on Monday."), negation: true),
+            "A contracted negation counts as a negation")
+        assertFalse(
+            flagged(failures("“We will go on with the work,” Kovalenko said after the vote."), negation: false),
+            "Punctuation around a verbatim quote does not hide its speaker")
+        assertTrue(
+            flagged(failures("The governor said the work will go on."), negation: false),
+            "A speaker absent from the passage is still flagged")
 
         // 6. Failure behavior: never store failed retelling as finished overview; show verified excerpts and source list
         let fallbackDoc = OverviewClaimVerifier.createFallbackOverview(
