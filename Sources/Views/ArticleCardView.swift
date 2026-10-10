@@ -18,6 +18,7 @@ struct ArticleCardView: View {
     @EnvironmentObject private var savedStories: SavedStoriesManager
     @EnvironmentObject private var appSettings: AppSettings
     @Environment(\.effectiveReduceMotion) private var reduceMotion
+    @Environment(\.effectiveContrast) private var contrast
     @State private var isHovered = false
 
     private var isRead: Bool {
@@ -58,7 +59,8 @@ struct ArticleCardView: View {
             )
         }
         return (
-            AppColor.borderSubtle, 0.5, AppShadow.cardRestingColor, AppShadow.cardRestingRadius, AppShadow.cardRestingY
+            AppColor.border(for: contrast), 0.5, AppShadow.cardRestingColor, AppShadow.cardRestingRadius,
+            AppShadow.cardRestingY
         )
     }
 
@@ -275,7 +277,7 @@ struct ArticleCardView: View {
         HStack(spacing: AppSpacing.xs) {
             Text(article.publicationDateText)
                 .font(AppTypography.caption)
-                .foregroundColor(AppColor.tertiaryText)
+                .foregroundColor(AppColor.tertiaryText(for: contrast))
 
             Spacer()
 

@@ -486,6 +486,14 @@ struct NativeUIQAChecks {
             EventOverviewReaderView.pillBackgroundOpacity(for: .increased), 0.22,
             "Overview increased contrast pill background opacity is 0.22")
 
+        // Shared card and metadata contrast tokens
+        assertEqual(AppColor.border(for: .standard), AppColor.borderSubtle, "Standard card border is the separator")
+        assertTrue(
+            AppColor.border(for: .increased) != AppColor.borderSubtle, "Card border strengthens with Increase Contrast")
+        assertEqual(
+            AppColor.tertiaryText(for: .increased), AppColor.secondaryText,
+            "Card dates use secondary text with Increase Contrast")
+
         // Article detail contrast
         assertEqual(ArticleDetailView.dividerOpacity(for: .standard), 0.15, "Article standard divider opacity is 0.15")
         assertEqual(
@@ -525,13 +533,21 @@ struct NativeUIQAChecks {
     static func testLightAndDarkAppearanceTokens() {
         print("  - Testing Light and Dark Appearance Tokens...")
 
-        // Access design system color tokens to verify resolution
-        _ = AppColor.background
-        _ = AppColor.surface
-        _ = AppColor.primaryText
-        _ = AppColor.secondaryText
-        _ = AppColor.accent
-        assertTrue(true, "AppColor semantic design tokens resolve without error")
+        // Adaptive tokens must resolve per appearance, not freeze at first use.
+        func resolved(_ color: Color, _ scheme: ColorScheme) -> Color.Resolved {
+            var environment = EnvironmentValues()
+            environment.colorScheme = scheme
+            return color.resolve(in: environment)
+        }
+        let tokens: [(String, Color)] = [
+            ("background", AppColor.background), ("surface", AppColor.surface),
+            ("cardBackground", AppColor.cardBackground), ("primaryText", AppColor.primaryText),
+            ("secondaryText", AppColor.secondaryText), ("tertiaryText", AppColor.tertiaryText),
+            ("borderSubtle", AppColor.borderSubtle),
+        ]
+        for (name, color) in tokens {
+            assertTrue(resolved(color, .light) != resolved(color, .dark), "AppColor.\(name) adapts to light and dark")
+        }
     }
 
     // MARK: - Phase 4 Shared Components
