@@ -61,6 +61,8 @@
 
 - The migration regression clears its temporary preferences domain by its suite name, and the test script removes only that run’s UUID-named plist after the runner exits (#311).
 
+- Event-corpus evaluation uses the production per-pass article and on-device judge budgets instead of unlimited overrides. A new targeted English diagnostic still falls below the clustering precision target; it does not establish release acceptance (#307).
+
 - Attributed overview perspectives recognize paired curly quotation marks and both `said Speaker` and `Speaker said` after a quote. Statements retain their original passage text; vague speakers and syndicated duplicates remain excluded. Older cached overviews regenerate on request (#313).
 
 - While tension collection is on, waiting minor stories from panel feeds are no longer deleted after a day, so past tension days keep the stories they were built from (#310). They stay hidden from the reading views as before.
