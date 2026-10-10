@@ -11323,6 +11323,38 @@ struct NewsTests {
         let short = answer.split(separator: "\n").prefix(3).joined(separator: "\n")
         let truncated = try await outcome(NewsTextModel { _, _ in short }, passages: passages)
         assertEqual(truncated.result, .lineCount, "Too few protocol lines is a format fallback")
+        // A pasted paragraph keeps its first sentence only when that sentence stands alone (#308).
+        assertEqual(
+            OverviewComposer.firstCompleteSentence(
+                "The council approved the bridge repairs on Monday. Officials gave no reopening date."),
+            "The council approved the bridge repairs on Monday.", "A pasted paragraph keeps its first sentence")
+        assertEqual(
+            OverviewComposer.firstCompleteSentence("Traffic resumed. Officials gave no reopening date for the bridge."),
+            nil, "A fragment is not kept as a claim")
+        assertEqual(
+            OverviewComposer.firstCompleteSentence(
+                "The mayor said: \u{201C}We will go on with the work. Nobody will stop the repairs.\u{201D}"),
+            nil, "A sentence that breaks a quotation is not kept")
+        assertEqual(
+            OverviewComposer.firstCompleteSentence("The bridge reopened after repairs."),
+            "The bridge reopened after repairs.", "A single sentence is unchanged")
+        let pasted = answer.replacingOccurrences(
+            of: "FACT|P2|The council funded the repairs.",
+            with: "FACT|P2|Engineers inspected the bridge before traffic resumed. The council funded the repairs.")
+        let pastedOutcome = try await outcome(
+            NewsTextModel { prompt, _ in
+                if prompt.contains("Return plain text only:") { return pasted }
+                return prompt.contains("Engineers destroyed the bridge.") ? "NO" : "YES"
+            }, passages: passages)
+        assertEqual(
+            [pastedOutcome.keptFacts, pastedOutcome.rejectionReasons["notOneSentence"] ?? 0], [3, 0],
+            "The first sentence of a pasted paragraph is verified and kept")
+        let fourLines = answer.split(separator: "\n")
+            .filter { !$0.contains("INTRO|P2") && !$0.contains("destroyed") }.joined(separator: "\n")
+        let fourLineOutcome = try await outcome(
+            NewsTextModel { prompt, _ in prompt.contains("Return plain text only:") ? fourLines : "YES" },
+            passages: passages)
+        assertEqual(fourLineOutcome.result, .accepted, "One introduction and three facts in four lines are accepted")
         let weakDraft = try await outcome(
             NewsTextModel { prompt, _ in prompt.contains("Return plain text only:") ? answer : "NO" },
             passages: passages)

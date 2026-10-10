@@ -399,7 +399,8 @@ public struct OverviewComposer: Sendable {
         try Task.checkCancellation()
         let lines = answer.split(whereSeparator: \.isNewline)
         outcome.lines = lines.count
-        guard (5...8).contains(lines.count) else {
+        // Four lines can still make a complete draft: one introduction and three facts.
+        guard (4...8).contains(lines.count) else {
             outcome.result = lines.contains { isProtocolLine($0) } ? .lineCount : .unstructured
             return (fallback, outcome)
         }
@@ -510,7 +511,12 @@ public struct OverviewComposer: Sendable {
                 passageFingerprint: passage.fingerprint, quote: passage.text,
                 source: OverviewSourceMetadata(
                     title: article.title, name: article.source, url: article.link, publishedAt: article.pubDate))
-            let fact = OverviewFact(id: "model_claim_\(index)", text: parsed.statement, citationIDs: [citationID])
+            guard let statement = firstCompleteSentence(parsed.statement) else {
+                draft.deterministicRejections += 1
+                draft.rejectionReasons["notOneSentence", default: 0] += 1
+                continue
+            }
+            let fact = OverviewFact(id: "model_claim_\(index)", text: statement, citationIDs: [citationID])
             let check = EventOverviewDocument(
                 eventID: fallback.eventID, version: fallback.version,
                 content: OverviewContent(title: fallback.title, summary: "", facts: [fact], citations: [citation]),
@@ -529,6 +535,22 @@ public struct OverviewComposer: Sendable {
             if parsed.isIntroduction { draft.introduction.append(fact) } else { draft.facts.append(fact) }
         }
         return draft
+    }
+
+    /// The line's sentence, or the first sentence of a pasted paragraph when it stands alone: six or more words
+    /// and balanced quotation marks. Every check then runs on that sentence only.
+    static func firstCompleteSentence(_ text: String) -> String? {
+        let tokenizer = NLTokenizer(unit: .sentence)
+        tokenizer.string = text
+        let sentences = tokenizer.tokens(for: text.startIndex..<text.endIndex)
+        guard let first = sentences.first else { return nil }
+        if sentences.count == 1 { return text }
+        let sentence = text[first].trimmingCharacters(in: .whitespaces)
+        let straight = sentence.filter { $0 == "\"" }.count
+        guard sentence.split(separator: " ").count >= 6, straight.isMultiple(of: 2),
+            sentence.filter({ $0 == "\u{201C}" }).count == sentence.filter({ $0 == "\u{201D}" }).count
+        else { return nil }
+        return sentence
     }
 
     /// One `KIND|P1|sentence` line naming a known passage, with its sentence decoded.
@@ -617,7 +639,7 @@ struct OverviewModelOutcome: Sendable, Equatable, Codable {
         case thinEvidence
         /// No INTRO or FACT line at all, for example a refusal written as prose.
         case unstructured
-        /// Structured lines, but not the 5 to 8 lines the format requires.
+        /// Structured lines, but not the 4 to 8 lines the format allows.
         case lineCount
         /// The verified lines do not form one to three introduction sentences plus three to five facts,
         /// or fewer than two thirds of the lines survived.
