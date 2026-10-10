@@ -176,7 +176,7 @@ final class AppSettings: ObservableObject {
 
     /// Normalizes and validates a feed subscription URL using URLComponents.
     /// Handles scheme upgrades, host lowercasing, and trailing slash cleanup without brittle string replacement.
-    static func normalizeFeedURL(_ raw: String, allowInsecureHTTP: Bool = false) -> String? {
+    nonisolated static func normalizeFeedURL(_ raw: String, allowInsecureHTTP: Bool = false) -> String? {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
 
