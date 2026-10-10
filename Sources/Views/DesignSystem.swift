@@ -177,6 +177,27 @@ enum AppTypography {
     /// A cited publisher passage, distinct from generated summaries.
     static let readerCitation = Font.system(size: 13, weight: .medium, design: .serif)
 
+    /// Event overview has its own editorial hierarchy, scaled with the shared reader preference.
+    static func overviewFont(_ role: OverviewTextRole, scale: CGFloat = 1) -> Font {
+        switch role {
+        case .title: return .system(size: 30 * scale, weight: .bold, design: .serif)
+        case .section: return .system(size: 18 * scale, weight: .bold)
+        case .subheading: return .system(size: 16 * scale, weight: .bold)
+        case .introduction: return .system(size: 16 * scale)
+        case .fact: return .system(size: 15 * scale)
+        case .body: return .system(size: 14 * scale)
+        case .bodyMedium: return .system(size: 14 * scale, weight: .medium)
+        case .detail: return .system(size: 13 * scale)
+        case .metadata: return .system(size: 13 * scale, weight: .medium)
+        case .emphasis: return .system(size: 13 * scale, weight: .semibold)
+        case .annotation: return .system(size: 12 * scale, weight: .medium)
+        case .eyebrow: return .system(size: 11 * scale, weight: .semibold)
+        case .caption: return .system(size: 11 * scale)
+        case .captionMedium: return .system(size: 11 * scale, weight: .medium)
+        case .micro: return .system(size: 10 * scale, weight: .semibold)
+        }
+    }
+
     static func readerCodeFont() -> Font {
         .system(.body, design: .monospaced)
     }
@@ -188,6 +209,11 @@ enum AppTypography {
         case .alto: return 12.0
         }
     }
+}
+
+enum OverviewTextRole: Sendable {
+    case title, section, subheading, introduction, fact, body, bodyMedium
+    case detail, metadata, emphasis, annotation, eyebrow, caption, captionMedium, micro
 }
 
 enum StoryCardLayout: Sendable {
@@ -237,14 +263,17 @@ struct EyebrowText: View {
     let text: String
     let color: Color
 
-    init(_ text: String, color: Color = AppColor.secondaryText) {
+    var font: Font = AppTypography.eyebrow
+
+    init(_ text: String, color: Color = AppColor.secondaryText, font: Font = AppTypography.eyebrow) {
         self.text = text
         self.color = color
+        self.font = font
     }
 
     var body: some View {
         Text(text)
-            .font(AppTypography.eyebrow)
+            .font(font)
             .tracking(AppTypography.eyebrowTracking)
             .textCase(.uppercase)
             .foregroundStyle(color)
@@ -258,6 +287,7 @@ struct TagView: View {
     let title: String
     var systemImage: String?
     var tint: Color = AppColor.secondaryText
+    var font: Font = AppTypography.eyebrow
     @Environment(\.effectiveContrast) private var contrast
 
     var body: some View {
@@ -268,7 +298,7 @@ struct TagView: View {
             }
             Text(title)
         }
-        .font(AppTypography.eyebrow)
+        .font(font)
         .foregroundStyle(tint)
         .padding(.horizontal, AppSpacing.eyebrowGap)
         .padding(.vertical, AppSpacing.textStack)

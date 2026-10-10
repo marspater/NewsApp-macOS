@@ -266,7 +266,7 @@ struct EventOverviewReaderView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 0) {
-                VStack(alignment: .leading, spacing: 24) {
+                VStack(alignment: .leading, spacing: AppSpacing.lg) {
                     // 1. Header: Eyebrow, Title, Update Time, Article & Publisher Counts
                     headerSection
 
@@ -299,7 +299,7 @@ struct EventOverviewReaderView: View {
                     }
                 }
                 .padding(.horizontal, Self.horizontalPageInset)
-                .padding(.vertical, 28)
+                .padding(.vertical, AppSpacing.lg)
                 .frame(maxWidth: Self.readingColumnMaxWidth(for: textScale), alignment: .leading)
             }
             .frame(maxWidth: .infinity)
@@ -312,53 +312,27 @@ struct EventOverviewReaderView: View {
     // MARK: - Section 1: Header
 
     private var headerSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 8) {
-                Text("EVENT OVERVIEW")
-                    .font(.system(size: 11, weight: .bold))
-                    .tracking(1.2)
-                    .foregroundColor(AppColor.accent)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 3)
-                    .background(AppColor.accent.opacity(Self.pillBackgroundOpacity(for: contrast)))
-                    .clipShape(Capsule())
-                    .overlay(
-                        Capsule().stroke(
-                            AppColor.accent.opacity(Self.pillBorderOpacity(for: contrast)),
-                            lineWidth: 1
-                        )
-                    )
-
+        VStack(alignment: .leading, spacing: AppSpacing.sm) {
+            HStack(spacing: AppSpacing.xs) {
+                TagView(title: "Event overview", tint: AppColor.accent)
+                
                 if overview.kind == .fallbackExcerpts {
-                    Text("VERIFIED EXCERPTS")
-                        .font(.system(size: 10, weight: .semibold))
-                        .tracking(0.8)
-                        .foregroundColor(currentSecondaryTextColor)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(AppColor.badgeBackground)
-                        .clipShape(Capsule())
-                        .overlay(
-                            Capsule().stroke(
-                                currentBorderStrokeColor,
-                                lineWidth: 1
-                            )
-                        )
+                    TagView(title: "Verified excerpts", tint: currentSecondaryTextColor)
                 }
             }
             .accessibilityElement(children: .combine)
 
             Text(overview.title)
-                .font(.system(size: 30 * textScale, weight: .bold, design: .serif))
+                .font(AppTypography.overviewFont(.title, scale: textScale))
                 .foregroundColor(AppColor.primaryText)
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityAddTraits(.isHeader)
                 .accessibilityHeading(.h1)
                 .textSelection(.enabled)
 
-            HStack(spacing: 6) {
+            HStack(spacing: AppSpacing.eyebrowGap) {
                 Text("Updated \(formattedUpdateTime)")
-                    .font(.system(size: 13 * textScale, weight: .medium))
+                    .font(AppTypography.overviewFont(.metadata, scale: textScale))
                     .foregroundColor(currentSecondaryTextColor)
 
                 Text("·")
@@ -366,7 +340,7 @@ struct EventOverviewReaderView: View {
                     .accessibilityHidden(true)
 
                 Text(articleCountText)
-                    .font(.system(size: 13 * textScale, weight: .medium))
+                    .font(AppTypography.overviewFont(.metadata, scale: textScale))
                     .foregroundColor(currentSecondaryTextColor)
 
                 Text("·")
@@ -374,7 +348,7 @@ struct EventOverviewReaderView: View {
                     .accessibilityHidden(true)
 
                 Text(publisherCountText)
-                    .font(.system(size: 13 * textScale, weight: .medium))
+                    .font(AppTypography.overviewFont(.metadata, scale: textScale))
                     .foregroundColor(currentSecondaryTextColor)
             }
             .accessibilityElement(children: .ignore)
@@ -395,16 +369,16 @@ struct EventOverviewReaderView: View {
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
 
-        return VStack(alignment: .leading, spacing: 14) {
+        return VStack(alignment: .leading, spacing: AppSpacing.sm) {
             if let introduction = overview.content.evidenceSections?.introduction, !introduction.isEmpty {
                 ForEach(introduction) { fact in
                     Text(fact.text)
-                        .font(.system(size: 16 * textScale))
-                        .lineSpacing(6 * textScale)
+                        .font(AppTypography.overviewFont(.introduction, scale: textScale))
+                        .lineSpacing(AppSpacing.eyebrowGap * textScale)
                         .foregroundColor(AppColor.primaryText)
                         .fixedSize(horizontal: false, vertical: true)
                         .textSelection(.enabled)
-                    HStack(spacing: 6) {
+                    HStack(spacing: AppSpacing.eyebrowGap) {
                         ForEach(fact.citationIDs, id: \.self) { id in
                             if let citation = overview.citations[id] { citationPill(citation) }
                         }
@@ -413,8 +387,8 @@ struct EventOverviewReaderView: View {
             } else {
                 ForEach(Array(paragraphs.enumerated()), id: \.offset) { _, para in
                     Text(para)
-                        .font(.system(size: 16 * textScale, weight: .regular))
-                        .lineSpacing(6 * textScale)
+                        .font(AppTypography.overviewFont(.introduction, scale: textScale))
+                        .lineSpacing(AppSpacing.eyebrowGap * textScale)
                         .foregroundColor(AppColor.primaryText)
                         .fixedSize(horizontal: false, vertical: true)
                         .textSelection(.enabled)
@@ -427,7 +401,7 @@ struct EventOverviewReaderView: View {
 
     @ViewBuilder
     private func leadImageSection(_ leadImage: OverviewLeadImage) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: AppSpacing.xs) {
             if let url = URL(string: leadImage.url) {
                 AsyncImage(url: url) { phase in
                     if let image = phase.image {
@@ -452,14 +426,14 @@ struct EventOverviewReaderView: View {
 
             if let caption = leadImage.caption?.trimmingCharacters(in: .whitespacesAndNewlines), !caption.isEmpty {
                 Text(caption)
-                    .font(.system(size: 12 * textScale, weight: .medium))
+                    .font(AppTypography.overviewFont(.annotation, scale: textScale))
                     .foregroundColor(currentSecondaryTextColor)
                     .textSelection(.enabled)
             }
 
             if let credit = leadImage.credit?.trimmingCharacters(in: .whitespacesAndNewlines), !credit.isEmpty {
                 Text(credit)
-                    .font(.system(size: 11 * textScale, weight: .regular))
+                    .font(AppTypography.overviewFont(.caption, scale: textScale))
                     .foregroundColor(currentTertiaryTextColor)
                     .textSelection(.enabled)
             }
@@ -471,26 +445,26 @@ struct EventOverviewReaderView: View {
     // MARK: - Section 4: Key Facts
 
     private var keyFactsSection: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: AppSpacing.sm) {
             Text("Key facts")
-                .font(.system(size: 18 * textScale, weight: .bold))
+                .font(AppTypography.overviewFont(.section, scale: textScale))
                 .foregroundColor(AppColor.primaryText)
                 .accessibilityAddTraits(.isHeader)
                 .accessibilityHeading(.h2)
 
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: AppSpacing.sm) {
                 ForEach(validFacts) { fact in
-                    HStack(alignment: .top, spacing: 10) {
-                        Image(systemName: "circle.fill")
-                            .font(.system(size: 5 * textScale))
+                    HStack(alignment: .top, spacing: AppSpacing.xs) {
+                        Circle()
+                            .frame(width: AppSpacing.xxs, height: AppSpacing.xxs)
                             .foregroundColor(AppColor.accent)
-                            .padding(.top, 7)
+                            .padding(.top, AppSpacing.eyebrowGap)
                             .accessibilityHidden(true)
 
-                        VStack(alignment: .leading, spacing: 6) {
+                        VStack(alignment: .leading, spacing: AppSpacing.eyebrowGap) {
                             Text(fact.text)
-                                .font(.system(size: 15 * textScale, weight: .regular))
-                                .lineSpacing(4 * textScale)
+                                .font(AppTypography.overviewFont(.fact, scale: textScale))
+                                .lineSpacing(AppSpacing.xxs * textScale)
                                 .foregroundColor(AppColor.primaryText)
                                 .fixedSize(horizontal: false, vertical: true)
                                 .textSelection(.enabled)
@@ -498,7 +472,7 @@ struct EventOverviewReaderView: View {
                             // Citation pills
                             let validCitationIDs = fact.citationIDs.filter { overview.citations[$0] != nil }
                             if !validCitationIDs.isEmpty {
-                                HStack(spacing: 6) {
+                                HStack(spacing: AppSpacing.eyebrowGap) {
                                     ForEach(validCitationIDs, id: \.self) { citID in
                                         if let citation = overview.citations[citID] {
                                             citationPill(citation)
@@ -510,7 +484,7 @@ struct EventOverviewReaderView: View {
                     }
                 }
             }
-            .padding(16)
+            .padding(AppSpacing.md)
             .background(AppColor.cardBackground)
             .clipShape(RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous))
             .overlay(
@@ -528,23 +502,11 @@ struct EventOverviewReaderView: View {
         Button {
             onSelectCitation(citation, match)
         } label: {
-            HStack(spacing: 4) {
-                Image(systemName: "link")
-                    .font(.system(size: 9, weight: .bold))
-                    .accessibilityHidden(true)
-                Text(label)
-                    .font(.system(size: 11 * textScale, weight: .semibold))
-            }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 3)
-            .background(AppColor.accent.opacity(Self.pillBackgroundOpacity(for: contrast)))
-            .foregroundColor(AppColor.accent)
-            .clipShape(Capsule())
-            .overlay(
-                Capsule().stroke(
-                    AppColor.accent.opacity(Self.pillBorderOpacity(for: contrast)),
-                    lineWidth: 1
-                )
+            TagView(
+                title: label,
+                systemImage: "link",
+                tint: AppColor.accent,
+                font: AppTypography.overviewFont(.eyebrow, scale: textScale)
             )
         }
         .buttonStyle(.plain)
@@ -571,23 +533,25 @@ struct EventOverviewReaderView: View {
                 }
             )
         ) {
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: AppSpacing.xs) {
                 ForEach(memberArticles) { article in
-                    HStack(alignment: .center, spacing: 12) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(article.publisherName)
-                                .font(.system(size: 11 * textScale, weight: .bold))
-                                .foregroundColor(AppColor.accent)
+                    HStack(alignment: .center, spacing: AppSpacing.sm) {
+                        VStack(alignment: .leading, spacing: AppSpacing.textStack) {
+                            EyebrowText(
+                                article.publisherName,
+                                color: AppColor.accent,
+                                font: AppTypography.overviewFont(.eyebrow, scale: textScale)
+                            )
 
                             Text(article.title)
-                                .font(.system(size: 13 * textScale, weight: .medium))
+                                .font(AppTypography.overviewFont(.metadata, scale: textScale))
                                 .foregroundColor(AppColor.primaryText)
                                 .lineLimit(2)
                                 .fixedSize(horizontal: false, vertical: true)
                                 .textSelection(.enabled)
 
                             Text(article.publicationDateText)
-                                .font(.system(size: 11 * textScale, weight: .regular))
+                                .font(AppTypography.overviewFont(.caption, scale: textScale))
                                 .foregroundColor(currentTertiaryTextColor)
                         }
 
@@ -607,7 +571,7 @@ struct EventOverviewReaderView: View {
                                 NSWorkspace.shared.open(url)
                             } label: {
                                 Image(systemName: "arrow.up.right.square")
-                                    .font(.system(size: 13))
+                                    .imageScale(.small)
                                     .accessibilityHidden(true)
                             }
                             .buttonStyle(.plain)
@@ -618,7 +582,7 @@ struct EventOverviewReaderView: View {
                                     title: article.title, source: article.publisherName))
                         }
                     }
-                    .padding(.vertical, 4)
+                    .padding(.vertical, AppSpacing.xxs)
 
                     if article.id != memberArticles.last?.id {
                         Divider()
@@ -626,22 +590,22 @@ struct EventOverviewReaderView: View {
                     }
                 }
             }
-            .padding(.top, 8)
+            .padding(.top, AppSpacing.xs)
         } label: {
-            HStack(spacing: 8) {
+            HStack(spacing: AppSpacing.xs) {
                 Image(systemName: "newspaper")
-                    .font(.system(size: 13, weight: .semibold))
+                    .imageScale(.small)
                     .foregroundColor(AppColor.accent)
                     .accessibilityHidden(true)
 
                 Text("Sources (\(memberArticles.count))")
-                    .font(.system(size: 15 * textScale, weight: .bold))
+                    .font(AppTypography.overviewFont(.subheading, scale: textScale))
                     .foregroundColor(AppColor.primaryText)
                     .accessibilityAddTraits(.isHeader)
                     .accessibilityHeading(.h2)
             }
         }
-        .padding(14)
+        .padding(AppSpacing.sm)
         .background(AppColor.cardBackground)
         .clipShape(RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous))
         .overlay(
@@ -661,7 +625,7 @@ struct EventOverviewReaderView: View {
             thematicAngle: overview.thematicAngle,
             coverageSentiment: overview.coverageSentiment
         ) {
-            VStack(alignment: .leading, spacing: 22) {
+            VStack(alignment: .leading, spacing: AppSpacing.lg) {
                 // Timeline
                 if !validTimeline.isEmpty {
                     timelineSection
@@ -688,50 +652,48 @@ struct EventOverviewReaderView: View {
     }
 
     private var timelineSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: AppSpacing.sm) {
             Text("Timeline")
-                .font(.system(size: 18 * textScale, weight: .bold))
+                .font(AppTypography.overviewFont(.section, scale: textScale))
                 .foregroundColor(AppColor.primaryText)
                 .accessibilityAddTraits(.isHeader)
                 .accessibilityHeading(.h2)
 
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: AppSpacing.xs) {
                 ForEach(validTimeline) { item in
-                    HStack(alignment: .top, spacing: 12) {
-                        VStack(alignment: .leading, spacing: 2) {
+                    HStack(alignment: .top, spacing: AppSpacing.sm) {
+                        VStack(alignment: .leading, spacing: AppSpacing.textStack) {
                             Text(item.dateText)
-                                .font(.system(size: 12 * textScale, weight: .bold))
+                                .font(AppTypography.overviewFont(.annotation, scale: textScale))
                                 .foregroundColor(AppColor.accent)
 
                             if item.isFuturePlan {
-                                Text("Plan")
-                                    .font(.system(size: 9 * textScale, weight: .bold))
-                                    .foregroundColor(.white)
-                                    .padding(.horizontal, 5)
-                                    .padding(.vertical, 1)
-                                    .background(Color.blue)
-                                    .clipShape(Capsule())
+                                TagView(
+                                    title: "Plan",
+                                    tint: AppColor.accent,
+                                    font: AppTypography.overviewFont(.micro, scale: textScale)
+                                )
                                     .accessibilityLabel("Planned event")
                             }
 
                             if let pubDate = item.publicationDate, item.eventDate != nil {
                                 Text("Reported \(formatTimelineDate(pubDate))")
-                                    .font(.system(size: 10 * textScale))
+                                    .font(AppTypography.overviewFont(.micro, scale: textScale))
                                     .foregroundColor(currentTertiaryTextColor)
                             }
                         }
                         .frame(minWidth: 80, maxWidth: 110, alignment: .leading)
 
-                        VStack(alignment: .leading, spacing: 4) {
+                        VStack(alignment: .leading, spacing: AppSpacing.xxs) {
                             Text(item.summary)
-                                .font(.system(size: 14 * textScale, weight: .regular))
+                                .font(AppTypography.overviewFont(.body, scale: textScale))
                                 .foregroundColor(AppColor.primaryText)
-                                .lineSpacing(3 * textScale)
+                                .lineSpacing(AppSpacing.textStack * textScale)
                                 .textSelection(.enabled)
 
                             let validCitationIDs = item.citationIDs.filter { overview.citations[$0] != nil }
                             if !validCitationIDs.isEmpty {
-                                HStack(spacing: 4) {
+                                HStack(spacing: AppSpacing.xxs) {
                                     ForEach(validCitationIDs, id: \.self) { citID in
                                         if let citation = overview.citations[citID] {
                                             citationPill(citation)
@@ -741,7 +703,7 @@ struct EventOverviewReaderView: View {
                             }
                         }
                     }
-                    .padding(.vertical, 4)
+                    .padding(.vertical, AppSpacing.xxs)
 
                     if item.id != validTimeline.last?.id {
                         Divider()
@@ -749,7 +711,7 @@ struct EventOverviewReaderView: View {
                     }
                 }
             }
-            .padding(16)
+            .padding(AppSpacing.md)
             .background(AppColor.cardBackground)
             .clipShape(RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous))
             .overlay(
@@ -760,52 +722,52 @@ struct EventOverviewReaderView: View {
     }
 
     private var perspectivesSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: AppSpacing.sm) {
             Text("Perspectives")
-                .font(.system(size: 18 * textScale, weight: .bold))
+                .font(AppTypography.overviewFont(.section, scale: textScale))
                 .foregroundColor(AppColor.primaryText)
                 .accessibilityAddTraits(.isHeader)
                 .accessibilityHeading(.h2)
 
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: AppSpacing.sm) {
                 ForEach(validPerspectives) { perspective in
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    VStack(alignment: .leading, spacing: AppSpacing.xxs) {
+                        HStack(alignment: .firstTextBaseline, spacing: AppSpacing.xs) {
                             Text(perspective.participant)
-                                .font(.system(size: 13 * textScale, weight: .bold))
+                                .font(AppTypography.overviewFont(.emphasis, scale: textScale))
                                 .foregroundColor(AppColor.primaryText)
                                 .textSelection(.enabled)
 
                             if let wire = perspective.originalWireSource, !wire.isEmpty {
                                 Text("via \(wire) syndicate")
-                                    .font(.system(size: 11 * textScale, weight: .medium))
+                                    .font(AppTypography.overviewFont(.captionMedium, scale: textScale))
                                     .foregroundColor(currentTertiaryTextColor)
                             } else if let publisher = perspective.sourcePublisher, !publisher.isEmpty {
                                 Text("via \(publisher)")
-                                    .font(.system(size: 11 * textScale, weight: .medium))
+                                    .font(AppTypography.overviewFont(.captionMedium, scale: textScale))
                                     .foregroundColor(currentTertiaryTextColor)
                             }
                         }
 
                         Text(perspective.position)
-                            .font(.system(size: 14 * textScale, weight: .regular))
+                            .font(AppTypography.overviewFont(.body, scale: textScale))
                             .foregroundColor(currentSecondaryTextColor)
-                            .lineSpacing(3 * textScale)
+                            .lineSpacing(AppSpacing.textStack * textScale)
                             .textSelection(.enabled)
 
                         let validCitationIDs = perspective.citationIDs.filter { overview.citations[$0] != nil }
                         if !validCitationIDs.isEmpty {
-                            HStack(spacing: 4) {
+                            HStack(spacing: AppSpacing.xxs) {
                                 ForEach(validCitationIDs, id: \.self) { citID in
                                     if let citation = overview.citations[citID] {
                                         citationPill(citation)
                                     }
                                 }
                             }
-                            .padding(.top, 2)
+                            .padding(.top, AppSpacing.textStack)
                         }
                     }
-                    .padding(.vertical, 4)
+                    .padding(.vertical, AppSpacing.xxs)
 
                     if perspective.id != validPerspectives.last?.id {
                         Divider()
@@ -813,7 +775,7 @@ struct EventOverviewReaderView: View {
                     }
                 }
             }
-            .padding(16)
+            .padding(AppSpacing.md)
             .background(AppColor.cardBackground)
             .clipShape(RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous))
             .overlay(
@@ -824,42 +786,42 @@ struct EventOverviewReaderView: View {
     }
 
     private func thematicAngleSection(_ angle: OverviewThematicAngle) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: AppSpacing.sm) {
             Text(angle.title)
-                .font(.system(size: 18 * textScale, weight: .bold))
+                .font(AppTypography.overviewFont(.section, scale: textScale))
                 .foregroundColor(AppColor.primaryText)
                 .accessibilityAddTraits(.isHeader)
                 .accessibilityHeading(.h2)
 
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: AppSpacing.xs) {
                 if !angle.summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     Text(angle.summary)
-                        .font(.system(size: 14 * textScale, weight: .regular))
-                        .lineSpacing(4 * textScale)
+                        .font(AppTypography.overviewFont(.body, scale: textScale))
+                        .lineSpacing(AppSpacing.xxs * textScale)
                         .foregroundColor(AppColor.primaryText)
                         .textSelection(.enabled)
                 }
 
                 let validAngleFacts = Self.filterValidFacts(angle.facts)
                 if !validAngleFacts.isEmpty {
-                    VStack(alignment: .leading, spacing: 8) {
+                    VStack(alignment: .leading, spacing: AppSpacing.xs) {
                         ForEach(validAngleFacts) { fact in
-                            HStack(alignment: .top, spacing: 8) {
-                                Image(systemName: "circle.fill")
-                                    .font(.system(size: 5 * textScale))
+                            HStack(alignment: .top, spacing: AppSpacing.xs) {
+                                Circle()
+                                    .frame(width: AppSpacing.xxs, height: AppSpacing.xxs)
                                     .foregroundColor(AppColor.accent)
-                                    .padding(.top, 6)
+                                    .padding(.top, AppSpacing.eyebrowGap)
                                     .accessibilityHidden(true)
 
-                                VStack(alignment: .leading, spacing: 4) {
+                                VStack(alignment: .leading, spacing: AppSpacing.xxs) {
                                     Text(fact.text)
-                                        .font(.system(size: 13 * textScale, weight: .regular))
+                                        .font(AppTypography.overviewFont(.detail, scale: textScale))
                                         .foregroundColor(AppColor.primaryText)
                                         .textSelection(.enabled)
 
                                     let validCitationIDs = fact.citationIDs.filter { overview.citations[$0] != nil }
                                     if !validCitationIDs.isEmpty {
-                                        HStack(spacing: 4) {
+                                        HStack(spacing: AppSpacing.xxs) {
                                             ForEach(validCitationIDs, id: \.self) { citID in
                                                 if let citation = overview.citations[citID] {
                                                     citationPill(citation)
@@ -871,11 +833,11 @@ struct EventOverviewReaderView: View {
                             }
                         }
                     }
-                    .padding(.top, 4)
+                    .padding(.top, AppSpacing.xxs)
                 } else if !angle.citationIDs.isEmpty {
                     let validCitationIDs = angle.citationIDs.filter { overview.citations[$0] != nil }
                     if !validCitationIDs.isEmpty {
-                        HStack(spacing: 4) {
+                        HStack(spacing: AppSpacing.xxs) {
                             ForEach(validCitationIDs, id: \.self) { citID in
                                 if let citation = overview.citations[citID] {
                                     citationPill(citation)
@@ -885,7 +847,7 @@ struct EventOverviewReaderView: View {
                     }
                 }
             }
-            .padding(16)
+            .padding(AppSpacing.md)
             .background(AppColor.cardBackground)
             .clipShape(RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous))
             .overlay(
@@ -896,20 +858,20 @@ struct EventOverviewReaderView: View {
     }
 
     private func sentimentSection(_ sentiment: OverviewCoverageSentiment) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: AppSpacing.xs) {
             Text("Coverage tone")
-                .font(.system(size: 18 * textScale, weight: .bold))
+                .font(AppTypography.overviewFont(.section, scale: textScale))
                 .foregroundColor(AppColor.primaryText)
                 .accessibilityAddTraits(.isHeader)
                 .accessibilityHeading(.h2)
 
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 8) {
+            VStack(alignment: .leading, spacing: AppSpacing.xs) {
+                HStack(spacing: AppSpacing.xs) {
                     Image(systemName: "text.magnifyingglass")
                         .foregroundColor(currentSecondaryTextColor)
                         .accessibilityHidden(true)
                     Text("\(sentiment.label) tone · automated estimate")
-                        .font(.system(size: 14 * textScale, weight: .medium))
+                        .font(AppTypography.overviewFont(.bodyMedium, scale: textScale))
                         .foregroundColor(AppColor.primaryText)
                 }
 
@@ -917,13 +879,13 @@ struct EventOverviewReaderView: View {
                     !rationale.isEmpty
                 {
                     Text(rationale)
-                        .font(.system(size: 12 * textScale))
+                        .font(AppTypography.overviewFont(.annotation, scale: textScale))
                         .foregroundColor(currentSecondaryTextColor)
-                        .lineSpacing(2 * textScale)
+                        .lineSpacing(AppSpacing.textStack * textScale)
                         .textSelection(.enabled)
                 }
             }
-            .padding(14)
+            .padding(AppSpacing.sm)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(AppColor.cardBackground)
             .clipShape(RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous))
@@ -937,27 +899,27 @@ struct EventOverviewReaderView: View {
     // MARK: - Section 7: Original Publications
 
     private var originalPublicationsSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: AppSpacing.sm) {
             Text("Original publications")
-                .font(.system(size: 16 * textScale, weight: .bold))
+                .font(AppTypography.overviewFont(.subheading, scale: textScale))
                 .foregroundColor(AppColor.primaryText)
                 .accessibilityAddTraits(.isHeader)
                 .accessibilityHeading(.h2)
 
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: AppSpacing.xs) {
                 ForEach(memberArticles) { article in
                     if let url = URL(string: article.link) {
                         Button {
                             NSWorkspace.shared.open(url)
                         } label: {
-                            HStack(spacing: 8) {
+                            HStack(spacing: AppSpacing.xs) {
                                 Image(systemName: "arrow.up.forward.square")
-                                    .font(.system(size: 13))
+                                    .imageScale(.small)
                                     .foregroundColor(AppColor.accent)
                                     .accessibilityHidden(true)
 
                                 Text(article.publisherName)
-                                    .font(.system(size: 13 * textScale, weight: .semibold))
+                                    .font(AppTypography.overviewFont(.emphasis, scale: textScale))
                                     .foregroundColor(AppColor.primaryText)
 
                                 Text("—")
@@ -965,13 +927,13 @@ struct EventOverviewReaderView: View {
                                     .accessibilityHidden(true)
 
                                 Text(article.title)
-                                    .font(.system(size: 13 * textScale, weight: .regular))
+                                    .font(AppTypography.overviewFont(.detail, scale: textScale))
                                     .foregroundColor(currentSecondaryTextColor)
                                     .lineLimit(2)
                                     .fixedSize(horizontal: false, vertical: true)
                             }
-                            .padding(.vertical, 4)
-                            .padding(.horizontal, 6)
+                            .padding(.vertical, AppSpacing.xxs)
+                            .padding(.horizontal, AppSpacing.eyebrowGap)
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
@@ -982,6 +944,6 @@ struct EventOverviewReaderView: View {
                 }
             }
         }
-        .padding(.top, 8)
+        .padding(.top, AppSpacing.xs)
     }
 }
