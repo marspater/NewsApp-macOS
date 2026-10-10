@@ -107,7 +107,7 @@ struct MainView: View {
                 .environmentObject(appSettings)
         }
         .onReceive(NotificationCenter.default.publisher(for: .showNewsTensionCommand)) { _ in
-            showsTension = true
+            if NewsTensionRequest.take() { showsTension = true }
         }
         .task(id: tensionReloadKey) {
             guard appSettings.tensionCollectionOptIn, articleStore.isReady else {
@@ -130,6 +130,8 @@ struct MainView: View {
             if feedManager.articles.isEmpty {
                 feedManager.fetchFeeds()
             }
+            // A window Settings reopened missed the notification; the request is still pending.
+            if NewsTensionRequest.take() { showsTension = true }
         }
         .onDrop(of: [.fileURL], isTargeted: $isWindowDropTargeted) { providers in
             handleWindowOPMLDrop(providers: providers)

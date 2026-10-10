@@ -6,6 +6,24 @@ extension Notification.Name {
     static let showNewsTensionCommand = Notification.Name("showNewsTensionCommand")
 }
 
+/// A request from Settings to show the tension sheet. It is kept until a main window takes it, so a window that
+/// Settings has to reopen still shows the sheet once it appears.
+@MainActor
+enum NewsTensionRequest {
+    private(set) static var isPending = false
+
+    static func post() {
+        isPending = true
+        NotificationCenter.default.post(name: .showNewsTensionCommand, object: nil)
+    }
+
+    /// True once per request.
+    static func take() -> Bool {
+        defer { isPending = false }
+        return isPending
+    }
+}
+
 /// The news tension experiment (#159) as a modal sheet: the current reading as a temperature, what drives it and
 /// the 30-day trend. Gap days are shown as gaps, never as zero, and the series starts when panel collection began.
 struct TensionIndexView: View {

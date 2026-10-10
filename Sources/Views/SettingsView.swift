@@ -523,8 +523,8 @@ struct SettingsView: View {
                 .font(AppTypography.caption)
                 .foregroundColor(AppColor.secondaryText)
                 Button("Show News Tension…") {
+                    NewsTensionRequest.post()
                     openWindow(id: "main")
-                    NotificationCenter.default.post(name: .showNewsTensionCommand, object: nil)
                 }
             }
         }
