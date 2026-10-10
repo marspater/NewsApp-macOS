@@ -1,6 +1,6 @@
 # Design language adoption plan — 9 October 2026
 
-Status: implemented; acceptance of phases 2–4 is open (10 October 2026). Planned from `origin/main` at `4eaf39c`. Rules: [DESIGN.md](../DESIGN.md). Evidence and line references: [Apple News and Liquid Glass study](../audits/2026-10-09-apple-news-liquid-glass-study.md).
+Status: implemented and accepted (10 October 2026). Planned from `origin/main` at `4eaf39c`. Rules: [DESIGN.md](../DESIGN.md). Evidence and line references: [Apple News and Liquid Glass study](../audits/2026-10-09-apple-news-liquid-glass-study.md).
 
 ## Progress — 10 October 2026
 
@@ -9,9 +9,9 @@ Tracked in #350, with one issue per phase.
 | Phase | Issue | Merged PRs | Status |
 | --- | --- | --- | --- |
 | 1 Foundations and guardrails | #351 | #358 | Done |
-| 2 Native window chrome | #352 | #349, #359, #360, #367; acceptance fixes in #407 | In progress: macOS 15/26 runtime not run; Mars decides whether the small measured scroll-readback and peak-memory increases meet "no regression" |
-| 3 Sidebar, search and states | #353 | #361, #394–#396; sidebar focus fix in #407 | In progress: live checks pass except OPML drops and the feed-failure view, which were not exercised |
-| 4 Content consistency | #354 | #363, #398–#400; appearance fixes in #407 | In progress: lint at zero; the light, dark and emulated Increase Contrast matrix passes after the fixes |
+| 2 Native window chrome | #352 | #349, #359, #360, #367; acceptance fixes in #407 | Done: Mars accepted the small measured scroll-readback and peak-memory increases as no regression |
+| 3 Sidebar, search and states | #353 | #361, #394–#396; sidebar focus fix in #407 | Done: live checks pass; OPML drops and the feed-failure view are out of scope |
+| 4 Content consistency | #354 | #363, #398–#400; appearance fixes in #407 | Done: lint at zero; the light, dark and emulated Increase Contrast matrix passes after the fixes |
 | 5 Reader | #355 | #349, #402 | Done |
 | 6 Optional glass moments | #356 | #377–#379 | Done |
 | 7 Settings and secondary windows | #357 | #365, #366, #368 | Done |
