@@ -1,6 +1,22 @@
 # Design language adoption plan — 9 October 2026
 
-Status: proposed. Base: `origin/main` at `4eaf39c`. Rules: [DESIGN.md](../DESIGN.md). Evidence and line references: [Apple News and Liquid Glass study](../audits/2026-10-09-apple-news-liquid-glass-study.md).
+Status: implemented; acceptance of phases 2–4 is open (10 October 2026). Planned from `origin/main` at `4eaf39c`. Rules: [DESIGN.md](../DESIGN.md). Evidence and line references: [Apple News and Liquid Glass study](../audits/2026-10-09-apple-news-liquid-glass-study.md).
+
+## Progress — 10 October 2026
+
+Tracked in #350, with one issue per phase.
+
+| Phase | Issue | Merged PRs | Status |
+| --- | --- | --- | --- |
+| 1 Foundations and guardrails | #351 | #358 | Done |
+| 2 Native window chrome | #352 | #349, #359, #360, #367; acceptance fixes in #407 | In progress: macOS 15/26 runtime not run; Mars decides whether the small measured scroll-readback and peak-memory increases meet "no regression" |
+| 3 Sidebar, search and states | #353 | #361, #394–#396; sidebar focus fix in #407 | In progress: live checks pass except OPML drops and the feed-failure view, which were not exercised |
+| 4 Content consistency | #354 | #363, #398–#400; appearance fixes in #407 | In progress: lint at zero; the light, dark and emulated Increase Contrast matrix passes after the fixes |
+| 5 Reader | #355 | #349, #402 | Done |
+| 6 Optional glass moments | #356 | #377–#379 | Done |
+| 7 Settings and secondary windows | #357 | #365, #366, #368 | Done |
+
+Evidence: [window chrome](../audits/2026-10-10-native-window-chrome.md), [phase 3](../audits/2026-10-10-design-phase-3.md), [phase 4](../audits/2026-10-10-design-phase-4.md), [phase 5](../audits/2026-10-10-design-phase-5.md), [phase 6](../audits/2026-10-10-design-phase-6.md) and [phases 2–4 acceptance](../audits/2026-10-10-design-acceptance.md). CI compiles every phase for macOS 15, but no phase has run on macOS 15 or 26. The system Reduce Transparency and Reduce Motion settings, the glass slider and full-screen hover remain unverified.
 
 ## Goal and limits
 
@@ -8,9 +24,9 @@ Make News feel native on macOS 26 and 27 by using system Liquid Glass wherever i
 
 Out of scope: parked work (#264 non-English feeds, #268 live VoiceOver QA), new dependencies, notarization or Intel builds, a brand color, a new icon, and any change to ranking or story selection.
 
-## Decisions to confirm
+## Decisions
 
-The rules in DESIGN.md use the recommended option. Changing a decision changes the matching rule before its phase starts.
+Mars accepted every recommended option with the design sketch on 9 October 2026 (#350), and the rules in DESIGN.md use them. Changing a decision changes the matching rule before its phase starts.
 
 | ID | Decision | Recommended | Alternative | Phase |
 | --- | --- | --- | --- | --- |
