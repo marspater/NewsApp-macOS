@@ -40,7 +40,7 @@ struct OverviewPerspectivesDiagnosis: Sendable, Equatable, Codable {
     var passagesWithCandidates = 0
     /// Passages without a candidate that still contain a quotation mark or a speech verb.
     var passagesWithUnmatchedSpeech = 0
-    /// Passages using typographic quotation marks; the attribution patterns match straight quotes only.
+    /// Passages using typographic quotation marks.
     var passagesWithTypographicQuotes = 0
     var candidates = 0
     var vagueCandidates = 0
@@ -436,20 +436,29 @@ struct OverviewPerspectivesExtractor: Sendable {
 
     // Compiled once; matches keep pattern order.
     private static let attributions: [Attribution] = {
-        // Pattern 1: "[Quote]," (said|announced|stated|argued|warned|noted) [Participant].
-        let patternQuoteFirst =
-            #"\"([^\"]{10,250})\",?\s*(?:said|stated|announced|noted|argued|warned|confirmed|declared|emphasized|urged|reiterated|cautioned|explained)\s+([A-Z][A-Za-z0-9\s,\.\-]{2,60})"#
+        // Quote first, with either "said Participant" or "Participant said". Keep paired delimiters and
+        // capture the original statement: typographic punctuation must not rewrite the cited evidence.
+        let verbs =
+            #"(?:said|stated|announced|noted|argued|warned|confirmed|declared|emphasized|urged|reiterated|cautioned|explained)"#
+        let participant = #"([A-Z][A-Za-z0-9\s,\.\-]{2,60})"#
+        var quoted: [Attribution?] = []
+        for quote in [#"\"([^\"“”]{10,250})\""#, #"“([^\"“”]{10,250})”"#] {
+            let verbFirst = quote + #",?\s*"# + verbs + #"\s+"# + participant
+            let speakerFirst = quote + #",?\s*"# + participant + #"\s+"# + verbs + #"\b"#
+            quoted.append(Attribution(verbFirst, participantGroup: 2, statementGroup: 1, minimumLength: 0))
+            quoted.append(Attribution(speakerFirst, participantGroup: 2, statementGroup: 1, minimumLength: 0))
+        }
         // Pattern 2: [Participant] (said that|stated that|announced that|argued that|warned that|noted that|confirmed that) [Statement].
         let patternSpeakerFirst =
             #"([A-Z][A-Za-z0-9\s,\.\-]{2,60})\s+(?:said that|stated that|announced that|argued that|warned that|noted that|confirmed that|emphasized that|urged that)\s+([^\.\n]{15,200})"#
         // Pattern 3: According to [Participant], [Statement].
         let patternAccordingTo = #"According to\s+([A-Z][A-Za-z0-9\s,\.\-]{2,60}),\s+([^\.\n]{15,200})"#
 
-        return [
-            Attribution(patternQuoteFirst, participantGroup: 2, statementGroup: 1, minimumLength: 0),
-            Attribution(patternSpeakerFirst, participantGroup: 1, statementGroup: 2, minimumLength: 10),
-            Attribution(patternAccordingTo, participantGroup: 1, statementGroup: 2, minimumLength: 10),
-        ].compactMap { $0 }
+        return
+            (quoted + [
+                Attribution(patternSpeakerFirst, participantGroup: 1, statementGroup: 2, minimumLength: 10),
+                Attribution(patternAccordingTo, participantGroup: 1, statementGroup: 2, minimumLength: 10),
+            ]).compactMap { $0 }
     }()
 
     /// Extracts quotes and statements with attribution to participants.

@@ -121,6 +121,7 @@ def claims(record):
 
 def write_new_sheet(path, columns, rows):
     """Creates a private reviewer sheet; never replaces one that may already hold a reviewer's labels."""
+    require(len({row[columns[0]] for row in rows}) == len(rows), f'Duplicate {columns[0]} in review inputs')
     out = io.StringIO()
     writer = csv.DictWriter(out, columns, lineterminator='\n')
     writer.writeheader()
@@ -144,16 +145,21 @@ def label_sheet(path, columns, labels):
     return rows
 
 
+def review_rows(records):
+    return [{'claim': f"{index}:{fact['id']}", 'overview': index, 'section': section,
+             'publisher': citation.get('sourceName') or '', 'text': fact['text'], 'passage': passage, 'label': '', 'note': ''}
+            for index, record in accepted_records(records) for section, fact, citation, passage in claims(record)]
+
+
 def sheet(directory):
     directory = private_run(directory)
-    rows = [{'claim': f"{index}:{fact['id']}", 'overview': index, 'section': section,
-             'publisher': citation.get('sourceName') or '', 'text': fact['text'], 'passage': passage, 'label': '', 'note': ''}
-            for index, record in accepted_records(runs(directory)) for section, fact, citation, passage in claims(record)]
-    return write_new_sheet(directory / SHEET, COLUMNS, rows)
+    return write_new_sheet(directory / SHEET, COLUMNS, review_rows(runs(directory)))
 
 
 def read_sheet_labels(path, key_column, allowed, expected):
-    """Reviewer labels from a sheet whose rows are exactly `expected`; a sheet from another run is rejected."""
+    """Bind labels to the exact reviewed inputs; only labels, notes and row order may change."""
+    inputs = {row[key_column]: row for row in expected}
+    require(len(inputs) == len(expected), f'Duplicate {key_column} in review inputs')
     labels = {}
     with path.open(newline='') as sheet_file:
         for row in csv.DictReader(sheet_file):
@@ -161,13 +167,14 @@ def read_sheet_labels(path, key_column, allowed, expected):
             label = (row.get('label') or '').strip().lower()
             require(label in ('',) + tuple(allowed), f'Unknown label {label!r} for {key_column} {key}')
             require(key not in labels, f'Duplicate {key_column} {key}')
+            require(key in inputs, f'{path.name} has an unknown {key_column}; rebuild it in a new private directory')
+            for column, value in inputs[key].items():
+                if column not in ('label', 'note'):
+                    require(row.get(column) == value, f'{path.name} has changed {column} for {key_column} {key}; '
+                            'rebuild it in a new private directory')
             labels[key] = label or None
-    require(set(labels) == set(expected), f'{path.name} does not list exactly the {key_column}s of this run; rebuild it')
+    require(set(labels) == set(inputs), f'{path.name} does not list exactly the {key_column}s of this run; rebuild it')
     return labels
-
-
-def claim_keys(records):
-    return {f"{index}:{fact['id']}" for index, record in accepted_records(records) for _, fact, _, _ in claims(record)}
 
 
 def accepted_records(records):
@@ -255,7 +262,7 @@ def report(directory):
     directory = private_run(directory)
     records = runs(directory)
     sheet_path = directory / SHEET
-    labels = read_sheet_labels(sheet_path, 'claim', LABELS, claim_keys(records)) if sheet_path.exists() else {}
+    labels = read_sheet_labels(sheet_path, 'claim', LABELS, review_rows(records)) if sheet_path.exists() else {}
     overviews, latency = overview_metrics(records)
     claims_report, verbatim, repetition = claim_metrics(records, labels)
     target = (run_json(directory, 'overviews.json') or {}).get('target', DEFAULT_TARGET)
@@ -309,6 +316,29 @@ def check_measures():
     require(math.isclose(jaccard('The bridge reopened on Monday.', 'The bridge reopened Monday after repairs.'), 0.6), 'Content-word Jaccard')
 
 
+def check_input_binding(directory):
+    path = directory / 'binding.csv'
+    expected = review_rows([('1', fixture_record('accepted', 4.0))])
+    edited = [dict(row, label='supported', note='Reviewer note') for row in reversed(expected)]
+    write_new_sheet(path, COLUMNS, edited)
+    require(all(read_sheet_labels(path, 'claim', LABELS, expected).values()), 'Notes and row order may change')
+    original = path.read_text()
+    for column in COLUMNS[:-2]:
+        changed = [dict(row) for row in edited]
+        changed[0][column] += ' changed'
+        path.unlink()
+        write_new_sheet(path, COLUMNS, changed)
+        expect_rejected(lambda: read_sheet_labels(path, 'claim', LABELS, expected), ValueError,
+                        f'Changed {column} accepted')
+    path.write_text(original)
+    expect_rejected(lambda: read_sheet_labels(path, 'claim', LABELS, expected + expected[:1]), ValueError,
+                    'Duplicate input claims accepted')
+    path.unlink()
+    expect_rejected(lambda: write_new_sheet(path, COLUMNS, expected + expected[:1]), ValueError,
+                    'Duplicate input claims written')
+    require(not path.exists(), 'Invalid inputs must not create a sheet')
+
+
 def check_sheet(directory):
     for index, item in enumerate([fixture_record('accepted', 4.0), fixture_record('weakDraft', 6.0), fixture_record(None, 1.0, 'refusal')], 1):
         (directory / f'overview-private-live-{index}.json').write_text(json.dumps(item))
@@ -351,6 +381,14 @@ def check_report(directory):
     require(report(directory)['decisionInputs']['acceptedTargetMet'], 'The run summary sets the target')
     public = (directory / REPORT).read_text()
     require('bridge' not in public.lower() and 'Publisher A' not in public, 'Report must not carry publisher or model text')
+    source = directory / 'overview-private-live-1.json'
+    original = source.read_text()
+    changed = json.loads(original)
+    changed['document']['evidenceSections']['introduction'][0]['text'] = 'Changed claim, same ID.'
+    source.write_text(json.dumps(changed))
+    expect_rejected(lambda: report(directory), ValueError, 'Changed claim inherited an old label')
+    require((directory / REPORT).read_text() == public, 'Rejected inputs replaced the last report')
+    source.write_text(original)
     (directory / SHEET).write_text('claim,label\n1:model_claim_0,supported\n')
     expect_rejected(lambda: report(directory), ValueError, 'A sheet missing claims was accepted')
     (directory / SHEET).write_text('claim,label\n1:model_claim_0,maybe\n')
@@ -361,6 +399,7 @@ def self_check():
     check_measures()
     with tempfile.TemporaryDirectory() as temporary:
         directory = pathlib.Path(temporary)
+        check_input_binding(directory)
         check_sheet(directory)
         check_report(directory)
     print('Overview review self-check passed')
