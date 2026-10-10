@@ -54,6 +54,8 @@ NEWS_LIVE_CATALOG_CHECK=1 ./test.sh # Optional: fetch every catalog feed through
 
 Add deterministic regressions for changed parsing, classification, persistence, migrations, security boundaries and state transitions. Synchronize async tests on observable state rather than short sleeps; model-dependent tests must use deterministic fallbacks. Preserve tests rather than removing failing coverage. Keep tests isolated from real user settings, databases and logs.
 
+The overview and importance reviewer sheets bind labels to the exact displayed inputs. Only `label`, `note` and row order may change. If a source capture or an input column changes, the report command rejects the sheet before writing aggregates. Keep the old capture and labels; prepare and review the changed capture in a new private directory. Sheets are never overwritten by the preparation command.
+
 HTTP mock fixtures use the test client's controlled DNS results as well as `URLProtocol` responses; they must not depend on public DNS availability. Production clients keep the native resolver, and real socket/proxy tests retain their connection and pinning checks.
 
 For app changes, build in an isolated staging directory: `build.sh` replaces `News.app` in its working directory. A successful build is not evidence of installation, launch or live network behavior; report those checks separately. Validate `build_release.sh` and affected packaging scripts for distribution changes, without invoking notarization in development. Documentation-only edits require link/path and consistency checks, not an unrelated app rebuild.

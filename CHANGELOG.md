@@ -55,6 +55,8 @@
 
 ### Fixed
 
+- Overview and importance evaluation reports reject reviewer sheets whose claim text, evidence, headline, summary or publisher changed despite retaining the same IDs. Labels remain editable, while stale sheets leave the last aggregate report intact (#308, #309).
+
 - The migration regression clears its temporary preferences domain by its suite name, and the test script removes only that run’s UUID-named plist after the runner exits (#311).
 
 - While tension collection is on, waiting minor stories from panel feeds are no longer deleted after a day, so past tension days keep the stories they were built from (#310). They stay hidden from the reading views as before.
