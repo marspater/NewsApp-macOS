@@ -8839,6 +8839,27 @@ struct NewsTests {
         assertEqual(await queue.state(for: articleC.id), .completed, "Superseding the backlog keeps finished work")
         await queue.enqueue(article: articleC, priority: .background)
         assertEqual(await queue.state(for: articleC.id), .completed, "A finished article is not classified again")
+
+        // 6. Batch enqueue articles in a single operation
+        let batchArticles = (0..<10).map { i in
+            FeedArticle(
+                title: "Batch Story \(i)",
+                link: "https://example.com/batch-\(i)",
+                guid: "batch-\(i)",
+                description: "Batch description \(i)",
+                pubDate: Date(),
+                source: "BatchNews"
+            )
+        }
+        await queue.cancelAll(reason: .superseded)
+        await queue.enqueue(articles: batchArticles, priority: .background, allowHTTP: false)
+        for article in batchArticles {
+            let state = await queue.state(for: article.id)
+            assertTrue(state != nil, "Batch enqueued article \(article.id) should exist in queue")
+        }
+
+        // Empty snapshot handling does not crash or create jobs
+        await queue.enqueue(articles: [], priority: .background, allowHTTP: false)
     }
 
     static func testDesignSystemAndArticleFilter() async {
