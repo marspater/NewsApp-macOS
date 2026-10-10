@@ -23,7 +23,9 @@ enum OverviewRequestPriority: Sendable, Comparable {
 /// caching, cooperative cancellation, staleness checks, and version supersession.
 /// Reuses the existing `EnrichmentQueue` to respect bounded concurrency and system resources.
 actor OverviewGenerationCoordinator {
-    static let shared = OverviewGenerationCoordinator()
+    static let shared = OverviewGenerationCoordinator(extractText: { link in
+        await ContentExtractionPipeline.shared.extractArticleWithIdentity(from: link).outcome
+    })
     private let logger = Logger(subsystem: "com.marspater.news", category: "OverviewCoordinator")
 
     /// A running generation and the inputs it was started from.
@@ -48,6 +50,19 @@ actor OverviewGenerationCoordinator {
     private let textModel: NewsTextModel
     private let allowsModel: @Sendable () async -> Bool
 
+    /// Publisher text for an overview's representatives (#308). Nil keeps the stored text only, as in tests.
+    nonisolated let extractText: (@Sendable (_ link: String) async -> ExtractionOutcome)?
+    /// Each page fetch ends by this deadline, counted from when it starts, so a slow publisher cannot hold up an overview.
+    nonisolated let extractionDeadline: Duration
+    static let maxEvidenceFetches = 4
+    static let maxConcurrentExtractions = 2
+    /// Running page fetches by article ID; overlapping requests join them instead of fetching again.
+    private var extractionTasks: [String: Task<Void, Never>] = [:]
+    /// Article ID plus publisher input of fetches that failed or timed out; not retried this session.
+    // ponytail: grows with articles seen in one session; prune by age if sessions get long.
+    private var failedExtractions: Set<String> = []
+    private var activeExtractions = 0
+
     init(
         store: ArticleStore? = nil, queue: EnrichmentQueue = .shared,
         textModel: NewsTextModel = .onDevice,
@@ -56,12 +71,16 @@ actor OverviewGenerationCoordinator {
             let info = ProcessInfo.processInfo
             return enabled && !info.isLowPowerModeEnabled
                 && info.thermalState.rawValue < ProcessInfo.ThermalState.serious.rawValue
-        }
+        },
+        extractText: (@Sendable (_ link: String) async -> ExtractionOutcome)? = nil,
+        extractionDeadline: Duration = .seconds(4)
     ) {
         self.store = store
         self.queue = queue
         self.textModel = textModel
         self.allowsModel = allowsModel
+        self.extractText = extractText
+        self.extractionDeadline = extractionDeadline
     }
 
     // MARK: - On-Demand & Visible Event Requests
@@ -75,11 +94,28 @@ actor OverviewGenerationCoordinator {
         membershipVersion: Int,
         articles: [FeedArticle],
         priority: OverviewRequestPriority = .onDemand,
-        store: ArticleStore? = nil
+        store: ArticleStore? = nil,
+        excludingFromExtraction excluded: Set<String> = []
     ) async -> EventOverviewDocument? {
         guard !Task.isCancelled else { return nil }
         let modelAllowed = await allowsModel()
         let model = textModel
+        guard !Task.isCancelled else { return nil }
+
+        let targetStore: ArticleStore
+        if let store {
+            targetStore = store
+        } else if let selfStore = self.store {
+            targetStore = selfStore
+        } else {
+            targetStore = await ArticleStore.shared
+        }
+        let multiSource = Set(articles.map { $0.source.lowercased() }).count > 1
+        // Publisher text first: storing it changes the articles' inputs, so the inputs, cache key and
+        // expected article versions below are all taken from the reloaded articles.
+        let articles =
+            modelAllowed && multiSource
+            ? await articlesWithPublisherText(articles, excluding: excluded, store: targetStore) : articles
         guard !Task.isCancelled else { return nil }
         // Storage rejects the result if any article's publisher input changed while it was generated.
         let expectedArticleInputs = Dictionary(
@@ -93,15 +129,6 @@ actor OverviewGenerationCoordinator {
         let sortedFingerprints = selection.passages.map { $0.fingerprint }.sorted().joined(separator: ":")
         let inputTextHash = ArticleIdentity.sha256Hex(sortedFingerprints.isEmpty ? eventTitle : sortedFingerprints)
         latestRequestedInputs[eventID] = (membershipVersion, inputTextHash)
-
-        let targetStore: ArticleStore
-        if let store {
-            targetStore = store
-        } else if let selfStore = self.store {
-            targetStore = selfStore
-        } else {
-            targetStore = await ArticleStore.shared
-        }
 
         // Persistent storage is authoritative: publisher-input changes atomically remove old overviews.
         if let stored = try? await targetStore.fetchEventOverview(eventID: eventID),
@@ -133,7 +160,6 @@ actor OverviewGenerationCoordinator {
         }
 
         let passages = selection.passages
-        let multiSource = Set(articles.map { $0.source.lowercased() }).count > 1
 
         // 4. Reuse EnrichmentQueue to schedule generation under bounded concurrency
         let task = Task<EventOverviewDocument?, Never> { [weak self] in
@@ -216,6 +242,104 @@ actor OverviewGenerationCoordinator {
             content: overview.content, provenance: overview.provenance)
     }
 
+    // MARK: - Publisher Text for Overview Evidence (#308)
+
+    /// Stores publisher text for up to four representatives that have none and returns the articles as stored
+    /// afterwards. Every fetch ends by its deadline; failed ones keep the feed summary. A cancelled caller stops
+    /// waiting at once, while shared fetches finish by their own deadlines for the requests that joined them.
+    func articlesWithPublisherText(
+        _ articles: [FeedArticle], excluding excluded: Set<String>, store: ArticleStore
+    ) async -> [FeedArticle] {
+        guard extractText != nil else { return articles }
+        let candidates = Set(
+            OverviewRepresentativeSelector().selectRepresentatives(from: articles).map(\.id).filter {
+                !excluded.contains($0)
+            })
+        // Callers may hold copies from before an earlier extraction; storage has the current text and inputs.
+        let current = await Self.reloaded(articles, ids: candidates, store: store)
+        let missing = current.filter {
+            candidates.contains($0.id) && !Self.hasPublisherText($0)
+                && !failedExtractions.contains($0.id + $0.publisherInputHash)
+        }.prefix(Self.maxEvidenceFetches)
+        guard !missing.isEmpty else { return current }
+        for article in missing { startExtraction(of: article, store: store) }
+        while !Task.isCancelled, missing.contains(where: { extractionTasks[$0.id] != nil }) {
+            try? await Task.sleep(for: .milliseconds(50))
+        }
+        guard !Task.isCancelled else { return articles }
+        return await Self.reloaded(current, ids: Set(missing.map(\.id)), store: store)
+    }
+
+    private static func reloaded(_ articles: [FeedArticle], ids: Set<String>, store: ArticleStore) async
+        -> [FeedArticle]
+    {
+        var current = articles
+        for (index, article) in articles.enumerated() where ids.contains(article.id) {
+            if let stored = try? await store.database.fetchArticles(limit: 1, id: article.id).first {
+                current[index] = stored
+            }
+        }
+        return current
+    }
+
+    /// Already extracted, reader text, or feed content long enough to stand in for it.
+    static func hasPublisherText(_ article: FeedArticle) -> Bool {
+        article.contentFetched || article.readerDocument?.hasPublisherText == true
+            || (article.fullContent?.count ?? 0) >= 600
+    }
+
+    /// Starts a fetch that stores accepted text and finishes by the deadline, unless one is already running.
+    private func startExtraction(of article: FeedArticle, store: ArticleStore) {
+        guard extractionTasks[article.id] == nil else { return }
+        let deadline = extractionDeadline
+        let task = Task {
+            let stored = await withTaskGroup(of: Bool?.self) { group in
+                group.addTask { await self.extractAndStore(article, store: store) }
+                group.addTask {
+                    try? await Task.sleep(for: deadline)
+                    return nil
+                }
+                let first = await group.next() ?? nil
+                group.cancelAll()
+                return first ?? false
+            }
+            await self.finishExtraction(article, stored: stored)
+        }
+        extractionTasks[article.id] = task
+    }
+
+    /// Fetches the page and stores its text only if extraction passed its quality checks, the fetch was not cut off
+    /// by the deadline, and the publisher input is unchanged.
+    private nonisolated func extractAndStore(_ article: FeedArticle, store: ArticleStore) async -> Bool {
+        guard let extractText, await acquireExtractionSlot() else { return false }
+        let outcome = await extractText(article.link)
+        await releaseExtractionSlot()
+        guard !Task.isCancelled, case .success(let content, _, _) = outcome,
+            content.count > article.description.count, !ArticleContentRedactor.redactAndSplit(content).isEmpty
+        else { return false }
+        return await store.updateEnrichment(
+            id: article.id, content: content, expectedInputHash: article.publisherInputHash)
+    }
+
+    /// Waits for one of the shared extraction slots; false if cancelled while waiting.
+    private func acquireExtractionSlot() async -> Bool {
+        while activeExtractions >= Self.maxConcurrentExtractions {
+            try? await Task.sleep(for: .milliseconds(50))
+            if Task.isCancelled { return false }
+        }
+        activeExtractions += 1
+        return true
+    }
+
+    private func releaseExtractionSlot() {
+        activeExtractions -= 1
+    }
+
+    private func finishExtraction(_ article: FeedArticle, stored: Bool) {
+        extractionTasks[article.id] = nil
+        if !stored { failedExtractions.insert(article.id + article.publisherInputHash) }
+    }
+
     /// Returns false when the result was built from superseded inputs, or storage rejected it, and must not reach the caller.
     private func commitGeneratedOverview(
         _ document: EventOverviewDocument,
@@ -289,7 +413,8 @@ actor OverviewGenerationCoordinator {
         membershipVersion: Int? = nil,
         articles: [FeedArticle]? = nil,
         store: ArticleStore? = nil,
-        owner: UUID? = nil
+        owner: UUID? = nil,
+        readerArticleID: String? = nil
     ) async -> EventOverviewDocument? {
         guard !Task.isCancelled else { return nil }
         let previous = currentVisibleEventID
@@ -314,7 +439,9 @@ actor OverviewGenerationCoordinator {
                 membershipVersion: version,
                 articles: arts,
                 priority: .visibleEvent,
-                store: store
+                store: store,
+                // The reader extracts its own article; fetching it here too would request the page twice.
+                excludingFromExtraction: Set([readerArticleID].compactMap { $0 })
             )
         }
         return nil
