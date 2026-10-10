@@ -27,6 +27,9 @@ struct SidebarView: View {
     @State private var isSubscribePopoverPresented = false
     @State private var newFeedURL: String = ""
     @State private var isDropTargeted = false
+    /// On macOS 27 a row click does not keep keyboard focus in the sidebar once the window title and toolbar
+    /// search update for the new section, so arrow keys reached the story list instead.
+    @FocusState private var isListFocused: Bool
 
     private let suggestedTopics: [(String, String)] = [
         ("Entertainment", "tv"), ("Science", "atom"),
@@ -43,6 +46,8 @@ struct SidebarView: View {
                 set: { newTopic in
                     if let newTopic = newTopic {
                         selectedTopic = newTopic
+                        // Only clicks and arrow keys in the list reach this setter; ⌘1–⌘4 leave focus alone.
+                        isListFocused = true
                     }
                 }
             )
@@ -52,6 +57,7 @@ struct SidebarView: View {
             userSectionsSection
             suggestedSection
         }
+        .focused($isListFocused)
         .focusedSceneValue(\.addFeedSubscription, { isSubscribePopoverPresented = true })
         .listStyle(.sidebar)
         .scrollContentBackground(.visible)
