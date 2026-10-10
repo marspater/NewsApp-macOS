@@ -1795,47 +1795,19 @@ actor DatabaseEngine {
 
     // MARK: - Article Queries
 
-    func fetchArticles(
-        section: String? = nil,
-        isRead: Bool? = nil,
-        isSaved: Bool? = nil,
-        limit: Int? = 500,
-        after: ArticleQueryCursor? = nil,
-        id: String? = nil,
-        canonicalURL: String? = nil,
-        eventID: String? = nil,
-        includingOriginals: Bool = false,
-        publicationWindow: ClosedRange<Date>? = nil,
-        muting: MuteRules = MuteRules(),
-        hidingWaitingStories: Bool = false
-    ) throws -> [FeedArticle] {
+    private func executeQueryArticles(sql: String, params: [QueryParameter], prepareErrorMessage: String) throws
+        -> [FeedArticle]
+    {
         guard let db = db else {
             throw NSError(
                 domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Database not open"])
         }
-
-        let criteria = FetchCriteria(
-            section: section,
-            isRead: isRead,
-            isSaved: isSaved,
-            limit: limit,
-            after: after,
-            id: id,
-            canonicalURL: canonicalURL,
-            eventID: eventID,
-            includingOriginals: includingOriginals,
-            publicationWindow: publicationWindow,
-            muting: muting,
-            hidingWaitingStories: hidingWaitingStories
-        )
-        let (query, params) = try buildFetchArticlesQuery(criteria: criteria)
-
         var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, query, -1, &stmt, nil) == SQLITE_OK else {
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
             let msg = String(cString: sqlite3_errmsg(db))
             throw NSError(
                 domain: "DatabaseEngine", code: -1,
-                userInfo: [NSLocalizedDescriptionKey: "Failed to prepare fetch query: \(msg)"])
+                userInfo: [NSLocalizedDescriptionKey: "\(prepareErrorMessage): \(msg)"])
         }
         defer { sqlite3_finalize(stmt) }
 
@@ -1856,7 +1828,40 @@ actor DatabaseEngine {
                 domain: "DatabaseEngine", code: Int(status),
                 userInfo: [NSLocalizedDescriptionKey: String(cString: sqlite3_errmsg(db))])
         }
+        return results
+    }
 
+    func fetchArticles(
+        section: String? = nil,
+        isRead: Bool? = nil,
+        isSaved: Bool? = nil,
+        limit: Int? = 500,
+        after: ArticleQueryCursor? = nil,
+        id: String? = nil,
+        canonicalURL: String? = nil,
+        eventID: String? = nil,
+        includingOriginals: Bool = false,
+        publicationWindow: ClosedRange<Date>? = nil,
+        muting: MuteRules = MuteRules(),
+        hidingWaitingStories: Bool = false
+    ) throws -> [FeedArticle] {
+        let criteria = FetchCriteria(
+            section: section,
+            isRead: isRead,
+            isSaved: isSaved,
+            limit: limit,
+            after: after,
+            id: id,
+            canonicalURL: canonicalURL,
+            eventID: eventID,
+            includingOriginals: includingOriginals,
+            publicationWindow: publicationWindow,
+            muting: muting,
+            hidingWaitingStories: hidingWaitingStories
+        )
+        let (query, params) = try buildFetchArticlesQuery(criteria: criteria)
+        let results = try executeQueryArticles(
+            sql: query, params: params, prepareErrorMessage: "Failed to prepare fetch query")
         return includingOriginals ? results : try curateImages(in: results)
     }
 
@@ -1923,33 +1928,8 @@ actor DatabaseEngine {
 
         let parsed = ArticleFilterQuery.parse(trimmed)
         let (sql, params) = buildSearchQuery(parsed: parsed, muting: muting, after: after, limit: limit)
-
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
-            let msg = String(cString: sqlite3_errmsg(db))
-            throw NSError(
-                domain: "DatabaseEngine", code: -1,
-                userInfo: [NSLocalizedDescriptionKey: "Failed to prepare FTS search query: \(msg)"])
-        }
-        defer { sqlite3_finalize(stmt) }
-
-        bind(params, to: stmt)
-
-        var results: [FeedArticle] = []
-        var status = sqlite3_step(stmt)
-        while status == SQLITE_ROW {
-            try Task.checkCancellation()
-            if var article = parseArticleRow(stmt) {
-                article.queryOrderValue = sqlite3_column_double(stmt, 18)
-                results.append(article)
-            }
-            status = sqlite3_step(stmt)
-        }
-        guard status == SQLITE_DONE else {
-            throw NSError(
-                domain: "DatabaseEngine", code: Int(status),
-                userInfo: [NSLocalizedDescriptionKey: String(cString: sqlite3_errmsg(db))])
-        }
+        let results = try executeQueryArticles(
+            sql: sql, params: params, prepareErrorMessage: "Failed to prepare FTS search query")
         return try curateImages(in: results)
     }
 

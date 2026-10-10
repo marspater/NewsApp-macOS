@@ -5412,6 +5412,33 @@ struct NewsTests {
             try await db.batchMarkSaved([art2.id, art3.id])
             assertTrue(try await db.isSaved(articleId: art2.id), "art2 should be marked saved via batch")
             assertTrue(try await db.isSaved(articleId: art3.id), "art3 should be marked saved via batch")
+
+            // Verify closed database contract
+            let closedDB = DatabaseEngine(path: ":memory:")
+            do {
+                _ = try await closedDB.searchArticles(query: "")
+                assertTrue(false, "searchArticles on closed db with empty query must throw")
+            } catch {
+                assertTrue(
+                    error.localizedDescription.contains("Database not open"),
+                    "Empty search throws Database not open on closed db")
+            }
+            do {
+                _ = try await closedDB.searchArticles(query: "search term")
+                assertTrue(false, "searchArticles on closed db with non-empty query must throw")
+            } catch {
+                assertTrue(
+                    error.localizedDescription.contains("Database not open"),
+                    "Non-empty search throws Database not open on closed db")
+            }
+            do {
+                _ = try await closedDB.fetchArticles()
+                assertTrue(false, "fetchArticles on closed db must throw")
+            } catch {
+                assertTrue(
+                    error.localizedDescription.contains("Database not open"),
+                    "fetchArticles throws Database not open on closed db")
+            }
         } catch {
             print("❌ DatabaseEngine test failed: \(error.localizedDescription)")
             exit(1)
