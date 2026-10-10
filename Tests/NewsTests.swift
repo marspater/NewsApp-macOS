@@ -1,5 +1,6 @@
 // NewsTests.swift
 
+import CryptoKit
 import Darwin
 import Foundation
 import ImageIO
@@ -7152,6 +7153,82 @@ struct NewsTests {
         try encoder.encode(coverage).write(to: directory.appendingPathComponent("perspectives.json"))
         print("OVERVIEW_REPORT \(String(decoding: try encoder.encode(report), as: UTF8.self))")
         print("PERSPECTIVE_COVERAGE \(String(decoding: try encoder.encode(coverage), as: UTF8.self))")
+
+        // Automatically record synchronous run receipt and provenance (#308/#313).
+        let captureDate = Date()
+        let isoFormatter = ISO8601DateFormatter()
+        isoFormatter.timeZone = TimeZone(secondsFromGMT: 0)
+        let captureTimeUTC = isoFormatter.string(from: captureDate)
+
+        func runGitCommand(_ arguments: [String]) -> String? {
+            let proc = Process()
+            proc.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+            proc.arguments = arguments
+            let pipe = Pipe()
+            proc.standardOutput = pipe
+            proc.standardError = Pipe()
+            do {
+                try proc.run()
+                proc.waitUntilExit()
+                guard proc.terminationStatus == 0 else { return nil }
+                let data = pipe.fileHandleForReading.readDataToEndOfFile()
+                return String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+            } catch {
+                return nil
+            }
+        }
+
+        func fileSHA256(_ fileURL: URL) -> String? {
+            guard let data = try? Data(contentsOf: fileURL) else { return nil }
+            return SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+        }
+
+        let gitCommit = runGitCommand(["rev-parse", "HEAD"]) ?? "unknown"
+        let gitBranch = runGitCommand(["rev-parse", "--abbrev-ref", "HEAD"]) ?? "unknown"
+        let gitStatus = runGitCommand(["status", "--porcelain"]) ?? ""
+        let dirtyFingerprint =
+            gitStatus.isEmpty ? "clean" : "dirty (\(gitStatus.split(separator: "\n").count) uncommitted changes)"
+
+        let activeDates = active.map(\.pubDate)
+        let windowStartUTC = activeDates.min().map { isoFormatter.string(from: $0) } ?? "unknown"
+        let windowEndUTC = activeDates.max().map { isoFormatter.string(from: $0) } ?? "unknown"
+
+        var outputFiles: [String: [String: Any]] = [:]
+        if let enumerator = FileManager.default.enumerator(at: directory, includingPropertiesForKeys: nil) {
+            for case let fileURL as URL in enumerator {
+                guard !fileURL.hasDirectoryPath, fileURL.lastPathComponent != "receipt.json" else { continue }
+                if let hash = fileSHA256(fileURL) {
+                    outputFiles[fileURL.lastPathComponent] = [
+                        "sha256": hash
+                    ]
+                }
+            }
+        }
+
+        let receipt: [String: Any] = [
+            "run": environment["NEWS_OVERVIEWS_RUN_NAME"] ?? "live-overview-measurement",
+            "issue": 308,
+            "receiptType": "live",
+            "captureTimeUTC": captureTimeUTC,
+            "gitCommit": gitCommit,
+            "gitBranch": gitBranch,
+            "dirtyCodeFingerprint": dirtyFingerprint,
+            "windowBoundsUTC": [
+                "start": windowStartUTC,
+                "end": windowEndUTC,
+            ],
+            "library": [
+                "path": url.path,
+                "sha256": fileSHA256(url) ?? "unknown",
+                "articleCount": active.count,
+                "multiSourceActiveEvents": events.count,
+            ],
+            "outputs": outputFiles,
+        ]
+
+        let receiptData = try JSONSerialization.data(withJSONObject: receipt, options: [.prettyPrinted, .sortedKeys])
+        try receiptData.write(to: directory.appendingPathComponent("receipt.json"))
+        print("LIVE_RUN_RECEIPT \(String(decoding: receiptData, as: UTF8.self))")
         await db.close()
     }
 
@@ -14491,6 +14568,169 @@ struct NewsTests {
         assertTrue(
             flagged(failures("The governor said the work will go on."), negation: false),
             "A speaker absent from the passage is still flagged")
+
+        // 5e. Detached quotations (#308): unframed questions and unattributed first-person quotes.
+        let quotePassage = EvidencePassage(
+            id: "pass-quote", articleID: "art-gamma",
+            text:
+                "At the Nova site, Katia Zohar, whose daughter Bar Zohar was killed at age 23, called the start of the attack at 6:29am (0329 GMT) \"the minute that changed our lives forever\".",
+            ordinal: 2)
+        let pikePassage = EvidencePassage(
+            id: "pass-pike", articleID: "art-gamma",
+            text:
+                "‘Where am I and who are you?’ Those were the first words death row inmate Christa Pike spoke after regaining consciousness, according to her lawyer.",
+            ordinal: 3)
+        func checkClaim(_ statement: String, passage: EvidencePassage) -> (
+            failures: [ClaimVerificationFailureReason], audit: ClaimAuditResult
+        ) {
+            let fact = PassageAnchoredFact(
+                id: "f-chk", statement: statement, passageID: passage.id, quote: passage.text, articleID: "art-gamma")
+            let overview = OverviewComposer.composeOverview(
+                eventID: "event-chk", eventTitle: "Quote test", verifiedFacts: [fact],
+                passages: [passage], articles: articles)
+            let f = OverviewClaimVerifier.verifyOverview(overview, passages: [passage], articles: articles)
+                .allFailureReasons
+            let of = OverviewFact(id: "f-chk", text: statement, citationIDs: [passage.id])
+            let cite = OverviewCitation(
+                id: passage.id, articleID: passage.articleID, passageID: passage.id,
+                passageFingerprint: passage.fingerprint, quote: passage.text)
+            let a = OverviewQualityAuditor.auditClaim(of, citations: [passage.id: cite], passages: [passage])
+            return (f, a)
+        }
+
+        let detached1 = checkClaim(
+            "the start of the attack at 6:29am (0329 GMT) \"the minute that changed our lives forever\"",
+            passage: quotePassage)
+        assertTrue(
+            detached1.failures.contains(where: {
+                if case .detachedQuotation = $0 { return true }
+                return false
+            }), "Detached first-person quote without attributing speaker is flagged by verifier")
+        assertEqual(
+            detached1.audit.criticalErrorKind, .attributionError,
+            "Detached first-person quote is flagged as critical attribution error by auditor")
+
+        let detached2 = checkClaim("‘Where am I and who are you?’", passage: pikePassage)
+        assertTrue(
+            detached2.failures.contains(where: {
+                if case .detachedQuotation = $0 { return true }
+                return false
+            }), "Standalone unframed dialogue/question quote is flagged by verifier")
+        assertEqual(
+            detached2.audit.criticalErrorKind, .attributionError,
+            "Standalone quote is flagged as critical attribution error by auditor")
+
+        let validQuote1 = checkClaim(
+            "Katia Zohar called the start of the attack at 6:29am \"the minute that changed our lives forever\".",
+            passage: quotePassage)
+        assertFalse(
+            validQuote1.failures.contains(where: {
+                if case .detachedQuotation = $0 { return true }
+                return false
+            }), "Attributed quote with speaker is not flagged as detached quote")
+        assertEqual(validQuote1.audit.status, .supported, "Attributed quote with speaker is supported by auditor")
+
+        // 5f. Dropped speaker attribution (#308): motives, military claims, and contested positions.
+        let motivePassage = EvidencePassage(
+            id: "pass-motive", articleID: "art-gamma",
+            text:
+                "Israeli Foreign Minister Gideon Saar said Thursday's move to downsize the U.K. presence had followed a dialogue with the British government in order to avoid an escalation of tensions between the two countries.",
+            ordinal: 4)
+        let droppedMotive = checkClaim(
+            "The move to downsize the U.K. presence had followed a dialogue with the British government in order to avoid an escalation of tensions between the two countries.",
+            passage: motivePassage)
+        assertTrue(
+            droppedMotive.failures.contains(where: {
+                if case .droppedAttribution = $0 { return true }
+                return false
+            }), "Dropping speaker attribution on diplomatic motive is flagged by verifier")
+        assertEqual(
+            droppedMotive.audit.criticalErrorKind, .attributionError,
+            "Dropping speaker on motive is flagged as critical attribution error")
+
+        let validMotive = checkClaim(
+            "Israeli Foreign Minister Gideon Saar said Thursday's move had followed a dialogue with the British government in order to avoid an escalation of tensions between the two countries.",
+            passage: motivePassage)
+        assertFalse(
+            validMotive.failures.contains(where: {
+                if case .droppedAttribution = $0 { return true }
+                return false
+            }), "Preserving speaker on motive passes verifier")
+        assertEqual(validMotive.audit.status, .supported, "Preserving speaker on motive is supported by auditor")
+
+        let militaryPassage = EvidencePassage(
+            id: "pass-mil", articleID: "art-gamma",
+            text:
+                "The spokesperson for the Saudi-led coalition fighting the Houthis, Major General Turki al-Malki, said forces intercepted a ballistic missile north of Riyadh and destroyed a platform in Yemen's capital of Sana.",
+            ordinal: 5)
+        let droppedMil = checkClaim(
+            "forces intercepted a ballistic missile north of Riyadh and destroyed a platform in Yemen's capital of Sana.",
+            passage: militaryPassage)
+        assertTrue(
+            droppedMil.failures.contains(where: {
+                if case .droppedAttribution = $0 { return true }
+                return false
+            }), "Dropping coalition spokesperson on military interception is flagged by verifier")
+        assertEqual(
+            droppedMil.audit.criticalErrorKind, .attributionError,
+            "Dropping spokesperson on military claim is critical error in auditor")
+
+        let validMil = checkClaim(
+            "Coalition spokesman Major General Turki al-Malki said forces intercepted a ballistic missile north of Riyadh and destroyed a platform in Yemen's capital of Sana.",
+            passage: militaryPassage)
+        assertFalse(
+            validMil.failures.contains(where: {
+                if case .droppedAttribution = $0 { return true }
+                return false
+            }), "Retaining coalition spokesperson passes verifier")
+        assertEqual(validMil.audit.status, .supported, "Retaining coalition spokesperson is supported by auditor")
+
+        // 5g. Citation grounding & selection mismatches (#308)
+        let consulatePassage = EvidencePassage(
+            id: "pass-consulate", articleID: "art-gamma",
+            text:
+                "The consulate is separate from the UK embassy, based in Tel Aviv, and has a distinct diplomatic role, covering East Jerusalem, the rest of the West Bank and Gaza.",
+            ordinal: 6)
+        let mismatchMission = checkClaim(
+            "The UK Mission will remain separate from the UK embassy in Tel Aviv.", passage: consulatePassage)
+        assertTrue(
+            mismatchMission.failures.contains(where: {
+                if case .ungroundedCitation(let token, _) = $0 { return token == "mission" }
+                return false
+            }), "Citing passage lacking 'mission' flags ungroundedCitation")
+        assertEqual(
+            mismatchMission.audit.status,
+            .unsupported(reason: "Claim refers to subject 'mission' not mentioned in cited passage"),
+            "Citing passage lacking 'mission' is unsupported in auditor")
+
+        let arrestPassage = EvidencePassage(
+            id: "pass-arrest", articleID: "art-gamma",
+            text:
+                "Ms. Rajapaksa travelled to Singapore on September 16 for medical treatment. She flew back after filing a court petition seeking to prevent her arrest, news agency AFP reported.",
+            ordinal: 7)
+        let mismatchArrest = checkClaim(
+            "Sri Lanka arrests ex-President Rajapaksa's wife in graft case", passage: arrestPassage)
+        assertTrue(
+            mismatchArrest.failures.contains(where: {
+                if case .ungroundedCitation(let token, _) = $0 { return token == "sri lanka" }
+                return false
+            }), "Citing passage lacking 'Sri Lanka' flags ungroundedCitation")
+        assertEqual(
+            mismatchArrest.audit.status,
+            .unsupported(reason: "Claim refers to entity 'Sri Lanka' not mentioned in cited passage"),
+            "Citing passage lacking 'Sri Lanka' is unsupported in auditor")
+
+        // 5h. Valid controls: ordinary reported facts without attribution wrappers pass cleanly (#308)
+        let plainFactPassage = EvidencePassage(
+            id: "pass-plain", articleID: "art-gamma",
+            text: "The bridge reopened on Monday after repairs costing $4m.",
+            ordinal: 8)
+        let plainFact = checkClaim(
+            "The bridge reopened on Monday after repairs costing $4m.", passage: plainFactPassage)
+        assertTrue(
+            plainFact.failures.isEmpty,
+            "Ordinary reported fact without attribution wrapper passes verifier with zero failures")
+        assertEqual(plainFact.audit.status, .supported, "Ordinary reported fact is supported by auditor")
 
         // 6. Failure behavior: never store failed retelling as finished overview; show verified excerpts and source list
         let fallbackDoc = OverviewClaimVerifier.createFallbackOverview(
