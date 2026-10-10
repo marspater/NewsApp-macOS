@@ -6105,6 +6105,44 @@ struct NewsTests {
             assertTrue(false, "Cancelled relation work must stop")
         } catch is CancellationError {}
         await db.close()
+
+        // The live harness writes each link with a hard near-miss control and refuses unsafe or reused outputs.
+        let run = URL(fileURLWithPath: "/private/tmp/news-relation-test-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: run, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: run) }
+        let copy = DatabaseEngine(path: run.appendingPathComponent("library.sqlite3").path)
+        try await copy.open()
+        let near = FeedArticle(
+            storedID: "near", title: "Volodymyr Zelenskyy congratulates football fans",
+            link: fixtureRoot.appendingPathComponent("relations/near").absoluteString, guid: "near",
+            description: "Volodymyr Zelenskyy congratulated football fans after the national team won a league match.",
+            pubDate: now.addingTimeInterval(-3 * 3600), source: "Publisher near")
+        try await copy.upsertArticles([articles[0], articles[1], near])
+        _ = try await copy.createEvent(memberArticleIDs: ["current"], at: now)
+        let linkedEvent = try await copy.createEvent(memberArticleIDs: ["earlier"], at: now)
+        let nearEvent = try await copy.createEvent(memberArticleIDs: ["near"], at: now)
+        await copy.close()
+        let output = run.appendingPathComponent("report").path
+        try await measureLiveRelations(path: run.appendingPathComponent("library.sqlite3").path, output: output)
+        let rows =
+            try JSONSerialization.jsonObject(
+                with: Data(contentsOf: URL(fileURLWithPath: output).appendingPathComponent("relations-private.json")))
+            as? [[String: String]] ?? []
+        assertEqual(
+            rows.filter { $0["kind"] == "link" }.map { $0["earlierEvent"] }, [linkedEvent.id],
+            "The harness records the proposed link")
+        assertEqual(
+            rows.filter { $0["kind"] == "control" }.map { $0["earlierEvent"] }, [nearEvent.id],
+            "A rejected earlier event sharing an actor is the control")
+        assertTrue(rows.allSatisfy { $0["later"]?.isEmpty == false }, "Pairs carry reviewable text")
+        do {
+            try await measureLiveRelations(path: run.appendingPathComponent("library.sqlite3").path, output: output)
+            assertTrue(false, "A second run must not replace the first run's pairs")
+        } catch {}
+        do {
+            try await measureLiveRelations(path: NSHomeDirectory() + "/library.sqlite3", output: output)
+            assertTrue(false, "Only temporary copies are measured")
+        } catch {}
     }
 
     static func testEventMatcherRules() async throws {
@@ -6633,12 +6671,20 @@ struct NewsTests {
         if ProcessInfo.processInfo.environment["NEWS_RELATED_RECLUSTER"] == "1",
             let newest = try await db.fetchArticles(limit: nil).map(\.pubDate).max()
         {
-            for pass in 1...5 {
+            var converged = false
+            for pass in 1...5 where !converged {
                 let clustering = try await EventClusterer.run(
                     in: db, judge: .onDevice, now: newest.addingTimeInterval(3600))
                 report["reclusterPasses"] = pass
                 report["reclusterChangedEvents", default: 0] += clustering.changedEvents.count
-                if clustering.changedEvents.isEmpty { break }
+                converged = clustering.changedEvents.isEmpty
+            }
+            // A pass that still changes events leaves a partial re-cluster; measuring it would mislead.
+            guard converged else {
+                await db.close()
+                throw NSError(
+                    domain: "LiveRelations", code: 3,
+                    userInfo: [NSLocalizedDescriptionKey: "Re-clustering still changed events after five passes"])
             }
         }
         let articles = try await db.fetchArticles(limit: nil)

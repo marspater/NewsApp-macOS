@@ -13,8 +13,16 @@ import json
 import pathlib
 import tempfile
 
-from overview_review import (expect_rejected, label_sheet, main, private_run, rate, read_sheet_labels, require,
-                             write_new_sheet)
+from overview_review import (
+    expect_rejected,
+    label_sheet,
+    main,
+    private_run,
+    rate,
+    read_sheet_labels,
+    require,
+    write_new_sheet,
+)
 
 LABELS = ('related', 'unrelated', 'unsure')
 RUN = 'relations-private.json'
