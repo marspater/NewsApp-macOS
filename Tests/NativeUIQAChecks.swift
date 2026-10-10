@@ -276,6 +276,11 @@ struct NativeUIQAChecks {
         assertEqual(
             ReaderFigureView.effectiveImageAlt(for: figureBlank), "Article image",
             "Whitespace alt text falls back to 'Article image'")
+
+        assertEqual(
+            MastheadNotice(message: "Subscribed to example.com")
+                == MastheadNotice(message: "Subscribed to example.com"),
+            false, "A repeated masthead notice restarts its lifetime and announcement")
     }
 
     // MARK: - 4. Window Widths and Layout Metrics

@@ -32,10 +32,17 @@ enum LeadStoryPresentation {
     }
 }
 
+/// A transient masthead status line. Each notice is distinct, so a repeated message restarts its
+/// lifetime and announcement.
+struct MastheadNotice: Equatable {
+    let message: String
+    let id = UUID()
+}
+
 struct ArticleListView: View {
     @Binding var selectedTopic: String?
     @Binding var searchText: String
-    @Binding var mastheadNotice: String?
+    @Binding var mastheadNotice: MastheadNotice?
     @Binding var articlePath: NavigationPath
 
     @EnvironmentObject private var appSettings: AppSettings
@@ -468,7 +475,7 @@ struct ArticleListView: View {
                         .font(AppTypography.caption)
                         .foregroundStyle(AppColor.secondaryText)
                         .accessibilityHidden(true)
-                    Text(mastheadNotice)
+                    Text(mastheadNotice.message)
                         .font(AppTypography.caption)
                         .foregroundStyle(AppColor.secondaryText)
                 }

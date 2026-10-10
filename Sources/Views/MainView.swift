@@ -20,7 +20,7 @@ extension Notification.Name {
 struct MainView: View {
     @State private var selectedTopic: String? = "Today"
     @State private var searchText: String = ""
-    @State private var mastheadNotice: String?
+    @State private var mastheadNotice: MastheadNotice?
     @State private var articlePath = NavigationPath()
 
     @EnvironmentObject private var appSettings: AppSettings
@@ -105,7 +105,7 @@ struct MainView: View {
             NSAccessibility.post(
                 element: application, notification: .announcementRequested,
                 userInfo: [
-                    .announcement: notice,
+                    .announcement: notice.message,
                     .priority: NSAccessibilityPriorityLevel.medium.rawValue,
                 ])
         }
@@ -197,9 +197,10 @@ struct MainView: View {
                     Task { @MainActor in
                         let count = await self.feedManager.importFeeds(fromFile: url)
                         if count > 0 {
-                            mastheadNotice = "Imported \(count) feed\(count == 1 ? "" : "s") from OPML"
+                            mastheadNotice = MastheadNotice(
+                                message: "Imported \(count) feed\(count == 1 ? "" : "s") from OPML")
                         } else if articleStore.operationError == nil {
-                            mastheadNotice = "No new feeds imported"
+                            mastheadNotice = MastheadNotice(message: "No new feeds imported")
                         }
                     }
                 }

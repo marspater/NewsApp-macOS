@@ -16,7 +16,7 @@ extension FocusedValues {
 
 struct SidebarView: View {
     @Binding var selectedTopic: String?
-    @Binding var mastheadNotice: String?
+    @Binding var mastheadNotice: MastheadNotice?
 
     @EnvironmentObject private var appSettings: AppSettings
     @EnvironmentObject private var feedManager: FeedManager
@@ -262,7 +262,7 @@ struct SidebarView: View {
     }
 
     private func showConfirmation(_ message: String) {
-        mastheadNotice = message
+        mastheadNotice = MastheadNotice(message: message)
     }
 
     private func iconForSection(_ section: String) -> String {
