@@ -1,9 +1,5 @@
 import Foundation
 
-#if canImport(FoundationModels)
-    import FoundationModels
-#endif
-
 // News tension (experiment, #99). The normative text is docs/methodology/tension-index-v1.md; change it and this file
 // together and bump `TensionMethodology.version`. Weights and smoothing come from calibration (#158); `TensionHistory`
 // feeds the separate view (#159). The rest of the app does not depend on it.
@@ -746,8 +742,8 @@ enum TensionLevel: String, CaseIterable, Sendable {
 
 // MARK: - Explanation (#159)
 
-/// Everything a tension explanation may say: findings scoring already made, nothing else. The paragraph is built from
-/// these facts deterministically, or phrased by the on-device model and checked against them.
+/// Everything a tension explanation may say: findings scoring already made, nothing else.
+/// The displayed paragraph is assembled directly from these facts, without model-generated claims.
 struct TensionBriefFacts: Hashable, Sendable {
     struct Driver: Hashable, Sendable {
         let headline: String
@@ -871,113 +867,5 @@ struct TensionBriefFacts: Hashable, Sendable {
             sentences.append("Today's reading is provisional and can still change.")
         }
         return sentences.joined(separator: " ")
-    }
-
-    /// The facts as the model sees them. Headlines are publisher text and stay inside the untrusted-data frame.
-    var promptFacts: String {
-        var lines = [
-            "Reading: \(degrees) degrees, band \(level.rawValue).",
-            change.map { "Change since the previous day: \($0 > 0 ? "+" : "")\($0) degrees." }
-                ?? "No previous day to compare.",
-            typicalDegrees.map { "30-day average: \($0) degrees." } ?? "No 30-day average yet.",
-            isProvisional ? "Today's reading is provisional." : "Today's reading is final.",
-        ]
-        for (index, driver) in drivers.enumerated() {
-            lines.append(
-                "Driver \(index + 1): \(Self.describe(driver)); covered by \(driver.reportingFeeds) panel feeds; headline \(index + 1) below."
-            )
-        }
-        let headlines = drivers.enumerated().map { "<headline_\($0.offset + 1)>\(GenerationPromptDefense.sanitizeSourceText($0.element.headline))</headline_\($0.offset + 1)>" }
-        return lines.joined(separator: "\n") + "\n" + GenerationPromptDefense.sourceDataStartTag + "\n"
-            + headlines.joined(separator: "\n") + "\n" + GenerationPromptDefense.sourceDataEndTag
-    }
-}
-
-/// A tension explanation and whether the on-device model phrased it.
-struct TensionExplanation: Equatable, Sendable {
-    let text: String
-    let isGenerated: Bool
-}
-
-/// Phrases the latest tension facts as a short paragraph. The model never chooses a type, magnitude or score: it only
-/// rewords facts, and a draft that mentions a number the facts do not contain falls back to the deterministic text.
-actor TensionExplainer {
-    static let shared = TensionExplainer()
-    // ponytail: one entry per distinct set of facts; a day produces a handful.
-    private var cache: [TensionBriefFacts: TensionExplanation] = [:]
-
-    /// The same policy as overviews: AI on, not in Low Power Mode, not thermally constrained.
-    nonisolated static func modelAllowed(aiEnabled: Bool) -> Bool {
-        let info = ProcessInfo.processInfo
-        return aiEnabled && !info.isLowPowerModeEnabled
-            && info.thermalState.rawValue < ProcessInfo.ThermalState.serious.rawValue
-    }
-
-    func explanation(for facts: TensionBriefFacts, allowsModel: Bool) async -> TensionExplanation {
-        if let known = cache[facts] { return known }
-        let fallback = TensionExplanation(text: facts.deterministicParagraph, isGenerated: false)
-        guard allowsModel, let draft = await Self.modelParagraph(facts),
-            Self.isFaithful(draft, to: facts)
-        else { return fallback }
-        let explanation = TensionExplanation(text: draft, isGenerated: true)
-        if cache.count >= 64 { cache.removeAll() }
-        cache[facts] = explanation
-        return explanation
-    }
-
-    static func prompt(_ facts: TensionBriefFacts) -> String {
-        """
-        \(GenerationPromptDefense.untrustedDataSystemGuard)
-
-        Write two or three sentences for a news reader that explain today's news tension reading. Use only the facts \
-        below. Say the reading and its band, how it compares with the previous day and the 30-day average, and which \
-        stories drive it, naming their kind of event and what was reported. Refer to stories by their subject, not by \
-        quoting headlines. Do not add events, places, numbers, causes or predictions that are not in the facts. The \
-        reading describes what a panel of news outlets reported, not how dangerous the world is. Plain prose only: no \
-        lists, headings or quotation marks around the whole answer.
-
-        \(facts.promptFacts)
-        """
-    }
-
-    static func modelParagraph(_ facts: TensionBriefFacts) async -> String? {
-        #if canImport(FoundationModels)
-            guard #available(macOS 26.0, *), case .available = SystemLanguageModel.default.availability else {
-                return nil
-            }
-            do {
-                let session = LanguageModelSession(
-                    model: SystemLanguageModel(guardrails: .permissiveContentTransformations))
-                let response = try await session.respond(
-                    to: prompt(facts),
-                    options: GenerationOptions(samplingMode: .greedy, maximumResponseTokens: 220))
-                return response.content.trimmingCharacters(in: .whitespacesAndNewlines)
-            } catch {
-                return nil
-            }
-        #else
-            return nil
-        #endif
-    }
-
-    /// A draft is used only when it is a short paragraph that states the reading and every number in it also appears
-    /// in the facts the model was given.
-    static func isFaithful(_ draft: String, to facts: TensionBriefFacts) -> Bool {
-        let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard (60...900).contains(text.count), !text.contains("\n\n"), !text.hasPrefix("-"), !text.hasPrefix("#")
-        else { return false }
-        let lowered = text.lowercased()
-        for refusal in ["i'm sorry", "i am sorry", "i cannot", "i can't", "as an ai", "language model"]
-        where lowered.contains(refusal) {
-            return false
-        }
-        let allowed = Set(numbers(in: facts.promptFacts))
-        let used = numbers(in: text)
-        guard used.contains(String(facts.degrees)) else { return false }
-        return used.allSatisfy { allowed.contains($0) }
-    }
-
-    static func numbers(in text: String) -> [String] {
-        text.split(whereSeparator: { !$0.isNumber }).map(String.init)
     }
 }

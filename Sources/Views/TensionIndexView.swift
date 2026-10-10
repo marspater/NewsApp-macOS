@@ -39,7 +39,6 @@ struct TensionIndexView: View {
     @State private var loadFailed = false
     @State private var selectedDay: Date?
     @State private var updatedAt: Date?
-    @State private var explanation: TensionExplanation?
 
     private static let methodologyURL = URL(
         string: "https://github.com/marspater/NewsApp-macOS/blob/main/docs/methodology/tension-index-v1.md")!
@@ -82,43 +81,22 @@ struct TensionIndexView: View {
         .task {
             if history.isEmpty { await load() }
         }
-        .task(id: TensionBriefFacts.latest(in: history)) {
-            guard let facts = TensionBriefFacts.latest(in: history) else {
-                explanation = nil
-                return
-            }
-            let allowsModel = TensionExplainer.modelAllowed(aiEnabled: appSettings.aiEnabled)
-            if !allowsModel {
-                explanation = TensionExplanation(text: facts.deterministicParagraph, isGenerated: false)
-            }
-            explanation = await TensionExplainer.shared.explanation(for: facts, allowsModel: allowsModel)
-        }
     }
 
     // MARK: - Summary
 
-    /// The reading explained in prose: phrased on device when allowed and checked against the scored facts, otherwise
-    /// built from them directly.
+    /// Every clause comes directly from the scored facts, regardless of AI settings.
+    @ViewBuilder
     private var summary: some View {
-        VStack(alignment: .leading, spacing: AppSpacing.sm) {
-            if let explanation {
-                Text(explanation.text)
-                    .font(AppTypography.lede)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .textSelection(.enabled)
-                if explanation.isGenerated {
-                    TagView.intelligence("Written on device")
-                        .help("Phrased by the on-device model from the scored facts above; it cannot change the reading.")
-                }
-            } else {
-                ProgressView("Summarizing the reading…")
-                    .controlSize(.small)
-            }
+        if let facts = TensionBriefFacts.latest(in: history) {
+            Text(facts.deterministicParagraph)
+                .font(AppTypography.lede)
+                .fixedSize(horizontal: false, vertical: true)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(AppSpacing.md)
+                .background(AppColor.surface, in: RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous))
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(AppSpacing.md)
-        .background(AppColor.surface, in: RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous))
-        .animation(reduceMotion ? nil : AppMotion.state, value: explanation)
     }
 
     private var header: some View {
@@ -258,7 +236,8 @@ struct TensionIndexView: View {
                     .interpolationMethod(.monotone)
                     PointMark(x: .value("Day", date, unit: .day), y: .value("Daily index", daily))
                         .foregroundStyle(
-                            AppColor.tension(TensionLevel(index: daily)).opacity(day.score.isProvisional ? 0.5 : 1))
+                            AppColor.tension(TensionLevel(index: daily)).opacity(day.score.isProvisional ? 0.5 : 1)
+                        )
                         .symbolSize(day.score.day.start == selected?.score.day.start ? 90 : 30)
                         .accessibilityLabel(Self.dateText(day))
                         .accessibilityValue(

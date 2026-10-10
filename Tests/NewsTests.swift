@@ -2216,17 +2216,23 @@ struct NewsTests {
         assertEqual(first.publicationDateText, "Date unavailable", "Unknown dates have an honest display label")
         assertEqual(first.cardDateText(), "Date unavailable", "Cards keep the honest unknown-date label")
         do {
-            let now = Date()
+            let now = Date(timeIntervalSince1970: 1_700_000_000)
             func story(ageInSeconds age: TimeInterval) -> FeedArticle {
                 FeedArticle(
                     title: "Dated", link: "https://example.com/dated", guid: "dated", description: "Text",
                     pubDate: now.addingTimeInterval(-age), source: "Test")
             }
-            assertEqual(story(ageInSeconds: 20).cardDateText(now: now), "Just now", "A story under a minute old reads Just now")
-            assertFalse(
-                story(ageInSeconds: 3 * 60 * 60).cardDateText(now: now)
-                    .contains(String(Calendar.current.component(.year, from: now))),
-                "A story from today shows a relative time, not a year")
+            assertEqual(
+                story(ageInSeconds: 20).cardDateText(now: now), "Just now", "A story under a minute old reads Just now")
+            let formatter = RelativeDateTimeFormatter()
+            formatter.unitsStyle = .abbreviated
+            formatter.dateTimeStyle = .numeric
+            for age: TimeInterval in [60, 2 * 60 * 60, 24 * 60 * 60 - 1] {
+                assertEqual(
+                    story(ageInSeconds: age).cardDateText(now: now),
+                    formatter.localizedString(fromTimeInterval: -age),
+                    "Relative card dates use the supplied reference time, not the wall clock")
+            }
         }
         assertEqual(first.id, second.id, "Undated stories without GUID or link retain a stable fingerprint")
         let json = Data(
@@ -3466,29 +3472,38 @@ struct NewsTests {
             ])
         let paragraph = brief.deterministicParagraph
         assertTrue(
-            paragraph.hasPrefix("News tension reads 44° (warm), up 3° from the previous day, above its 30-day average of 38°."),
+            paragraph.hasPrefix(
+                "News tension reads 44° (warm), up 3° from the previous day, above its 30-day average of 38°."),
             "The explanation opens with the reading, the daily change and the 30-day comparison")
         assertTrue(
-            paragraph.contains("armed conflict with dozens of deaths reported and reports of escalation, covered by 5 panel feeds"),
+            paragraph.contains(
+                "armed conflict with dozens of deaths reported and reports of escalation, covered by 5 panel feeds"),
             "The largest driver is described from its classification")
-        assertTrue(paragraph.contains("a disaster with hundreds of people reported hurt or displaced"), "Further drivers are listed")
-        assertTrue(paragraph.hasSuffix("Today's reading is provisional and can still change."), "Provisional days say so")
         assertTrue(
-            TensionExplainer.isFaithful(
-                "News tension stands at 44 degrees, a warm reading up 3 from yesterday and above its average of 38, driven mainly by escalating armed conflict.",
-                to: brief),
-            "A paraphrase that uses only given numbers is accepted")
-        assertFalse(
-            TensionExplainer.isFaithful(
-                "News tension stands at 44 degrees after 120 people were killed in fighting that escalated overnight.",
-                to: brief),
-            "A paraphrase that invents a number falls back to the deterministic text")
-        assertFalse(
-            TensionExplainer.isFaithful("I'm sorry, but I cannot help with that request about 44 degrees.", to: brief),
-            "A refusal is never shown")
+            paragraph.contains("a disaster with hundreds of people reported hurt or displaced"),
+            "Further drivers are listed")
         assertTrue(
-            brief.promptFacts.contains(GenerationPromptDefense.sourceDataStartTag),
-            "Headlines reach the model only inside the untrusted-data frame")
+            paragraph.hasSuffix("Today's reading is provisional and can still change."), "Provisional days say so")
+        assertEqual(
+            paragraph,
+            "News tension reads 44° (warm), up 3° from the previous day, above its 30-day average of 38°. "
+                + "The largest contribution is armed conflict with dozens of deaths reported and reports of escalation, covered by 5 panel feeds: “Airport hit again”. "
+                + "Also contributing: a disaster with hundreds of people reported hurt or displaced (“Quake strikes coast”). "
+                + "Today's reading is provisional and can still change.",
+            "The displayed paragraph contains only scored facts and attributed headlines")
+        let lowerBrief = TensionBriefFacts(
+            day: brief.day, degrees: 19, level: .calm, change: -3, typicalDegrees: 38,
+            isProvisional: false, drivers: [])
+        assertEqual(
+            lowerBrief.deterministicParagraph,
+            "News tension reads 19° (calm), down 3° from the previous day, below its 30-day average of 38°.",
+            "A new reading recomputes the band, direction and average comparison without cached prose")
+        let firstBrief = TensionBriefFacts(
+            day: brief.day, degrees: 44, level: .warm, change: nil, typicalDegrees: nil,
+            isProvisional: false, drivers: [])
+        assertEqual(
+            firstBrief.deterministicParagraph, "News tension reads 44° (warm).",
+            "A first reading invents neither a previous-day change nor an average")
         assertFalse(
             methodology.panelRegions.contains(.latinAmerica) || methodology.panelRegions.contains(.oceania),
             "Latin America and Oceania are stated v1 gaps")

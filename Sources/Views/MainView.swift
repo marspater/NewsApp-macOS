@@ -48,10 +48,10 @@ struct MainView: View {
                 tensionReading: TensionHistory.latestReading(in: tensionHistory),
                 openTension: { showsTension = true }
             )
-                .environmentObject(appSettings)
-                .environmentObject(feedManager)
-                .environmentObject(savedStories)
-                .environmentObject(readManager)
+            .environmentObject(appSettings)
+            .environmentObject(feedManager)
+            .environmentObject(savedStories)
+            .environmentObject(readManager)
         } detail: {
             NavigationStack(path: $articlePath) {
                 ZStack {
@@ -122,12 +122,6 @@ struct MainView: View {
             else { return }
             tensionHistory = loaded
             tensionUpdatedAt = Date()
-            // Phrase the new reading now, so the sheet opens with its explanation.
-            if let facts = TensionBriefFacts.latest(in: loaded),
-                TensionExplainer.modelAllowed(aiEnabled: appSettings.aiEnabled)
-            {
-                _ = await TensionExplainer.shared.explanation(for: facts, allowsModel: true)
-            }
         }
         .task(id: tensionDayStart) {
             let nextDay = TensionMethodology.day(containing: Date()).end

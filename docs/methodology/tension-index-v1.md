@@ -62,7 +62,7 @@ Cues are English words and phrases matched as whole words after lowercasing (`ri
 
 **Escalation.** What the day's facts say explicitly, not an inference from changing figures: *escalating* when a fact carries an escalation cue (escalated, intensified, renewed fighting, mobilised, declared war…), *de-escalating* for a de-escalation cue (ceasefire, truce, peace talks, withdrawal, prisoner exchange, lifted curfew…), *mixed* for both, otherwise no signal. A de-escalation cue followed within three words by collapsed, failed, broke, violated, ended, stalled or faltered does not count.
 
-Every classification records the methodology version and the IDs of the facts behind its type, figures and escalation, so an explanation can describe known contributions without inventing them. A language model may phrase such an explanation; it never chooses a type, a magnitude or a score.
+Every classification records the methodology version and the IDs of the facts behind its type, figures and escalation, so an explanation can describe known contributions without inventing them. The explanation is assembled directly from those recorded findings; a language model does not write it or choose a type, a magnitude or a score.
 
 ## 6. Calibration hand-off (#158) and opt-in collection (#160)
 
@@ -79,7 +79,7 @@ Calibrated parameters (`TensionWeights.calibratedV1`):
 
 The app shows the latest 7-day reading as whole degrees and names its range: Calm below 20, Mild from 20, Warm from 40, Hot from 60 and Boiling from 80 (`TensionLevel`). The bands are labels for display; they never feed back into scoring. The reading is rescored after every feed refresh and when a new UTC day begins.
 
-The explanation paragraph is built from `TensionBriefFacts`: the reading and band, the change since the previous scored day, the mean of the scored days shown (with at least three), whether the day is provisional, and up to three largest contributions with their classified type, magnitude bins, escalation, panel-feed count and one panel headline. Without the on-device model (AI off, Low Power Mode, thermal pressure or no Apple Intelligence) the paragraph is assembled from those facts directly. With it, the model rewords the same facts; headlines are framed as untrusted data, and a draft is discarded for the deterministic text when it does not state the reading, contains a number absent from the facts, is not a single short paragraph or reads as a refusal. Generated text is labelled as written on device and cannot change the score.
+The explanation paragraph is built from `TensionBriefFacts`: the reading and band, the change since the previous scored day, the mean of the scored days shown (with at least three), whether the day is provisional, and up to three largest contributions with their classified type, magnitude bins, escalation, panel-feed count and one panel headline. The paragraph is always assembled from those facts directly, with panel headlines quoted and attributed as headlines. It does not depend on AI settings or a generated-text cache. No model paraphrase is displayed: checking whether its numbers appear in the facts cannot establish whether its claims, band or comparisons are supported.
 
 ## 7. Versioning
 
