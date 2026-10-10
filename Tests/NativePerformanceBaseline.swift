@@ -53,10 +53,19 @@ private final class BaselineDelegate: NSObject, NSApplicationDelegate {
         await store.initialize()
         guard store.isReady else { throw Failure.storage }
         let now = Date()
-        let articles = (0..<10_000).map { index in
-            FeedArticle(title: index == 0 ? "Native baseline story Alpha" : "Native baseline story \(index)", link: "https://baseline.example/story/\(index)",
-                        guid: "native-\(index)", description: "Controlled offline article for native rendering.",
-                        pubDate: now.addingTimeInterval(-Double(index)), source: "Publisher \(index % 20)")
+        // Compare the unmodified text baseline with the phase-six lead on the
+        // same machine: NEWS_NATIVE_LEAD_STORY=1, no network or production data.
+        let leadScenario = ProcessInfo.processInfo.environment["NEWS_NATIVE_LEAD_STORY"] == "1"
+        let imageProbe = NativeLeadImageProbe()
+        let articles = (0..<10_000).map { index -> FeedArticle in
+            var story = FeedArticle(
+                title: index == 0 ? "Native baseline story Alpha" : "Native baseline story \(index)",
+                link: "https://baseline.example/story/\(index)",
+                guid: "native-\(index)", description: "Controlled offline article for native rendering.",
+                pubDate: now.addingTimeInterval(-Double(index)), source: "Publisher \(index % 20)"
+            )
+            if leadScenario && index == 0 { story.imageUrl = "https://images.example/native-lead.jpg" }
+            return story
         }
         try await database.upsertArticles(articles)
         // A steady-state library: archived rows were matched by an earlier refresh.
@@ -73,6 +82,7 @@ private final class BaselineDelegate: NSObject, NSApplicationDelegate {
                                      themeManager: ThemeManager())
         defer { manager.stopBackgroundWork() }
         var samples: [Double] = []
+        var scrollFrameSamples: [Double] = []
         let firstTitle = articles.first!.title
         for index in 0..<5 {
             let start = ProcessInfo.processInfo.systemUptime
@@ -85,6 +95,7 @@ private final class BaselineDelegate: NSObject, NSApplicationDelegate {
                 .environmentObject(container.readManager)
                 .environmentObject(container.savedStories)
                 .defaultAppStorage(defaults)
+                .environment(\.readerImageLoader) { url in try await imageProbe.load(url) }
             let view = NSHostingView(rootView: root)
             let current = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1100, height: 800),
                                    styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
@@ -122,8 +133,31 @@ private final class BaselineDelegate: NSObject, NSApplicationDelegate {
                 }
                 guard capturedAt - start < 15 else { throw Failure.cardTimeout }
             }
+            // A captured-frame sample after a bounded scroll. This is a
+            // render/readback upper bound, not a GPU frame-time or FPS claim.
+            guard let scroller = Self.detailScroller(in: view) else { throw Failure.scrollCaptureUnavailable }
+            for step in 1...3 {
+                let scrollStarted = ProcessInfo.processInfo.systemUptime
+                let clip = scroller.contentView
+                let maximumY = max(0, (scroller.documentView?.bounds.height ?? 0) - clip.bounds.height)
+                guard maximumY > 0 else { throw Failure.scrollCaptureUnavailable }
+                clip.scroll(to: NSPoint(x: 0, y: min(CGFloat(step) * 300, maximumY)))
+                scroller.reflectScrolledClipView(clip)
+                view.layoutSubtreeIfNeeded()
+                view.displayIfNeeded()
+                guard let frame = view.bitmapImageRepForCachingDisplay(in: view.bounds)
+                else { throw Failure.render }
+                view.cacheDisplay(in: view.bounds, to: frame)
+                scrollFrameSamples.append((ProcessInfo.processInfo.systemUptime - scrollStarted) * 1000)
+            }
             current.close()
             window = nil
+        }
+        guard scrollFrameSamples.count == 15 else { throw Failure.scrollCaptureUnavailable }
+        if leadScenario {
+            if #available(macOS 26.0, *) {
+                guard imageProbe.requests > 0 else { throw Failure.heroNotLoaded }
+            }
         }
         let refreshStart = ProcessInfo.processInfo.systemUptime
         await manager.fetchFeedsAsync()
@@ -138,15 +172,57 @@ private final class BaselineDelegate: NSObject, NSApplicationDelegate {
         let report: [String: Any] = [
             "library_rows": 10_000, "final_library_rows": 10_001, "publishers": 20,
             "window_width": 1100, "window_height": 800, "snapshot_rows": 500,
-            "window_to_first_card_bitmap_ms": samples, "refresh_one_mocked_feed_ms": refreshMilliseconds,
+            "window_to_first_card_bitmap_ms": samples,
+            "scroll_frame_capture_ms": scrollFrameSamples,
+            "scroll_frame_count": scrollFrameSamples.count,
+            "lead_story_scenario": leadScenario,
+            "mock_lead_image_requests": imageProbe.requests,
+            "refresh_one_mocked_feed_ms": refreshMilliseconds,
             "peak_process_rss_bytes": usage.ru_maxrss, "os": ProcessInfo.processInfo.operatingSystemVersionString,
             "physical_memory_bytes": ProcessInfo.processInfo.physicalMemory,
-            "scope": "Seeded native MainView, text-only synthetic articles, offline. Time to first sampled bitmap containing the title; includes prior failed capture/OCR polls but excludes successful OCR. Memory includes setup, SwiftUI and Vision. Not cold app launch, live network, or model timing."
+            "scope": "Seeded native MainView, offline synthetic articles; optionally a mock publisher image on first Today entry. First-card samples measure time to bitmap containing the title (prior failed capture/OCR polls included, successful OCR excluded). Scroll samples measure synchronous clip move/layout/display/bitmap readback, not GPU latency or FPS. Memory includes setup, SwiftUI and Vision. Not cold launch, network or model timing."
         ]
         try JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys])
             .write(to: output.appendingPathComponent("native-baseline.json"))
         await database.close()
     }
 
-    private enum Failure: Error { case storage, cardTimeout, render, memory }
+    /// SwiftUI's detail list is the widest scroll view; the sidebar is narrower.
+    /// If a future SwiftUI release does not expose an NSScrollView, the
+    /// benchmark fails rather than presenting an unmeasured run as a pass.
+    private static func detailScroller(in root: NSView) -> NSScrollView? {
+        var found: [NSScrollView] = []
+        func walk(_ view: NSView) {
+            if let scroll = view as? NSScrollView, scroll.documentView != nil {
+                found.append(scroll)
+            }
+            for child in view.subviews { walk(child) }
+        }
+        walk(root)
+        return found.filter { $0.bounds.width >= 300 }
+            .max { $0.bounds.width < $1.bounds.width }
+    }
+
+    private enum Failure: Error { case storage, cardTimeout, render, memory, heroNotLoaded, scrollCaptureUnavailable }
+}
+
+/// The image variant still uses ArticleRemoteImage and the production decoded
+/// cache. Only its injected loader is synthetic; it never makes a network call.
+@MainActor
+private final class NativeLeadImageProbe {
+    private(set) var requests = 0
+
+    func load(_ url: URL) throws -> CGImage {
+        guard url.host == "images.example" else { throw URLError(.badURL) }
+        requests += 1
+        guard let context = CGContext(
+            data: nil, width: 1200, height: 680, bitsPerComponent: 8,
+            bytesPerRow: 4800, space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { throw URLError(.cannotDecodeContentData) }
+        context.setFillColor(CGColor(gray: 0.24, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: 1200, height: 680))
+        guard let result = context.makeImage() else { throw URLError(.cannotDecodeContentData) }
+        return result
+    }
 }
