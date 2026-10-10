@@ -7265,7 +7265,7 @@ struct NewsTests {
         // Automatically record synchronous run receipt and provenance (#308/#313).
         var outputFiles: [String: [String: Any]] = [:]
         if let enumerator = FileManager.default.enumerator(at: directory, includingPropertiesForKeys: nil) {
-            for case let fileURL as URL in enumerator {
+            for case let fileURL as URL in enumerator.allObjects {
                 guard !fileURL.hasDirectoryPath,
                     fileURL.lastPathComponent != "receipt.json",
                     fileURL.lastPathComponent != "run-library.sqlite3",
