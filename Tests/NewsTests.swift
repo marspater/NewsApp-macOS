@@ -12422,6 +12422,16 @@ struct NewsTests {
                 "One of your browser extensions seems to be blocking the video player from loading."),
             "Video player notices are boilerplate")
         assertTrue(
+            ArticleContentRedactor.isBoilerplateLine("Keywords for this article"),
+            "Keywords header is boilerplate")
+        assertTrue(
+            ArticleContentRedactor.isBoilerplateLine("Keywords for this story"),
+            "Keywords header variation is boilerplate")
+        assertTrue(
+            ArticleContentRedactor.isBoilerplateLine(
+                "The content you requested does not exist or is not available anymore."),
+            "Unavailable content notices are boilerplate")
+        assertTrue(
             documents[0].hasPublisherText && bodyOnly.readerDocument?.hasPublisherText == true,
             "Publisher text makes a reader document")
         let db = DatabaseEngine(path: ":memory:")
