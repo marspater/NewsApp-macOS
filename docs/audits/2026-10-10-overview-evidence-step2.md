@@ -71,8 +71,22 @@ Final run: no line-count fallbacks, 18 weak drafts, 5 thin-evidence events. 20 s
 
 Against the step-2 targets, format fallbacks (0 %), end-to-end time and requests per event now pass. Acceptance (60.3 %, upper bound 71.9 %) remains below 70 %, and independent claim labels (step 3) are open.
 
-## Limits
+## Execution receipt and provenance
 
-- One window, the same as the earlier audit, with no review labels.
+- **Receipt**: [overview-step2-receipt.json](../benchmarks/2026-10-10-overview-step2-receipt.json).
+- **Producer commit**: `8f5377088c1ea61696124ab9369790bce88d601f` (worktree `claude/verifier-long-passages` at `bbfd8a9b33a93addba86629723344c24d28f12aa`, clean dirty-code fingerprint).
+- **Capture time**: 2026-10-10T09:37:30Z.
+- **UTC window bounds**: 2026-10-06T17:20:35Z to 2026-10-08T17:10:00Z (7–8 October window; 1,659 articles across 58 multi-source events).
+- **Library SHA-256**: `84a63dfb3f9669703a653832035498843773358ac4013946b05e0da0c57a33d9`.
+- **Output SHA-256**:
+  - `claims-review-private.csv`: `f539dce48f131ac39104c2d0859fa3880137122d4cbf271b9bf56cd7fb96b73a` (167 claims)
+  - `overview-evaluation.json`: `109d34b911ee4b472c82121eb2ff798c92e7ade0d62c7daa4b4087bfc79a257d`
+  - `overviews.json`: `01f9aec5eb4b04f74f34b30fbd63f5551ae3b5a594c9c1bd1aafe4844dae5989`
+  - `perspectives.json`: `e40750c3d24b3466a20780e66311f999d7ee5a322dad632523ee37444a8c0539`
+
+## Limits and acceptance status
+
+- **Overlapping older sample**: draws on the 7–8 October window matching #412. It is not a fresh or separate acceptance window.
+- **Development evidence only**: serves as diagnostic and tuning evidence. Zero claims of fresh-window acceptance.
 - The run's second pass retried pages that had failed.
 - No installation, isolated launch or sealed data was used.
