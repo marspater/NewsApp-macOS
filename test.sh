@@ -23,6 +23,7 @@ python3 script/evaluation/publisher_dates.py
 python3 script/evaluation/overview_review.py
 python3 script/evaluation/importance_review.py
 python3 script/evaluation/relation_review.py
+python3 script/evaluation/catalog_review.py
 
 echo "Compiling tests for macOS ${TARGET_MACOS} ($(uname -m))..."
 swiftc "${TEST_OPT_FLAGS[@]}" -target "$(uname -m)-apple-macos${TARGET_MACOS}" \
