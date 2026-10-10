@@ -1,5 +1,5 @@
-import SwiftUI
 import AppKit
+import SwiftUI
 
 enum SettingsPane: String, CaseIterable, Identifiable {
     case general
@@ -26,7 +26,7 @@ struct SettingsView: View {
     @EnvironmentObject var readManager: ReadManager
     @Environment(\.effectiveReduceMotion) private var reduceMotion
     @Environment(\.openWindow) private var openWindow
-    
+
     @AppStorage(SettingsView.lastPaneStorageKey) private var selectedPane: SettingsPane = .general
     @State private var newFeedURL: String = ""
     @State private var webCacheSize: String = "Calculating..."
@@ -54,7 +54,7 @@ struct SettingsView: View {
             mutingTab
                 .tabItem { Label("Muting", systemImage: "speaker.slash") }
                 .tag(SettingsPane.muting)
-                
+
             appearanceTab
                 .tabItem { Label("Appearance", systemImage: "paintbrush") }
                 .tag(SettingsPane.appearance)
@@ -87,22 +87,25 @@ struct SettingsView: View {
     private var generalTab: some View {
         Form {
             Section("Feed Refresh & Sync") {
-                Picker("Background Refresh Interval", selection: Binding(
-                    get: { appSettings.fetchIntervalMinutes },
-                    set: { feedManager.setFetchInterval(minutes: $0) }
-                )) {
+                Picker(
+                    "Background Refresh Interval",
+                    selection: Binding(
+                        get: { appSettings.fetchIntervalMinutes },
+                        set: { feedManager.setFetchInterval(minutes: $0) }
+                    )
+                ) {
                     Text("15 minutes").tag(15.0)
                     Text("30 minutes").tag(30.0)
                     Text("1 hour").tag(60.0)
                     Text("2 hours").tag(120.0)
                 }
                 .pickerStyle(.menu)
-                
+
                 Text("Periodic feed updates occur in the background when NewsApp is running.")
                     .font(AppTypography.caption)
                     .foregroundColor(AppColor.secondaryText)
             }
-            
+
             Section("Reading Behavior") {
                 Toggle("Auto-Hide Read Articles", isOn: $themeManager.autoHideRead)
                 Text("Articles will disappear from filtered views once marked as read.")
@@ -265,9 +268,11 @@ struct SettingsView: View {
     private var mutingTab: some View {
         Form {
             Section {
-                Text("Muted stories leave Today, Unread, your sections, search and notifications. Saved Stories and History still list everything, and each list shows how many stories muting hides.")
-                    .font(AppTypography.caption)
-                    .foregroundColor(AppColor.secondaryText)
+                Text(
+                    "Muted stories leave Today, Unread, your sections, search and notifications. Saved Stories and History still list everything, and each list shows how many stories muting hides."
+                )
+                .font(AppTypography.caption)
+                .foregroundColor(AppColor.secondaryText)
             }
 
             Section("Sources") {
@@ -296,9 +301,11 @@ struct SettingsView: View {
                         .controlSize(.small)
                         .disabled(MuteRules.phrase(newMutedTopic).isEmpty)
                 }
-                Text("Matches whole words in headlines and feed summaries, ignoring case: “art” hides “Art fair” but not “Artist”.")
-                    .font(AppTypography.caption)
-                    .foregroundColor(AppColor.secondaryText)
+                Text(
+                    "Matches whole words in headlines and feed summaries, ignoring case: “art” hides “Art fair” but not “Artist”."
+                )
+                .font(AppTypography.caption)
+                .foregroundColor(AppColor.secondaryText)
                 ForEach(appSettings.muteRules.topics, id: \.self) { topic in
                     mutingRow(topic, count: muteCounts.topics[topic] ?? 0) { appSettings.unmuteTopic(topic) }
                 }
@@ -356,21 +363,26 @@ struct SettingsView: View {
     private var notificationsTab: some View {
         Form {
             Section("Notification Delivery") {
-                Toggle("Enable Notifications", isOn: Binding(
-                    get: { appSettings.notificationsEnabled },
-                    set: { appSettings.setNotificationsEnabled($0) }
-                ))
+                Toggle(
+                    "Enable Notifications",
+                    isOn: Binding(
+                        get: { appSettings.notificationsEnabled },
+                        set: { appSettings.setNotificationsEnabled($0) }
+                    ))
                 Text("Receive native macOS notification alerts when high-importance news arrives.")
                     .font(AppTypography.caption)
                     .foregroundColor(AppColor.secondaryText)
             }
-            
+
             if appSettings.notificationsEnabled {
                 Section("Notification Privacy & Detail") {
-                    Picker("Detail Level", selection: Binding(
-                        get: { appSettings.notificationMode },
-                        set: { appSettings.setNotificationMode($0) }
-                    )) {
+                    Picker(
+                        "Detail Level",
+                        selection: Binding(
+                            get: { appSettings.notificationMode },
+                            set: { appSettings.setNotificationMode($0) }
+                        )
+                    ) {
                         ForEach(AppSettings.NotificationMode.allCases) { mode in
                             Text(mode.displayName).tag(mode)
                         }
@@ -379,7 +391,8 @@ struct SettingsView: View {
 
                     HStack(spacing: 8) {
                         Image(systemName: appSettings.notificationMode == .privacy ? "lock.fill" : "info.circle")
-                            .foregroundColor(appSettings.notificationMode == .privacy ? AppColor.success : AppColor.accent)
+                            .foregroundColor(
+                                appSettings.notificationMode == .privacy ? AppColor.success : AppColor.accent)
                         Text(appSettings.notificationMode.detail)
                             .font(AppTypography.caption)
                             .foregroundColor(AppColor.secondaryText)
@@ -397,10 +410,12 @@ struct SettingsView: View {
     private var intelligenceTab: some View {
         Form {
             Section("On-Device Intelligence") {
-                Toggle("Enable AI Article Analysis", isOn: Binding(
-                    get: { appSettings.aiEnabled },
-                    set: { appSettings.setAIEnabled($0) }
-                ))
+                Toggle(
+                    "Enable AI Article Analysis",
+                    isOn: Binding(
+                        get: { appSettings.aiEnabled },
+                        set: { appSettings.setAIEnabled($0) }
+                    ))
                 Text("Generates executive summaries, key takeaways, entity tags, and sentiment analysis.")
                     .font(AppTypography.caption)
                     .foregroundColor(AppColor.secondaryText)
@@ -416,9 +431,11 @@ struct SettingsView: View {
                             Text("Apple-Native On-Device Models")
                                 .font(AppTypography.label)
                                 .foregroundColor(AppColor.primaryText)
-                            Text("Powered exclusively by Apple NaturalLanguage and on-device FoundationModels when available.")
-                                .font(AppTypography.caption)
-                                .foregroundColor(AppColor.secondaryText)
+                            Text(
+                                "Powered exclusively by Apple NaturalLanguage and on-device FoundationModels when available."
+                            )
+                            .font(AppTypography.caption)
+                            .foregroundColor(AppColor.secondaryText)
                         }
                     }
 
@@ -430,9 +447,11 @@ struct SettingsView: View {
                             Text("On-Demand Execution")
                                 .font(AppTypography.label)
                                 .foregroundColor(AppColor.primaryText)
-                            Text("Analysis runs lazily only when you open an article for reading, preserving battery, CPU, and Neural Engine resources.")
-                                .font(AppTypography.caption)
-                                .foregroundColor(AppColor.secondaryText)
+                            Text(
+                                "Analysis runs lazily only when you open an article for reading, preserving battery, CPU, and Neural Engine resources."
+                            )
+                            .font(AppTypography.caption)
+                            .foregroundColor(AppColor.secondaryText)
                         }
                     }
 
@@ -444,9 +463,11 @@ struct SettingsView: View {
                             Text("Zero Cloud Telemetry")
                                 .font(AppTypography.label)
                                 .foregroundColor(AppColor.primaryText)
-                            Text("No text, prompts, or embeddings are ever transmitted to third-party servers or external AI APIs.")
-                                .font(AppTypography.caption)
-                                .foregroundColor(AppColor.secondaryText)
+                            Text(
+                                "No text, prompts, or embeddings are ever transmitted to third-party servers or external AI APIs."
+                            )
+                            .font(AppTypography.caption)
+                            .foregroundColor(AppColor.secondaryText)
                         }
                     }
                 }
@@ -454,13 +475,17 @@ struct SettingsView: View {
             }
 
             Section("News Tension Index (Experiment)") {
-                Toggle("Collect Panel Feeds for Tension Indicator", isOn: Binding(
-                    get: { appSettings.tensionCollectionOptIn },
-                    set: { feedManager.setTensionCollectionOptIn($0) }
-                ))
-                Text("Fetches articles from the 12 international panel feeds to calculate the news tension indicator. These articles are stored locally for tension analysis and will not generate unread notifications unless you subscribe to the feeds directly.")
-                    .font(AppTypography.caption)
-                    .foregroundColor(AppColor.secondaryText)
+                Toggle(
+                    "Collect Panel Feeds for Tension Indicator",
+                    isOn: Binding(
+                        get: { appSettings.tensionCollectionOptIn },
+                        set: { feedManager.setTensionCollectionOptIn($0) }
+                    ))
+                Text(
+                    "Fetches articles from the 12 international panel feeds to calculate the news tension indicator. These articles are stored locally for tension analysis and will not generate unread notifications unless you subscribe to the feeds directly."
+                )
+                .font(AppTypography.caption)
+                .foregroundColor(AppColor.secondaryText)
                 Button("Show News Tension…") { openWindow(id: "tension") }
             }
         }
@@ -473,18 +498,22 @@ struct SettingsView: View {
     private var privacyTab: some View {
         Form {
             Section("Network Security Boundary") {
-                Toggle("Allow Insecure HTTP Feeds", isOn: Binding(
-                    get: { appSettings.allowInsecureHTTP },
-                    set: { appSettings.setAllowInsecureHTTP($0) }
-                ))
-                
+                Toggle(
+                    "Allow Insecure HTTP Feeds",
+                    isOn: Binding(
+                        get: { appSettings.allowInsecureHTTP },
+                        set: { appSettings.setAllowInsecureHTTP($0) }
+                    ))
+
                 if appSettings.allowInsecureHTTP {
                     HStack(spacing: 6) {
                         Image(systemName: "exclamationmark.triangle.fill")
                             .foregroundColor(AppColor.warning)
-                        Text("Warning: Unencrypted HTTP feeds transmit data in plain text across your local network and internet providers.")
-                            .font(AppTypography.caption)
-                            .foregroundColor(AppColor.warning)
+                        Text(
+                            "Warning: Unencrypted HTTP feeds transmit data in plain text across your local network and internet providers."
+                        )
+                        .font(AppTypography.caption)
+                        .foregroundColor(AppColor.warning)
                     }
                 } else {
                     Text("Enforces strict HTTPS connections for all feed ingestion and remote media assets.")
@@ -517,9 +546,11 @@ struct SettingsView: View {
                             Text("Direct Connection")
                                 .font(AppTypography.label)
                                 .foregroundColor(AppColor.primaryText)
-                            Text("Fetches feeds directly from publishers without middleman cloud servers, proxy aggregators, or telemetry logging.")
-                                .font(AppTypography.caption)
-                                .foregroundColor(AppColor.secondaryText)
+                            Text(
+                                "Fetches feeds directly from publishers without middleman cloud servers, proxy aggregators, or telemetry logging."
+                            )
+                            .font(AppTypography.caption)
+                            .foregroundColor(AppColor.secondaryText)
                         }
                     }
                 }
@@ -529,7 +560,7 @@ struct SettingsView: View {
         .formStyle(.grouped)
         .frame(width: Self.paneWidth)
     }
-    
+
     // MARK: - 6. Appearance Tab
 
     private var appearanceTab: some View {
@@ -541,12 +572,14 @@ struct SettingsView: View {
                     }
                 }
                 .pickerStyle(.segmented)
-                
-                Text("Select whether NewsApp follows your macOS system appearance or stays locked to light or dark mode.")
-                    .font(AppTypography.caption)
-                    .foregroundColor(AppColor.secondaryText)
+
+                Text(
+                    "Select whether NewsApp follows your macOS system appearance or stays locked to light or dark mode."
+                )
+                .font(AppTypography.caption)
+                .foregroundColor(AppColor.secondaryText)
             }
-            
+
             Section("Article Typography") {
                 Picker("Theme Style", selection: $themeManager.articleTheme) {
                     ForEach(ArticleThemeType.allCases) { theme in
@@ -554,16 +587,18 @@ struct SettingsView: View {
                     }
                 }
                 .pickerStyle(.radioGroup)
-                
+
                 // Typography Preview
                 VStack(alignment: .leading, spacing: 6) {
                     Text("The quick brown fox jumps over the lazy dog.")
                         .font(AppTypography.headlineFont(for: themeManager.articleTheme))
                         .foregroundColor(AppColor.primaryText)
-                    Text("Editorial typography determines the headline and body font families, line spacing, and tracking used in reader mode.")
-                        .font(AppTypography.bodyFont(for: themeManager.articleTheme))
-                        .foregroundColor(AppColor.secondaryText)
-                        .lineSpacing(AppTypography.bodyLineSpacing(for: themeManager.articleTheme))
+                    Text(
+                        "Editorial typography determines the headline and body font families, line spacing, and tracking used in reader mode."
+                    )
+                    .font(AppTypography.bodyFont(for: themeManager.articleTheme))
+                    .foregroundColor(AppColor.secondaryText)
+                    .lineSpacing(AppTypography.bodyLineSpacing(for: themeManager.articleTheme))
                 }
                 .padding(12)
                 .background(RoundedRectangle(cornerRadius: AppRadius.control).fill(AppColor.surface))
@@ -600,7 +635,9 @@ struct SettingsView: View {
                         .foregroundColor(AppColor.success)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 4)
-                        .background(RoundedRectangle(cornerRadius: AppRadius.control).fill(AppColor.success.opacity(0.12)))
+                        .background(
+                            RoundedRectangle(cornerRadius: AppRadius.control).fill(AppColor.success.opacity(0.12))
+                        )
                         .transition(.opacity)
                 }
             }
@@ -713,9 +750,11 @@ struct SettingsView: View {
                         Text("Purge All Caches")
                             .font(AppTypography.headline)
                             .foregroundColor(AppColor.danger)
-                        Text("Purges web cache, article content, and AI analysis. Preserves subscriptions, saved stories, and read history.")
-                            .font(AppTypography.caption)
-                            .foregroundColor(AppColor.secondaryText)
+                        Text(
+                            "Purges web cache, article content, and AI analysis. Preserves subscriptions, saved stories, and read history."
+                        )
+                        .font(AppTypography.caption)
+                        .foregroundColor(AppColor.secondaryText)
                     }
                     Spacer()
                     Button(role: .destructive) {
@@ -821,14 +860,17 @@ struct SettingsView: View {
 
     private nonisolated static func calculateDatabaseBytes() -> Int64 {
         let fileManager = FileManager.default
-        guard let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else { return 0 }
+        guard let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
+            return 0
+        }
         let dbDir = appSupport.appendingPathComponent("com.marspater.news", isDirectory: true)
         let files = ["news.sqlite3", "news.sqlite3-wal", "news.sqlite3-shm"]
         var total: Int64 = 0
         for file in files {
             let path = dbDir.appendingPathComponent(file).path
             if let attrs = try? fileManager.attributesOfItem(atPath: path),
-               let size = attrs[.size] as? Int64 {
+                let size = attrs[.size] as? Int64
+            {
                 total += size
             }
         }

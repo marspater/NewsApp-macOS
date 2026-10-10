@@ -6,12 +6,12 @@
 // tree order and heading levels, and invokes exposed accessibility actions.
 // Tree order is not VoiceOver cursor order; speech and rotor traversal still require a manual pass.
 
-import Foundation
-import SwiftUI
+import Accessibility
 import AppKit
 import ApplicationServices
-import Accessibility
 import Darwin
+import Foundation
+import SwiftUI
 
 // MARK: - Accessibility Node Model
 
@@ -64,10 +64,12 @@ private func axObserverCallback(
     refcon: UnsafeMutableRawPointer?
 ) {
     if let dict = info as? [String: Any] {
-        let text = (dict["NSAccessibilityAnnouncementKey"] as? String)
+        let text =
+            (dict["NSAccessibilityAnnouncementKey"] as? String)
             ?? (dict[kAXAnnouncementKey as String] as? String)
             ?? ""
-        let priority = (dict[kAXPriorityKey as String] as? Int)
+        let priority =
+            (dict[kAXPriorityKey as String] as? Int)
             ?? (dict["NSAccessibilityPriorityKey"] as? Int)
             ?? 0
         if !text.isEmpty {
@@ -80,11 +82,14 @@ private func axObserverCallback(
 
 func inspectAXElement(_ element: AXUIElement, maxDepth: Int = 15) throws -> AXElementRecord {
     var remainingNodes = 1000
-    return try inspectAXNode(element, maxDepth: maxDepth,
+    return try inspectAXNode(
+        element, maxDepth: maxDepth,
         deadline: ProcessInfo.processInfo.systemUptime + 3, remainingNodes: &remainingNodes)
 }
 
-private func inspectAXNode(_ element: AXUIElement, maxDepth: Int, deadline: TimeInterval, remainingNodes: inout Int) throws -> AXElementRecord {
+private func inspectAXNode(_ element: AXUIElement, maxDepth: Int, deadline: TimeInterval, remainingNodes: inout Int)
+    throws -> AXElementRecord
+{
     guard remainingNodes > 0, ProcessInfo.processInfo.systemUptime < deadline else {
         throw QAFailure("Accessibility tree exceeded its three-second / 1,000-node inspection budget")
     }
@@ -111,8 +116,10 @@ private func inspectAXNode(_ element: AXUIElement, maxDepth: Int, deadline: Time
     let hint = attribute(kAXHelpAttribute as String) as? String
     var headingLevel = (attribute("AXHeadingLevel") as? NSNumber)?.intValue
     if headingLevel == nil, let attributed, attributed.length > 0 {
-        headingLevel = (attributed.attribute(NSAttributedString.Key(AttributeScopes.AccessibilityAttributes.HeadingLevelAttribute.name),
-            at: 0, effectiveRange: nil) as? NSNumber)?.intValue
+        headingLevel =
+            (attributed.attribute(
+                NSAttributedString.Key(AttributeScopes.AccessibilityAttributes.HeadingLevelAttribute.name),
+                at: 0, effectiveRange: nil) as? NSNumber)?.intValue
     }
 
     var actionsVal: CFArray?
@@ -138,7 +145,9 @@ private func inspectAXNode(_ element: AXUIElement, maxDepth: Int, deadline: Time
         AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &childrenVal)
         if let children = childrenVal as? [AXUIElement] {
             for child in children {
-                childrenRecords.append(try inspectAXNode(child, maxDepth: maxDepth - 1, deadline: deadline, remainingNodes: &remainingNodes))
+                childrenRecords.append(
+                    try inspectAXNode(
+                        child, maxDepth: maxDepth - 1, deadline: deadline, remainingNodes: &remainingNodes))
             }
         }
     }
@@ -162,10 +171,11 @@ func flattenNavigationOrder(_ record: AXElementRecord) -> [AXElementRecord] {
     var list: [AXElementRecord] = []
     let containerRoles: Set<String> = [
         "AXWindow", "AXGroup", "AXScrollArea", "AXSplitGroup",
-        "AXApplication", "AXMenuBar", "AXMenuBarItem", "AXMenu", "AXMenuItem"
+        "AXApplication", "AXMenuBar", "AXMenuBarItem", "AXMenu", "AXMenuItem",
     ]
 
-    let isInteractiveOrHeading = record.role == "AXHeading"
+    let isInteractiveOrHeading =
+        record.role == "AXHeading"
         || record.role == "AXButton"
         || record.role == "AXLink"
         || record.role == "AXTextField"
@@ -173,7 +183,9 @@ func flattenNavigationOrder(_ record: AXElementRecord) -> [AXElementRecord] {
 
     let hasSpokenContent = !record.spokenText.isEmpty
 
-    if (isInteractiveOrHeading || hasSpokenContent) && (!containerRoles.contains(record.role) || !record.customActions.isEmpty) {
+    if (isInteractiveOrHeading || hasSpokenContent)
+        && (!containerRoles.contains(record.role) || !record.customActions.isEmpty)
+    {
         list.append(record)
     }
 
@@ -187,7 +199,7 @@ func flattenNavigationOrder(_ record: AXElementRecord) -> [AXElementRecord] {
 
 @MainActor
 final class HostAppState: ObservableObject {
-    @Published var activeMode: String = "LIST" // "LIST", "READER", "OVERVIEW"
+    @Published var activeMode: String = "LIST"  // "LIST", "READER", "OVERVIEW"
     @Published var readerPath: NavigationPath = NavigationPath()
 
     var container: AppContainer?
@@ -209,18 +221,22 @@ struct HostRootView: View {
     var body: some View {
         Group {
             if let container = state.container, let settings = state.settings,
-               let store = state.store, let manager = state.manager {
+                let store = state.store, let manager = state.manager
+            {
                 Group {
                     if state.activeMode == "LIST" {
                         MainView()
                     } else {
                         NavigationStack {
                             if state.activeMode == "READER", let article = state.fusionArticle {
-                                ArticleDetailView(article: article, allArticles: [article], path: $state.readerPath,
+                                ArticleDetailView(
+                                    article: article, allArticles: [article], path: $state.readerPath,
                                     initialExperienceMode: .sourcePublication)
                             } else if let article = state.summitArticleAP, let overview = state.summitOverview {
-                                ArticleDetailView(article: article,
-                                    allArticles: [article, state.summitArticleReuters, state.summitArticleBBC].compactMap { $0 },
+                                ArticleDetailView(
+                                    article: article,
+                                    allArticles: [article, state.summitArticleReuters, state.summitArticleBBC]
+                                        .compactMap { $0 },
                                     path: $state.readerPath, overview: overview, initialExperienceMode: .eventOverview)
                             }
                         }
@@ -262,7 +278,8 @@ final class LiveVoiceOverHost {
         if let index = arguments.firstIndex(of: "--fixture-directory"), arguments.indices.contains(index + 1) {
             self.tempDir = URL(fileURLWithPath: arguments[index + 1])
         } else {
-            self.tempDir = FileManager.default.temporaryDirectory.appendingPathComponent("news-vo-qa-\(UUID().uuidString)")
+            self.tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(
+                "news-vo-qa-\(UUID().uuidString)")
         }
         if let index = arguments.firstIndex(of: "--defaults-suite"), arguments.indices.contains(index + 1) {
             self.suite = arguments[index + 1]
@@ -315,7 +332,8 @@ final class LiveVoiceOverHost {
             source: "Reuters",
             fullContent: "A $100 billion annual climate resilience fund was formally established.",
             readerDocument: ReaderDocument(blocks: [
-                ReaderBlock(kind: .paragraph, text: "A $100 billion annual climate resilience fund was formally established.")
+                ReaderBlock(
+                    kind: .paragraph, text: "A $100 billion annual climate resilience fund was formally established.")
             ])
         )
 
@@ -348,10 +366,15 @@ final class LiveVoiceOverHost {
             ),
             content: OverviewContent(
                 title: "Global Climate Summit Adopts Geneva Pact",
-                summary: "Delegates from 195 nations established a $100B resilience fund and binding carbon neutrality milestones.",
+                summary:
+                    "Delegates from 195 nations established a $100B resilience fund and binding carbon neutrality milestones.",
                 facts: [
-                    OverviewFact(id: "f1", text: "Delegates from 195 nations agreed to binding carbon neutrality milestones.", citationIDs: ["c1"]),
-                    OverviewFact(id: "f2", text: "A $100 billion annual climate resilience fund was established.", citationIDs: ["c2"])
+                    OverviewFact(
+                        id: "f1", text: "Delegates from 195 nations agreed to binding carbon neutrality milestones.",
+                        citationIDs: ["c1"]),
+                    OverviewFact(
+                        id: "f2", text: "A $100 billion annual climate resilience fund was established.",
+                        citationIDs: ["c2"]),
                 ],
                 citations: [
                     OverviewCitation(
@@ -360,7 +383,8 @@ final class LiveVoiceOverHost {
                         passageID: "p1",
                         passageFingerprint: "fp1",
                         quote: "Delegates from 195 nations signed the treaty.",
-                        source: OverviewSourceMetadata(title: artAP.title, name: artAP.source, url: artAP.link, publishedAt: artAP.pubDate)
+                        source: OverviewSourceMetadata(
+                            title: artAP.title, name: artAP.source, url: artAP.link, publishedAt: artAP.pubDate)
                     ),
                     OverviewCitation(
                         id: "c2",
@@ -368,22 +392,33 @@ final class LiveVoiceOverHost {
                         passageID: "p2",
                         passageFingerprint: "fp2",
                         quote: "A $100 billion annual climate resilience fund was formally established.",
-                        source: OverviewSourceMetadata(title: artReuters.title, name: artReuters.source, url: artReuters.link, publishedAt: artReuters.pubDate)
-                    )
+                        source: OverviewSourceMetadata(
+                            title: artReuters.title, name: artReuters.source, url: artReuters.link,
+                            publishedAt: artReuters.pubDate)
+                    ),
                 ],
-                leadImage: nil, // Overview hero loading uses AsyncImage; keep this fixture offline.
+                leadImage: nil,  // Overview hero loading uses AsyncImage; keep this fixture offline.
                 evidenceSections: OverviewEvidenceSections(
                     timeline: [
-                        OverviewTimelineItem(dateText: "12 October", summary: "Working groups convened in Geneva", isFuturePlan: false),
-                        OverviewTimelineItem(dateText: "15 October", summary: "Final treaty ratified unanimously", isFuturePlan: false)
+                        OverviewTimelineItem(
+                            dateText: "12 October", summary: "Working groups convened in Geneva", isFuturePlan: false),
+                        OverviewTimelineItem(
+                            dateText: "15 October", summary: "Final treaty ratified unanimously", isFuturePlan: false),
                     ],
                     perspectives: [
-                        OverviewPerspective(participant: "European Delegates", position: "European delegates pushed for enforceable mechanisms", sourcePublisher: "Reuters"),
-                        OverviewPerspective(participant: "Developing Nations", position: "Developing nations secured dedicated loss-and-damage financing", sourcePublisher: "Associated Press")
+                        OverviewPerspective(
+                            participant: "European Delegates",
+                            position: "European delegates pushed for enforceable mechanisms", sourcePublisher: "Reuters"
+                        ),
+                        OverviewPerspective(
+                            participant: "Developing Nations",
+                            position: "Developing nations secured dedicated loss-and-damage financing",
+                            sourcePublisher: "Associated Press"),
                     ],
                     thematicAngle: OverviewThematicAngle(
                         title: "Economic Impact",
-                        summary: "Economic implications of binding energy transition targets across developing economies."
+                        summary:
+                            "Economic implications of binding energy transition targets across developing economies."
                     )
                 )
             ),
@@ -403,7 +438,9 @@ final class LiveVoiceOverHost {
             source: "Nature Technology",
             fullContent: "Scientists demonstrated net positive electrical energy output from a compact tokamak.",
             readerDocument: ReaderDocument(blocks: [
-                ReaderBlock(kind: .paragraph, text: "Scientists today demonstrated net positive electrical energy output from a compact tokamak."),
+                ReaderBlock(
+                    kind: .paragraph,
+                    text: "Scientists today demonstrated net positive electrical energy output from a compact tokamak."),
                 ReaderBlock(
                     kind: .figure,
                     text: "Cross-section of vacuum vessel",
@@ -415,17 +452,20 @@ final class LiveVoiceOverHost {
                 ),
                 ReaderBlock(kind: .heading, text: "Core Physics Breakthrough"),
                 ReaderBlock(kind: .subheading, text: "Plasma Equilibrium State"),
-                ReaderBlock(kind: .paragraph, text: "The magnetic confinement coils maintained high-density deuterium-tritium plasma."),
-                ReaderBlock(kind: .quote, text: "The sustained reaction demonstrated net electrical gain for 1,000 seconds."),
+                ReaderBlock(
+                    kind: .paragraph,
+                    text: "The magnetic confinement coils maintained high-density deuterium-tritium plasma."),
+                ReaderBlock(
+                    kind: .quote, text: "The sustained reaction demonstrated net electrical gain for 1,000 seconds."),
                 ReaderBlock(
                     kind: .figure,
                     text: "Toroidal field sensor array",
                     imageURL: "https://liveqa.invalid/images/sensor.jpg",
-                    imageAlt: "", // Intentionally blank to test "Article image" fallback
+                    imageAlt: "",  // Intentionally blank to test "Article image" fallback
                     imageCredit: "Diagnostics Team",
                     imageWidth: 400,
                     imageHeight: 300
-                )
+                ),
             ])
         )
 
@@ -454,7 +494,8 @@ final class LiveVoiceOverHost {
         await manager.waitForEventClustering()
         manager.articles = store.articles
         let themeManager = ThemeManager()
-        let container = AppContainer(appSettings: settings, articleStore: store, feedManager: manager, themeManager: themeManager)
+        let container = AppContainer(
+            appSettings: settings, articleStore: store, feedManager: manager, themeManager: themeManager)
 
         state.container = container
         state.settings = settings
@@ -474,8 +515,11 @@ final class LiveVoiceOverHost {
         )
         window.isReleasedWhenClosed = false
         window.title = "News — VoiceOver Live QA"
-        imageObserver = NotificationCenter.default.addObserver(forName: .readerImageFinished, object: nil, queue: .main) { [weak self] notification in
-            guard let url = notification.object as? URL, notification.userInfo?["success"] as? Bool == true else { return }
+        imageObserver = NotificationCenter.default.addObserver(forName: .readerImageFinished, object: nil, queue: .main)
+        { [weak self] notification in
+            guard let url = notification.object as? URL, notification.userInfo?["success"] as? Bool == true else {
+                return
+            }
             MainActor.assumeIsolated { _ = self?.loadedImages.insert(url) }
         }
         self.window = window
@@ -522,7 +566,8 @@ final class LiveVoiceOverHost {
         case "QUEUE_UPDATES":
             guard let store = state.store else { throw QAFailure("Missing fixture store") }
             let incoming = (0..<3).map { index in
-                FeedArticle(storedID: "qa-new-\(index)", title: "New fixture story \(index)",
+                FeedArticle(
+                    storedID: "qa-new-\(index)", title: "New fixture story \(index)",
                     link: "https://liveqa.invalid/new/\(index)", guid: "qa-new-\(index)",
                     description: "A distinct buffered fixture publication.",
                     pubDate: Date().addingTimeInterval(Double(index + 1)), source: "Fixture publisher \(index)")
@@ -531,7 +576,9 @@ final class LiveVoiceOverHost {
             try await db.markEventMatchProcessed(incoming.map(\.id), matcherVersion: EventMatcher.version, at: Date())
             guard await store.refreshState() else { throw QAFailure("Could not publish fixture updates") }
         case "SCROLL_TOP", "SCROLL_MIDDLE", "SCROLL_BOTTOM":
-            guard let content = window?.contentView, let scroll = Self.scrollView(in: content), let document = scroll.documentView else {
+            guard let content = window?.contentView, let scroll = Self.scrollView(in: content),
+                let document = scroll.documentView
+            else {
                 throw QAFailure("Reader scroll view was not found")
             }
             let fraction: CGFloat = command == "SCROLL_TOP" ? 0 : command == "SCROLL_MIDDLE" ? 0.5 : 1
@@ -545,7 +592,9 @@ final class LiveVoiceOverHost {
             guard state.container?.readManager.isRead(article.id) == true else {
                 throw QAFailure("Accessibility read action did not update production read state")
             }
-            try await waitUntil("read article persistence") { try await self.db.getReadArticleIDs().contains(article.id) }
+            try await waitUntil("read article persistence") {
+                try await self.db.getReadArticleIDs().contains(article.id)
+            }
         case "CHECK_SAVED":
             guard let article = state.fusionArticle else { throw QAFailure("Missing fixture article") }
             try await waitUntil("save action state") { self.state.container?.savedStories.isSaved(article) == true }
@@ -553,7 +602,9 @@ final class LiveVoiceOverHost {
                 throw QAFailure("Accessibility save action did not update production save state")
             }
             // SavedStoriesManager's write is asynchronous; wait on observable persistence.
-            try await waitUntil("saved article persistence") { try await self.db.getSavedArticles().contains { $0.id == article.id } }
+            try await waitUntil("saved article persistence") {
+                try await self.db.getSavedArticles().contains { $0.id == article.id }
+            }
         default: throw QAFailure("Unknown host command: \(command)")
         }
     }
@@ -566,9 +617,10 @@ final class LiveVoiceOverHost {
         loadedImages.removeAll()
         state.activeMode = mode
         let image = self.image
-        let view = NSHostingView(rootView: HostRootView(state: state)
-            .defaultAppStorage(defaults)
-            .environment(\.readerImageLoader, { _ in image }))
+        let view = NSHostingView(
+            rootView: HostRootView(state: state)
+                .defaultAppStorage(defaults)
+                .environment(\.readerImageLoader, { _ in image }))
         window.contentView = view
         view.layoutSubtreeIfNeeded()
         view.displayIfNeeded()
@@ -603,9 +655,13 @@ final class LiveVoiceOverHost {
             try await Task.sleep(for: .milliseconds(300))
             view.layoutSubtreeIfNeeded()
             view.displayIfNeeded()
-            guard let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { throw QAFailure("No fixture bitmap") }
+            guard let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) else {
+                throw QAFailure("No fixture bitmap")
+            }
             view.cacheDisplay(in: view.bounds, to: bitmap)
-            guard let data = bitmap.representation(using: .png, properties: [:]) else { throw QAFailure("Could not encode fixture bitmap") }
+            guard let data = bitmap.representation(using: .png, properties: [:]) else {
+                throw QAFailure("Could not encode fixture bitmap")
+            }
             try data.write(to: output.appendingPathComponent("\(mode.lowercased()).png"))
         }
         print("SMOKE_PASS: list, source reader, overview rendered; two offline images decoded")
@@ -613,8 +669,11 @@ final class LiveVoiceOverHost {
 }
 
 private func fixtureImage() throws -> CGImage {
-    guard let context = CGContext(data: nil, width: 120, height: 80, bitsPerComponent: 8, bytesPerRow: 0,
-        space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else {
+    guard
+        let context = CGContext(
+            data: nil, width: 120, height: 80, bitsPerComponent: 8, bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+    else {
         throw QAFailure("Could not create offline image")
     }
     context.setFillColor(CGColor(red: 0.1, green: 0.4, blue: 0.6, alpha: 1))
@@ -629,7 +688,9 @@ struct QAFailure: Error, CustomStringConvertible {
 }
 
 @MainActor
-private func waitUntil(_ description: String, timeout: TimeInterval = 8, condition: () async throws -> Bool) async throws {
+private func waitUntil(_ description: String, timeout: TimeInterval = 8, condition: () async throws -> Bool)
+    async throws
+{
     let deadline = ProcessInfo.processInfo.systemUptime + timeout
     while ProcessInfo.processInfo.systemUptime < deadline {
         try Task.checkCancellation()
@@ -720,7 +781,9 @@ final class LiveVoiceOverInspector {
         print("=====================================================================")
 
         guard AXIsProcessTrusted() else {
-            throw QAFailure("Accessibility access is missing. Grant access to the terminal launching this QA bundle in System Settings > Privacy & Security > Accessibility, then rerun --live. Use --smoke for rendering checks or --manual for a spoken VoiceOver pass.")
+            throw QAFailure(
+                "Accessibility access is missing. Grant access to the terminal launching this QA bundle in System Settings > Privacy & Security > Accessibility, then rerun --live. Use --smoke for rendering checks or --manual for a spoken VoiceOver pass."
+            )
         }
         // Apply a finite timeout to all AX messages issued by this process.
         guard AXUIElementSetMessagingTimeout(AXUIElementCreateSystemWide(), 0.2) == .success else {
@@ -728,7 +791,8 @@ final class LiveVoiceOverInspector {
         }
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: CommandLine.arguments[0])
-        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("news-vo-inspected-\(UUID().uuidString)")
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "news-vo-inspected-\(UUID().uuidString)")
         let suite = "test.vo.host.\(UUID().uuidString)"
         defer {
             UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite)
@@ -760,11 +824,15 @@ final class LiveVoiceOverInspector {
         let axApp = AXUIElementCreateApplication(childPID)
         var observer: AXObserver?
         let obsErr = AXObserverCreateWithInfoCallback(childPID, axObserverCallback, &observer)
-        guard obsErr == .success, let observer else { throw QAFailure("Could not create AXObserver: \(obsErr.rawValue)") }
+        guard obsErr == .success, let observer else {
+            throw QAFailure("Could not create AXObserver: \(obsErr.rawValue)")
+        }
         let notification = kAXAnnouncementRequestedNotification as CFString
         let addErr = AXObserverAddNotification(observer, axApp, notification, nil)
         guard addErr == .success else {
-            throw QAFailure("Cannot observe announcement notifications (AX error \(addErr.rawValue)). Start VoiceOver and rerun --live; a rendering smoke pass does not verify spoken announcements.")
+            throw QAFailure(
+                "Cannot observe announcement notifications (AX error \(addErr.rawValue)). Start VoiceOver and rerun --live; a rendering smoke pass does not verify spoken announcements."
+            )
         }
         let source = AXObserverGetRunLoopSource(observer)
         CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
@@ -778,7 +846,8 @@ final class LiveVoiceOverInspector {
             while ProcessInfo.processInfo.systemUptime < deadline {
                 var windowsVal: AnyObject?
                 if AXUIElementCopyAttributeValue(axApp, kAXWindowsAttribute as CFString, &windowsVal) == .success,
-                   let windows = windowsVal as? [AXUIElement] {
+                    let windows = windowsVal as? [AXUIElement]
+                {
                     for w in windows {
                         var roleVal: AnyObject?
                         AXUIElementCopyAttributeValue(w, kAXRoleAttribute as CFString, &roleVal)
@@ -797,7 +866,9 @@ final class LiveVoiceOverInspector {
             return nil
         }
 
-        func pollNavigationOrder(timeout: TimeInterval = 12.0, condition: ([AXElementRecord]) -> Bool) async throws -> [AXElementRecord] {
+        func pollNavigationOrder(timeout: TimeInterval = 12.0, condition: ([AXElementRecord]) -> Bool) async throws
+            -> [AXElementRecord]
+        {
             let deadline = ProcessInfo.processInfo.systemUptime + timeout
             var lastOrder: [AXElementRecord] = []
             while ProcessInfo.processInfo.systemUptime < deadline {
@@ -811,7 +882,9 @@ final class LiveVoiceOverInspector {
                 }
                 try? await Task.sleep(nanoseconds: 350_000_000)
             }
-            throw QAFailure("Expected accessibility state did not appear within \(timeout) seconds; last tree had \(lastOrder.count) elements")
+            throw QAFailure(
+                "Expected accessibility state did not appear within \(timeout) seconds; last tree had \(lastOrder.count) elements"
+            )
         }
 
         func scanReader() async throws -> [AXElementRecord] {
@@ -821,7 +894,9 @@ final class LiveVoiceOverInspector {
                 try await command(position)
                 // Scroll layout is asynchronous; sample after the host processes a redraw.
                 try await Task.sleep(for: .milliseconds(150))
-                guard let window = await getWindow() else { throw QAFailure("Fixture window disappeared during scrolling") }
+                guard let window = await getWindow() else {
+                    throw QAFailure("Fixture window disappeared during scrolling")
+                }
                 for record in flattenNavigationOrder(try inspectAXElement(window)) {
                     let key = "\(record.role):\(record.spokenText):\(record.headingLevel ?? 0)"
                     if seen.insert(key).inserted { records.append(record) }
@@ -878,15 +953,24 @@ final class LiveVoiceOverInspector {
         assert(hasReadAction, "Article card exposes 'Mark as Read' as accessibility actions")
         assert(hasSaveAction, "Article card exposes 'Save Story' as accessibility actions")
 
-        guard let coverage = order1.first(where: { $0.spokenText.hasPrefix("Event:") && $0.actions.contains(kAXPressAction as String) })?.element,
-              AXUIElementPerformAction(coverage, kAXPressAction as CFString) == .success else {
+        guard
+            let coverage = order1.first(where: {
+                $0.spokenText.hasPrefix("Event:") && $0.actions.contains(kAXPressAction as String)
+            })?.element,
+            AXUIElementPerformAction(coverage, kAXPressAction as CFString) == .success
+        else {
             throw QAFailure("Could not expand the event's coverage through accessibility")
         }
         let expanded = try await pollNavigationOrder { order in
-            order.contains { $0.spokenText.contains("Geneva Conference Concludes") } && order.contains { $0.spokenText.contains("Analysis: Inside the Geneva") }
+            order.contains { $0.spokenText.contains("Geneva Conference Concludes") }
+                && order.contains { $0.spokenText.contains("Analysis: Inside the Geneva") }
         }
-        assert(expanded.contains { $0.customActions.contains("Not the Same Event") }, "Expanded event sources expose the separation action")
-        guard AXUIElementPerformAction(coverage, kAXPressAction as CFString) == .success else { throw QAFailure("Could not collapse event coverage") }
+        assert(
+            expanded.contains { $0.customActions.contains("Not the Same Event") },
+            "Expanded event sources expose the separation action")
+        guard AXUIElementPerformAction(coverage, kAXPressAction as CFString) == .success else {
+            throw QAFailure("Could not collapse event coverage")
+        }
 
         // Invoke the exposed actions and confirm production state plus SQLite persistence.
         func perform(_ record: AXElementRecord?, named name: String) throws {
@@ -894,17 +978,24 @@ final class LiveVoiceOverInspector {
             var raw: CFArray?
             let copyError = AXUIElementCopyActionNames(element, &raw)
             guard copyError == .success else { throw QAFailure("Cannot read actions: \(copyError.rawValue)") }
-            guard let action = (raw as? [String])?.first(where: {
-                $0.components(separatedBy: "\n").contains { $0.trimmingCharacters(in: .whitespaces) == "Name: \(name)" || $0 == "Name:\(name)" }
-            }) else { throw QAFailure("Missing accessibility action \(name)") }
+            guard
+                let action = (raw as? [String])?.first(where: {
+                    $0.components(separatedBy: "\n").contains {
+                        $0.trimmingCharacters(in: .whitespaces) == "Name: \(name)" || $0 == "Name:\(name)"
+                    }
+                })
+            else { throw QAFailure("Missing accessibility action \(name)") }
             let result = AXUIElementPerformAction(element, action as CFString)
             guard result == .success else { throw QAFailure("Accessibility action \(name) failed: \(result.rawValue)") }
         }
         try perform(singleCard, named: "Mark as Read")
         try await command("CHECK_READ")
         assert(true, "Accessibility read action updated and persisted production read state")
-        let updatedCards = try await pollNavigationOrder { $0.contains { $0.spokenText.contains("Next-Generation Fusion Reactor") } }
-        try perform(updatedCards.first { $0.spokenText.contains("Next-Generation Fusion Reactor") }, named: "Save Story")
+        let updatedCards = try await pollNavigationOrder {
+            $0.contains { $0.spokenText.contains("Next-Generation Fusion Reactor") }
+        }
+        try perform(
+            updatedCards.first { $0.spokenText.contains("Next-Generation Fusion Reactor") }, named: "Save Story")
         try await command("CHECK_SAVED")
         assert(true, "Accessibility save action updated and persisted production save state")
 
@@ -915,7 +1006,8 @@ final class LiveVoiceOverInspector {
             AnnouncementBox.shared.getAnnouncements().contains { $0.text == "3 new stories available" }
         }
         let announcement = AnnouncementBox.shared.getAnnouncements().last { $0.text == "3 new stories available" }
-        assert(announcement?.priority == NSAccessibilityPriorityLevel.medium.rawValue,
+        assert(
+            announcement?.priority == NSAccessibilityPriorityLevel.medium.rawValue,
             "Observed production buffered-update notification with medium priority (speech requires a manual pass)")
 
         // -------------------------------------------------------------
@@ -934,18 +1026,24 @@ final class LiveVoiceOverInspector {
         }
 
         // 2. Grouped Source Line
-        let sourceLine = order2.first { $0.spokenText.contains("Nature Technology") && $0.spokenText.contains("min read") }
+        let sourceLine = order2.first {
+            $0.spokenText.contains("Nature Technology") && $0.spokenText.contains("min read")
+        }
         assert(sourceLine != nil, "Source metadata is combined into a single accessibility element")
 
         // 3. Headings Hierarchy
         let h1Article = heading(order2, text: "Next-Generation Fusion Reactor", level: 1)
-        assert(h1Article?.spokenText.contains("Next-Generation Fusion Reactor") == true, "Heading text matches article title")
+        assert(
+            h1Article?.spokenText.contains("Next-Generation Fusion Reactor") == true,
+            "Heading text matches article title")
         _ = heading(order2, text: "Core Physics Breakthrough", level: 2)
         _ = heading(order2, text: "Plasma Equilibrium State", level: 3)
 
         // Non-headings do not have AXHeading
         let nonHeadingRoleCount = order2.filter { $0.role == "AXHeading" }.count
-        assert(nonHeadingRoleCount == 3, "Only true headings (H1, H2, H3) possess AXHeading role (\(nonHeadingRoleCount) found)")
+        assert(
+            nonHeadingRoleCount == 3,
+            "Only true headings (H1, H2, H3) possess AXHeading role (\(nonHeadingRoleCount) found)")
 
         // 4. Figures & Alt Text
         let leadFigure = order2.first { $0.spokenText == "Cross-section of vacuum vessel with superconducting coils" }
@@ -967,7 +1065,9 @@ final class LiveVoiceOverInspector {
         print("\n--- [Suite 3/3] Event Overview Reader Mode QA ---")
         try await command("MODE_OVERVIEW")
 
-        _ = try await pollNavigationOrder { $0.contains { $0.spokenText.contains("Global Climate Summit Adopts Geneva Pact") } }
+        _ = try await pollNavigationOrder {
+            $0.contains { $0.spokenText.contains("Global Climate Summit Adopts Geneva Pact") }
+        }
         var order3 = try await scanReader()
 
         print("\n  Recorded Overview AX Tree Order (\(order3.count) elements):")
@@ -977,8 +1077,11 @@ final class LiveVoiceOverInspector {
         }
 
         // Exercise the disclosure rather than injecting its expanded state into production views.
-        if let sources = order3.first(where: { $0.spokenText.contains("Sources") && $0.actions.contains(kAXPressAction as String) }),
-           let element = sources.element {
+        if let sources = order3.first(where: {
+            $0.spokenText.contains("Sources") && $0.actions.contains(kAXPressAction as String)
+        }),
+            let element = sources.element
+        {
             _ = AXUIElementPerformAction(element, "AXScrollToVisible" as CFString)
             let result = AXUIElementPerformAction(element, kAXPressAction as CFString)
             guard result == .success else { throw QAFailure("Sources disclosure action failed: \(result.rawValue)") }
@@ -987,14 +1090,20 @@ final class LiveVoiceOverInspector {
 
         // 1. Overview Title (H1)
         let h1Overview = heading(order3, text: "Global Climate Summit Adopts Geneva Pact", level: 1)
-        assert(h1Overview?.spokenText.contains("Global Climate Summit Adopts Geneva Pact") == true, "Overview heading matches expected title")
+        assert(
+            h1Overview?.spokenText.contains("Global Climate Summit Adopts Geneva Pact") == true,
+            "Overview heading matches expected title")
 
         // 2. Metadata line
-        let metaLine = order3.first { $0.spokenText.contains("Updated") && $0.spokenText.contains("articles") && $0.spokenText.contains("publishers") }
+        let metaLine = order3.first {
+            $0.spokenText.contains("Updated") && $0.spokenText.contains("articles")
+                && $0.spokenText.contains("publishers")
+        }
         assert(metaLine != nil, "Overview metadata is combined into a single accessibility element")
 
         // 3. Section Headings (H2)
-        for section in ["Key facts", "Timeline", "Perspectives", "Economic Impact", "Sources", "Original publications"] {
+        for section in ["Key facts", "Timeline", "Perspectives", "Economic Impact", "Sources", "Original publications"]
+        {
             _ = heading(order3, text: section, level: 2)
         }
 
@@ -1002,36 +1111,58 @@ final class LiveVoiceOverInspector {
         let citationPills = order3.filter { $0.role == "AXButton" && $0.spokenText.contains("Citation from") }
         assert(!citationPills.isEmpty, "Citation pills are accessible buttons with explicit source and quote")
         if let firstPill = citationPills.first {
-            assert(firstPill.hint == "Opens source publication at cited passage", "Citation pill has explicit hint for navigation")
+            assert(
+                firstPill.hint == "Opens source publication at cited passage",
+                "Citation pill has explicit hint for navigation")
         }
 
         // 5. Contextual Source Buttons
-        let readButtons = order3.filter { $0.spokenText.hasPrefix("Read ") && $0.spokenText.contains("in Source publication mode") }
+        let readButtons = order3.filter {
+            $0.spokenText.hasPrefix("Read ") && $0.spokenText.contains("in Source publication mode")
+        }
         let webButtons = order3.filter { $0.spokenText.hasPrefix("Open original publication: ") }
         assert(!readButtons.isEmpty, "Sources section exposes distinct contextual Read button labels")
         assert(!webButtons.isEmpty, "Sources section exposes distinct contextual Open web button labels")
 
         // Follow a real citation, then dismiss its production banner through AXPress.
-        guard let pill = citationPills.first, let pillElement = pill.element else { throw QAFailure("No citation pill to exercise") }
+        guard let pill = citationPills.first, let pillElement = pill.element else {
+            throw QAFailure("No citation pill to exercise")
+        }
         _ = AXUIElementPerformAction(pillElement, "AXScrollToVisible" as CFString)
-        guard AXUIElementPerformAction(pillElement, kAXPressAction as CFString) == .success else { throw QAFailure("Citation press failed") }
-        let citedOrder = try await pollNavigationOrder { $0.contains { $0.spokenText.contains("Cited passage in event overview") } }
-        assert(citedOrder.contains { $0.spokenText.contains("Delegates from 195 nations signed the treaty.") || $0.spokenText.contains("$100 billion annual") }, "Citation opens the source publication with its stored passage")
+        guard AXUIElementPerformAction(pillElement, kAXPressAction as CFString) == .success else {
+            throw QAFailure("Citation press failed")
+        }
+        let citedOrder = try await pollNavigationOrder {
+            $0.contains { $0.spokenText.contains("Cited passage in event overview") }
+        }
+        assert(
+            citedOrder.contains {
+                $0.spokenText.contains("Delegates from 195 nations signed the treaty.")
+                    || $0.spokenText.contains("$100 billion annual")
+            }, "Citation opens the source publication with its stored passage")
         guard let dismiss = citedOrder.first(where: { $0.spokenText == "Dismiss citation highlight" })?.element,
-              AXUIElementPerformAction(dismiss, kAXPressAction as CFString) == .success else { throw QAFailure("Citation banner dismiss action failed") }
-        let dismissed = try await pollNavigationOrder { !$0.contains { $0.spokenText.contains("Cited passage in event overview") } }
-        assert(!dismissed.isEmpty && !dismissed.contains { $0.spokenText.contains("Cited passage in event overview") }, "Dismiss action removes the citation banner")
+            AXUIElementPerformAction(dismiss, kAXPressAction as CFString) == .success
+        else { throw QAFailure("Citation banner dismiss action failed") }
+        let dismissed = try await pollNavigationOrder {
+            !$0.contains { $0.spokenText.contains("Cited passage in event overview") }
+        }
+        assert(
+            !dismissed.isEmpty && !dismissed.contains { $0.spokenText.contains("Cited passage in event overview") },
+            "Dismiss action removes the citation banner")
         try inPipe.fileHandleForWriting.write(contentsOf: Data("QUIT\n".utf8))
         try await waitUntil("QA host cleanup and exit", timeout: 5) { !proc.isRunning }
         guard proc.terminationStatus == 0 else { throw QAFailure("QA host failed during cleanup") }
 
         print("\n=====================================================================")
-        print("  Live AX QA Summary: \(checksPassed) passed, \(checksFailed) failed; \(unavailableHeadingRanks) heading ranks unverified")
+        print(
+            "  Live AX QA Summary: \(checksPassed) passed, \(checksFailed) failed; \(unavailableHeadingRanks) heading ranks unverified"
+        )
         print("  Spoken VoiceOver, cursor order and rotor traversal require a separate manual pass.")
         print("=====================================================================")
 
         if checksFailed > 0 {
-            throw NSError(domain: "LiveVoiceOverQA", code: 1, userInfo: [NSLocalizedDescriptionKey: "VoiceOver QA checks failed"])
+            throw NSError(
+                domain: "LiveVoiceOverQA", code: 1, userInfo: [NSLocalizedDescriptionKey: "VoiceOver QA checks failed"])
         }
     }
 }
@@ -1051,23 +1182,33 @@ private func selfTest() async throws {
     try await channel.expect("CMD_DONE MODE_READER")
     try await writer.value
     try pipe.fileHandleForWriting.close()
-    do { _ = try await channel.nextLine(); throw QAFailure("EOF check did not fail") }
-    catch let error as QAFailure { guard error.description.contains("closed") else { throw error } }
+    do {
+        _ = try await channel.nextLine()
+        throw QAFailure("EOF check did not fail")
+    } catch let error as QAFailure { guard error.description.contains("closed") else { throw error } }
     let idle = Pipe()
     let idleChannel = try LineChannel(idle.fileHandleForReading)
     let start = ProcessInfo.processInfo.systemUptime
-    do { _ = try await idleChannel.nextLine(timeout: 0.05); throw QAFailure("Deadline check did not fail") }
-    catch let error as QAFailure { guard error.description.contains("timed out") else { throw error } }
+    do {
+        _ = try await idleChannel.nextLine(timeout: 0.05)
+        throw QAFailure("Deadline check did not fail")
+    } catch let error as QAFailure { guard error.description.contains("timed out") else { throw error } }
     guard ProcessInfo.processInfo.systemUptime - start < 1 else { throw QAFailure("Pipe deadline was not bounded") }
     let waiter = Task { try await idleChannel.nextLine() }
     waiter.cancel()
-    do { _ = try await waiter.value; throw QAFailure("Cancellation did not stop the pipe wait") }
-    catch is CancellationError { }
+    do {
+        _ = try await waiter.value
+        throw QAFailure("Cancellation did not stop the pipe wait")
+    } catch is CancellationError {}
     try idle.fileHandleForWriting.write(contentsOf: Data("WRONG_ACK\n".utf8))
-    do { try await idleChannel.expect("CMD_DONE MODE_READER"); throw QAFailure("Wrong acknowledgement was accepted") }
-    catch let error as QAFailure { guard error.description.contains("Expected") else { throw error } }
+    do {
+        try await idleChannel.expect("CMD_DONE MODE_READER")
+        throw QAFailure("Wrong acknowledgement was accepted")
+    } catch let error as QAFailure { guard error.description.contains("Expected") else { throw error } }
     guard try fixtureImage().width == 120 else { throw QAFailure("Invalid offline fixture image") }
-    print("SELF_TEST_PASS: partial reads, multiple responses, EOF, deadline, cancellation, wrong acknowledgement, offline image")
+    print(
+        "SELF_TEST_PASS: partial reads, multiple responses, EOF, deadline, cancellation, wrong acknowledgement, offline image"
+    )
 }
 
 @MainActor
@@ -1079,7 +1220,9 @@ private final class QADelegate: NSObject, NSApplicationDelegate {
             do {
                 if CommandLine.arguments.contains("--self-test") {
                     try await selfTest()
-                } else if CommandLine.arguments.contains("--host") || CommandLine.arguments.contains("--manual") || CommandLine.arguments.contains("--smoke") {
+                } else if CommandLine.arguments.contains("--host") || CommandLine.arguments.contains("--manual")
+                    || CommandLine.arguments.contains("--smoke")
+                {
                     let host = try LiveVoiceOverHost()
                     self.host = host
                     try await host.run()
@@ -1089,10 +1232,14 @@ private final class QADelegate: NSObject, NSApplicationDelegate {
                     }
                     if CommandLine.arguments.contains("--manual") {
                         installFixtureMenu()
-                        print("Manual pass: enable VoiceOver; traverse sidebar/cards; use headings/actions rotor; read/save a card; expand event sources; open overview; follow/dismiss a citation. Use the Fixtures menu (Command-1/2/3) for list/source/overview and Queue New Stories for buffered updates. Close the fixture window to finish. Real library and installed app are untouched.")
+                        print(
+                            "Manual pass: enable VoiceOver; traverse sidebar/cards; use headings/actions rotor; read/save a card; expand event sources; open overview; follow/dismiss a citation. Use the Fixtures menu (Command-1/2/3) for list/source/overview and Queue New Stories for buffered updates. Close the fixture window to finish. Real library and installed app are untouched."
+                        )
                         return
                     }
-                    guard let outputPath = ProcessInfo.processInfo.environment["NEWS_VOICEOVER_OUTPUT"] else { throw QAFailure("Missing smoke output directory") }
+                    guard let outputPath = ProcessInfo.processInfo.environment["NEWS_VOICEOVER_OUTPUT"] else {
+                        throw QAFailure("Missing smoke output directory")
+                    }
                     try await host.smoke(output: URL(fileURLWithPath: outputPath))
                     await host.shutdown()
                     self.host = nil
@@ -1114,8 +1261,10 @@ private final class QADelegate: NSObject, NSApplicationDelegate {
         let root = NSMenuItem(title: "Fixtures", action: nil, keyEquivalent: "")
         root.submenu = fixtures
         main.addItem(root)
-        for (title, action, key) in [("Feed", #selector(showFeed), "1"), ("Source Reader", #selector(showSource), "2"),
-                                     ("Event Overview", #selector(showOverview), "3"), ("Queue New Stories", #selector(queueUpdates), "u")] {
+        for (title, action, key) in [
+            ("Feed", #selector(showFeed), "1"), ("Source Reader", #selector(showSource), "2"),
+            ("Event Overview", #selector(showOverview), "3"), ("Queue New Stories", #selector(queueUpdates), "u"),
+        ] {
             let item = NSMenuItem(title: title, action: action, keyEquivalent: key)
             item.target = self
             fixtures.addItem(item)
@@ -1127,8 +1276,7 @@ private final class QADelegate: NSObject, NSApplicationDelegate {
     @objc private func showSource() { showMode("READER") }
     @objc private func showOverview() { showMode("OVERVIEW") }
     private func showMode(_ mode: String) {
-        do { try host?.displayMode(mode) }
-        catch { fputs("Fixture mode failed: \(error)\n", stderr) }
+        do { try host?.displayMode(mode) } catch { fputs("Fixture mode failed: \(error)\n", stderr) }
     }
 
     @objc private func queueUpdates() {
@@ -1168,7 +1316,9 @@ struct LiveVoiceOverEntry {
         let app = NSApplication.shared
         let delegate = QADelegate()
         app.delegate = delegate
-        let visible = CommandLine.arguments.contains("--host") || CommandLine.arguments.contains("--manual") || CommandLine.arguments.contains("--smoke")
+        let visible =
+            CommandLine.arguments.contains("--host") || CommandLine.arguments.contains("--manual")
+            || CommandLine.arguments.contains("--smoke")
         app.setActivationPolicy(visible ? .regular : .prohibited)
         app.run()
         withExtendedLifetime(delegate) {}

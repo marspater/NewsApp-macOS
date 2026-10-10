@@ -3,8 +3,8 @@ import os
 
 /// Priority levels for enrichment jobs.
 enum EnrichmentPriority: Int, Comparable, Sendable {
-    case background = 0   // Batch feed ingest backlog
-    case high = 1         // Visible unread headlines in active section
+    case background = 0  // Batch feed ingest backlog
+    case high = 1  // Visible unread headlines in active section
     case interactive = 2  // Currently focused / opened by user
 
     static func < (lhs: EnrichmentPriority, rhs: EnrichmentPriority) -> Bool {
@@ -61,7 +61,7 @@ actor EnrichmentQueue {
     private let logger = Logger(subsystem: "com.marspater.news", category: "EnrichmentQueue")
 
     private struct Job: Identifiable {
-        let id: String // article.id
+        let id: String  // article.id
         let generation = UUID()
         let article: FeedArticle
         let allowHTTP: Bool
@@ -73,7 +73,7 @@ actor EnrichmentQueue {
 
     private let maxConcurrency: Int = 3
     private var activeCount: Int = 0
-    private var jobs: [String: Job] = [:] // Indexed by articleId
+    private var jobs: [String: Job] = [:]  // Indexed by articleId
 
     private let store: ArticleStore?
 
@@ -109,7 +109,8 @@ actor EnrichmentQueue {
                 switch existing.state {
                 case .queued(let currentPriority):
                     if priority > currentPriority {
-                        logger.debug("Promoting article '\(articleId)' from \(currentPriority.rawValue) to \(priority.rawValue)")
+                        logger.debug(
+                            "Promoting article '\(articleId)' from \(currentPriority.rawValue) to \(priority.rawValue)")
                         existing.priority = priority
                         existing.state = .queued(priority)
                         jobs[articleId] = existing
@@ -297,7 +298,8 @@ actor EnrichmentQueue {
             return
         }
 
-        let signpostState = NewsSignposts.begin(NewsSignposts.enrichment, name: "EnrichmentJob", metadata: "source=\(article.source)")
+        let signpostState = NewsSignposts.begin(
+            NewsSignposts.enrichment, name: "EnrichmentJob", metadata: "source=\(article.source)")
         defer { NewsSignposts.end(NewsSignposts.enrichment, name: "EnrichmentJob", state: signpostState) }
 
         // Background feed ingestion: strictly lightweight topic classification.

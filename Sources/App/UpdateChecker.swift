@@ -2,8 +2,9 @@
 
 import Foundation
 import os
+
 #if canImport(AppKit)
-import AppKit
+    import AppKit
 #endif
 
 /// Strict semantic version representation (major.minor.patch).
@@ -35,14 +36,14 @@ struct SemanticVersion: Equatable, Comparable, Sendable {
         }
 
         guard let maj = Int(parts[0]),
-              let min = Int(parts[1]),
-              let pat = Int(parts[2]),
-              maj >= 0, min >= 0, pat >= 0 else {
+            let min = Int(parts[1]),
+            let pat = Int(parts[2]),
+            maj >= 0, min >= 0, pat >= 0
+        else {
             return nil
         }
         return SemanticVersion(major: maj, minor: min, patch: pat)
     }
-
 
     static func < (lhs: SemanticVersion, rhs: SemanticVersion) -> Bool {
         if lhs.major != rhs.major { return lhs.major < rhs.major }
@@ -92,7 +93,7 @@ final class UpdateChecker: ObservableObject {
     init(httpClient: SecureHTTPClient = .shared) { self.httpClient = httpClient }
 
     private let logger = Logger(subsystem: "com.marspater.news", category: "UpdateChecker")
-    private let minimumCheckInterval: TimeInterval = 6 * 3600 // 6 hours
+    private let minimumCheckInterval: TimeInterval = 6 * 3600  // 6 hours
 
     var currentAppVersion: String {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "2.0.0"
@@ -128,7 +129,7 @@ final class UpdateChecker: ObservableObject {
                 timeout: 10,
                 customHeaders: [
                     "Accept": "application/vnd.github+json",
-                    "User-Agent": "NewsApp/\(currentAppVersion)"
+                    "User-Agent": "NewsApp/\(currentAppVersion)",
                 ]
             )
             guard httpResponse.statusCode == 200 else {
@@ -163,7 +164,8 @@ final class UpdateChecker: ObservableObject {
             if remoteVersion > localVersion {
                 // Verify that html_url belongs strictly to expected GitHub repository releases
                 guard let targetURL = URL(string: payload.htmlUrl),
-                      Self.isValidReleaseURL(targetURL) else {
+                    Self.isValidReleaseURL(targetURL)
+                else {
                     logger.error("Rejected untrusted release URL: \(payload.htmlUrl)")
                     statusMessage = "Received untrusted release URL"
                     return
@@ -194,15 +196,15 @@ final class UpdateChecker: ObservableObject {
     /// Verifies that a release URL is HTTPS, hosted on github.com, and scoped to the repository releases.
     nonisolated static func isValidReleaseURL(_ url: URL) -> Bool {
         guard url.scheme?.lowercased() == "https",
-              url.host?.lowercased() == "github.com",
-              url.user == nil, url.password == nil,
-              url.port == nil || url.port == 443 else {
+            url.host?.lowercased() == "github.com",
+            url.user == nil, url.password == nil,
+            url.port == nil || url.port == 443
+        else {
             return false
         }
         let path = url.path.lowercased()
         return path == "/marspater/newsapp-macos/releases" || path.hasPrefix("/marspater/newsapp-macos/releases/")
     }
-
 
     /// Securely opens the verified release webpage in the default browser.
     /// NEVER downloads, executes, or replaces local files.
@@ -212,7 +214,7 @@ final class UpdateChecker: ObservableObject {
             return
         }
         #if canImport(AppKit)
-        NSWorkspace.shared.open(url)
+            NSWorkspace.shared.open(url)
         #endif
     }
 }
