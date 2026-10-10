@@ -177,6 +177,36 @@ enum AppTypography {
     /// A cited publisher passage, distinct from generated summaries.
     static let readerCitation = Font.system(size: 13, weight: .medium, design: .serif)
 
+    /// Event overview has its own editorial hierarchy, scaled with the shared reader preference.
+    static func overviewFont(_ role: OverviewTextRole, scale: CGFloat = 1) -> Font {
+        .system(
+            size: overviewSize(role) * scale, weight: overviewWeight(role),
+            design: role == .title ? .serif : .default)
+    }
+
+    private static func overviewSize(_ role: OverviewTextRole) -> CGFloat {
+        switch role {
+        case .title: return 30
+        case .section: return 18
+        case .subheading, .introduction: return 16
+        case .fact: return 15
+        case .body, .bodyMedium: return 14
+        case .detail, .metadata, .emphasis: return 13
+        case .annotation: return 12
+        case .eyebrow, .caption, .captionMedium: return 11
+        case .micro: return 10
+        }
+    }
+
+    private static func overviewWeight(_ role: OverviewTextRole) -> Font.Weight {
+        switch role {
+        case .title, .section, .subheading: return .bold
+        case .emphasis, .eyebrow, .micro: return .semibold
+        case .bodyMedium, .metadata, .annotation, .captionMedium: return .medium
+        case .introduction, .fact, .body, .detail, .caption: return .regular
+        }
+    }
+
     static func readerCodeFont() -> Font {
         .system(.body, design: .monospaced)
     }
@@ -188,6 +218,11 @@ enum AppTypography {
         case .alto: return 12.0
         }
     }
+}
+
+enum OverviewTextRole: Sendable {
+    case title, section, subheading, introduction, fact, body, bodyMedium
+    case detail, metadata, emphasis, annotation, eyebrow, caption, captionMedium, micro
 }
 
 enum StoryCardLayout: Sendable {
@@ -237,14 +272,17 @@ struct EyebrowText: View {
     let text: String
     let color: Color
 
-    init(_ text: String, color: Color = AppColor.secondaryText) {
+    var font: Font = AppTypography.eyebrow
+
+    init(_ text: String, color: Color = AppColor.secondaryText, font: Font = AppTypography.eyebrow) {
         self.text = text
         self.color = color
+        self.font = font
     }
 
     var body: some View {
         Text(text)
-            .font(AppTypography.eyebrow)
+            .font(font)
             .tracking(AppTypography.eyebrowTracking)
             .textCase(.uppercase)
             .foregroundStyle(color)
@@ -258,6 +296,7 @@ struct TagView: View {
     let title: String
     var systemImage: String?
     var tint: Color = AppColor.secondaryText
+    var font: Font = AppTypography.eyebrow
     @Environment(\.effectiveContrast) private var contrast
 
     var body: some View {
@@ -268,7 +307,7 @@ struct TagView: View {
             }
             Text(title)
         }
-        .font(AppTypography.eyebrow)
+        .font(font)
         .foregroundStyle(tint)
         .padding(.horizontal, AppSpacing.eyebrowGap)
         .padding(.vertical, AppSpacing.textStack)
@@ -282,7 +321,6 @@ extension TagView {
         TagView(title: title, systemImage: "sparkles", tint: AppColor.intelligence)
     }
 }
-
 
 // MARK: - Shared content labels and notices
 
