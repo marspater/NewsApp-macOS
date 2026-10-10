@@ -11,18 +11,23 @@ extension Notification.Name {
     static let toggleReadCommand = Notification.Name("toggleReadCommand")
     static let toggleSaveCommand = Notification.Name("toggleSaveCommand")
     static let openInBrowserCommand = Notification.Name("openInBrowserCommand")
-    static let toggleViewModeCommand = Notification.Name("toggleViewModeCommand")
+    static let showFeedUpdatesCommand = Notification.Name("showFeedUpdatesCommand")
 }
 
 @main
 struct NewsApp: App {
+    @FocusedValue(\.selectedStory) private var selectedStory
+    @FocusedValue(\.readerActions) private var readerActions
+    @FocusedValue(\.listActions) private var listActions
+    @FocusedValue(\.addFeedSubscription) private var addFeedSubscription
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @StateObject private var appContainer = AppContainer.shared
     @StateObject private var appSettings = AppSettings.shared
     @StateObject private var articleStore = ArticleStore.shared
-    @StateObject private var feedManager = FeedManager()
+    @StateObject private var feedManager = AppContainer.shared.feedManager
     @StateObject private var themeManager = ThemeManager.shared
-    @StateObject private var readManager = ReadManager.shared
+    @StateObject private var readManager = AppContainer.shared.readManager
+    @StateObject private var savedStories = AppContainer.shared.savedStories
     
     var body: some Scene {
         Window("News", id: "main") {
@@ -33,12 +38,14 @@ struct NewsApp: App {
                 .environmentObject(feedManager)
                 .environmentObject(themeManager)
                 .environmentObject(readManager)
+                .environmentObject(savedStories)
                 .preferredColorScheme(themeManager.appearance.colorScheme)
-                .background(WindowAccessor().frame(width: 0, height: 0))
+                .modifier(SystemSettingsOverrideModifier())
         }
-        .windowStyle(HiddenTitleBarWindowStyle())
+        .windowToolbarStyle(.unified)
         .commands {
             SidebarCommands()
+            KeyboardShortcutsCommands()
             CommandGroup(after: .appInfo) {
                 Button("Check for Updates...") {
                     Task { @MainActor in
@@ -50,6 +57,9 @@ struct NewsApp: App {
                 }
             }
             CommandGroup(replacing: .importExport) {
+                Button("Add Feed Subscription…") { addFeedSubscription?() }
+                    .disabled(addFeedSubscription == nil)
+                Divider()
                 Button("Import Subscriptions (OPML)...") {
                     OPMLDialogs.importOPML { data in
                         feedManager.importFeeds(from: data)
@@ -63,6 +73,7 @@ struct NewsApp: App {
                 }
                 .keyboardShortcut("e", modifiers: [.command, .shift])
             }
+            ListViewCommands(themeManager: themeManager)
             CommandGroup(after: .sidebar) {
                 Button("Refresh Feeds") {
                     NotificationCenter.default.post(name: .refreshFeedsCommand, object: nil)
@@ -70,6 +81,11 @@ struct NewsApp: App {
                 .keyboardShortcut("r", modifiers: .command)
             }
             CommandMenu("Navigate") {
+                Button("Back to Stories") { readerActions?.back() }
+                    .disabled(readerActions == nil)
+                Button("New Briefing") { listActions?.newBriefing?() }
+                    .disabled(listActions?.newBriefing == nil)
+                Divider()
                 Button("Today") {
                     NotificationCenter.default.post(name: .jumpToTodayCommand, object: nil)
                 }
@@ -102,30 +118,75 @@ struct NewsApp: App {
                 }
                 .keyboardShortcut("k", modifiers: .command)
 
-                Divider()
-
-                Button("Toggle Read / Unread") {
+                Button("Show Queued Updates") {
+                    NotificationCenter.default.post(name: .showFeedUpdatesCommand, object: nil)
+                }
+            }
+            // Actions on the focused or open story, as Mail's Message menu (DESIGN.md 14).
+            CommandMenu("Story") {
+                Button("Mark as Read or Unread") {
                     NotificationCenter.default.post(name: .toggleReadCommand, object: nil)
                 }
                 .keyboardShortcut("u", modifiers: [.command, .shift])
+                .disabled(selectedStory == nil)
 
-                Button("Save / Bookmark Article") {
+                Button("Save or Remove from Saved") {
                     NotificationCenter.default.post(name: .toggleSaveCommand, object: nil)
                 }
                 .keyboardShortcut("s", modifiers: .command)
+                .disabled(selectedStory == nil)
+
+                Divider()
 
                 Button("Open in Browser") {
                     NotificationCenter.default.post(name: .openInBrowserCommand, object: nil)
                 }
                 .keyboardShortcut("o", modifiers: .command)
+                .disabled(selectedStory == nil)
 
-                Button("Toggle Reader / Web View") {
-                    NotificationCenter.default.post(name: .toggleViewModeCommand, object: nil)
+                if let story = selectedStory, let url = URL(string: story.link) {
+                    ShareLink(item: url, subject: Text(story.title)) { Text("Share Story") }
                 }
-                .keyboardShortcut("w", modifiers: [.command, .shift])
+
+                // ⇧⌘W is Close Window in tabbed macOS apps, so Story / Web uses ⇧⌘R (design plan D5).
+                Button("Switch Between Story and Web") {
+                    if let actions = readerActions {
+                        actions.mode.wrappedValue = actions.mode.wrappedValue.toggledPublicationMode
+                    }
+                }
+                .keyboardShortcut(ReaderMode.webShortcut, modifiers: ReaderMode.webShortcutModifiers)
+                .disabled(readerActions == nil)
+
+                if let actions = readerActions {
+                    Picker("Reading Mode", selection: actions.mode) {
+                        if actions.hasOverview { Text("Overview").tag(ReaderMode.overview) }
+                        Text("Story").tag(ReaderMode.story)
+                        Text("Web").tag(ReaderMode.web)
+                    }
+                    Button("Reload Reader Content") { actions.reload?() }
+                        .disabled(actions.reload == nil)
+                    Button("Copy Link", action: actions.copyLink)
+                    Button("Web Back") { actions.webBack?() }.disabled(actions.webBack == nil)
+                    Button("Web Forward") { actions.webForward?() }.disabled(actions.webForward == nil)
+                }
             }
         }
         
+        Window("Keyboard Shortcuts", id: KeyboardShortcutsCommands.windowID) {
+            KeyboardShortcutsView()
+                .preferredColorScheme(themeManager.appearance.colorScheme)
+                .modifier(SystemSettingsOverrideModifier())
+        }
+        .windowResizability(.contentSize)
+
+        Window("News Tension", id: "tension") {
+            TensionIndexView()
+                .environmentObject(appSettings)
+                .environmentObject(articleStore)
+                .preferredColorScheme(themeManager.appearance.colorScheme)
+                .modifier(SystemSettingsOverrideModifier())
+        }
+
         Settings {
             SettingsView()
                 .environmentObject(appSettings)
@@ -133,14 +194,66 @@ struct NewsApp: App {
                 .environmentObject(feedManager)
                 .environmentObject(themeManager)
                 .environmentObject(readManager)
+                .environmentObject(savedStories)
                 .preferredColorScheme(themeManager.appearance.colorScheme)
+                .modifier(SystemSettingsOverrideModifier())
+        }
+    }
+}
+
+/// View → as List, as Grid and Group Stories by Event, sharing the list toolbar's stored preferences.
+struct ListViewCommands: Commands {
+    @FocusedValue(\.listActions) private var listActions
+    @FocusedValue(\.readerActions) private var readerActions
+    @ObservedObject var themeManager: ThemeManager
+    @AppStorage("articleGridLayout") private var gridLayout = false
+    @AppStorage("groupsEventCoverage") private var groupsEvents = true
+
+    var body: some Commands {
+        CommandGroup(before: .sidebar) {
+            Picker("Story Layout", selection: $gridLayout) {
+                Text("As List").tag(false)
+                Text("As Grid").tag(true)
+            }
+            .pickerStyle(.inline)
+            .labelsHidden()
+
+            Toggle("Group Stories by Event", isOn: $groupsEvents)
+                .disabled(listActions?.canGroupStories != true)
+
+            if let actions = readerActions {
+                Picker("Text Size", selection: actions.textScale) {
+                    Text("Standard").tag(CGFloat(1))
+                    Text("Large").tag(CGFloat(1.25))
+                    Text("Extra Large").tag(CGFloat(1.5))
+                }
+                Picker("Reading Style", selection: $themeManager.articleTheme) {
+                    ForEach(ArticleThemeType.allCases) { Text($0.rawValue).tag($0) }
+                }
+            }
+
+            Divider()
+        }
+    }
+}
+
+/// Help → Keyboard Shortcuts opens the single-key shortcut list in its own window.
+struct KeyboardShortcutsCommands: Commands {
+    static let windowID = "keyboard-shortcuts"
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some Commands {
+        CommandGroup(after: .help) {
+            Button("Keyboard Shortcuts") {
+                openWindow(id: Self.windowID)
+            }
         }
     }
 }
 
 @MainActor
 class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
-    func applicationDidFinishLaunching(_ notification: Notification) {
+    func applicationDidFinishLaunching(_ _: Notification) {
         CacheManager.shared.configureOfflineCache()
         // Request Notification Permissions on App Launch
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { _, _ in
@@ -150,13 +263,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
     }
     
     // Force macOS to show alert even if app is focused
-    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification, withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
+    nonisolated func userNotificationCenter(_ _: UNUserNotificationCenter, willPresent _: UNNotification, withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
         completionHandler([.banner, .sound])
     }
     
     // Handle notification click — deep link to the article
-    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse, withCompletionHandler completionHandler: @escaping () -> Void) {
+    nonisolated func userNotificationCenter(_ _: UNUserNotificationCenter, didReceive response: UNNotificationResponse, withCompletionHandler completionHandler: @escaping () -> Void) {
         let userInfo = response.notification.request.content.userInfo
+        let articleID = userInfo["articleID"] as? String
         if let articleLink = userInfo["articleLink"] as? String {
             Task { @MainActor in
                 // Bring app to front
@@ -165,47 +279,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
                 } else {
                     NSApp.activate(ignoringOtherApps: true)
                 }
-                // Post notification for MainView to pick up
-                try? await Task.sleep(nanoseconds: 300_000_000)
-                NotificationCenter.default.post(
-                    name: .openArticleFromNotification,
-                    object: nil,
-                    userInfo: ["articleLink": articleLink]
+                ArticleStore.shared.pendingNavigation = .init(
+                    articleID: articleID,
+                    link: articleLink
                 )
             }
         }
         completionHandler()
-    }
-}
-
-// Accessor to deeply customize the NSWindow for Glassmorphism & Edge-to-Edge feel
-struct WindowAccessor: NSViewRepresentable {
-    func makeNSView(context: Context) -> NSView {
-        let view = NSView()
-        DispatchQueue.main.async {
-            guard let window = view.window else { return }
-            window.titlebarAppearsTransparent = true
-            window.titleVisibility = .hidden
-            window.styleMask.insert(.fullSizeContentView)
-            window.isMovableByWindowBackground = true
-            window.titlebarSeparatorStyle = .none
-            
-            // Force the sidebar divider to render cleanly
-            if let splitView = findSplitView(in: window.contentView) {
-                splitView.dividerStyle = .thin
-            }
-        }
-        return view
-    }
-
-    func updateNSView(_ nsView: NSView, context: Context) {}
-    
-    private func findSplitView(in view: NSView?) -> NSSplitView? {
-        guard let view = view else { return nil }
-        if let splitView = view as? NSSplitView { return splitView }
-        for subview in view.subviews {
-            if let found = findSplitView(in: subview) { return found }
-        }
-        return nil
     }
 }

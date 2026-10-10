@@ -14,3 +14,8 @@ Centauri/
 FTABHarvest/
 powerlog/
 .sourcekit-lsp/
+# Generated SwiftPM/Xcode workspace state
+.swiftpm/
+
+# Python evaluation tooling cache
+script/evaluation/__pycache__/

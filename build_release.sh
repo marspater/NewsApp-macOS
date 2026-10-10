@@ -14,7 +14,7 @@ export SWIFT_MODULECACHE_PATH="$CLANG_MODULE_CACHE_PATH"
 
 
 echo "=================================================="
-echo "🚀 Building Universal 2 Release for ${APP_NAME} (macOS ${TARGET_MACOS})"
+echo "🚀 Building arm64 Verification for ${APP_NAME} (macOS ${TARGET_MACOS})"
 echo "=================================================="
 
 rm -rf "${APP_DIR}" "${BUILD_TMP}"
@@ -23,25 +23,50 @@ mkdir -p "${MACOS_DIR}" "${RESOURCES_DIR}" "${BUILD_TMP}" Assets
 cp container-migration.plist PrivacyInfo.xcprivacy "${RESOURCES_DIR}/"
 
 # Compile the editable Icon Composer source, including legacy macOS fallback.
-xcrun actool Assets/AppIcon.icon --compile "${RESOURCES_DIR}" \
+xcrun actool "$(pwd)/Assets/AppIcon.icon" --compile "$(pwd)/${RESOURCES_DIR}" \
     --platform macosx --minimum-deployment-target "${TARGET_MACOS}" \
-    --app-icon AppIcon --output-partial-info-plist "${CONTENTS_DIR}/IconInfo.plist"
+    --app-icon AppIcon --output-partial-info-plist "$(pwd)/${CONTENTS_DIR}/IconInfo.plist"
 
 SWIFT_SOURCES=(
     Sources/Services/DateParser.swift
     Sources/Models/FeedError.swift
+    Sources/Models/FeedFetchState.swift
+    Sources/Models/FeedCatalog.swift
+    Sources/Models/MuteRules.swift
     Sources/Services/IPAddressValidator.swift
     Sources/Models/ArticleIdentity.swift
+    Sources/Models/EventOverview.swift
+    Sources/Models/EventFeed.swift
     Sources/Storage/DatabaseEngine.swift
     Sources/Storage/MigrationCoordinator.swift
     Sources/Storage/ArticleStore.swift
     Sources/Intelligence/ArticleIntelligence.swift
+    Sources/Intelligence/OverviewPassageSelector.swift
+    Sources/Intelligence/PromptDefense.swift
+    Sources/Intelligence/ModelAvailability.swift
+    Sources/Intelligence/PassageFactExtractor.swift
+    Sources/Intelligence/TensionMethodology.swift
+    Sources/Intelligence/OverviewComposer.swift
+    Sources/Intelligence/OverviewTimelineBuilder.swift
+    Sources/Intelligence/OverviewQualityAuditor.swift
+    Sources/Intelligence/OverviewClaimVerifier.swift
+    Sources/Intelligence/OverviewTimelineExtractor.swift
+    Sources/Intelligence/OverviewPerspectivesExtractor.swift
+    Sources/Intelligence/OverviewThematicAngleExtractor.swift
+    Sources/Intelligence/CoverageSentimentEvaluator.swift
+    Sources/Intelligence/EventCandidates.swift
+    Sources/Intelligence/EventMatcher.swift
+    Sources/Intelligence/EventClustering.swift
+    Sources/Intelligence/EventJudge.swift
+    Sources/Intelligence/StoryImportance.swift
     Sources/Intelligence/ContentExtractionPipeline.swift
     Sources/Intelligence/EnrichmentQueue.swift
+    Sources/Intelligence/OverviewGenerationCoordinator.swift
+    Sources/Services/NetworkBoundaryProxy.swift
+    Sources/Views/WebPreviewPolicy.swift
     Sources/Services/SecureHTTPClient.swift
     Sources/App/AppSettings.swift
     Sources/Services/FeedXMLParser.swift
-    Sources/Intelligence/WebContentExtractor.swift
     Sources/Coordinators/NotificationService.swift
     Sources/Services/FeedFetcher.swift
     Sources/Services/JSONFeedParser.swift
@@ -55,10 +80,15 @@ SWIFT_SOURCES=(
     Sources/Views/GlassSystem.swift
     Sources/Views/SidebarView.swift
     Sources/Views/ArticleCardView.swift
+    Sources/Views/EventCardView.swift
     Sources/Views/ArticleListView.swift
     Sources/Views/ArticleDetailView.swift
+    Sources/Views/EventOverviewReaderView.swift
+    Sources/Views/TensionIndexView.swift
     Sources/Views/MainView.swift
     Sources/Views/SettingsView.swift
+    Sources/Views/FeedCatalogView.swift
+    Sources/Views/FeedHealthLine.swift
     Sources/Storage/SavedStoriesManager.swift
     Sources/Services/OPMLManager.swift
     Sources/Views/ArticleWebView.swift
@@ -74,17 +104,9 @@ swiftc -swift-version 6 -O -whole-module-optimization -parse-as-library \
     "${SWIFT_SOURCES[@]}" \
     -o "${BUILD_TMP}/News_arm64"
 
-echo "⚙️ Compiling x86_64 slice..."
-swiftc -swift-version 6 -O -whole-module-optimization -parse-as-library \
-    -target x86_64-apple-macos${TARGET_MACOS} \
-    "${SWIFT_SOURCES[@]}" \
-    -o "${BUILD_TMP}/News_x86_64"
-
-echo "🔗 Creating Universal 2 binary with lipo..."
-lipo -create "${BUILD_TMP}/News_arm64" "${BUILD_TMP}/News_x86_64" -output "${MACOS_DIR}/${APP_NAME}"
-
-echo "📋 Binary architectures:"
-lipo -info "${MACOS_DIR}/${APP_NAME}"
+echo "📋 Verifying arm64 binary..."
+cp "${BUILD_TMP}/News_arm64" "${MACOS_DIR}/${APP_NAME}"
+lipo "${MACOS_DIR}/${APP_NAME}" -verify_arch arm64
 
 # Create Info.plist
 cat > "${CONTENTS_DIR}/Info.plist" << PLIST_EOF
@@ -124,7 +146,7 @@ PLIST_EOF
 echo "🔐 Signing binary with Hardened Runtime..."
 find "${APP_DIR}" -name ".DS_Store" -delete
 
-SIGN_IDENTITY="${DEVELOPER_ID:--}"
+SIGN_IDENTITY="-"
 SIGN_TMP=$(mktemp -d "${TMPDIR:-/tmp}/news-sign.XXXXXX")
 TEMP_APP="${SIGN_TMP}/${APP_DIR}"
 cp -R "${APP_DIR}" "${TEMP_APP}"
@@ -145,4 +167,4 @@ codesign --verify --deep --strict --verbose=2 "${APP_DIR}"
 codesign -d --entitlements - "${APP_DIR}"
 
 echo ""
-echo "🎉 Universal 2 Release Build complete at ${APP_DIR}!"
+echo "🎉 arm64 Verification Build complete at ${APP_DIR}!"

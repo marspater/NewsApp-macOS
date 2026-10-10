@@ -23,13 +23,13 @@ struct ArticleIdentity: Sendable {
         }
         
         if let queryItems = components.queryItems {
-            let trackingPrefixes = [
-                "utm_", "ref", "rss_source", "feedburner", "fbclid",
+            let trackingNames: Set<String> = [
+                "ref", "rss_source", "feedburner", "fbclid",
                 "gclid", "mc_cid", "mc_eid", "yclid", "igshid"
             ]
             let filtered = queryItems.filter { item in
                 let lowerName = item.name.lowercased()
-                return !trackingPrefixes.contains { lowerName.hasPrefix($0) }
+                return !lowerName.hasPrefix("utm_") && !trackingNames.contains(lowerName)
             }
             components.queryItems = filtered.isEmpty ? nil : filtered
         }
@@ -43,6 +43,12 @@ struct ArticleIdentity: Sendable {
         return components.url?.absoluteString ?? trimmed
     }
 
+    /// Computes a lowercase hex SHA-256 string for the given UTF-8 text.
+    static func sha256Hex(_ string: String) -> String {
+        let digest = SHA256.hash(data: Data(string.utf8))
+        return digest.map { String(format: "%02x", $0) }.joined()
+    }
+
     /// Computes a fallback content fingerprint using SHA-256.
     /// Used when both GUID and canonical link are missing or generic.
     static func computeContentFingerprint(title: String, source: String, pubDate: Date) -> String {
@@ -50,9 +56,50 @@ struct ArticleIdentity: Sendable {
         let normalizedSource = source.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let timestamp = Int(pubDate.timeIntervalSince1970)
         let raw = "\(normalizedTitle)|\(normalizedSource)|\(timestamp)"
-        let digest = SHA256.hash(data: Data(raw.utf8))
-        let hex = digest.map { String(format: "%02x", $0) }.joined()
-        return "fp_" + String(hex.prefix(16))
+        return "fp_" + String(sha256Hex(raw).prefix(16))
+    }
+
+    /// Exact publisher text is supporting evidence, never a global document key.
+    static func publisherTextFingerprints(_ article: FeedArticle) -> [String] {
+        guard article.pubDate != DateParser.unknownDate,
+              article.pubDate.timeIntervalSince1970.isFinite,
+              let url = URLComponents(string: article.normalizedLink),
+              let host = url.host?.lowercased(), !host.isEmpty,
+              url.user == nil, url.password == nil,
+              ["http", "https"].contains(url.scheme ?? ""),
+              !url.path.trimmingCharacters(in: CharacterSet(charactersIn: "/")).isEmpty
+                || !(url.query ?? "").isEmpty else { return [] }
+        func normalized(_ text: String) -> String {
+            text.precomposedStringWithCanonicalMapping
+                .split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
+        }
+        let title = normalized(article.title)
+        guard !title.isEmpty else { return [] }
+        let publisher = host + (url.port.map { ":\($0)" } ?? "")
+        return [("description", article.description), ("body", article.fullContent ?? "")].compactMap { kind, text in
+            // ponytail: conservative exact text only; tune recall against the holdout,
+            // rather than merging short teasers or truncated large documents.
+            guard text.utf8.count <= 262_144 else { return nil }
+            let content = normalized(text)
+            guard content.count >= 400, content.split(separator: " ").count >= 40 else { return nil }
+            let fields = ["publisher-text-v1", publisher, normalized(article.source), kind, title,
+                          String(article.pubDate.timeIntervalSince1970), content]
+            let framed = fields.map { "\($0.utf8.count):\($0)" }.joined()
+            return SHA256.hash(data: Data(framed.utf8)).map { String(format: "%02x", $0) }.joined()
+        }
+    }
+
+    /// GUIDs identify documents only within the configured subscription URL.
+    static func scopedGUID(_ guid: String?, feedURL: String?) -> String? {
+        guard let guid = guid?.trimmingCharacters(in: .whitespacesAndNewlines), !guid.isEmpty,
+              let feedURL, !feedURL.isEmpty else { return nil }
+        // AppSettings normalizes subscriptions. Keep their scheme and every query
+        // parameter: document URL tracking rules must not collapse distinct feeds.
+        let feed = feedURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !feed.isEmpty else { return nil }
+        let normalizedGUID = computeId(guid: guid, link: "")
+        let digest = SHA256.hash(data: Data("\(feed.utf8.count):\(feed)\(normalizedGUID)".utf8))
+        return "feed-guid:" + digest.map { String(format: "%02x", $0) }.joined()
     }
 
     /// Computes deterministic article identity using the three-tier resolution:
@@ -64,8 +111,10 @@ struct ArticleIdentity: Sendable {
         link: String,
         title: String = "",
         source: String = "",
-        pubDate: Date = Date()
+        pubDate: Date = Date(),
+        feedURL: String? = nil
     ) -> String {
+        if let scoped = scopedGUID(guid, feedURL: feedURL) { return scoped }
         if let g = guid?.trimmingCharacters(in: .whitespacesAndNewlines), !g.isEmpty {
             if g.hasPrefix("http://") || g.hasPrefix("https://") {
                 return canonicalizeURL(g)

@@ -1,105 +1,11 @@
-# Jules Project Context
+# Instructions for the Jules agent
 
-## What this app is
-NewsApp is a native macOS RSS/news reader built with Swift and SwiftUI. It is intentionally local-first, privacy-oriented, ad-free, keyboard-friendly, and designed around native macOS interaction and visual language.
+Follow [AGENTS.md](AGENTS.md) for coding-agent workflow. Project technology, architecture and validation requirements are maintained in the contributor documents linked there; do not redefine them in this file.
 
-The current codebase already contains feed ingestion, SQLite persistence, FTS5 search, saved/read/history state, notifications, article extraction, WebKit reading, OPML import/export, a semantic design system, and an on-device intelligence pipeline. The README describes these capabilities and the major source-file responsibilities. 
+Keep PRs focused, compare proposed changes with current main, and omit unrelated helper scripts or agent journals from product changes. Report failed checks accurately and do not assume a stale PR failure is caused by its patch.
 
-## Current architecture map
+## Linux environment
 
-### App / UI (`Sources/App/`, `Sources/Views/`)
-- `Sources/App/NewsApp.swift`: application lifecycle, scenes, commands, notification routing, window configuration.
-- `Sources/App/AppContainer.swift`: app dependency injection container.
-- `Sources/App/AppSettings.swift`: user settings and defaults persistence.
-- `Sources/App/ThemeManager.swift`: appearance/theme state.
-- `Sources/App/UpdateChecker.swift`: GitHub release version verification.
-- `Sources/App/NewsSignposts.swift`: OSSignposter telemetry.
-- `Sources/Views/MainView.swift`: top-level UI coordinator.
-- `Sources/Views/SidebarView.swift`, `ArticleListView.swift`, `ArticleCardView.swift`: navigation and list presentation.
-- `Sources/Views/ArticleDetailView.swift`, `ArticleWebView.swift`: article reading and WebKit rendering.
-- `Sources/Views/SettingsView.swift`: user settings.
-- `Sources/Views/DesignSystem.swift`, `GlassSystem.swift`: semantic design tokens and Liquid Glass integration.
+Jules runs on Ubuntu Linux without Xcode or the macOS SDK. The app imports SwiftUI, AppKit and FoundationModels, and the tests compile for `arm64-apple-macos15.0`, so `./test.sh`, `build.sh`, `build_release.sh` and `swift build` cannot run there. Run only the Python evaluation scripts that `./test.sh` invokes before compiling. Report Swift builds and tests as not run, never as passed or failed; the GitHub CI and Codemagic macOS runners are the Swift gate.
 
-### Data / persistence (`Sources/Storage/`, `Sources/Models/`)
-- `Sources/Storage/DatabaseEngine.swift`: SQLite engine, schema, WAL/FTS5 responsibilities.
-- `Sources/Storage/ArticleStore.swift`: article domain persistence.
-- `Sources/Storage/MigrationCoordinator.swift`: database migrations.
-- `Sources/Storage/ReadManager.swift`, `SavedStoriesManager.swift`: reading and saved-story state.
-- `Sources/Storage/CacheManager.swift`: HTTP cache, intentionally separate from durable user state.
-- `Sources/Models/FeedArticle.swift`, `ArticleIdentity.swift`: article/domain identity models.
-- `Sources/Models/FeedError.swift`: feed error types.
-
-### Feed / networking (`Sources/Services/`, `Sources/Coordinators/`)
-- `Sources/Coordinators/FeedManager.swift`: feed orchestration and synchronization.
-- `Sources/Coordinators/RefreshCoordinator.swift`: refresh lifecycle.
-- `Sources/Coordinators/NotificationService.swift`: user notification triage.
-- `Sources/Services/FeedFetcher.swift`, `SecureHTTPClient.swift`: network fetching and security boundaries.
-- `Sources/Services/FeedXMLParser.swift`, `JSONFeedParser.swift`, `DateParser.swift`: feed parsing.
-- `Sources/Services/IPAddressValidator.swift`: SSRF/IP validation.
-- `Sources/Services/OPMLManager.swift`: OPML portability.
-
-### Content / intelligence (`Sources/Intelligence/`)
-- `Sources/Intelligence/ContentExtractionPipeline.swift`, `WebContentExtractor.swift`: article content extraction.
-- `Sources/Intelligence/ArticleIntelligence.swift`: article classification, sentiment, entities, summarization and content-cleaning capabilities.
-- `Sources/Intelligence/EnrichmentQueue.swift`: actor-isolated background enrichment scheduling.
-- Current intelligence code uses `NaturalLanguage` and conditionally `FoundationModels`, with typed `@Generable` outputs and a fixed 12-category taxonomy.
-
-### Tests (`Tests/`)
-- `Tests/NewsTests.swift`: automated test runner and unit test suites.
-
-### Platform / distribution
-- `News.entitlements`: sandbox/runtime capabilities.
-- `build.sh`, `build_release.sh`, `package_dmg.sh`, `notarize.sh`, `test.sh`: build, release, packaging and validation pipeline.
-- `.github/workflows/ci.yml`: CI.
-- `PRIVACY.md`, `SECURITY.md`: privacy/security commitments.
-
-## Product behavior priorities
-1. Correctness of article classification is more important than aggressive enrichment.
-2. RSS ingestion should remain inexpensive. Do not automatically perform expensive full article extraction/AI analysis on every item unless the product behavior explicitly calls for it.
-3. Full summarization/key-point extraction should generally happen when the user chooses to inspect an article in detail or under a clearly defined, user-controlled background policy.
-4. The UI should remain responsive during network, database, extraction, and intelligence work.
-5. Persist only information necessary for the user's reading experience and product behavior.
-6. Respect user settings immediately and consistently across fetch, notification, enrichment, and UI behavior.
-
-## AI constraints
-- Apple-native intelligence frameworks only.
-- No custom model downloads, no external model providers, no OpenAI/Anthropic/Gemini/etc. APIs, no hosted inference.
-- Use FoundationModels on supported systems where appropriate.
-- Use NaturalLanguage and deterministic logic as native fallbacks where appropriate.
-- Keep structured outputs constrained to the supported taxonomy/schema.
-- Never silently substitute a different model/provider.
-- Store model/version metadata needed to invalidate stale analysis.
-
-## Performance expectations
-- Swift concurrency must remain Swift 6-safe.
-- Do not perform heavy SQLite/network work on the main actor.
-- Keep background concurrency bounded.
-- Make cancellation meaningful.
-- Avoid retaining article bodies or large extracted documents longer than needed.
-- Watch for timer/task/NotificationCenter/WebKit lifecycle leaks.
-- Prefer incremental processing over repeatedly scanning the whole database.
-
-## UX / Liquid Glass expectations
-The visual target is a polished native macOS app, not generic cross-platform glassmorphism. Use semantic materials, native controls, proper vibrancy/contrast, and the existing design system. Avoid fake glass implemented through layers of arbitrary opacity, excessive blur, or hard-coded geometry.
-
-Important UI qualities:
-- consistent spacing/radius/typography tokens
-- native toolbar/sidebar behavior
-- keyboard navigation and shortcuts remain discoverable
-- accessible labels for icon-only controls
-- reduced-motion friendliness
-- correct focus behavior
-- dark/light appearance consistency
-- no clipping or layout behavior tied to one screen size
-
-## Security / privacy expectations
-Feed and article URLs are hostile input. Preserve all existing SSRF and redirect defenses. Do not weaken sandboxing. Avoid leaking user/article content into logs. Do not introduce telemetry merely to diagnose a problem.
-
-## Release expectations
-The project targets Universal 2 distribution and Hardened Runtime signing. Release changes should preserve both Apple Silicon and Intel support where the current build configuration supports them. Do not casually raise the deployment target or add entitlements.
-
-## Known historical issues
-Early project reviews documented previously identified areas such as settings wiring, background fetch cadence, feature flags, history behavior, service decomposition, deterministic parsing/categorization tests, loading/error states, URL identity stability, enrichment resource controls, accessibility, and security hardening. Treat those areas as historical context, not permission to implement every recommendation blindly.
-
-## How Jules should approach a task
-Inspect the relevant files and existing abstractions first. Reuse the established path. Prefer a small coherent change over a broad rewrite. Add tests for behavior changes. Run the repository's validation scripts when the environment supports them. Review the resulting diff for concurrency, memory, security, accessibility, and regression risks before finishing.
+The default Jules image has no Swift toolchain. The environment setup, [script/jules_setup.sh](script/jules_setup.sh), installs Swift 6.4 (the Xcode 27 toolchain). When `swiftc` is available, run `swiftc -parse` on changed Swift files. This is a syntax-only check: it does not resolve imports or type-check, and it does not replace the macOS checks.

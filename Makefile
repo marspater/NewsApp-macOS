@@ -5,12 +5,12 @@ SCRATCH_PATH ?= $(HOME)/.swiftbuild/News
 all: build
 
 build:
-	@mkdir -p $(SCRATCH_PATH)
-	swift build --scratch-path $(SCRATCH_PATH)
+	@mkdir -p "$(SCRATCH_PATH)"
+	swift build --arch arm64 --scratch-path "$(SCRATCH_PATH)"
 
 release:
-	@mkdir -p $(SCRATCH_PATH)
-	swift build -c release --scratch-path $(SCRATCH_PATH)
+	@mkdir -p "$(SCRATCH_PATH)"
+	swift build -c release --arch arm64 --scratch-path "$(SCRATCH_PATH)"
 
 run:
 	./script/build_and_run.sh
@@ -22,4 +22,4 @@ test:
 	./test.sh
 
 clean:
-	rm -rf $(SCRATCH_PATH) .build
+	rm -rf -- "$(SCRATCH_PATH)" .build

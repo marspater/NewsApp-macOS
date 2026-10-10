@@ -132,13 +132,11 @@ actor EnrichmentQueue {
 
     /// Explicitly promotes an article to interactive priority (e.g. user clicked).
     func promote(articleId: String, to priority: EnrichmentPriority = .interactive) {
-        if var job = jobs[articleId], case .queued(let cur) = job.state {
-            if priority > cur {
-                job.priority = priority
-                job.state = .queued(priority)
-                jobs[articleId] = job
-                processNextJobs()
-            }
+        if var job = jobs[articleId], case .queued(let cur) = job.state, priority > cur {
+            job.priority = priority
+            job.state = .queued(priority)
+            jobs[articleId] = job
+            processNextJobs()
         }
     }
 
@@ -156,12 +154,64 @@ actor EnrichmentQueue {
     /// Cancels all pending and in-flight jobs (e.g. on feed refresh or settings change).
     func cancelAll(reason: EnrichmentCancellationReason = .superseded) {
         for (id, var job) in jobs {
+            // Finished work stays finished, so a refresh does not classify the same articles again.
+            if case .completed = job.state { continue }
             job.task?.cancel()
             job.state = .cancelled(reason)
             jobs[id] = job
         }
+        for (eventID, task) in overviewTasks {
+            task.cancel()
+            logger.debug("Cancelled overview generation for '\(eventID)': \(reason.rawValue)")
+        }
+        overviewTasks.removeAll()
         // Cancelled tasks occupy slots until their deferred cleanup runs.
         logger.info("Cancelled all enrichment jobs: \(reason.rawValue)")
+    }
+
+    // MARK: - Overview Generation Integration
+
+    private var overviewTasks: [String: Task<EventOverviewDocument?, Never>] = [:]
+
+    /// Runs overview generation using the enrichment queue's bounded concurrency and cancellation tracking.
+    func scheduleOverviewGeneration(
+        eventID: String,
+        priority: EnrichmentPriority = .high,
+        operation: @escaping @Sendable () async -> EventOverviewDocument?
+    ) async -> EventOverviewDocument? {
+        cancelOverview(eventID: eventID, reason: .superseded)
+
+        while activeCount >= maxConcurrency {
+            try? await Task.sleep(nanoseconds: 50_000_000)
+            if Task.isCancelled { return nil }
+        }
+
+        activeCount += 1
+        defer {
+            activeCount = max(0, activeCount - 1)
+            processNextJobs()
+        }
+
+        let task = Task<EventOverviewDocument?, Never> {
+            if Task.isCancelled { return nil }
+            return await operation()
+        }
+        overviewTasks[eventID] = task
+        defer { if overviewTasks[eventID] == task { overviewTasks.removeValue(forKey: eventID) } }
+
+        return await withTaskCancellationHandler {
+            await task.value
+        } onCancel: {
+            task.cancel()
+        }
+    }
+
+    /// Cancels overview generation for a specific event.
+    func cancelOverview(eventID: String, reason: EnrichmentCancellationReason = .user) {
+        if let task = overviewTasks.removeValue(forKey: eventID) {
+            task.cancel()
+            logger.debug("Cancelled overview generation for '\(eventID)': \(reason.rawValue)")
+        }
     }
 
     // MARK: - Queue State Queries
@@ -222,7 +272,7 @@ actor EnrichmentQueue {
         }
     }
 
-    private func executeJob(article: FeedArticle, allowHTTP: Bool, generation: UUID) async {
+    private func executeJob(article: FeedArticle, allowHTTP _: Bool, generation: UUID) async {
         let articleId = article.id
 
         defer {
@@ -280,7 +330,8 @@ actor EnrichmentQueue {
             entities: nil,
             topics: nil,
             content: nil,
-            image: nil
+            image: nil,
+            expectedInputHash: article.publisherInputHash
         )
 
         guard jobs[articleId]?.generation == generation, !Task.isCancelled else { return }

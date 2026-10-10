@@ -10,7 +10,7 @@ final class ArticleStore: ObservableObject {
     private let logger = Logger(subsystem: "com.marspater.news", category: "ArticleStore")
     
     let database: DatabaseEngine
-    let migrationCoordinator: MigrationCoordinator
+    let migrationCoordinator: MigrationCoordinator?
     
     @Published private(set) var articles: [FeedArticle] = []
     @Published private(set) var savedArticles: [FeedArticle] = []
@@ -19,10 +19,15 @@ final class ArticleStore: ObservableObject {
     @Published private(set) var savedCount: Int = 0
     @Published private(set) var isReady: Bool = false
     
-    init(database: DatabaseEngine? = nil) {
+    @Published private(set) var revision: UInt64 = 0
+    /// Bumped when clustering or the reader changes events; the feed regroups on it.
+    @Published private(set) var eventRevision: UInt64 = 0
+    @Published var operationError: String?
+
+    init(database: DatabaseEngine? = nil, migrationCoordinator: MigrationCoordinator? = nil) {
         let db = database ?? DatabaseEngine.shared
         self.database = db
-        self.migrationCoordinator = MigrationCoordinator(database: db)
+        self.migrationCoordinator = migrationCoordinator ?? (database == nil ? MigrationCoordinator(database: db) : nil)
         
         Task {
             await initialize()
@@ -32,15 +37,27 @@ final class ArticleStore: ObservableObject {
     func initialize() async {
         do {
             try await database.open()
-            _ = try await migrationCoordinator.migrateIfNeeded()
-            await refreshState()
-            self.isReady = true
+            _ = try await migrationCoordinator?.migrateIfNeeded()
+            // Overviews and summaries from an earlier macOS model regenerate with the current one when next requested.
+            // Only the app's own library tracks this; stores over other databases (tests, audits) are left as they are.
+            if database === DatabaseEngine.shared {
+                do {
+                    try await database.reconcileModelGeneration(NewsTextModel.generation)
+                } catch {
+                    logger.error("Model generation check failed: \(error.localizedDescription)")
+                }
+            }
+            self.isReady = await refreshState()
+            if !isReady { operationError = "Stored articles could not be loaded. Please try again." }
         } catch {
+            isReady = false
+            operationError = "Article storage could not be opened. Please try again."
             logger.error("Failed to initialize ArticleStore: \(error.localizedDescription)")
         }
     }
     
-    func refreshState() async {
+    @discardableResult
+    func refreshState() async -> Bool {
         do {
             let fetched = try await database.fetchArticles(limit: 500)
             let readIDs = try await database.getReadArticleIDs()
@@ -52,21 +69,30 @@ final class ArticleStore: ObservableObject {
             self.savedArticles = saved
             self.unreadCount = counts.unread
             self.savedCount = counts.saved
+            revision &+= 1
+            return true
         } catch {
             logger.error("Failed to refresh ArticleStore state: \(error.localizedDescription)")
+            return false
         }
     }
     
     // MARK: - Article Ingestion & Upsert
     
-    func batchUpsert(articles newArticles: [FeedArticle], feedUrl: String? = nil) async {
-        guard !newArticles.isEmpty else { return }
+    @discardableResult
+    func batchUpsert(articles newArticles: [FeedArticle], feedUrl: String? = nil, validators: FeedValidators? = nil) async -> Set<String> {
+        guard !newArticles.isEmpty else { return [] }
         do {
-            try await database.upsertArticles(newArticles, feedUrl: feedUrl)
+            let insertedIDs = try await database.upsertArticles(newArticles, feedUrl: feedUrl, validators: validators)
             await refreshState()
+            return insertedIDs
+        } catch is CancellationError {
+            // Superseded refreshes must not publish stale snapshots.
         } catch {
+            operationError = "Could not store fetched articles. Please try again."
             logger.error("Failed to batch upsert articles: \(error.localizedDescription)")
         }
+        return []
     }
     
     // MARK: - Article Queries & Search
@@ -76,15 +102,28 @@ final class ArticleStore: ObservableObject {
         isRead: Bool? = nil,
         isSaved: Bool? = nil,
         limit: Int? = 500
-    ) async -> [FeedArticle] {
-        do {
-            return try await database.fetchArticles(section: section, isRead: isRead, isSaved: isSaved, limit: limit)
-        } catch {
-            logger.error("Failed to fetch articles: \(error.localizedDescription)")
-            return []
-        }
+    ) async throws -> [FeedArticle] {
+        try await database.fetchArticles(section: section, isRead: isRead, isSaved: isSaved, limit: limit)
     }
-    
+
+    struct NavigationRequest: Equatable, Sendable {
+        let token = UUID()
+        let articleID: String?
+        let link: String
+    }
+
+    @Published var pendingNavigation: NavigationRequest?
+
+    func articleForNavigation(_ request: NavigationRequest) async throws -> FeedArticle? {
+        if let id = request.articleID,
+           let article = try await database.fetchArticles(limit: 1, id: id).first {
+            return article
+        }
+        let link = ArticleIdentity.canonicalizeURL(request.link)
+        guard !link.isEmpty else { return nil }
+        return try await database.fetchArticles(limit: 1, canonicalURL: link).first
+    }
+
     func search(query: String, limit: Int = 100) async -> [FeedArticle] {
         guard !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return articles
@@ -118,6 +157,7 @@ final class ArticleStore: ObservableObject {
     
     func markAsRead(id: String, isRead: Bool = true) async {
         do {
+            let id = try await database.resolvedArticleID(id)
             try await database.markRead(articleId: id, isRead: isRead)
             if isRead {
                 readArticleIDs.insert(id)
@@ -126,14 +166,22 @@ final class ArticleStore: ObservableObject {
             }
             let counts = try await database.counts()
             self.unreadCount = counts.unread
+            revision &+= 1
         } catch {
+            operationError = "Could not save reading status. Please try again."
+            await refreshState()
             logger.error("Failed to mark article read: \(error.localizedDescription)")
         }
     }
     
     func toggleRead(id: String) async {
-        let current = isRead(id)
-        await markAsRead(id: id, isRead: !current)
+        do {
+            let id = try await database.resolvedArticleID(id)
+            await markAsRead(id: id, isRead: !isRead(id))
+        } catch {
+            operationError = "Could not save reading history. Please try again."
+            logger.error("Failed to resolve article read state: \(error.localizedDescription)")
+        }
     }
     
     func markAllAsRead(feedUrl: String? = nil) async {
@@ -141,6 +189,7 @@ final class ArticleStore: ObservableObject {
             try await database.markAllRead(feedUrl: feedUrl)
             await refreshState()
         } catch {
+            operationError = "Could not mark articles as read. Please try again."
             logger.error("Failed to mark all as read: \(error.localizedDescription)")
         }
     }
@@ -148,19 +197,37 @@ final class ArticleStore: ObservableObject {
     @discardableResult
     func toggleSave(article: FeedArticle) async -> Bool {
         do {
-            try await database.upsertArticles([article], feedUrl: nil)
-            let nextState = try await database.toggleSaved(articleId: article.id)
+            let id = try await database.resolvedArticleID(for: article)
+            let nextState = try await !database.isSaved(articleId: id)
+            return await setSaved(article: article, isSaved: nextState)
+        } catch {
+            operationError = "Could not update Saved Stories. Please try again."
+            logger.error("Failed to resolve article saved state: \(error.localizedDescription)")
+            return false
+        }
+    }
+
+    @discardableResult
+    func setSaved(article: FeedArticle, isSaved nextState: Bool) async -> Bool {
+        do {
+            _ = try await database.upsertArticles([article], preservingStoredContent: true)
+            let id = try await database.resolvedArticleID(for: article)
+            guard let storedArticle = try await database.fetchArticles(limit: 1, id: id).first else { return false }
+            try await database.setSaved(articleId: storedArticle.id, isSaved: nextState)
             if nextState {
-                if !savedArticles.contains(where: { $0.id == article.id }) {
-                    savedArticles.insert(article, at: 0)
+                if !savedArticles.contains(where: { $0.id == storedArticle.id }) {
+                    savedArticles.insert(storedArticle, at: 0)
                 }
             } else {
-                savedArticles.removeAll { $0.id == article.id }
+                savedArticles.removeAll { $0.id == storedArticle.id }
             }
             let counts = try await database.counts()
             self.savedCount = counts.saved
+            revision &+= 1
             return nextState
         } catch {
+            operationError = "Could not update Saved Stories. Please try again."
+            await refreshState()
             logger.error("Failed to toggle save: \(error.localizedDescription)")
             return false
         }
@@ -168,6 +235,7 @@ final class ArticleStore: ObservableObject {
     
     // MARK: - Enrichment
     
+    @discardableResult
     func updateEnrichment(
         id: String,
         summary: String? = nil,
@@ -176,63 +244,54 @@ final class ArticleStore: ObservableObject {
         entities: [String]? = nil,
         topics: [String]? = nil,
         content: String? = nil,
-        image: String? = nil
-    ) async {
+        image: String? = nil,
+        readerDocument: ReaderDocument? = nil,
+        identityEvidence: DocumentIdentityEvidence? = nil,
+        expectedInputHash: String? = nil
+    ) async -> Bool {
         do {
-            try await database.updateEnrichment(
+            let id = try await database.resolvedArticleID(id)
+            guard try await database.updateEnrichment(
                 articleId: id,
-                summary: summary,
-                category: category,
-                sentiment: sentiment,
-                entities: entities,
-                topics: topics,
-                content: content,
-                image: image
-            )
-            
-            // Update in-memory articles array
-            if let idx = articles.firstIndex(where: { $0.id == id }) {
-                var updated = articles[idx]
-                if let s = summary { updated.aiSummary = s }
-                if let category { updated.category = category }
-                if let c = content {
-                    updated.fullContent = c
-                    updated.contentFetched = true
-                }
-                if let img = image, updated.imageUrl == nil {
-                    updated.imageUrl = img
-                }
-                articles[idx] = updated
+                update: .init(summary: summary, category: category, sentiment: sentiment,
+                              entities: entities, topics: topics, content: content,
+                              image: image, readerDocument: readerDocument, expectedInputHash: expectedInputHash)
+            ) else { return false }
+            if let identityEvidence {
+                do { try await database.recordDocumentIdentity(identityEvidence, articleID: id) }
+                catch { logger.error("Failed to record document identity: \(error.localizedDescription)") }
             }
+            try await publishStoredArticle(id)
+            return true
         } catch {
             logger.error("Failed to update enrichment: \(error.localizedDescription)")
+            return false
         }
     }
-    
+
+    /// Hydrate the persisted result, including fields invalidated by publisher-input changes.
+    private func publishStoredArticle(_ id: String) async throws {
+        guard let updated = try await database.fetchArticles(limit: 1, id: id).first else { return }
+        if let index = articles.firstIndex(where: { $0.id == id }) { articles[index] = updated }
+        if let index = savedArticles.firstIndex(where: { $0.id == id }) { savedArticles[index] = updated }
+        revision &+= 1
+    }
+
     // MARK: - Structured Article Analysis
-    
-    func saveArticleAnalysis(_ analysis: ArticleAnalysis, for articleId: String) async {
+
+    @discardableResult
+    func saveArticleAnalysis(_ analysis: ArticleAnalysis, for articleId: String, expectedInputHash: String? = nil) async -> Bool {
         do {
-            try await database.saveArticleAnalysis(analysis, for: articleId)
-            if let idx = articles.firstIndex(where: { $0.id == articleId }) {
-                var updated = articles[idx]
-                updated.aiSummary = analysis.summary
-                updated.keyPoints = analysis.keyPoints
-                updated.entities = analysis.entities
-                if let s = analysis.sentiment {
-                    updated.sentimentScore = s.score
-                    updated.sentimentLabel = s.label
-                }
-                if let cat = analysis.category {
-                    updated.category = cat
-                }
-                articles[idx] = updated
-            }
+            let articleId = try await database.resolvedArticleID(articleId)
+            guard try await database.saveArticleAnalysis(analysis, for: articleId, expectedInputHash: expectedInputHash) else { return false }
+            try await publishStoredArticle(articleId)
+            return true
         } catch {
             logger.error("Failed to save article analysis: \(error.localizedDescription)")
+            return false
         }
     }
-    
+
     func fetchArticleAnalysis(for articleId: String) async -> ArticleAnalysis? {
         await database.fetchArticleAnalysis(for: articleId)
     }
@@ -240,36 +299,21 @@ final class ArticleStore: ObservableObject {
     // MARK: - Granular Cache Purging
 
     /// Purges all generated AI analysis data while preserving articles and subscriptions.
-    func clearAIAnalysis() async {
-        do {
-            try await database.clearArticleEnrichment()
-            await refreshState()
-            logger.info("Cleared all AI analysis in ArticleStore.")
-        } catch {
-            logger.error("Failed to clear AI analysis: \(error.localizedDescription)")
-        }
+    func clearAIAnalysis() async throws {
+        try await database.clearArticleEnrichment()
+        await refreshState()
     }
 
     /// Clears cached full article content while preserving subscriptions, saved stories, and read history.
-    func clearArticleCache() async {
-        do {
-            try await database.clearArticleCache()
-            await refreshState()
-            logger.info("Cleared article cache in ArticleStore.")
-        } catch {
-            logger.error("Failed to clear article cache: \(error.localizedDescription)")
-        }
+    func clearArticleCache() async throws {
+        try await database.clearArticleCache()
+        await refreshState()
     }
 
-    /// Completely purges all cached articles, state, and enrichment while preserving feeds.
-    func clearAllDatabaseCache() async {
-        do {
-            try await database.clearAllDatabaseCache()
-            await refreshState()
-            logger.info("Cleared all database cache in ArticleStore.")
-        } catch {
-            logger.error("Failed to clear all database cache: \(error.localizedDescription)")
-        }
+    /// Clears replaceable caches while preserving subscriptions, history and saved bodies.
+    func clearAllDatabaseCache() async throws {
+        try await database.clearAllDatabaseCache()
+        await refreshState()
     }
     
     // MARK: - Retention Pruning
@@ -286,5 +330,72 @@ final class ArticleStore: ObservableObject {
             logger.error("Failed to prune old articles: \(error.localizedDescription)")
             return 0
         }
+    }
+
+    // MARK: - Events
+
+    func noteEventsChanged() {
+        eventRevision &+= 1
+    }
+
+    func eventFeedSummaries(for articleIDs: [String]) async throws -> [EventFeedSummary] {
+        try await database.eventFeedSummaries(forArticles: articleIDs)
+    }
+
+    func eventMemberArticles(eventID: String) async throws -> [FeedArticle] {
+        try await database.fetchArticles(limit: nil, eventID: eventID)
+    }
+
+    /// Records the event version the reader has seen. Article read and saved state stay as they are.
+    func markEventSeen(_ eventID: String) async {
+        do {
+            let before = try await database.eventSeenVersion(eventID)
+            if try await database.markEventSeen(eventID) != before { eventRevision &+= 1 }
+        } catch {
+            logger.error("Failed to record event reading state: \(error.localizedDescription)")
+        }
+    }
+
+    /// "These are different events": a local exclusion that later refreshes and passes respect.
+    @discardableResult
+    func separateArticle(_ articleID: String, fromEvent eventID: String) async -> Bool {
+        do {
+            try await database.separateArticle(articleID, fromEvent: eventID)
+            eventRevision &+= 1
+            return true
+        } catch {
+            operationError = "This article could not be separated from the event. Please try again."
+            logger.error("Failed to separate article from event: \(error.localizedDescription)")
+            return false
+        }
+    }
+
+    // MARK: - Event Overviews
+
+    @discardableResult
+    func recordVerifiedOverview(
+        _ document: EventOverviewDocument,
+        passages: [EvidencePassage],
+        articles: [FeedArticle]
+    ) async throws -> (saved: Bool, document: EventOverviewDocument) {
+        try await database.recordVerifiedOverview(document, passages: passages, articles: articles)
+    }
+
+    @discardableResult
+    func recordEventOverview(_ document: EventOverviewDocument, expectedArticleInputs: [String: String]? = nil) async throws -> Bool {
+        try await database.recordEventOverview(document, expectedArticleInputs: expectedArticleInputs)
+    }
+
+    func fetchEventOverview(eventID: String) async throws -> EventOverviewDocument? {
+        try await database.fetchEventOverview(eventID: eventID)
+    }
+
+    func fetchEventOverview(forArticleID articleID: String) async throws -> EventOverviewDocument? {
+        try await database.fetchEventOverview(forArticleID: articleID)
+    }
+
+    @discardableResult
+    func deleteEventOverview(eventID: String) async throws -> Bool {
+        try await database.deleteEventOverview(eventID: eventID)
     }
 }

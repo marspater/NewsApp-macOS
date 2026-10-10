@@ -13,7 +13,7 @@ export CLANG_MODULE_CACHE_PATH="${CLANG_MODULE_CACHE_PATH:-${TMPDIR:-/tmp}/news-
 export SWIFT_MODULECACHE_PATH="$CLANG_MODULE_CACHE_PATH"
 
 
-echo "Building ${APP_NAME} v2.0 for macOS ${TARGET_MACOS} ($(uname -m))..."
+echo "Building ${APP_NAME} v2.0 for macOS ${TARGET_MACOS} (arm64)..."
 
 # Clean old build
 rm -rf "${APP_DIR}"
@@ -26,26 +26,51 @@ mkdir -p Assets
 cp container-migration.plist PrivacyInfo.xcprivacy "${RESOURCES_DIR}/"
 
 # Compile the editable Icon Composer source, including legacy macOS fallback.
-xcrun actool Assets/AppIcon.icon --compile "${RESOURCES_DIR}" \
+xcrun actool "$(pwd)/Assets/AppIcon.icon" --compile "$(pwd)/${RESOURCES_DIR}" \
     --platform macosx --minimum-deployment-target "${TARGET_MACOS}" \
-    --app-icon AppIcon --output-partial-info-plist "${CONTENTS_DIR}/IconInfo.plist"
+    --app-icon AppIcon --output-partial-info-plist "$(pwd)/${CONTENTS_DIR}/IconInfo.plist"
 
 # Compile Swift files (exclude any standalone scripts)
-swiftc -swift-version 6 -O -parse-as-library -target $(uname -m)-apple-macos${TARGET_MACOS} \
+swiftc -swift-version 6 -O -parse-as-library -target arm64-apple-macos${TARGET_MACOS} \
     Sources/Services/DateParser.swift \
     Sources/Models/FeedError.swift \
+    Sources/Models/FeedFetchState.swift \
+    Sources/Models/FeedCatalog.swift \
+    Sources/Models/MuteRules.swift \
     Sources/Services/IPAddressValidator.swift \
     Sources/Models/ArticleIdentity.swift \
+    Sources/Models/EventOverview.swift \
+    Sources/Models/EventFeed.swift \
     Sources/Storage/DatabaseEngine.swift \
     Sources/Storage/MigrationCoordinator.swift \
     Sources/Storage/ArticleStore.swift \
     Sources/Intelligence/ArticleIntelligence.swift \
+    Sources/Intelligence/OverviewPassageSelector.swift \
+    Sources/Intelligence/PromptDefense.swift \
+    Sources/Intelligence/ModelAvailability.swift \
+    Sources/Intelligence/PassageFactExtractor.swift \
+    Sources/Intelligence/TensionMethodology.swift \
+    Sources/Intelligence/OverviewComposer.swift \
+    Sources/Intelligence/OverviewTimelineBuilder.swift \
+    Sources/Intelligence/OverviewQualityAuditor.swift \
+    Sources/Intelligence/OverviewClaimVerifier.swift \
+    Sources/Intelligence/OverviewTimelineExtractor.swift \
+    Sources/Intelligence/OverviewPerspectivesExtractor.swift \
+    Sources/Intelligence/OverviewThematicAngleExtractor.swift \
+    Sources/Intelligence/CoverageSentimentEvaluator.swift \
+    Sources/Intelligence/EventCandidates.swift \
+    Sources/Intelligence/EventMatcher.swift \
+    Sources/Intelligence/EventClustering.swift \
+    Sources/Intelligence/EventJudge.swift \
+    Sources/Intelligence/StoryImportance.swift \
     Sources/Intelligence/ContentExtractionPipeline.swift \
     Sources/Intelligence/EnrichmentQueue.swift \
+    Sources/Intelligence/OverviewGenerationCoordinator.swift \
+    Sources/Services/NetworkBoundaryProxy.swift \
+    Sources/Views/WebPreviewPolicy.swift \
     Sources/Services/SecureHTTPClient.swift \
     Sources/App/AppSettings.swift \
     Sources/Services/FeedXMLParser.swift \
-    Sources/Intelligence/WebContentExtractor.swift \
     Sources/Coordinators/NotificationService.swift \
     Sources/Services/FeedFetcher.swift \
     Sources/Services/JSONFeedParser.swift \
@@ -59,10 +84,15 @@ swiftc -swift-version 6 -O -parse-as-library -target $(uname -m)-apple-macos${TA
     Sources/Views/GlassSystem.swift \
     Sources/Views/SidebarView.swift \
     Sources/Views/ArticleCardView.swift \
+    Sources/Views/EventCardView.swift \
     Sources/Views/ArticleListView.swift \
     Sources/Views/ArticleDetailView.swift \
+    Sources/Views/EventOverviewReaderView.swift \
+    Sources/Views/TensionIndexView.swift \
     Sources/Views/MainView.swift \
     Sources/Views/SettingsView.swift \
+    Sources/Views/FeedCatalogView.swift \
+    Sources/Views/FeedHealthLine.swift \
     Sources/Storage/SavedStoriesManager.swift \
     Sources/Services/OPMLManager.swift \
     Sources/Views/ArticleWebView.swift \
@@ -93,7 +123,7 @@ cat > "${CONTENTS_DIR}/Info.plist" <<EOF
     <key>CFBundleIconName</key>
     <string>AppIcon</string>
     <key>CFBundleShortVersionString</key>
-    <string>2.0</string>
+    <string>2.0.0</string>
     <key>CFBundleVersion</key>
     <string>3</string>
     <key>LSMinimumSystemVersion</key>
@@ -120,5 +150,7 @@ rm -rf "${SIGN_TMP}"
 
 # Force Finder to refresh the app icon cache
 touch "${APP_DIR}"
+
+codesign --verify --deep --strict "${APP_DIR}"
 
 echo "Build complete. App is ready at ${APP_DIR}!"

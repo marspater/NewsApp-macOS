@@ -1,0 +1,3426 @@
+{
+  "version": 1,
+  "status": "provisional-evidence-supplement",
+  "releaseEligible": false,
+  "baseManifest": "publisher-review-v2.json",
+  "baseSHA256": "2ff6bd38c290b5e71528a20d32415aed986a9236451bdd890564aa1f44bedf0f",
+  "captureSHA256": "56f31c123a220bf739e2c5f58863c73a3b56b00de2527a7d53ed25334a8bff4e",
+  "splitRule": "SHA256(news-review-v2:family), first 8 hex digits modulo 10 >=7 is holdout; related action families kept together.",
+  "sampling": "Source-based expansion and advertised URLs; no matcher, fingerprint or embedding holdout predictions viewed.",
+  "documents": [
+    {
+      "id": "doc-1155",
+      "captureIndex": 1155,
+      "event": "fp9-announcement",
+      "url": "https://www.pravda.com.ua/news/2026/10/03/8056326/",
+      "feed": "https://www.pravda.com.ua/rss",
+      "source": "Українська правда",
+      "language": "uk",
+      "published": 1791048000,
+      "timestampStatus": "feed-reported",
+      "origin": "capture-v2",
+      "scope": "event",
+      "timestampEvidence": {
+        "id": "doc-1155",
+        "url": "https://www.pravda.com.ua/news/2026/10/03/8056326/",
+        "feedPublished": 1791048000,
+        "status": "feed-matches-publication",
+        "pageSHA256": "d980aa2ea8bef604c20b839ebe3c708aac4c664e988f1cfd68c92ce53e27aa13",
+        "fetchedAt": 1791059149.455133,
+        "finalURL": "https://www.pravda.com.ua/news/2026/10/03/8056326/",
+        "dateEvidence": [
+          {
+            "kind": "datePublished",
+            "field": "jsonld:datePublished",
+            "raw": "2026-10-03T20:20:00+03:00",
+            "epoch": 1791048000.0
+          },
+          {
+            "kind": "dateModified",
+            "field": "jsonld:dateModified",
+            "raw": "2026-10-03T20:20:00+03:00",
+            "epoch": 1791048000.0
+          }
+        ],
+        "publisherPublished": "2026-10-03T17:20:00Z",
+        "deltaSeconds": 0.0
+      }
+    },
+    {
+      "id": "doc-1201",
+      "captureIndex": 1201,
+      "event": "fp9-announcement",
+      "url": "https://www.radiosvoboda.org/a/news-zelensky-fp-9-bude-hotova-voseny/33869775.html",
+      "feed": "https://www.radiosvoboda.org/api/zrqiteuuir",
+      "source": "Новини",
+      "language": "uk",
+      "published": 1791049654,
+      "timestampStatus": "feed-reported",
+      "origin": "capture-v2",
+      "scope": "event",
+      "timestampEvidence": {
+        "id": "doc-1201",
+        "url": "https://www.radiosvoboda.org/a/news-zelensky-fp-9-bude-hotova-voseny/33869775.html",
+        "feedPublished": 1791049654,
+        "status": "feed-matches-publication",
+        "pageSHA256": "41c2261c78881587004186f174c6de22cb8539d052f7f241d589cd4a457f383b",
+        "fetchedAt": 1791059148.733873,
+        "finalURL": "https://www.radiosvoboda.org/a/news-zelensky-fp-9-bude-hotova-voseny/33869775.html",
+        "dateEvidence": [
+          {
+            "kind": "datePublished",
+            "field": "jsonld:datePublished",
+            "raw": "2026-10-03 17:47:34Z",
+            "epoch": 1791049654.0
+          },
+          {
+            "kind": "dateModified",
+            "field": "jsonld:dateModified",
+            "raw": "2026-10-03 17:47:34Z",
+            "epoch": 1791049654.0
+          }
+        ],
+        "publisherPublished": "2026-10-03T17:47:34Z",
+        "deltaSeconds": 0.0
+      }
+    },
+    {
+      "id": "doc-0273",
+      "captureIndex": 273,
+      "event": "kyiv-pontoon-plan",
+      "url": "https://kyivindependent.com/pontoon-crossings-coming-to-kyiv-following-russian-strikes-on-key-bridges-media-reports/",
+      "feed": "https://kyivindependent.com/news-archive/rss",
+      "source": "The Kyiv Independent",
+      "language": "en",
+      "published": 1791045216,
+      "timestampStatus": "feed-reported",
+      "origin": "base-v2-reference",
+      "scope": "event",
+      "timestampEvidence": {
+        "id": "doc-0273",
+        "url": "https://kyivindependent.com/pontoon-crossings-coming-to-kyiv-following-russian-strikes-on-key-bridges-media-reports/",
+        "feedPublished": 1791045216,
+        "status": "feed-matches-publication",
+        "pageSHA256": "1b3e3c8cb7d003b3bf30801eedec7f09abb4165a571e900f43282a2cd764bd6c",
+        "fetchedAt": 1791059827.928112,
+        "finalURL": "https://kyivindependent.com/pontoon-crossings-coming-to-kyiv-following-russian-strikes-on-key-bridges-media-reports/",
+        "dateEvidence": [
+          {
+            "kind": "datePublished",
+            "field": "meta:article:published_time",
+            "raw": "2026-10-03T16:33:36.000Z",
+            "epoch": 1791045216.0
+          },
+          {
+            "kind": "dateModified",
+            "field": "meta:article:modified_time",
+            "raw": "2026-10-03T16:33:36.000Z",
+            "epoch": 1791045216.0
+          },
+          {
+            "kind": "datePublished",
+            "field": "jsonld:datePublished",
+            "raw": "2026-10-03T16:33:36.000Z",
+            "epoch": 1791045216.0
+          },
+          {
+            "kind": "dateModified",
+            "field": "jsonld:dateModified",
+            "raw": "2026-10-03T16:33:36.000Z",
+            "epoch": 1791045216.0
+          }
+        ],
+        "publisherPublished": "2026-10-03T16:33:36Z",
+        "deltaSeconds": 0.0
+      }
+    },
+    {
+      "id": "doc-1180",
+      "captureIndex": 1180,
+      "event": "kyiv-pontoon-plan",
+      "url": "https://www.pravda.com.ua/eng/news/2026/10/03/8056314/",
+      "feed": "https://www.pravda.com.ua/eng/rss",
+      "source": "Ukrainska Pravda",
+      "language": "en",
+      "published": 1791038640,
+      "timestampStatus": "feed-reported",
+      "origin": "capture-v2",
+      "scope": "event",
+      "timestampEvidence": {
+        "id": "doc-1180",
+        "url": "https://www.pravda.com.ua/eng/news/2026/10/03/8056314/",
+        "feedPublished": 1791038640,
+        "status": "feed-matches-publication",
+        "pageSHA256": "a688772caced380f78cae461d7779598a2bad86dade989ef30a09713dc7ab00e",
+        "fetchedAt": 1791059827.928267,
+        "finalURL": "https://www.pravda.com.ua/eng/news/2026/10/03/8056314/",
+        "dateEvidence": [
+          {
+            "kind": "datePublished",
+            "field": "jsonld:datePublished",
+            "raw": "2026-10-03T17:44:00+03:00",
+            "epoch": 1791038640.0
+          },
+          {
+            "kind": "dateModified",
+            "field": "jsonld:dateModified",
+            "raw": "2026-10-03T17:44:00+03:00",
+            "epoch": 1791038640.0
+          }
+        ],
+        "publisherPublished": "2026-10-03T14:44:00Z",
+        "deltaSeconds": 0.0
+      }
+    },
+    {
+      "id": "doc-1164",
+      "captureIndex": 1164,
+      "event": "kyiv-pontoon-plan",
+      "url": "https://www.pravda.com.ua/news/2026/10/03/8056314/",
+      "feed": "https://www.pravda.com.ua/rss",
+      "source": "Українська правда",
+      "language": "uk",
+      "published": 1791038640,
+      "timestampStatus": "feed-reported",
+      "origin": "capture-v2",
+      "scope": "event",
+      "timestampEvidence": {
+        "id": "doc-1164",
+        "url": "https://www.pravda.com.ua/news/2026/10/03/8056314/",
+        "feedPublished": 1791038640,
+        "status": "feed-matches-publication",
+        "pageSHA256": "43709db3baa85f4e18682fd6658bccb4241dcee5371f625e0c5a11fc3330ce96",
+        "fetchedAt": 1791059150.053687,
+        "finalURL": "https://www.pravda.com.ua/news/2026/10/03/8056314/",
+        "dateEvidence": [
+          {
+            "kind": "datePublished",
+            "field": "jsonld:datePublished",
+            "raw": "2026-10-03T17:44:00+03:00",
+            "epoch": 1791038640.0
+          },
+          {
+            "kind": "dateModified",
+            "field": "jsonld:dateModified",
+            "raw": "2026-10-03T17:44:00+03:00",
+            "epoch": 1791038640.0
+          }
+        ],
+        "publisherPublished": "2026-10-03T14:44:00Z",
+        "deltaSeconds": 0.0
+      }
+    },
+    {
+      "id": "doc-1204",
+      "captureIndex": 1204,
+      "event": "kyiv-pontoon-plan",
+      "url": "https://www.radiosvoboda.org/a/news-kyiv-rezervni-perepravy-cherez-dnipro-ministr/33869748.html",
+      "feed": "https://www.radiosvoboda.org/api/zrqiteuuir",
+      "source": "Новини",
+      "language": "uk",
+      "published": 1791042978,
+      "timestampStatus": "feed-reported",
+      "origin": "capture-v2",
+      "scope": "event",
+      "timestampEvidence": {
+        "id": "doc-1204",
+        "url": "https://www.radiosvoboda.org/a/news-kyiv-rezervni-perepravy-cherez-dnipro-ministr/33869748.html",
+        "feedPublished": 1791042978,
+        "status": "feed-matches-publication",
+        "pageSHA256": "8153af0ec5d659d74c33e50cdc31d892909117cb23a592b3f3ee98f92cbe920c",
+        "fetchedAt": 1791059148.981067,
+        "finalURL": "https://www.radiosvoboda.org/a/news-kyiv-rezervni-perepravy-cherez-dnipro-ministr/33869748.html",
+        "dateEvidence": [
+          {
+            "kind": "datePublished",
+            "field": "jsonld:datePublished",
+            "raw": "2026-10-03 15:56:18Z",
+            "epoch": 1791042978.0
+          },
+          {
+            "kind": "dateModified",
+            "field": "jsonld:dateModified",
+            "raw": "2026-10-03 15:56:18Z",
+            "epoch": 1791042978.0
+          }
+        ],
+        "publisherPublished": "2026-10-03T15:56:18Z",
+        "deltaSeconds": 0.0
+      }
+    },
+    {
+      "id": "doc-1436",
+      "captureIndex": 1436,
+      "event": "kyiv-pontoon-plan",
+      "url": "https://www.ukrinform.ua/rubric-vidbudova/4170747-u-kievi-pocnut-buduvati-pontonni-perepravi-cerez-dnipro-kalasnik.html",
+      "feed": "https://www.ukrinform.ua/rss/block-lastnews",
+      "source": "Останні новини",
+      "language": "uk",
+      "published": 1791043680,
+      "timestampStatus": "feed-reported",
+      "origin": "capture-v2",
+      "scope": "event",
+      "timestampEvidence": {
+        "id": "doc-1436",
+        "url": "https://www.ukrinform.ua/rubric-vidbudova/4170747-u-kievi-pocnut-buduvati-pontonni-perepravi-cerez-dnipro-kalasnik.html",
+        "feedPublished": 1791043680,
+        "status": "feed-matches-publication",
+        "pageSHA256": "61b81fbee8dc0996efb376ce055d4e0ae4488bab20e43e79c8aad3dbf5979eef",
+        "fetchedAt": 1791059149.495401,
+        "finalURL": "https://www.ukrinform.ua/rubric-vidbudova/4170747-u-kievi-pocnut-buduvati-pontonni-perepravi-cerez-dnipro-kalasnik.html",
+        "dateEvidence": [
+          {
+            "kind": "datePublished",
+            "field": "jsonld:datePublished",
+            "raw": "2026-10-03T19:08:00+03:00",
+            "epoch": 1791043680.0
+          },
+          {
+            "kind": "dateModified",
+            "field": "jsonld:dateModified",
+            "raw": "2026-10-03T19:08:00+03:00",
+            "epoch": 1791043680.0
+          },
+          {
+            "kind": "datePublished",
+            "field": "jsonld:datePublished",
+            "raw": "1791043680",
+            "epoch": null
+          },
+          {
+            "kind": "dateModified",
+            "field": "jsonld:dateModified",
+            "raw": "1791043680",
+            "epoch": null
+          }
+        ],
+        "publisherPublished": "2026-10-03T16:08:00Z",
+        "deltaSeconds": 0.0
+      }
+    },
+    {
+      "id": "doc-1159",
+      "captureIndex": 1159,
+      "event": "portugal-lajes-investigation",
+      "url": "https://www.pravda.com.ua/news/2026/10/03/8056321/",
+      "feed": "https://www.pravda.com.ua/rss",
+      "source": "Українська правда",
+      "language": "uk",
+      "published": 1791043260,
+      "timestampStatus": "feed-reported",
+      "origin": "capture-v2",
+      "scope": "event",
+      "timestampEvidence": {
+        "id": "doc-1159",
+        "url": "https://www.pravda.com.ua/news/2026/10/03/8056321/",
+        "feedPublished": 1791043260,
+        "status": "feed-publication-differs",
+        "pageSHA256": "2a8466f7f3eed105dc7a1dd39eb56b6ff8c702437bad33cbd8b61a0967452e5f",
+        "fetchedAt": 1791059149.6406221,
+        "finalURL": "https://www.eurointegration.com.ua/news/2026/10/3/7246880/",
+        "dateEvidence": [
+          {
+            "kind": "datePublished",
+            "field": "jsonld:datePublished",
+            "raw": "2026-10-03T17:21:04+03:00",
+            "epoch": 1791037264.0
+          },
+          {
+            "kind": "dateModified",
+            "field": "jsonld:dateModified",
+            "raw": "2026-10-03T17:21:04+03:00",
+            "epoch": 1791037264.0
+          }
+        ],
+        "publisherPublished": "2026-10-03T14:21:04Z",
+        "deltaSeconds": -5996.0
+      }
+    },
+    {
+      "id": "doc-1434",
+      "captureIndex": 1434,
+      "event": "portugal-lajes-investigation",
+      "url": "https://www.ukrinform.ua/rubric-world/4170750-u-portugalii-rozsliduut-vikoristanna-statami-aviabazi-lazes-dla-vijni-z-iranom.html",
+      "feed": "https://www.ukrinform.ua/rss/block-lastnews",
+      "source": "Останні новини",
+      "language": "uk",
+      "published": 1791045720,
+      "timestampStatus": "feed-reported",
+      "origin": "capture-v2",
+      "scope": "event",
+      "timestampEvidence": {
+        "id": "doc-1434",
+        "url": "https://www.ukrinform.ua/rubric-world/4170750-u-portugalii-rozsliduut-vikoristanna-statami-aviabazi-lazes-dla-vijni-z-iranom.html",
+        "feedPublished": 1791045720,
+        "status": "feed-matches-publication",
+        "pageSHA256": "414fadf54f9db379a0e7beee7620557fd6514565902979fb2e3a623259e0d493",
+        "fetchedAt": 1791059149.357064,
+        "finalURL": "https://www.ukrinform.ua/rubric-world/4170750-u-portugalii-rozsliduut-vikoristanna-statami-aviabazi-lazes-dla-vijni-z-iranom.html",
+        "dateEvidence": [
+          {
+            "kind": "datePublished",
+            "field": "jsonld:datePublished",
+            "raw": "2026-10-03T19:42:00+03:00",
+            "epoch": 1791045720.0
+          },
+          {
+            "kind": "dateModified",
+            "field": "jsonld:dateModified",
+            "raw": "2026-10-03T19:42:00+03:00",
+            "epoch": 1791045720.0
+          },
+          {
+            "kind": "datePublished",
+            "field": "jsonld:datePublished",
+            "raw": "1791045720",
+            "epoch": null
+          },
+          {
+            "kind": "dateModified",
+            "field": "jsonld:dateModified",
+            "raw": "1791045720",
+            "epoch": null
+          }
+        ],
+        "publisherPublished": "2026-10-03T16:42:00Z",
+        "deltaSeconds": 0.0
+      }
+    },
+    {
+      "id": "doc-1160",
+      "captureIndex": 1160,
+      "event": "kirovohrad-road-strike",
+      "url": "https://www.pravda.com.ua/news/2026/10/03/8056320/",
+      "feed": "https://www.pravda.com.ua/rss",
+      "source": "Українська правда",
+      "language": "uk",
+      "published": 1791042540,
+      "timestampStatus": "feed-reported",
+      "origin": "capture-v2",
+      "scope": "event",
+      "timestampEvidence": {
+        "id": "doc-1160",
+        "url": "https://www.pravda.com.ua/news/2026/10/03/8056320/",
+        "feedPublished": 1791042540,
+        "status": "feed-matches-publication",
+        "pageSHA256": "2cf098a39181dbbcbbf33d833c8e43d4206643ae2990bdd498360927b0da68ce",
+        "fetchedAt": 1791059149.720327,
+        "finalURL": "https://www.pravda.com.ua/news/2026/10/03/8056320/",
+        "dateEvidence": [
+          {
+            "kind": "datePublished",
+            "field": "jsonld:datePublished",
+            "raw": "2026-10-03T18:49:00+03:00",
+            "epoch": 1791042540.0
+          },
+          {
+            "kind": "dateModified",
+            "field": "jsonld:dateModified",
+            "raw": "2026-10-03T18:49:00+03:00",
+            "epoch": 1791042540.0
+          }
+        ],
+        "publisherPublished": "2026-10-03T15:49:00Z",
+        "deltaSeconds": 0.0
+      }
+    },
+    {
+      "id": "doc-1444",
+      "captureIndex": 1444,
+      "event": "kirovohrad-road-strike",
+      "url": "https://www.ukrinform.ua/rubric-regions/4170729-u-gajvoroni-na-kirovogradsini-dron-upav-na-proizdzu-castinu-e-zagiblij-i-poranena.html",
+      "feed": "https://www.ukrinform.ua/rss/block-lastnews",
+      "source": "Останні новини",
+      "language": "uk",
+      "published": 1791039000,
+      "timestampStatus": "feed-reported",
+      "origin": "capture-v2",
+      "scope": "event",
+      "timestampEvidence": {
+        "id": "doc-1444",
+        "url": "https://www.ukrinform.ua/rubric-regions/4170729-u-gajvoroni-na-kirovogradsini-dron-upav-na-proizdzu-castinu-e-zagiblij-i-poranena.html",
+        "feedPublished": 1791039000,
+        "status": "feed-matches-publication",
+        "pageSHA256": "b9e2f1a5d9bb82682a894f0e3252013dbea537e1c4995646d7f19e2cac43b2a0",
+        "fetchedAt": 1791059149.9932709,
+        "finalURL": "https://www.ukrinform.ua/rubric-regions/4170729-u-gajvoroni-na-kirovogradsini-dron-upav-na-proizdzu-castinu-e-zagiblij-i-poranena.html",
+        "dateEvidence": [
+          {
+            "kind": "datePublished",
+            "field": "jsonld:datePublished",
+            "raw": "2026-10-03T17:50:00+03:00",
+            "epoch": 1791039000.0
+          },
+          {
+            "kind": "dateModified",
+            "field": "jsonld:dateModified",
+            "raw": "2026-10-03T17:50:00+03:00",
+            "epoch": 1791039000.0
+          },
+          {
+            "kind": "datePublished",
+            "field": "jsonld:datePublished",
+            "raw": "1791039000",
+            "epoch": null
+          },
+          {
+            "kind": "dateModified",
+            "field": "jsonld:dateModified",
+            "raw": "1791039000",
+            "epoch": null
+          }
+        ],
+        "publisherPublished": "2026-10-03T14:50:00Z",
+        "deltaSeconds": 0.0
+      }
+    },
+    {
+      "id": "doc-1150",
+      "captureIndex": 1150,
+      "event": "kharkiv-car-strike",
+      "url": "https://www.pravda.com.ua/news/2026/10/03/8056335/",
+      "feed": "https://www.pravda.com.ua/rss",
+      "source": "Українська правда",
+      "language": "uk",
+      "published": 1791053280,
+      "timestampStatus": "feed-reported",
+      "origin": "capture-v2",
+      "scope": "event",
+      "timestampEvidence": {
+        "id": "doc-1150",
+        "url": "https://www.pravda.com.ua/news/2026/10/03/8056335/",
+        "feedPublished": 1791053280,
+        "status": "feed-matches-publication",
+        "pageSHA256": "c4fda95f37562ae38ffb16c49d2ed0815befa52b30802c83d6f4f2e75816b9b2",
+        "fetchedAt": 1791059148.7338638,
+        "finalURL": "https://www.pravda.com.ua/news/2026/10/03/8056335/",
+        "dateEvidence": [
+          {
+            "kind": "datePublished",
+            "field": "jsonld:datePublished",
+            "raw": "2026-10-03T21:48:00+03:00",
+            "epoch": 1791053280.0
+          },
+          {
+            "kind": "dateModified",
+            "field": "jsonld:dateModified",
+            "raw": "2026-10-03T21:48:00+03:00",
+            "epoch": 1791053280.0
+          }
+        ],
+        "publisherPublished": "2026-10-03T18:48:00Z",
+        "deltaSeconds": 0.0
+      }
+    },
+    {
+      "id": "doc-1428",
+      "captureIndex": 1428,
+      "event": "kharkiv-car-strike",
+      "url": "https://www.ukrinform.ua/rubric-regions/4170765-na-harkivsini-vnaslidok-udaru-drona-rf-po-avtivci-zaginula-zinka.html",
+      "feed": "https://www.ukrinform.ua/rss/block-lastnews",
+      "source": "Останні новини",
+      "language": "uk",
+      "published": 1791050722,
+      "timestampStatus": "feed-reported",
+      "origin": "capture-v2",
+      "scope": "event",
+      "timestampEvidence": {
+        "id": "doc-1428",
+        "url": "https://www.ukrinform.ua/rubric-regions/4170765-na-harkivsini-vnaslidok-udaru-drona-rf-po-avtivci-zaginula-zinka.html",
+        "feedPublished": 1791050722,
+        "status": "feed-matches-publication",
+        "pageSHA256": "2aa23badf0462777d2d9a9db1031e5fee8dab1b6ad3090c9b1f1cdbe70685b30",
+        "fetchedAt": 1791059149.1851401,
+        "finalURL": "https://www.ukrinform.ua/rubric-regions/4170765-na-harkivsini-vnaslidok-udaru-drona-rf-po-avtivci-zaginula-zinka.html",
+        "dateEvidence": [
+          {
+            "kind": "datePublished",
+            "field": "jsonld:datePublished",
+            "raw": "2026-10-03T21:05:22+03:00",
+            "epoch": 1791050722.0
+          },
+          {
+            "kind": "dateModified",
+            "field": "jsonld:dateModified",
+            "raw": "2026-10-03T21:05:22+03:00",
+            "epoch": 1791050722.0
+          },
+          {
+            "kind": "datePublished",
+            "field": "jsonld:datePublished",
+            "raw": "1791050722",
+            "epoch": null
+          },
+          {
+            "kind": "dateModified",
+            "field": "jsonld:dateModified",
+            "raw": "1791050722",
+            "epoch": null
+          }
+        ],
+        "publisherPublished": "2026-10-03T18:05:22Z",
+        "deltaSeconds": 0.0
+      }
+    },
+    {
+      "id": "doc-1152",
+      "captureIndex": 1152,
+      "event": "ukraine-budget-deficit",
+      "url": "https://www.pravda.com.ua/news/2026/10/03/8056332/",
+      "feed": "https://www.pravda.com.ua/rss",
+      "source": "Українська правда",
+      "language": "uk",
+      "published": 1791051480,
+      "timestampStatus": "feed-reported",
+      "origin": "capture-v2",
+      "scope": "event",
+      "timestampEvidence": {
+        "id": "doc-1152",
+        "url": "https://www.pravda.com.ua/news/2026/10/03/8056332/",
+        "feedPublished": 1791051480,
+        "status": "feed-matches-publication",
+        "pageSHA256": "925f0b0645eb3721d46424cb12768778dd618a0b9749fc0b4474d063ea57054e",
+        "fetchedAt": 1791059149.2654529,
+        "finalURL": "https://www.pravda.com.ua/news/2026/10/03/8056332/",
+        "dateEvidence": [
+          {
+            "kind": "datePublished",
+            "field": "jsonld:datePublished",
+            "raw": "2026-10-03T21:18:00+03:00",
+            "epoch": 1791051480.0
+          },
+          {
+            "kind": "dateModified",
+            "field": "jsonld:dateModified",
+            "raw": "2026-10-03T21:18:00+03:00",
+            "epoch": 1791051480.0
+          }
+        ],
+        "publisherPublished": "2026-10-03T18:18:00Z",
+        "deltaSeconds": 0.0
+      }
+    },
+    {
+      "id": "doc-1423",
+      "captureIndex": 1423,
+      "event": "ukraine-budget-deficit",
+      "url": "https://www.ukrinform.ua/rubric-economy/4170769-ukraina-zakrie-ninisnij-finansovij-deficit-do-kinca-roku-prezident.html",
+      "feed": "https://www.ukrinform.ua/rss/block-lastnews",
+      "source": "Останні новини",
+      "language": "uk",
+      "published": 1791052980,
+      "timestampStatus": "feed-reported",
+      "origin": "capture-v2",
+      "scope": "event",
+      "timestampEvidence": {
+        "id": "doc-1423",
+        "url": "https://www.ukrinform.ua/rubric-economy/4170769-ukraina-zakrie-ninisnij-finansovij-deficit-do-kinca-roku-prezident.html",
+        "feedPublished": 1791052980,
+        "status": "no-zoned-publication-time",
+        "pageSHA256": "37dca70c089fa08fd5ca0fe8901c77aecfee2b276641168052497765c803c828",
+        "fetchedAt": 1791059148.733883,
+        "finalURL": "https://www.ukrinform.ua/rubric-economy/4170769-ukraina-zakrie-ninisnij-finansovij-deficit-do-kinca-roku-prezident.html",
+        "dateEvidence": []
+      }
+    },
+    {
+      "id": "doc-1161",
+      "captureIndex": 1161,
+      "event": "oct3-counterstrike-report",
+      "url": "https://www.pravda.com.ua/news/2026/10/03/8056319/",
+      "feed": "https://www.pravda.com.ua/rss",
+      "source": "Українська правда",
+      "language": "uk",
+      "published": 1791041160,
+      "timestampStatus": "feed-reported",
+      "origin": "capture-v2",
+      "scope": "event",
+      "timestampEvidence": {
+        "id": "doc-1161",
+        "url": "https://www.pravda.com.ua/news/2026/10/03/8056319/",
+        "feedPublished": 1791041160,
+        "status": "feed-matches-publication",
+        "pageSHA256": "ec2aeac4028f2bac8cfeaa05a9ae9e98b91075de609b2cac6045fba7d364e437",
+        "fetchedAt": 1791059149.8541799,
+        "finalURL": "https://www.pravda.com.ua/news/2026/10/03/8056319/",
+        "dateEvidence": [
+          {
+            "kind": "datePublished",
+            "field": "jsonld:datePublished",
+            "raw": "2026-10-03T18:26:00+03:00",
+            "epoch": 1791041160.0
+          },
+          {
+            "kind": "dateModified",
+            "field": "jsonld:dateModified",
+            "raw": "2026-10-03T18:26:00+03:00",
+            "epoch": 1791041160.0
+          }
+        ],
+        "publisherPublished": "2026-10-03T15:26:00Z",
+        "deltaSeconds": 0.0
+      }
+    },
+    {
+      "id": "doc-1440",
+      "captureIndex": 1440,
+      "event": "oct3-counterstrike-report",
+      "url": "https://www.ukrinform.ua/rubric-ato/4170736-zelenskij-nasi-sankcii-ciei-dobi-dosagli-samarskogo-regionu-ta-rozrahunkiv-iskanderiv-u-branskij-oblasti.html",
+      "feed": "https://www.ukrinform.ua/rss/block-lastnews",
+      "source": "Останні новини",
+      "language": "uk",
+      "published": 1791041340,
+      "timestampStatus": "feed-reported",
+      "origin": "capture-v2",
+      "scope": "event",
+      "timestampEvidence": {
+        "id": "doc-1440",
+        "url": "https://www.ukrinform.ua/rubric-ato/4170736-zelenskij-nasi-sankcii-ciei-dobi-dosagli-samarskogo-regionu-ta-rozrahunkiv-iskanderiv-u-branskij-oblasti.html",
+        "feedPublished": 1791041340,
+        "status": "feed-matches-publication",
+        "pageSHA256": "b29bb1f6888e3dbde374188c7b43b4f6d39db8d5a206ac849acc66dfb1a50a3e",
+        "fetchedAt": 1791059149.656894,
+        "finalURL": "https://www.ukrinform.ua/rubric-ato/4170736-zelenskij-nasi-sankcii-ciei-dobi-dosagli-samarskogo-regionu-ta-rozrahunkiv-iskanderiv-u-branskij-oblasti.html",
+        "dateEvidence": [
+          {
+            "kind": "datePublished",
+            "field": "jsonld:datePublished",
+            "raw": "2026-10-03T18:29:00+03:00",
+            "epoch": 1791041340.0
+          },
+          {
+            "kind": "dateModified",
+            "field": "jsonld:dateModified",
+            "raw": "2026-10-03T18:29:00+03:00",
+            "epoch": 1791041340.0
+          },
+          {
+            "kind": "datePublished",
+            "field": "jsonld:datePublished",
+            "raw": "1791041340",
+            "epoch": null
+          },
+          {
+            "kind": "dateModified",
+            "field": "jsonld:dateModified",
+            "raw": "1791041340",
+            "epoch": null
+          }
+        ],
+        "publisherPublished": "2026-10-03T15:29:00Z",
+        "deltaSeconds": 0.0
+      }
+    },
+    {
+      "id": "doc-0517",
+      "captureIndex": 517,
+      "event": "senior-wellness-payments",
+      "url": "https://thehill.com/homenews/administration/6127480-seniors-medicare-improvement-fund-checks/",
+      "feed": "https://thehill.com/feed",
+      "source": "The Hill News",
+      "language": "en",
+      "published": 1791033433,
+      "timestampStatus": "feed-reported",
+      "origin": "capture-v2",
+      "scope": "event",
+      "timestampEvidence": {
+        "id": "doc-0517",
+        "url": "https://thehill.com/homenews/administration/6127480-seniors-medicare-improvement-fund-checks/",
+        "feedPublished": 1791033433,
+        "status": "feed-matches-publication",
+        "pageSHA256": "8d262bdfe5e71694b7e4cd88dad0f47e86803dd3d14172586374fbbc8c01e7c8",
+        "fetchedAt": 1791059827.928252,
+        "finalURL": "https://thehill.com/homenews/administration/6127480-seniors-medicare-improvement-fund-checks/",
+        "dateEvidence": [
+          {
+            "kind": "datePublished",
+            "field": "meta:article:published_time",
+            "raw": "2026-10-03T13:17:13+00:00",
+            "epoch": 1791033433.0
+          },
+          {
+            "kind": "dateModified",
+            "field": "meta:article:modified_time",
+            "raw": "2026-10-03T13:17:19+00:00",
+            "epoch": 1791033439.0
+          },
+          {
+            "kind": "datePublished",
+            "field": "jsonld:datePublished",
+            "raw": "2026-10-03T13:17:13+00:00",
+            "epoch": 1791033433.0
+          },
+          {
+            "kind": "dateModified",
+            "field": "jsonld:dateModified",
+            "raw": "2026-10-03T13:17:19+00:00",
+            "epoch": 1791033439.0
+          }
+        ],
+        "publisherPublished": "2026-10-03T13:17:13Z",
+        "deltaSeconds": 0.0
+      }
+    },
+    {
+      "id": "doc-1151",
+      "captureIndex": 1151,
+      "event": "senior-wellness-payments",
+      "url": "https://www.pravda.com.ua/news/2026/10/03/8056334/",
+      "feed": "https://www.pravda.com.ua/rss",
+      "source": "Українська правда",
+      "language": "uk",
+      "published": 1791052140,
+      "timestampStatus": "feed-reported",
+      "origin": "capture-v2",
+      "scope": "event",
+      "timestampEvidence": {
+        "id": "doc-1151",
+        "url": "https://www.pravda.com.ua/news/2026/10/03/8056334/",
+        "feedPublished": 1791052140,
+        "status": "feed-publication-differs",
+        "pageSHA256": "8249ee3dc64442178de96c24d0db23e13aeeacb195d96851c3c4071faea1619e",
+        "fetchedAt": 1791059148.9669762,
+        "finalURL": "https://www.eurointegration.com.ua/news/2026/10/3/7246885/",
+        "dateEvidence": [
+          {
+            "kind": "datePublished",
+            "field": "jsonld:datePublished",
+            "raw": "2026-10-03T19:40:07+03:00",
+            "epoch": 1791045607.0
+          },
+          {
+            "kind": "dateModified",
+            "field": "jsonld:dateModified",
+            "raw": "2026-10-03T19:40:07+03:00",
+            "epoch": 1791045607.0
+          }
+        ],
+        "publisherPublished": "2026-10-03T16:40:07Z",
+        "deltaSeconds": -6533.0
+      }
+    },
+    {
+      "id": "doc-1442",
+      "captureIndex": 1442,
+      "event": "senior-wellness-payments",
+      "url": "https://www.ukrinform.ua/rubric-world/4170732-tramp-viplatit-20-miljonam-amerikanciv-po-90-na-ozdorovlenna.html",
+      "feed": "https://www.ukrinform.ua/rss/block-lastnews",
+      "source": "Останні новини",
+      "language": "uk",
+      "published": 1791039600,
+      "timestampStatus": "feed-reported",
+      "origin": "capture-v2",
+      "scope": "event",
+      "timestampEvidence": {
+        "id": "doc-1442",
+        "url": "https://www.ukrinform.ua/rubric-world/4170732-tramp-viplatit-20-miljonam-amerikanciv-po-90-na-ozdorovlenna.html",
+        "feedPublished": 1791039600,
+        "status": "feed-matches-publication",
+        "pageSHA256": "f629c664186f2c93c091c7fbea21256114b79eb6b50e317e7f20bb1223a359b2",
+        "fetchedAt": 1791059149.807825,
+        "finalURL": "https://www.ukrinform.ua/rubric-world/4170732-tramp-viplatit-20-miljonam-amerikanciv-po-90-na-ozdorovlenna.html",
+        "dateEvidence": [
+          {
+            "kind": "datePublished",
+            "field": "jsonld:datePublished",
+            "raw": "2026-10-03T18:00:00+03:00",
+            "epoch": 1791039600.0
+          },
+          {
+            "kind": "dateModified",
+            "field": "jsonld:dateModified",
+            "raw": "2026-10-03T18:00:00+03:00",
+            "epoch": 1791039600.0
+          },
+          {
+            "kind": "datePublished",
+            "field": "jsonld:datePublished",
+            "raw": "1791039600",
+            "epoch": null
+          },
+          {
+            "kind": "dateModified",
+            "field": "jsonld:dateModified",
+            "raw": "1791039600",
+            "epoch": null
+          }
+        ],
+        "publisherPublished": "2026-10-03T15:00:00Z",
+        "deltaSeconds": 0.0
+      }
+    },
+    {
+      "id": "doc-1256",
+      "captureIndex": 1256,
+      "event": "irene-butter-death",
+      "url": "https://www.tagesschau.de/tagesschau_20_uhr/video-1659918.html",
+      "feed": "https://www.tagesschau.de/index~rss2.xml",
+      "source": "tagesschau.de",
+      "language": "de",
+      "published": 1791051528,
+      "timestampStatus": "feed-reported",
+      "origin": "capture-v2",
+      "scope": "event",
+      "timestampEvidence": {
+        "id": "doc-1256",
+        "url": "https://www.tagesschau.de/tagesschau_20_uhr/video-1659918.html",
+        "feedPublished": 1791051528,
+        "status": "feed-matches-publication",
+        "pageSHA256": "260c391f6f12bdc687d15f653fd337ef3f8aae46353a5cc29bb4ee06067022a5",
+        "fetchedAt": 1791059149.670224,
+        "finalURL": "https://www.tagesschau.de/tagesschau_20_uhr/video-1659918.html",
+        "dateEvidence": [
+          {
+            "kind": "datePublished",
+            "field": "jsonld:datePublished",
+            "raw": "2026-10-03T18:18:48.410Z",
+            "epoch": 1791051528.41
+          },
+          {
+            "kind": "dateModified",
+            "field": "jsonld:dateModified",
+            "raw": "2026-10-03T18:18:48.432Z",
+            "epoch": 1791051528.432
+          }
+        ],
+        "publisherPublished": "2026-10-03T18:18:48.410000Z",
+        "deltaSeconds": 0.4100000858306885
+      }
+    },
+    {
+      "id": "doc-1259",
+      "captureIndex": 1259,
+      "event": "irene-butter-death",
+      "url": "https://www.tagesschau.de/ausland/amerika/irene-butter-gestorben-100.html",
+      "feed": "https://www.tagesschau.de/index~rss2.xml",
+      "source": "tagesschau.de",
+      "language": "de",
+      "published": 1791049261,
+      "timestampStatus": "feed-reported",
+      "origin": "capture-v2",
+      "scope": "event",
+      "timestampEvidence": {
+        "id": "doc-1259",
+        "url": "https://www.tagesschau.de/ausland/amerika/irene-butter-gestorben-100.html",
+        "feedPublished": 1791049261,
+        "status": "feed-matches-publication",
+        "pageSHA256": "3a9e5922bd2234c1490b1dd78beae7d81d46c708bb68cad1c780203e2fe64051",
+        "fetchedAt": 1791059149.847628,
+        "finalURL": "https://www.tagesschau.de/ausland/amerika/irene-butter-gestorben-100.html",
+        "dateEvidence": [
+          {
+            "kind": "datePublished",
+            "field": "jsonld:datePublished",
+            "raw": "2026-10-03T17:41:01.301Z",
+            "epoch": 1791049261.301
+          },
+          {
+            "kind": "dateModified",
+            "field": "jsonld:dateModified",
+            "raw": "2026-10-03T18:59:31.240Z",
+            "epoch": 1791053971.24
+          }
+        ],
+        "publisherPublished": "2026-10-03T17:41:01.301000Z",
+        "deltaSeconds": 0.30100011825561523
+      }
+    },
+    {
+      "id": "doc-0308",
+      "captureIndex": 308,
+      "event": "steinmeier-unity-speech",
+      "url": "https://www.dw.com/de/steinmeier-zum-tag-der-deutschen-einheit/a-79518484?maca=de-rss-de-all-1119-rdf",
+      "feed": "https://rss.dw.com/rdf/rss-de-all",
+      "source": "Deutsche Welle: DW.com Deutsch",
+      "language": "de",
+      "published": null,
+      "timestampStatus": "feed-reported",
+      "origin": "capture-v2",
+      "scope": "event",
+      "timestampEvidence": {
+        "id": "doc-0308",
+        "url": "https://www.dw.com/de/steinmeier-zum-tag-der-deutschen-einheit/a-79518484?maca=de-rss-de-all-1119-rdf",
+        "feedPublished": null,
+        "status": "publisher-time-only",
+        "pageSHA256": "da13429b703e3f07b8454923ac713597106ca7a6709d321575d3cae5d212b757",
+        "fetchedAt": 1791059146.603009,
+        "finalURL": "https://www.dw.com/de/steinmeier-zum-tag-der-deutschen-einheit/a-79518484?maca=de-rss-de-all-1119-rdf",
+        "dateEvidence": [
+          {
+            "kind": "datePublished",
+            "field": "jsonld:datePublished",
+            "raw": "2026-10-03T16:02:20.689Z",
+            "epoch": 1791043340.689
+          },
+          {
+            "kind": "dateModified",
+            "field": "jsonld:dateModified",
+            "raw": "2026-10-03T16:02:20.689Z",
+            "epoch": 1791043340.689
+          }
+        ],
+        "publisherPublished": "2026-10-03T16:02:20.689000Z"
+      }
+    },
+    {
+      "id": "doc-1246",
+      "captureIndex": 1246,
+      "event": "steinmeier-unity-speech",
+      "url": "https://www.tagesschau.de/inland/gesellschaft/einheitsfeier-steinmeier-100.html",
+      "feed": "https://www.tagesschau.de/index~rss2.xml",
+      "source": "tagesschau.de",
+      "language": "de",
+      "published": 1791030548,
+      "timestampStatus": "feed-reported",
+      "origin": "base-v2-reference",
+      "scope": "event",
+      "timestampEvidence": {
+        "id": "doc-1246",
+        "url": "https://www.tagesschau.de/inland/gesellschaft/einheitsfeier-steinmeier-100.html",
+        "feedPublished": 1791030548,
+        "status": "feed-matches-publication",
+        "pageSHA256": "b18c893031adf164f97cd9cb341268a0a86deba17c40f895545c96afdb8789c8",
+        "fetchedAt": 1791058931.502919,
+        "finalURL": "https://www.tagesschau.de/inland/gesellschaft/einheitsfeier-steinmeier-100.html",
+        "dateEvidence": [
+          {
+            "kind": "datePublished",
+            "field": "jsonld:datePublished",
+            "raw": "2026-10-03T12:29:08.129Z",
+            "epoch": 1791030548.129
+          },
+          {
+            "kind": "dateModified",
+            "field": "jsonld:dateModified",
+            "raw": "2026-10-03T18:20:49.043Z",
+            "epoch": 1791051649.043
+          }
+        ],
+        "publisherPublished": "2026-10-03T12:29:08.129000Z",
+        "deltaSeconds": 0.12899994850158691
+      }
+    },
+    {
+      "id": "doc-1263",
+      "captureIndex": 1263,
+      "event": "latvia-exit-poll",
+      "url": "https://www.tagesschau.de/ausland/lettland-wahlen-100.html",
+      "feed": "https://www.tagesschau.de/index~rss2.xml",
+      "source": "tagesschau.de",
+      "language": "de",
+      "published": 1791052112,
+      "timestampStatus": "feed-reported",
+      "origin": "capture-v2",
+      "scope": "event",
+      "timestampEvidence": {
+        "id": "doc-1263",
+        "url": "https://www.tagesschau.de/ausland/lettland-wahlen-100.html",
+        "feedPublished": 1791052112,
+        "status": "feed-matches-publication",
+        "pageSHA256": "cc886117947e748f9adae95fd52cc45b0e79f6d4370be14ea06f5c84dcd3c767",
+        "fetchedAt": 1791059827.928271,
+        "finalURL": "https://www.tagesschau.de/ausland/lettland-wahlen-100.html",
+        "dateEvidence": [
+          {
+            "kind": "datePublished",
+            "field": "jsonld:datePublished",
+            "raw": "2026-10-03T18:28:32.281Z",
+            "epoch": 1791052112.281
+          },
+          {
+            "kind": "dateModified",
+            "field": "jsonld:dateModified",
+            "raw": "2026-10-03T19:09:31.222Z",
+            "epoch": 1791054571.222
+          }
+        ],
+        "publisherPublished": "2026-10-03T18:28:32.281000Z",
+        "deltaSeconds": 0.28099989891052246
+      }
+    },
+    {
+      "id": "doc-0289",
+      "captureIndex": 289,
+      "event": "latvia-exit-poll",
+      "url": "https://www.dw.com/en/latvia-ruling-party-leads-in-exit-polls-amid-populist-gains/a-79527253?maca=en-rss-en-top-1022-xml-mrss",
+      "feed": "https://rss.dw.com/xml/rss-en-top",
+      "source": "Deutsche Welle: DW.com",
+      "language": "en",
+      "published": 1791050700,
+      "timestampStatus": "feed-reported",
+      "origin": "base-v2-reference",
+      "scope": "event",
+      "timestampEvidence": {
+        "id": "doc-0289",
+        "url": "https://www.dw.com/en/latvia-ruling-party-leads-in-exit-polls-amid-populist-gains/a-79527253?maca=en-rss-en-top-1022-xml-mrss",
+        "feedPublished": 1791050700,
+        "status": "feed-publication-differs",
+        "pageSHA256": "8d1e4419352bc8676ea90d16166fe6a0947639ae5ad78108a3aee6feba26209c",
+        "fetchedAt": 1791058927.941848,
+        "finalURL": "https://www.dw.com/en/latvia-ruling-party-leads-in-exit-polls-amid-populist-gains/a-79527253?maca=en-rss-en-top-1022-xml-mrss",
+        "dateEvidence": [
+          {
+            "kind": "datePublished",
+            "field": "jsonld:datePublished",
+            "raw": "2026-10-03T06:06:19.399Z",
+            "epoch": 1791007579.399
+          },
+          {
+            "kind": "dateModified",
+            "field": "jsonld:dateModified",
+            "raw": "2026-10-03T18:05:53.988Z",
+            "epoch": 1791050753.988
+          }
+        ],
+        "publisherPublished": "2026-10-03T06:06:19.399000Z",
+        "deltaSeconds": -43120.60100007057
+      }
+    },
+    {
+      "id": "doc-0602",
+      "captureIndex": 602,
+      "event": "latvia-exit-poll",
+      "url": "https://wiadomosci.onet.pl/kraj/zjednoczona-lista-zwycieza-wybory-na-lotwie-wyniki-exit-poll-pokazuja-dominacje/c7fzzvp",
+      "feed": "https://wiadomosci.onet.pl/.feed",
+      "source": "Wiadomości wiadomosci.onet.pl",
+      "language": "pl",
+      "published": 1791049958,
+      "timestampStatus": "feed-reported",
+      "origin": "base-v2-reference",
+      "scope": "event",
+      "timestampEvidence": {
+        "id": "doc-0602",
+        "url": "https://wiadomosci.onet.pl/kraj/zjednoczona-lista-zwycieza-wybory-na-lotwie-wyniki-exit-poll-pokazuja-dominacje/c7fzzvp",
+        "feedPublished": 1791049958,
+        "status": "feed-matches-publication",
+        "pageSHA256": "b9dfa62c7aaaed7dc34f71d31a480f145c63dc8e4d7704936a2d0c703aa8edb0",
+        "fetchedAt": 1791058919.7173638,
+        "finalURL": "https://wiadomosci.onet.pl/kraj/zjednoczona-lista-zwycieza-wybory-na-lotwie-wyniki-exit-poll-pokazuja-dominacje/c7fzzvp",
+        "dateEvidence": [
+          {
+            "kind": "datePublished",
+            "field": "jsonld:datePublished",
+            "raw": "2026-10-03T19:52:38+0200",
+            "epoch": 1791049958.0
+          }
+        ],
+        "publisherPublished": "2026-10-03T17:52:38Z",
+        "deltaSeconds": 0.0
+      }
+    },
+    {
+      "id": "doc-0074",
+      "captureIndex": 74,
+      "event": "kyiv-northern-bridge",
+      "url": "https://nos.nl/l/2633476",
+      "feed": "https://feeds.nos.nl/nosnieuwsalgemeen",
+      "source": "NOS Nieuws",
+      "language": "nl",
+      "published": 1791004756,
+      "timestampStatus": "feed-reported",
+      "origin": "capture-v2",
+      "scope": "event",
+      "timestampEvidence": {
+        "id": "doc-0074",
+        "url": "https://nos.nl/l/2633476",
+        "feedPublished": 1791004756,
+        "status": "feed-matches-publication",
+        "pageSHA256": "fb42677dfb61f4008cd72cb4aeda23d516b9f5c178c09da02d3a49051aad0285",
+        "fetchedAt": 1791059145.328061,
+        "finalURL": "https://nos.nl/artikel/2633476-derde-dag-op-rij-met-russische-aanvallen-op-belangrijke-bruggen-in-kyiv",
+        "dateEvidence": [
+          {
+            "kind": "datePublished",
+            "field": "meta:og:article:published_time",
+            "raw": "2026-10-03T07:19:16+02:00",
+            "epoch": 1791004756.0
+          },
+          {
+            "kind": "dateModified",
+            "field": "meta:og:article:modified_time",
+            "raw": "2026-10-03T08:16:48+02:00",
+            "epoch": 1791008208.0
+          },
+          {
+            "kind": "datePublished",
+            "field": "jsonld:datePublished",
+            "raw": "2026-10-03T07:19:16+02:00",
+            "epoch": 1791004756.0
+          },
+          {
+            "kind": "dateModified",
+            "field": "jsonld:dateModified",
+            "raw": "2026-10-03T08:16:48+02:00",
+            "epoch": 1791008208.0
+          },
+          {
+            "kind": "datePublished",
+            "field": "jsonld:datePublished",
+            "raw": "2026-10-03T07:19:16+02:00",
+            "epoch": 1791004756.0
+          },
+          {
+            "kind": "dateModified",
+            "field": "jsonld:dateModified",
+            "raw": "2026-10-03T08:16:48+02:00",
+            "epoch": 1791008208.0
+          }
+        ],
+        "publisherPublished": "2026-10-03T05:19:16Z",
+        "deltaSeconds": 0.0
+      }
+    },
+    {
+      "id": "doc-0082",
+      "captureIndex": 82,
+      "event": "kyiv-northern-bridge",
+      "url": "https://epravda.com.ua/oborona/transport-kiyeva-vpliv-ataki-drona-na-pivnichniy-mist-i-gromadskiy-ruh-826223/",
+      "feed": "https://epravda.com.ua/rss",
+      "source": "Економічна правда",
+      "language": "uk",
+      "published": 1791011100,
+      "timestampStatus": "feed-reported",
+      "origin": "capture-v2",
+      "scope": "event",
+      "timestampEvidence": {
+        "id": "doc-0082",
+        "url": "https://epravda.com.ua/oborona/transport-kiyeva-vpliv-ataki-drona-na-pivnichniy-mist-i-gromadskiy-ruh-826223/",
+        "feedPublished": 1791011100,
+        "status": "feed-matches-publication",
+        "pageSHA256": "551cab32a34fef78c30f25acc639c26c7dde8b9a6d82643580a89b0ae2a1488e",
+        "fetchedAt": 1791059145.193954,
+        "finalURL": "https://epravda.com.ua/oborona/transport-kiyeva-vpliv-ataki-drona-na-pivnichniy-mist-i-gromadskiy-ruh-826223/",
+        "dateEvidence": [
+          {
+            "kind": "datePublished",
+            "field": "jsonld:datePublished",
+            "raw": "2026-10-03T10:05:00+03:00",
+            "epoch": 1791011100.0
+          },
+          {
+            "kind": "dateModified",
+            "field": "jsonld:dateModified",
+            "raw": "2026-10-03T10:05:00+03:00",
+            "epoch": 1791011100.0
+          }
+        ],
+        "publisherPublished": "2026-10-03T07:05:00Z",
+        "deltaSeconds": 0.0
+      }
+    },
+    {
+      "id": "doc-0232",
+      "captureIndex": 232,
+      "event": "kyiv-northern-bridge",
+      "url": "https://www.bbc.co.uk/news/articles/c83vqxzdg1yko?at_medium=RSS&at_campaign=rss",
+      "feed": "https://feeds.bbci.co.uk/news/world/rss.xml",
+      "source": "BBC News",
+      "language": "en",
+      "published": 1791044209,
+      "timestampStatus": "feed-reported",
+      "origin": "base-v2-reference",
+      "scope": "event",
+      "timestampEvidence": {
+        "id": "doc-0232",
+        "url": "https://www.bbc.co.uk/news/articles/c83vqxzdg1yko?at_medium=RSS&at_campaign=rss",
+        "feedPublished": 1791044209,
+        "status": "feed-matches-modification",
+        "pageSHA256": "be92a0410f3bd91737af8c7fdfa303a002a2153bcb049197ac94aaae072465f6",
+        "fetchedAt": 1791058926.575716,
+        "finalURL": "https://www.bbc.co.uk/news/articles/c83vqxzdg1yko?at_medium=RSS&at_campaign=rss",
+        "dateEvidence": [
+          {
+            "kind": "datePublished",
+            "field": "jsonld:datePublished",
+            "raw": "2026-10-03T06:13:22.955Z",
+            "epoch": 1791008002.955
+          },
+          {
+            "kind": "dateModified",
+            "field": "jsonld:dateModified",
+            "raw": "2026-10-03T16:16:49.030Z",
+            "epoch": 1791044209.03
+          }
+        ],
+        "publisherPublished": "2026-10-03T06:13:22.955000Z",
+        "deltaSeconds": -36206.045000076294
+      }
+    },
+    {
+      "id": "doc-0279",
+      "captureIndex": 279,
+      "event": "kyiv-northern-bridge",
+      "url": "https://kyivindependent.com/russia-strikes-key-kyiv-bridge-for-3rd-straight-day-as-attacks-intensify/",
+      "feed": "https://kyivindependent.com/news-archive/rss",
+      "source": "The Kyiv Independent",
+      "language": "en",
+      "published": 1791003190,
+      "timestampStatus": "feed-reported",
+      "origin": "base-v2-reference",
+      "scope": "event",
+      "timestampEvidence": {
+        "id": "doc-0279",
+        "url": "https://kyivindependent.com/russia-strikes-key-kyiv-bridge-for-3rd-straight-day-as-attacks-intensify/",
+        "feedPublished": 1791003190,
+        "status": "feed-matches-publication",
+        "pageSHA256": "0be1cf9b5f637166c0d42492918c7e685731394d3c0970271892c03aefd3bbe8",
+        "fetchedAt": 1791058917.467218,
+        "finalURL": "https://kyivindependent.com/russia-strikes-key-kyiv-bridge-for-3rd-straight-day-as-attacks-intensify/",
+        "dateEvidence": [
+          {
+            "kind": "datePublished",
+            "field": "meta:article:published_time",
+            "raw": "2026-10-03T04:53:10.000Z",
+            "epoch": 1791003190.0
+          },
+          {
+            "kind": "dateModified",
+            "field": "meta:article:modified_time",
+            "raw": "2026-10-03T11:17:12.000Z",
+            "epoch": 1791026232.0
+          },
+          {
+            "kind": "datePublished",
+            "field": "jsonld:datePublished",
+            "raw": "2026-10-03T04:53:10.000Z",
+            "epoch": 1791003190.0
+          },
+          {
+            "kind": "dateModified",
+            "field": "jsonld:dateModified",
+            "raw": "2026-10-03T11:17:12.000Z",
+            "epoch": 1791026232.0
+          }
+        ],
+        "publisherPublished": "2026-10-03T04:53:10Z",
+        "deltaSeconds": 0.0
+      }
+    },
+    {
+      "id": "doc-1213",
+      "captureIndex": 1213,
+      "event": "kyiv-northern-bridge",
+      "url": "https://www.radiosvoboda.org/a/news-kyiv-mist-ataka/33869678.html",
+      "feed": "https://www.radiosvoboda.org/api/zrqiteuuir",
+      "source": "Новини",
+      "language": "uk",
+      "published": 1791027181,
+      "timestampStatus": "feed-reported",
+      "origin": "base-v2-reference",
+      "scope": "event",
+      "timestampEvidence": {
+        "id": "doc-1213",
+        "url": "https://www.radiosvoboda.org/a/news-kyiv-mist-ataka/33869678.html",
+        "feedPublished": 1791027181,
+        "status": "feed-matches-publication",
+        "pageSHA256": "a18a8b36437faaee74796c347788f8b78260ec0cc99e040daef7fb06bf8a47bf",
+        "fetchedAt": 1791058928.06673,
+        "finalURL": "https://www.radiosvoboda.org/a/news-kyiv-mist-ataka/33869678.html",
+        "dateEvidence": [
+          {
+            "kind": "datePublished",
+            "field": "jsonld:datePublished",
+            "raw": "2026-10-03 11:33:01Z",
+            "epoch": 1791027181.0
+          },
+          {
+            "kind": "dateModified",
+            "field": "jsonld:dateModified",
+            "raw": "2026-10-03 15:56:42Z",
+            "epoch": 1791043002.0
+          }
+        ],
+        "publisherPublished": "2026-10-03T11:33:01Z",
+        "deltaSeconds": 0.0
+      }
+    },
+    {
+      "id": "doc-1167",
+      "captureIndex": 1167,
+      "event": "cebr-housing-funding",
+      "url": "https://www.pravda.com.ua/news/2026/10/03/8056309/",
+      "feed": "https://www.pravda.com.ua/rss",
+      "source": "Українська правда",
+      "language": "uk",
+      "published": 1791035760,
+      "timestampStatus": "feed-reported",
+      "origin": "capture-v2",
+      "scope": "event",
+      "timestampEvidence": {
+        "id": "doc-1167",
+        "url": "https://www.pravda.com.ua/news/2026/10/03/8056309/",
+        "feedPublished": 1791035760,
+        "status": "feed-publication-differs",
+        "pageSHA256": "d44ee8f39eab764cf10e6c6c742045e65c708c1dfb0746dd1b5374e103ad7a26",
+        "fetchedAt": 1791059150.300355,
+        "finalURL": "https://www.eurointegration.com.ua/news/2026/10/3/7246875/",
+        "dateEvidence": [
+          {
+            "kind": "datePublished",
+            "field": "jsonld:datePublished",
+            "raw": "2026-10-03T15:33:29+03:00",
+            "epoch": 1791030809.0
+          },
+          {
+            "kind": "dateModified",
+            "field": "jsonld:dateModified",
+            "raw": "2026-10-03T15:33:29+03:00",
+            "epoch": 1791030809.0
+          }
+        ],
+        "publisherPublished": "2026-10-03T12:33:29Z",
+        "deltaSeconds": -4951.0
+      }
+    },
+    {
+      "id": "doc-1424",
+      "captureIndex": 1424,
+      "event": "finland-ukraine-funding",
+      "url": "https://www.ukrinform.ua/rubric-polytics/4170768-sibiga-podakuvav-finlandii-za-vidilenna-50-miljoniv-dla-ukraini.html",
+      "feed": "https://www.ukrinform.ua/rss/block-lastnews",
+      "source": "Останні новини",
+      "language": "uk",
+      "published": 1791052578,
+      "timestampStatus": "feed-reported",
+      "origin": "capture-v2",
+      "scope": "event",
+      "timestampEvidence": {
+        "id": "doc-1424",
+        "url": "https://www.ukrinform.ua/rubric-polytics/4170768-sibiga-podakuvav-finlandii-za-vidilenna-50-miljoniv-dla-ukraini.html",
+        "feedPublished": 1791052578,
+        "status": "feed-matches-publication",
+        "pageSHA256": "cf969a6472235f03adbfad2b9ff4caaa98d7866b9972bfdd389b4cebdc6be43e",
+        "fetchedAt": 1791059829.0958781,
+        "finalURL": "https://www.ukrinform.ua/rubric-polytics/4170768-sibiga-podakuvav-finlandii-za-vidilenna-50-miljoniv-dla-ukraini.html",
+        "dateEvidence": [
+          {
+            "kind": "datePublished",
+            "field": "jsonld:datePublished",
+            "raw": "2026-10-03T21:36:18+03:00",
+            "epoch": 1791052578.0
+          },
+          {
+            "kind": "dateModified",
+            "field": "jsonld:dateModified",
+            "raw": "2026-10-03T21:36:18+03:00",
+            "epoch": 1791052578.0
+          },
+          {
+            "kind": "datePublished",
+            "field": "jsonld:datePublished",
+            "raw": "1791052578",
+            "epoch": null
+          },
+          {
+            "kind": "dateModified",
+            "field": "jsonld:dateModified",
+            "raw": "1791052578",
+            "epoch": null
+          }
+        ],
+        "publisherPublished": "2026-10-03T18:36:18Z",
+        "deltaSeconds": 0.0
+      }
+    },
+    {
+      "id": "doc-0848",
+      "captureIndex": 848,
+      "event": "irkutsk-lab-death",
+      "url": "https://www.ansa.it/sito/notizie/mondo/2026/10/03/una-donna-e-morta-di-peste-in-siberia-200-persone-in-quarantena_6ec9fb81-4922-4d09-8ebf-068ebc5af8c7.html",
+      "feed": "https://www.ansa.it/sito/ansait_rss.xml",
+      "source": "Primo piano ANSA",
+      "language": "it",
+      "published": 1790994974,
+      "timestampStatus": "feed-reported",
+      "origin": "capture-v2",
+      "scope": "event",
+      "timestampEvidence": {
+        "id": "doc-0848",
+        "url": "https://www.ansa.it/sito/notizie/mondo/2026/10/03/una-donna-e-morta-di-peste-in-siberia-200-persone-in-quarantena_6ec9fb81-4922-4d09-8ebf-068ebc5af8c7.html",
+        "feedPublished": 1790994974,
+        "status": "feed-matches-modification",
+        "pageSHA256": "309ef4b1c3c49f9b0bfc71dd8761e4ef252eb5061092453193a0c7309ae3afdd",
+        "fetchedAt": 1791059145.5609999,
+        "finalURL": "https://www.ansa.it/sito/notizie/mondo/2026/10/03/una-donna-e-morta-di-peste-in-siberia-200-persone-in-quarantena_6ec9fb81-4922-4d09-8ebf-068ebc5af8c7.html",
+        "dateEvidence": [
+          {
+            "kind": "datePublished",
+            "field": "meta:datepublished",
+            "raw": "2026-10-03T02:31:00+0200",
+            "epoch": 1790987460.0
+          },
+          {
+            "kind": "dateModified",
+            "field": "meta:datemodified",
+            "raw": "2026-10-03T04:36:14+0200",
+            "epoch": 1790994974.0
+          },
+          {
+            "kind": "datePublished",
+            "field": "meta:article:published_time",
+            "raw": "2026-10-03T02:31:00+0200",
+            "epoch": 1790987460.0
+          },
+          {
+            "kind": "dateModified",
+            "field": "meta:article:modified_time",
+            "raw": "2026-10-03T04:36:14+0200",
+            "epoch": 1790994974.0
+          }
+        ],
+        "publisherPublished": "2026-10-03T00:31:00Z",
+        "deltaSeconds": -7514.0
+      }
+    },
+    {
+      "id": "doc-1207",
+      "captureIndex": 1207,
+      "event": "irkutsk-information-removal",
+      "url": "https://www.radiosvoboda.org/a/news-rosija-chuma-pid-irkutskom/33869727.html",
+      "feed": "https://www.radiosvoboda.org/api/zrqiteuuir",
+      "source": "Новини",
+      "language": "uk",
+      "published": 1791036411,
+      "timestampStatus": "feed-reported",
+      "origin": "capture-v2",
+      "scope": "event",
+      "timestampEvidence": {
+        "id": "doc-1207",
+        "url": "https://www.radiosvoboda.org/a/news-rosija-chuma-pid-irkutskom/33869727.html",
+        "feedPublished": 1791036411,
+        "status": "feed-matches-publication",
+        "pageSHA256": "609793b39b36f40964303ee055e8ef68dc8954e847b0b4cbdf08fa7bb84fbf97",
+        "fetchedAt": 1791059149.233119,
+        "finalURL": "https://www.radiosvoboda.org/a/news-rosija-chuma-pid-irkutskom/33869727.html",
+        "dateEvidence": [
+          {
+            "kind": "datePublished",
+            "field": "jsonld:datePublished",
+            "raw": "2026-10-03 14:06:51Z",
+            "epoch": 1791036411.0
+          },
+          {
+            "kind": "dateModified",
+            "field": "jsonld:dateModified",
+            "raw": "2026-10-03 14:06:51Z",
+            "epoch": 1791036411.0
+          }
+        ],
+        "publisherPublished": "2026-10-03T14:06:51Z",
+        "deltaSeconds": 0.0
+      }
+    },
+    {
+      "id": "doc-0206",
+      "captureIndex": 206,
+      "event": "edition-0206",
+      "url": "https://www.bbc.co.uk/sounds/play/w3ct9787?at_medium=RSS&at_campaign=rss",
+      "feed": "https://feeds.bbci.co.uk/news/science_and_environment/rss.xml",
+      "source": "BBC News",
+      "language": "en",
+      "published": 1790884800,
+      "timestampStatus": "feed-reported",
+      "origin": "capture-v2",
+      "scope": "document-only",
+      "timestampEvidence": {
+        "id": "doc-0206",
+        "url": "https://www.bbc.co.uk/sounds/play/w3ct9787?at_medium=RSS&at_campaign=rss",
+        "feedPublished": 1790884800,
+        "status": "no-zoned-publication-time",
+        "pageSHA256": "88c47ff315aa47e9e9f1f658c2ce3fc7e446c680586186fb32a102054d5bbfea",
+        "fetchedAt": 1791059146.603001,
+        "finalURL": "https://www.bbc.co.uk/sounds/play/w3ct9787?at_medium=RSS&at_campaign=rss",
+        "dateEvidence": []
+      }
+    },
+    {
+      "id": "doc-0207",
+      "captureIndex": 207,
+      "event": "edition-0207",
+      "url": "https://www.bbc.co.uk/sounds/play/w3ct9786?at_medium=RSS&at_campaign=rss",
+      "feed": "https://feeds.bbci.co.uk/news/science_and_environment/rss.xml",
+      "source": "BBC News",
+      "language": "en",
+      "published": 1790280000,
+      "timestampStatus": "feed-reported",
+      "origin": "capture-v2",
+      "scope": "document-only",
+      "timestampEvidence": {
+        "id": "doc-0207",
+        "url": "https://www.bbc.co.uk/sounds/play/w3ct9786?at_medium=RSS&at_campaign=rss",
+        "feedPublished": 1790280000,
+        "status": "no-zoned-publication-time",
+        "pageSHA256": "55caea4c4afeb9fda53b210c3f2f9b361d41051f4173fb65681f56e6d4e9305f",
+        "fetchedAt": 1791059147.167375,
+        "finalURL": "https://www.bbc.co.uk/sounds/play/w3ct9786?at_medium=RSS&at_campaign=rss",
+        "dateEvidence": []
+      }
+    },
+    {
+      "id": "doc-0208",
+      "captureIndex": 208,
+      "event": "edition-0208",
+      "url": "https://www.bbc.co.uk/sounds/play/w3ct9785?at_medium=RSS&at_campaign=rss",
+      "feed": "https://feeds.bbci.co.uk/news/science_and_environment/rss.xml",
+      "source": "BBC News",
+      "language": "en",
+      "published": 1789675200,
+      "timestampStatus": "feed-reported",
+      "origin": "capture-v2",
+      "scope": "document-only",
+      "timestampEvidence": {
+        "id": "doc-0208",
+        "url": "https://www.bbc.co.uk/sounds/play/w3ct9785?at_medium=RSS&at_campaign=rss",
+        "feedPublished": 1789675200,
+        "status": "no-zoned-publication-time",
+        "pageSHA256": "406acde338ea50a997f997742cf1b7ddedc1fb7a3a11e05babb78ff807a80da4",
+        "fetchedAt": 1791059147.4369931,
+        "finalURL": "https://www.bbc.co.uk/sounds/play/w3ct9785?at_medium=RSS&at_campaign=rss",
+        "dateEvidence": []
+      }
+    },
+    {
+      "id": "doc-0209",
+      "captureIndex": 209,
+      "event": "edition-0209",
+      "url": "https://www.bbc.co.uk/sounds/play/w3ct9784?at_medium=RSS&at_campaign=rss",
+      "feed": "https://feeds.bbci.co.uk/news/science_and_environment/rss.xml",
+      "source": "BBC News",
+      "language": "en",
+      "published": 1789070400,
+      "timestampStatus": "feed-reported",
+      "origin": "capture-v2",
+      "scope": "document-only",
+      "timestampEvidence": {
+        "id": "doc-0209",
+        "url": "https://www.bbc.co.uk/sounds/play/w3ct9784?at_medium=RSS&at_campaign=rss",
+        "feedPublished": 1789070400,
+        "status": "no-zoned-publication-time",
+        "pageSHA256": "ef1d26829a1b0eef96c0a91b6c6704e3766291e8ca8da5014b7075c307e8adec",
+        "fetchedAt": 1791059147.6667671,
+        "finalURL": "https://www.bbc.co.uk/sounds/play/w3ct9784?at_medium=RSS&at_campaign=rss",
+        "dateEvidence": []
+      }
+    },
+    {
+      "id": "doc-0475",
+      "captureIndex": 475,
+      "event": "edition-0475",
+      "url": "https://www.politico.com/gallery/2026/10/02/the-nations-cartoonists-on-the-week-in-politics-01104555",
+      "feed": "https://rss.politico.com/politics-news.xml",
+      "source": "Politics",
+      "language": "en",
+      "published": 1790931600,
+      "timestampStatus": "feed-reported",
+      "origin": "capture-v2",
+      "scope": "document-only",
+      "timestampEvidence": {
+        "id": "doc-0475",
+        "url": "https://www.politico.com/gallery/2026/10/02/the-nations-cartoonists-on-the-week-in-politics-01104555",
+        "feedPublished": 1790931600,
+        "status": "no-zoned-publication-time",
+        "pageSHA256": "aafd595ff8791d46dace47837a3fa2df097444d88650307de83f61482e5672fc",
+        "fetchedAt": 1791059146.603014,
+        "finalURL": "https://www.politico.com/gallery/2026/10/02/the-nations-cartoonists-on-the-week-in-politics-01104555",
+        "dateEvidence": []
+      }
+    },
+    {
+      "id": "doc-0489",
+      "captureIndex": 489,
+      "event": "edition-0489",
+      "url": "https://www.politico.com/gallery/2026/09/25/the-nations-cartoonists-on-the-week-in-politics-01092570",
+      "feed": "https://rss.politico.com/politics-news.xml",
+      "source": "Politics",
+      "language": "en",
+      "published": 1790326800,
+      "timestampStatus": "feed-reported",
+      "origin": "capture-v2",
+      "scope": "document-only",
+      "timestampEvidence": {
+        "id": "doc-0489",
+        "url": "https://www.politico.com/gallery/2026/09/25/the-nations-cartoonists-on-the-week-in-politics-01092570",
+        "feedPublished": 1790326800,
+        "status": "no-zoned-publication-time",
+        "pageSHA256": "2c3bcb2db6368801ac3e2310317dbc3c2625acc456046b0935df9d1ad119e66f",
+        "fetchedAt": 1791059147.207048,
+        "finalURL": "https://www.politico.com/gallery/2026/09/25/the-nations-cartoonists-on-the-week-in-politics-01092570",
+        "dateEvidence": []
+      }
+    },
+    {
+      "id": "doc-1277",
+      "captureIndex": 1277,
+      "event": "edition-1277",
+      "url": "https://www.tagesschau.de/tagesschau_20_uhr/ts-81206.html",
+      "feed": "https://www.tagesschau.de/index~rss2.xml",
+      "source": "tagesschau.de",
+      "language": "de",
+      "published": 1791051563,
+      "timestampStatus": "feed-reported",
+      "origin": "capture-v2",
+      "scope": "document-only",
+      "timestampEvidence": {
+        "id": "doc-1277",
+        "url": "https://www.tagesschau.de/tagesschau_20_uhr/ts-81206.html",
+        "feedPublished": 1791051563,
+        "status": "no-zoned-publication-time",
+        "pageSHA256": "fe152fb19b6f456b07128a095a9d04c562df0fb3f30b10206a5ecd7264ca67f3",
+        "fetchedAt": 1791059150.435833,
+        "finalURL": "https://www.tagesschau.de/tagesschau_20_uhr/ts-81206.html",
+        "dateEvidence": []
+      }
+    },
+    {
+      "id": "doc-1278",
+      "captureIndex": 1278,
+      "event": "edition-1278",
+      "url": "https://www.tagesschau.de/tagesschau/ts-81214.html",
+      "feed": "https://www.tagesschau.de/index~rss2.xml",
+      "source": "tagesschau.de",
+      "language": "de",
+      "published": 1791042939,
+      "timestampStatus": "feed-reported",
+      "origin": "capture-v2",
+      "scope": "document-only",
+      "timestampEvidence": {
+        "id": "doc-1278",
+        "url": "https://www.tagesschau.de/tagesschau/ts-81214.html",
+        "feedPublished": 1791042939,
+        "status": "no-zoned-publication-time",
+        "pageSHA256": "853c257779a8b15798fb201da2fb14147ffc7a07a647a1ef500d401cd27ad5b3",
+        "fetchedAt": 1791059150.520256,
+        "finalURL": "https://www.tagesschau.de/tagesschau/ts-81214.html",
+        "dateEvidence": []
+      }
+    },
+    {
+      "id": "apple-fy24-q3",
+      "event": "apple-fy24-q3",
+      "url": "https://www.apple.com/newsroom/2024/08/apple-reports-third-quarter-results/",
+      "source": "Apple Newsroom",
+      "language": "en",
+      "origin": "publisher-page",
+      "scope": "event",
+      "pageSHA256": "57b10a3234623bd5c8239407ab6aa60504b939be07efe6a5afed6d4a6a56167b",
+      "publisherDate": "2024-08-01",
+      "datePrecision": "day",
+      "timestampStatus": "publisher-date-only",
+      "timestampEvidence": {
+        "id": "apple-fy24-q3",
+        "url": "https://www.apple.com/newsroom/2024/08/apple-reports-third-quarter-results/",
+        "feedPublished": null,
+        "status": "no-zoned-publication-time",
+        "pageSHA256": "57b10a3234623bd5c8239407ab6aa60504b939be07efe6a5afed6d4a6a56167b",
+        "fetchedAt": 1791059146.26343,
+        "finalURL": "https://www.apple.com/newsroom/2024/08/apple-reports-third-quarter-results/",
+        "dateEvidence": [
+          {
+            "kind": "datePublished",
+            "field": "jsonld:datePublished",
+            "raw": "2024-08-01Z",
+            "epoch": null
+          },
+          {
+            "kind": "dateModified",
+            "field": "jsonld:dateModified",
+            "raw": "2026-08-19T18:34:32Z",
+            "epoch": 1787164472.0
+          }
+        ]
+      }
+    },
+    {
+      "id": "apple-fy25-q2",
+      "event": "apple-fy25-q2",
+      "url": "https://www.apple.com/newsroom/2025/05/apple-reports-second-quarter-results/",
+      "source": "Apple Newsroom",
+      "language": "en",
+      "origin": "publisher-page",
+      "scope": "event",
+      "pageSHA256": "de4f896173f6cf8e734d1f44f816865961e2ff18ef6ec1b28089bb0c109c9902",
+      "publisherDate": "2025-05-01",
+      "datePrecision": "day",
+      "timestampStatus": "publisher-date-only",
+      "timestampEvidence": {
+        "id": "apple-fy25-q2",
+        "url": "https://www.apple.com/newsroom/2025/05/apple-reports-second-quarter-results/",
+        "feedPublished": null,
+        "status": "no-zoned-publication-time",
+        "pageSHA256": "de4f896173f6cf8e734d1f44f816865961e2ff18ef6ec1b28089bb0c109c9902",
+        "fetchedAt": 1791059144.581301,
+        "finalURL": "https://www.apple.com/newsroom/2025/05/apple-reports-second-quarter-results/",
+        "dateEvidence": [
+          {
+            "kind": "datePublished",
+            "field": "jsonld:datePublished",
+            "raw": "2025-05-01Z",
+            "epoch": null
+          },
+          {
+            "kind": "dateModified",
+            "field": "jsonld:dateModified",
+            "raw": "2026-08-19T16:59:26Z",
+            "epoch": 1787158766.0
+          }
+        ]
+      }
+    },
+    {
+      "id": "apple-fy25-q3",
+      "event": "apple-fy25-q3",
+      "url": "https://www.apple.com/newsroom/2025/07/apple-reports-third-quarter-results/",
+      "source": "Apple Newsroom",
+      "language": "en",
+      "origin": "publisher-page",
+      "scope": "event",
+      "pageSHA256": "b8068d2ed70eed1993d7fb2f7c061acb3bd7f6e451fb79985497f8a8bafa3bf5",
+      "publisherDate": "2025-07-31",
+      "datePrecision": "day",
+      "timestampStatus": "publisher-date-only",
+      "timestampEvidence": {
+        "id": "apple-fy25-q3",
+        "url": "https://www.apple.com/newsroom/2025/07/apple-reports-third-quarter-results/",
+        "feedPublished": null,
+        "status": "no-zoned-publication-time",
+        "pageSHA256": "b8068d2ed70eed1993d7fb2f7c061acb3bd7f6e451fb79985497f8a8bafa3bf5",
+        "fetchedAt": 1791059145.570572,
+        "finalURL": "https://www.apple.com/newsroom/2025/07/apple-reports-third-quarter-results/",
+        "dateEvidence": [
+          {
+            "kind": "datePublished",
+            "field": "jsonld:datePublished",
+            "raw": "2025-07-31Z",
+            "epoch": null
+          },
+          {
+            "kind": "dateModified",
+            "field": "jsonld:dateModified",
+            "raw": "2026-08-19T18:06:05Z",
+            "epoch": 1787162765.0
+          }
+        ]
+      }
+    },
+    {
+      "id": "fomc-jun25",
+      "event": "fomc-jun25",
+      "url": "https://www.federalreserve.gov/newsevents/pressreleases/monetary20250618a.htm",
+      "source": "Federal Reserve",
+      "language": "en",
+      "origin": "publisher-page",
+      "scope": "event",
+      "pageSHA256": "5b183cbba415baf16e6a8e5328c725454a15b91839d5d7e8f13467008b0c29f6",
+      "publisherDate": "2025-06-18T18:00:00Z",
+      "datePrecision": "second",
+      "timestampStatus": "visible-release-time-EDT",
+      "timestampEvidence": {
+        "id": "fomc-jun25",
+        "url": "https://www.federalreserve.gov/newsevents/pressreleases/monetary20250618a.htm",
+        "feedPublished": null,
+        "status": "no-zoned-publication-time",
+        "pageSHA256": "5b183cbba415baf16e6a8e5328c725454a15b91839d5d7e8f13467008b0c29f6",
+        "fetchedAt": 1791059146.6030102,
+        "finalURL": "https://www.federalreserve.gov/newsevents/pressreleases/monetary20250618a.htm",
+        "dateEvidence": []
+      }
+    },
+    {
+      "id": "fomc-jul25",
+      "event": "fomc-jul25",
+      "url": "https://www.federalreserve.gov/newsevents/pressreleases/monetary20250730a.htm",
+      "source": "Federal Reserve",
+      "language": "en",
+      "origin": "publisher-page",
+      "scope": "event",
+      "pageSHA256": "5c244e7baf36e90f19e422e5428c3314ac3f7ffcae054611adc0d5dbd0539e4f",
+      "publisherDate": "2025-07-30T18:00:00Z",
+      "datePrecision": "second",
+      "timestampStatus": "visible-release-time-EDT",
+      "timestampEvidence": {
+        "id": "fomc-jul25",
+        "url": "https://www.federalreserve.gov/newsevents/pressreleases/monetary20250730a.htm",
+        "feedPublished": null,
+        "status": "no-zoned-publication-time",
+        "pageSHA256": "5c244e7baf36e90f19e422e5428c3314ac3f7ffcae054611adc0d5dbd0539e4f",
+        "fetchedAt": 1791059147.162358,
+        "finalURL": "https://www.federalreserve.gov/newsevents/pressreleases/monetary20250730a.htm",
+        "dateEvidence": []
+      }
+    },
+    {
+      "id": "kharkiv-oct2-glide-bombs",
+      "event": "kharkiv-oct2-glide-bombs",
+      "url": "https://kyivindependent.com/russian-glide-bombs-strike-kharkiv-kill-women-injure-children-2/",
+      "source": "The Kyiv Independent",
+      "language": "en",
+      "origin": "publisher-page",
+      "scope": "event",
+      "pageSHA256": "88c015d57de422f2397625d83696285fdd13503ef6e32fdf2d3633c6a089d1f7",
+      "timestampEvidence": {
+        "id": "kharkiv-oct2-glide-bombs",
+        "url": "https://kyivindependent.com/russian-glide-bombs-strike-kharkiv-kill-women-injure-children-2/",
+        "feedPublished": null,
+        "status": "publisher-time-only",
+        "pageSHA256": "88c015d57de422f2397625d83696285fdd13503ef6e32fdf2d3633c6a089d1f7",
+        "fetchedAt": 1791060224.0265021,
+        "finalURL": "https://kyivindependent.com/russian-glide-bombs-strike-kharkiv-kill-women-injure-children-2/",
+        "dateEvidence": [
+          {
+            "kind": "datePublished",
+            "field": "meta:article:published_time",
+            "raw": "2026-10-02T16:21:59.000Z",
+            "epoch": 1790958119.0
+          },
+          {
+            "kind": "dateModified",
+            "field": "meta:article:modified_time",
+            "raw": "2026-10-02T16:21:59.000Z",
+            "epoch": 1790958119.0
+          },
+          {
+            "kind": "datePublished",
+            "field": "jsonld:datePublished",
+            "raw": "2026-10-02T16:21:59.000Z",
+            "epoch": 1790958119.0
+          },
+          {
+            "kind": "dateModified",
+            "field": "jsonld:dateModified",
+            "raw": "2026-10-02T16:21:59.000Z",
+            "epoch": 1790958119.0
+          }
+        ],
+        "publisherPublished": "2026-10-02T16:21:59Z"
+      }
+    },
+    {
+      "id": "doc-0055",
+      "captureIndex": 55,
+      "event": "occurrence-0055",
+      "url": "https://nos.nl/l/2633558",
+      "feed": "https://feeds.nos.nl/nosnieuwsalgemeen",
+      "source": "NOS Nieuws",
+      "language": "nl",
+      "published": 1791050341,
+      "timestampStatus": "feed-reported",
+      "origin": "base-v2-reference",
+      "scope": "document-only",
+      "pageSHA256": "3f6d9307a773db49a747addfd60fd82e56db8f40cb2ae68e4b56f37444372f45",
+      "timestampEvidence": {
+        "id": "doc-0055",
+        "url": "https://nos.nl/l/2633558",
+        "feedPublished": 1791050341,
+        "status": "feed-matches-publication",
+        "pageSHA256": "3f6d9307a773db49a747addfd60fd82e56db8f40cb2ae68e4b56f37444372f45",
+        "fetchedAt": 1791059262.733996,
+        "finalURL": "https://nos.nl/artikel/2633558-marathonschaatslegende-jan-roelof-kruithof-89-overleden",
+        "dateEvidence": [
+          {
+            "kind": "datePublished",
+            "field": "meta:og:article:published_time",
+            "raw": "2026-10-03T19:59:01+02:00",
+            "epoch": 1791050341.0
+          },
+          {
+            "kind": "dateModified",
+            "field": "meta:og:article:modified_time",
+            "raw": "2026-10-03T19:59:01+02:00",
+            "epoch": 1791050341.0
+          },
+          {
+            "kind": "datePublished",
+            "field": "jsonld:datePublished",
+            "raw": "2026-10-03T19:59:01+02:00",
+            "epoch": 1791050341.0
+          },
+          {
+            "kind": "dateModified",
+            "field": "jsonld:dateModified",
+            "raw": "2026-10-03T19:59:01+02:00",
+            "epoch": 1791050341.0
+          },
+          {
+            "kind": "datePublished",
+            "field": "jsonld:datePublished",
+            "raw": "2026-10-03T19:59:01+02:00",
+            "epoch": 1791050341.0
+          },
+          {
+            "kind": "dateModified",
+            "field": "jsonld:dateModified",
+            "raw": "2026-10-03T19:59:01+02:00",
+            "epoch": 1791050341.0
+          }
+        ],
+        "publisherPublished": "2026-10-03T17:59:01Z",
+        "deltaSeconds": 0.0
+      }
+    },
+    {
+      "id": "web-variant-000",
+      "event": "occurrence-0055",
+      "url": "https://nos.nl/artikel/2633558-marathonschaatslegende-jan-roelof-kruithof-89-overleden",
+      "feed": "https://feeds.nos.nl/nosnieuwsalgemeen",
+      "source": "NOS Nieuws",
+      "language": "nl",
+      "published": 1791050341,
+      "timestampStatus": "feed-reported",
+      "origin": "observed-publisher-link",
+      "scope": "document-only",
+      "pageSHA256": "454a234222a4dd89ee8b99c13c2ac008b821f7a40af0ed3a7c4235a5d0af898d",
+      "observedOn": "https://nos.nl/l/2633558",
+      "relation": "canonical",
+      "privatePageID": "variant-000",
+      "timestampEvidence": {
+        "id": "web-variant-000",
+        "url": "https://nos.nl/artikel/2633558-marathonschaatslegende-jan-roelof-kruithof-89-overleden",
+        "feedPublished": 1791050341,
+        "status": "feed-matches-publication",
+        "pageSHA256": "454a234222a4dd89ee8b99c13c2ac008b821f7a40af0ed3a7c4235a5d0af898d",
+        "fetchedAt": 1791059469.620253,
+        "finalURL": "https://nos.nl/artikel/2633558-marathonschaatslegende-jan-roelof-kruithof-89-overleden",
+        "dateEvidence": [
+          {
+            "kind": "datePublished",
+            "field": "meta:og:article:published_time",
+            "raw": "2026-10-03T19:59:01+02:00",
+            "epoch": 1791050341.0
+          },
+          {
+            "kind": "dateModified",
+            "field": "meta:og:article:modified_time",
+            "raw": "2026-10-03T19:59:01+02:00",
+            "epoch": 1791050341.0
+          },
+          {
+            "kind": "datePublished",
+            "field": "jsonld:datePublished",
+            "raw": "2026-10-03T19:59:01+02:00",
+            "epoch": 1791050341.0
+          },
+          {
+            "kind": "dateModified",
+            "field": "jsonld:dateModified",
+            "raw": "2026-10-03T19:59:01+02:00",
+            "epoch": 1791050341.0
+          },
+          {
+            "kind": "datePublished",
+            "field": "jsonld:datePublished",
+            "raw": "2026-10-03T19:59:01+02:00",
+            "epoch": 1791050341.0
+          },
+          {
+            "kind": "dateModified",
+            "field": "jsonld:dateModified",
+            "raw": "2026-10-03T19:59:01+02:00",
+            "epoch": 1791050341.0
+          }
+        ],
+        "publisherPublished": "2026-10-03T17:59:01Z",
+        "deltaSeconds": 0.0
+      }
+    },
+    {
+      "id": "doc-0056",
+      "captureIndex": 56,
+      "event": "oktoberfest-shorts",
+      "url": "https://nos.nl/l/2633555",
+      "feed": "https://feeds.nos.nl/nosnieuwsalgemeen",
+      "source": "NOS Nieuws",
+      "language": "nl",
+      "published": 1791048856,
+      "timestampStatus": "feed-reported",
+      "origin": "base-v2-reference",
+      "scope": "document-only",
+      "pageSHA256": "1ed339980a1dc3015bee66210ae4bc32df2002120f615d63ed3c9a6a90ca6a31",
+      "timestampEvidence": {
+        "id": "doc-0056",
+        "url": "https://nos.nl/l/2633555",
+        "feedPublished": 1791048856,
+        "status": "feed-matches-publication",
+        "pageSHA256": "1ed339980a1dc3015bee66210ae4bc32df2002120f615d63ed3c9a6a90ca6a31",
+        "fetchedAt": 1791059263.4515471,
+        "finalURL": "https://nos.nl/artikel/2633555-fietsbroek-moet-vrouwen-op-oktoberfest-beschermen-tegen-filmen-onder-rokken",
+        "dateEvidence": [
+          {
+            "kind": "datePublished",
+            "field": "meta:og:article:published_time",
+            "raw": "2026-10-03T19:34:16+02:00",
+            "epoch": 1791048856.0
+          },
+          {
+            "kind": "dateModified",
+            "field": "meta:og:article:modified_time",
+            "raw": "2026-10-03T19:34:16+02:00",
+            "epoch": 1791048856.0
+          },
+          {
+            "kind": "datePublished",
+            "field": "jsonld:datePublished",
+            "raw": "2026-10-03T19:34:16+02:00",
+            "epoch": 1791048856.0
+          },
+          {
+            "kind": "dateModified",
+            "field": "jsonld:dateModified",
+            "raw": "2026-10-03T19:34:16+02:00",
+            "epoch": 1791048856.0
+          },
+          {
+            "kind": "datePublished",
+            "field": "jsonld:datePublished",
+            "raw": "2026-10-03T19:34:16+02:00",
+            "epoch": 1791048856.0
+          },
+          {
+            "kind": "dateModified",
+            "field": "jsonld:dateModified",
+            "raw": "2026-10-03T19:34:16+02:00",
+            "epoch": 1791048856.0
+          }
+        ],
+        "publisherPublished": "2026-10-03T17:34:16Z",
+        "deltaSeconds": 0.0
+      }
+    },
+    {
+      "id": "web-variant-001",
+      "event": "oktoberfest-shorts",
+      "url": "https://nos.nl/artikel/2633555-fietsbroek-moet-vrouwen-op-oktoberfest-beschermen-tegen-filmen-onder-rokken",
+      "feed": "https://feeds.nos.nl/nosnieuwsalgemeen",
+      "source": "NOS Nieuws",
+      "language": "nl",
+      "published": 1791048856,
+      "timestampStatus": "feed-reported",
+      "origin": "observed-publisher-link",
+      "scope": "document-only",
+      "pageSHA256": "232c4598d444edfb51a48107851990b9dbdb67ad6a42b7dbe149ec5930056299",
+      "observedOn": "https://nos.nl/l/2633555",
+      "relation": "canonical",
+      "privatePageID": "variant-001",
+      "timestampEvidence": {
+        "id": "web-variant-001",
+        "url": "https://nos.nl/artikel/2633555-fietsbroek-moet-vrouwen-op-oktoberfest-beschermen-tegen-filmen-onder-rokken",
+        "feedPublished": 1791048856,
+        "status": "feed-matches-publication",
+        "pageSHA256": "232c4598d444edfb51a48107851990b9dbdb67ad6a42b7dbe149ec5930056299",
+        "fetchedAt": 1791059470.149178,
+        "finalURL": "https://nos.nl/artikel/2633555-fietsbroek-moet-vrouwen-op-oktoberfest-beschermen-tegen-filmen-onder-rokken",
+        "dateEvidence": [
+          {
+            "kind": "datePublished",
+            "field": "meta:og:article:published_time",
+            "raw": "2026-10-03T19:34:16+02:00",
+            "epoch": 1791048856.0
+          },
+          {
+            "kind": "dateModified",
+            "field": "meta:og:article:modified_time",
+            "raw": "2026-10-03T19:34:16+02:00",
+            "epoch": 1791048856.0
+          },
+          {
+            "kind": "datePublished",
+            "field": "jsonld:datePublished",
+            "raw": "2026-10-03T19:34:16+02:00",
+            "epoch": 1791048856.0
+          },
+          {
+            "kind": "dateModified",
+            "field": "jsonld:dateModified",
+            "raw": "2026-10-03T19:34:16+02:00",
+            "epoch": 1791048856.0
+          },
+          {
+            "kind": "datePublished",
+            "field": "jsonld:datePublished",
+            "raw": "2026-10-03T19:34:16+02:00",
+            "epoch": 1791048856.0
+          },
+          {
+            "kind": "dateModified",
+            "field": "jsonld:dateModified",
+            "raw": "2026-10-03T19:34:16+02:00",
+            "epoch": 1791048856.0
+          }
+        ],
+        "publisherPublished": "2026-10-03T17:34:16Z",
+        "deltaSeconds": 0.0
+      }
+    },
+    {
+      "id": "doc-0057",
+      "captureIndex": 57,
+      "event": "spain-housing-rally",
+      "url": "https://nos.nl/l/2633545",
+      "feed": "https://feeds.nos.nl/nosnieuwsalgemeen",
+      "source": "NOS Nieuws",
+      "language": "nl",
+      "published": 1791044663,
+      "timestampStatus": "feed-reported",
+      "origin": "base-v2-reference",
+      "scope": "document-only",
+      "pageSHA256": "84031402fbffaefd22695a60e4051763b60224d3a77cdf1b338f5fcd00237ca9",
+      "timestampEvidence": {
+        "id": "doc-0057",
+        "url": "https://nos.nl/l/2633545",
+        "feedPublished": 1791044663,
+        "status": "feed-matches-publication",
+        "pageSHA256": "84031402fbffaefd22695a60e4051763b60224d3a77cdf1b338f5fcd00237ca9",
+        "fetchedAt": 1791059263.606148,
+        "finalURL": "https://nos.nl/artikel/2633545-tienduizenden-mensen-in-heel-spanje-op-de-been-bij-protesten-tegen-woningcrisis",
+        "dateEvidence": [
+          {
+            "kind": "datePublished",
+            "field": "meta:og:article:published_time",
+            "raw": "2026-10-03T18:24:23+02:00",
+            "epoch": 1791044663.0
+          },
+          {
+            "kind": "dateModified",
+            "field": "meta:og:article:modified_time",
+            "raw": "2026-10-03T18:24:23+02:00",
+            "epoch": 1791044663.0
+          },
+          {
+            "kind": "datePublished",
+            "field": "jsonld:datePublished",
+            "raw": "2026-10-03T18:24:23+02:00",
+            "epoch": 1791044663.0
+          },
+          {
+            "kind": "dateModified",
+            "field": "jsonld:dateModified",
+            "raw": "2026-10-03T18:24:23+02:00",
+            "epoch": 1791044663.0
+          },
+          {
+            "kind": "datePublished",
+            "field": "jsonld:datePublished",
+            "raw": "2026-10-03T18:24:23+02:00",
+            "epoch": 1791044663.0
+          },
+          {
+            "kind": "dateModified",
+            "field": "jsonld:dateModified",
+            "raw": "2026-10-03T18:24:23+02:00",
+            "epoch": 1791044663.0
+          }
+        ],
+        "publisherPublished": "2026-10-03T16:24:23Z",
+        "deltaSeconds": 0.0
+      }
+    },
+    {
+      "id": "web-variant-002",
+      "event": "spain-housing-rally",
+      "url": "https://nos.nl/artikel/2633545-tienduizenden-mensen-in-heel-spanje-op-de-been-bij-protesten-tegen-woningcrisis",
+      "feed": "https://feeds.nos.nl/nosnieuwsalgemeen",
+      "source": "NOS Nieuws",
+      "language": "nl",
+      "published": 1791044663,
+      "timestampStatus": "feed-reported",
+      "origin": "observed-publisher-link",
+      "scope": "document-only",
+      "pageSHA256": "f1888e5f1b2025a021692f34af6694fc9724440985b26e5d46cc496d6d48b1a5",
+      "observedOn": "https://nos.nl/l/2633545",
+      "relation": "canonical",
+      "privatePageID": "variant-002",
+      "timestampEvidence": {
+        "id": "web-variant-002",
+        "url": "https://nos.nl/artikel/2633545-tienduizenden-mensen-in-heel-spanje-op-de-been-bij-protesten-tegen-woningcrisis",
+        "feedPublished": 1791044663,
+        "status": "feed-matches-publication",
+        "pageSHA256": "f1888e5f1b2025a021692f34af6694fc9724440985b26e5d46cc496d6d48b1a5",
+        "fetchedAt": 1791059470.353136,
+        "finalURL": "https://nos.nl/artikel/2633545-tienduizenden-mensen-in-heel-spanje-op-de-been-bij-protesten-tegen-woningcrisis",
+        "dateEvidence": [
+          {
+            "kind": "datePublished",
+            "field": "meta:og:article:published_time",
+            "raw": "2026-10-03T18:24:23+02:00",
+            "epoch": 1791044663.0
+          },
+          {
+            "kind": "dateModified",
+            "field": "meta:og:article:modified_time",
+            "raw": "2026-10-03T18:24:23+02:00",
+            "epoch": 1791044663.0
+          },
+          {
+            "kind": "datePublished",
+            "field": "jsonld:datePublished",
+            "raw": "2026-10-03T18:24:23+02:00",
+            "epoch": 1791044663.0
+          },
+          {
+            "kind": "dateModified",
+            "field": "jsonld:dateModified",
+            "raw": "2026-10-03T18:24:23+02:00",
+            "epoch": 1791044663.0
+          },
+          {
+            "kind": "datePublished",
+            "field": "jsonld:datePublished",
+            "raw": "2026-10-03T18:24:23+02:00",
+            "epoch": 1791044663.0
+          },
+          {
+            "kind": "dateModified",
+            "field": "jsonld:dateModified",
+            "raw": "2026-10-03T18:24:23+02:00",
+            "epoch": 1791044663.0
+          }
+        ],
+        "publisherPublished": "2026-10-03T16:24:23Z",
+        "deltaSeconds": 0.0
+      }
+    },
+    {
+      "id": "doc-1053",
+      "captureIndex": 1053,
+      "event": "publisher-document-1053",
+      "url": "https://www.dawn.com/news/2034465/official-outcome-of-govt-opposition-talks-awaited-after-hours-long-meeting",
+      "feed": "https://www.dawn.com/feeds/home",
+      "source": "Dawn",
+      "language": "en",
+      "published": 1791052520,
+      "timestampStatus": "feed-reported",
+      "origin": "capture-v2",
+      "scope": "document-only",
+      "pageSHA256": "2d04b15e49349ad30d01730848b48cbe56ff23c23a925107972c76383db00ff9",
+      "timestampEvidence": {
+        "id": "doc-1053",
+        "url": "https://www.dawn.com/news/2034465/official-outcome-of-govt-opposition-talks-awaited-after-hours-long-meeting",
+        "feedPublished": 1791052520,
+        "status": "feed-publication-differs",
+        "pageSHA256": "2d04b15e49349ad30d01730848b48cbe56ff23c23a925107972c76383db00ff9",
+        "fetchedAt": 1791059264.088718,
+        "finalURL": "https://www.dawn.com/news/2034465/official-outcome-of-govt-opposition-talks-awaited-after-hours-long-meeting",
+        "dateEvidence": [
+          {
+            "kind": "datePublished",
+            "field": "meta:article:published_time",
+            "raw": "2026-10-03 13:50:29+05:00",
+            "epoch": 1791017429.0
+          },
+          {
+            "kind": "dateModified",
+            "field": "meta:article:modified_time",
+            "raw": "2026-10-04 01:20:16+05:00",
+            "epoch": 1791058816.0
+          }
+        ],
+        "publisherPublished": "2026-10-03T08:50:29Z",
+        "deltaSeconds": -35091.0
+      }
+    },
+    {
+      "id": "web-variant-013",
+      "event": "publisher-document-1053",
+      "url": "https://www.dawn.com/news/2034465",
+      "feed": "https://www.dawn.com/feeds/home",
+      "source": "Dawn",
+      "language": "en",
+      "published": 1791052520,
+      "timestampStatus": "feed-reported",
+      "origin": "observed-publisher-link",
+      "scope": "document-only",
+      "pageSHA256": "a9cfedd14921fa011d82076ebf9d031ceaa2f0e1711cfb5954bf6a30a299f0f5",
+      "observedOn": "https://www.dawn.com/news/2034465/official-outcome-of-govt-opposition-talks-awaited-after-hours-long-meeting",
+      "relation": "canonical",
+      "privatePageID": "variant-013",
+      "timestampEvidence": {
+        "id": "web-variant-013",
+        "url": "https://www.dawn.com/news/2034465",
+        "feedPublished": 1791052520,
+        "status": "feed-publication-differs",
+        "pageSHA256": "a9cfedd14921fa011d82076ebf9d031ceaa2f0e1711cfb5954bf6a30a299f0f5",
+        "fetchedAt": 1791059469.620292,
+        "finalURL": "https://www.dawn.com/news/2034465",
+        "dateEvidence": [
+          {
+            "kind": "datePublished",
+            "field": "meta:article:published_time",
+            "raw": "2026-10-03 13:50:29+05:00",
+            "epoch": 1791017429.0
+          },
+          {
+            "kind": "dateModified",
+            "field": "meta:article:modified_time",
+            "raw": "2026-10-04 01:20:16+05:00",
+            "epoch": 1791058816.0
+          }
+        ],
+        "publisherPublished": "2026-10-03T08:50:29Z",
+        "deltaSeconds": -35091.0
+      }
+    },
+    {
+      "id": "doc-1054",
+      "captureIndex": 1054,
+      "event": "publisher-document-1054",
+      "url": "https://www.dawn.com/news/2034492/bilawal-says-centre-was-ready-to-impose-emergency-in-kp-but-ppp-sought-political-solution",
+      "feed": "https://www.dawn.com/feeds/home",
+      "source": "Dawn",
+      "language": "en",
+      "published": 1791038649,
+      "timestampStatus": "feed-reported",
+      "origin": "capture-v2",
+      "scope": "document-only",
+      "pageSHA256": "8b5b94db7c6902e3a649169f6e4f3cba0539d443cbbef00e9389b86605d96708",
+      "timestampEvidence": {
+        "id": "doc-1054",
+        "url": "https://www.dawn.com/news/2034492/bilawal-says-centre-was-ready-to-impose-emergency-in-kp-but-ppp-sought-political-solution",
+        "feedPublished": 1791038649,
+        "status": "feed-publication-differs",
+        "pageSHA256": "8b5b94db7c6902e3a649169f6e4f3cba0539d443cbbef00e9389b86605d96708",
+        "fetchedAt": 1791059264.431353,
+        "finalURL": "https://www.dawn.com/news/2034492/bilawal-says-centre-was-ready-to-impose-emergency-in-kp-but-ppp-sought-political-solution",
+        "dateEvidence": [
+          {
+            "kind": "datePublished",
+            "field": "meta:article:published_time",
+            "raw": "2026-10-03 18:17:24+05:00",
+            "epoch": 1791033444.0
+          },
+          {
+            "kind": "dateModified",
+            "field": "meta:article:modified_time",
+            "raw": "2026-10-04 01:27:37+05:00",
+            "epoch": 1791059257.0
+          }
+        ],
+        "publisherPublished": "2026-10-03T13:17:24Z",
+        "deltaSeconds": -5205.0
+      }
+    },
+    {
+      "id": "web-variant-014",
+      "event": "publisher-document-1054",
+      "url": "https://www.dawn.com/news/2034492",
+      "feed": "https://www.dawn.com/feeds/home",
+      "source": "Dawn",
+      "language": "en",
+      "published": 1791038649,
+      "timestampStatus": "feed-reported",
+      "origin": "observed-publisher-link",
+      "scope": "document-only",
+      "pageSHA256": "9d4af7930ff2e47cf7bb7270a235a16c628e532bf635be9d2da13604e9845be8",
+      "observedOn": "https://www.dawn.com/news/2034492/bilawal-says-centre-was-ready-to-impose-emergency-in-kp-but-ppp-sought-political-solution",
+      "relation": "canonical",
+      "privatePageID": "variant-014",
+      "timestampEvidence": {
+        "id": "web-variant-014",
+        "url": "https://www.dawn.com/news/2034492",
+        "feedPublished": 1791038649,
+        "status": "feed-publication-differs",
+        "pageSHA256": "9d4af7930ff2e47cf7bb7270a235a16c628e532bf635be9d2da13604e9845be8",
+        "fetchedAt": 1791059470.393426,
+        "finalURL": "https://www.dawn.com/news/2034492",
+        "dateEvidence": [
+          {
+            "kind": "datePublished",
+            "field": "meta:article:published_time",
+            "raw": "2026-10-03 18:17:24+05:00",
+            "epoch": 1791033444.0
+          },
+          {
+            "kind": "dateModified",
+            "field": "meta:article:modified_time",
+            "raw": "2026-10-04 01:27:37+05:00",
+            "epoch": 1791059257.0
+          }
+        ],
+        "publisherPublished": "2026-10-03T13:17:24Z",
+        "deltaSeconds": -5205.0
+      }
+    },
+    {
+      "id": "doc-1055",
+      "captureIndex": 1055,
+      "event": "publisher-document-1055",
+      "url": "https://www.dawn.com/news/2034516/local-automakers-voice-concerns-as-imports-of-used-cars-surge-in-sept",
+      "feed": "https://www.dawn.com/feeds/home",
+      "source": "Dawn",
+      "language": "en",
+      "published": 1791049541,
+      "timestampStatus": "feed-reported",
+      "origin": "capture-v2",
+      "scope": "document-only",
+      "pageSHA256": "5f9798d2e363a6fc1e6fa0f87072056222349bc19dac9ff7bca80842d646c889",
+      "timestampEvidence": {
+        "id": "doc-1055",
+        "url": "https://www.dawn.com/news/2034516/local-automakers-voice-concerns-as-imports-of-used-cars-surge-in-sept",
+        "feedPublished": 1791049541,
+        "status": "feed-matches-publication",
+        "pageSHA256": "5f9798d2e363a6fc1e6fa0f87072056222349bc19dac9ff7bca80842d646c889",
+        "fetchedAt": 1791059264.744307,
+        "finalURL": "https://www.dawn.com/news/2034516/local-automakers-voice-concerns-as-imports-of-used-cars-surge-in-sept",
+        "dateEvidence": [
+          {
+            "kind": "datePublished",
+            "field": "meta:article:published_time",
+            "raw": "2026-10-03 22:45:41+05:00",
+            "epoch": 1791049541.0
+          },
+          {
+            "kind": "dateModified",
+            "field": "meta:article:modified_time",
+            "raw": "2026-10-03 22:45:41+05:00",
+            "epoch": 1791049541.0
+          }
+        ],
+        "publisherPublished": "2026-10-03T17:45:41Z",
+        "deltaSeconds": 0.0
+      }
+    },
+    {
+      "id": "web-variant-015",
+      "event": "publisher-document-1055",
+      "url": "https://www.dawn.com/news/2034516",
+      "feed": "https://www.dawn.com/feeds/home",
+      "source": "Dawn",
+      "language": "en",
+      "published": 1791049541,
+      "timestampStatus": "feed-reported",
+      "origin": "observed-publisher-link",
+      "scope": "document-only",
+      "pageSHA256": "0a96facab6dc9a0a5c4c31e0a20db84cc59ceffe91c1d869c3aa464cb5eb42e8",
+      "observedOn": "https://www.dawn.com/news/2034516/local-automakers-voice-concerns-as-imports-of-used-cars-surge-in-sept",
+      "relation": "canonical",
+      "privatePageID": "variant-015",
+      "timestampEvidence": {
+        "id": "web-variant-015",
+        "url": "https://www.dawn.com/news/2034516",
+        "feedPublished": 1791049541,
+        "status": "feed-matches-publication",
+        "pageSHA256": "0a96facab6dc9a0a5c4c31e0a20db84cc59ceffe91c1d869c3aa464cb5eb42e8",
+        "fetchedAt": 1791059470.486711,
+        "finalURL": "https://www.dawn.com/news/2034516",
+        "dateEvidence": [
+          {
+            "kind": "datePublished",
+            "field": "meta:article:published_time",
+            "raw": "2026-10-03 22:45:41+05:00",
+            "epoch": 1791049541.0
+          },
+          {
+            "kind": "dateModified",
+            "field": "meta:article:modified_time",
+            "raw": "2026-10-03 22:45:41+05:00",
+            "epoch": 1791049541.0
+          }
+        ],
+        "publisherPublished": "2026-10-03T17:45:41Z",
+        "deltaSeconds": 0.0
+      }
+    }
+  ],
+  "events": [
+    {
+      "id": "fp9-announcement",
+      "family": "ukraine-policy",
+      "split": "tune",
+      "reviewStatus": "pending",
+      "reason": "Zelensky announcement that FP-9 is expected this autumn."
+    },
+    {
+      "id": "kyiv-pontoon-plan",
+      "family": "kyiv-bridges",
+      "split": "tune",
+      "reviewStatus": "pending",
+      "reason": "Kalashnyk announcement of reserve pontoon crossings; separate from the bridge strikes."
+    },
+    {
+      "id": "portugal-lajes-investigation",
+      "family": "portugal-lajes",
+      "split": "tune",
+      "reviewStatus": "pending",
+      "reason": "Portuguese prosecutors investigate permission to use Lajes airbase."
+    },
+    {
+      "id": "kirovohrad-road-strike",
+      "family": "kyiv-bridges",
+      "split": "tune",
+      "reviewStatus": "pending",
+      "reason": "Haivoron road drone crash: one man killed and a woman injured; separate location/action from bridge and Kharkiv attacks."
+    },
+    {
+      "id": "kharkiv-car-strike",
+      "family": "kyiv-bridges",
+      "split": "tune",
+      "reviewStatus": "pending",
+      "reason": "Shestakove civilian-car drone strike: a woman killed and a man wounded."
+    },
+    {
+      "id": "ukraine-budget-deficit",
+      "family": "ukraine-policy",
+      "split": "tune",
+      "reviewStatus": "pending",
+      "reason": "Zelensky statement on closing the current financing deficit by year end."
+    },
+    {
+      "id": "oct3-counterstrike-report",
+      "family": "ukraine-policy",
+      "split": "tune",
+      "reviewStatus": "pending",
+      "reason": "Same Zelensky statement reporting strikes on Samara and Bryansk targets; multi-action boundaries need reviewer confirmation."
+    },
+    {
+      "id": "senior-wellness-payments",
+      "family": "senior-wellness",
+      "split": "tune",
+      "reviewStatus": "pending",
+      "reason": "Announcement of $90 payments to 20 million Medicare recipients."
+    },
+    {
+      "id": "irene-butter-death",
+      "family": "irene-butter",
+      "split": "holdout",
+      "reviewStatus": "pending",
+      "reason": "Death announcement of Irene Butter aged 95."
+    },
+    {
+      "id": "steinmeier-unity-speech",
+      "family": "german-unity",
+      "split": "tune",
+      "reason": "Steinmeier speech at the same German Unity Day ceremony.",
+      "reviewStatus": "pending"
+    },
+    {
+      "id": "latvia-exit-poll",
+      "family": "latvia",
+      "split": "tune",
+      "reason": "The same Latvian election exit poll giving United List 35.6 percent.",
+      "reviewStatus": "pending"
+    },
+    {
+      "id": "kyiv-northern-bridge",
+      "family": "kyiv-bridges",
+      "split": "tune",
+      "reason": "Saturday attack on the Northern bridge; distinguish earlier attacks on the Southern bridge.",
+      "reviewStatus": "pending"
+    },
+    {
+      "id": "cebr-housing-funding",
+      "family": "ukraine-policy",
+      "split": "tune",
+      "reviewStatus": "pending",
+      "reason": "Council of Europe Development Bank / Italy housing compensation funding."
+    },
+    {
+      "id": "finland-ukraine-funding",
+      "family": "ukraine-policy",
+      "split": "tune",
+      "reviewStatus": "pending",
+      "reason": "Finnish €50 million allocation: different donor and action from CEB / Italy housing funding."
+    },
+    {
+      "id": "irkutsk-lab-death",
+      "family": "irkutsk-plague",
+      "split": "tune",
+      "reviewStatus": "pending",
+      "reason": "Laboratory worker death in Irkutsk; separate administrative suppression response."
+    },
+    {
+      "id": "irkutsk-information-removal",
+      "family": "irkutsk-plague",
+      "split": "tune",
+      "reviewStatus": "pending",
+      "reason": "Officials remove statements about the plague incident; different action from the death."
+    },
+    {
+      "id": "edition-0206",
+      "family": "bbc-science-episodes",
+      "split": "tune",
+      "reviewStatus": "pending",
+      "reason": "Identical programme headline, distinct episode IDs and different scientific subjects."
+    },
+    {
+      "id": "edition-0207",
+      "family": "bbc-science-episodes",
+      "split": "tune",
+      "reviewStatus": "pending",
+      "reason": "Identical programme headline, distinct episode IDs and different scientific subjects."
+    },
+    {
+      "id": "edition-0208",
+      "family": "bbc-science-episodes",
+      "split": "tune",
+      "reviewStatus": "pending",
+      "reason": "Identical programme headline, distinct episode IDs and different scientific subjects."
+    },
+    {
+      "id": "edition-0209",
+      "family": "bbc-science-episodes",
+      "split": "tune",
+      "reviewStatus": "pending",
+      "reason": "Identical programme headline, distinct episode IDs and different scientific subjects."
+    },
+    {
+      "id": "edition-0475",
+      "family": "politico-weekly-cartoons",
+      "split": "tune",
+      "reviewStatus": "pending",
+      "reason": "Identical headline and summary, different weekly editions."
+    },
+    {
+      "id": "edition-0489",
+      "family": "politico-weekly-cartoons",
+      "split": "tune",
+      "reviewStatus": "pending",
+      "reason": "Identical headline and summary, different weekly editions."
+    },
+    {
+      "id": "edition-1277",
+      "family": "tagesschau-bulletins",
+      "split": "tune",
+      "reviewStatus": "pending",
+      "reason": "Identical generic bulletin headline, distinct editions within three hours; event overlap must not become an event label."
+    },
+    {
+      "id": "edition-1278",
+      "family": "tagesschau-bulletins",
+      "split": "tune",
+      "reviewStatus": "pending",
+      "reason": "Identical generic bulletin headline, distinct editions within three hours; event overlap must not become an event label."
+    },
+    {
+      "id": "apple-fy24-q3",
+      "family": "apple-quarterly-results",
+      "split": "holdout",
+      "reviewStatus": "pending",
+      "reason": "Distinct fiscal quarter/year or FOMC meeting; shared issuer and wording do not make the same occurrence."
+    },
+    {
+      "id": "apple-fy25-q2",
+      "family": "apple-quarterly-results",
+      "split": "holdout",
+      "reviewStatus": "pending",
+      "reason": "Distinct fiscal quarter/year or FOMC meeting; shared issuer and wording do not make the same occurrence."
+    },
+    {
+      "id": "apple-fy25-q3",
+      "family": "apple-quarterly-results",
+      "split": "holdout",
+      "reviewStatus": "pending",
+      "reason": "Distinct fiscal quarter/year or FOMC meeting; shared issuer and wording do not make the same occurrence."
+    },
+    {
+      "id": "fomc-jun25",
+      "family": "fomc-statements",
+      "split": "tune",
+      "reviewStatus": "pending",
+      "reason": "Distinct fiscal quarter/year or FOMC meeting; shared issuer and wording do not make the same occurrence."
+    },
+    {
+      "id": "fomc-jul25",
+      "family": "fomc-statements",
+      "split": "tune",
+      "reviewStatus": "pending",
+      "reason": "Distinct fiscal quarter/year or FOMC meeting; shared issuer and wording do not make the same occurrence."
+    },
+    {
+      "id": "kharkiv-oct2-glide-bombs",
+      "family": "kyiv-bridges",
+      "split": "tune",
+      "reviewStatus": "pending",
+      "reason": "October 2 Kharkiv city glide-bomb strike; separate date, weapons and target from the October 3 Shestakove car drone strike in the same oblast."
+    },
+    {
+      "id": "occurrence-0055",
+      "family": "occurrence-0055",
+      "split": "tune",
+      "reason": "Candidate singleton; reviewer must check whether another selected report describes the same occurrence.",
+      "reviewStatus": "pending"
+    },
+    {
+      "id": "oktoberfest-shorts",
+      "family": "oktoberfest",
+      "split": "tune",
+      "reason": "Free cycling shorts for the Teufelsrad ride after voyeuristic recordings.",
+      "reviewStatus": "pending"
+    },
+    {
+      "id": "spain-housing-rally",
+      "family": "spain-housing",
+      "split": "holdout",
+      "reason": "Saturday rallies after housing measures were defeated; distinct from the parliamentary vote.",
+      "reviewStatus": "pending"
+    },
+    {
+      "id": "publisher-document-1053",
+      "family": "publisher-document-1053",
+      "split": "holdout",
+      "reviewStatus": "pending",
+      "reason": "Same publisher document advertised by two distinct same-origin canonical URL paths."
+    },
+    {
+      "id": "publisher-document-1054",
+      "family": "publisher-document-1054",
+      "split": "holdout",
+      "reviewStatus": "pending",
+      "reason": "Same publisher document advertised by two distinct same-origin canonical URL paths."
+    },
+    {
+      "id": "publisher-document-1055",
+      "family": "publisher-document-1055",
+      "split": "tune",
+      "reviewStatus": "pending",
+      "reason": "Same publisher document advertised by two distinct same-origin canonical URL paths."
+    }
+  ],
+  "pairs": [
+    {
+      "id": "extra-001",
+      "left": "doc-1155",
+      "right": "doc-1201",
+      "split": "tune",
+      "proposedLabel": "same_event",
+      "scope": "event",
+      "reviewStatus": "pending",
+      "reason": "Zelensky announcement that FP-9 is expected this autumn."
+    },
+    {
+      "id": "extra-002",
+      "left": "doc-0273",
+      "right": "doc-1180",
+      "split": "tune",
+      "proposedLabel": "same_event",
+      "scope": "event",
+      "reviewStatus": "pending",
+      "reason": "Kalashnyk announcement of reserve pontoon crossings; separate from the bridge strikes."
+    },
+    {
+      "id": "extra-003",
+      "left": "doc-0273",
+      "right": "doc-1164",
+      "split": "tune",
+      "proposedLabel": "same_event",
+      "scope": "event",
+      "reviewStatus": "pending",
+      "reason": "Kalashnyk announcement of reserve pontoon crossings; separate from the bridge strikes."
+    },
+    {
+      "id": "extra-004",
+      "left": "doc-0273",
+      "right": "doc-1204",
+      "split": "tune",
+      "proposedLabel": "same_event",
+      "scope": "event",
+      "reviewStatus": "pending",
+      "reason": "Kalashnyk announcement of reserve pontoon crossings; separate from the bridge strikes."
+    },
+    {
+      "id": "extra-005",
+      "left": "doc-0273",
+      "right": "doc-1436",
+      "split": "tune",
+      "proposedLabel": "same_event",
+      "scope": "event",
+      "reviewStatus": "pending",
+      "reason": "Kalashnyk announcement of reserve pontoon crossings; separate from the bridge strikes."
+    },
+    {
+      "id": "extra-006",
+      "left": "doc-1180",
+      "right": "doc-1164",
+      "split": "tune",
+      "proposedLabel": "same_event",
+      "scope": "event",
+      "reviewStatus": "pending",
+      "reason": "Kalashnyk announcement of reserve pontoon crossings; separate from the bridge strikes."
+    },
+    {
+      "id": "extra-007",
+      "left": "doc-1180",
+      "right": "doc-1204",
+      "split": "tune",
+      "proposedLabel": "same_event",
+      "scope": "event",
+      "reviewStatus": "pending",
+      "reason": "Kalashnyk announcement of reserve pontoon crossings; separate from the bridge strikes."
+    },
+    {
+      "id": "extra-008",
+      "left": "doc-1180",
+      "right": "doc-1436",
+      "split": "tune",
+      "proposedLabel": "same_event",
+      "scope": "event",
+      "reviewStatus": "pending",
+      "reason": "Kalashnyk announcement of reserve pontoon crossings; separate from the bridge strikes."
+    },
+    {
+      "id": "extra-009",
+      "left": "doc-1164",
+      "right": "doc-1204",
+      "split": "tune",
+      "proposedLabel": "same_event",
+      "scope": "event",
+      "reviewStatus": "pending",
+      "reason": "Kalashnyk announcement of reserve pontoon crossings; separate from the bridge strikes."
+    },
+    {
+      "id": "extra-010",
+      "left": "doc-1164",
+      "right": "doc-1436",
+      "split": "tune",
+      "proposedLabel": "same_event",
+      "scope": "event",
+      "reviewStatus": "pending",
+      "reason": "Kalashnyk announcement of reserve pontoon crossings; separate from the bridge strikes."
+    },
+    {
+      "id": "extra-011",
+      "left": "doc-1204",
+      "right": "doc-1436",
+      "split": "tune",
+      "proposedLabel": "same_event",
+      "scope": "event",
+      "reviewStatus": "pending",
+      "reason": "Kalashnyk announcement of reserve pontoon crossings; separate from the bridge strikes."
+    },
+    {
+      "id": "extra-012",
+      "left": "doc-1159",
+      "right": "doc-1434",
+      "split": "tune",
+      "proposedLabel": "same_event",
+      "scope": "event",
+      "reviewStatus": "pending",
+      "reason": "Portuguese prosecutors investigate permission to use Lajes airbase."
+    },
+    {
+      "id": "extra-013",
+      "left": "doc-1160",
+      "right": "doc-1444",
+      "split": "tune",
+      "proposedLabel": "same_event",
+      "scope": "event",
+      "reviewStatus": "pending",
+      "reason": "Haivoron road drone crash: one man killed and a woman injured; separate location/action from bridge and Kharkiv attacks."
+    },
+    {
+      "id": "extra-014",
+      "left": "doc-1150",
+      "right": "doc-1428",
+      "split": "tune",
+      "proposedLabel": "same_event",
+      "scope": "event",
+      "reviewStatus": "pending",
+      "reason": "Shestakove civilian-car drone strike: a woman killed and a man wounded."
+    },
+    {
+      "id": "extra-015",
+      "left": "doc-1152",
+      "right": "doc-1423",
+      "split": "tune",
+      "proposedLabel": "same_event",
+      "scope": "event",
+      "reviewStatus": "pending",
+      "reason": "Zelensky statement on closing the current financing deficit by year end."
+    },
+    {
+      "id": "extra-016",
+      "left": "doc-1161",
+      "right": "doc-1440",
+      "split": "tune",
+      "proposedLabel": "same_event",
+      "scope": "event",
+      "reviewStatus": "pending",
+      "reason": "Same Zelensky statement reporting strikes on Samara and Bryansk targets; multi-action boundaries need reviewer confirmation."
+    },
+    {
+      "id": "extra-017",
+      "left": "doc-0517",
+      "right": "doc-1151",
+      "split": "tune",
+      "proposedLabel": "same_event",
+      "scope": "event",
+      "reviewStatus": "pending",
+      "reason": "Announcement of $90 payments to 20 million Medicare recipients."
+    },
+    {
+      "id": "extra-018",
+      "left": "doc-0517",
+      "right": "doc-1442",
+      "split": "tune",
+      "proposedLabel": "same_event",
+      "scope": "event",
+      "reviewStatus": "pending",
+      "reason": "Announcement of $90 payments to 20 million Medicare recipients."
+    },
+    {
+      "id": "extra-019",
+      "left": "doc-1151",
+      "right": "doc-1442",
+      "split": "tune",
+      "proposedLabel": "same_event",
+      "scope": "event",
+      "reviewStatus": "pending",
+      "reason": "Announcement of $90 payments to 20 million Medicare recipients."
+    },
+    {
+      "id": "extra-020",
+      "left": "doc-1256",
+      "right": "doc-1259",
+      "split": "holdout",
+      "proposedLabel": "same_event",
+      "scope": "event",
+      "reviewStatus": "pending",
+      "reason": "Death announcement of Irene Butter aged 95."
+    },
+    {
+      "id": "extra-021",
+      "left": "doc-0308",
+      "right": "doc-1246",
+      "split": "tune",
+      "proposedLabel": "same_event",
+      "scope": "event",
+      "reviewStatus": "pending",
+      "reason": "Same Steinmeier Unity Day speech."
+    },
+    {
+      "id": "extra-022",
+      "left": "doc-1263",
+      "right": "doc-0289",
+      "split": "tune",
+      "proposedLabel": "same_event",
+      "scope": "event",
+      "reviewStatus": "pending",
+      "reason": "Same election exit poll; pre-election coverage excluded from this occurrence."
+    },
+    {
+      "id": "extra-023",
+      "left": "doc-1263",
+      "right": "doc-0602",
+      "split": "tune",
+      "proposedLabel": "same_event",
+      "scope": "event",
+      "reviewStatus": "pending",
+      "reason": "Same election exit poll; pre-election coverage excluded from this occurrence."
+    },
+    {
+      "id": "extra-024",
+      "left": "doc-0074",
+      "right": "doc-0082",
+      "split": "tune",
+      "proposedLabel": "same_event",
+      "scope": "event",
+      "reviewStatus": "pending",
+      "reason": "October 3 Northern Bridge attack; not the October 2 Southern Bridge strike."
+    },
+    {
+      "id": "extra-025",
+      "left": "doc-0074",
+      "right": "doc-0232",
+      "split": "tune",
+      "proposedLabel": "same_event",
+      "scope": "event",
+      "reviewStatus": "pending",
+      "reason": "October 3 Northern Bridge attack; not the October 2 Southern Bridge strike."
+    },
+    {
+      "id": "extra-026",
+      "left": "doc-0074",
+      "right": "doc-0279",
+      "split": "tune",
+      "proposedLabel": "same_event",
+      "scope": "event",
+      "reviewStatus": "pending",
+      "reason": "October 3 Northern Bridge attack; not the October 2 Southern Bridge strike."
+    },
+    {
+      "id": "extra-027",
+      "left": "doc-0074",
+      "right": "doc-1213",
+      "split": "tune",
+      "proposedLabel": "same_event",
+      "scope": "event",
+      "reviewStatus": "pending",
+      "reason": "October 3 Northern Bridge attack; not the October 2 Southern Bridge strike."
+    },
+    {
+      "id": "extra-028",
+      "left": "doc-0082",
+      "right": "doc-0232",
+      "split": "tune",
+      "proposedLabel": "same_event",
+      "scope": "event",
+      "reviewStatus": "pending",
+      "reason": "October 3 Northern Bridge attack; not the October 2 Southern Bridge strike."
+    },
+    {
+      "id": "extra-029",
+      "left": "doc-0082",
+      "right": "doc-0279",
+      "split": "tune",
+      "proposedLabel": "same_event",
+      "scope": "event",
+      "reviewStatus": "pending",
+      "reason": "October 3 Northern Bridge attack; not the October 2 Southern Bridge strike."
+    },
+    {
+      "id": "extra-030",
+      "left": "doc-0082",
+      "right": "doc-1213",
+      "split": "tune",
+      "proposedLabel": "same_event",
+      "scope": "event",
+      "reviewStatus": "pending",
+      "reason": "October 3 Northern Bridge attack; not the October 2 Southern Bridge strike."
+    },
+    {
+      "id": "extra-031",
+      "left": "doc-0206",
+      "right": "doc-0207",
+      "split": "tune",
+      "proposedLabel": "different",
+      "scope": "document-only",
+      "reviewStatus": "pending",
+      "reason": "Observed identical/repeated headline or issuer, distinct episode, edition, fiscal period or meeting. Retain temporal support stratification."
+    },
+    {
+      "id": "extra-032",
+      "left": "doc-0206",
+      "right": "doc-0208",
+      "split": "tune",
+      "proposedLabel": "different",
+      "scope": "document-only",
+      "reviewStatus": "pending",
+      "reason": "Observed identical/repeated headline or issuer, distinct episode, edition, fiscal period or meeting. Retain temporal support stratification."
+    },
+    {
+      "id": "extra-033",
+      "left": "doc-0206",
+      "right": "doc-0209",
+      "split": "tune",
+      "proposedLabel": "different",
+      "scope": "document-only",
+      "reviewStatus": "pending",
+      "reason": "Observed identical/repeated headline or issuer, distinct episode, edition, fiscal period or meeting. Retain temporal support stratification."
+    },
+    {
+      "id": "extra-034",
+      "left": "doc-0207",
+      "right": "doc-0208",
+      "split": "tune",
+      "proposedLabel": "different",
+      "scope": "document-only",
+      "reviewStatus": "pending",
+      "reason": "Observed identical/repeated headline or issuer, distinct episode, edition, fiscal period or meeting. Retain temporal support stratification."
+    },
+    {
+      "id": "extra-035",
+      "left": "doc-0207",
+      "right": "doc-0209",
+      "split": "tune",
+      "proposedLabel": "different",
+      "scope": "document-only",
+      "reviewStatus": "pending",
+      "reason": "Observed identical/repeated headline or issuer, distinct episode, edition, fiscal period or meeting. Retain temporal support stratification."
+    },
+    {
+      "id": "extra-036",
+      "left": "doc-0208",
+      "right": "doc-0209",
+      "split": "tune",
+      "proposedLabel": "different",
+      "scope": "document-only",
+      "reviewStatus": "pending",
+      "reason": "Observed identical/repeated headline or issuer, distinct episode, edition, fiscal period or meeting. Retain temporal support stratification."
+    },
+    {
+      "id": "extra-037",
+      "left": "doc-0475",
+      "right": "doc-0489",
+      "split": "tune",
+      "proposedLabel": "different",
+      "scope": "document-only",
+      "reviewStatus": "pending",
+      "reason": "Observed identical/repeated headline or issuer, distinct episode, edition, fiscal period or meeting. Retain temporal support stratification."
+    },
+    {
+      "id": "extra-038",
+      "left": "doc-1277",
+      "right": "doc-1278",
+      "split": "tune",
+      "proposedLabel": "different",
+      "scope": "document-only",
+      "reviewStatus": "pending",
+      "reason": "Observed identical/repeated headline or issuer, distinct episode, edition, fiscal period or meeting. Retain temporal support stratification."
+    },
+    {
+      "id": "extra-039",
+      "left": "apple-fy24-q3",
+      "right": "apple-fy25-q2",
+      "split": "holdout",
+      "proposedLabel": "different",
+      "scope": "event",
+      "reviewStatus": "pending",
+      "reason": "Observed identical/repeated headline or issuer, distinct episode, edition, fiscal period or meeting. Retain temporal support stratification."
+    },
+    {
+      "id": "extra-040",
+      "left": "apple-fy24-q3",
+      "right": "apple-fy25-q3",
+      "split": "holdout",
+      "proposedLabel": "different",
+      "scope": "event",
+      "reviewStatus": "pending",
+      "reason": "Observed identical/repeated headline or issuer, distinct episode, edition, fiscal period or meeting. Retain temporal support stratification."
+    },
+    {
+      "id": "extra-041",
+      "left": "apple-fy25-q2",
+      "right": "apple-fy25-q3",
+      "split": "holdout",
+      "proposedLabel": "different",
+      "scope": "event",
+      "reviewStatus": "pending",
+      "reason": "Observed identical/repeated headline or issuer, distinct episode, edition, fiscal period or meeting. Retain temporal support stratification."
+    },
+    {
+      "id": "extra-042",
+      "left": "fomc-jun25",
+      "right": "fomc-jul25",
+      "split": "tune",
+      "proposedLabel": "different",
+      "scope": "event",
+      "reviewStatus": "pending",
+      "reason": "Observed identical/repeated headline or issuer, distinct episode, edition, fiscal period or meeting. Retain temporal support stratification."
+    },
+    {
+      "id": "extra-043",
+      "left": "doc-1167",
+      "right": "doc-1424",
+      "split": "tune",
+      "proposedLabel": "different",
+      "scope": "event",
+      "reviewStatus": "pending",
+      "reason": "Same amount/region/topic; different donor or administrative action, not another report of the same occurrence."
+    },
+    {
+      "id": "extra-044",
+      "left": "doc-0848",
+      "right": "doc-1207",
+      "split": "tune",
+      "proposedLabel": "different",
+      "scope": "event",
+      "reviewStatus": "pending",
+      "reason": "Same amount/region/topic; different donor or administrative action, not another report of the same occurrence."
+    },
+    {
+      "id": "extra-045",
+      "left": "doc-1160",
+      "right": "doc-1150",
+      "split": "tune",
+      "proposedLabel": "different",
+      "scope": "event",
+      "reviewStatus": "pending",
+      "reason": "Separate drone strikes on civilians: Haivoron road versus Shestakove car. Distinct places and casualties in the same attack period."
+    },
+    {
+      "id": "extra-046",
+      "left": "doc-1160",
+      "right": "doc-1428",
+      "split": "tune",
+      "proposedLabel": "different",
+      "scope": "event",
+      "reviewStatus": "pending",
+      "reason": "Separate drone strikes on civilians: Haivoron road versus Shestakove car. Distinct places and casualties in the same attack period."
+    },
+    {
+      "id": "extra-047",
+      "left": "doc-1444",
+      "right": "doc-1150",
+      "split": "tune",
+      "proposedLabel": "different",
+      "scope": "event",
+      "reviewStatus": "pending",
+      "reason": "Separate drone strikes on civilians: Haivoron road versus Shestakove car. Distinct places and casualties in the same attack period."
+    },
+    {
+      "id": "extra-048",
+      "left": "doc-1444",
+      "right": "doc-1428",
+      "split": "tune",
+      "proposedLabel": "different",
+      "scope": "event",
+      "reviewStatus": "pending",
+      "reason": "Separate drone strikes on civilians: Haivoron road versus Shestakove car. Distinct places and casualties in the same attack period."
+    },
+    {
+      "id": "extra-049",
+      "left": "doc-0074",
+      "right": "doc-1164",
+      "split": "tune",
+      "proposedLabel": "different",
+      "scope": "event",
+      "reviewStatus": "pending",
+      "reason": "Northern Bridge strike versus announced reserve pontoon construction; related response, separate action."
+    },
+    {
+      "id": "extra-050",
+      "left": "doc-0074",
+      "right": "doc-1204",
+      "split": "tune",
+      "proposedLabel": "different",
+      "scope": "event",
+      "reviewStatus": "pending",
+      "reason": "Northern Bridge strike versus announced reserve pontoon construction; related response, separate action."
+    },
+    {
+      "id": "extra-051",
+      "left": "doc-0074",
+      "right": "doc-1436",
+      "split": "tune",
+      "proposedLabel": "different",
+      "scope": "event",
+      "reviewStatus": "pending",
+      "reason": "Northern Bridge strike versus announced reserve pontoon construction; related response, separate action."
+    },
+    {
+      "id": "extra-052",
+      "left": "doc-0082",
+      "right": "doc-1164",
+      "split": "tune",
+      "proposedLabel": "different",
+      "scope": "event",
+      "reviewStatus": "pending",
+      "reason": "Northern Bridge strike versus announced reserve pontoon construction; related response, separate action."
+    },
+    {
+      "id": "extra-053",
+      "left": "doc-0082",
+      "right": "doc-1204",
+      "split": "tune",
+      "proposedLabel": "different",
+      "scope": "event",
+      "reviewStatus": "pending",
+      "reason": "Northern Bridge strike versus announced reserve pontoon construction; related response, separate action."
+    },
+    {
+      "id": "extra-054",
+      "left": "doc-0082",
+      "right": "doc-1436",
+      "split": "tune",
+      "proposedLabel": "different",
+      "scope": "event",
+      "reviewStatus": "pending",
+      "reason": "Northern Bridge strike versus announced reserve pontoon construction; related response, separate action."
+    },
+    {
+      "id": "extra-055",
+      "left": "kharkiv-oct2-glide-bombs",
+      "right": "doc-1150",
+      "split": "tune",
+      "proposedLabel": "different",
+      "scope": "event",
+      "reviewStatus": "pending",
+      "reason": "Different strikes in Kharkiv oblast within two days: city glide bombs versus Shestakove car drone attack."
+    },
+    {
+      "id": "extra-056",
+      "left": "kharkiv-oct2-glide-bombs",
+      "right": "doc-1428",
+      "split": "tune",
+      "proposedLabel": "different",
+      "scope": "event",
+      "reviewStatus": "pending",
+      "reason": "Different strikes in Kharkiv oblast within two days: city glide bombs versus Shestakove car drone attack."
+    },
+    {
+      "id": "extra-057",
+      "left": "doc-0055",
+      "right": "web-variant-000",
+      "split": "tune",
+      "proposedLabel": "same_document",
+      "scope": "document-only",
+      "reviewStatus": "pending",
+      "reason": "Publisher-advertised same-origin canonical path; independently fetched pages have equal normalized production-readability text. Human adjudication pending."
+    },
+    {
+      "id": "extra-058",
+      "left": "doc-0056",
+      "right": "web-variant-001",
+      "split": "tune",
+      "proposedLabel": "same_document",
+      "scope": "document-only",
+      "reviewStatus": "pending",
+      "reason": "Publisher-advertised same-origin canonical path; independently fetched pages have equal normalized production-readability text. Human adjudication pending."
+    },
+    {
+      "id": "extra-059",
+      "left": "doc-0057",
+      "right": "web-variant-002",
+      "split": "holdout",
+      "proposedLabel": "same_document",
+      "scope": "document-only",
+      "reviewStatus": "pending",
+      "reason": "Publisher-advertised same-origin canonical path; independently fetched pages have equal normalized production-readability text. Human adjudication pending."
+    },
+    {
+      "id": "extra-060",
+      "left": "doc-1053",
+      "right": "web-variant-013",
+      "split": "holdout",
+      "proposedLabel": "same_document",
+      "scope": "document-only",
+      "reviewStatus": "pending",
+      "reason": "Publisher-advertised same-origin canonical path; independently fetched pages have equal normalized production-readability text. Human adjudication pending."
+    },
+    {
+      "id": "extra-061",
+      "left": "doc-1054",
+      "right": "web-variant-014",
+      "split": "holdout",
+      "proposedLabel": "same_document",
+      "scope": "document-only",
+      "reviewStatus": "pending",
+      "reason": "Publisher-advertised same-origin canonical path; independently fetched pages have equal normalized production-readability text. Human adjudication pending."
+    },
+    {
+      "id": "extra-062",
+      "left": "doc-1055",
+      "right": "web-variant-015",
+      "split": "tune",
+      "proposedLabel": "same_document",
+      "scope": "document-only",
+      "reviewStatus": "pending",
+      "reason": "Publisher-advertised same-origin canonical path; independently fetched pages have equal normalized production-readability text. Human adjudication pending."
+    }
+  ],
+  "proposedAssignmentCorrections": [
+    {
+      "id": "doc-0273",
+      "previousEvent": "occurrence-0273",
+      "proposedEvent": "kyiv-pontoon-plan",
+      "previousFamily": "occurrence-0273",
+      "proposedFamily": "kyiv-bridges",
+      "reason": "Kalashnyk announcement of reserve pontoon crossings; separate from the bridge strikes.",
+      "reviewStatus": "pending"
+    }
+  ],
+  "excludedCandidates": [
+    {
+      "captureIndexes": [
+        76,
+        319,
+        321,
+        1267,
+        1247,
+        1274,
+        316,
+        826,
+        828,
+        1290
+      ],
+      "reason": "Multi-event roundups, broad thematic/background pieces or unclear occurrence boundary; kept private for reviewer context, not proposed as fresh event positives."
+    }
+  ]
+}

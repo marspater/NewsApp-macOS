@@ -11,7 +11,6 @@ on:
 
 permissions:
   contents: read
-  security-events: write
 
 concurrency:
   group: security-${{ github.workflow }}-${{ github.ref }}
@@ -20,12 +19,23 @@ concurrency:
 jobs:
   codeql:
     name: CodeQL (Swift)
-    runs-on: macos-15
-    timeout-minutes: 20
+    permissions:
+      contents: read
+      security-events: write
+    # Keep extraction on a supported stable toolchain; normal CI tests Xcode 27.
+    runs-on: macos-26
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+    timeout-minutes: 30
 
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+
+      # CodeQL tracing requires Rosetta on Apple Silicon, including compiler
+      # subprocesses. The application itself is still compiled only for arm64.
+      - name: Prepare CodeQL tracing runtime
+        run: sudo softwareupdate --install-rosetta --agree-to-license
 
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v4
@@ -34,15 +44,37 @@ jobs:
           build-mode: manual
           queries: security-extended
 
-      # This repository is a Swift Package without an Xcode project/workspace.
-      # Build one architecture so CodeQL can observe the compiled Swift code.
-      - name: Build Swift package for CodeQL
-        run: swift build --target News --arch arm64
+      # Extract all app sources without release optimization or bundle packaging.
+      # Disable only compiler subprocess sandboxing on this disposable runner;
+      # application sandbox entitlements remain unchanged.
+      - name: Build arm64 sources for CodeQL
+        run: swift build --force-resolved-versions --target News --arch arm64 --jobs 3 --disable-sandbox -Xswiftc -disable-sandbox
 
       - name: Analyze
         uses: github/codeql-action/analyze@v4
         with:
           category: "/language:swift"
+
+  codeql-actions:
+    name: CodeQL (Actions)
+    permissions:
+      contents: read
+      security-events: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: actions
+          build-mode: none
+          queries: security-extended
+      - name: Analyze
+        uses: github/codeql-action/analyze@v4
+        with:
+          category: "/language:actions"
 
   dependency-review:
     name: Dependency Review
@@ -70,13 +102,13 @@ jobs:
         with:
           fetch-depth: 0
       - name: TruffleHog OSS
-        uses: trufflesecurity/trufflehog@v3.97.9
+        uses: trufflesecurity/trufflehog@4dd8831c5f12599465d4d45c3c447b4018a34c85 # v3.97.9
         with:
           extra_args: --results=verified,unknown
 
   swift-security-tests:
     name: Swift Security Tests
-    runs-on: macos-15
+    runs-on: xcode-27
     timeout-minutes: 20
     steps:
       - name: Checkout

@@ -1,0 +1,327 @@
+{
+  "version": 1,
+  "description": "Historical sample corpus for calibration of the News Tension Index (Issue #158)",
+  "sampleDays": [
+    {
+      "id": "day-01-major-conflict-escalation",
+      "date": "2026-09-01T00:00:00Z",
+      "reportingFeedCatalogIDs": [
+        "bbc-world", "guardian-world", "dw-english", "france-24", "cbc-world",
+        "al-jazeera", "arab-news", "the-hindu", "cna", "africanews"
+      ],
+      "expectedCoverageStatus": "sufficient",
+      "events": [
+        {
+          "id": "evt-01-frontline-offensive",
+          "expectedType": "armedConflict",
+          "expectedDeaths": "hundreds",
+          "expectedAffected": "thousands",
+          "expectedEscalation": "escalating",
+          "reportingCatalogIDs": ["bbc-world", "guardian-world", "al-jazeera", "cbc-world", "cna"],
+          "facts": [
+            { "id": "f101", "quote": "Military troops launched a new offensive across the eastern frontline at dawn." },
+            { "id": "f102", "quote": "Heavy artillery and missile strikes intensified through the morning, killing at least 140 people." },
+            { "id": "f103", "quote": "Relief coordinators reported over 5,000 residents were displaced by the renewed fighting." }
+          ]
+        },
+        {
+          "id": "evt-02-port-airstrikes",
+          "expectedType": "armedConflict",
+          "expectedDeaths": "tens",
+          "expectedAffected": "tens",
+          "expectedEscalation": "escalating",
+          "reportingCatalogIDs": ["france-24", "dw-english", "arab-news"],
+          "facts": [
+            { "id": "f104", "quote": "Drone strikes hit naval facilities in the southern harbor as armed conflict escalated." },
+            { "id": "f105", "quote": "Authorities said the death toll rose to 28 with 40 others injured." }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "day-02-major-earthquake",
+      "date": "2026-09-02T00:00:00Z",
+      "reportingFeedCatalogIDs": [
+        "bbc-world", "guardian-world", "dw-english", "france-24", "euronews",
+        "cbc-world", "al-jazeera", "the-hindu", "dawn", "cna", "africanews"
+      ],
+      "expectedCoverageStatus": "sufficient",
+      "events": [
+        {
+          "id": "evt-03-highland-earthquake",
+          "expectedType": "disaster",
+          "expectedDeaths": "hundreds",
+          "expectedAffected": "thousands",
+          "expectedEscalation": "noSignal",
+          "reportingCatalogIDs": ["bbc-world", "dw-english", "the-hindu", "cna", "cbc-world"],
+          "facts": [
+            { "id": "f201", "quote": "A 7.4 magnitude earthquake struck the mountainous province near the border." },
+            { "id": "f202", "quote": "Search and rescue teams confirmed 420 deaths across ten flattened villages." },
+            { "id": "f203", "quote": "More than 12,000 civilians were displaced and left homeless in freezing weather." }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "day-03-civil-unrest",
+      "date": "2026-09-03T00:00:00Z",
+      "reportingFeedCatalogIDs": [
+        "bbc-world", "france-24", "cbc-world", "al-jazeera",
+        "arab-news", "the-hindu", "cna", "africanews"
+      ],
+      "expectedCoverageStatus": "sufficient",
+      "events": [
+        {
+          "id": "evt-04-capital-protests",
+          "expectedType": "civilUnrest",
+          "expectedDeaths": "units",
+          "expectedAffected": "hundreds",
+          "expectedEscalation": "escalating",
+          "reportingCatalogIDs": ["france-24", "al-jazeera", "africanews", "bbc-world"],
+          "facts": [
+            { "id": "f301", "quote": "Protesters clashed with security forces in the capital after a national curfew was announced." },
+            { "id": "f302", "quote": "Police deployed tear gas during rioting, injuring over 150 demonstrators." },
+            { "id": "f303", "quote": "Officials said 4 protesters were killed as unrest stepped up overnight." }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "day-04-diplomatic-coercion",
+      "date": "2026-09-04T00:00:00Z",
+      "reportingFeedCatalogIDs": [
+        "bbc-world", "guardian-world", "dw-english", "cbc-world",
+        "al-jazeera", "the-hindu", "dawn", "cna", "africanews"
+      ],
+      "expectedCoverageStatus": "sufficient",
+      "events": [
+        {
+          "id": "evt-05-missile-test-sanctions",
+          "expectedType": "coercion",
+          "expectedDeaths": "notReported",
+          "expectedAffected": "notReported",
+          "expectedEscalation": "escalating",
+          "reportingCatalogIDs": ["cna", "bbc-world", "cbc-world", "the-hindu"],
+          "facts": [
+            { "id": "f401", "quote": "The defense ministry conducted an unannounced ballistic missile test over international waters." },
+            { "id": "f402", "quote": "Allied nations issued an ultimatum and enacted sweeping economic sanctions." },
+            { "id": "f403", "quote": "Diplomatic sources warned the military drills have intensified regional tensions." }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "day-05-ceasefire-deescalation",
+      "date": "2026-09-05T00:00:00Z",
+      "reportingFeedCatalogIDs": [
+        "bbc-world", "dw-english", "france-24", "cbc-world",
+        "al-jazeera", "the-hindu", "dawn", "africanews"
+      ],
+      "expectedCoverageStatus": "sufficient",
+      "events": [
+        {
+          "id": "evt-06-border-truce",
+          "expectedType": "armedConflict",
+          "expectedDeaths": "notReported",
+          "expectedAffected": "notReported",
+          "expectedEscalation": "deescalating",
+          "reportingCatalogIDs": ["al-jazeera", "bbc-world", "dawn", "france-24"],
+          "facts": [
+            { "id": "f501", "quote": "Both nations agreed to a formal ceasefire following bilateral peace talks in Geneva." },
+            { "id": "f502", "quote": "Commanders confirmed troops withdrew from forward positions under a comprehensive peace deal." },
+            { "id": "f503", "quote": "A prisoner exchange of 80 soldiers began as curfew was lifted across border towns." }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "day-06-routine-peaceful-day",
+      "date": "2026-09-06T00:00:00Z",
+      "reportingFeedCatalogIDs": [
+        "bbc-world", "guardian-world", "dw-english", "cbc-world",
+        "al-jazeera", "the-hindu", "cna", "africanews"
+      ],
+      "expectedCoverageStatus": "sufficient",
+      "events": [
+        {
+          "id": "evt-07-trade-forum",
+          "expectedType": null,
+          "expectedDeaths": "notReported",
+          "expectedAffected": "notReported",
+          "expectedEscalation": "noSignal",
+          "reportingCatalogIDs": ["bbc-world", "cbc-world", "cna"],
+          "facts": [
+            { "id": "f601", "quote": "Finance ministers gathered for the annual international trade forum in Singapore." },
+            { "id": "f602", "quote": "Discussions focused on supply chain logistics, renewable tariffs and economic forecasts." }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "day-07-cyberattack",
+      "date": "2026-09-07T00:00:00Z",
+      "reportingFeedCatalogIDs": [
+        "bbc-world", "dw-english", "cbc-world", "al-jazeera",
+        "the-hindu", "cna", "africanews"
+      ],
+      "expectedCoverageStatus": "sufficient",
+      "events": [
+        {
+          "id": "evt-08-grid-ransomware",
+          "expectedType": "cyberAttack",
+          "expectedDeaths": "notReported",
+          "expectedAffected": "notReported",
+          "expectedEscalation": "noSignal",
+          "reportingCatalogIDs": ["bbc-world", "dw-english", "cbc-world"],
+          "facts": [
+            { "id": "f701", "quote": "A sophisticated ransomware attack temporarily disabled computer systems at regional utilities." },
+            { "id": "f702", "quote": "Cybersecurity investigators linked the major data breach to an international syndicate." }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "day-08-health-emergency",
+      "date": "2026-09-08T00:00:00Z",
+      "reportingFeedCatalogIDs": [
+        "bbc-world", "france-24", "cbc-world", "al-jazeera",
+        "arab-news", "the-hindu", "africanews"
+      ],
+      "expectedCoverageStatus": "sufficient",
+      "events": [
+        {
+          "id": "evt-09-cholera-outbreak",
+          "expectedType": "healthEmergency",
+          "expectedDeaths": "tens",
+          "expectedAffected": "hundreds",
+          "expectedEscalation": "noSignal",
+          "reportingCatalogIDs": ["al-jazeera", "france-24", "africanews"],
+          "facts": [
+            { "id": "f801", "quote": "Health officials declared a public health emergency following a severe cholera outbreak." },
+            { "id": "f802", "quote": "At least 35 deaths were registered with over 450 people hospitalised in two weeks." }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "day-09-hard-negatives-negations",
+      "date": "2026-09-09T00:00:00Z",
+      "reportingFeedCatalogIDs": [
+        "bbc-world", "dw-english", "cbc-world", "al-jazeera",
+        "arab-news", "the-hindu", "cna", "africanews"
+      ],
+      "expectedCoverageStatus": "sufficient",
+      "events": [
+        {
+          "id": "evt-10-denials-and-negations",
+          "expectedType": null,
+          "expectedDeaths": "notReported",
+          "expectedAffected": "notReported",
+          "expectedEscalation": "noSignal",
+          "reportingCatalogIDs": ["bbc-world", "cbc-world", "al-jazeera"],
+          "facts": [
+            { "id": "f901", "quote": "Officials confirmed there were no airstrikes conducted over the border." },
+            { "id": "f902", "quote": "The defense ministry denied a troop buildup and rejected calls for sanctions." },
+            { "id": "f903", "quote": "Spokespersons ruled out offensive operations and said no casualties occurred." }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "day-10-hard-negatives-reversals",
+      "date": "2026-09-10T00:00:00Z",
+      "reportingFeedCatalogIDs": [
+        "bbc-world", "guardian-world", "france-24", "cbc-world",
+        "al-jazeera", "the-hindu", "cna", "africanews"
+      ],
+      "expectedCoverageStatus": "sufficient",
+      "events": [
+        {
+          "id": "evt-11-ceasefire-collapse",
+          "expectedType": "armedConflict",
+          "expectedDeaths": "tens",
+          "expectedAffected": "notReported",
+          "expectedEscalation": "escalating",
+          "reportingCatalogIDs": ["bbc-world", "guardian-world", "al-jazeera"],
+          "facts": [
+            { "id": "f1001", "quote": "The fragile ceasefire collapsed within hours as artillery bombardment resumed." },
+            { "id": "f1002", "quote": "Peace talks failed after delegates walked out and fighting intensified." },
+            { "id": "f1003", "quote": "Medical sources reported 18 soldiers were killed in the fighting." }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "day-11-hard-negatives-historical-years",
+      "date": "2026-09-11T00:00:00Z",
+      "reportingFeedCatalogIDs": [
+        "bbc-world", "dw-english", "france-24", "cbc-world",
+        "al-jazeera", "the-hindu", "cna", "africanews"
+      ],
+      "expectedCoverageStatus": "sufficient",
+      "events": [
+        {
+          "id": "evt-12-historical-treaty-commemoration",
+          "expectedType": null,
+          "expectedDeaths": "notReported",
+          "expectedAffected": "notReported",
+          "expectedEscalation": "noSignal",
+          "reportingCatalogIDs": ["bbc-world", "dw-english", "france-24"],
+          "facts": [
+            { "id": "f1101", "quote": "Leaders gathered to commemorate the historic accord signed in 1995." },
+            { "id": "f1102", "quote": "The delegates reviewed bilateral goals originally framed in 1980 and updated in 2024." }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "day-12-insufficient-feeds",
+      "date": "2026-09-12T00:00:00Z",
+      "reportingFeedCatalogIDs": [
+        "bbc-world", "dw-english", "cbc-world", "al-jazeera", "the-hindu"
+      ],
+      "expectedCoverageStatus": "insufficient",
+      "events": [
+        {
+          "id": "evt-13-unrest-low-coverage",
+          "expectedType": "civilUnrest",
+          "expectedDeaths": "notReported",
+          "expectedAffected": "notReported",
+          "expectedEscalation": "noSignal",
+          "reportingCatalogIDs": ["bbc-world", "dw-english"],
+          "facts": [
+            { "id": "f1201", "quote": "Demonstrators marched against utility price increases in the provincial capital." }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "day-13-insufficient-regions",
+      "date": "2026-09-13T00:00:00Z",
+      "reportingFeedCatalogIDs": [
+        "bbc-world", "guardian-world", "dw-english", "france-24", "euronews", "cbc-world"
+      ],
+      "expectedCoverageStatus": "insufficient",
+      "events": [
+        {
+          "id": "evt-14-regional-unrest",
+          "expectedType": "civilUnrest",
+          "expectedDeaths": "notReported",
+          "expectedAffected": "tens",
+          "expectedEscalation": "noSignal",
+          "reportingCatalogIDs": ["bbc-world", "guardian-world", "france-24"],
+          "facts": [
+            { "id": "f1301", "quote": "Protests and rioting disrupted transit hubs, with 25 passengers injured." }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "day-14-no-data",
+      "date": "2026-09-14T00:00:00Z",
+      "reportingFeedCatalogIDs": [],
+      "expectedCoverageStatus": "noData",
+      "events": []
+    }
+  ]
+}

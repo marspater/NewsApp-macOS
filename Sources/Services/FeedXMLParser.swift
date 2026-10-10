@@ -23,8 +23,11 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
     private var itemDescription = ""
     private var itemLink = ""
     private var itemGuid = ""
+    private var itemGuidIsPermalink = true
     private var itemPubDate = ""
     private var itemImageUrl = ""
+    private var itemImageCandidates = [ReaderImageCandidate]()
+    private var itemContentIsXHTML = false
     private var itemCategory = ""
     private var itemContentEncoded = ""
     private var isCollectingContentEncoded = false
@@ -70,7 +73,7 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
                         description: articles[i].description, pubDate: articles[i].pubDate,
                         source: name, imageUrl: articles[i].imageUrl,
                         aiSummary: articles[i].aiSummary, fullContent: articles[i].fullContent,
-                        category: articles[i].category, contentFetched: articles[i].contentFetched
+                        category: articles[i].category, contentFetched: articles[i].contentFetched, readerDocument: articles[i].readerDocument
                     )
                 }
             }
@@ -95,9 +98,10 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
 
     // MARK: - XMLParserDelegate
 
-    func parser(_ parser: XMLParser, didStartElement elementName: String, namespaceURI: String?, qualifiedName qName: String?, attributes attributeDict: [String: String] = [:]) {
+    func parser(_ parser: XMLParser, didStartElement elementName: String, namespaceURI: String?, qualifiedName _: String?, attributes attributeDict: [String: String] = [:]) {
         currentNestingDepth += 1
-        if currentNestingDepth > maxNestingDepth {
+        // A cancelled refresh stops here instead of extracting the rest of the feed.
+        if currentNestingDepth > maxNestingDepth || Task.isCancelled {
             parser.abortParsing()
             return
         }
@@ -120,12 +124,15 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
             itemDescription = ""
             itemLink = ""
             itemGuid = ""
+            itemGuidIsPermalink = true
             itemPubDate = ""
             itemUpdated = ""
             contentDepth = nil
             itemContentIsPlainText = false
             isCollectingContentEncoded = false
             itemImageUrl = ""
+            itemImageCandidates = []
+            itemContentIsXHTML = false
             itemCategory = ""
             itemContentEncoded = ""
         }
@@ -135,21 +142,36 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
             itemContentEncoded = ""
             contentDepth = currentNestingDepth
             itemContentIsPlainText = elementName == "content" && (attributeDict["type"] ?? "text") == "text"
-        } else if isCollectingContentEncoded && ["p", "div", "br", "li", "h1", "h2", "blockquote"].contains(elementName) {
-            itemContentEncoded += "\n\n"
+            itemContentIsXHTML = elementName == "content" && attributeDict["type"] == "xhtml"
+        } else if isCollectingContentEncoded && !itemContentIsPlainText {
+            let attributes = attributeDict.sorted { $0.key < $1.key }.map { key, value in
+                " \(key)=\"\(escapeHTML(value))\""
+            }.joined()
+            itemContentEncoded += "<\(elementName)\(attributes)>"
+        }
+
+        if insideItem && elementName == "guid" {
+            itemGuidIsPermalink = attributeDict["isPermaLink"]?.lowercased() != "false"
         }
 
         if insideItem && elementName == "category", let term = attributeDict["term"], itemCategory.isEmpty {
             itemCategory = term
         }
 
-        if insideItem && (elementName == "enclosure" || elementName == "media:content" || elementName == "media:thumbnail") {
-            if let url = attributeDict["url"], !url.isEmpty {
-                if let type = attributeDict["type"], type.hasPrefix("image") {
-                    itemImageUrl = url
-                } else if itemImageUrl.isEmpty {
-                    itemImageUrl = url
-                }
+        if insideItem && ["enclosure", "media:content", "media:thumbnail"].contains(elementName),
+           let raw = attributeDict["url"], !raw.isEmpty {
+            let type = attributeDict["type"]?.lowercased()
+            let medium = attributeDict["medium"]?.lowercased()
+            let url = resolvedURL(raw)
+            let width = attributeDict["width"].flatMap(Int.init), height = attributeDict["height"].flatMap(Int.init)
+            // The Guardian lists sized media:content renditions with neither type nor medium.
+            let isImage = type?.hasPrefix("image/") == true
+                || (type == nil && (elementName == "media:thumbnail" || medium == "image"
+                    || (elementName == "media:content" && medium == nil && width != nil)))
+            if isImage, ReaderImageCandidate.usable(url: url, width: width, height: height), itemImageCandidates.count < 8 {
+                itemImageCandidates.append(ReaderImageCandidate(url: url, origin: .feed, width: width, height: height))
+                // The widest rendition; the first listed when sizes are unknown or equal.
+                itemImageUrl = itemImageCandidates.max { ($0.width ?? 0) < ($1.width ?? 0) }?.url ?? url
             }
         }
 
@@ -161,9 +183,9 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
         }
     }
 
-    func parser(_ parser: XMLParser, foundCharacters string: String) {
+    func parser(_ _: XMLParser, foundCharacters string: String) {
         if isCollectingContentEncoded {
-            itemContentEncoded += string
+            itemContentEncoded += itemContentIsXHTML ? escapeHTML(string) : string
             return
         }
 
@@ -172,6 +194,11 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
         }
 
         guard insideItem else { return }
+        if currentElement == "media:credit", !itemImageCandidates.isEmpty {
+            let index = itemImageCandidates.count - 1
+            itemImageCandidates[index].credit = String(((itemImageCandidates[index].credit ?? "") + string).prefix(500))
+            return
+        }
         let field = elementStack.last(where: { ["title", "description", "summary", "link", "guid", "id", "pubDate", "published", "updated", "category", "dc:subject"].contains($0) }) ?? currentElement
         switch field {
         case "title": itemTitle += string
@@ -185,19 +212,19 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
         }
     }
 
-    func parser(_ parser: XMLParser, foundCDATA CDATABlock: Data) {
-        guard let str = String(data: CDATABlock, encoding: .utf8) else { return }
+    func parser(_ parser: XMLParser, foundCDATA cdataBlock: Data) {
+        guard let str = String(data: cdataBlock, encoding: .utf8) else { return }
 
         self.parser(parser, foundCharacters: str)
     }
 
-    func parser(_ parser: XMLParser, didEndElement elementName: String, namespaceURI: String?, qualifiedName qName: String?) {
+    func parser(_ _: XMLParser, didEndElement elementName: String, namespaceURI: String?, qualifiedName _: String?) {
         let elementName = normalizedElement(elementName, namespaceURI: namespaceURI)
         if contentDepth == currentNestingDepth {
             isCollectingContentEncoded = false
             contentDepth = nil
-        } else if isCollectingContentEncoded && ["p", "div", "li", "blockquote"].contains(elementName) {
-            itemContentEncoded += "\n\n"
+        } else if isCollectingContentEncoded && !itemContentIsPlainText {
+            itemContentEncoded += "</\(elementName)>"
         }
         currentNestingDepth = max(0, currentNestingDepth - 1)
         _ = elementStack.popLast()
@@ -209,11 +236,15 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
 
             guard articles.count < maxArticlesPerFeed else { return }
 
-            let date = DateParser.parse(itemPubDate.isEmpty ? itemUpdated : itemPubDate)
+            let date = DateParser.parse(itemPubDate.isEmpty ? itemUpdated : itemPubDate) ?? DateParser.unknownDate
             let cleanDesc = stripHTMLSimple(itemDescription).trimmingCharacters(in: .whitespacesAndNewlines)
 
             var fullContent: String? = nil
             let trimmedContent = itemContentEncoded.trimmingCharacters(in: .whitespacesAndNewlines)
+            // Some publishers put plain text in content:encoded, with line breaks between paragraphs. HTML extraction would
+            // collapse it into one paragraph; the simple cleanup keeps the breaks and still decodes entities.
+            let plainText = itemContentIsPlainText
+                || (!itemContentIsXHTML && !trimmedContent.contains("<") && trimmedContent.contains("\n"))
             if !trimmedContent.isEmpty {
                 let cleaned = itemContentIsPlainText ? trimmedContent : stripHTMLSimple(trimmedContent)
                 fullContent = cleaned.isEmpty ? nil : cleaned
@@ -224,18 +255,9 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
                 sourceName = extractSourceFromURL(itemLink.trimmingCharacters(in: .whitespacesAndNewlines))
             }
 
-            if let dashRange = sourceName.range(of: " - ", options: .backwards) {
-                let before = sourceName[..<dashRange.lowerBound]
-                if before.count > 2 { sourceName = String(before) }
-            }
-            if let gtRange = sourceName.range(of: " > ") {
-                let before = sourceName[..<gtRange.lowerBound]
-                if before.count > 2 { sourceName = String(before) }
-            }
-            if let pipeRange = sourceName.range(of: " | ") {
-                let before = sourceName[..<pipeRange.lowerBound]
-                if before.count > 2 { sourceName = String(before) }
-            }
+            trimSourceName(&sourceName, separator: " - ", options: .backwards)
+            trimSourceName(&sourceName, separator: " > ")
+            trimSourceName(&sourceName, separator: " | ")
 
             if itemImageUrl.isEmpty {
                 itemImageUrl = extractImageFromHTML(itemDescription) ?? ""
@@ -245,6 +267,12 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
             }
 
             let guidVal = itemGuid.trimmingCharacters(in: .whitespacesAndNewlines)
+            var articleLink = itemLink.trimmingCharacters(in: .whitespacesAndNewlines)
+            if articleLink.isEmpty, itemGuidIsPermalink,
+               let url = URL(string: guidVal),
+               ["http", "https"].contains(url.scheme?.lowercased() ?? ""), url.host != nil {
+                articleLink = guidVal
+            }
             let cleanCategory: String? = {
                 let first = itemCategory.components(separatedBy: .newlines)
                     .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -252,21 +280,34 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
                 guard let first = first, !first.isEmpty else { return nil }
                 return first
             }()
+            let extracted = plainText ? nil : ContentExtractionPipeline.shared.extractFromHTML(trimmedContent, baseUrl: resolvedURL(articleLink))
+            var document: ReaderDocument?
+            if case .success(_, _, let extractedDocument) = extracted { document = extractedDocument }
+            if !itemImageCandidates.isEmpty {
+                document = ReaderDocument(blocks: document?.blocks ?? [], images: (document?.images ?? []) + itemImageCandidates)
+            }
+            document = document?.curated(feedImage: itemImageUrl.isEmpty ? nil : resolvedURL(itemImageUrl), title: itemTitle)
             let article = FeedArticle(
                 title: itemTitle.trimmingCharacters(in: .whitespacesAndNewlines),
-                link: resolvedURL(itemLink),
+                link: resolvedURL(articleLink),
                 guid: guidVal.isEmpty ? nil : guidVal,
                 description: cleanDesc,
                 pubDate: date,
                 source: sourceName.isEmpty ? "Feed" : sourceName,
                 imageUrl: itemImageUrl.isEmpty ? nil : resolvedURL(itemImageUrl),
                 aiSummary: nil,
-                fullContent: fullContent,
+                fullContent: extracted?.content ?? fullContent,
                 category: cleanCategory,
-                contentFetched: fullContent != nil
+                contentFetched: fullContent != nil,
+                readerDocument: document
             )
             articles.append(article)
         }
+    }
+
+    private func escapeHTML(_ text: String) -> String {
+        text.replacingOccurrences(of: "&", with: "&amp;").replacingOccurrences(of: "<", with: "&lt;")
+            .replacingOccurrences(of: ">", with: "&gt;").replacingOccurrences(of: "\"", with: "&quot;")
     }
 
     private func normalizedElement(_ name: String, namespaceURI: String?) -> String {
@@ -300,31 +341,30 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
             with: " ",
             options: .regularExpression
         )
-        text = text
-            .replacingOccurrences(of: "&nbsp;", with: " ")
-            .replacingOccurrences(of: "&amp;", with: "&")
-            .replacingOccurrences(of: "&quot;", with: "\"")
-            .replacingOccurrences(of: "&#39;", with: "'")
-            .replacingOccurrences(of: "&apos;", with: "'")
-            .replacingOccurrences(of: "&lt;", with: "<")
-            .replacingOccurrences(of: "&gt;", with: ">")
-            .replacingOccurrences(of: "&#8217;", with: "\u{2019}")
-            .replacingOccurrences(of: "&#8220;", with: "\u{201C}")
-            .replacingOccurrences(of: "&#8221;", with: "\u{201D}")
-            .replacingOccurrences(of: "&#8212;", with: "\u{2014}")
-            .replacingOccurrences(of: "&mdash;", with: "\u{2014}")
-            .replacingOccurrences(of: "&#8211;", with: "\u{2013}")
-            .replacingOccurrences(of: "&ndash;", with: "\u{2013}")
+        // Every named and numeric form, including zero-padded ones such as `&#039;`.
+        text = ContentExtractionPipeline.shared.decodeHTMLEntities(text)
         
         text = text.replacingOccurrences(of: "[ \\t]+", with: " ", options: .regularExpression)
+        text = text.replacingOccurrences(of: "[ \\t]*\\n[ \\t]*", with: "\n", options: .regularExpression)
         text = text.replacingOccurrences(of: "\\n{3,}", with: "\n\n", options: .regularExpression)
 
         return ArticleContentRedactor.cleanText(text.trimmingCharacters(in: .whitespacesAndNewlines))
     }
 
+    private func trimSourceName(_ sourceName: inout String, separator: String, options: String.CompareOptions = []) {
+        if let range = sourceName.range(of: separator, options: options) {
+            let before = sourceName[..<range.lowerBound]
+            if before.count > 2 { sourceName = String(before) }
+        }
+    }
+
+    private static let imageRegex: NSRegularExpression? = {
+        try? NSRegularExpression(pattern: "<img[^>]+src\\s*=\\s*['\"]([^'\"]+)['\"]", options: .caseInsensitive)
+    }()
+
     private func extractImageFromHTML(_ html: String) -> String? {
-        let pattern = "<img[^>]+src\\s*=\\s*['\"]([^'\"]+)['\"]"
-        guard let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive) else { return nil }
+        // Avoid repeated compilation of regex per parsed item
+        guard let regex = Self.imageRegex else { return nil }
         let range = NSRange(html.startIndex..., in: html)
         guard let match = regex.firstMatch(in: html, range: range),
               let captureRange = Range(match.range(at: 1), in: html) else { return nil }

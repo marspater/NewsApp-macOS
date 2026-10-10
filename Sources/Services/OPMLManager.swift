@@ -20,15 +20,24 @@ public final class OPMLParser: NSObject, XMLParserDelegate, @unchecked Sendable 
     private var outlineStack: [Bool] = []
 
     public static func parse(data: Data) -> [OPMLItem] {
+        (try? parseValidated(data: data)) ?? []
+    }
+
+    public static func parseValidated(data: Data) throws -> [OPMLItem] {
+        guard data.count <= OPMLFileReader.maximumBytes else {
+            throw NSError(domain: "OPML", code: 2, userInfo: [NSLocalizedDescriptionKey: "OPML files must be no larger than 5 MB."])
+        }
         let parser = OPMLParser()
         let xmlParser = XMLParser(data: data)
         xmlParser.shouldResolveExternalEntities = false
         xmlParser.delegate = parser
-        xmlParser.parse()
+        guard xmlParser.parse() else {
+            throw xmlParser.parserError ?? NSError(domain: "OPML", code: 1, userInfo: [NSLocalizedDescriptionKey: "The OPML file is incomplete or malformed."])
+        }
         return parser.items
     }
 
-    public func parser(_ parser: XMLParser, didStartElement elementName: String, namespaceURI: String?, qualifiedName qName: String?, attributes attributeDict: [String : String] = [:]) {
+    public func parser(_ _: XMLParser, didStartElement elementName: String, namespaceURI _: String?, qualifiedName _: String?, attributes attributeDict: [String : String] = [:]) {
         guard elementName.lowercased() == "outline" else { return }
 
         var xmlUrl: String?
@@ -53,7 +62,7 @@ public final class OPMLParser: NSObject, XMLParserDelegate, @unchecked Sendable 
         }
     }
 
-    public func parser(_ parser: XMLParser, didEndElement elementName: String, namespaceURI: String?, qualifiedName qName: String?) {
+    public func parser(_ _: XMLParser, didEndElement elementName: String, namespaceURI _: String?, qualifiedName _: String?) {
         guard elementName.lowercased() == "outline" else { return }
         if let isFolder = outlineStack.popLast(), isFolder {
             _ = folderStack.popLast()
@@ -104,6 +113,25 @@ public enum OPMLExporter: Sendable {
     }
 }
 
+/// Reads off the UI actor, with a bound even if the file grows after selection.
+enum OPMLFileReader {
+    static let maximumBytes = 5 * 1024 * 1024
+
+    static func read(_ url: URL) async throws -> Data {
+        try await Task.detached(priority: .userInitiated) {
+            let scoped = url.startAccessingSecurityScopedResource()
+            defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+            let handle = try FileHandle(forReadingFrom: url)
+            defer { try? handle.close() }
+            let data = try handle.read(upToCount: maximumBytes + 1) ?? Data()
+            guard data.count <= maximumBytes else {
+                throw NSError(domain: "OPML", code: 2, userInfo: [NSLocalizedDescriptionKey: "OPML files must be no larger than 5 MB."])
+            }
+            return data
+        }.value
+    }
+}
+
 @MainActor
 public enum OPMLDialogs {
     public static func importOPML(onImport: @escaping (Data) -> Void) {
@@ -118,8 +146,11 @@ public enum OPMLDialogs {
         } else {
             panel.allowedContentTypes = [.xml]
         }
-        if panel.runModal() == .OK, let url = panel.url, let data = try? Data(contentsOf: url) {
-            onImport(data)
+        if panel.runModal() == .OK, let url = panel.url {
+            Task {
+                do { onImport(try await OPMLFileReader.read(url)) }
+                catch { NSAlert(error: error).runModal() }
+            }
         }
     }
 
@@ -134,7 +165,8 @@ public enum OPMLDialogs {
             panel.allowedContentTypes = [.xml]
         }
         if panel.runModal() == .OK, let url = panel.url {
-            try? xmlString.write(to: url, atomically: true, encoding: .utf8)
+            do { try xmlString.write(to: url, atomically: true, encoding: .utf8) }
+            catch { NSAlert(error: error).runModal() }
         }
     }
 }

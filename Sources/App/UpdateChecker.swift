@@ -87,6 +87,10 @@ final class UpdateChecker: ObservableObject {
     @Published var lastCheckDate: Date? = nil
     @Published var statusMessage: String? = nil
 
+    private let httpClient: SecureHTTPClient
+
+    init(httpClient: SecureHTTPClient = .shared) { self.httpClient = httpClient }
+
     private let logger = Logger(subsystem: "com.marspater.news", category: "UpdateChecker")
     private let minimumCheckInterval: TimeInterval = 6 * 3600 // 6 hours
 
@@ -104,6 +108,10 @@ final class UpdateChecker: ObservableObject {
 
         guard !isChecking else { return }
         isChecking = true
+        updateAvailable = false
+        latestVersionString = nil
+        releaseNotes = nil
+        verifiedReleaseURL = nil
         statusMessage = "Checking for updates..."
         defer { isChecking = false }
 
@@ -113,26 +121,16 @@ final class UpdateChecker: ObservableObject {
             return
         }
 
-        var request = URLRequest(url: url)
-        request.httpMethod = "GET"
-        request.timeoutInterval = 10.0
-        request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
-        request.setValue("NewsApp/\(currentAppVersion)", forHTTPHeaderField: "User-Agent")
-
         do {
-            let (data, response) = try await URLSession.shared.data(for: request)
-            guard let httpResponse = response as? HTTPURLResponse else {
-                statusMessage = "Invalid server response"
-                return
-            }
-
-            if httpResponse.statusCode == 404 {
-                statusMessage = "NewsApp is up to date (v\(currentAppVersion))"
-                updateAvailable = false
-                lastCheckDate = Date()
-                return
-            }
-
+            let (data, httpResponse) = try await httpClient.fetchData(
+                from: url,
+                maxBytes: 1024 * 1024,
+                timeout: 10,
+                customHeaders: [
+                    "Accept": "application/vnd.github+json",
+                    "User-Agent": "NewsApp/\(currentAppVersion)"
+                ]
+            )
             guard httpResponse.statusCode == 200 else {
                 statusMessage = "Update check failed (HTTP \(httpResponse.statusCode))"
                 return
@@ -182,6 +180,11 @@ final class UpdateChecker: ObservableObject {
                 self.statusMessage = "NewsApp is up to date (v\(self.currentAppVersion))"
                 logger.info("NewsApp is up to date.")
             }
+        } catch FeedError.httpStatus(404) {
+            statusMessage = "No published release is available to compare."
+            lastCheckDate = Date()
+        } catch FeedError.httpStatus(let status) {
+            statusMessage = "Update check failed (HTTP \(status))"
         } catch {
             logger.error("Update check failed: \(error.localizedDescription)")
             statusMessage = "Unable to check for updates"
@@ -191,7 +194,9 @@ final class UpdateChecker: ObservableObject {
     /// Verifies that a release URL is HTTPS, hosted on github.com, and scoped to the repository releases.
     nonisolated static func isValidReleaseURL(_ url: URL) -> Bool {
         guard url.scheme?.lowercased() == "https",
-              url.host?.lowercased() == "github.com" else {
+              url.host?.lowercased() == "github.com",
+              url.user == nil, url.password == nil,
+              url.port == nil || url.port == 443 else {
             return false
         }
         let path = url.path.lowercased()

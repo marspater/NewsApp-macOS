@@ -8,13 +8,6 @@ import UniformTypeIdentifiers
 // MARK: - Navigation Notifications & Commands
 
 extension Notification.Name {
-    static let detailNextArticle = Notification.Name("detailNextArticle")
-    static let detailPrevArticle = Notification.Name("detailPrevArticle")
-    static let detailToggleRead = Notification.Name("detailToggleRead")
-    static let detailToggleSave = Notification.Name("detailToggleSave")
-    static let detailOpenInBrowser = Notification.Name("detailOpenInBrowser")
-    static let detailToggleViewMode = Notification.Name("detailToggleViewMode")
-    
     // Section Jump Commands
     static let jumpToTodayCommand = Notification.Name("jumpToTodayCommand")
     static let jumpToUnreadCommand = Notification.Name("jumpToUnreadCommand")
@@ -34,14 +27,14 @@ struct MainView: View {
     @EnvironmentObject private var feedManager: FeedManager
     @EnvironmentObject private var themeManager: ThemeManager
     @EnvironmentObject private var readManager: ReadManager
-    @StateObject private var savedStories = SavedStoriesManager.shared
+    @EnvironmentObject private var savedStories: SavedStoriesManager
     
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @State private var isWindowDropTargeted = false
     
     var body: some View {
         NavigationSplitView(columnVisibility: $columnVisibility) {
-            SidebarView(selectedTopic: $selectedTopic, searchText: $searchText)
+            SidebarView(selectedTopic: $selectedTopic)
                 .environmentObject(appSettings)
                 .environmentObject(feedManager)
                 .environmentObject(savedStories)
@@ -49,13 +42,12 @@ struct MainView: View {
         } detail: {
             NavigationStack(path: $articlePath) {
                 ZStack {
-                    AppColor.background.ignoresSafeArea()
+                    AppColor.background
                     
                     ArticleListView(
                         selectedTopic: $selectedTopic,
                         searchText: $searchText,
-                        articlePath: $articlePath,
-                        columnVisibility: $columnVisibility
+                        articlePath: $articlePath
                     )
                     .environmentObject(appSettings)
                     .environmentObject(articleStore)
@@ -71,6 +63,8 @@ struct MainView: View {
                         path: $articlePath
                     )
                     .navigationBarBackButtonHidden(true)
+                    // In full screen the toolbar steps aside for the story and returns on hover.
+                    .windowToolbarFullScreenVisibility(.onHover)
                     .environmentObject(appSettings)
                     .environmentObject(articleStore)
                     .environmentObject(feedManager)
@@ -80,7 +74,18 @@ struct MainView: View {
                 }
             }
         }
+        .alert("Operation failed", isPresented: Binding(
+            get: { articleStore.operationError != nil },
+            set: { if !$0 { articleStore.operationError = nil } }
+        )) {
+            Button("OK") { articleStore.operationError = nil }
+        } message: {
+            Text(articleStore.operationError ?? "Please try again.")
+        }
         .navigationSplitViewStyle(.balanced)
+        // The system sidebar field: Liquid Glass on macOS 26, the standard search field on macOS 15.
+        .searchable(text: $searchText, placement: .sidebar, prompt: "Search")
+        .searchSuggestions { searchOperatorSuggestions }
         .frame(minWidth: 900, minHeight: 600)
         .onAppear {
             if feedManager.articles.isEmpty {
@@ -92,6 +97,9 @@ struct MainView: View {
         }
         .onChange(of: selectedTopic) { _, _ in
             articlePath = NavigationPath()
+        }
+        .onChange(of: searchText) { _, _ in
+            if !articlePath.isEmpty { articlePath = NavigationPath() }
         }
         // Notification Deep Link & Section Jump Routing
         .onReceive(NotificationCenter.default.publisher(for: .jumpToTodayCommand)) { _ in
@@ -106,21 +114,52 @@ struct MainView: View {
         .onReceive(NotificationCenter.default.publisher(for: .jumpToHistoryCommand)) { _ in
             selectedTopic = "History"
         }
-        .onReceive(NotificationCenter.default.publisher(for: .openArticleFromNotification)) { notification in
-            guard let userInfo = notification.userInfo,
-                  let articleLink = userInfo["articleLink"] as? String else { return }
-            
-            if let article = feedManager.articles.first(where: { $0.link == articleLink }) {
-                selectedTopic = "Today"
-                articlePath = NavigationPath()
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+        .task(id: articleStore.isReady ? articleStore.pendingNavigation?.token : nil) {
+            guard articleStore.isReady, let request = articleStore.pendingNavigation else { return }
+            do {
+                let article = try await articleStore.articleForNavigation(request)
+                guard !Task.isCancelled, articleStore.pendingNavigation == request else { return }
+                if let article {
+                    articlePath = NavigationPath()
                     readManager.markAsRead(article.id)
                     articlePath.append(FeedArticleWrap(article: article))
+                } else {
+                    articleStore.operationError = "This story is no longer available in your archive."
                 }
+                articleStore.pendingNavigation = nil
+            } catch {
+                guard !Task.isCancelled else { return }
+                articleStore.operationError = "The notification story could not be loaded. Please try again."
             }
         }
     }
     
+    // MARK: - Search Operators
+
+    private static let searchOperators: [(token: String, summary: String)] = [
+        ("is:unread", "Unread stories"),
+        ("is:read", "Stories you have read"),
+        ("is:saved", "Saved stories"),
+        ("source:", "Publisher, e.g. source:bbc"),
+        ("category:", "Category, e.g. category:science")
+    ]
+
+    /// Filter operators, offered while the word being typed is empty or starts one; a choice completes onto the
+    /// words already typed.
+    @ViewBuilder
+    private var searchOperatorSuggestions: some View {
+        let word = searchText.last?.isWhitespace == false ? String(searchText.split(whereSeparator: \.isWhitespace).last ?? "") : ""
+        let typed = String(searchText.dropLast(word.count))
+        let lowered = word.lowercased()
+        ForEach(Self.searchOperators.filter { lowered.isEmpty || ($0.token.hasPrefix(lowered) && $0.token != lowered) }, id: \.token) { option in
+            HStack(spacing: AppSpacing.sm) {
+                Text(option.token).font(.system(.body, design: .monospaced))
+                Text(option.summary).foregroundStyle(AppColor.secondaryText)
+            }
+            .searchCompletion(typed + option.token)
+        }
+    }
+
     // MARK: - Window-Level OPML Drop
     
     private func handleWindowOPMLDrop(providers: [NSItemProvider]) -> Bool {
@@ -130,10 +169,8 @@ struct MainView: View {
                     guard let url = item else { return }
                     
                     if url.isFileURL && (url.pathExtension.lowercased() == "opml" || url.pathExtension.lowercased() == "xml") {
-                        if let fileData = try? Data(contentsOf: url) {
-                            Task { @MainActor in
-                                self.feedManager.importFeeds(from: fileData)
-                            }
+                        Task { @MainActor in
+                            await self.feedManager.importFeeds(fromFile: url)
                         }
                     }
                 }

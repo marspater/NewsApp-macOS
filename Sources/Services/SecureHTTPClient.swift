@@ -1,7 +1,9 @@
 import Foundation
+import ImageIO
+import Network
 
 /// Centralized, hardened HTTP client for all remote network ingestion.
-/// Enforces strict scheme/port rules, DNS resolution validation, anti-rebinding socket checks,
+/// Enforces strict scheme/port rules, DNS resolution validation, socket-level public-address enforcement,
 /// redirect validation with HTTPS downgrade protection, and progressive streaming response bounds.
 actor SecureHTTPClient {
     static let shared = SecureHTTPClient()
@@ -12,50 +14,87 @@ actor SecureHTTPClient {
     static let defaultTimeout: TimeInterval = 15.0
     static let maxRedirects: Int = 5
 
-    private let session: URLSession
+    private var session: URLSession?
     private let delegateCoordinator: SecureSessionDelegateCoordinator
+    private let resolver: NetworkBoundaryProxy.Resolver
 
     private init() {
         let coordinator = SecureSessionDelegateCoordinator()
         self.delegateCoordinator = coordinator
-
-        let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest = Self.defaultTimeout
-        config.timeoutIntervalForResource = Self.defaultTimeout * 2
-        config.requestCachePolicy = .reloadIgnoringLocalCacheData
-        config.httpShouldSetCookies = false
-
-        self.session = URLSession(configuration: config, delegate: coordinator, delegateQueue: nil)
+        self.resolver = { IPAddressValidator.validateHost($0) }
     }
 
-    internal init(configuration: URLSessionConfiguration) {
-        let coordinator = SecureSessionDelegateCoordinator()
+    internal init(configuration: URLSessionConfiguration,
+                  resolver: @escaping NetworkBoundaryProxy.Resolver = { IPAddressValidator.validateHost($0) }) {
+        let coordinator = SecureSessionDelegateCoordinator(resolver: resolver)
         self.delegateCoordinator = coordinator
+        self.resolver = resolver
         self.session = URLSession(configuration: configuration, delegate: coordinator, delegateQueue: nil)
+    }
+
+    private func protectedSession() async throws -> URLSession {
+        if let session { return session }
+        let proxy = try await NetworkBoundaryProxy.shared.configuration()
+        // Another caller may have configured the session while listener readiness was awaited.
+        if let session { return session }
+        let configuration = URLSessionConfiguration.default
+        configuration.timeoutIntervalForRequest = Self.defaultTimeout
+        configuration.timeoutIntervalForResource = Self.defaultTimeout * 2
+        configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+        configuration.httpShouldSetCookies = false
+        configuration.proxyConfigurations = [proxy]
+        let session = URLSession(configuration: configuration, delegate: delegateCoordinator, delegateQueue: nil)
+        self.session = session
+        return session
     }
 
     // MARK: - Public Fetch Ingestion APIs
 
-    func fetchFeed(from url: URL, allowHTTP: Bool = false) async throws -> (Data, HTTPURLResponse) {
-        try await fetchData(from: url, maxBytes: Self.defaultFeedLimit, timeout: Self.defaultTimeout, allowHTTP: allowHTTP)
+    /// With validators the request is conditional and a 304 returns an empty body instead of throwing.
+    func fetchFeed(from url: URL, allowHTTP: Bool = false, validators: FeedValidators? = nil) async throws -> (Data, HTTPURLResponse) {
+        try await fetchData(from: url, maxBytes: Self.defaultFeedLimit, timeout: Self.defaultTimeout, allowHTTP: allowHTTP, validators: validators, reportsBackpressure: true)
     }
 
     func fetchArticleHTML(from url: URL, allowHTTP: Bool = false) async throws -> (Data, HTTPURLResponse) {
         try await fetchData(from: url, maxBytes: Self.defaultArticleLimit, timeout: Self.defaultTimeout, allowHTTP: allowHTTP)
     }
 
-    func fetchImage(from url: URL, allowHTTP: Bool = false) async throws -> (Data, HTTPURLResponse) {
-        try await fetchData(from: url, maxBytes: Self.defaultImageLimit, timeout: Self.defaultTimeout, allowHTTP: allowHTTP)
+    /// Metadata lookup reads only the start of a page, then cancels the remaining download.
+    func fetchArticleHead(from url: URL) async throws -> (Data, HTTPURLResponse) {
+        try await fetchData(from: url, maxBytes: 256 * 1024, timeout: Self.defaultTimeout, prefixOnly: true)
     }
 
-    // MARK: - Core Secure Fetch
+    func fetchImage(from url: URL, allowHTTP: Bool = false) async throws -> (Data, HTTPURLResponse) {
+        try await fetchData(from: url, maxBytes: Self.defaultImageLimit, timeout: Self.defaultTimeout, allowHTTP: allowHTTP, cachePolicy: .useProtocolCachePolicy)
+    }
 
-    func fetchData(
-        from url: URL,
-        maxBytes: Int64,
-        timeout: TimeInterval = defaultTimeout,
-        allowHTTP: Bool = false
-    ) async throws -> (Data, HTTPURLResponse) {
+    /// Decodes bounded thumbnails concurrently, away from SwiftUI's main actor and from this actor, so one large image
+    /// never holds up other cards or feed requests.
+    @concurrent nonisolated func fetchReaderImage(from url: URL) async throws -> CGImage {
+        let (data, _) = try await fetchImage(from: url)
+        try Task.checkCancellation()
+        return try Self.decodeReaderImage(data)
+    }
+
+    nonisolated static func decodeReaderImage(_ data: Data) throws -> CGImage {
+        guard let source = CGImageSourceCreateWithData(data as CFData, [kCGImageSourceShouldCache: false] as CFDictionary),
+              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+              let width = (properties[kCGImagePropertyPixelWidth] as? NSNumber)?.doubleValue,
+              let height = (properties[kCGImagePropertyPixelHeight] as? NSNumber)?.doubleValue,
+              width > 0, height > 0, width <= 16384, height <= 16384, width * height <= 64_000_000,
+              let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [
+                kCGImageSourceCreateThumbnailFromImageAlways: true,
+                kCGImageSourceCreateThumbnailWithTransform: true,
+                kCGImageSourceThumbnailMaxPixelSize: 1600,
+                kCGImageSourceShouldCacheImmediately: true
+              ] as CFDictionary) else {
+            throw URLError(.cannotDecodeContentData)
+        }
+        return image
+    }
+
+    /// Shared navigation/ingestion preflight. DNS work stays on this actor, off the UI actor.
+    func validateDestination(_ url: URL, allowHTTP: Bool = false) throws {
         // 1. Scheme & Port Validation
         guard let scheme = url.scheme?.lowercased() else {
             throw FeedError.malformedURL(url.absoluteString)
@@ -75,7 +114,7 @@ actor SecureHTTPClient {
             throw FeedError.malformedURL(url.absoluteString)
         }
 
-        switch IPAddressValidator.validateHost(host) {
+        switch resolver(host) {
         case .allowed:
             break
         case .blocked(let reason):
@@ -84,8 +123,25 @@ actor SecureHTTPClient {
             throw FeedError.network("Host '\(host)' unresolvable: \(reason)")
         }
 
+    }
+
+    // MARK: - Core Secure Fetch
+
+    func fetchData(
+        from url: URL,
+        maxBytes: Int64,
+        timeout: TimeInterval = defaultTimeout,
+        allowHTTP: Bool = false,
+        cachePolicy: URLRequest.CachePolicy = .reloadIgnoringLocalCacheData,
+        validators: FeedValidators? = nil,
+        reportsBackpressure: Bool = false,
+        customHeaders: [String: String]? = nil,
+        prefixOnly: Bool = false
+    ) async throws -> (Data, HTTPURLResponse) {
+        try validateDestination(url, allowHTTP: allowHTTP)
+
         // 3. Register Task Security Policy in Delegate Coordinator
-        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: timeout)
+        var request = URLRequest(url: url, cachePolicy: cachePolicy, timeoutInterval: timeout)
         request.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.3 Safari/605.1.15", forHTTPHeaderField: "User-Agent")
         request.setValue("text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8", forHTTPHeaderField: "Accept")
         request.setValue("en-US,en;q=0.9", forHTTPHeaderField: "Accept-Language")
@@ -94,8 +150,20 @@ actor SecureHTTPClient {
         request.setValue("document", forHTTPHeaderField: "Sec-Fetch-Dest")
         request.setValue("?1", forHTTPHeaderField: "Sec-Fetch-User")
 
+        if let customHeaders {
+            for (key, value) in customHeaders {
+                request.setValue(value, forHTTPHeaderField: key)
+            }
+        }
+        // Explicit validators with a reload policy: URLSession passes the 304 to us instead of replaying its cache.
+        if let etag = validators?.etag { request.setValue(etag, forHTTPHeaderField: "If-None-Match") }
+        if let modified = validators?.lastModified { request.setValue(modified, forHTTPHeaderField: "If-Modified-Since") }
+        let isConditional = !(validators?.isEmpty ?? true)
+
         // 4. Progressive Byte Streaming Download with Size Enforcement
+        let session = try await protectedSession()
         let (asyncBytes, rawResponse) = try await session.bytes(for: request)
+        defer { if prefixOnly { asyncBytes.task.cancel() } }
 
         guard let httpResponse = rawResponse as? HTTPURLResponse else {
             throw FeedError.network("Invalid non-HTTP response received")
@@ -103,7 +171,7 @@ actor SecureHTTPClient {
 
         // 5. Pre-check Content-Length header if available
         let expectedLength = httpResponse.expectedContentLength
-        if expectedLength > 0 && expectedLength > maxBytes {
+        if !prefixOnly && expectedLength > 0 && expectedLength > maxBytes {
             throw FeedError.responseTooLarge(bytes: expectedLength, maxAllowed: maxBytes)
         }
 
@@ -113,13 +181,18 @@ actor SecureHTTPClient {
 
         for try await byte in asyncBytes {
             buffer.append(byte)
+            if prefixOnly && Int64(buffer.count) == maxBytes { break }
             if Int64(buffer.count) > maxBytes {
                 throw FeedError.responseTooLarge(bytes: Int64(buffer.count), maxAllowed: maxBytes)
             }
         }
 
         // 7. Verify HTTP Status Code
-        guard (200...299).contains(httpResponse.statusCode) else {
+        if reportsBackpressure, httpResponse.statusCode == 429 || httpResponse.statusCode == 503 {
+            throw FeedError.serverBusy(status: httpResponse.statusCode,
+                                       retryAfter: FeedRetryPolicy.retryAfter(header: httpResponse.value(forHTTPHeaderField: "Retry-After"), now: Date()))
+        }
+        guard (200...299).contains(httpResponse.statusCode) || (isConditional && httpResponse.statusCode == 304) else {
             throw FeedError.httpStatus(httpResponse.statusCode)
         }
 
@@ -130,6 +203,12 @@ actor SecureHTTPClient {
 // MARK: - Delegate Coordinator for Redirects and DNS Rebinding Detection
 
 final class SecureSessionDelegateCoordinator: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+    private let resolver: NetworkBoundaryProxy.Resolver
+
+    init(resolver: @escaping NetworkBoundaryProxy.Resolver = { IPAddressValidator.validateHost($0) }) {
+        self.resolver = resolver
+        super.init()
+    }
     private struct TaskSecurityState {
         var redirectCount: Int = 0
         var initialScheme: String
@@ -140,9 +219,9 @@ final class SecureSessionDelegateCoordinator: NSObject, URLSessionTaskDelegate, 
     private var states = [Int: TaskSecurityState]()
 
     func urlSession(
-        _ session: URLSession,
+        _ _: URLSession,
         task: URLSessionTask,
-        willPerformHTTPRedirection response: HTTPURLResponse,
+        willPerformHTTPRedirection _: HTTPURLResponse,
         newRequest request: URLRequest,
         completionHandler: @escaping (URLRequest?) -> Void
     ) {
@@ -179,7 +258,7 @@ final class SecureSessionDelegateCoordinator: NSObject, URLSessionTaskDelegate, 
         }
 
         // 4. Validate redirect target host and IP resolution
-        switch IPAddressValidator.validateHost(targetHost) {
+        switch resolver(targetHost) {
         case .allowed:
             completionHandler(request)
         case .blocked, .unresolvable:
@@ -187,18 +266,15 @@ final class SecureSessionDelegateCoordinator: NSObject, URLSessionTaskDelegate, 
         }
     }
 
-    func urlSession(_ session: URLSession, task: URLSessionTask, didFinishCollecting metrics: URLSessionTaskMetrics) {
+    func urlSession(_ _: URLSession, task: URLSessionTask, didFinishCollecting metrics: URLSessionTaskMetrics) {
         lock.lock()
         states.removeValue(forKey: task.taskIdentifier)
         lock.unlock()
 
-        // Anti-DNS Rebinding: check final socket address if metrics provide it
+        // Diagnostic only: metrics arrive after the request; this cannot prevent rebinding.
         for metric in metrics.transactionMetrics {
-            if let remoteIP = metric.remoteAddress {
-                if let reason = IPAddressValidator.checkLiteralIP(remoteIP) {
-                    task.cancel()
-                    _ = reason
-                }
+            if let remoteIP = metric.remoteAddress, IPAddressValidator.checkLiteralIP(remoteIP) != nil {
+                task.cancel()
             }
         }
     }

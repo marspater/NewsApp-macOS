@@ -58,12 +58,11 @@ actor MigrationCoordinator {
         let cacheDir = fileManager.urls(for: .cachesDirectory, in: .userDomainMask).first?
             .appendingPathComponent("com.marspater.news.cache")
         if let cacheFile = cacheDir?.appendingPathComponent(legacyCacheKey),
-           fileManager.fileExists(atPath: cacheFile.path) {
-            if let data = try? Data(contentsOf: cacheFile),
-               let decoded = try? JSONDecoder().decode([FeedArticle].self, from: data) {
-                legacyArticles = decoded
-                stats.articlesFound = decoded.count
-            }
+           fileManager.fileExists(atPath: cacheFile.path),
+           let data = try? Data(contentsOf: cacheFile),
+           let decoded = try? JSONDecoder().decode([FeedArticle].self, from: data) {
+            legacyArticles = decoded
+            stats.articlesFound = decoded.count
         }
         
         // 2. Load legacy saved stories
@@ -109,34 +108,25 @@ actor MigrationCoordinator {
         
         let allArticlesToImport = Array(reconciledArticlesById.values)
         
-        // 5. Atomic SQLite Transaction
+        // 5. Import. Each step is its own transactional, idempotent upsert (they cannot nest in one SQLite transaction),
+        // and completion is recorded only after all succeed, so a failed import is simply repeated at the next launch.
         do {
-            try await database.beginTransaction()
-            
-            // Batch upsert reconciled articles
             try await database.upsertArticles(allArticlesToImport)
-            
-            // Mark read states
-            try await database.markReadBatch(articleIds: Array(legacyReadIDs), isRead: true)
-            
-            // Mark saved states
+            // Read entries whose story is no longer cached have nothing to mark; state needs its article row.
+            try await database.markReadBatch(articleIds: legacyReadIDs.filter { reconciledArticlesById[$0] != nil }, isRead: true)
             try await database.batchMarkSaved(savedIds)
-            
-            // COMMIT the transaction
-            try await database.commitTransaction()
             
             stats.articlesImported = allArticlesToImport.count
             
-            // Mark migration complete ONLY AFTER successful commit!
+            // Mark migration complete ONLY AFTER every step succeeded!
             userDefaults.set(Self.currentMigrationVersion, forKey: Self.migrationVersionKey)
             
             logger.info("Legacy migration completed successfully: \(stats.articlesImported) articles imported, \(stats.savedStories) saved stories, \(stats.readStates) read states, \(stats.duplicatesMerged) duplicates merged.")
             return stats
         } catch {
-            // ROLLBACK on failure, leaving legacy data untouched
-            try? await database.rollbackTransaction()
+            // Legacy data is never removed, so the next launch repeats the import.
             stats.failures += 1
-            logger.error("Legacy migration failed and was rolled back: \(error.localizedDescription). Legacy data preserved.")
+            logger.error("Legacy migration failed and will be retried: \(error.localizedDescription). Legacy data preserved.")
             throw error
         }
     }

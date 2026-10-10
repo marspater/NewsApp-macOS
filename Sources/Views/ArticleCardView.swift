@@ -8,11 +8,14 @@ struct ArticleCardView: View {
     let article: FeedArticle
     var isSelected: Bool = false
     var compact: Bool = false
+    /// Other coverage of the same event; the card shows the first of their images when this article has none.
+    var imageFallbacks: [FeedArticle] = []
     let action: () -> Void
     
     @EnvironmentObject private var readManager: ReadManager
     @EnvironmentObject private var savedStories: SavedStoriesManager
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @EnvironmentObject private var appSettings: AppSettings
+    @Environment(\.effectiveReduceMotion) private var reduceMotion
     @State private var isHovered = false
     
     private var isRead: Bool {
@@ -22,10 +25,30 @@ struct ArticleCardView: View {
     private var isSaved: Bool {
         savedStories.isSaved(article)
     }
+
+    /// The muting action for this story's publisher host: unmute the rules covering it, or mute the host.
+    private var sourceMuting: (title: String, apply: () -> Void)? {
+        let covering = appSettings.muteRules.matchedSources(link: article.link)
+        if let rule = covering.first {
+            return ("Unmute \(rule)", { for source in covering { appSettings.unmuteSource(source) } })
+        }
+        guard let host = MuteRules.host(article.link) else { return nil }
+        return ("Mute \(host)", { _ = appSettings.muteSource(host) })
+    }
     
     private var cardLayout: AnyLayout {
         compact ? AnyLayout(HStackLayout(alignment: .center, spacing: 0))
                 : AnyLayout(VStackLayout(alignment: .leading, spacing: 0))
+    }
+
+    private var appearance: (border: Color, width: CGFloat, shadow: Color, radius: CGFloat, y: CGFloat) {
+        if isSelected {
+            return (AppColor.accent, 1.5, AppShadow.cardFocusRingColor, AppShadow.cardFocusRingRadius, AppShadow.cardFocusRingY)
+        }
+        if isHovered {
+            return (AppColor.accent.opacity(0.4), 1.0, AppShadow.cardHoverColor, AppShadow.cardHoverRadius, AppShadow.cardHoverY)
+        }
+        return (AppColor.borderSubtle, 0.5, AppShadow.cardRestingColor, AppShadow.cardRestingRadius, AppShadow.cardRestingY)
     }
 
     var body: some View {
@@ -37,21 +60,17 @@ struct ArticleCardView: View {
                     .accessibilityHidden(true)
                 
                 // Content Body Container
-                VStack(alignment: .leading, spacing: 6) {
+                VStack(alignment: .leading, spacing: AppSpacing.eyebrowGap) {
                     // Eyebrow Row: Source + Badges
-                    HStack(spacing: 6) {
-                        Text(displaySource.uppercased())
-                            .font(AppTypography.metadata)
-                            .foregroundColor(AppColor.secondaryText)
-                            .tracking(AppTypography.sourceEyebrowTracking)
-                            .lineLimit(1)
-                        
+                    HStack(spacing: AppSpacing.eyebrowGap) {
+                        EyebrowText(displaySource)
+
                         Spacer()
-                        
+
                         if isSaved {
                             Image(systemName: "bookmark.fill")
-                                .font(.system(size: 10))
-                                .foregroundColor(AppColor.accent)
+                                .font(AppTypography.eyebrow)
+                                .foregroundStyle(AppColor.accent)
                         }
                         
                         if !isRead {
@@ -64,10 +83,12 @@ struct ArticleCardView: View {
                     
                     // Headline
                     Text(article.title)
-                        .font(compact ? .system(size: 20, weight: .semibold, design: .serif) : AppTypography.headline)
+                        .font(AppTypography.cardHeadline(compact ? .list : .grid))
                         .foregroundColor(isRead ? AppColor.secondaryText : AppColor.primaryText)
                         .lineLimit(2)
                         .multilineTextAlignment(.leading)
+                        // In the fixed-height list card the summary gives up lines before the headline does.
+                        .layoutPriority(1)
                     
                     // Description
                     if !article.description.isEmpty {
@@ -81,33 +102,25 @@ struct ArticleCardView: View {
                         }
                     }
                     
-                    Spacer(minLength: 4)
-                    
+                    Spacer(minLength: AppSpacing.xxs)
+
                     // Footer Row: Timestamp & Optional AI Badge
-                    HStack(spacing: 8) {
-                        Text(article.pubDate.formatted(date: .abbreviated, time: .omitted))
+                    HStack(spacing: AppSpacing.xs) {
+                        Text(article.publicationDateText)
                             .font(AppTypography.caption)
                             .foregroundColor(AppColor.tertiaryText)
                         
                         Spacer()
                         
                         if article.aiSummary != nil {
-                            HStack(spacing: 3) {
-                                Text("✦")
-                                    .font(.system(size: 8))
-                                Text("AI")
-                                    .font(.system(size: 9, weight: .bold))
-                            }
-                            .foregroundColor(AppColor.intelligence)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(Capsule().fill(AppColor.intelligence.opacity(0.12)))
-                            .help("AI summary available")
-                            .accessibilityLabel("AI summary available")
+                            TagView.intelligence()
+                                .help("AI summary available")
+                                .accessibilityLabel("AI summary available")
                         }
                     }
                 }
-                .padding(compact ? AppSpacing.lg : AppSpacing.sm)
+                .padding(.horizontal, compact ? AppSpacing.lg : AppSpacing.sm)
+                .padding(.vertical, compact ? AppSpacing.md : AppSpacing.sm)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             .frame(height: compact ? 170 : nil)
@@ -115,25 +128,9 @@ struct ArticleCardView: View {
             .clipShape(RoundedRectangle(cornerRadius: AppRadius.card))
             .overlay(
                 RoundedRectangle(cornerRadius: AppRadius.card)
-                    .stroke(
-                        isSelected
-                            ? AppColor.accent
-                            : (isHovered ? AppColor.accent.opacity(0.4) : AppColor.borderSubtle),
-                        lineWidth: isSelected ? 1.5 : (isHovered ? 1.0 : 0.5)
-                    )
+                    .stroke(appearance.border, lineWidth: appearance.width)
             )
-            .shadow(
-                color: isSelected
-                    ? AppShadow.cardFocusRingColor
-                    : (isHovered ? AppShadow.cardHoverColor : AppShadow.cardRestingColor),
-                radius: isSelected
-                    ? AppShadow.cardFocusRingRadius
-                    : (isHovered ? AppShadow.cardHoverRadius : AppShadow.cardRestingRadius),
-                x: 0,
-                y: isSelected
-                    ? AppShadow.cardFocusRingY
-                    : (isHovered ? AppShadow.cardHoverY : AppShadow.cardRestingY)
-            )
+            .shadow(color: appearance.shadow, radius: appearance.radius, x: 0, y: appearance.y)
             .animation(reduceMotion ? nil : AppMotion.state, value: isHovered || isSelected)
             .opacity(isRead ? 0.90 : 1.0)
             .onHover { hovering in
@@ -141,6 +138,7 @@ struct ArticleCardView: View {
             }
         }
         .buttonStyle(.plain)
+        .buttonBorderShape(.roundedRectangle(radius: AppRadius.card))
         .contextMenu {
             Button {
                 readManager.toggleRead(article.id)
@@ -164,6 +162,12 @@ struct ArticleCardView: View {
                 )
             }
             
+            if let muting = sourceMuting {
+                Button(action: muting.apply) {
+                    Label(muting.title, systemImage: "speaker.slash")
+                }
+            }
+
             Divider()
             
             Button {
@@ -197,26 +201,34 @@ struct ArticleCardView: View {
                 savedStories.save(article)
             }
         }
+        .accessibilityActions {
+            if let muting = sourceMuting {
+                Button(muting.title, action: muting.apply)
+            }
+        }
     }
     
     // MARK: - Subviews & Helpers
     
     @ViewBuilder
     private var cardImageHeader: some View {
-        if let imageUrl = article.imageUrl, let url = URL(string: imageUrl) {
+        if let url = FeedArticle.bestCardImage(in: [article] + imageFallbacks) {
             ArticleRemoteImage(url: url) { phase in
                 switch phase {
                 case .success(let image):
-                    image.resizable()
-                        .aspectRatio(contentMode: .fill)
-                        .frame(height: compact ? 170 : 140)
+                    // The clear frame takes the column's size; a filled image wider than it must not push past it.
+                    Color.clear
                         .frame(maxWidth: .infinity)
+                        .frame(height: compact ? 170 : 140)
+                        .overlay { image.resizable().aspectRatio(contentMode: .fill) }
                         .clipped()
                         .saturation(isRead ? 0.92 : 1.0)
+                        .accessibilityHidden(true)
                 default:
-                    editorialFallbackHeader
+                    editorialFallbackHeader.frame(height: compact ? 170 : 140)
                 }
             }
+            .frame(height: compact ? 170 : 140)
         } else {
             editorialFallbackHeader
         }
@@ -233,46 +245,95 @@ struct ArticleCardView: View {
             .frame(maxWidth: .infinity)
             
             Image(systemName: "newspaper")
-                .font(.system(size: 18))
-                .foregroundColor(AppColor.tertiaryText.opacity(0.35))
-                .padding(10)
+                .imageScale(.large)
+                .foregroundStyle(AppColor.quaternaryLabel)
+                .padding(AppSpacing.sm)
         }
     }
     
-    private var displaySource: String {
-        (article.source.components(separatedBy: "\n").first ?? article.source)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-    }
+    private var displaySource: String { article.publisherName }
     
     private var accessibilityDescription: String {
         let readState = isRead ? "Read" : "Unread"
         let savedState = isSaved ? ", saved in your library" : ""
-        let dateFormatted = article.pubDate.formatted(date: .abbreviated, time: .omitted)
+        let dateFormatted = article.publicationDateText
         return "\(article.title), from \(displaySource), published \(dateFormatted). \(readState)\(savedState)."
     }
+}
+
+extension Notification.Name {
+    /// Posted with the image URL as object and `["success": Bool]` when a reader image finishes decoding or fails;
+    /// never on cancellation. Lets performance harnesses wait for what the reader actually rendered.
+    static let readerImageFinished = Notification.Name("readerImageFinished")
+}
+
+// The default loader retains the protected network path; native harnesses can supply an offline image.
+private struct ReaderImageLoaderKey: EnvironmentKey {
+    static let defaultValue: @Sendable (URL) async throws -> CGImage = {
+        try await SecureHTTPClient.shared.fetchReaderImage(from: $0)
+    }
+}
+
+extension EnvironmentValues {
+    var readerImageLoader: @Sendable (URL) async throws -> CGImage {
+        get { self[ReaderImageLoaderKey.self] }
+        set { self[ReaderImageLoaderKey.self] = newValue }
+    }
+}
+
+/// Decoded images by source URL, so a card scrolled back into view shows its image at once instead of fetching and
+/// decoding it again. NSCache evicts under memory pressure.
+@MainActor private enum DecodedImageCache {
+    static let images: NSCache<NSURL, CGImage> = {
+        let cache = NSCache<NSURL, CGImage>()
+        cache.totalCostLimit = 192 * 1024 * 1024
+        return cache
+    }()
 }
 
 // Feed image URLs use the same bounded, validated network path as article content.
 struct ArticleRemoteImage<Content: View>: View {
     let url: URL
     @ViewBuilder var content: (AsyncImagePhase) -> Content
-    @State private var phase: AsyncImagePhase = .empty
+    @State private var phase: AsyncImagePhase
+    @State private var phaseURL: URL
+    @Environment(\.readerImageLoader) private var loadImage
+
+    init(url: URL, @ViewBuilder content: @escaping (AsyncImagePhase) -> Content) {
+        self.url = url
+        self.content = content
+        _phase = State(initialValue: DecodedImageCache.images.object(forKey: url as NSURL).map { .success(Self.image($0)) } ?? .empty)
+        _phaseURL = State(initialValue: url)
+    }
+
+    private static func image(_ image: CGImage) -> Image {
+        Image(image, scale: 1, label: Text("Article image"))
+    }
 
     var body: some View {
-        content(phase)
+        content(phaseURL == url ? phase : .empty)
             .task(id: url) {
+                if phaseURL == url, phase.image != nil {
+                    NotificationCenter.default.post(name: .readerImageFinished, object: url, userInfo: ["success": true])
+                    return
+                }
+                phaseURL = url
+                if let cached = DecodedImageCache.images.object(forKey: url as NSURL) {
+                    phase = .success(Self.image(cached))
+                    NotificationCenter.default.post(name: .readerImageFinished, object: url, userInfo: ["success": true])
+                    return
+                }
                 phase = .empty
                 do {
-                    let (data, _) = try await SecureHTTPClient.shared.fetchImage(from: url)
+                    let image = try await loadImage(ReaderImageCandidate.preferredRendition(of: url))
                     try Task.checkCancellation()
-                    if let image = NSImage(data: data) {
-                        phase = .success(Image(nsImage: image))
-                    } else {
-                        phase = .failure(URLError(.cannotDecodeContentData))
-                    }
+                    DecodedImageCache.images.setObject(image, forKey: url as NSURL, cost: image.bytesPerRow * image.height)
+                    phase = .success(Self.image(image))
+                    NotificationCenter.default.post(name: .readerImageFinished, object: url, userInfo: ["success": true])
                 } catch {
                     guard !Task.isCancelled else { return }
                     phase = .failure(error)
+                    NotificationCenter.default.post(name: .readerImageFinished, object: url, userInfo: ["success": false])
                 }
             }
     }

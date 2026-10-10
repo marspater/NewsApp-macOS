@@ -35,9 +35,10 @@ public final class CacheManager: @unchecked Sendable {
     /// Calculates total byte size of cached network responses and web assets on disk.
     public func calculateTotalCacheSize() -> Int64 {
         var totalSize: Int64 = 0
-        if let enumerator = fileManager.enumerator(at: cacheDirectory, includingPropertiesForKeys: [.fileSizeKey], options: []) {
+        let keys = Set<URLResourceKey>([.fileSizeKey])
+        if let enumerator = fileManager.enumerator(at: cacheDirectory, includingPropertiesForKeys: Array(keys), options: []) {
             for case let fileURL as URL in enumerator {
-                if let resourceValues = try? fileURL.resourceValues(forKeys: [.fileSizeKey]),
+                if let resourceValues = try? fileURL.resourceValues(forKeys: keys),
                    let size = resourceValues.fileSize {
                     totalSize += Int64(size)
                 }
@@ -67,11 +68,4 @@ public final class CacheManager: @unchecked Sendable {
         logger.info("Cleared article cache via CacheManager.")
     }
 
-    /// Completely purges web cache and all cached database articles, state, and enrichment.
-    /// Strictly preserves subscribed feed URLs and user settings. Runs VACUUM on SQLite database.
-    func clearEverything(database: DatabaseEngine = DatabaseEngine.shared) async throws {
-        clearWebCache()
-        try await database.clearAllDatabaseCache()
-        logger.info("Cleared all web and database caches via CacheManager.")
-    }
 }

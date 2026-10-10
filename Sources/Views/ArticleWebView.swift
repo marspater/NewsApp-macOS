@@ -9,6 +9,7 @@ enum WebNavigationAction: Equatable {
 
 struct ArticleWebView: NSViewRepresentable {
     let url: URL
+    var allowHTTP: Bool
     @Binding var isLoading: Bool
     @Binding var canGoBack: Bool
     @Binding var canGoForward: Bool
@@ -17,6 +18,7 @@ struct ArticleWebView: NSViewRepresentable {
 
     init(
         url: URL,
+        allowHTTP: Bool = false,
         isLoading: Binding<Bool>,
         canGoBack: Binding<Bool>,
         canGoForward: Binding<Bool>,
@@ -24,6 +26,7 @@ struct ArticleWebView: NSViewRepresentable {
         loadError: Binding<String?> = .constant(nil)
     ) {
         self.url = url
+        self.allowHTTP = allowHTTP
         self._isLoading = isLoading
         self._canGoBack = canGoBack
         self._canGoForward = canGoForward
@@ -37,8 +40,11 @@ struct ArticleWebView: NSViewRepresentable {
 
     func makeNSView(context: Context) -> WKWebView {
         let configuration = WKWebViewConfiguration()
+        // Do not inherit publisher service workers or cookies from earlier previews.
+        configuration.websiteDataStore = .nonPersistent()
         let preferences = WKWebpagePreferences()
-        preferences.allowsContentJavaScript = true
+        // Public WebKit proxies do not constrain WebRTC sockets created by publisher scripts.
+        preferences.allowsContentJavaScript = false
         configuration.defaultWebpagePreferences = preferences
         configuration.preferences.isFraudulentWebsiteWarningEnabled = true
 
@@ -47,17 +53,20 @@ struct ArticleWebView: NSViewRepresentable {
         webView.navigationDelegate = context.coordinator
         context.coordinator.webView = webView
         context.coordinator.currentRequestedURL = url
-        let request = URLRequest(url: url)
-        webView.load(request)
+        context.coordinator.prepareGateway(webView)
         return webView
     }
 
     func updateNSView(_ nsView: WKWebView, context: Context) {
+        if context.coordinator.parent.allowHTTP != allowHTTP {
+            context.coordinator.requestGeneration = UUID()
+        }
         context.coordinator.parent = self
         if context.coordinator.currentRequestedURL != url {
+            context.coordinator.requestGeneration = UUID()
+            nsView.stopLoading()
             context.coordinator.currentRequestedURL = url
-            let request = URLRequest(url: url)
-            nsView.load(request)
+            if context.coordinator.gatewayReady { nsView.load(URLRequest(url: url)) }
         }
         if let currentAction = action {
             switch currentAction {
@@ -66,7 +75,8 @@ struct ArticleWebView: NSViewRepresentable {
             case .goForward:
                 if nsView.canGoForward { nsView.goForward() }
             case .reload:
-                nsView.reload()
+                if context.coordinator.gatewayReady { nsView.reload() }
+                else { context.coordinator.prepareGateway(nsView) }
             }
             DispatchQueue.main.async {
                 self.action = nil
@@ -75,8 +85,11 @@ struct ArticleWebView: NSViewRepresentable {
     }
 
     static func dismantleNSView(_ nsView: WKWebView, coordinator: Coordinator) {
+        coordinator.gatewayTask?.cancel()
+        coordinator.requestGeneration = UUID()
         nsView.stopLoading()
         nsView.navigationDelegate = nil
+        coordinator.webView = nil
     }
 
     @MainActor
@@ -84,82 +97,103 @@ struct ArticleWebView: NSViewRepresentable {
         var parent: ArticleWebView
         weak var webView: WKWebView?
         var currentRequestedURL: URL?
+        var requestGeneration = UUID()
+        private var activeNavigation: WKNavigation?
+        var gatewayReady = false
+        var gatewayTask: Task<Void, Never>?
+
+        func prepareGateway(_ view: WKWebView) {
+            gatewayTask?.cancel()
+            parent.isLoading = true
+            gatewayTask = Task { [weak self, weak view] in
+                do {
+                    let proxy = try await NetworkBoundaryProxy.shared.configuration()
+                    let rules = try await WebPreviewPolicy.contentRules()
+                    guard !Task.isCancelled, let self, let view, self.webView === view else { return }
+                    view.configuration.userContentController.add(rules)
+                    view.configuration.websiteDataStore.proxyConfigurations = [proxy]
+                    self.gatewayReady = true
+                    self.currentRequestedURL = self.parent.url
+                    view.load(URLRequest(url: self.parent.url))
+                } catch {
+                    guard !Task.isCancelled, let self, let view, self.webView === view else { return }
+                    self.parent.isLoading = false
+                    self.parent.loadError = "The protected network gateway could not start. Try reloading."
+                }
+            }
+        }
 
         init(_ parent: ArticleWebView) {
             self.parent = parent
         }
 
-        func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping @MainActor (WKNavigationActionPolicy) -> Void) {
+        func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
+                     decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void) {
             guard let requestURL = navigationAction.request.url else {
                 decisionHandler(.cancel)
                 return
             }
-
-            // 1. Strict scheme policy: only HTTPS and HTTP
-            guard let scheme = requestURL.scheme?.lowercased(), scheme == "https" || scheme == "http" else {
-                decisionHandler(.cancel)
-                return
+            let generation = requestGeneration
+            let allowHTTP = parent.allowHTTP
+            let opensNewWindow = navigationAction.targetFrame == nil
+            Task { @MainActor [weak self, weak webView] in
+                do {
+                    // Navigation delegates cover documents, not WebKit subresource traffic.
+                    try await SecureHTTPClient.shared.validateDestination(requestURL, allowHTTP: allowHTTP)
+                    guard !Task.isCancelled, let self, let webView, self.webView === webView,
+                          self.requestGeneration == generation else {
+                        decisionHandler(.cancel)
+                        return
+                    }
+                    if opensNewWindow {
+                        NSWorkspace.shared.open(requestURL)
+                        decisionHandler(.cancel)
+                        return
+                    }
+                    decisionHandler(.allow)
+                } catch {
+                    if let self, let webView, self.webView === webView, self.requestGeneration == generation {
+                        self.parent.loadError = "This address was blocked by the app’s network policy. Open the publisher in your browser if needed."
+                        self.parent.isLoading = false
+                    }
+                    decisionHandler(.cancel)
+                }
             }
-
-            // 2. Prevent navigation to local or intranet IP hosts
-            // Since we already enforced HTTP/HTTPS above, the URL MUST have a valid host.
-            guard let host = requestURL.host, !host.isEmpty else {
-                decisionHandler(.cancel)
-                return
-            }
-
-            let validationResult = IPAddressValidator.validateHost(host)
-            switch validationResult {
-            case .allowed:
-                break
-            case .blocked, .unresolvable:
-                decisionHandler(.cancel)
-                return
-            }
-
-            // 3. Delegate target="_blank" popups to external default browser
-            if navigationAction.targetFrame == nil {
-                NSWorkspace.shared.open(requestURL)
-                decisionHandler(.cancel)
-                return
-            }
-
-            decisionHandler(.allow)
         }
 
         func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
-            DispatchQueue.main.async {
-                self.parent.loadError = nil
-                self.parent.isLoading = true
-                self.parent.canGoBack = webView.canGoBack
-                self.parent.canGoForward = webView.canGoForward
-            }
+            guard self.webView === webView else { return }
+            activeNavigation = navigation
+            parent.loadError = nil
+            parent.isLoading = true
+            updateHistory(webView)
         }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-            DispatchQueue.main.async {
-                self.parent.isLoading = false
-                self.parent.canGoBack = webView.canGoBack
-                self.parent.canGoForward = webView.canGoForward
+            guard self.webView === webView, navigation === activeNavigation else { return }
+            parent.isLoading = false
+            updateHistory(webView)
+        }
+
+        private func updateHistory(_ webView: WKWebView) {
+            parent.canGoBack = webView.canGoBack
+            parent.canGoForward = webView.canGoForward
+        }
+
+        private func didFail(_ webView: WKWebView, navigation: WKNavigation?, error: Error) {
+            guard self.webView === webView, navigation === activeNavigation else { return }
+            parent.isLoading = false
+            if (error as NSError).code != NSURLErrorCancelled {
+                parent.loadError = "The publisher page could not be loaded. Try reloading or return to Reader."
             }
         }
 
         func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
-            DispatchQueue.main.async {
-                self.parent.isLoading = false
-                if (error as NSError).code != NSURLErrorCancelled {
-                    self.parent.loadError = "The publisher page could not be loaded. Try reloading or return to Reader."
-                }
-            }
+            didFail(webView, navigation: navigation, error: error)
         }
 
         func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
-            DispatchQueue.main.async {
-                self.parent.isLoading = false
-                if (error as NSError).code != NSURLErrorCancelled {
-                    self.parent.loadError = "The publisher page could not be loaded. Try reloading or return to Reader."
-                }
-            }
+            didFail(webView, navigation: navigation, error: error)
         }
     }
 }

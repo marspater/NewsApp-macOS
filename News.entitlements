@@ -8,6 +8,10 @@
     <key>com.apple.security.network.client</key>
     <true/>
 
+    <!-- Required only for the network gateway listener bound to 127.0.0.1. -->
+    <key>com.apple.security.network.server</key>
+    <true/>
+
     <!-- User-selected file access for OPML import and export -->
     <key>com.apple.security.files.user-selected.read-write</key>
     <true/>

@@ -5,21 +5,28 @@ import SwiftUI
 import AppKit
 import UniformTypeIdentifiers
 
+private struct AddFeedSubscriptionKey: FocusedValueKey { typealias Value = () -> Void }
+
+extension FocusedValues {
+    var addFeedSubscription: (() -> Void)? {
+        get { self[AddFeedSubscriptionKey.self] }
+        set { self[AddFeedSubscriptionKey.self] = newValue }
+    }
+}
+
 struct SidebarView: View {
     @Binding var selectedTopic: String?
-    @Binding var searchText: String
     
     @EnvironmentObject private var appSettings: AppSettings
     @EnvironmentObject private var feedManager: FeedManager
     @EnvironmentObject private var savedStories: SavedStoriesManager
     @EnvironmentObject private var readManager: ReadManager
+    @Environment(\.effectiveReduceMotion) private var reduceMotion
     
     @State private var isSubscribePopoverPresented = false
     @State private var newFeedURL: String = ""
     @State private var isDropTargeted = false
     @State private var dropConfirmationMessage: String? = nil
-    @State private var isSearchSyntaxHelpPresented = false
-    @FocusState private var isSearchFocused: Bool
     
     private let suggestedTopics: [(String, String)] = [
         ("Entertainment", "tv"), ("Science", "atom"),
@@ -36,11 +43,8 @@ struct SidebarView: View {
                 if let newTopic = newTopic {
                     selectedTopic = newTopic
                 }
-                isSearchFocused = false
             }
         )) {
-            searchFieldRow
-            
             if let confirmation = dropConfirmationMessage {
                 dropConfirmationBanner(confirmation)
             }
@@ -50,6 +54,7 @@ struct SidebarView: View {
             userSectionsSection
             suggestedSection
         }
+        .focusedSceneValue(\.addFeedSubscription, { isSubscribePopoverPresented = true })
         .listStyle(.sidebar)
         .scrollContentBackground(.visible)
         .navigationSplitViewColumnWidth(min: 220, ideal: 240, max: 300)
@@ -74,94 +79,8 @@ struct SidebarView: View {
             RoundedRectangle(cornerRadius: AppRadius.control)
                 .stroke(isDropTargeted ? AppColor.accent : Color.clear, lineWidth: 1.5)
                 .padding(AppSpacing.xxs)
-                .animation(AppMotion.quick, value: isDropTargeted)
+                .animation(reduceMotion ? nil : AppMotion.quick, value: isDropTargeted)
         )
-    }
-    
-    // MARK: - Search Field
-    
-    private var searchFieldRow: some View {
-        HStack(spacing: AppSpacing.xs) {
-            Image(systemName: "magnifyingglass")
-                .foregroundColor(AppColor.secondaryText)
-                .font(.system(size: 13))
-            
-            TextField("Search", text: $searchText)
-                .textFieldStyle(.plain)
-                .font(AppTypography.bodySmall)
-                .focused($isSearchFocused)
-                .onSubmit { isSearchFocused = false }
-                .accessibilityLabel("Search articles")
-            
-            if !searchText.isEmpty {
-                Button {
-                    searchText = ""
-                    isSearchFocused = false
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .foregroundColor(AppColor.tertiaryText)
-                        .font(.system(size: 12))
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Clear search text")
-            }
-            
-            Button {
-                isSearchSyntaxHelpPresented.toggle()
-            } label: {
-                Image(systemName: "questionmark.circle")
-                    .font(.system(size: 12))
-                    .foregroundColor(AppColor.tertiaryText)
-            }
-            .buttonStyle(.plain)
-            .help("Search Syntax & Filter Operators")
-            .accessibilityLabel("Search Syntax Help")
-            .popover(isPresented: $isSearchSyntaxHelpPresented) {
-                searchSyntaxHelpView
-            }
-        }
-        .padding(.horizontal, AppSpacing.xs)
-        .padding(.vertical, 6)
-        .background(AppColor.surface)
-        .overlay(
-            RoundedRectangle(cornerRadius: AppRadius.control)
-                .stroke(AppColor.borderSubtle, lineWidth: 1)
-        )
-        .cornerRadius(AppRadius.control)
-        .padding(.bottom, 6)
-        .onExitCommand { isSearchFocused = false }
-        .listRowBackground(Color.clear)
-        .listRowSeparator(.hidden)
-    }
-    
-    private var searchSyntaxHelpView: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Search Filters")
-                .font(AppTypography.headline)
-                .foregroundColor(AppColor.primaryText)
-                .padding(.bottom, 2)
-            
-            Group {
-                syntaxHelpRow("is:unread", "Show unread articles only")
-                syntaxHelpRow("is:read", "Show read articles only")
-                syntaxHelpRow("is:saved", "Show bookmarked articles")
-                syntaxHelpRow("source:<name>", "Filter by feed source name")
-                syntaxHelpRow("category:<topic>", "Filter by article category")
-            }
-        }
-        .padding(12)
-        .frame(width: 250)
-    }
-    
-    private func syntaxHelpRow(_ syntax: String, _ desc: String) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(syntax)
-                .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                .foregroundColor(AppColor.accent)
-            Text(desc)
-                .font(AppTypography.caption)
-                .foregroundColor(AppColor.secondaryText)
-        }
     }
     
     // MARK: - Drop Confirmation Banner
@@ -177,47 +96,49 @@ struct SidebarView: View {
         }
         .padding(AppSpacing.xs)
         .background(AppColor.success.opacity(0.12))
-        .cornerRadius(AppRadius.control)
+        .clipShape(RoundedRectangle(cornerRadius: AppRadius.control))
         .listRowBackground(Color.clear)
         .listRowSeparator(.hidden)
     }
     
     // MARK: - Sidebar Sections
     
+    /// A native sidebar row (DESIGN.md 6): the list's selection handles clicks and arrow keys, the system draws
+    /// the badge, and row size follows the person's sidebar size setting.
+    @ViewBuilder
     private func topicRow(title: String, icon: String, badge: Int? = nil, isLoading: Bool = false, accessibility: String? = nil) -> some View {
-        Button {
-            selectedTopic = title
-            isSearchFocused = false
-        } label: {
-            HStack {
-                Label(title, systemImage: icon)
-                Spacer()
-                if isLoading {
+        let count = badge ?? 0
+        let badgeValue = count > 0 ? String(count) : ""
+        Group {
+            if isLoading {
+                HStack {
+                    Label(title, systemImage: icon)
+                    Spacer()
                     ProgressView()
-                        .controlSize(.small)
-                        .scaleEffect(0.7)
-                        .frame(width: 14, height: 14)
-                } else if let b = badge, b > 0 {
-                    Text("\(b)")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundColor(selectedTopic == title ? AppColor.primaryText : AppColor.secondaryText)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 1)
-                        .background(Capsule().fill(selectedTopic == title ? AppColor.surface.opacity(0.8) : AppColor.surface))
+                        .controlSize(.mini)
                 }
+            } else {
+                Label(title, systemImage: icon)
+                    .badge(badge ?? 0)
             }
-            .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
         .tag(title)
         .accessibilityLabel(accessibility ?? title)
+        .accessibilityValue(isLoading ? "Refreshing" : badgeValue)
     }
 
     private var inboxSection: some View {
         Section("Inbox") {
             topicRow(title: "Today", icon: "newspaper.fill", isLoading: feedManager.isAnyFeedLoading, accessibility: "Today's Articles")
-            topicRow(title: "Unread", icon: "circle.circle.fill", badge: feedManager.articles.filter { !readManager.isRead($0.id) }.count, accessibility: "Unread Articles")
+            topicRow(title: "Unread", icon: "circle.circle.fill", badge: unreadBadge, accessibility: "Unread Articles")
+            topicRow(title: "Briefing", icon: "text.book.closed", accessibility: "Finite Briefing")
         }
+    }
+
+    /// Unread stories the Unread list can show: muted stories are left out, as they are from the list.
+    private var unreadBadge: Int {
+        let muting = appSettings.muteRules
+        return feedManager.articles.filter { !readManager.isRead($0.id) && (muting.isEmpty || !muting.mutes($0)) }.count
     }
     
     private var librarySection: some View {
@@ -254,8 +175,8 @@ struct SidebarView: View {
                                 .foregroundColor(AppColor.secondaryText)
                             Spacer()
                             Image(systemName: "plus")
-                                .font(.system(size: 11, weight: .semibold))
-                                .foregroundColor(AppColor.tertiaryText)
+                                .imageScale(.small)
+                                .foregroundStyle(AppColor.tertiaryText)
                         }
                     }
                     .buttonStyle(.plain)
@@ -307,13 +228,9 @@ struct SidebarView: View {
                     guard let url = item else { return }
                     
                     if url.isFileURL && (url.pathExtension.lowercased() == "opml" || url.pathExtension.lowercased() == "xml") {
-                        if let fileData = try? Data(contentsOf: url) {
-                            Task { @MainActor in
-                                let countBefore = self.feedManager.feedURLs.count
-                                self.feedManager.importFeeds(from: fileData)
-                                let added = self.feedManager.feedURLs.count - countBefore
-                                self.showConfirmation(added > 0 ? "Imported \(added) feed(s) from OPML" : "OPML feeds up to date")
-                            }
+                        Task { @MainActor in
+                            let added = await self.feedManager.importFeeds(fromFile: url)
+                            self.showConfirmation(added > 0 ? "Imported \(added) feed(s) from OPML" : "No new feeds imported")
                         }
                     } else if !url.isFileURL && (url.scheme == "http" || url.scheme == "https") {
                         let urlString = url.absoluteString
@@ -345,11 +262,11 @@ struct SidebarView: View {
     }
     
     private func showConfirmation(_ message: String) {
-        withAnimation(AppMotion.responsive) {
+        withAnimation(reduceMotion ? nil : AppMotion.responsive) {
             dropConfirmationMessage = message
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 4) {
-            withAnimation(AppMotion.responsive) {
+            withAnimation(reduceMotion ? nil : AppMotion.responsive) {
                 self.dropConfirmationMessage = nil
             }
         }

@@ -1,0 +1,1845 @@
+{
+  "version": 2,
+  "status": "provisional-source-review",
+  "releaseEligible": false,
+  "baseSHA256": "2ff6bd38c290b5e71528a20d32415aed986a9236451bdd890564aa1f44bedf0f",
+  "supplementSHA256": "643675d06fd32d6390325832dff03c58ec61ea6a756315d56f96b8f301e80adb",
+  "captureFile": "capture-1791053699105.json",
+  "captureSHA256": "56f31c123a220bf739e2c5f58863c73a3b56b00de2527a7d53ed25334a8bff4e",
+  "selectionSHA256": "fd75a2808fff28a0778bdc51fd25f3539f71b6686b15c62df09da31dc1b0f213",
+  "excludedCandidates": [
+    {
+      "id": "doc-0312",
+      "captureIndex": 312,
+      "url": "https://www.dw.com/de/trump-diesel-drohung-war-nicht-ernst-gemeint/a-79528258?maca=de-rss-de-all-1119-rdf",
+      "timestampEvidence": {
+        "id": "doc-0312",
+        "url": "https://www.dw.com/de/trump-diesel-drohung-war-nicht-ernst-gemeint/a-79528258?maca=de-rss-de-all-1119-rdf",
+        "feedPublished": null,
+        "status": "publisher-time-only",
+        "pageSHA256": "e1bdac6ad8d44f2e8105b6f5f4fe85323d7f69aa6f69ecd88ef67dcb34dad3f1",
+        "fetchedAt": 1791072567.283825,
+        "finalURL": "https://www.dw.com/de/g7-diesel-rohoel-usa-donald-trump-emmanuel-macron-export-stopp-eu-friedrich-merz-iran-krieg-us-wahl/a-79528258?maca=de-rss-de-all-1119-rdf",
+        "dateEvidence": [
+          {
+            "kind": "datePublished",
+            "field": "jsonld:datePublished",
+            "raw": "2026-10-03T09:44:21.637Z",
+            "epoch": 1791020661.637
+          },
+          {
+            "kind": "dateModified",
+            "field": "jsonld:dateModified",
+            "raw": "2026-10-03T09:44:21.637Z",
+            "epoch": 1791020661.637
+          }
+        ],
+        "publisherPublished": "2026-10-03T09:44:21.637000Z"
+      },
+      "reason": "The captured feed supplies no timestamp. Page publication evidence cannot replace an input the app did not receive. Kept as private context, excluded from replay proposals."
+    }
+  ],
+  "sampling": "Twelve subject/action groups selected from captured source evidence before inspecting their deterministic family split. No matcher/embedding output was used. Fixed anchor pairs avoid adding every correlated triangle. Prior families and captured metadata are unchanged.",
+  "splitRule": "SHA256(news-review-v2:family), first 8 hex digits modulo 10 >=7 is holdout; related action families kept together.",
+  "documents": [
+    {
+      "id": "doc-0395",
+      "captureIndex": 395,
+      "event": "bitchat-india-removal",
+      "url": "https://techcrunch.com/2026/10/03/jack-dorseys-bitchat-disappears-from-app-stores-in-india-after-government-order/",
+      "feed": "https://techcrunch.com/feed",
+      "source": "TechCrunch",
+      "language": "en",
+      "published": 1791039721,
+      "timestampStatus": "feed-reported",
+      "scope": "event",
+      "origin": "capture-v2",
+      "timestampEvidence": {
+        "id": "doc-0395",
+        "url": "https://techcrunch.com/2026/10/03/jack-dorseys-bitchat-disappears-from-app-stores-in-india-after-government-order/",
+        "feedPublished": 1791039721,
+        "status": "feed-matches-publication",
+        "pageSHA256": "f5dd342a6a799a2c98d9f0c9d05534d00a786cec21f579541846aa3bb38b4e66",
+        "fetchedAt": 1791072565.962708,
+        "finalURL": "https://techcrunch.com/2026/10/03/jack-dorseys-bitchat-disappears-from-app-stores-in-india-after-government-order/",
+        "dateEvidence": [
+          {
+            "kind": "datePublished",
+            "field": "meta:article:published_time",
+            "raw": "2026-10-03T15:02:01+00:00",
+            "epoch": 1791039721.0
+          },
+          {
+            "kind": "dateModified",
+            "field": "meta:article:modified_time",
+            "raw": "2026-10-03T15:02:06+00:00",
+            "epoch": 1791039726.0
+          },
+          {
+            "kind": "datePublished",
+            "field": "jsonld:datePublished",
+            "raw": "2026-10-03T15:02:01+00:00",
+            "epoch": 1791039721.0
+          },
+          {
+            "kind": "dateModified",
+            "field": "jsonld:dateModified",
+            "raw": "2026-10-03T15:02:06+00:00",
+            "epoch": 1791039726.0
+          },
+          {
+            "kind": "datePublished",
+            "field": "jsonld:datePublished",
+            "raw": "2026-10-03T15:02:01+00:00",
+            "epoch": 1791039721.0
+          },
+          {
+            "kind": "dateModified",
+            "field": "jsonld:dateModified",
+            "raw": "2026-10-03T15:02:06+00:00",
+            "epoch": 1791039726.0
+          }
+        ],
+        "publisherPublished": "2026-10-03T15:02:01Z",
+        "deltaSeconds": 0.0
+      }
+    },
+    {
+      "id": "doc-0429",
+      "captureIndex": 429,
+      "event": "bitchat-india-removal",
+      "url": "https://timesofindia.indiatimes.com/technology/technology-news/apple-removes-offline-messaging-application-bitchat-from-india-app-store-over-security-concerns/articleshow/134663222.cms",
+      "feed": "https://timesofindia.indiatimes.com/rssfeedstopstories.cms",
+      "source": "Times of India",
+      "language": "en",
+      "published": 1791046985,
+      "timestampStatus": "feed-reported",
+      "scope": "event",
+      "origin": "capture-v2",
+      "timestampEvidence": {
+        "id": "doc-0429",
+        "url": "https://timesofindia.indiatimes.com/technology/technology-news/apple-removes-offline-messaging-application-bitchat-from-india-app-store-over-security-concerns/articleshow/134663222.cms",
+        "feedPublished": 1791046985,
+        "status": "feed-publication-differs",
+        "pageSHA256": "e292fcfd70a28dc1101017774b868da631049c74c650511d135dd199019f46b3",
+        "fetchedAt": 1791072565.962738,
+        "finalURL": "https://timesofindia.indiatimes.com/technology/technology-news/apple-removes-offline-messaging-application-bitchat-from-india-app-store-over-security-concerns/articleshow/134663222.cms",
+        "dateEvidence": [
+          {
+            "kind": "datePublished",
+            "field": "jsonld:datePublished",
+            "raw": "2026-10-03T22:33:00+05:30",
+            "epoch": 1791046980.0
+          },
+          {
+            "kind": "dateModified",
+            "field": "jsonld:dateModified",
+            "raw": "2026-10-03T22:33:00+05:30",
+            "epoch": 1791046980.0
+          }
+        ],
+        "publisherPublished": "2026-10-03T17:03:00Z",
+        "deltaSeconds": -5.0
+      }
+    },
+    {
+      "id": "doc-0254",
+      "captureIndex": 254,
+      "event": "renee-good-lawsuit",
+      "url": "https://www.bbc.co.uk/news/articles/cwly7y5gvxlmo?at_medium=RSS&at_campaign=rss",
+      "feed": "https://feeds.bbci.co.uk/news/world/rss.xml",
+      "source": "BBC News",
+      "language": "en",
+      "published": 1790886647,
+      "timestampStatus": "feed-reported",
+      "scope": "event",
+      "origin": "capture-v2",
+      "timestampEvidence": {
+        "id": "doc-0254",
+        "url": "https://www.bbc.co.uk/news/articles/cwly7y5gvxlmo?at_medium=RSS&at_campaign=rss",
+        "feedPublished": 1790886647,
+        "status": "feed-matches-modification",
+        "pageSHA256": "69d52021e345c96c8be4cc31ddf15a04e35994ef04685e9e2b824fa5594ca59b",
+        "fetchedAt": 1791072567.283813,
+        "finalURL": "https://www.bbc.co.uk/news/articles/cwly7y5gvxlmo?at_medium=RSS&at_campaign=rss",
+        "dateEvidence": [
+          {
+            "kind": "datePublished",
+            "field": "jsonld:datePublished",
+            "raw": "2026-10-01T16:40:59.801Z",
+            "epoch": 1790872859.801
+          },
+          {
+            "kind": "dateModified",
+            "field": "jsonld:dateModified",
+            "raw": "2026-10-01T20:30:47.102Z",
+            "epoch": 1790886647.102
+          }
+        ],
+        "publisherPublished": "2026-10-01T16:40:59.801000Z",
+        "deltaSeconds": -13787.198999881744
+      }
+    },
+    {
+      "id": "doc-0921",
+      "captureIndex": 921,
+      "event": "renee-good-lawsuit",
+      "url": "https://www.cbc.ca/news/world/renee-good-lawsuits-minneapolis-9.7365279?cmp=rss",
+      "feed": "https://www.cbc.ca/webfeed/rss/rss-world",
+      "source": "CBC",
+      "language": "en",
+      "published": 1790869975,
+      "timestampStatus": "feed-reported",
+      "scope": "event",
+      "origin": "capture-v2",
+      "timestampEvidence": {
+        "id": "doc-0921",
+        "url": "https://www.cbc.ca/news/world/renee-good-lawsuits-minneapolis-9.7365279?cmp=rss",
+        "feedPublished": 1790869975,
+        "status": "feed-matches-publication",
+        "pageSHA256": "f55b335db8b7bd7f4cdb436052256724685f4a90b15ead91495a72e940aa867a",
+        "fetchedAt": 1791072567.283819,
+        "finalURL": "https://www.cbc.ca/news/world/renee-good-lawsuits-minneapolis-9.7365279?cmp=rss",
+        "dateEvidence": [
+          {
+            "kind": "datePublished",
+            "field": "jsonld:datePublished",
+            "raw": "2026-10-01T15:52:55.601Z",
+            "epoch": 1790869975.601
+          },
+          {
+            "kind": "dateModified",
+            "field": "jsonld:dateModified",
+            "raw": "2026-10-01T18:28:27.139Z",
+            "epoch": 1790879307.139
+          }
+        ],
+        "publisherPublished": "2026-10-01T15:52:55.601000Z",
+        "deltaSeconds": 0.6010000705718994
+      }
+    },
+    {
+      "id": "doc-0235",
+      "captureIndex": 235,
+      "event": "nantucket-air-ambulance-search",
+      "url": "https://www.bbc.co.uk/news/articles/cme3x85013llo?at_medium=RSS&at_campaign=rss",
+      "feed": "https://feeds.bbci.co.uk/news/world/rss.xml",
+      "source": "BBC News",
+      "language": "en",
+      "published": 1791050807,
+      "timestampStatus": "feed-reported",
+      "scope": "event",
+      "origin": "capture-v2",
+      "timestampEvidence": {
+        "id": "doc-0235",
+        "url": "https://www.bbc.co.uk/news/articles/cme3x85013llo?at_medium=RSS&at_campaign=rss",
+        "feedPublished": 1791050807,
+        "status": "feed-publication-differs",
+        "pageSHA256": "553229fef54044cee87c7bd4c7b06b725b19976ae244894688fa25b0599441d4",
+        "fetchedAt": 1791072567.624086,
+        "finalURL": "https://www.bbc.co.uk/news/articles/cme3x85013llo?at_medium=RSS&at_campaign=rss",
+        "dateEvidence": [
+          {
+            "kind": "datePublished",
+            "field": "jsonld:datePublished",
+            "raw": "2026-10-03T15:56:14.615Z",
+            "epoch": 1791042974.615
+          },
+          {
+            "kind": "dateModified",
+            "field": "jsonld:dateModified",
+            "raw": "2026-10-03T21:16:21.150Z",
+            "epoch": 1791062181.15
+          }
+        ],
+        "publisherPublished": "2026-10-03T15:56:14.615000Z",
+        "deltaSeconds": -7832.384999990463
+      }
+    },
+    {
+      "id": "doc-0459",
+      "captureIndex": 459,
+      "event": "nantucket-air-ambulance-search",
+      "url": "https://timesofindia.indiatimes.com/world/us/6-missing-after-gulfstream-jet-disappears-near-nantucket-after-takeoff-from-bermuda/articleshow/134660618.cms",
+      "feed": "https://timesofindia.indiatimes.com/rssfeedstopstories.cms",
+      "source": "Times of India",
+      "language": "en",
+      "published": 1791033929,
+      "timestampStatus": "feed-reported",
+      "scope": "event",
+      "origin": "capture-v2",
+      "timestampEvidence": {
+        "id": "doc-0459",
+        "url": "https://timesofindia.indiatimes.com/world/us/6-missing-after-gulfstream-jet-disappears-near-nantucket-after-takeoff-from-bermuda/articleshow/134660618.cms",
+        "feedPublished": 1791033929,
+        "status": "feed-publication-differs",
+        "pageSHA256": "751d0619da680762f66ebede5245ca4f4cbad679ddf862ae4bcfce337d0fa6ca",
+        "fetchedAt": 1791072566.840662,
+        "finalURL": "https://timesofindia.indiatimes.com/world/us/6-missing-after-gulfstream-jet-disappears-near-nantucket-after-takeoff-from-bermuda/articleshow/134660618.cms",
+        "dateEvidence": [
+          {
+            "kind": "datePublished",
+            "field": "jsonld:datePublished",
+            "raw": "2026-10-03T18:55:00+05:30",
+            "epoch": 1791033900.0
+          },
+          {
+            "kind": "dateModified",
+            "field": "jsonld:dateModified",
+            "raw": "2026-10-03T18:56:00+05:30",
+            "epoch": 1791033960.0
+          }
+        ],
+        "publisherPublished": "2026-10-03T13:25:00Z",
+        "deltaSeconds": -29.0
+      }
+    },
+    {
+      "id": "doc-1560",
+      "captureIndex": 1560,
+      "event": "nantucket-air-ambulance-search",
+      "url": "https://www.theguardian.com/us-news/2026/oct/03/us-coast-guard-missing-air-ambulance-massachusetts",
+      "feed": "https://www.theguardian.com/world/rss",
+      "source": "World news",
+      "language": "en",
+      "published": 1791047034,
+      "timestampStatus": "feed-reported",
+      "scope": "event",
+      "origin": "capture-v2",
+      "timestampEvidence": {
+        "id": "doc-1560",
+        "url": "https://www.theguardian.com/us-news/2026/oct/03/us-coast-guard-missing-air-ambulance-massachusetts",
+        "feedPublished": 1791047034,
+        "status": "feed-matches-publication",
+        "pageSHA256": "abc9cf74a2d338cb4eae79220ae8213e5fb8c9907da89e6c2c941f2106489fbd",
+        "fetchedAt": 1791072568.757087,
+        "finalURL": "https://www.theguardian.com/us-news/2026/oct/03/us-coast-guard-missing-air-ambulance-massachusetts",
+        "dateEvidence": [
+          {
+            "kind": "dateModified",
+            "field": "meta:article:modified_time",
+            "raw": "2026-10-03T17:03:54.000Z",
+            "epoch": 1791047034.0
+          },
+          {
+            "kind": "datePublished",
+            "field": "meta:article:published_time",
+            "raw": "2026-10-03T17:03:54.000Z",
+            "epoch": 1791047034.0
+          },
+          {
+            "kind": "datePublished",
+            "field": "jsonld:datePublished",
+            "raw": "2026-10-03T17:03:54.000Z",
+            "epoch": 1791047034.0
+          },
+          {
+            "kind": "dateModified",
+            "field": "jsonld:dateModified",
+            "raw": "2026-10-03T17:03:54.000Z",
+            "epoch": 1791047034.0
+          }
+        ],
+        "publisherPublished": "2026-10-03T17:03:54Z",
+        "deltaSeconds": 0.0
+      }
+    },
+    {
+      "id": "doc-1144",
+      "captureIndex": 1144,
+      "event": "uk-rejoin-poll",
+      "url": "https://www.franceinfo.fr/monde/europe/la-grande-bretagne-et-l-ue/plus-de-la-moitie-des-britanniques-sont-favorables-a-un-retour-du-royaume-uni-dans-l-union-europeenne-selon-un-sondage_8221126.html#xtor=RSS-3-%5Blestitres%5D",
+      "feed": "https://www.franceinfo.fr/titres.rss",
+      "source": "franceinfo",
+      "language": "fr",
+      "published": 1791026732,
+      "timestampStatus": "feed-reported",
+      "scope": "event",
+      "origin": "capture-v2",
+      "timestampEvidence": {
+        "id": "doc-1144",
+        "url": "https://www.franceinfo.fr/monde/europe/la-grande-bretagne-et-l-ue/plus-de-la-moitie-des-britanniques-sont-favorables-a-un-retour-du-royaume-uni-dans-l-union-europeenne-selon-un-sondage_8221126.html#xtor=RSS-3-%5Blestitres%5D",
+        "feedPublished": 1791026732,
+        "status": "feed-matches-publication",
+        "pageSHA256": "05a8d78ab6d4fb476a85a0477d64d0fa3bff5d23cc03aedd85fc9452df08483b",
+        "fetchedAt": 1791072568.757077,
+        "finalURL": "https://www.franceinfo.fr/monde/europe/la-grande-bretagne-et-l-ue/plus-de-la-moitie-des-britanniques-sont-favorables-a-un-retour-du-royaume-uni-dans-l-union-europeenne-selon-un-sondage_8221126.html#xtor=RSS-3-%5Blestitres%5D",
+        "dateEvidence": [
+          {
+            "kind": "datePublished",
+            "field": "meta:article:published_time",
+            "raw": "2026-10-03T13:25:32+02:00",
+            "epoch": 1791026732.0
+          },
+          {
+            "kind": "dateModified",
+            "field": "meta:article:modified_time",
+            "raw": "2026-10-03T13:25:32+02:00",
+            "epoch": 1791026732.0
+          },
+          {
+            "kind": "datePublished",
+            "field": "jsonld:datePublished",
+            "raw": "2026-10-03T13:25:32+02:00",
+            "epoch": 1791026732.0
+          },
+          {
+            "kind": "dateModified",
+            "field": "jsonld:dateModified",
+            "raw": "2026-10-03T13:25:32+02:00",
+            "epoch": 1791026732.0
+          }
+        ],
+        "publisherPublished": "2026-10-03T11:25:32Z",
+        "deltaSeconds": 0.0
+      }
+    },
+    {
+      "id": "doc-1314",
+      "captureIndex": 1314,
+      "event": "uk-rejoin-poll",
+      "url": "https://www.theguardian.com/world/2026/oct/03/half-want-to-rejoin-eu-and-backing-it-could-drive-up-labour-vote-megapoll-finds",
+      "feed": "https://www.theguardian.com/politics/rss",
+      "source": "Politics",
+      "language": "en",
+      "published": 1791003652,
+      "timestampStatus": "feed-reported",
+      "scope": "event",
+      "origin": "capture-v2",
+      "timestampEvidence": {
+        "id": "doc-1314",
+        "url": "https://www.theguardian.com/world/2026/oct/03/half-want-to-rejoin-eu-and-backing-it-could-drive-up-labour-vote-megapoll-finds",
+        "feedPublished": 1791003652,
+        "status": "feed-matches-publication",
+        "pageSHA256": "6cd2cb6dd42de3b8119ba67b04c10dd4effb3b188f11619c99c48c373fdbe22c",
+        "fetchedAt": 1791072569.117672,
+        "finalURL": "https://www.theguardian.com/world/2026/oct/03/half-want-to-rejoin-eu-and-backing-it-could-drive-up-labour-vote-megapoll-finds",
+        "dateEvidence": [
+          {
+            "kind": "dateModified",
+            "field": "meta:article:modified_time",
+            "raw": "2026-10-03T05:32:45.000Z",
+            "epoch": 1791005565.0
+          },
+          {
+            "kind": "datePublished",
+            "field": "meta:article:published_time",
+            "raw": "2026-10-03T05:00:52.000Z",
+            "epoch": 1791003652.0
+          },
+          {
+            "kind": "datePublished",
+            "field": "jsonld:datePublished",
+            "raw": "2026-10-03T05:00:52.000Z",
+            "epoch": 1791003652.0
+          },
+          {
+            "kind": "dateModified",
+            "field": "jsonld:dateModified",
+            "raw": "2026-10-03T05:32:45.000Z",
+            "epoch": 1791005565.0
+          }
+        ],
+        "publisherPublished": "2026-10-03T05:00:52Z",
+        "deltaSeconds": 0.0
+      }
+    },
+    {
+      "id": "doc-0154",
+      "captureIndex": 154,
+      "event": "amazon-community-investment",
+      "url": "https://arstechnica.com/tech-policy/2026/10/amazons-1b-plan-to-combat-data-center-backlash-draws-more-backlash/",
+      "feed": "https://feeds.arstechnica.com/arstechnica/index",
+      "source": "Ars Technica",
+      "language": "en",
+      "published": 1790973027,
+      "timestampStatus": "feed-reported",
+      "scope": "event",
+      "origin": "capture-v2",
+      "timestampEvidence": {
+        "id": "doc-0154",
+        "url": "https://arstechnica.com/tech-policy/2026/10/amazons-1b-plan-to-combat-data-center-backlash-draws-more-backlash/",
+        "feedPublished": 1790973027,
+        "status": "feed-matches-publication",
+        "pageSHA256": "ada0dc95b2c3ead8df693ab492ffea22a1cdc0d11fa4ee8f2d0c411b23ae1933",
+        "fetchedAt": 1791072565.962709,
+        "finalURL": "https://arstechnica.com/tech-policy/2026/10/amazons-1b-plan-to-combat-data-center-backlash-draws-more-backlash/",
+        "dateEvidence": [
+          {
+            "kind": "datePublished",
+            "field": "meta:article:published_time",
+            "raw": "2026-10-02T20:30:27+00:00",
+            "epoch": 1790973027.0
+          },
+          {
+            "kind": "dateModified",
+            "field": "meta:article:modified_time",
+            "raw": "2026-10-02T20:30:27+00:00",
+            "epoch": 1790973027.0
+          },
+          {
+            "kind": "datePublished",
+            "field": "meta:article:published_time",
+            "raw": "2026-10-02T20:30:27+00:00",
+            "epoch": 1790973027.0
+          },
+          {
+            "kind": "dateModified",
+            "field": "meta:article:modified_time",
+            "raw": "2026-10-02T20:30:27+00:00",
+            "epoch": 1790973027.0
+          },
+          {
+            "kind": "datePublished",
+            "field": "jsonld:datePublished",
+            "raw": "2026-10-02T20:30:27+00:00",
+            "epoch": 1790973027.0
+          },
+          {
+            "kind": "dateModified",
+            "field": "jsonld:dateModified",
+            "raw": "2026-10-02T20:30:27+00:00",
+            "epoch": 1790973027.0
+          },
+          {
+            "kind": "datePublished",
+            "field": "jsonld:datePublished",
+            "raw": "2026-10-02T20:30:27+00:00",
+            "epoch": 1790973027.0
+          },
+          {
+            "kind": "dateModified",
+            "field": "jsonld:dateModified",
+            "raw": "2026-10-02T20:30:27+00:00",
+            "epoch": 1790973027.0
+          }
+        ],
+        "publisherPublished": "2026-10-02T20:30:27Z",
+        "deltaSeconds": 0.0
+      }
+    },
+    {
+      "id": "doc-0393",
+      "captureIndex": 393,
+      "event": "amazon-community-investment",
+      "url": "https://techcrunch.com/2026/10/03/amazon-responds-to-data-center-backlash-says-it-no-longer-uses-ndas/",
+      "feed": "https://techcrunch.com/feed",
+      "source": "TechCrunch",
+      "language": "en",
+      "published": 1791053037,
+      "timestampStatus": "feed-reported",
+      "scope": "event",
+      "origin": "capture-v2",
+      "timestampEvidence": {
+        "id": "doc-0393",
+        "url": "https://techcrunch.com/2026/10/03/amazon-responds-to-data-center-backlash-says-it-no-longer-uses-ndas/",
+        "feedPublished": 1791053037,
+        "status": "feed-matches-publication",
+        "pageSHA256": "5b6fb935c45702e6772ac6599763e05ba3ac25ec1d762252cf7024dfdd507ed7",
+        "fetchedAt": 1791072566.686796,
+        "finalURL": "https://techcrunch.com/2026/10/03/amazon-responds-to-data-center-backlash-says-it-no-longer-uses-ndas/",
+        "dateEvidence": [
+          {
+            "kind": "datePublished",
+            "field": "meta:article:published_time",
+            "raw": "2026-10-03T18:43:57+00:00",
+            "epoch": 1791053037.0
+          },
+          {
+            "kind": "dateModified",
+            "field": "meta:article:modified_time",
+            "raw": "2026-10-03T19:44:10+00:00",
+            "epoch": 1791056650.0
+          },
+          {
+            "kind": "datePublished",
+            "field": "jsonld:datePublished",
+            "raw": "2026-10-03T18:43:57+00:00",
+            "epoch": 1791053037.0
+          },
+          {
+            "kind": "dateModified",
+            "field": "jsonld:dateModified",
+            "raw": "2026-10-03T19:44:10+00:00",
+            "epoch": 1791056650.0
+          },
+          {
+            "kind": "datePublished",
+            "field": "jsonld:datePublished",
+            "raw": "2026-10-03T18:43:57+00:00",
+            "epoch": 1791053037.0
+          },
+          {
+            "kind": "dateModified",
+            "field": "jsonld:dateModified",
+            "raw": "2026-10-03T19:44:10+00:00",
+            "epoch": 1791056650.0
+          }
+        ],
+        "publisherPublished": "2026-10-03T18:43:57Z",
+        "deltaSeconds": 0.0
+      }
+    },
+    {
+      "id": "doc-0553",
+      "captureIndex": 553,
+      "event": "amazon-community-investment",
+      "url": "https://thehill.com/policy/technology/6126145-amazon-investment-data-center-communities-energy-water-costs/",
+      "feed": "https://thehill.com/feed",
+      "source": "The Hill News",
+      "language": "en",
+      "published": 1790956976,
+      "timestampStatus": "feed-reported",
+      "scope": "event",
+      "origin": "capture-v2",
+      "timestampEvidence": {
+        "id": "doc-0553",
+        "url": "https://thehill.com/policy/technology/6126145-amazon-investment-data-center-communities-energy-water-costs/",
+        "feedPublished": 1790956976,
+        "status": "feed-matches-publication",
+        "pageSHA256": "c9f8f5c27264ad51eee7c376d94b3264ab2f49ab79ff714a9d48bb412dc560ce",
+        "fetchedAt": 1791072565.962731,
+        "finalURL": "https://thehill.com/policy/technology/6126145-amazon-investment-data-center-communities-energy-water-costs/",
+        "dateEvidence": [
+          {
+            "kind": "datePublished",
+            "field": "meta:article:published_time",
+            "raw": "2026-10-02T16:02:56+00:00",
+            "epoch": 1790956976.0
+          },
+          {
+            "kind": "dateModified",
+            "field": "meta:article:modified_time",
+            "raw": "2026-10-02T16:14:35+00:00",
+            "epoch": 1790957675.0
+          },
+          {
+            "kind": "datePublished",
+            "field": "jsonld:datePublished",
+            "raw": "2026-10-02T16:02:56+00:00",
+            "epoch": 1790956976.0
+          },
+          {
+            "kind": "dateModified",
+            "field": "jsonld:dateModified",
+            "raw": "2026-10-02T16:14:35+00:00",
+            "epoch": 1790957675.0
+          }
+        ],
+        "publisherPublished": "2026-10-02T16:02:56Z",
+        "deltaSeconds": 0.0
+      }
+    },
+    {
+      "id": "doc-1084",
+      "captureIndex": 1084,
+      "event": "france-italy-draw",
+      "url": "https://www.france24.com/en/tv-shows/sports/20261003-no-fairytale-return-for-zidane-as-italy-hold-france-at-the-stade-de-france",
+      "feed": "https://www.france24.com/en/rss",
+      "source": "France 24",
+      "language": "en",
+      "published": 1791015656,
+      "timestampStatus": "feed-reported",
+      "scope": "event",
+      "origin": "capture-v2",
+      "timestampEvidence": {
+        "id": "doc-1084",
+        "url": "https://www.france24.com/en/tv-shows/sports/20261003-no-fairytale-return-for-zidane-as-italy-hold-france-at-the-stade-de-france",
+        "feedPublished": 1791015656,
+        "status": "feed-matches-publication",
+        "pageSHA256": "b72cc6b0ac7db33adffd9acbdc8d156d4f5ebfb25cb7c4c92b5ad2bdf0f8f0cd",
+        "fetchedAt": 1791072567.2838259,
+        "finalURL": "https://www.france24.com/en/tv-shows/sports/20261003-no-fairytale-return-for-zidane-as-italy-hold-france-at-the-stade-de-france",
+        "dateEvidence": [
+          {
+            "kind": "datePublished",
+            "field": "meta:article:published_time",
+            "raw": "2026-10-03T08:20:56+00:00",
+            "epoch": 1791015656.0
+          },
+          {
+            "kind": "dateModified",
+            "field": "meta:article:modified_time",
+            "raw": "2026-10-03T08:20:56+00:00",
+            "epoch": 1791015656.0
+          },
+          {
+            "kind": "datePublished",
+            "field": "jsonld:datePublished",
+            "raw": "2026-10-03T08:20:56+00:00",
+            "epoch": 1791015656.0
+          },
+          {
+            "kind": "dateModified",
+            "field": "jsonld:dateModified",
+            "raw": "2026-10-03T08:20:56+00:00",
+            "epoch": 1791015656.0
+          }
+        ],
+        "publisherPublished": "2026-10-03T08:20:56Z",
+        "deltaSeconds": 0.0
+      }
+    },
+    {
+      "id": "doc-1091",
+      "captureIndex": 1091,
+      "event": "france-italy-draw",
+      "url": "https://www.france24.com/en/sport/20261002-france-held-by-italy-in-zidane-s-homecoming-after-olise-stunner",
+      "feed": "https://www.france24.com/en/rss",
+      "source": "France 24",
+      "language": "en",
+      "published": 1790974725,
+      "timestampStatus": "feed-reported",
+      "scope": "event",
+      "origin": "capture-v2",
+      "timestampEvidence": {
+        "id": "doc-1091",
+        "url": "https://www.france24.com/en/sport/20261002-france-held-by-italy-in-zidane-s-homecoming-after-olise-stunner",
+        "feedPublished": 1790974725,
+        "status": "feed-matches-publication",
+        "pageSHA256": "766923a487603f15d62a67db45f69151b46690a9efdc250c8260941a1b979b48",
+        "fetchedAt": 1791072568.309822,
+        "finalURL": "https://www.france24.com/en/sport/20261002-france-held-by-italy-in-zidane-s-homecoming-after-olise-stunner",
+        "dateEvidence": [
+          {
+            "kind": "datePublished",
+            "field": "meta:article:published_time",
+            "raw": "2026-10-02T20:58:45+00:00",
+            "epoch": 1790974725.0
+          },
+          {
+            "kind": "dateModified",
+            "field": "meta:article:modified_time",
+            "raw": "2026-10-03T13:58:43+00:00",
+            "epoch": 1791035923.0
+          },
+          {
+            "kind": "datePublished",
+            "field": "jsonld:datePublished",
+            "raw": "2026-10-02T20:58:45+00:00",
+            "epoch": 1790974725.0
+          },
+          {
+            "kind": "dateModified",
+            "field": "jsonld:dateModified",
+            "raw": "2026-10-03T13:58:43+00:00",
+            "epoch": 1791035923.0
+          }
+        ],
+        "publisherPublished": "2026-10-02T20:58:45Z",
+        "deltaSeconds": 0.0
+      }
+    },
+    {
+      "id": "doc-0867",
+      "captureIndex": 867,
+      "event": "india-pakistan-cricket-final",
+      "url": "https://www.arabnews.com/cricket/abhishek-and-varma-shine-as-india-beat-pakistan-to-complete-cricket-double-3004423",
+      "feed": "https://www.arabnews.com/rss.xml",
+      "source": "Arab News",
+      "language": "en",
+      "published": 1791043809,
+      "timestampStatus": "feed-reported",
+      "scope": "event",
+      "origin": "capture-v2",
+      "timestampEvidence": {
+        "id": "doc-0867",
+        "url": "https://www.arabnews.com/cricket/abhishek-and-varma-shine-as-india-beat-pakistan-to-complete-cricket-double-3004423",
+        "feedPublished": 1791043809,
+        "status": "feed-matches-publication",
+        "pageSHA256": "f5e35a1c1d80d8822195147b3b69a731dc37c894960aaf792ffea24698a13c8f",
+        "fetchedAt": 1791072565.962758,
+        "finalURL": "https://www.arabnews.com/cricket/abhishek-and-varma-shine-as-india-beat-pakistan-to-complete-cricket-double-3004423",
+        "dateEvidence": [
+          {
+            "kind": "datePublished",
+            "field": "meta:article:published_time",
+            "raw": "2026-10-03T16:10:09.149Z",
+            "epoch": 1791043809.149
+          },
+          {
+            "kind": "dateModified",
+            "field": "meta:article:modified_time",
+            "raw": "2026-10-03T16:10:10.955Z",
+            "epoch": 1791043810.955
+          },
+          {
+            "kind": "datePublished",
+            "field": "jsonld:datePublished",
+            "raw": "2026-10-03T16:10:09.149Z",
+            "epoch": 1791043809.149
+          },
+          {
+            "kind": "dateModified",
+            "field": "jsonld:dateModified",
+            "raw": "2026-10-03T16:10:10.955Z",
+            "epoch": 1791043810.955
+          }
+        ],
+        "publisherPublished": "2026-10-03T16:10:09.149000Z",
+        "deltaSeconds": 0.14899992942810059
+      }
+    },
+    {
+      "id": "doc-1064",
+      "captureIndex": 1064,
+      "event": "india-pakistan-cricket-final",
+      "url": "https://www.dawn.com/news/2034438/hasan-nawazs-fighting-96-against-india-in-vain-as-pakistan-settle-for-asian-games-cricket-silver",
+      "feed": "https://www.dawn.com/feeds/home",
+      "source": "Dawn",
+      "language": "en",
+      "published": 1791040373,
+      "timestampStatus": "feed-reported",
+      "scope": "event",
+      "origin": "capture-v2",
+      "timestampEvidence": {
+        "id": "doc-1064",
+        "url": "https://www.dawn.com/news/2034438/hasan-nawazs-fighting-96-against-india-in-vain-as-pakistan-settle-for-asian-games-cricket-silver",
+        "feedPublished": 1791040373,
+        "status": "feed-matches-modification",
+        "pageSHA256": "38231cb147e55726209282a2cda28bdc15954f8dd1de60aec31cb91520fc89ad",
+        "fetchedAt": 1791072567.283824,
+        "finalURL": "https://www.dawn.com/news/2034438/hasan-nawazs-fighting-96-against-india-in-vain-as-pakistan-settle-for-asian-games-cricket-silver",
+        "dateEvidence": [
+          {
+            "kind": "datePublished",
+            "field": "meta:article:published_time",
+            "raw": "2026-10-03 09:24:59+05:00",
+            "epoch": 1791001499.0
+          },
+          {
+            "kind": "dateModified",
+            "field": "meta:article:modified_time",
+            "raw": "2026-10-03 20:12:53+05:00",
+            "epoch": 1791040373.0
+          }
+        ],
+        "publisherPublished": "2026-10-03T04:24:59Z",
+        "deltaSeconds": -38874.0
+      }
+    },
+    {
+      "id": "doc-0655",
+      "captureIndex": 655,
+      "event": "congo-ebola-exposure-trial",
+      "url": "http://www.africanews.com/2026/10/03/dr-congo-trial-of-post-ebola-exposure-drug-underway/",
+      "feed": "https://www.africanews.com/feed/rss",
+      "source": "Africanews RSS",
+      "language": "en",
+      "published": 1791025269,
+      "timestampStatus": "feed-reported",
+      "scope": "event",
+      "origin": "capture-v2",
+      "timestampEvidence": {
+        "id": "doc-0655",
+        "url": "http://www.africanews.com/2026/10/03/dr-congo-trial-of-post-ebola-exposure-drug-underway/",
+        "feedPublished": 1791025269,
+        "status": "no-zoned-publication-time",
+        "pageSHA256": "c56d658372c71eb4b4013663d4d41b315cc9b874e63d9a8793c175ba8649f7d7",
+        "fetchedAt": 1791072565.9627519,
+        "finalURL": "https://www.africanews.com/2026/10/03/dr-congo-trial-of-post-ebola-exposure-drug-underway/",
+        "dateEvidence": [
+          {
+            "kind": "datePublished",
+            "field": "meta:article:published_time",
+            "raw": "2026-10-03CEST13:01:09+02:00",
+            "epoch": null
+          },
+          {
+            "kind": "dateModified",
+            "field": "meta:article:modified_time",
+            "raw": "2026-10-03CEST13:01:09+02:00",
+            "epoch": null
+          }
+        ],
+        "publisherCMS": [
+          {
+            "field": "cms:createdAt",
+            "epoch": 1790965470
+          },
+          {
+            "field": "cms:publishedAt",
+            "epoch": 1791025269
+          },
+          {
+            "field": "cms:firstPublishedAt",
+            "epoch": 1791025269
+          },
+          {
+            "field": "cms:lastPublishedAt",
+            "epoch": 1791025269
+          },
+          {
+            "field": "cms:updatedAt",
+            "epoch": 1791025269
+          }
+        ]
+      }
+    },
+    {
+      "id": "doc-1425",
+      "captureIndex": 1425,
+      "event": "congo-ebola-exposure-trial",
+      "url": "https://www.ukrinform.ua/rubric-world/4170753-u-dr-kongo-testuut-preparat-so-moze-zapobigati-eboli-pisla-kontaktu-z-hvorim.html",
+      "feed": "https://www.ukrinform.ua/rss/block-lastnews",
+      "source": "Останні новини",
+      "language": "uk",
+      "published": 1791052200,
+      "timestampStatus": "feed-reported",
+      "scope": "event",
+      "origin": "capture-v2",
+      "timestampEvidence": {
+        "id": "doc-1425",
+        "url": "https://www.ukrinform.ua/rubric-world/4170753-u-dr-kongo-testuut-preparat-so-moze-zapobigati-eboli-pisla-kontaktu-z-hvorim.html",
+        "feedPublished": 1791052200,
+        "status": "feed-matches-publication",
+        "pageSHA256": "796ea559da21305749252477eeca3d87c8f567a5e5aad4cce79ccd9acf45aa1f",
+        "fetchedAt": 1791072568.757088,
+        "finalURL": "https://www.ukrinform.ua/rubric-world/4170753-u-dr-kongo-testuut-preparat-so-moze-zapobigati-eboli-pisla-kontaktu-z-hvorim.html",
+        "dateEvidence": [
+          {
+            "kind": "datePublished",
+            "field": "jsonld:datePublished",
+            "raw": "2026-10-03T21:30:00+03:00",
+            "epoch": 1791052200.0
+          },
+          {
+            "kind": "dateModified",
+            "field": "jsonld:dateModified",
+            "raw": "2026-10-03T21:30:00+03:00",
+            "epoch": 1791052200.0
+          },
+          {
+            "kind": "datePublished",
+            "field": "jsonld:datePublished",
+            "raw": "1791052200",
+            "epoch": null
+          },
+          {
+            "kind": "dateModified",
+            "field": "jsonld:dateModified",
+            "raw": "1791052200",
+            "epoch": null
+          }
+        ],
+        "publisherPublished": "2026-10-03T18:30:00Z",
+        "deltaSeconds": 0.0
+      }
+    },
+    {
+      "id": "doc-0249",
+      "captureIndex": 249,
+      "event": "ethiopia-eritrea-ties-severed",
+      "url": "https://www.bbc.co.uk/news/articles/crpd0d0jl0y0o?at_medium=RSS&at_campaign=rss",
+      "feed": "https://feeds.bbci.co.uk/news/world/rss.xml",
+      "source": "BBC News",
+      "language": "en",
+      "published": 1790957305,
+      "timestampStatus": "feed-reported",
+      "scope": "event",
+      "origin": "capture-v2",
+      "timestampEvidence": {
+        "id": "doc-0249",
+        "url": "https://www.bbc.co.uk/news/articles/crpd0d0jl0y0o?at_medium=RSS&at_campaign=rss",
+        "feedPublished": 1790957305,
+        "status": "feed-matches-modification",
+        "pageSHA256": "cc6ed9a70c20e7b8cd02f7bb86bfe1cd7f02a1f87d254b267c7f16d357bfac69",
+        "fetchedAt": 1791072568.1495252,
+        "finalURL": "https://www.bbc.co.uk/news/articles/crpd0d0jl0y0o?at_medium=RSS&at_campaign=rss",
+        "dateEvidence": [
+          {
+            "kind": "datePublished",
+            "field": "jsonld:datePublished",
+            "raw": "2026-10-02T05:42:07.581Z",
+            "epoch": 1790919727.581
+          },
+          {
+            "kind": "dateModified",
+            "field": "jsonld:dateModified",
+            "raw": "2026-10-02T16:08:25.511Z",
+            "epoch": 1790957305.511
+          }
+        ],
+        "publisherPublished": "2026-10-02T05:42:07.581000Z",
+        "deltaSeconds": -37577.418999910355
+      }
+    },
+    {
+      "id": "doc-0677",
+      "captureIndex": 677,
+      "event": "ethiopia-eritrea-ties-severed",
+      "url": "http://www.africanews.com/2026/10/02/ethiopia-and-eritrea-sever-ties-as-tigray-fighting-intensifies/",
+      "feed": "https://www.africanews.com/feed/rss",
+      "source": "Africanews RSS",
+      "language": "en",
+      "published": 1790927038,
+      "timestampStatus": "feed-reported",
+      "scope": "event",
+      "origin": "capture-v2",
+      "timestampEvidence": {
+        "id": "doc-0677",
+        "url": "http://www.africanews.com/2026/10/02/ethiopia-and-eritrea-sever-ties-as-tigray-fighting-intensifies/",
+        "feedPublished": 1790927038,
+        "status": "no-zoned-publication-time",
+        "pageSHA256": "9e619a4429e37306730dfbe380758bde6fed703c1f20b0b0ec00e747f57580b2",
+        "fetchedAt": 1791072566.600965,
+        "finalURL": "https://www.africanews.com/2026/10/02/ethiopia-and-eritrea-sever-ties-as-tigray-fighting-intensifies/",
+        "dateEvidence": [
+          {
+            "kind": "datePublished",
+            "field": "meta:article:published_time",
+            "raw": "2026-10-02CEST07:03:03+02:00",
+            "epoch": null
+          },
+          {
+            "kind": "dateModified",
+            "field": "meta:article:modified_time",
+            "raw": "2026-10-02CEST09:43:58+02:00",
+            "epoch": null
+          }
+        ],
+        "publisherCMS": [
+          {
+            "field": "cms:createdAt",
+            "epoch": 1790885705
+          },
+          {
+            "field": "cms:publishedAt",
+            "epoch": 1790917383
+          },
+          {
+            "field": "cms:firstPublishedAt",
+            "epoch": 1790917383
+          },
+          {
+            "field": "cms:lastPublishedAt",
+            "epoch": 1790927038
+          },
+          {
+            "field": "cms:updatedAt",
+            "epoch": 1790927038
+          }
+        ]
+      }
+    },
+    {
+      "id": "doc-0913",
+      "captureIndex": 913,
+      "event": "cornell-consent-law-review",
+      "url": "https://www.cbc.ca/news/world/cornell-investigation-special-prosecutor-9.7366592?cmp=rss",
+      "feed": "https://www.cbc.ca/webfeed/rss/rss-world",
+      "source": "CBC",
+      "language": "en",
+      "published": 1790943656,
+      "timestampStatus": "feed-reported",
+      "scope": "event",
+      "origin": "capture-v2",
+      "timestampEvidence": {
+        "id": "doc-0913",
+        "url": "https://www.cbc.ca/news/world/cornell-investigation-special-prosecutor-9.7366592?cmp=rss",
+        "feedPublished": 1790943656,
+        "status": "feed-matches-publication",
+        "pageSHA256": "b39da54b3df68186d25aba0f01d4112987986811ff6034a802b16785f901a198",
+        "fetchedAt": 1791072568.288063,
+        "finalURL": "https://www.cbc.ca/news/world/cornell-investigation-special-prosecutor-9.7366592?cmp=rss",
+        "dateEvidence": [
+          {
+            "kind": "datePublished",
+            "field": "jsonld:datePublished",
+            "raw": "2026-10-02T12:20:56.728Z",
+            "epoch": 1790943656.728
+          },
+          {
+            "kind": "dateModified",
+            "field": "jsonld:dateModified",
+            "raw": "2026-10-02T15:06:30.251Z",
+            "epoch": 1790953590.251
+          }
+        ],
+        "publisherPublished": "2026-10-02T12:20:56.728000Z",
+        "deltaSeconds": 0.7279999256134033
+      }
+    },
+    {
+      "id": "doc-0937",
+      "captureIndex": 937,
+      "event": "cornell-consent-law-review",
+      "url": "https://www.channelnewsasia.com/world/cornell-gang-rape-cases-hochul-6428071",
+      "feed": "https://www.channelnewsasia.com/rssfeeds/8395884",
+      "source": "Latest News",
+      "language": "en",
+      "published": 1790968020,
+      "timestampStatus": "feed-reported",
+      "scope": "event",
+      "origin": "capture-v2",
+      "timestampEvidence": {
+        "id": "doc-0937",
+        "url": "https://www.channelnewsasia.com/world/cornell-gang-rape-cases-hochul-6428071",
+        "feedPublished": 1790968020,
+        "status": "feed-matches-publication",
+        "pageSHA256": "20f4f4b2d6ec418be3aacd0b0b094600bb33498bb2ebe643d39f75fdbb4074c9",
+        "fetchedAt": 1791072567.283823,
+        "finalURL": "https://www.channelnewsasia.com/world/cornell-gang-rape-cases-hochul-6428071",
+        "dateEvidence": [
+          {
+            "kind": "datePublished",
+            "field": "jsonld:datePublished",
+            "raw": "2026-10-03T03:07:00+08:00",
+            "epoch": 1790968020.0
+          },
+          {
+            "kind": "dateModified",
+            "field": "jsonld:dateModified",
+            "raw": "2026-10-03T06:54:52+08:00",
+            "epoch": 1790981692.0
+          }
+        ],
+        "publisherPublished": "2026-10-02T19:07:00Z",
+        "deltaSeconds": 0.0
+      }
+    },
+    {
+      "id": "doc-0417",
+      "captureIndex": 417,
+      "event": "vivaldi-progress-statement",
+      "url": "https://timesofindia.indiatimes.com/world/europe/zelensky-claims-ukraine-de-occupied-around-140-kilometres-of-territory-from-russia-hurled-42000-casualties-a-month/articleshow/134664248.cms",
+      "feed": "https://timesofindia.indiatimes.com/rssfeedstopstories.cms",
+      "source": "Times of India",
+      "language": "en",
+      "published": 1791050475,
+      "timestampStatus": "feed-reported",
+      "scope": "event",
+      "origin": "capture-v2",
+      "timestampEvidence": {
+        "id": "doc-0417",
+        "url": "https://timesofindia.indiatimes.com/world/europe/zelensky-claims-ukraine-de-occupied-around-140-kilometres-of-territory-from-russia-hurled-42000-casualties-a-month/articleshow/134664248.cms",
+        "feedPublished": 1791050475,
+        "status": "feed-publication-differs",
+        "pageSHA256": "0cbacaf9f05fcefeb7ada43aea803cca9fe37bcd5670d2247bd4d0ba5f649929",
+        "fetchedAt": 1791072567.04838,
+        "finalURL": "https://timesofindia.indiatimes.com/world/europe/zelensky-claims-ukraine-de-occupied-around-140-kilometres-of-territory-from-russia-hurled-42000-casualties-a-month/articleshow/134664248.cms",
+        "dateEvidence": [
+          {
+            "kind": "datePublished",
+            "field": "jsonld:datePublished",
+            "raw": "2026-10-03T23:31:00+05:30",
+            "epoch": 1791050460.0
+          },
+          {
+            "kind": "dateModified",
+            "field": "jsonld:dateModified",
+            "raw": "2026-10-03T23:31:00+05:30",
+            "epoch": 1791050460.0
+          }
+        ],
+        "publisherPublished": "2026-10-03T18:01:00Z",
+        "deltaSeconds": -15.0
+      }
+    },
+    {
+      "id": "doc-1153",
+      "captureIndex": 1153,
+      "event": "vivaldi-progress-statement",
+      "url": "https://www.pravda.com.ua/news/2026/10/03/8056331/",
+      "feed": "https://www.pravda.com.ua/rss",
+      "source": "Українська правда",
+      "language": "uk",
+      "published": 1791050100,
+      "timestampStatus": "feed-reported",
+      "scope": "event",
+      "origin": "capture-v2",
+      "timestampEvidence": {
+        "id": "doc-1153",
+        "url": "https://www.pravda.com.ua/news/2026/10/03/8056331/",
+        "feedPublished": 1791050100,
+        "status": "feed-matches-publication",
+        "pageSHA256": "6eef12425c5a0074fa56ca3ffecbf73b7550dc46f9a0390d5d2cdb7a7316f49e",
+        "fetchedAt": 1791072568.757081,
+        "finalURL": "https://www.pravda.com.ua/news/2026/10/03/8056331/",
+        "dateEvidence": [
+          {
+            "kind": "datePublished",
+            "field": "jsonld:datePublished",
+            "raw": "2026-10-03T20:55:00+03:00",
+            "epoch": 1791050100.0
+          },
+          {
+            "kind": "dateModified",
+            "field": "jsonld:dateModified",
+            "raw": "2026-10-03T20:55:00+03:00",
+            "epoch": 1791050100.0
+          }
+        ],
+        "publisherPublished": "2026-10-03T17:55:00Z",
+        "deltaSeconds": 0.0
+      }
+    },
+    {
+      "id": "doc-1426",
+      "captureIndex": 1426,
+      "event": "vivaldi-progress-statement",
+      "url": "https://www.ukrinform.ua/rubric-ato/4170766-zelenskij-zavdaki-operacii-vivaldi-stanom-na-sogodni-deokupovani-125140-km.html",
+      "feed": "https://www.ukrinform.ua/rss/block-lastnews",
+      "source": "Останні новини",
+      "language": "uk",
+      "published": 1791052020,
+      "timestampStatus": "feed-reported",
+      "scope": "event",
+      "origin": "capture-v2",
+      "timestampEvidence": {
+        "id": "doc-1426",
+        "url": "https://www.ukrinform.ua/rubric-ato/4170766-zelenskij-zavdaki-operacii-vivaldi-stanom-na-sogodni-deokupovani-125140-km.html",
+        "feedPublished": 1791052020,
+        "status": "feed-matches-publication",
+        "pageSHA256": "bf3a7b5e135a681242621568b468b310925d870afc6241020bcef9c6f803d36d",
+        "fetchedAt": 1791072569.13034,
+        "finalURL": "https://www.ukrinform.ua/rubric-ato/4170766-zelenskij-zavdaki-operacii-vivaldi-stanom-na-sogodni-deokupovani-125140-km.html",
+        "dateEvidence": [
+          {
+            "kind": "datePublished",
+            "field": "jsonld:datePublished",
+            "raw": "2026-10-03T21:27:00+03:00",
+            "epoch": 1791052020.0
+          },
+          {
+            "kind": "dateModified",
+            "field": "jsonld:dateModified",
+            "raw": "2026-10-03T21:27:00+03:00",
+            "epoch": 1791052020.0
+          },
+          {
+            "kind": "datePublished",
+            "field": "jsonld:datePublished",
+            "raw": "1791052020",
+            "epoch": null
+          },
+          {
+            "kind": "dateModified",
+            "field": "jsonld:dateModified",
+            "raw": "1791052020",
+            "epoch": null
+          }
+        ],
+        "publisherPublished": "2026-10-03T18:27:00Z",
+        "deltaSeconds": 0.0
+      }
+    },
+    {
+      "id": "doc-0931",
+      "captureIndex": 931,
+      "event": "trump-diesel-ban-reversal",
+      "url": "https://www.channelnewsasia.com/world/trump-diesel-export-ban-europe-6428441",
+      "feed": "https://www.channelnewsasia.com/rssfeeds/8395884",
+      "source": "Latest News",
+      "language": "en",
+      "published": 1790985840,
+      "timestampStatus": "feed-reported",
+      "scope": "event",
+      "origin": "capture-v2",
+      "timestampEvidence": {
+        "id": "doc-0931",
+        "url": "https://www.channelnewsasia.com/world/trump-diesel-export-ban-europe-6428441",
+        "feedPublished": 1790985840,
+        "status": "feed-matches-publication",
+        "pageSHA256": "f294c88288905f0671d8d2684e19cfa3a8318c7a1103e0171cfddcd7e6e9b4d5",
+        "fetchedAt": 1791072567.920573,
+        "finalURL": "https://www.channelnewsasia.com/world/trump-diesel-export-ban-europe-6428441",
+        "dateEvidence": [
+          {
+            "kind": "datePublished",
+            "field": "jsonld:datePublished",
+            "raw": "2026-10-03T08:04:00+08:00",
+            "epoch": 1790985840.0
+          },
+          {
+            "kind": "dateModified",
+            "field": "jsonld:dateModified",
+            "raw": "2026-10-03T08:10:07+08:00",
+            "epoch": 1790986207.0
+          }
+        ],
+        "publisherPublished": "2026-10-03T00:04:00Z",
+        "deltaSeconds": 0.0
+      }
+    },
+    {
+      "id": "doc-0823",
+      "captureIndex": 823,
+      "event": "mekelle-retreat",
+      "url": "https://www.aljazeera.com/news/2026/10/3/rebels-pulling-back-as-addis-ababas-forces-advance-reports-say?traffic_source=rss",
+      "feed": "https://www.aljazeera.com/xml/rss/all.xml",
+      "source": "Al Jazeera – Breaking News, World News and Video from Al Jazeera",
+      "language": "en",
+      "published": 1791026203,
+      "timestampStatus": "feed-reported"
+    },
+    {
+      "id": "doc-0255",
+      "captureIndex": 255,
+      "event": "addis-explosions",
+      "url": "https://www.bbc.co.uk/news/articles/c3vgygpqky9zo?at_medium=RSS&at_campaign=rss",
+      "feed": "https://feeds.bbci.co.uk/news/world/rss.xml",
+      "source": "BBC News",
+      "language": "en",
+      "published": 1790867136,
+      "timestampStatus": "feed-reported"
+    },
+    {
+      "id": "doc-0306",
+      "captureIndex": 306,
+      "event": "cornell-prosecutor",
+      "url": "https://www.dw.com/en/new-york-governor-condemns-handling-of-cornell-rape-case/a-79525431?maca=en-rss-en-top-1022-xml-mrss",
+      "feed": "https://rss.dw.com/xml/rss-en-top",
+      "source": "Deutsche Welle: DW.com",
+      "language": "en",
+      "published": 1790968140,
+      "timestampStatus": "feed-reported"
+    },
+    {
+      "id": "doc-0586",
+      "captureIndex": 586,
+      "event": "cornell-prosecutor",
+      "url": "https://thehill.com/homenews/state-watch/6124932-hochul-appoints-james-special-prosecutor/",
+      "feed": "https://thehill.com/feed",
+      "source": "The Hill News",
+      "language": "en",
+      "published": 1790905235,
+      "timestampStatus": "feed-reported"
+    },
+    {
+      "id": "doc-0912",
+      "captureIndex": 912,
+      "event": "congo-ebola-toll",
+      "url": "https://www.cbc.ca/news/world/congo-outbreak-death-toll-treatment-centre-beating-9.7366690?cmp=rss",
+      "feed": "https://www.cbc.ca/webfeed/rss/rss-world",
+      "source": "CBC",
+      "language": "en",
+      "published": 1790950535,
+      "timestampStatus": "feed-reported"
+    },
+    {
+      "id": "doc-0994",
+      "captureIndex": 994,
+      "event": "congo-ebola-toll",
+      "url": "https://www.euronews.com/2026/10/02/dr-congo-ebola-outbreak-killed-more-than-4000-official-figures",
+      "feed": "https://www.euronews.com/rss?level=theme&name=news",
+      "source": "News",
+      "language": "en",
+      "published": 1790959242,
+      "timestampStatus": "feed-reported"
+    },
+    {
+      "id": "doc-1155",
+      "captureIndex": 1155,
+      "event": "fp9-announcement",
+      "url": "https://www.pravda.com.ua/news/2026/10/03/8056326/",
+      "feed": "https://www.pravda.com.ua/rss",
+      "source": "Українська правда",
+      "language": "uk",
+      "published": 1791048000,
+      "timestampStatus": "feed-reported",
+      "origin": "capture-v2",
+      "scope": "event",
+      "timestampEvidence": {
+        "id": "doc-1155",
+        "url": "https://www.pravda.com.ua/news/2026/10/03/8056326/",
+        "feedPublished": 1791048000,
+        "status": "feed-matches-publication",
+        "pageSHA256": "d980aa2ea8bef604c20b839ebe3c708aac4c664e988f1cfd68c92ce53e27aa13",
+        "fetchedAt": 1791059149.455133,
+        "finalURL": "https://www.pravda.com.ua/news/2026/10/03/8056326/",
+        "dateEvidence": [
+          {
+            "kind": "datePublished",
+            "field": "jsonld:datePublished",
+            "raw": "2026-10-03T20:20:00+03:00",
+            "epoch": 1791048000.0
+          },
+          {
+            "kind": "dateModified",
+            "field": "jsonld:dateModified",
+            "raw": "2026-10-03T20:20:00+03:00",
+            "epoch": 1791048000.0
+          }
+        ],
+        "publisherPublished": "2026-10-03T17:20:00Z",
+        "deltaSeconds": 0.0
+      }
+    },
+    {
+      "id": "doc-1152",
+      "captureIndex": 1152,
+      "event": "ukraine-budget-deficit",
+      "url": "https://www.pravda.com.ua/news/2026/10/03/8056332/",
+      "feed": "https://www.pravda.com.ua/rss",
+      "source": "Українська правда",
+      "language": "uk",
+      "published": 1791051480,
+      "timestampStatus": "feed-reported",
+      "origin": "capture-v2",
+      "scope": "event",
+      "timestampEvidence": {
+        "id": "doc-1152",
+        "url": "https://www.pravda.com.ua/news/2026/10/03/8056332/",
+        "feedPublished": 1791051480,
+        "status": "feed-matches-publication",
+        "pageSHA256": "925f0b0645eb3721d46424cb12768778dd618a0b9749fc0b4474d063ea57054e",
+        "fetchedAt": 1791059149.2654529,
+        "finalURL": "https://www.pravda.com.ua/news/2026/10/03/8056332/",
+        "dateEvidence": [
+          {
+            "kind": "datePublished",
+            "field": "jsonld:datePublished",
+            "raw": "2026-10-03T21:18:00+03:00",
+            "epoch": 1791051480.0
+          },
+          {
+            "kind": "dateModified",
+            "field": "jsonld:dateModified",
+            "raw": "2026-10-03T21:18:00+03:00",
+            "epoch": 1791051480.0
+          }
+        ],
+        "publisherPublished": "2026-10-03T18:18:00Z",
+        "deltaSeconds": 0.0
+      }
+    },
+    {
+      "id": "doc-0603",
+      "captureIndex": 603,
+      "event": "zelensky-refinery-response",
+      "url": "https://wiadomosci.onet.pl/swiat/wolodymyr-zelenski-zapowiada-odwetowe-ataki-na-rosje-wskazal-cel/v1wpscz",
+      "feed": "https://wiadomosci.onet.pl/.feed",
+      "source": "Wiadomości wiadomosci.onet.pl",
+      "language": "pl",
+      "published": 1791049354,
+      "timestampStatus": "feed-reported"
+    },
+    {
+      "id": "doc-0000",
+      "captureIndex": 0,
+      "event": "g7-reserve-release",
+      "url": "https://www.bbc.co.uk/news/articles/ck87zg8jnwngo?at_medium=RSS&at_campaign=rss",
+      "feed": "https://feeds.bbci.co.uk/news/business/rss.xml",
+      "source": "BBC News",
+      "language": "en",
+      "published": 1791002311,
+      "timestampStatus": "feed-reported"
+    },
+    {
+      "id": "doc-0234",
+      "captureIndex": 234,
+      "event": "g7-reserve-release",
+      "url": "https://www.bbc.co.uk/news/articles/ck87zg8jnwngo?at_medium=RSS&at_campaign=rss",
+      "feed": "https://feeds.bbci.co.uk/news/world/rss.xml",
+      "source": "BBC News",
+      "language": "en",
+      "published": 1791002311,
+      "timestampStatus": "feed-reported"
+    }
+  ],
+  "events": [
+    {
+      "id": "bitchat-india-removal",
+      "family": "bitchat-india",
+      "split": "tune",
+      "reviewStatus": "pending",
+      "reason": "October 3 removal of Bitchat from the Indian App Store following a ministry order; distinct from earlier repository restrictions."
+    },
+    {
+      "id": "renee-good-lawsuit",
+      "family": "renee-good-lawsuit",
+      "split": "holdout",
+      "reviewStatus": "pending",
+      "reason": "Joint announcement/filing of the two Renee Good family lawsuits; distinct from the January shooting itself."
+    },
+    {
+      "id": "nantucket-air-ambulance-search",
+      "family": "nantucket-air-ambulance",
+      "split": "tune",
+      "reviewStatus": "pending",
+      "reason": "Disappearance of the same Gulfstream G-100 Bermuda-to-Boston medical flight and immediate Nantucket search; the search is a direct consequence."
+    },
+    {
+      "id": "uk-rejoin-poll",
+      "family": "uk-rejoin-poll",
+      "split": "tune",
+      "reviewStatus": "pending",
+      "reason": "Publication of the same September Messina Group UK/EU polling results; not a new referendum or policy decision. Franceinfo cites the Guardian, so this is shared reporting lineage."
+    },
+    {
+      "id": "amazon-community-investment",
+      "family": "amazon-data-center-investment",
+      "split": "tune",
+      "reviewStatus": "pending",
+      "reason": "Publication of the Amazon Data Center Commitment, including community funding and NDA changes. Review whether each captured headline has this announcement as its lead; commentary is not independent confirmation."
+    },
+    {
+      "id": "france-italy-draw",
+      "family": "france-italy-oct2",
+      "split": "holdout",
+      "reviewStatus": "pending",
+      "reason": "October 2 France/Italy Nations League 1-1 draw. Two France 24 documents include a later sports segment; they share a publisher and must not count as independent confirmation."
+    },
+    {
+      "id": "india-pakistan-cricket-final",
+      "family": "asian-games-cricket-final",
+      "split": "tune",
+      "reviewStatus": "pending",
+      "reason": "October 3 Asian Games men’s cricket final: India beat Pakistan by 19 runs at Nisshin; distinct from the hockey final and other cricket games."
+    },
+    {
+      "id": "congo-ebola-exposure-trial",
+      "family": "congo-ebola",
+      "split": "tune",
+      "reviewStatus": "pending",
+      "reason": "October report on the ongoing EBO-PEP/Obeldesivir post-exposure trial in DR Congo. The trial started in July; this is trial coverage, not a new trial launch or the outbreak toll. Ukrinform cites AP; reporting lineage may overlap."
+    },
+    {
+      "id": "ethiopia-eritrea-ties-severed",
+      "family": "ethiopia",
+      "split": "holdout",
+      "reviewStatus": "pending",
+      "reason": "Ethiopia/Eritrea diplomatic severance and reciprocal embassy measures; a new administrative action, separate from the Mekelle retreat and Addis explosions."
+    },
+    {
+      "id": "cornell-consent-law-review",
+      "family": "cornell",
+      "split": "holdout",
+      "reviewStatus": "pending",
+      "reason": "Hochul’s October 2 pledge to change intoxication/consent law; a new policy commitment, separate from appointing the special prosecutor."
+    },
+    {
+      "id": "vivaldi-progress-statement",
+      "family": "ukraine-policy",
+      "split": "tune",
+      "reviewStatus": "pending",
+      "reason": "Zelensky’s October 3 Reuters interview reporting Operation Vivaldi territorial progress. Reports of this statement are not separate battlefield incidents or unrelated interview promises."
+    },
+    {
+      "id": "trump-diesel-ban-reversal",
+      "family": "fuel-policy",
+      "split": "tune",
+      "reviewStatus": "pending",
+      "reason": "Trump’s October 2 statement ruling out a diesel export ban; separate decision-maker/action from G7 reserve release. One captured DW observation has no feed timestamp and cannot enter replay without a reviewed exclusion."
+    },
+    {
+      "id": "mekelle-retreat",
+      "family": "ethiopia",
+      "split": "holdout",
+      "reason": "Retreat from Mekelle and airport recapture; boundary between these developments needs review.",
+      "reviewStatus": "pending"
+    },
+    {
+      "id": "addis-explosions",
+      "family": "ethiopia",
+      "split": "holdout",
+      "reason": "Explosions in Addis Ababa after a drone-flight ban; distinct from the Mekelle developments.",
+      "reviewStatus": "pending"
+    },
+    {
+      "id": "cornell-prosecutor",
+      "family": "cornell",
+      "split": "holdout",
+      "reason": "Hochul appoints a special prosecutor in the Cornell allegation investigation.",
+      "reviewStatus": "pending"
+    },
+    {
+      "id": "congo-ebola-toll",
+      "family": "congo-ebola",
+      "split": "tune",
+      "reason": "The same outbreak update passing 4000 deaths; not independent verification of the toll.",
+      "reviewStatus": "pending"
+    },
+    {
+      "id": "fp9-announcement",
+      "family": "ukraine-policy",
+      "split": "tune",
+      "reviewStatus": "pending",
+      "reason": "Zelensky announcement that FP-9 is expected this autumn."
+    },
+    {
+      "id": "ukraine-budget-deficit",
+      "family": "ukraine-policy",
+      "split": "tune",
+      "reviewStatus": "pending",
+      "reason": "Zelensky statement on closing the current financing deficit by year end."
+    },
+    {
+      "id": "zelensky-refinery-response",
+      "family": "ukraine-policy",
+      "split": "tune",
+      "reason": "The same Zelensky statement on increasing refinery attacks.",
+      "reviewStatus": "pending"
+    },
+    {
+      "id": "g7-reserve-release",
+      "family": "fuel-policy",
+      "split": "tune",
+      "reason": "The same coordinated 100-million-barrel release announcement.",
+      "reviewStatus": "pending"
+    }
+  ],
+  "pairs": [
+    {
+      "id": "diversity-001",
+      "left": "doc-0395",
+      "right": "doc-0429",
+      "split": "tune",
+      "proposedLabel": "same_event",
+      "scope": "event",
+      "reviewStatus": "pending",
+      "reason": "October 3 removal of Bitchat from the Indian App Store following a ministry order; distinct from earlier repository restrictions."
+    },
+    {
+      "id": "diversity-002",
+      "left": "doc-0254",
+      "right": "doc-0921",
+      "split": "holdout",
+      "proposedLabel": "same_event",
+      "scope": "event",
+      "reviewStatus": "pending",
+      "reason": "Joint announcement/filing of the two Renee Good family lawsuits; distinct from the January shooting itself."
+    },
+    {
+      "id": "diversity-003",
+      "left": "doc-0235",
+      "right": "doc-0459",
+      "split": "tune",
+      "proposedLabel": "same_event",
+      "scope": "event",
+      "reviewStatus": "pending",
+      "reason": "Disappearance of the same Gulfstream G-100 Bermuda-to-Boston medical flight and immediate Nantucket search; the search is a direct consequence."
+    },
+    {
+      "id": "diversity-004",
+      "left": "doc-0235",
+      "right": "doc-1560",
+      "split": "tune",
+      "proposedLabel": "same_event",
+      "scope": "event",
+      "reviewStatus": "pending",
+      "reason": "Disappearance of the same Gulfstream G-100 Bermuda-to-Boston medical flight and immediate Nantucket search; the search is a direct consequence."
+    },
+    {
+      "id": "diversity-005",
+      "left": "doc-1144",
+      "right": "doc-1314",
+      "split": "tune",
+      "proposedLabel": "same_event",
+      "scope": "event",
+      "reviewStatus": "pending",
+      "reason": "Publication of the same September Messina Group UK/EU polling results; not a new referendum or policy decision. Franceinfo cites the Guardian, so this is shared reporting lineage."
+    },
+    {
+      "id": "diversity-006",
+      "left": "doc-0154",
+      "right": "doc-0393",
+      "split": "tune",
+      "proposedLabel": "same_event",
+      "scope": "event",
+      "reviewStatus": "pending",
+      "reason": "Publication of the Amazon Data Center Commitment, including community funding and NDA changes. Review whether each captured headline has this announcement as its lead; commentary is not independent confirmation."
+    },
+    {
+      "id": "diversity-007",
+      "left": "doc-0154",
+      "right": "doc-0553",
+      "split": "tune",
+      "proposedLabel": "same_event",
+      "scope": "event",
+      "reviewStatus": "pending",
+      "reason": "Publication of the Amazon Data Center Commitment, including community funding and NDA changes. Review whether each captured headline has this announcement as its lead; commentary is not independent confirmation."
+    },
+    {
+      "id": "diversity-008",
+      "left": "doc-1084",
+      "right": "doc-1091",
+      "split": "holdout",
+      "proposedLabel": "same_event",
+      "scope": "event",
+      "reviewStatus": "pending",
+      "reason": "October 2 France/Italy Nations League 1-1 draw. Two France 24 documents include a later sports segment; they share a publisher and must not count as independent confirmation."
+    },
+    {
+      "id": "diversity-009",
+      "left": "doc-0867",
+      "right": "doc-1064",
+      "split": "tune",
+      "proposedLabel": "same_event",
+      "scope": "event",
+      "reviewStatus": "pending",
+      "reason": "October 3 Asian Games men’s cricket final: India beat Pakistan by 19 runs at Nisshin; distinct from the hockey final and other cricket games."
+    },
+    {
+      "id": "diversity-010",
+      "left": "doc-0655",
+      "right": "doc-1425",
+      "split": "tune",
+      "proposedLabel": "same_event",
+      "scope": "event",
+      "reviewStatus": "pending",
+      "reason": "October report on the ongoing EBO-PEP/Obeldesivir post-exposure trial in DR Congo. The trial started in July; this is trial coverage, not a new trial launch or the outbreak toll. Ukrinform cites AP; reporting lineage may overlap."
+    },
+    {
+      "id": "diversity-011",
+      "left": "doc-0249",
+      "right": "doc-0677",
+      "split": "holdout",
+      "proposedLabel": "same_event",
+      "scope": "event",
+      "reviewStatus": "pending",
+      "reason": "Ethiopia/Eritrea diplomatic severance and reciprocal embassy measures; a new administrative action, separate from the Mekelle retreat and Addis explosions."
+    },
+    {
+      "id": "diversity-012",
+      "left": "doc-0913",
+      "right": "doc-0937",
+      "split": "holdout",
+      "proposedLabel": "same_event",
+      "scope": "event",
+      "reviewStatus": "pending",
+      "reason": "Hochul’s October 2 pledge to change intoxication/consent law; a new policy commitment, separate from appointing the special prosecutor."
+    },
+    {
+      "id": "diversity-013",
+      "left": "doc-0417",
+      "right": "doc-1153",
+      "split": "tune",
+      "proposedLabel": "same_event",
+      "scope": "event",
+      "reviewStatus": "pending",
+      "reason": "Zelensky’s October 3 Reuters interview reporting Operation Vivaldi territorial progress. Reports of this statement are not separate battlefield incidents or unrelated interview promises."
+    },
+    {
+      "id": "diversity-014",
+      "left": "doc-0417",
+      "right": "doc-1426",
+      "split": "tune",
+      "proposedLabel": "same_event",
+      "scope": "event",
+      "reviewStatus": "pending",
+      "reason": "Zelensky’s October 3 Reuters interview reporting Operation Vivaldi territorial progress. Reports of this statement are not separate battlefield incidents or unrelated interview promises."
+    },
+    {
+      "id": "diversity-015",
+      "left": "doc-0249",
+      "right": "doc-0823",
+      "split": "holdout",
+      "proposedLabel": "different",
+      "scope": "event",
+      "reviewStatus": "pending",
+      "reason": "Diplomatic severance versus a military retreat: related conflict, separate concrete action."
+    },
+    {
+      "id": "diversity-016",
+      "left": "doc-0677",
+      "right": "doc-0255",
+      "split": "holdout",
+      "proposedLabel": "different",
+      "scope": "event",
+      "reviewStatus": "pending",
+      "reason": "Diplomatic severance versus the capital explosions; shared background does not merge acts."
+    },
+    {
+      "id": "diversity-017",
+      "left": "doc-0913",
+      "right": "doc-0306",
+      "split": "holdout",
+      "proposedLabel": "different",
+      "scope": "event",
+      "reviewStatus": "pending",
+      "reason": "Changing consent legislation versus appointing a special prosecutor."
+    },
+    {
+      "id": "diversity-018",
+      "left": "doc-0937",
+      "right": "doc-0586",
+      "split": "holdout",
+      "proposedLabel": "different",
+      "scope": "event",
+      "reviewStatus": "pending",
+      "reason": "Policy pledge versus prosecutor appointment in the same criminal case."
+    },
+    {
+      "id": "diversity-019",
+      "left": "doc-0655",
+      "right": "doc-0912",
+      "split": "tune",
+      "proposedLabel": "different",
+      "scope": "event",
+      "reviewStatus": "pending",
+      "reason": "Trial coverage versus the outbreak casualty report; different concrete subject/act."
+    },
+    {
+      "id": "diversity-020",
+      "left": "doc-1425",
+      "right": "doc-0994",
+      "split": "tune",
+      "proposedLabel": "different",
+      "scope": "event",
+      "reviewStatus": "pending",
+      "reason": "Obeldesivir post-exposure study versus new epidemic toll figures."
+    },
+    {
+      "id": "diversity-021",
+      "left": "doc-1153",
+      "right": "doc-1155",
+      "split": "tune",
+      "proposedLabel": "different",
+      "scope": "event",
+      "reviewStatus": "pending",
+      "reason": "Territorial-progress report versus new weapon timing: different statement topics/actions; reviewer must confirm interview boundaries."
+    },
+    {
+      "id": "diversity-022",
+      "left": "doc-1426",
+      "right": "doc-1152",
+      "split": "tune",
+      "proposedLabel": "different",
+      "scope": "event",
+      "reviewStatus": "pending",
+      "reason": "Territorial progress versus financing-deficit commitment; review separate interview topics."
+    },
+    {
+      "id": "diversity-023",
+      "left": "doc-0417",
+      "right": "doc-0603",
+      "split": "tune",
+      "proposedLabel": "different",
+      "scope": "event",
+      "reviewStatus": "pending",
+      "reason": "Operation Vivaldi progress versus promised refinery response; no single-event label for a whole war or interview."
+    },
+    {
+      "id": "diversity-024",
+      "left": "doc-0931",
+      "right": "doc-0000",
+      "split": "tune",
+      "proposedLabel": "different",
+      "scope": "event",
+      "reviewStatus": "pending",
+      "reason": "Trump’s ban reversal versus G7 reserve-release decision."
+    },
+    {
+      "id": "diversity-025",
+      "left": "doc-0254",
+      "right": "doc-0913",
+      "split": "holdout",
+      "proposedLabel": "different",
+      "scope": "event",
+      "reviewStatus": "pending",
+      "reason": "Family lawsuits over the Minneapolis killing versus the separate Cornell consent-law pledge."
+    },
+    {
+      "id": "diversity-026",
+      "left": "doc-1084",
+      "right": "doc-0677",
+      "split": "holdout",
+      "proposedLabel": "different",
+      "scope": "event",
+      "reviewStatus": "pending",
+      "reason": "Different subjects/actions in contemporaneous international coverage: a football match and diplomatic severance."
+    }
+  ]
+}
