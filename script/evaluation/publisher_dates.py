@@ -323,13 +323,14 @@ def check(condition, message="Assertion failed"):
 
 def self_check():
     example_a = 'https://example.com/a'
+    published_a = '2026-10-02T10:00:00Z'
     html = '<meta property="article:modified_time" content="2026-10-03T12:00:00Z"><script type="application/ld+json">' + json.dumps({TYPE_KEY: 'NewsArticle', 'url': example_a, 'datePublished': '2026-10-02T12:00:00+02:00', 'related': {'datePublished': '2020-01-01T00:00:00Z'}}) + '</script>'
     page = Page(html, example_a + '?utm_source=rss')
-    check(len(page.dates) == 2 and page.dates[1]['epoch'] == instant('2026-10-02T10:00:00Z'))
+    check(len(page.dates) == 2 and page.dates[1]['epoch'] == instant(published_a))
     check(instant('2026-10-02') is None and instant('2026-10-02T12:00:00') is None)
     check(not Page(html, 'https://example.com/b').dates[1:])
     check(document_key(example_a + '?id=1') != document_key(example_a + '?id=2'))
-    for malformed in ({'@graph': None}, {TYPE_KEY: None}, {TYPE_KEY: 'NewsArticle', 'url': 'https://[bad', 'datePublished': '2026-10-02T10:00:00Z'}):
+    for malformed in ({'@graph': None}, {TYPE_KEY: None}, {TYPE_KEY: 'NewsArticle', 'url': 'https://[bad', 'datePublished': published_a}):
         bad = '<script type="application/ld+json">' + json.dumps(malformed) + '</script>'
         check(Page(bad, example_a).dates == [])
     cms = {'canonical': 'https://www.africanews.com/article/', 'createdAt': 100, 'publishedAt': 200, 'firstPublishedAt': 200, 'lastPublishedAt': 200, 'updatedAt': 300}
@@ -349,7 +350,7 @@ def self_check():
         (directory / 'page.html').write_bytes(raw)
         record = {'file': 'page.html', 'finalURL': example_a, 'sha256': hashlib.sha256(raw).hexdigest(), 'fetchedAt': 0}
         report = verify({'id': 'a', 'url': example_a, 'published': instant('2026-10-03T12:00:00Z')}, record, directory)
-        check(report['status'] == 'feed-matches-modification' and report['publisherPublished'] == '2026-10-02T10:00:00Z')
+        check(report['status'] == 'feed-matches-modification' and report['publisherPublished'] == published_a)
         (directory / 'page.html').write_text('changed')
         try:
             verify({'id': 'a', 'url': example_a}, record, directory)
