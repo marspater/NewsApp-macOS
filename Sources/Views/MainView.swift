@@ -1,8 +1,8 @@
 // MainView.swift
 // NewsApp Main Window Orchestrator & Split View Coordinator
 
-import SwiftUI
 import AppKit
+import SwiftUI
 import UniformTypeIdentifiers
 
 // MARK: - Navigation Notifications & Commands
@@ -21,17 +21,17 @@ struct MainView: View {
     @State private var selectedTopic: String? = "Today"
     @State private var searchText: String = ""
     @State private var articlePath = NavigationPath()
-    
+
     @EnvironmentObject private var appSettings: AppSettings
     @EnvironmentObject private var articleStore: ArticleStore
     @EnvironmentObject private var feedManager: FeedManager
     @EnvironmentObject private var themeManager: ThemeManager
     @EnvironmentObject private var readManager: ReadManager
     @EnvironmentObject private var savedStories: SavedStoriesManager
-    
+
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @State private var isWindowDropTargeted = false
-    
+
     var body: some View {
         NavigationSplitView(columnVisibility: $columnVisibility) {
             SidebarView(selectedTopic: $selectedTopic)
@@ -43,7 +43,7 @@ struct MainView: View {
             NavigationStack(path: $articlePath) {
                 ZStack {
                     AppColor.background
-                    
+
                     ArticleListView(
                         selectedTopic: $selectedTopic,
                         searchText: $searchText,
@@ -74,10 +74,13 @@ struct MainView: View {
                 }
             }
         }
-        .alert("Operation failed", isPresented: Binding(
-            get: { articleStore.operationError != nil },
-            set: { if !$0 { articleStore.operationError = nil } }
-        )) {
+        .alert(
+            "Operation failed",
+            isPresented: Binding(
+                get: { articleStore.operationError != nil },
+                set: { if !$0 { articleStore.operationError = nil } }
+            )
+        ) {
             Button("OK") { articleStore.operationError = nil }
         } message: {
             Text(articleStore.operationError ?? "Please try again.")
@@ -133,7 +136,7 @@ struct MainView: View {
             }
         }
     }
-    
+
     // MARK: - Search Operators
 
     private static let searchOperators: [(token: String, summary: String)] = [
@@ -141,17 +144,22 @@ struct MainView: View {
         ("is:read", "Stories you have read"),
         ("is:saved", "Saved stories"),
         ("source:", "Publisher, e.g. source:bbc"),
-        ("category:", "Category, e.g. category:science")
+        ("category:", "Category, e.g. category:science"),
     ]
 
     /// Filter operators, offered while the word being typed is empty or starts one; a choice completes onto the
     /// words already typed.
     @ViewBuilder
     private var searchOperatorSuggestions: some View {
-        let word = searchText.last?.isWhitespace == false ? String(searchText.split(whereSeparator: \.isWhitespace).last ?? "") : ""
+        let word =
+            searchText.last?.isWhitespace == false
+            ? String(searchText.split(whereSeparator: \.isWhitespace).last ?? "") : ""
         let typed = String(searchText.dropLast(word.count))
         let lowered = word.lowercased()
-        ForEach(Self.searchOperators.filter { lowered.isEmpty || ($0.token.hasPrefix(lowered) && $0.token != lowered) }, id: \.token) { option in
+        ForEach(
+            Self.searchOperators.filter { lowered.isEmpty || ($0.token.hasPrefix(lowered) && $0.token != lowered) },
+            id: \.token
+        ) { option in
             HStack(spacing: AppSpacing.sm) {
                 Text(option.token).font(.system(.body, design: .monospaced))
                 Text(option.summary).foregroundStyle(AppColor.secondaryText)
@@ -161,21 +169,21 @@ struct MainView: View {
     }
 
     // MARK: - Window-Level OPML Drop
-    
+
     private func handleWindowOPMLDrop(providers: [NSItemProvider]) -> Bool {
-        for provider in providers {
-            if provider.canLoadObject(ofClass: URL.self) {
-                _ = provider.loadObject(ofClass: URL.self) { item, _ in
-                    guard let url = item else { return }
-                    
-                    if url.isFileURL && (url.pathExtension.lowercased() == "opml" || url.pathExtension.lowercased() == "xml") {
-                        Task { @MainActor in
-                            await self.feedManager.importFeeds(fromFile: url)
-                        }
+        for provider in providers where provider.canLoadObject(ofClass: URL.self) {
+            _ = provider.loadObject(ofClass: URL.self) { item, _ in
+                guard let url = item else { return }
+
+                if url.isFileURL
+                    && (url.pathExtension.lowercased() == "opml" || url.pathExtension.lowercased() == "xml")
+                {
+                    Task { @MainActor in
+                        await self.feedManager.importFeeds(fromFile: url)
                     }
                 }
-                return true
             }
+            return true
         }
         return false
     }

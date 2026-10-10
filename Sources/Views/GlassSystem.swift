@@ -38,16 +38,16 @@ public struct NativeLiquidGlassModifier<S: Shape>: ViewModifier {
 
 // MARK: - View Extensions
 
-public extension View {
+extension View {
     /// Custom Liquid Glass for a floating control (DESIGN.md 3.2). Apply it last,
     /// after the control's content and padding. Never inside content or on another glass surface.
-    func nativeLiquidGlass<S: Shape>(in shape: S, interactive: Bool = false) -> some View {
+    public func nativeLiquidGlass<S: Shape>(in shape: S, interactive: Bool = false) -> some View {
         self.modifier(NativeLiquidGlassModifier(shape: shape, interactive: interactive))
     }
 
     /// Groups nearby custom glass so it samples, blends and morphs as one surface on macOS 26 and later.
     @ViewBuilder
-    func inGlassContainer() -> some View {
+    public func inGlassContainer() -> some View {
         if #available(macOS 26.0, *) {
             GlassEffectContainer {
                 self
@@ -60,7 +60,7 @@ public extension View {
     /// Glass button style for floating buttons: `.glass` or `.glassProminent` on macOS 26 and later,
     /// `.bordered` or `.borderedProminent` on macOS 15.
     @ViewBuilder
-    func nativeGlassButtonStyle(prominent: Bool = false) -> some View {
+    public func nativeGlassButtonStyle(prominent: Bool = false) -> some View {
         if #available(macOS 26.0, *) {
             if prominent {
                 self.buttonStyle(.glassProminent)

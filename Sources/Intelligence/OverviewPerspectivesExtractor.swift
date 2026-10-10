@@ -29,7 +29,7 @@ struct OverviewPerspectiveValidationResult: Sendable, Equatable {
         ("Participant name is empty or too short", .shortParticipant),
         ("is an unattributed generality", .vagueParticipant),
         ("Position statement is empty or too short", .shortPosition),
-        ("is not grounded in cited passage text (synthetic or hallucinated claim)", .ungrounded)
+        ("is not grounded in cited passage text (synthetic or hallucinated claim)", .ungrounded),
     ]
 }
 
@@ -62,7 +62,7 @@ struct OverviewPerspectivesValidator: Sendable {
         "some people", "people", "many people", "many believe", "analysts", "analysts say",
         "sources", "sources say", "sources claim", "unnamed sources", "anonymous sources",
         "opponents", "opponents claim", "opponents argue", "skeptics", "the other side",
-        "officials say", "experts", "experts say", "commentators"
+        "officials say", "experts", "experts say", "commentators",
     ]
 
     /// Evaluates whether a participant string represents a vague anonymous generality.
@@ -149,7 +149,8 @@ struct OverviewPerspectivesValidator: Sendable {
             if !citedPassages.isEmpty {
                 let combinedText = citedPassages.map(\.text).joined(separator: " ").lowercased()
                 let normalizedPosition = positionCleaned.lowercased()
-                let positionWords = normalizedPosition
+                let positionWords =
+                    normalizedPosition
                     .components(separatedBy: CharacterSet.alphanumerics.inverted)
                     .filter { $0.count >= 4 }
 
@@ -159,7 +160,8 @@ struct OverviewPerspectivesValidator: Sendable {
                     if matchRatio < 0.35 {
                         return OverviewPerspectiveValidationResult(
                             isValid: false,
-                            rejectionReason: "Position statement is not grounded in cited passage text (synthetic or hallucinated claim)"
+                            rejectionReason:
+                                "Position statement is not grounded in cited passage text (synthetic or hallucinated claim)"
                         )
                     }
                 }
@@ -182,7 +184,7 @@ struct OverviewPerspectivesExtractor: Sendable {
         ("Bloomberg", ["bloomberg news", "bloomberg", "— bloomberg"]),
         ("UPI", ["united press international", "(upi)", "upi"]),
         ("PR Newswire", ["pr newswire", "(pr newswire)"]),
-        ("Business Wire", ["business wire", "(business wire)"])
+        ("Business Wire", ["business wire", "(business wire)"]),
     ]
 
     /// Candidate attributed perspective discovered during text extraction.
@@ -231,11 +233,13 @@ struct OverviewPerspectivesExtractor: Sendable {
     ) -> (perspectives: [OverviewPerspective], diagnosis: OverviewPerspectivesDiagnosis) {
         var diagnosis = OverviewPerspectivesDiagnosis()
         diagnosis.passages = passages.count
-        let candidates = attributedCandidates(passages: passages, articles: articles, existingCitations: existingCitations, diagnosis: &diagnosis)
+        let candidates = attributedCandidates(
+            passages: passages, articles: articles, existingCitations: existingCitations, diagnosis: &diagnosis)
         diagnosis.candidates = candidates.count
         let voices = collapseVoices(candidates, diagnosis: &diagnosis)
         diagnosis.voices = voices.count
-        let perspectives = validatedPerspectives(voices, existingCitations: existingCitations, passages: passages, diagnosis: &diagnosis)
+        let perspectives = validatedPerspectives(
+            voices, existingCitations: existingCitations, passages: passages, diagnosis: &diagnosis)
         diagnosis.perspectives = perspectives.count
         // Sorted deterministically by participant name; no verified perspective leaves the section absent.
         return (perspectives.sorted { $0.participant < $1.participant }, diagnosis)
@@ -251,7 +255,8 @@ struct OverviewPerspectivesExtractor: Sendable {
         let articlesByID = Dictionary(uniqueKeysWithValues: articles.map { ($0.id, $0) })
 
         // Reverse-index passages to citation IDs
-        let passageToCitationID = Dictionary(existingCitations.map { ($0.value.passageID, $0.key) }, uniquingKeysWith: { _, last in last })
+        let passageToCitationID = Dictionary(
+            existingCitations.map { ($0.value.passageID, $0.key) }, uniquingKeysWith: { _, last in last })
 
         var candidates: [ExtractedCandidate] = []
         for passage in passages {
@@ -283,7 +288,9 @@ struct OverviewPerspectivesExtractor: Sendable {
 
     /// Rule 3: reprints are not presented as independent voices. Vague speakers are dropped; statements from the same
     /// participant or a syndicated wire story collapse into one voice that keeps every citation.
-    private static func collapseVoices(_ candidates: [ExtractedCandidate], diagnosis: inout OverviewPerspectivesDiagnosis) -> [Voice] {
+    private static func collapseVoices(
+        _ candidates: [ExtractedCandidate], diagnosis: inout OverviewPerspectivesDiagnosis
+    ) -> [Voice] {
         var collapsed: [Voice] = []
         for cand in candidates {
             guard !OverviewPerspectivesValidator.isVagueParticipant(cand.participant) else {
@@ -332,7 +339,8 @@ struct OverviewPerspectivesExtractor: Sendable {
                 sourcePublisher: primary.sourcePublisher,
                 originalWireSource: primary.originalWireSource
             )
-            let validation = OverviewPerspectivesValidator.validatePerspective(perspective, against: existingCitations, passages: passages)
+            let validation = OverviewPerspectivesValidator.validatePerspective(
+                perspective, against: existingCitations, passages: passages)
             if validation.isValid {
                 validated.append(perspective)
             } else {
@@ -342,7 +350,8 @@ struct OverviewPerspectivesExtractor: Sendable {
         return validated
     }
 
-    private static let speechVerbs = try? NSRegularExpression(pattern: #"\b(?:said|says|told|added|stated|announced|warned)\b"#, options: [.caseInsensitive])
+    private static let speechVerbs = try? NSRegularExpression(
+        pattern: #"\b(?:said|says|told|added|stated|announced|warned)\b"#, options: [.caseInsensitive])
 
     /// A quotation mark or speech verb, so a passage without a candidate may hold a missed attribution.
     private static func containsSpeechCue(_ text: String) -> Bool {
@@ -428,16 +437,18 @@ struct OverviewPerspectivesExtractor: Sendable {
     // Compiled once; matches keep pattern order.
     private static let attributions: [Attribution] = {
         // Pattern 1: "[Quote]," (said|announced|stated|argued|warned|noted) [Participant].
-        let patternQuoteFirst = #"\"([^\"]{10,250})\",?\s*(?:said|stated|announced|noted|argued|warned|confirmed|declared|emphasized|urged|reiterated|cautioned|explained)\s+([A-Z][A-Za-z0-9\s,\.\-]{2,60})"#
+        let patternQuoteFirst =
+            #"\"([^\"]{10,250})\",?\s*(?:said|stated|announced|noted|argued|warned|confirmed|declared|emphasized|urged|reiterated|cautioned|explained)\s+([A-Z][A-Za-z0-9\s,\.\-]{2,60})"#
         // Pattern 2: [Participant] (said that|stated that|announced that|argued that|warned that|noted that|confirmed that) [Statement].
-        let patternSpeakerFirst = #"([A-Z][A-Za-z0-9\s,\.\-]{2,60})\s+(?:said that|stated that|announced that|argued that|warned that|noted that|confirmed that|emphasized that|urged that)\s+([^\.\n]{15,200})"#
+        let patternSpeakerFirst =
+            #"([A-Z][A-Za-z0-9\s,\.\-]{2,60})\s+(?:said that|stated that|announced that|argued that|warned that|noted that|confirmed that|emphasized that|urged that)\s+([^\.\n]{15,200})"#
         // Pattern 3: According to [Participant], [Statement].
         let patternAccordingTo = #"According to\s+([A-Z][A-Za-z0-9\s,\.\-]{2,60}),\s+([^\.\n]{15,200})"#
 
         return [
             Attribution(patternQuoteFirst, participantGroup: 2, statementGroup: 1, minimumLength: 0),
             Attribution(patternSpeakerFirst, participantGroup: 1, statementGroup: 2, minimumLength: 10),
-            Attribution(patternAccordingTo, participantGroup: 1, statementGroup: 2, minimumLength: 10)
+            Attribution(patternAccordingTo, participantGroup: 1, statementGroup: 2, minimumLength: 10),
         ].compactMap { $0 }
     }()
 
@@ -461,16 +472,17 @@ struct OverviewPerspectivesExtractor: Sendable {
                 minimumStatementLength: attribution.minimumLength
             )
             for match in matches {
-                results.append(ExtractedCandidate(
-                    participant: match.participant,
-                    position: match.statement,
-                    quote: match.statement,
-                    citationID: citationID,
-                    passageID: passageID,
-                    articleID: articleID,
-                    originalWireSource: wireSource,
-                    sourcePublisher: publisher
-                ))
+                results.append(
+                    ExtractedCandidate(
+                        participant: match.participant,
+                        position: match.statement,
+                        quote: match.statement,
+                        citationID: citationID,
+                        passageID: passageID,
+                        articleID: articleID,
+                        originalWireSource: wireSource,
+                        sourcePublisher: publisher
+                    ))
             }
         }
 
@@ -490,7 +502,8 @@ struct OverviewPerspectivesExtractor: Sendable {
         return matches.compactMap { match -> (participant: String, statement: String)? in
             guard match.numberOfRanges >= 3 else { return nil }
             let participant = cleanParticipant(nsString.substring(with: match.range(at: participantGroup)))
-            let statement = nsString.substring(with: match.range(at: statementGroup)).trimmingCharacters(in: .whitespacesAndNewlines)
+            let statement = nsString.substring(with: match.range(at: statementGroup)).trimmingCharacters(
+                in: .whitespacesAndNewlines)
             guard !participant.isEmpty, statement.count >= minimumStatementLength else { return nil }
             return (participant, statement)
         }

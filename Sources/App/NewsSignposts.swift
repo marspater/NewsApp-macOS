@@ -29,7 +29,9 @@ enum NewsSignposts {
         guard sysctl(&mib, 4, &info, &size, nil, 0) == 0 else { return }
         let start = info.kp_proc.p_un.__p_starttime
         let elapsed = Date().timeIntervalSince1970 - (Double(start.tv_sec) + Double(start.tv_usec) / 1_000_000)
-        Logger(subsystem: subsystem, category: "Launch").notice("First card visible ms_since_process_start=\(elapsed * 1000, format: .fixed(precision: 3), privacy: .public)")
+        Logger(subsystem: subsystem, category: "Launch").notice(
+            "First card visible ms_since_process_start=\(elapsed * 1000, format: .fixed(precision: 3), privacy: .public)"
+        )
     }
 
     /// Begins a signpost interval and returns the state token.
@@ -83,4 +85,3 @@ enum NewsSignposts {
         return try await work()
     }
 }
-

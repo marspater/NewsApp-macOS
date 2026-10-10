@@ -1,8 +1,8 @@
 // DesignSystem.swift
 // NewsApp Design Token System
 
-import SwiftUI
 import AppKit
+import SwiftUI
 
 // MARK: - App Colors
 
@@ -26,7 +26,7 @@ enum AppColor {
 
     // Semantic Accents & Status (90% Neutral, 7% Accent, 3% Intelligence)
     static var accent: Color { Color.accentColor }
-    static let intelligence = Color(.displayP3, red: 0.85, green: 0.65, blue: 0.20, opacity: 1.0) // Subtle warm gold
+    static let intelligence = Color(.displayP3, red: 0.85, green: 0.65, blue: 0.20, opacity: 1.0)  // Subtle warm gold
     static let success = Color(NSColor.systemGreen)
     static let warning = Color(NSColor.systemYellow)
     static let danger = Color(NSColor.systemRed)
@@ -37,6 +37,12 @@ enum AppColor {
     static let focusRing = Color.accentColor.opacity(0.65)
     static let badgeBackground = Color.secondary.opacity(0.12)
     static let unreadDot = Color.accentColor
+
+    // Image-caption contrast remains independent of Liquid Glass transparency.
+    static let leadPlaceholder = Color(NSColor.darkGray)
+    static let leadScrim = Color.black.opacity(0.84)
+    static let leadText = Color.white
+    static let leadSecondaryText = Color.white.opacity(0.85)
 }
 
 // MARK: - App Layout
@@ -49,6 +55,7 @@ enum AppLayout {
     /// Reader and event-overview column width at text scale 1 (DESIGN.md 9).
     static let readingMeasure: CGFloat = 720.0
     static let listMaxWidth: CGFloat = 1000.0
+    static let leadStoryHeight: CGFloat = 360.0
     static let gridColumnMinimum: CGFloat = 300.0
     static let gridColumnMaximum: CGFloat = 420.0
     // Control and toolbar heights belong to the system (DESIGN.md 12).
@@ -97,6 +104,7 @@ enum AppTypography {
     static let display = Font.system(size: 32, weight: .bold)
     static let title = Font.system(size: 22, weight: .bold)
     static let headline = Font.system(size: 15, weight: .semibold)
+    static let leadStoryHeadline = Font.system(size: 28, weight: .semibold, design: .serif)
     static let body = Font.system(size: 14, weight: .regular)
     static let bodySmall = Font.system(size: 13, weight: .regular)
     static let label = Font.system(size: 12, weight: .medium)
@@ -224,9 +232,11 @@ enum AppMotion {
 /// Publisher name or kicker above a headline. Uppercased for display only, so VoiceOver reads words.
 struct EyebrowText: View {
     let text: String
+    let color: Color
 
-    init(_ text: String) {
+    init(_ text: String, color: Color = AppColor.secondaryText) {
         self.text = text
+        self.color = color
     }
 
     var body: some View {
@@ -234,7 +244,7 @@ struct EyebrowText: View {
             .font(AppTypography.eyebrow)
             .tracking(AppTypography.eyebrowTracking)
             .textCase(.uppercase)
-            .foregroundStyle(AppColor.secondaryText)
+            .foregroundStyle(color)
             .lineLimit(1)
     }
 }

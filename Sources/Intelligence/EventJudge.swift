@@ -1,6 +1,7 @@
 import Foundation
+
 #if canImport(FoundationModels)
-import FoundationModels
+    import FoundationModels
 #endif
 
 /// One report as the judge sees it: its headline and the start of its feed summary.
@@ -37,26 +38,29 @@ actor OnDeviceEventJudge {
     private var cache: [String: Bool] = [:]
 
     func sameEvent(_ a: EventJudgeReport, _ b: EventJudgeReport) async -> Bool? {
-        let key = [a, b].map { "\($0.id)\u{1}\($0.title)\u{1}\($0.summary.hashValue)" }.sorted().joined(separator: "\u{2}")
+        let key = [a, b].map { "\($0.id)\u{1}\($0.title)\u{1}\($0.summary.hashValue)" }.sorted().joined(
+            separator: "\u{2}")
         if let known = cache[key] { return known }
         #if canImport(FoundationModels)
-        guard #available(macOS 26.0, *), case .available = SystemLanguageModel.default.availability else { return nil }
-        do {
-            // News reports violence, terror and death; the default guardrails refuse such text. Comparing two reports
-            // is a content transformation, which the permissive guardrails allow for plain-text answers.
-            let model = SystemLanguageModel(guardrails: .permissiveContentTransformations)
-            let session = LanguageModelSession(model: model)
-            let response = try await session.respond(
-                to: Self.prompt(a, b), options: GenerationOptions(sampling: .greedy, maximumResponseTokens: 8))
-            guard let same = Self.verdict(response.content) else { return nil }
-            if cache.count >= 5_000 { cache.removeAll() }
-            cache[key] = same
-            return same
-        } catch {
-            return nil
-        }
+            guard #available(macOS 26.0, *), case .available = SystemLanguageModel.default.availability else {
+                return nil
+            }
+            do {
+                // News reports violence, terror and death; the default guardrails refuse such text. Comparing two reports
+                // is a content transformation, which the permissive guardrails allow for plain-text answers.
+                let model = SystemLanguageModel(guardrails: .permissiveContentTransformations)
+                let session = LanguageModelSession(model: model)
+                let response = try await session.respond(
+                    to: Self.prompt(a, b), options: GenerationOptions(sampling: .greedy, maximumResponseTokens: 8))
+                guard let same = Self.verdict(response.content) else { return nil }
+                if cache.count >= 5_000 { cache.removeAll() }
+                cache[key] = same
+                return same
+            } catch {
+                return nil
+            }
         #else
-        return nil
+            return nil
         #endif
     }
 
