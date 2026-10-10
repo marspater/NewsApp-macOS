@@ -810,29 +810,41 @@ struct ArticleDetailView: View {
         }
     }
 
+    /// Labels in one trailing-aligned column and controls in the next, as in macOS settings forms.
     private var readingOptions: some View {
-        VStack(alignment: .leading, spacing: AppSpacing.md) {
-            Text("Reading Options").font(AppTypography.headline)
-            HStack(spacing: AppSpacing.sm) {
-                Button("A−") { readerTextScaleBinding.wrappedValue = ReaderTextSize.adjusted(readerTextScale, by: -1) }
+        Form {
+            LabeledContent("Text Size") {
+                HStack(spacing: AppSpacing.xs) {
+                    Button {
+                        readerTextScaleBinding.wrappedValue = ReaderTextSize.adjusted(readerTextScale, by: -1)
+                    } label: {
+                        Label("Make Text Smaller", systemImage: "textformat.size.smaller")
+                    }
                     .disabled(readerTextScale <= ReaderTextSize.minimum)
-                    .accessibilityLabel("Make Text Smaller")
                     .help("Make text smaller (⌘−)")
-                Text(readerTextScale, format: .percent.precision(.fractionLength(0)))
-                    .monospacedDigit()
-                    .accessibilityLabel("Text size")
-                    .accessibilityValue(Text(readerTextScale, format: .percent.precision(.fractionLength(0))))
-                Button("A+") { readerTextScaleBinding.wrappedValue = ReaderTextSize.adjusted(readerTextScale, by: 1) }
+                    Button {
+                        readerTextScaleBinding.wrappedValue = ReaderTextSize.adjusted(readerTextScale, by: 1)
+                    } label: {
+                        Label("Make Text Bigger", systemImage: "textformat.size.larger")
+                    }
                     .disabled(readerTextScale >= ReaderTextSize.maximum)
-                    .accessibilityLabel("Make Text Bigger")
                     .help("Make text bigger (⌘+)")
+                    Text(readerTextScale, format: .percent.precision(.fractionLength(0)))
+                        .monospacedDigit()
+                        .foregroundStyle(AppColor.secondaryText)
+                        .accessibilityLabel("Text size")
+                        .accessibilityValue(Text(readerTextScale, format: .percent.precision(.fractionLength(0))))
+                }
+                .buttonStyle(.bordered)
+                .labelStyle(.iconOnly)
             }
-            .buttonStyle(.bordered)
             Picker("Reading Style", selection: $themeManager.articleTheme) {
                 ForEach(ArticleThemeType.allCases) { Text($0.displayName).tag($0) }
             }
             .pickerStyle(.radioGroup)
         }
+        .formStyle(.columns)
+        .fixedSize()
         .padding(AppSpacing.md)
         .focusable()
         .focusEffectDisabled()
