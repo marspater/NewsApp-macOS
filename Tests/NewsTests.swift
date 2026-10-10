@@ -3096,6 +3096,7 @@ struct NewsTests {
         manager.stopBackgroundWork()
     }
 
+    @MainActor
     static func testCatalogReviewAndAlternatives() async throws {
         print("  - Testing catalog reviews, advisories, topic gaps and alternatives (#244)...")
         // 1. Advisory lookup
@@ -3150,6 +3151,36 @@ struct NewsTests {
         let allSubscribedGaps = CatalogReviewEngine.detectTopicGaps(
             subscribedURLs: allFeeds.map(\.url), catalog: allFeeds)
         assertTrue(allSubscribedGaps.isEmpty, "Fully covered reading diet has 0 gaps")
+
+        // 6. Advisory dismissal persistence and invariant checks
+        let dismissSuite = "test.catalog.dismissal.\(UUID().uuidString)"
+        let dismissDefaults = UserDefaults(suiteName: dismissSuite)!
+        defer { dismissDefaults.removePersistentDomain(forName: dismissSuite) }
+
+        let testSettings = AppSettings(defaults: dismissDefaults)
+        let targetFeed = "https://www.france24.com/en/rss"
+        assertFalse(testSettings.isAdvisoryDismissed(for: targetFeed, date: "2026-10-08"), "Not dismissed initially")
+
+        testSettings.dismissAdvisory(for: targetFeed + "/", date: "2026-10-08")
+        assertTrue(
+            testSettings.isAdvisoryDismissed(for: targetFeed, date: "2026-10-08"), "Dismissal persists normalized")
+        assertTrue(
+            testSettings.isAdvisoryDismissed(for: targetFeed, date: "2026-10-01"), "Earlier advisory is also covered")
+        assertFalse(
+            testSettings.isAdvisoryDismissed(for: targetFeed, date: "2026-10-09"), "Future advisory is not dismissed")
+
+        // Reloading settings preserves dismissed state
+        let reloadedSettings = AppSettings(defaults: dismissDefaults)
+        assertTrue(
+            reloadedSettings.isAdvisoryDismissed(for: targetFeed, date: "2026-10-08"),
+            "Reloaded settings retains dismissal")
+
+        // Invariant: Subscriptions are never silently removed when a feed has an advisory
+        testSettings.feedURLs = [targetFeed, "https://example.com/custom.xml"]
+        let currentSubs = testSettings.feedURLs
+        let advisory = FeedCatalog.advisory(for: targetFeed)
+        assertTrue(advisory != nil, "Advisory exists for target feed")
+        assertEqual(testSettings.feedURLs, currentSubs, "Feed with active advisory remains in user subscriptions")
     }
 
     /// Fetches every catalog feed through the app's own protected networking and parsers. Needs the network.

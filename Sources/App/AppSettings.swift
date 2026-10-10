@@ -20,6 +20,7 @@ final class AppSettings: ObservableObject {
     static let mutedTopicsKey = "muted_topics"
     static let tensionCollectionOptInKey = "tension_collection_opt_in"
     static let retiredFeedsVersionKey = "retired_feeds_version"
+    static let dismissedAdvisoriesKey = "dismissed_advisories"
 
     enum NotificationMode: String, CaseIterable, Identifiable, Sendable {
         case full = "full"  // Headlines + snippets + images
@@ -83,6 +84,8 @@ final class AppSettings: ObservableObject {
     @Published var tensionCollectionOptIn: Bool
     /// The reader's muted publisher hosts and topics; empty unless the reader adds rules.
     @Published private(set) var muteRules: MuteRules
+    /// Mapping of normalized feed URL to the latest advisory date dismissed by the reader.
+    @Published private(set) var dismissedAdvisories: [String: String]
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -154,6 +157,8 @@ final class AppSettings: ObservableObject {
         self.muteRules = MuteRules(
             sources: defaults.stringArray(forKey: Self.mutedSourcesKey) ?? [],
             topics: defaults.stringArray(forKey: Self.mutedTopicsKey) ?? [])
+        self.dismissedAdvisories =
+            (defaults.dictionary(forKey: Self.dismissedAdvisoriesKey) as? [String: String]) ?? [:]
     }
 
     /// Panel feeds whose stories must outlive waiting-story expiry, because the tension index rebuilds past days from them.
@@ -241,6 +246,24 @@ final class AppSettings: ObservableObject {
         feedURLs.append(contentsOf: added)
         saveFeeds()
         return added.count
+    }
+
+    // MARK: - Advisories
+
+    /// Acknowledges and dismisses a dated advisory for a feed URL so the reader is not persistently nagged.
+    func dismissAdvisory(for url: String, date: String) {
+        guard let normalized = Self.normalizeFeedURL(url, allowInsecureHTTP: allowInsecureHTTP) else { return }
+        var updated = dismissedAdvisories
+        updated[normalized] = date
+        dismissedAdvisories = updated
+        defaults.set(updated, forKey: Self.dismissedAdvisoriesKey)
+    }
+
+    /// Whether an advisory dated on or before `date` has already been acknowledged by the reader.
+    func isAdvisoryDismissed(for url: String, date: String) -> Bool {
+        guard let normalized = Self.normalizeFeedURL(url, allowInsecureHTTP: allowInsecureHTTP) else { return false }
+        guard let dismissedDate = dismissedAdvisories[normalized] else { return false }
+        return dismissedDate >= date
     }
 
     func addSection(_ name: String) {
