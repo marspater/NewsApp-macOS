@@ -522,7 +522,7 @@ struct EventOverviewReaderView: View {
         }
         .buttonStyle(.plain)
         .buttonBorderShape(.capsule)
-        .help("Open in Source publication: “\(citation.quote)”")
+        .help("Open in source publication: “\(citation.quote)”")
         .accessibilityLabel(Self.citationAccessibilityLabel(sourceName: label, quote: citation.quote))
         .accessibilityHint("Opens source publication at cited passage")
     }

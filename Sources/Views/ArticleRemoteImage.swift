@@ -51,7 +51,7 @@ struct ArticleRemoteImage<Content: View>: View {
     }
 
     private static func image(_ image: CGImage) -> Image {
-        Image(image, scale: 1, label: Text("Article image"))
+        Image(image, scale: 1, label: Text("Story image"))
     }
 
     var body: some View {

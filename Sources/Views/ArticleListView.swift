@@ -642,7 +642,7 @@ struct ArticleListView: View {
                     .symbolEffect(
                         .rotate, options: .repeat(.continuous), isActive: feedManager.isAnyFeedLoading && !reduceMotion)
             }
-            .help(feedManager.isAnyFeedLoading ? "Refreshing feeds…" : "Refresh Feeds (R or ⌘R)")
+            .help(feedManager.isAnyFeedLoading ? "Refreshing feeds…" : "Refresh feeds (R or ⌘R)")
             .accessibilityLabel("Refresh Feeds")
             .accessibilityValue(feedManager.isAnyFeedLoading ? "Refreshing" : "")
         }

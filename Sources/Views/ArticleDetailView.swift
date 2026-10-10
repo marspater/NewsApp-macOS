@@ -510,7 +510,7 @@ struct ArticleDetailView: View {
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
-                    .help("Open Web View (W)")
+                    .help("Open web view (W)")
                 }
 
                 Text(reason)
@@ -653,7 +653,7 @@ struct ArticleDetailView: View {
                 .foregroundStyle(AppColor.secondaryText)
             HStack(spacing: AppSpacing.sm) {
                 Button("Open Web View", systemImage: "globe") { readerModeBinding.wrappedValue = .web }
-                    .help("Open Web View (W)")
+                    .help("Open web view (W)")
                 if URL(string: currentArticle.link) != nil {
                     Button("Open in Browser", systemImage: "safari", action: openInBrowser)
                         .help("Open in default browser (O or ⌘O)")
@@ -775,27 +775,27 @@ struct ArticleDetailView: View {
                     Label("Web Back", systemImage: "arrow.left")
                 }
                 .disabled(!webCanGoBack)
-                .help("Web Back")
+                .help("Go back")
                 Button {
                     webAction = .goForward
                 } label: {
                     Label("Web Forward", systemImage: "arrow.right")
                 }
                 .disabled(!webCanGoForward)
-                .help("Web Forward")
+                .help("Go forward")
             }
             Button(action: toggleSave) {
                 Label(
                     isSaved ? "Remove from Saved Stories" : "Save Story",
                     systemImage: isSaved ? "bookmark.fill" : "bookmark")
             }
-            .help(isSaved ? "Remove from Saved Stories (S)" : "Save Story (S)")
+            .help(isSaved ? "Remove from saved stories (S)" : "Save story (S)")
 
             if let url = URL(string: currentArticle.link) {
                 ShareLink(item: url, subject: Text(currentArticle.title)) {
                     Label("Share Story", systemImage: "square.and.arrow.up")
                 }
-                .help("Share Story")
+                .help("Share story")
                 .accessibilityLabel("Share Story")
             }
         }
@@ -1173,7 +1173,7 @@ struct ArticleDetailView: View {
 
         let link = currentArticle.link
         guard !link.isEmpty, let url = URL(string: link), url.scheme == "http" || url.scheme == "https" else {
-            contentState = .fallback(reason: "Invalid article URL")
+            contentState = .fallback(reason: "Invalid story link")
             return
         }
         let allowInsecure = appSettings.allowInsecureHTTP
@@ -1226,7 +1226,7 @@ struct ArticleDetailView: View {
                 self.activeArticle = updated
                 self.contentState = .ready
             case .qualityValidationFailed(let reason):
-                self.contentState = .fallback(reason: "Article quality check not met: \(reason)")
+                self.contentState = .fallback(reason: "Story quality check not met: \(reason)")
             case .httpError(let status):
                 self.contentState = .fallback(reason: "Publisher returned HTTP \(status)")
             case .securityBlocked(let reason):
@@ -1234,7 +1234,7 @@ struct ArticleDetailView: View {
             case .emptyContent:
                 self.contentState = .fallback(reason: "Publisher returned empty content")
             case .contentParsingFailed(let reason):
-                self.contentState = .fallback(reason: "Could not extract article body: \(reason)")
+                self.contentState = .fallback(reason: "Could not extract story body: \(reason)")
             case .networkError(let reason):
                 self.contentState = .fallback(reason: "Network error: \(reason)")
             }
@@ -1462,7 +1462,7 @@ struct ReaderFigureView: View {
                     case .failure:
                         Label("Image unavailable", systemImage: "photo").foregroundStyle(AppColor.secondaryText)
                     case .empty:
-                        ProgressView().accessibilityLabel("Loading article image")
+                        ProgressView().accessibilityLabel("Loading story image")
                     @unknown default: EmptyView()
                     }
                 }
