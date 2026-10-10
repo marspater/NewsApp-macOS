@@ -16,13 +16,16 @@ Stack must land in order. No changes to phases 1, 2, 4, 5, 6 or 7, the reader, d
 - Source inspection: sidebar still uses the existing `List(selection:)` navigation, no new button wrapper, badge drawing or row font; no change to ⌘1–⌘4 notification routes or list keyboard handler.
 - The existing `ArticleFilterQuery` parser still handles `is:read`, `is:unread`, `is:saved`, `source:` and `category:`; converted token expressions are joined with the free-text query. Added deterministic tests for token-only and mixed queries, incomplete prefixes and value filters.
 - No new design-lint exceptions or glass surfaces were introduced. The sidebar add-feed control and Suggested section remain.
-- Local macOS build, `./test.sh`, `script/design_lint.sh`, `script/test_native_ui_qa.sh`, signed arm64 app, live VoiceOver and appearance/performance runs are **not executable from the connector-only environment**. CI status and macOS acceptance remain pending; this is not a reported pass.
+- Local run, 2026-10-10, Apple silicon, macOS 27.0.1, Xcode 27.0 (Swift 6.4), after rebasing the stack on `main` at `2542462`: `swift build`, `script/design_lint.sh`, `script/test_native_ui_qa.sh` and the full `./test.sh` passed at each slice tip. `build.sh` produced an ad-hoc signed arm64 bundle in a staging copy.
+- That run found and fixed: `build.sh` and `build_release.sh` did not compile `ArchiveSearchToken.swift`; the design-lint baseline was not lowered after the literal font sizes were removed; a repeated identical masthead notice kept the earlier five-second timer and skipped its announcement; unreadable drops were consumed silently; several chips for one filter showed although the parser keeps only the last; promoting a chip removed the space after free text, so the next word joined it.
+- Isolated launch (`script/run_isolated.sh --seed`, separate container, macOS 27 only): `report is:unread ` became an `is:unread` chip plus free text and returned archive results; a later `is:read` replaced the `is:unread` chip; a query without matches showed the system no-results view without a refresh action. Masthead notices, drop alerts, feed-failure and empty views were not exercised live.
+- Hosted CI, macOS 15/26, VoiceOver and appearance/performance runs remain pending; they are not reported as passes.
 - No user installation, migration, live publisher requests or user library access were performed.
 
 ## Required on-device acceptance checklist
 
-- [ ] Run `script/design_lint.sh && script/test_native_ui_qa.sh && ./test.sh` on Apple silicon.
-- [ ] Build and launch in an isolated ad-hoc signed staging directory on macOS 15, 26 and 27 where available.
+- [x] Run `script/design_lint.sh && script/test_native_ui_qa.sh && ./test.sh` on Apple silicon.
+- [ ] Build and launch in an isolated ad-hoc signed staging directory on macOS 15, 26 and 27 where available (macOS 27 done).
 - [ ] Confirm sidebar sizes small/medium/large, selection and arrow keys, ⌘1–⌘4, + and Suggested.
 - [ ] At 900 pt and wide layouts, check search at toolbar trailing, overflow and search suggestions; opt into minimization only if 900 pt is crowded.
 - [ ] Search the archive from Today, Saved, History and reader, using free text alone, each of the five token operators and combinations; removing a chip restores previous results. Search no-results must name the query and not suggest feed refresh.
@@ -39,4 +42,5 @@ Do not check off the issue's final acceptance list or close #353 until the stack
 - [x] Native search field, native sidebar rows, system empty/failure states.
 - [x] Copy distinguishes search-no-results from feed failure; technical detail is disclosed on request.
 - [ ] macOS appearance, system sidebar size and 900 pt acceptance matrix not yet observed.
-- [ ] Hosted CI and isolated arm64 build not yet verified.
+- [x] Isolated arm64 build verified locally.
+- [ ] Hosted CI not yet verified.
