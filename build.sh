@@ -77,6 +77,7 @@ swiftc -swift-version 6 -O -parse-as-library -target arm64-apple-macos${TARGET_M
     Sources/Storage/ReadManager.swift \
     Sources/App/ThemeManager.swift \
     Sources/Models/FeedArticle.swift \
+    Sources/Models/ArchiveSearchToken.swift \
     Sources/Storage/CacheManager.swift \
     Sources/Coordinators/FeedManager.swift \
     Sources/App/AppContainer.swift \

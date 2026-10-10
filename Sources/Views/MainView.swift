@@ -20,6 +20,8 @@ extension Notification.Name {
 struct MainView: View {
     @State private var selectedTopic: String? = "Today"
     @State private var searchText: String = ""
+    @State private var searchTokens: [ArchiveSearchToken] = []
+    @State private var mastheadNotice: MastheadNotice?
     @State private var articlePath = NavigationPath()
 
     @EnvironmentObject private var appSettings: AppSettings
@@ -34,7 +36,7 @@ struct MainView: View {
 
     var body: some View {
         NavigationSplitView(columnVisibility: $columnVisibility) {
-            SidebarView(selectedTopic: $selectedTopic)
+            SidebarView(selectedTopic: $selectedTopic, mastheadNotice: $mastheadNotice)
                 .environmentObject(appSettings)
                 .environmentObject(feedManager)
                 .environmentObject(savedStories)
@@ -46,7 +48,11 @@ struct MainView: View {
 
                     ArticleListView(
                         selectedTopic: $selectedTopic,
-                        searchText: $searchText,
+                        searchText: Binding(
+                            get: { archiveQuery },
+                            set: { searchText = $0 }
+                        ),
+                        mastheadNotice: $mastheadNotice,
                         articlePath: $articlePath
                     )
                     .environmentObject(appSettings)
@@ -86,8 +92,10 @@ struct MainView: View {
             Text(articleStore.operationError ?? "Please try again.")
         }
         .navigationSplitViewStyle(.balanced)
-        // The system sidebar field: Liquid Glass on macOS 26, the standard search field on macOS 15.
-        .searchable(text: $searchText, placement: .sidebar, prompt: "Search")
+        // One archive search in the trailing toolbar, shared by list and reader.
+        .searchable(text: $searchText, tokens: $searchTokens, placement: .toolbar, prompt: "Search archive") { token in
+            Text(token.expression)
+        }
         .searchSuggestions { searchOperatorSuggestions }
         .frame(minWidth: 900, minHeight: 600)
         .onAppear {
@@ -98,10 +106,36 @@ struct MainView: View {
         .onDrop(of: [.fileURL], isTargeted: $isWindowDropTargeted) { providers in
             handleWindowOPMLDrop(providers: providers)
         }
+        .onChange(of: mastheadNotice) { _, notice in
+            guard let notice, let application = NSApp else { return }
+            NSAccessibility.post(
+                element: application, notification: .announcementRequested,
+                userInfo: [
+                    .announcement: notice.message,
+                    .priority: NSAccessibilityPriorityLevel.medium.rawValue,
+                ])
+        }
+        .task(id: mastheadNotice) {
+            guard let current = mastheadNotice else { return }
+            try? await Task.sleep(for: .seconds(5))
+            if !Task.isCancelled && mastheadNotice == current { mastheadNotice = nil }
+        }
         .onChange(of: selectedTopic) { _, _ in
             articlePath = NavigationPath()
         }
-        .onChange(of: searchText) { _, _ in
+        .onChange(of: searchText) { _, updatedText in
+            let promoted = ArchiveSearchToken.promoteCompleted(in: updatedText)
+            if !promoted.tokens.isEmpty {
+                for token in promoted.tokens where !searchTokens.contains(token) {
+                    searchTokens.append(token)
+                }
+                searchText = promoted.text
+            }
+            if !articlePath.isEmpty { articlePath = NavigationPath() }
+        }
+        .onChange(of: searchTokens) { _, tokens in
+            let kept = ArchiveSearchToken.latestPerField(tokens)
+            if kept != tokens { searchTokens = kept }
             if !articlePath.isEmpty { articlePath = NavigationPath() }
         }
         // Notification Deep Link & Section Jump Routing
@@ -139,6 +173,10 @@ struct MainView: View {
 
     // MARK: - Search Operators
 
+    private var archiveQuery: String {
+        ArchiveSearchToken.query(text: searchText, tokens: searchTokens)
+    }
+
     private static let searchOperators: [(token: String, summary: String)] = [
         ("is:unread", "Unread stories"),
         ("is:read", "Stories you have read"),
@@ -160,11 +198,26 @@ struct MainView: View {
             Self.searchOperators.filter { lowered.isEmpty || ($0.token.hasPrefix(lowered) && $0.token != lowered) },
             id: \.token
         ) { option in
-            HStack(spacing: AppSpacing.sm) {
-                Text(option.token).font(.system(.body, design: .monospaced))
-                Text(option.summary).foregroundStyle(AppColor.secondaryText)
+            if let token = ArchiveSearchToken(completedExpression: option.token) {
+                HStack(spacing: AppSpacing.sm) {
+                    Text(option.token).font(.system(.body, design: .monospaced))
+                    Text(option.summary).foregroundStyle(AppColor.secondaryText)
+                }
+                .searchCompletion(token)
+            } else {
+                // Source and category need values before becoming tokens.
+                HStack(spacing: AppSpacing.sm) {
+                    Text(option.token).font(.system(.body, design: .monospaced))
+                    Text(option.summary).foregroundStyle(AppColor.secondaryText)
+                }
+                .searchCompletion(typed + option.token)
             }
-            .searchCompletion(typed + option.token)
+        }
+        if let token = ArchiveSearchToken(completedExpression: word),
+            lowered.hasPrefix("source:") || lowered.hasPrefix("category:")
+        {
+            Text("Filter: \(token.expression)")
+                .searchCompletion(token)
         }
     }
 
@@ -173,13 +226,26 @@ struct MainView: View {
     private func handleWindowOPMLDrop(providers: [NSItemProvider]) -> Bool {
         for provider in providers where provider.canLoadObject(ofClass: URL.self) {
             _ = provider.loadObject(ofClass: URL.self) { item, _ in
-                guard let url = item else { return }
+                guard let url = item else {
+                    Task { @MainActor in articleStore.operationError = "The dropped file could not be read." }
+                    return
+                }
 
                 if url.isFileURL
                     && (url.pathExtension.lowercased() == "opml" || url.pathExtension.lowercased() == "xml")
                 {
                     Task { @MainActor in
-                        await self.feedManager.importFeeds(fromFile: url)
+                        let count = await self.feedManager.importFeeds(fromFile: url)
+                        if count > 0 {
+                            mastheadNotice = MastheadNotice(
+                                message: "Imported \(count) feed\(count == 1 ? "" : "s") from OPML")
+                        } else if articleStore.operationError == nil {
+                            mastheadNotice = MastheadNotice(message: "No new feeds imported")
+                        }
+                    }
+                } else {
+                    Task { @MainActor in
+                        articleStore.operationError = "Only OPML or XML subscription files can be imported."
                     }
                 }
             }
