@@ -9,3 +9,9 @@
 **Learning:** Compiling `NSRegularExpression` is computationally expensive. In `FeedXMLParser.swift`, the `extractImageFromHTML` method was repeatedly compiling a regular expression for image extraction up to twice per parsed article. When a feed has many items, this caused hundreds of unnecessary regex compilation cycles during background feed refresh.
 
 **Action:** Future Bolt runs should statically compile and store `NSRegularExpression` instances using `static let` (or statically initialized arrays for multiple patterns) when they are used inside loops or frequently called methods like XML element parsers or UI render passes, instead of instantiating them on demand.
+
+## 2024-10-26 - Optimized EventFeedGrouping ID collection without allocating FeedEntry enum payloads
+
+**Learning:** In `EventFeed.swift`, `FeedUpdateBuffer.receive` previously called `displayed.entries(mode).map(\.id)` and `snapshot.entries(mode).map(\.id)` to check if feed groupings and orders stayed consistent during refreshes. This effectively instantiated hundreds of full `FeedEntry` objects (many containing nested grouped arrays of `FeedArticle` structs) strictly to extract a string ID, leading to thousands of unnecessary allocations and main thread O(N) traversal overhead during UI updates.
+
+**Action:** Future Bolt runs evaluating complex SwiftUI array state differences should decouple structural or identifying representations (like `[String]` identifiers) from rich display wrappers (like `[FeedEntry]`). Calculate identifiers directly when checking diffs or group states, avoiding full view model instantiation until rendering is actually needed.

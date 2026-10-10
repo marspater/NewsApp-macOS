@@ -204,6 +204,8 @@ enum EventControlSet {
 @main
 struct NewsTests {
     static func main() async {
+        testOptimizedEventFeedGroupingIDs()
+        testOptimizedEventFeedGroupingIDsComprehensive()
         do {
             try await runTests()
         } catch {
@@ -8381,3 +8383,59 @@ struct NewsTests {
 
 
 
+
+// Optimized Event Feed Grouping tests
+func testOptimizedEventFeedGroupingIDs() {
+    let articles = [FeedArticle(id: "1"), FeedArticle(id: "2"), FeedArticle(id: "3")]
+    let events = [EventFeedSummary(eventID: "e1", membershipVersion: 1, seenVersion: nil, members: [
+        EventFeedMember(articleID: "1", source: "", title: "", date: Date(), joinedVersion: 1, isRead: false, isSaved: false),
+        EventFeedMember(articleID: "2", source: "", title: "", date: Date(), joinedVersion: 1, isRead: false, isSaved: false)
+    ])]
+
+    let original = EventFeedGrouping.entries(for: articles, events: events, mode: .events).map(\.id)
+    let optimized = EventFeedGrouping.entryIDs(for: articles, events: events, mode: .events)
+
+    assertEqual(original, optimized, "Optimized entryIDs method must match the IDs returned by entries method.")
+}
+func testOptimizedEventFeedGroupingIDsComprehensive() {
+    let articles = [FeedArticle(id: "1"), FeedArticle(id: "2"), FeedArticle(id: "3"), FeedArticle(id: "4")]
+
+    // Case 1: Unchanged
+    let eventsUnchanged = [EventFeedSummary(eventID: "e1", membershipVersion: 1, seenVersion: nil, members: [
+        EventFeedMember(articleID: "1", source: "", title: "", date: Date(), joinedVersion: 1, isRead: false, isSaved: false),
+        EventFeedMember(articleID: "2", source: "", title: "", date: Date(), joinedVersion: 1, isRead: false, isSaved: false)
+    ])]
+
+    assertEqual(EventFeedGrouping.entries(for: articles, events: eventsUnchanged, mode: .events).map(\.id),
+                EventFeedGrouping.entryIDs(for: articles, events: eventsUnchanged, mode: .events),
+                "Optimized entryIDs must match entries for unchanged scenario")
+
+    // Case 2: Reordered
+    let articlesReordered = [FeedArticle(id: "3"), FeedArticle(id: "2"), FeedArticle(id: "1"), FeedArticle(id: "4")]
+    assertEqual(EventFeedGrouping.entries(for: articlesReordered, events: eventsUnchanged, mode: .events).map(\.id),
+                EventFeedGrouping.entryIDs(for: articlesReordered, events: eventsUnchanged, mode: .events),
+                "Optimized entryIDs must match entries for reordered scenario")
+
+    // Case 3: Newly Grouped
+    let eventsNewlyGrouped = [EventFeedSummary(eventID: "e2", membershipVersion: 1, seenVersion: nil, members: [
+        EventFeedMember(articleID: "3", source: "", title: "", date: Date(), joinedVersion: 1, isRead: false, isSaved: false),
+        EventFeedMember(articleID: "4", source: "", title: "", date: Date(), joinedVersion: 1, isRead: false, isSaved: false)
+    ])]
+    assertEqual(EventFeedGrouping.entries(for: articles, events: eventsNewlyGrouped, mode: .events).map(\.id),
+                EventFeedGrouping.entryIDs(for: articles, events: eventsNewlyGrouped, mode: .events),
+                "Optimized entryIDs must match entries for newly grouped scenario")
+
+    // Case 4: Pending Updates (Some confirmed, some unconfirmed events)
+    let eventsPending = [
+        EventFeedSummary(eventID: "e1", membershipVersion: 1, seenVersion: nil, members: [
+            EventFeedMember(articleID: "1", source: "", title: "", date: Date(), joinedVersion: 1, isRead: false, isSaved: false),
+            EventFeedMember(articleID: "2", source: "", title: "", date: Date(), joinedVersion: 1, isRead: false, isSaved: false)
+        ]),
+        EventFeedSummary(eventID: "e3", membershipVersion: 1, seenVersion: nil, members: [
+            EventFeedMember(articleID: "3", source: "", title: "", date: Date(), joinedVersion: 1, isRead: false, isSaved: false) // Unconfirmed
+        ])
+    ]
+    assertEqual(EventFeedGrouping.entries(for: articles, events: eventsPending, mode: .events).map(\.id),
+                EventFeedGrouping.entryIDs(for: articles, events: eventsPending, mode: .events),
+                "Optimized entryIDs must match entries for pending updates scenario")
+}
