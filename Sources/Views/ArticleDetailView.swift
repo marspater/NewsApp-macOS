@@ -1345,7 +1345,8 @@ struct ArticleDetailView: View {
             membershipVersion: membershipVersion,
             articles: resolvedMembers,
             store: articleStore,
-            owner: overviewOwner
+            owner: overviewOwner,
+            readerArticleID: articleID
         )
 
         guard !Task.isCancelled, activeArticle.id == articleID,

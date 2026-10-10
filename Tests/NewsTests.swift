@@ -174,6 +174,40 @@ final class GatedURLProtocol: URLProtocol, @unchecked Sendable {
 }
 
 /// Suspends every waiter until opened, so tests can hold follow-up work in flight.
+/// Records page fetches for overview evidence tests: links in order and the most that ran at once.
+actor ExtractionLog {
+    private(set) var links: [String] = []
+    private(set) var peak = 0
+    private var active = 0
+    func begin(_ link: String) {
+        links.append(link)
+        active += 1
+        peak = max(peak, active)
+    }
+    func end() { active -= 1 }
+    func count(_ link: String) -> Int { links.filter { $0 == link }.count }
+    var isIdle: Bool { active == 0 }
+}
+
+/// Scripted publisher pages for overview evidence tests.
+actor TestPages {
+    struct Reply: Sendable {
+        var outcome: ExtractionOutcome = .emptyContent
+        var delay: Duration = .zero
+        var during: (@Sendable () async -> Void)?
+        /// Held until opened, ignoring cancellation, like an extractor that does not cooperate.
+        var gate: OpenGate?
+    }
+    private var replies: [String: Reply] = [:]
+    func set(
+        _ link: String, _ outcome: ExtractionOutcome, delay: Duration = .zero,
+        during: (@Sendable () async -> Void)? = nil, gate: OpenGate? = nil
+    ) {
+        replies[link] = Reply(outcome: outcome, delay: delay, during: during, gate: gate)
+    }
+    func reply(for link: String) -> Reply { replies[link] ?? Reply() }
+}
+
 actor OpenGate {
     private var isOpen = false
     private var waiters: [CheckedContinuation<Void, Never>] = []
@@ -427,6 +461,7 @@ struct NewsTests {
             try await testPassageAnchoredFactExtraction()
             try await testOverviewCompositionFromVerifiedFacts(fixtureHost: fixtureHost)
             try await testPlainTextGeneration(fixtureHost: fixtureHost)
+            try await testOverviewPublisherEvidence(fixtureHost: fixtureHost)
             try await testOverviewQualityAuditAndReleaseGate(fixtureHost: fixtureHost)
             try await testOnDemandOverviewGenerationAndCaching(fixtureHost: fixtureHost)
             try await testOverviewGenerationCancellationAndSupersession(fixtureHost: fixtureHost)
@@ -521,6 +556,7 @@ struct NewsTests {
         try await testPassageAnchoredFactExtraction()
         try await testOverviewCompositionFromVerifiedFacts(fixtureHost: fixtureHost)
         try await testPlainTextGeneration(fixtureHost: fixtureHost)
+        try await testOverviewPublisherEvidence(fixtureHost: fixtureHost)
         try await testOverviewQualityAuditAndReleaseGate(fixtureHost: fixtureHost)
         try await testOnDemandOverviewGenerationAndCaching(fixtureHost: fixtureHost)
         try await testOverviewGenerationCancellationAndSupersession(fixtureHost: fixtureHost)
@@ -10816,6 +10852,230 @@ struct NewsTests {
     }
 
     @MainActor
+    static func testOverviewPublisherEvidence(fixtureHost: String) async throws {
+        print("  - Testing overview publisher text: thin evidence, deadline, shared fetches and version checks...")
+        func article(_ id: String, _ source: String) -> FeedArticle {
+            FeedArticle(
+                storedID: id, title: "\(source) on the harbor bridge", link: "https://\(fixtureHost)/\(id)", guid: id,
+                description: "The harbor bridge reopened after repairs, \(source) reported.", pubDate: Date(),
+                source: source)
+        }
+        func page(_ name: String) -> String {
+            """
+            \(name) said the harbor bridge reopened to traffic on Monday morning. Crews from \(name) worked through \
+            the weekend on the deck. The first buses crossed shortly after six o'clock.
+
+            Engineers told \(name) that two damaged support cables were replaced. The city council approved the \
+            final inspection for \(name) on Sunday. Commuters told \(name) the detour had added twenty minutes.
+            """
+        }
+        func success(_ text: String) -> ExtractionOutcome { .success(content: text, imageUrl: nil, document: nil) }
+        // Thin evidence: feed summaries alone never reach the model.
+        let calls = TestCounter()
+        let refusing = NewsTextModel { prompt, _ in
+            if prompt.contains("Return plain text only:") { await calls.increment() }
+            return "I refuse"
+        }
+        let (a, b) = (article("ev-a", "Publisher A"), article("ev-b", "Publisher B"))
+        let summaries = OverviewPassageSelector().selectPassages(from: [a, b]).passages
+        let summaryFallback = OverviewComposer.composeOverview(
+            eventID: "thin", eventTitle: "Harbor bridge", verifiedFacts: [], passages: summaries, articles: [a, b])
+        let thin = try await OverviewComposer.composeWithModelOutcome(
+            fallback: summaryFallback, passages: summaries, articles: [a, b], model: refusing)
+        assertEqual(thin.outcome.result, .thinEvidence, "Feed summaries alone are thin evidence")
+        assertEqual(await calls.value, 0, "Thin evidence never reaches the model")
+        let repeated = String(repeating: "The harbor bridge reopened to traffic on Monday morning. ", count: 6)
+        assertFalse(
+            OverviewComposer.hasSufficientEvidence([
+                EvidencePassage(id: "r1", articleID: a.id, text: repeated),
+                EvidencePassage(id: "r2", articleID: b.id, text: repeated),
+            ]), "Repeated sentences count once")
+        assertFalse(
+            OverviewComposer.hasSufficientEvidence([EvidencePassage(id: "one", articleID: a.id, text: page("A"))]),
+            "One article alone is not enough to synthesize")
+
+        let database = DatabaseEngine(path: ":memory:")
+        try await database.open()
+        let store = ArticleStore(database: database)
+        let log = ExtractionLog()
+        let pages = TestPages()
+        let extractor: @Sendable (String) async -> ExtractionOutcome = { link in
+            await log.begin(link)
+            let reply = await pages.reply(for: link)
+            if reply.delay > .zero { try? await Task.sleep(for: reply.delay) }
+            await reply.gate?.wait()
+            await log.end()
+            await reply.during?()
+            return reply.outcome
+        }
+        func coordinator(_ model: NewsTextModel = refusing, deadline: Duration = .seconds(4))
+            -> OverviewGenerationCoordinator
+        {
+            OverviewGenerationCoordinator(
+                store: store, queue: EnrichmentQueue(store: store), textModel: model, allowsModel: { true },
+                extractText: extractor, extractionDeadline: deadline)
+        }
+        func stored(_ id: String) async throws -> FeedArticle? {
+            try await database.fetchArticles(limit: 1, id: id).first
+        }
+
+        // Extracted text replaces the summary before the inputs are fixed, and invalidates an older overview.
+        _ = try await database.upsertArticles([a, b])
+        let plain = OverviewGenerationCoordinator(
+            store: store, queue: EnrichmentQueue(store: store), textModel: refusing, allowsModel: { true })
+        let before = await plain.requestOverview(
+            eventID: "evidence", eventTitle: "Harbor bridge", membershipVersion: 1, articles: [a, b])
+        assertTrue(before != nil, "Without an extractor the summary overview is stored")
+        await pages.set(a.link, success(page("Publisher A")))
+        await pages.set(b.link, success(page("Publisher B")))
+        let prompts = TestCounter()
+        let recording = NewsTextModel { prompt, _ in
+            if prompt.contains("Return plain text only:"), prompt.contains("two damaged support cables") {
+                await prompts.increment()
+            }
+            return "I refuse"
+        }
+        let extracting = coordinator(recording)
+        let after = await extracting.requestOverview(
+            eventID: "evidence", eventTitle: "Harbor bridge", membershipVersion: 1, articles: [a, b])
+        assertEqual(try await stored(a.id)?.fullContent, page("Publisher A"), "Accepted publisher text is stored")
+        assertEqual(await prompts.value, 1, "The draft prompt carries the extracted text")
+        assertTrue(after?.inputTextHash != before?.inputTextHash, "Extracted text gives the overview new inputs")
+        assertEqual(
+            try await database.fetchEventOverview(eventID: "evidence")?.id, after?.id,
+            "The summary overview is replaced, not kept as current")
+        let again = await extracting.requestOverview(
+            eventID: "evidence", eventTitle: "Harbor bridge", membershipVersion: 1, articles: [a, b])
+        assertEqual(again?.id, after?.id, "Copies from before extraction still hit the stored overview")
+        assertEqual(await prompts.value, 1, "The stored overview is reused without another draft")
+        assertEqual(await log.count(a.link), 1, "Stored text is never fetched again")
+
+        // The reader's own article is left to the reader.
+        let (c, d) = (article("ev-c", "Publisher C"), article("ev-d", "Publisher D"))
+        _ = try await database.upsertArticles([c, d])
+        await pages.set(c.link, success(page("Publisher C")))
+        await pages.set(d.link, success(page("Publisher D")))
+        _ = await coordinator().requestOverview(
+            eventID: "reader", eventTitle: "Harbor bridge", membershipVersion: 1, articles: [c, d],
+            excludingFromExtraction: [c.id])
+        assertEqual(await log.count(c.link), 0, "The reader's article is not fetched twice")
+        assertEqual(await log.count(d.link), 1, "Other representatives are fetched")
+
+        // A slow publisher is cut off at the deadline, keeps its summary and is not retried for the same input.
+        let (e, f) = (article("ev-e", "Publisher E"), article("ev-f", "Publisher F"))
+        _ = try await database.upsertArticles([e, f])
+        await pages.set(e.link, success(page("Publisher E")), delay: .seconds(30))
+        await pages.set(f.link, success(page("Publisher F")))
+        let slow = coordinator(deadline: .milliseconds(300))
+        let clock = ContinuousClock()
+        let started = clock.now
+        let slowResult = await slow.requestOverview(
+            eventID: "slow", eventTitle: "Harbor bridge", membershipVersion: 1, articles: [e, f])
+        assertTrue(clock.now - started < .seconds(3), "The deadline bounds the wait for a slow page")
+        assertTrue(slowResult != nil, "The overview is still produced")
+        assertEqual(try await stored(e.id)?.fullContent, nil, "A page cut off by the deadline is not stored")
+        assertEqual(try await stored(f.id)?.fullContent, page("Publisher F"), "The fast page is stored")
+        _ = await slow.requestOverview(
+            eventID: "slow", eventTitle: "Harbor bridge", membershipVersion: 1, articles: [e, f])
+        assertEqual(await log.count(e.link), 1, "A failed fetch is not retried for the same publisher input")
+
+        // At most two fetches run at once, and overlapping requests share them.
+        let group = ["ev-g", "ev-h", "ev-i", "ev-j"].enumerated().map { article($1, "Publisher \($0 + 7)") }
+        _ = try await database.upsertArticles(group)
+        for item in group {
+            await pages.set(item.link, success(page(item.source)), delay: .milliseconds(150))
+        }
+        let shared = coordinator()
+        async let first = shared.requestOverview(
+            eventID: "shared", eventTitle: "Harbor bridge", membershipVersion: 1, articles: group)
+        async let second = shared.requestOverview(
+            eventID: "shared", eventTitle: "Harbor bridge", membershipVersion: 1, articles: group,
+            priority: .background)
+        _ = await (first, second)
+        assertTrue(await log.peak <= OverviewGenerationCoordinator.maxConcurrentExtractions, "Two fetches at most")
+        for item in group {
+            assertEqual(await log.count(item.link), 1, "Overlapping requests fetch each page once")
+        }
+
+        // A publisher edit during the fetch wins; quality-rejected and too-short text is not stored.
+        let (k, l, m) = (article("ev-k", "Publisher K"), article("ev-l", "Publisher L"), article("ev-m", "Publisher M"))
+        _ = try await database.upsertArticles([k, l, m])
+        let edited = FeedArticle(
+            storedID: k.id, title: "Harbor bridge reopens to buses", link: k.link, guid: k.guid,
+            description: k.description, pubDate: k.pubDate, source: k.source)
+        await pages.set(
+            k.link, success(page("Publisher K")), during: { _ = try? await database.upsertArticles([edited]) })
+        await pages.set(l.link, .qualityValidationFailed(reason: "navigation page"))
+        await pages.set(m.link, success("Short."))
+        _ = await coordinator().requestOverview(
+            eventID: "checks", eventTitle: "Harbor bridge", membershipVersion: 1, articles: [k, l, m])
+        assertEqual(try await stored(k.id)?.fullContent, nil, "Text fetched for an older publisher version is dropped")
+        assertEqual(try await stored(l.id)?.fullContent, nil, "Quality-rejected text is not stored")
+        assertEqual(try await stored(m.id)?.fullContent, nil, "Text shorter than the summary is not stored")
+
+        // A cancelled request stops waiting; its fetches end by the deadline and release their slots.
+        let (n, o, q) = (article("ev-n", "Publisher N"), article("ev-o", "Publisher O"), article("ev-q", "Publisher Q"))
+        _ = try await database.upsertArticles([n, o, q])
+        for item in [n, o] {
+            await pages.set(item.link, success(page(item.source)), delay: .seconds(30))
+        }
+        await pages.set(q.link, success(page("Publisher Q")))
+        let cancelling = coordinator(deadline: .milliseconds(500))
+        let cancelled = Task {
+            await cancelling.requestOverview(
+                eventID: "cancelled", eventTitle: "Harbor bridge", membershipVersion: 1, articles: [n, o])
+        }
+        while await log.count(o.link) == 0 { await Task.yield() }
+        let cancelledAt = clock.now
+        cancelled.cancel()
+        assertEqual(await cancelled.value, nil, "A cancelled request returns nothing")
+        assertTrue(clock.now - cancelledAt < .milliseconds(400), "A cancelled request stops waiting at once")
+        try await Task.sleep(for: .milliseconds(700))
+        _ = await cancelling.requestOverview(
+            eventID: "after-cancel", eventTitle: "Harbor bridge", membershipVersion: 1, articles: [q, a])
+        assertEqual(
+            try await stored(q.id)?.fullContent, page("Publisher Q"), "Slots are released after cancelled fetches")
+
+        // An extractor that ignores cancellation cannot hold the overview past the deadline or store late text.
+        let (r, t) = (article("ev-r", "Publisher R"), article("ev-t", "Publisher T"))
+        _ = try await database.upsertArticles([r, t])
+        let stuck = OpenGate()
+        await pages.set(r.link, success(page("Publisher R")), gate: stuck)
+        await pages.set(t.link, success(page("Publisher T")))
+        let stubborn = coordinator(deadline: .milliseconds(300))
+        let stubbornStart = clock.now
+        let stubbornResult = await stubborn.requestOverview(
+            eventID: "stubborn", eventTitle: "Harbor bridge", membershipVersion: 1, articles: [r, t])
+        assertTrue(clock.now - stubbornStart < .seconds(3), "A fetch that ignores cancellation is not awaited")
+        assertTrue(stubbornResult != nil, "The overview is produced without the stuck page")
+        await stuck.open()
+        while !(await log.isIdle) { await Task.yield() }
+        try await Task.sleep(for: .milliseconds(100))
+        assertEqual(try await stored(r.id)?.fullContent, nil, "Text that arrives after the deadline is not stored")
+
+        // Nothing is fetched while the model may not run, and at most four representatives are fetched per event.
+        let (u, v) = (article("ev-u", "Publisher U"), article("ev-v", "Publisher V"))
+        _ = try await database.upsertArticles([u, v])
+        await pages.set(u.link, success(page("Publisher U")))
+        let gated = OverviewGenerationCoordinator(
+            store: store, queue: EnrichmentQueue(store: store), textModel: refusing, allowsModel: { false },
+            extractText: extractor)
+        _ = await gated.requestOverview(
+            eventID: "gated", eventTitle: "Harbor bridge", membershipVersion: 1, articles: [u, v])
+        assertEqual(await log.count(u.link), 0, "AI, Low Power and thermal policy also gate page fetches")
+        let five = ["ev-w1", "ev-w2", "ev-w3", "ev-w4", "ev-w5"].enumerated().map {
+            article($1, "Publisher W\($0)")
+        }
+        _ = try await database.upsertArticles(five)
+        for item in five { await pages.set(item.link, success(page(item.source))) }
+        _ = await coordinator().requestOverview(
+            eventID: "five", eventTitle: "Harbor bridge", membershipVersion: 1, articles: five)
+        var fetched = 0
+        for item in five { fetched += await log.count(item.link) }
+        assertEqual(fetched, OverviewGenerationCoordinator.maxEvidenceFetches, "Four representatives at most")
+    }
+
+    @MainActor
     static func testPlainTextGeneration(fixtureHost: String) async throws {
         print("  - Testing Plain Text Generation, Support Gates and Refusal Fallbacks...")
         assertTrue(ArticleTextAnswer.classification("World|0.91") != nil, "Fixed category text parses")
@@ -10873,7 +11133,7 @@ struct NewsTests {
             storedID: "plain-a", title: "Bridge repairs", link: "https://\(fixtureHost)/a", guid: "plain-a",
             description: text, pubDate: Date(), source: "Publisher A")
         let other =
-            "Engineers inspected the bridge before traffic resumed. The council funded the repairs. Residents welcomed the reopening."
+            "Engineers inspected the bridge before traffic resumed. The council funded the repairs. Residents welcomed the reopening. Buses returned to the bridge route on Monday morning. Shop owners near the bridge reported more customers this week. The transport office will publish a full inspection report next month."
         let article2 = FeedArticle(
             storedID: "plain-b", title: "Bridge reopening", link: "https://\(fixtureHost)/b", guid: "plain-b",
             description: other, pubDate: Date(), source: "Publisher B")

@@ -28,8 +28,11 @@ DEFAULT_TARGET = 30
 # #308 asks for refusal, format and weak-draft causes. A prose answer without protocol lines ("unstructured") is usually
 # a refusal written as text, so it counts there; the raw causes stay in `fallbackCauses`.
 FALLBACK_GROUPS = {'refusal': ('refusal', 'unstructured'), 'format': ('lineCount',), 'weakDraft': ('weakDraft',),
-                   'notAsked': ('noPassages',), 'modelUnavailableOrError': ('unavailable', 'contextWindow', 'error')}
-STOPWORDS = set('a an and are as at be by for from has have in is it its of on or that the their to was were will with'.split())
+                   'notAsked': ('noPassages', 'thinEvidence'), 'modelUnavailableOrError': ('unavailable', 'contextWindow', 'error')}
+STOPWORDS = frozenset({
+    'a', 'an', 'and', 'are', 'as', 'at', 'be', 'by', 'for', 'from', 'has', 'have', 'in', 'is',
+    'it', 'its', 'of', 'on', 'or', 'that', 'the', 'their', 'to', 'was', 'were', 'will', 'with',
+})
 
 
 def require(condition, message):
