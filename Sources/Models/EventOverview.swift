@@ -343,7 +343,7 @@ public struct EventOverviewDocument: Codable, Hashable, Sendable, Identifiable {
     public static let currentSchemaVersion = 1
     /// 5: attributed straight/typographic quotations with both post-quote speaker orders. Older overviews, and
     /// provisional ones stored at 0 (`OverviewGenerationCoordinator`), regenerate.
-    public static let currentAnalysisVersion = 5
+    public static let currentAnalysisVersion = 6
 
     public let id: String
     public let eventID: String
