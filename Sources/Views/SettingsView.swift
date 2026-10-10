@@ -211,9 +211,7 @@ struct SettingsView: View {
                                 .accessibilityLabel("Feed is active and up to date")
                         case .loading?:
                             ProgressView()
-                                .controlSize(.small)
-                                .scaleEffect(0.7)
-                                .frame(width: 14, height: 14)
+                                .controlSize(.mini)
                                 .help("Fetching updates…")
                                 .accessibilityLabel("Fetching updates…")
                         case .failed(let err)?:

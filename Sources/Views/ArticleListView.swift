@@ -448,11 +448,6 @@ struct ArticleListView: View {
         .accessibilityLabel(
             showsMuted ? "Showing \(mutedCount) muted stories" : "\(mutedCount) stories hidden by muting"
         )
-        .confirmationDialog("Unmute every source and topic?", isPresented: $confirmsUnmuteAll) {
-            Button("Unmute All", role: .destructive) { appSettings.clearMuting() }
-        } message: {
-            Text("Muted stories return to every list.")
-        }
     }
 
     // MARK: - Queued Updates
@@ -510,43 +505,16 @@ struct ArticleListView: View {
                 .foregroundStyle(AppColor.primaryText)
                 .accessibilityAddTraits(.isHeader)
                 .accessibilityHeading(.h1)
-            HStack(spacing: AppSpacing.xs) {
-                Text(listSubtitle)
-                    .font(AppTypography.caption)
-                    .foregroundStyle(AppColor.secondaryText)
-                    .monospacedDigit()
-                if let mastheadNotice {
-                    Text("·")
-                        .font(AppTypography.caption)
-                        .foregroundStyle(AppColor.secondaryText)
-                        .accessibilityHidden(true)
-                    Text(mastheadNotice.message)
-                        .font(AppTypography.caption)
-                        .foregroundStyle(AppColor.secondaryText)
+            // One line when it fits; at narrow widths the inline actions move to a second line instead of
+            // squeezing every part into its own wrapped column.
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: AppSpacing.xs) {
+                    statusText
+                    statusExtras(startsLine: false)
                 }
-                if waitingCount > 0 && !isBriefing {
-                    Text("·")
-                        .font(AppTypography.caption)
-                        .foregroundStyle(AppColor.secondaryText)
-                        .accessibilityHidden(true)
-                    Button(showsWaiting ? "Hide \(waitingCount) waiting" : "\(waitingCount) waiting for more sources") {
-                        showsWaiting.toggle()
-                    }
-                    .buttonStyle(.plain)
-                    .font(AppTypography.caption)
-                    .foregroundStyle(AppColor.secondaryText)
-                    .help(
-                        showsWaiting
-                            ? "Hide minor stories until more publishers cover them"
-                            : "Minor stories appear once \(StoryVisibilityPolicy.minorStorySources + 1) publishers cover them; unread ones expire after a day"
-                    )
-                }
-                if mutedCount > 0 && !listMuting.isEmpty {
-                    Text("·")
-                        .font(AppTypography.caption)
-                        .foregroundStyle(AppColor.secondaryText)
-                        .accessibilityHidden(true)
-                    mutingMenu
+                VStack(alignment: .leading, spacing: AppSpacing.textStack) {
+                    statusText
+                    HStack(spacing: AppSpacing.xs) { statusExtras(startsLine: true) }
                 }
             }
         }
@@ -554,6 +522,55 @@ struct ArticleListView: View {
         .padding(.horizontal, AppLayout.pageInset)
         .padding(.top, AppSpacing.md)
         .padding(.bottom, AppLayout.cardGap)
+        .confirmationDialog("Unmute every source and topic?", isPresented: $confirmsUnmuteAll) {
+            Button("Unmute All", role: .destructive) { appSettings.clearMuting() }
+        } message: {
+            Text("Muted stories return to every list.")
+        }
+    }
+
+    private var statusText: some View {
+        Text(listSubtitle)
+            .font(AppTypography.caption)
+            .foregroundStyle(AppColor.secondaryText)
+            .monospacedDigit()
+    }
+
+    private var statusSeparator: some View {
+        Text("·")
+            .font(AppTypography.caption)
+            .foregroundStyle(AppColor.secondaryText)
+            .accessibilityHidden(true)
+    }
+
+    /// The masthead notice and inline actions. `startsLine` drops the separator before the first one.
+    @ViewBuilder
+    private func statusExtras(startsLine: Bool) -> some View {
+        let showsWaitingAction = waitingCount > 0 && !isBriefing
+        if let mastheadNotice {
+            if !startsLine { statusSeparator }
+            Text(mastheadNotice.message)
+                .font(AppTypography.caption)
+                .foregroundStyle(AppColor.secondaryText)
+        }
+        if showsWaitingAction {
+            if !startsLine || mastheadNotice != nil { statusSeparator }
+            Button(showsWaiting ? "Hide \(waitingCount) waiting" : "\(waitingCount) waiting for more sources") {
+                showsWaiting.toggle()
+            }
+            .buttonStyle(.plain)
+            .font(AppTypography.caption)
+            .foregroundStyle(AppColor.secondaryText)
+            .help(
+                showsWaiting
+                    ? "Hide minor stories until more publishers cover them"
+                    : "Minor stories appear once \(StoryVisibilityPolicy.minorStorySources + 1) publishers cover them; unread ones expire after a day"
+            )
+        }
+        if mutedCount > 0 && !listMuting.isEmpty {
+            if !startsLine || mastheadNotice != nil || showsWaitingAction { statusSeparator }
+            mutingMenu
+        }
     }
 
     // MARK: - Toolbar

@@ -1050,7 +1050,6 @@ struct ArticleDetailView: View {
             HStack(spacing: AppSpacing.xs) {
                 ProgressView()
                     .controlSize(.small)
-                    .scaleEffect(0.8)
                 Text("Analyzing the story on device…")
                     .font(AppTypography.label)
                     .foregroundColor(AppColor.secondaryText)
