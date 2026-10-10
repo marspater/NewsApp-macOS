@@ -63,7 +63,7 @@ if [[ ! -f "$BASELINE" ]]; then
     exit 1
 fi
 
-grep -v '^#' "$BASELINE" | awk -v current="$current" '
+{ grep -v '^#' "$BASELINE" || true; } | awk -v current="$current" '
     { base[$1 " " $2] = $3 }
     END {
         while ((getline line < current) > 0) {
