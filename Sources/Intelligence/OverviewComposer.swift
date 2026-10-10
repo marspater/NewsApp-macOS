@@ -444,8 +444,12 @@ public struct OverviewComposer: Sendable {
         \(GenerationPromptDefense.untrustedDataSystemGuard)
         Summarize this news event using only the publisher passages below. Keep attribution,
         uncertainty, dates and numbers. Do not add background knowledge or fabricated quotations.
-        Return plain text only: 2 INTRO lines followed by 3 to 5 FACT lines.
-        Every line must contain exactly one sentence in this format:
+        Return plain text only: exactly 2 INTRO lines followed by 3 to 5 FACT lines (do not provide fewer than 3 facts).
+        Every line must contain exactly one complete sentence; never combine multiple sentences into one line.
+        Preserve exact negation and polarity from the cited passage; never invert positive or negative claims.
+        Retain speaker attribution: attribute assertions, allegations and disputed claims to their named speaker.
+        Ground all numbers, quantities, dates and units strictly in the cited passage without modification.
+        Format every line as:
         INTRO|P1|sentence
         FACT|P2|sentence
         Replace P1/P2 with the exact short passage ID that supports that sentence.
