@@ -229,6 +229,10 @@ struct SidebarView: View {
                         Task { @MainActor in
                             self.subscribe(to: urlString)
                         }
+                    } else {
+                        Task { @MainActor in
+                            self.feedManager.articleStore.operationError = "Drop an OPML file or an HTTP(S) feed URL."
+                        }
                     }
                 }
                 return true
@@ -242,6 +246,8 @@ struct SidebarView: View {
                     if text.hasPrefix("http://") || text.hasPrefix("https://") {
                         Task { @MainActor in
                             self.subscribe(to: text)
+                        } else {
+                            self.feedManager.articleStore.operationError = "The dropped text is not an HTTP(S) feed URL."
                         }
                     }
                 }
