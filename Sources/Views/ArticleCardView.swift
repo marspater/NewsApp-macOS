@@ -275,7 +275,7 @@ struct ArticleCardView: View {
 
     private var regularFooter: some View {
         HStack(spacing: AppSpacing.xs) {
-            Text(article.publicationDateText)
+            Text(article.cardDateText())
                 .font(AppTypography.caption)
                 .foregroundColor(AppColor.tertiaryText(for: contrast))
 
@@ -368,7 +368,7 @@ struct ArticleCardView: View {
             }
 
             HStack(spacing: AppSpacing.sm) {
-                Text(article.publicationDateText)
+                Text(article.cardDateText())
                     .font(AppTypography.caption)
                     .foregroundStyle(AppColor.leadSecondaryText)
                 Spacer(minLength: AppSpacing.xs)

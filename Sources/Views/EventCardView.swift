@@ -171,7 +171,7 @@ private struct EventSourceRow: View {
                         .font(AppTypography.eyebrow)
                         .foregroundStyle(AppColor.accent)
                 }
-                Text(article.publicationDateText)
+                Text(article.cardDateText())
                     .font(AppTypography.caption)
                     .foregroundStyle(AppColor.tertiaryText(for: contrast))
             }

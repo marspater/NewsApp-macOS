@@ -2214,6 +2214,20 @@ struct NewsTests {
         let second = FeedXMLParser(data: undatedXML).parse().first!
         assertEqual(first.pubDate, DateParser.unknownDate, "Undated XML stories do not become breaking news")
         assertEqual(first.publicationDateText, "Date unavailable", "Unknown dates have an honest display label")
+        assertEqual(first.cardDateText(), "Date unavailable", "Cards keep the honest unknown-date label")
+        do {
+            let now = Date()
+            func story(ageInSeconds age: TimeInterval) -> FeedArticle {
+                FeedArticle(
+                    title: "Dated", link: "https://example.com/dated", guid: "dated", description: "Text",
+                    pubDate: now.addingTimeInterval(-age), source: "Test")
+            }
+            assertEqual(story(ageInSeconds: 20).cardDateText(now: now), "Just now", "A story under a minute old reads Just now")
+            assertFalse(
+                story(ageInSeconds: 3 * 60 * 60).cardDateText(now: now)
+                    .contains(String(Calendar.current.component(.year, from: now))),
+                "A story from today shows a relative time, not a year")
+        }
         assertEqual(first.id, second.id, "Undated stories without GUID or link retain a stable fingerprint")
         let json = Data(
             #"{"items":[{"id":"undated","url":"\#(fixtureRoot.appendingPathComponent("story").absoluteString)","date_published":"broken"}]}"#
