@@ -36,6 +36,8 @@ swiftc -swift-version 6 -O -parse-as-library -target $(uname -m)-apple-macos${TA
     Sources/Intelligence/EventCandidates.swift \
     Sources/Intelligence/EventMatcher.swift \
     Sources/Intelligence/EventClustering.swift \
+    Sources/Intelligence/EventJudge.swift \
+    Sources/Intelligence/StoryImportance.swift \
     Sources/Intelligence/ContentExtractionPipeline.swift \
     Sources/Intelligence/EnrichmentQueue.swift \
     Sources/Intelligence/OverviewGenerationCoordinator.swift \
@@ -44,7 +46,6 @@ swiftc -swift-version 6 -O -parse-as-library -target $(uname -m)-apple-macos${TA
     Sources/Services/SecureHTTPClient.swift \
     Sources/App/AppSettings.swift \
     Sources/Services/FeedXMLParser.swift \
-    Sources/Intelligence/WebContentExtractor.swift \
     Sources/Coordinators/NotificationService.swift \
     Sources/Services/FeedFetcher.swift \
     Sources/Services/JSONFeedParser.swift \

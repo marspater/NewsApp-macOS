@@ -1,8 +1,8 @@
 // DesignSystem.swift
 // NewsApp Design Token System
 
-import SwiftUI
 import AppKit
+import SwiftUI
 
 // MARK: - App Colors
 
@@ -18,18 +18,31 @@ enum AppColor {
     static let secondaryText = Color.secondary
     static let tertiaryText = Color.secondary.opacity(0.65)
 
+    // System label colors (DESIGN.md 11): hierarchy without lowering primary-text opacity
+    static let label = Color(NSColor.labelColor)
+    static let secondaryLabel = Color(NSColor.secondaryLabelColor)
+    static let tertiaryLabel = Color(NSColor.tertiaryLabelColor)
+    static let quaternaryLabel = Color(NSColor.quaternaryLabelColor)
+
     // Semantic Accents & Status (90% Neutral, 7% Accent, 3% Intelligence)
     static var accent: Color { Color.accentColor }
-    static let intelligence = Color(.displayP3, red: 0.85, green: 0.65, blue: 0.20, opacity: 1.0) // Subtle warm gold
+    static let intelligence = Color(.displayP3, red: 0.85, green: 0.65, blue: 0.20, opacity: 1.0)  // Subtle warm gold
     static let success = Color(NSColor.systemGreen)
     static let warning = Color(NSColor.systemYellow)
     static let danger = Color(NSColor.systemRed)
 
     // Borders, Focus Rings & Badges
     static let borderSubtle = Color.primary.opacity(0.08)
+    static let separator = Color(NSColor.separatorColor)
     static let focusRing = Color.accentColor.opacity(0.65)
     static let badgeBackground = Color.secondary.opacity(0.12)
     static let unreadDot = Color.accentColor
+
+    // Image-caption contrast remains independent of Liquid Glass transparency.
+    static let leadPlaceholder = Color(NSColor.darkGray)
+    static let leadScrim = Color.black.opacity(0.84)
+    static let leadText = Color.white
+    static let leadSecondaryText = Color.white.opacity(0.85)
 }
 
 // MARK: - App Layout
@@ -39,8 +52,13 @@ enum AppLayout {
     static let sidebarInset: CGFloat = 12.0
     static let sectionGap: CGFloat = 24.0
     static let cardGap: CGFloat = 16.0
-    static let toolbarHeight: CGFloat = 44.0
-    static let controlHeight: CGFloat = 28.0
+    /// Reader and event-overview column width at text scale 1 (DESIGN.md 9).
+    static let readingMeasure: CGFloat = 720.0
+    static let listMaxWidth: CGFloat = 1000.0
+    static let leadStoryHeight: CGFloat = 360.0
+    static let gridColumnMinimum: CGFloat = 300.0
+    static let gridColumnMaximum: CGFloat = 420.0
+    // Control and toolbar heights belong to the system (DESIGN.md 12).
 }
 
 // MARK: - App Spacing
@@ -53,6 +71,12 @@ enum AppSpacing {
     static let lg: CGFloat = 24.0
     static let xl: CGFloat = 32.0
     static let xxl: CGFloat = 48.0
+
+    // Micro steps for text clusters only (DESIGN.md 12)
+    /// Between stacked text lines.
+    static let textStack: CGFloat = 2.0
+    /// Between an eyebrow's parts.
+    static let eyebrowGap: CGFloat = 6.0
 }
 
 // MARK: - App Corner Radius
@@ -74,16 +98,32 @@ enum AppRadius {
 enum AppTypography {
     static let sectionHeaderTracking: Double = 0.6
     static let sourceEyebrowTracking: Double = 0.5
+    static let eyebrowTracking: Double = 0.5
 
     // Standard semantic typographic scale
     static let display = Font.system(size: 32, weight: .bold)
     static let title = Font.system(size: 22, weight: .bold)
     static let headline = Font.system(size: 15, weight: .semibold)
+    static let leadStoryHeadline = Font.system(size: 28, weight: .semibold, design: .serif)
     static let body = Font.system(size: 14, weight: .regular)
     static let bodySmall = Font.system(size: 13, weight: .regular)
     static let label = Font.system(size: 12, weight: .medium)
     static let caption = Font.system(size: 11, weight: .regular)
     static let metadata = Font.system(size: 10, weight: .semibold)
+
+    // System text styles for chrome (DESIGN.md 10)
+    static let masthead = Font.largeTitle.bold()
+    static let sectionTitle = Font.title3.weight(.semibold)
+    static let callout = Font.callout
+    /// Publisher and kicker; pair with `eyebrowTracking` and `.textCase(.uppercase)`.
+    static let eyebrow = Font.caption2.weight(.semibold)
+
+    static func cardHeadline(_ layout: StoryCardLayout) -> Font {
+        switch layout {
+        case .list: return .system(size: 20, weight: .semibold, design: .serif)
+        case .grid: return .system(size: 15, weight: .semibold)
+        }
+    }
 
     // Reader Article Typography Themes
     static func titleFont(for theme: ArticleThemeType, scale: CGFloat = 1) -> Font {
@@ -118,6 +158,26 @@ enum AppTypography {
         }
     }
 
+    /// Section headings inside publisher text: level 2 (heading) or 3 (subheading).
+    static func readerHeadingFont(level: Int, scale: CGFloat = 1) -> Font {
+        level <= 2
+            ? .system(size: 22 * scale, weight: .bold)
+            : .system(size: 15 * scale, weight: .semibold)
+    }
+
+    static func readerQuoteFont(for theme: ArticleThemeType, scale: CGFloat = 1) -> Font {
+        bodyFont(for: theme, scale: scale).italic()
+    }
+
+    /// Figure captions and credits.
+    static func readerCaptionFont(scale: CGFloat = 1) -> Font {
+        .system(size: 11 * scale)
+    }
+
+    static func readerCodeFont() -> Font {
+        .system(.body, design: .monospaced)
+    }
+
     static func bodyLineSpacing(for theme: ArticleThemeType) -> CGFloat {
         switch theme {
         case .casper: return 10.0
@@ -125,6 +185,11 @@ enum AppTypography {
         case .alto: return 12.0
         }
     }
+}
+
+enum StoryCardLayout: Sendable {
+    case list
+    case grid
 }
 
 // MARK: - App Shadows
@@ -160,4 +225,57 @@ enum AppMotion {
     static let quick = hover
     static let responsive = state
     static let smooth = navigation
+}
+
+// MARK: - Components (DESIGN.md 18)
+
+/// Publisher name or kicker above a headline. Uppercased for display only, so VoiceOver reads words.
+struct EyebrowText: View {
+    let text: String
+    let color: Color
+
+    init(_ text: String, color: Color = AppColor.secondaryText) {
+        self.text = text
+        self.color = color
+    }
+
+    var body: some View {
+        Text(text)
+            .font(AppTypography.eyebrow)
+            .tracking(AppTypography.eyebrowTracking)
+            .textCase(.uppercase)
+            .foregroundStyle(color)
+            .lineLimit(1)
+    }
+}
+
+/// A small capsule for a state or label ("Updated", the intelligence tag). The fill is the tint at 12 %,
+/// 22 % with Increase Contrast (DESIGN.md 11).
+struct TagView: View {
+    let title: String
+    var systemImage: String?
+    var tint: Color = AppColor.secondaryText
+    @Environment(\.effectiveContrast) private var contrast
+
+    var body: some View {
+        HStack(spacing: AppSpacing.textStack) {
+            if let systemImage {
+                Image(systemName: systemImage)
+                    .imageScale(.small)
+            }
+            Text(title)
+        }
+        .font(AppTypography.eyebrow)
+        .foregroundStyle(tint)
+        .padding(.horizontal, AppSpacing.eyebrowGap)
+        .padding(.vertical, AppSpacing.textStack)
+        .background(tint.opacity(contrast == .increased ? 0.22 : 0.12), in: Capsule())
+    }
+}
+
+extension TagView {
+    /// Marks generated content; the only use of the intelligence color besides its glyphs.
+    static func intelligence(_ title: String = "AI") -> TagView {
+        TagView(title: title, systemImage: "sparkles", tint: AppColor.intelligence)
+    }
 }

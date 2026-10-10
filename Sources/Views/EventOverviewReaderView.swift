@@ -1,8 +1,8 @@
 // EventOverviewReaderView.swift
 // NewsApp Event Overview Reader Mode & Source Navigation
 
-import SwiftUI
 import AppKit
+import SwiftUI
 
 /// Native SwiftUI reader view for multi-source event overviews.
 /// Implements the 7 editorial sections in order:
@@ -36,8 +36,8 @@ struct EventOverviewReaderView: View {
     }
 
     @Environment(\.colorScheme) private var colorScheme
-    @Environment(\.colorSchemeContrast) private var contrast
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.effectiveContrast) private var contrast
+    @Environment(\.effectiveReduceMotion) private var reduceMotion
 
     @State private var isSourcesExpanded: Bool = false
     @State private var activeCitationPreview: OverviewCitation? = nil
@@ -97,15 +97,18 @@ struct EventOverviewReaderView: View {
             return match
         }
         if let url = citation.sourceURL, !url.isEmpty,
-           let match = memberArticles.first(where: { $0.link == url }) {
+            let match = memberArticles.first(where: { $0.link == url })
+        {
             return match
         }
         if let title = citation.sourceTitle, !title.isEmpty,
-           let match = memberArticles.first(where: { $0.title == title }) {
+            let match = memberArticles.first(where: { $0.title == title })
+        {
             return match
         }
         if let name = citation.sourceName, !name.isEmpty,
-           let match = memberArticles.first(where: { $0.source.caseInsensitiveCompare(name) == .orderedSame }) {
+            let match = memberArticles.first(where: { $0.source.caseInsensitiveCompare(name) == .orderedSame })
+        {
             return match
         }
         return nil
@@ -131,15 +134,15 @@ struct EventOverviewReaderView: View {
 
     static func filterValidTimeline(_ timeline: [OverviewTimelineItem]) -> [OverviewTimelineItem] {
         timeline.filter {
-            !$0.dateText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
-            !$0.summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            !$0.dateText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                || !$0.summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }
     }
 
     static func filterValidPerspectives(_ perspectives: [OverviewPerspective]) -> [OverviewPerspective] {
         perspectives.filter {
-            !$0.participant.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
-            !$0.position.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            !$0.participant.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                || !$0.position.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }
     }
 
@@ -162,10 +165,8 @@ struct EventOverviewReaderView: View {
         thematicAngle: OverviewThematicAngle?,
         coverageSentiment: OverviewCoverageSentiment?
     ) -> Bool {
-        !filterValidTimeline(timeline).isEmpty ||
-        !filterValidPerspectives(perspectives).isEmpty ||
-        hasThematicAngleContent(thematicAngle) ||
-        hasCoverageSentimentContent(coverageSentiment)
+        !filterValidTimeline(timeline).isEmpty || !filterValidPerspectives(perspectives).isEmpty
+            || hasThematicAngleContent(thematicAngle) || hasCoverageSentimentContent(coverageSentiment)
     }
 
     private var validFacts: [OverviewFact] {
@@ -220,7 +221,7 @@ struct EventOverviewReaderView: View {
         var set = Set<String>()
         var list: [String] = []
         for article in memberArticles {
-            let src = article.source.trimmingCharacters(in: .whitespacesAndNewlines)
+            let src = article.publisherName
             if !src.isEmpty && !set.contains(src) {
                 set.insert(src)
                 list.append(src)
@@ -228,7 +229,9 @@ struct EventOverviewReaderView: View {
         }
         if list.isEmpty {
             for citation in overview.citations.values {
-                if let name = citation.sourceName?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty, !set.contains(name) {
+                if let name = citation.sourceName?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty,
+                    !set.contains(name)
+                {
                     set.insert(name)
                     list.append(name)
                 }
@@ -375,11 +378,12 @@ struct EventOverviewReaderView: View {
                     .foregroundColor(currentSecondaryTextColor)
             }
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel(Self.headerMetadataAccessibilityLabel(
-                formattedUpdateTime: formattedUpdateTime,
-                articleCountText: articleCountText,
-                publisherCountText: publisherCountText
-            ))
+            .accessibilityLabel(
+                Self.headerMetadataAccessibilityLabel(
+                    formattedUpdateTime: formattedUpdateTime,
+                    articleCountText: articleCountText,
+                    publisherCountText: publisherCountText
+                ))
         }
     }
 
@@ -392,13 +396,29 @@ struct EventOverviewReaderView: View {
             .filter { !$0.isEmpty }
 
         return VStack(alignment: .leading, spacing: 14) {
-            ForEach(Array(paragraphs.enumerated()), id: \.offset) { _, para in
-                Text(para)
-                    .font(.system(size: 16 * textScale, weight: .regular))
-                    .lineSpacing(6 * textScale)
-                    .foregroundColor(AppColor.primaryText)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .textSelection(.enabled)
+            if let introduction = overview.content.evidenceSections?.introduction, !introduction.isEmpty {
+                ForEach(introduction) { fact in
+                    Text(fact.text)
+                        .font(.system(size: 16 * textScale))
+                        .lineSpacing(6 * textScale)
+                        .foregroundColor(AppColor.primaryText)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                    HStack(spacing: 6) {
+                        ForEach(fact.citationIDs, id: \.self) { id in
+                            if let citation = overview.citations[id] { citationPill(citation) }
+                        }
+                    }
+                }
+            } else {
+                ForEach(Array(paragraphs.enumerated()), id: \.offset) { _, para in
+                    Text(para)
+                        .font(.system(size: 16 * textScale, weight: .regular))
+                        .lineSpacing(6 * textScale)
+                        .foregroundColor(AppColor.primaryText)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                }
             }
         }
     }
@@ -555,7 +575,7 @@ struct EventOverviewReaderView: View {
                 ForEach(memberArticles) { article in
                     HStack(alignment: .center, spacing: 12) {
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(article.source)
+                            Text(article.publisherName)
                                 .font(.system(size: 11 * textScale, weight: .bold))
                                 .foregroundColor(AppColor.accent)
 
@@ -579,7 +599,8 @@ struct EventOverviewReaderView: View {
                         .buttonStyle(.bordered)
                         .controlSize(.small)
                         .help("Read this article in Source publication mode")
-                        .accessibilityLabel(Self.readArticleAccessibilityLabel(title: article.title, source: article.source))
+                        .accessibilityLabel(
+                            Self.readArticleAccessibilityLabel(title: article.title, source: article.publisherName))
 
                         if let url = URL(string: article.link) {
                             Button {
@@ -592,7 +613,9 @@ struct EventOverviewReaderView: View {
                             .buttonStyle(.plain)
                             .foregroundColor(currentSecondaryTextColor)
                             .help("Open original web publication")
-                            .accessibilityLabel(Self.openWebArticleAccessibilityLabel(title: article.title, source: article.source))
+                            .accessibilityLabel(
+                                Self.openWebArticleAccessibilityLabel(
+                                    title: article.title, source: article.publisherName))
                         }
                     }
                     .padding(.vertical, 4)
@@ -655,7 +678,9 @@ struct EventOverviewReaderView: View {
                 }
 
                 // Coverage tone / sentiment (only when evaluation justifies it)
-                if Self.hasCoverageSentimentContent(overview.coverageSentiment), let sentiment = overview.coverageSentiment {
+                if Self.hasCoverageSentimentContent(overview.coverageSentiment),
+                    let sentiment = overview.coverageSentiment
+                {
                     sentimentSection(sentiment)
                 }
             }
@@ -888,7 +913,9 @@ struct EventOverviewReaderView: View {
                         .foregroundColor(AppColor.primaryText)
                 }
 
-                if let rationale = sentiment.rationale?.trimmingCharacters(in: .whitespacesAndNewlines), !rationale.isEmpty {
+                if let rationale = sentiment.rationale?.trimmingCharacters(in: .whitespacesAndNewlines),
+                    !rationale.isEmpty
+                {
                     Text(rationale)
                         .font(.system(size: 12 * textScale))
                         .foregroundColor(currentSecondaryTextColor)
@@ -899,9 +926,9 @@ struct EventOverviewReaderView: View {
             .padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(AppColor.cardBackground)
-            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous)
                     .stroke(currentBorderStrokeColor, lineWidth: 1)
             )
         }
@@ -929,7 +956,7 @@ struct EventOverviewReaderView: View {
                                     .foregroundColor(AppColor.accent)
                                     .accessibilityHidden(true)
 
-                                Text(article.source)
+                                Text(article.publisherName)
                                     .font(.system(size: 13 * textScale, weight: .semibold))
                                     .foregroundColor(AppColor.primaryText)
 
@@ -948,8 +975,9 @@ struct EventOverviewReaderView: View {
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
-                        .help("Open original article on \(article.source)")
-                        .accessibilityLabel(Self.openWebArticleAccessibilityLabel(title: article.title, source: article.source))
+                        .help("Open original article on \(article.publisherName)")
+                        .accessibilityLabel(
+                            Self.openWebArticleAccessibilityLabel(title: article.title, source: article.publisherName))
                     }
                 }
             }

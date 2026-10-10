@@ -1,9 +1,9 @@
 // ReaderAccessibilityTests.swift
 // Dedicated accessibility regression test suite for source-reader experience (Issue #123)
 
+import AppKit
 import Foundation
 import SwiftUI
-import AppKit
 
 extension Notification.Name {
     static let nextArticleCommand = Notification.Name("nextArticleCommand")
@@ -11,7 +11,6 @@ extension Notification.Name {
     static let toggleReadCommand = Notification.Name("toggleReadCommand")
     static let toggleSaveCommand = Notification.Name("toggleSaveCommand")
     static let openInBrowserCommand = Notification.Name("openInBrowserCommand")
-    static let toggleViewModeCommand = Notification.Name("toggleViewModeCommand")
 }
 
 @main
@@ -20,7 +19,9 @@ struct ReaderAccessibilityTests {
     static var testsRun = 0
     static var failures = 0
 
-    static func assertEqual<T: Equatable>(_ actual: T, _ expected: T, _ message: String, file: StaticString = #file, line: UInt = #line) {
+    static func assertEqual<T: Equatable>(
+        _ actual: T, _ expected: T, _ message: String, file: StaticString = #file, line: UInt = #line
+    ) {
         testsRun += 1
         if actual != expected {
             failures += 1
@@ -79,7 +80,8 @@ struct ReaderAccessibilityTests {
         let run5 = ReaderInlineRun(text: ", and ", strong: false, emphasis: false, code: false, link: nil)
         let run6 = ReaderInlineRun(text: "code snippet", strong: false, emphasis: false, code: true, link: nil)
         let run7 = ReaderInlineRun(text: ", with a ", strong: false, emphasis: false, code: false, link: nil)
-        let run8 = ReaderInlineRun(text: "reference link", strong: false, emphasis: false, code: false, link: "https://example.com/article")
+        let run8 = ReaderInlineRun(
+            text: "reference link", strong: false, emphasis: false, code: false, link: "https://example.com/article")
         let run9 = ReaderInlineRun(text: ".", strong: false, emphasis: false, code: false, link: nil)
 
         let runs = [run1, run2, run3, run4, run5, run6, run7, run8, run9]
@@ -93,7 +95,8 @@ struct ReaderAccessibilityTests {
 
         let richAttr = readerText(richBlock)
         // 1. Text copy fidelity: String conversion preserves exact plain text
-        assertEqual(String(richAttr.characters), fullText, "String(characters) extracts complete text without dropped segments")
+        assertEqual(
+            String(richAttr.characters), fullText, "String(characters) extracts complete text without dropped segments")
 
         // 2. Formatting verification: inspect attribute runs
         var foundStrong = false
@@ -128,7 +131,8 @@ struct ReaderAccessibilityTests {
         NSPasteboard.general.clearContents()
         let copied = NSPasteboard.general.setString(String(richAttr.characters), forType: .string)
         assertTrue(copied, "Clipboard accepted reader block text")
-        assertEqual(NSPasteboard.general.string(forType: .string), fullText, "Pasted text matches reader block characters")
+        assertEqual(
+            NSPasteboard.general.string(forType: .string), fullText, "Pasted text matches reader block characters")
     }
 
     // MARK: - 2. VoiceOver Alt Text Fallback Tests
@@ -136,19 +140,27 @@ struct ReaderAccessibilityTests {
         print("  - Testing Figure Accessibility Alt Text Fallback...")
 
         // Case 1: Alt text provided
-        let block1 = ReaderBlock(kind: .figure, text: "Photo caption", imageURL: "https://example.com/photo.jpg", imageAlt: "Sunset over hills", imageCredit: "Jane Doe", imageWidth: 800, imageHeight: 600)
+        let block1 = ReaderBlock(
+            kind: .figure, text: "Photo caption", imageURL: "https://example.com/photo.jpg",
+            imageAlt: "Sunset over hills", imageCredit: "Jane Doe", imageWidth: 800, imageHeight: 600)
         let resolvedAlt1 = ReaderFigureView.effectiveImageAlt(for: block1)
         assertEqual(resolvedAlt1, "Sunset over hills", "Explicit alt text is preserved")
 
         // Case 2: Alt text is nil
-        let block2 = ReaderBlock(kind: .figure, text: "Photo caption", imageURL: "https://example.com/photo2.jpg", imageAlt: nil, imageCredit: "Jane Doe", imageWidth: 800, imageHeight: 600)
+        let block2 = ReaderBlock(
+            kind: .figure, text: "Photo caption", imageURL: "https://example.com/photo2.jpg", imageAlt: nil,
+            imageCredit: "Jane Doe", imageWidth: 800, imageHeight: 600)
         let resolvedAlt2 = ReaderFigureView.effectiveImageAlt(for: block2)
         assertEqual(resolvedAlt2, "Article image", "Nil alt text falls back to 'Article image'")
 
         // Case 3: Alt text is empty or whitespace-only (defect in current code)
-        let block3 = ReaderBlock(kind: .figure, text: "Photo caption", imageURL: "https://example.com/photo3.jpg", imageAlt: "   ", imageCredit: "Jane Doe", imageWidth: 800, imageHeight: 600)
+        let block3 = ReaderBlock(
+            kind: .figure, text: "Photo caption", imageURL: "https://example.com/photo3.jpg", imageAlt: "   ",
+            imageCredit: "Jane Doe", imageWidth: 800, imageHeight: 600)
         let resolvedAlt3 = ReaderFigureView.effectiveImageAlt(for: block3)
-        assertEqual(resolvedAlt3, "Article image", "Whitespace/empty alt text must fall back to 'Article image' instead of empty label")
+        assertEqual(
+            resolvedAlt3, "Article image",
+            "Whitespace/empty alt text must fall back to 'Article image' instead of empty label")
     }
 
     // MARK: - 3. VoiceOver Source Line Formatter Tests
@@ -160,7 +172,9 @@ struct ReaderAccessibilityTests {
             publicationDateText: "Oct 2, 2026",
             readingTimeEstimate: "4 min read"
         )
-        assertEqual(label, "BBC News, Oct 2, 2026, 4 min read", "Source line is formatted cleanly for VoiceOver without separators or screaming caps")
+        assertEqual(
+            label, "BBC News, Oct 2, 2026, 4 min read",
+            "Source line is formatted cleanly for VoiceOver without separators or screaming caps")
     }
 
     // MARK: - 4. Increase Contrast Values Tests
@@ -170,7 +184,9 @@ struct ReaderAccessibilityTests {
         // Divider opacity under standard vs increased contrast
         let standardDividerOpacity = ArticleDetailView.dividerOpacity(for: .standard)
         let increasedDividerOpacity = ArticleDetailView.dividerOpacity(for: .increased)
-        assertTrue(increasedDividerOpacity > standardDividerOpacity, "Increased contrast divider opacity must be stronger than standard")
+        assertTrue(
+            increasedDividerOpacity > standardDividerOpacity,
+            "Increased contrast divider opacity must be stronger than standard")
         assertEqual(standardDividerOpacity, 0.15, "Standard divider opacity is 0.15")
         assertEqual(increasedDividerOpacity, 0.60, "Increased divider opacity is 0.60")
 
@@ -205,15 +221,23 @@ struct ReaderAccessibilityTests {
 
         // Command modifier (e.g. Cmd+C for copying selection) must pass through to system
         let cmdModifier = EventModifiers.command
-        assertTrue(ArticleDetailView.shouldPassThroughToSystem(modifiers: cmdModifier), "Cmd modifier passes through to system (e.g. Cmd+C)")
+        assertTrue(
+            ArticleDetailView.shouldPassThroughToSystem(modifiers: cmdModifier),
+            "Cmd modifier passes through to system (e.g. Cmd+C)")
 
         let ctrlModifier = EventModifiers.control
-        assertTrue(ArticleDetailView.shouldPassThroughToSystem(modifiers: ctrlModifier), "Control modifier passes through to system")
+        assertTrue(
+            ArticleDetailView.shouldPassThroughToSystem(modifiers: ctrlModifier),
+            "Control modifier passes through to system")
 
         let optModifier = EventModifiers.option
-        assertTrue(ArticleDetailView.shouldPassThroughToSystem(modifiers: optModifier), "Option modifier passes through to system")
+        assertTrue(
+            ArticleDetailView.shouldPassThroughToSystem(modifiers: optModifier),
+            "Option modifier passes through to system")
 
         let emptyModifiers: EventModifiers = []
-        assertFalse(ArticleDetailView.shouldPassThroughToSystem(modifiers: emptyModifiers), "Unmodified single-key strokes are captured by reader shortcuts")
+        assertFalse(
+            ArticleDetailView.shouldPassThroughToSystem(modifiers: emptyModifiers),
+            "Unmodified single-key strokes are captured by reader shortcuts")
     }
 }

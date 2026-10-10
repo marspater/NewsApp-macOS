@@ -1,9 +1,9 @@
 // EventOverviewAccessibilityTests.swift
 // Dedicated accessibility regression test suite for Event Overview reader mode (Issue #155)
 
+import AppKit
 import Foundation
 import SwiftUI
-import AppKit
 
 extension Notification.Name {
     static let nextArticleCommand = Notification.Name("nextArticleCommand")
@@ -11,7 +11,6 @@ extension Notification.Name {
     static let toggleReadCommand = Notification.Name("toggleReadCommand")
     static let toggleSaveCommand = Notification.Name("toggleSaveCommand")
     static let openInBrowserCommand = Notification.Name("openInBrowserCommand")
-    static let toggleViewModeCommand = Notification.Name("toggleViewModeCommand")
 }
 
 @main
@@ -20,7 +19,9 @@ struct EventOverviewAccessibilityTests {
     static var testsRun = 0
     static var failures = 0
 
-    static func assertEqual<T: Equatable>(_ actual: T, _ expected: T, _ message: String, file: StaticString = #file, line: UInt = #line) {
+    static func assertEqual<T: Equatable>(
+        _ actual: T, _ expected: T, _ message: String, file: StaticString = #file, line: UInt = #line
+    ) {
         testsRun += 1
         if actual != expected {
             failures += 1
@@ -95,7 +96,9 @@ struct EventOverviewAccessibilityTests {
             passageID: "pass_1",
             passageFingerprint: "fp1",
             quote: "Delegates agreed on carbon targets.",
-            source: OverviewSourceMetadata(title: "Global Climate Summit Reaches Historic Treaty", name: "Reuters", url: "https://example.com/climate-summit", publishedAt: nil)
+            source: OverviewSourceMetadata(
+                title: "Global Climate Summit Reaches Historic Treaty", name: "Reuters",
+                url: "https://example.com/climate-summit", publishedAt: nil)
         )
         let resolvedByID = EventOverviewReaderView.matchingArticle(for: citationByID, in: articles)
         assertEqual(resolvedByID?.id, "art_101", "Matches article directly by articleID")
@@ -108,7 +111,8 @@ struct EventOverviewAccessibilityTests {
             passageID: "pass_2",
             passageFingerprint: "fp2",
             quote: "Methane reduction will be expedited.",
-            source: OverviewSourceMetadata(title: nil, name: nil, url: "https://example.com/methane-pledge", publishedAt: nil)
+            source: OverviewSourceMetadata(
+                title: nil, name: nil, url: "https://example.com/methane-pledge", publishedAt: nil)
         )
         let resolvedByURL = EventOverviewReaderView.matchingArticle(for: citationByURL, in: articles)
         assertEqual(resolvedByURL?.id, "art_102", "Matches article by sourceURL fallback")
@@ -120,7 +124,8 @@ struct EventOverviewAccessibilityTests {
             passageID: "pass_3",
             passageFingerprint: "fp3",
             quote: "Historic treaty signed.",
-            source: OverviewSourceMetadata(title: "Global Climate Summit Reaches Historic Treaty", name: nil, url: nil, publishedAt: nil)
+            source: OverviewSourceMetadata(
+                title: "Global Climate Summit Reaches Historic Treaty", name: nil, url: nil, publishedAt: nil)
         )
         let resolvedByTitle = EventOverviewReaderView.matchingArticle(for: citationByTitle, in: articles)
         assertEqual(resolvedByTitle?.id, "art_101", "Matches article by sourceTitle fallback")
@@ -144,7 +149,8 @@ struct EventOverviewAccessibilityTests {
             passageID: "pass_5",
             passageFingerprint: "fp5",
             quote: "Uncited quote.",
-            source: OverviewSourceMetadata(title: "Unknown", name: "Bloomberg", url: "https://bloomberg.com/other", publishedAt: nil)
+            source: OverviewSourceMetadata(
+                title: "Unknown", name: "Bloomberg", url: "https://bloomberg.com/other", publishedAt: nil)
         )
         let resolvedGhost = EventOverviewReaderView.matchingArticle(for: citationUnresolvable, in: articles)
         assertTrue(resolvedGhost == nil, "Returns nil when citation has no matching member article")
@@ -157,61 +163,88 @@ struct EventOverviewAccessibilityTests {
         // Summary
         assertFalse(EventOverviewReaderView.hasSummaryContent(""), "Empty summary is considered absent")
         assertFalse(EventOverviewReaderView.hasSummaryContent("   \n\t  "), "Whitespace summary is considered absent")
-        assertTrue(EventOverviewReaderView.hasSummaryContent("A concise introductory paragraph."), "Non-empty summary is present")
+        assertTrue(
+            EventOverviewReaderView.hasSummaryContent("A concise introductory paragraph."),
+            "Non-empty summary is present")
 
         // Lead Image
         assertFalse(EventOverviewReaderView.hasLeadImageContent(nil), "Nil lead image is absent")
-        assertFalse(EventOverviewReaderView.hasLeadImageContent(OverviewLeadImage(url: "", caption: nil, credit: nil)), "Empty lead image URL is absent")
-        assertFalse(EventOverviewReaderView.hasLeadImageContent(OverviewLeadImage(url: "   ", caption: "Caption", credit: nil)), "Whitespace URL is absent")
-        assertTrue(EventOverviewReaderView.hasLeadImageContent(OverviewLeadImage(url: "https://example.com/lead.jpg", caption: "Summit", credit: "Reuters")), "Valid image URL is present")
+        assertFalse(
+            EventOverviewReaderView.hasLeadImageContent(OverviewLeadImage(url: "", caption: nil, credit: nil)),
+            "Empty lead image URL is absent")
+        assertFalse(
+            EventOverviewReaderView.hasLeadImageContent(OverviewLeadImage(url: "   ", caption: "Caption", credit: nil)),
+            "Whitespace URL is absent")
+        assertTrue(
+            EventOverviewReaderView.hasLeadImageContent(
+                OverviewLeadImage(url: "https://example.com/lead.jpg", caption: "Summit", credit: "Reuters")),
+            "Valid image URL is present")
 
         // Key Facts
         let emptyFacts: [OverviewFact] = []
-        assertEqual(EventOverviewReaderView.filterValidFacts(emptyFacts).count, 0, "Empty facts array yields 0 valid facts")
+        assertEqual(
+            EventOverviewReaderView.filterValidFacts(emptyFacts).count, 0, "Empty facts array yields 0 valid facts")
         let blankFacts = [
             OverviewFact(id: "f1", text: "  ", citationIDs: []),
-            OverviewFact(id: "f2", text: "\n", citationIDs: [])
+            OverviewFact(id: "f2", text: "\n", citationIDs: []),
         ]
         assertEqual(EventOverviewReaderView.filterValidFacts(blankFacts).count, 0, "Whitespace facts are pruned")
         let mixedFacts = [
             OverviewFact(id: "f1", text: "Verified carbon reduction goal.", citationIDs: ["c1"]),
-            OverviewFact(id: "f2", text: "", citationIDs: [])
+            OverviewFact(id: "f2", text: "", citationIDs: []),
         ]
         assertEqual(EventOverviewReaderView.filterValidFacts(mixedFacts).count, 1, "Only non-empty facts are retained")
 
         // Timeline
         let emptyTimeline: [OverviewTimelineItem] = []
-        assertEqual(EventOverviewReaderView.filterValidTimeline(emptyTimeline).count, 0, "Empty timeline yields 0 valid items")
+        assertEqual(
+            EventOverviewReaderView.filterValidTimeline(emptyTimeline).count, 0, "Empty timeline yields 0 valid items")
         let blankTimeline = [
             OverviewTimelineItem(id: "t1", dateText: " ", summary: "", isFuturePlan: false)
         ]
-        assertEqual(EventOverviewReaderView.filterValidTimeline(blankTimeline).count, 0, "Blank timeline item is pruned")
-        let validTimelineItem = OverviewTimelineItem(id: "t2", dateText: "Oct 2", summary: "Treaty signed", isFuturePlan: false)
-        assertEqual(EventOverviewReaderView.filterValidTimeline([validTimelineItem]).count, 1, "Valid timeline item is retained")
+        assertEqual(
+            EventOverviewReaderView.filterValidTimeline(blankTimeline).count, 0, "Blank timeline item is pruned")
+        let validTimelineItem = OverviewTimelineItem(
+            id: "t2", dateText: "Oct 2", summary: "Treaty signed", isFuturePlan: false)
+        assertEqual(
+            EventOverviewReaderView.filterValidTimeline([validTimelineItem]).count, 1, "Valid timeline item is retained"
+        )
 
         // Perspectives
         let emptyPerspectives: [OverviewPerspective] = []
-        assertEqual(EventOverviewReaderView.filterValidPerspectives(emptyPerspectives).count, 0, "Empty perspectives yields 0 valid items")
+        assertEqual(
+            EventOverviewReaderView.filterValidPerspectives(emptyPerspectives).count, 0,
+            "Empty perspectives yields 0 valid items")
         let blankPerspective = OverviewPerspective(id: "p1", participant: "  ", position: "")
-        assertEqual(EventOverviewReaderView.filterValidPerspectives([blankPerspective]).count, 0, "Blank perspective is pruned")
-        let validPerspective = OverviewPerspective(id: "p2", participant: "EU Envoy", position: "Supports binding commitments")
-        assertEqual(EventOverviewReaderView.filterValidPerspectives([validPerspective]).count, 1, "Valid perspective is retained")
+        assertEqual(
+            EventOverviewReaderView.filterValidPerspectives([blankPerspective]).count, 0, "Blank perspective is pruned")
+        let validPerspective = OverviewPerspective(
+            id: "p2", participant: "EU Envoy", position: "Supports binding commitments")
+        assertEqual(
+            EventOverviewReaderView.filterValidPerspectives([validPerspective]).count, 1,
+            "Valid perspective is retained")
 
         // Thematic Angle
         assertFalse(EventOverviewReaderView.hasThematicAngleContent(nil), "Nil thematic angle is absent")
         let emptyAngle = OverviewThematicAngle(id: "a1", title: "", summary: "", citationIDs: [], facts: [])
         assertFalse(EventOverviewReaderView.hasThematicAngleContent(emptyAngle), "Empty thematic angle is absent")
         let whitespaceAngle = OverviewThematicAngle(id: "a2", title: "  ", summary: "\n", citationIDs: [], facts: [])
-        assertFalse(EventOverviewReaderView.hasThematicAngleContent(whitespaceAngle), "Whitespace thematic angle is absent")
-        let validAngle = OverviewThematicAngle(id: "a3", title: "Economic Impact", summary: "Renewable investment expected to double.", citationIDs: [], facts: [])
+        assertFalse(
+            EventOverviewReaderView.hasThematicAngleContent(whitespaceAngle), "Whitespace thematic angle is absent")
+        let validAngle = OverviewThematicAngle(
+            id: "a3", title: "Economic Impact", summary: "Renewable investment expected to double.", citationIDs: [],
+            facts: [])
         assertTrue(EventOverviewReaderView.hasThematicAngleContent(validAngle), "Valid thematic angle is present")
 
         // Coverage Sentiment
         assertFalse(EventOverviewReaderView.hasCoverageSentimentContent(nil), "Nil coverage sentiment is absent")
         let blankSentiment = OverviewCoverageSentiment(score: 0.1, label: "  ", confidence: 0.8, rationale: nil)
-        assertFalse(EventOverviewReaderView.hasCoverageSentimentContent(blankSentiment), "Blank sentiment label is absent")
-        let validSentiment = OverviewCoverageSentiment(score: 0.3, label: "Cautious", confidence: 0.85, rationale: "Measured optimism.")
-        assertTrue(EventOverviewReaderView.hasCoverageSentimentContent(validSentiment), "Valid coverage sentiment is present")
+        assertFalse(
+            EventOverviewReaderView.hasCoverageSentimentContent(blankSentiment), "Blank sentiment label is absent")
+        let validSentiment = OverviewCoverageSentiment(
+            score: 0.3, label: "Cautious", confidence: 0.85, rationale: "Measured optimism.")
+        assertTrue(
+            EventOverviewReaderView.hasCoverageSentimentContent(validSentiment), "Valid coverage sentiment is present")
 
         // Evidence section compound check
         assertFalse(
@@ -245,7 +278,9 @@ struct EventOverviewAccessibilityTests {
             articleCountText: "3 articles",
             publisherCountText: "2 publishers"
         )
-        assertEqual(metaLabel, "Updated 2 hours ago, 3 articles, 2 publishers", "Header metadata label combines elements cleanly without dot artifacts")
+        assertEqual(
+            metaLabel, "Updated 2 hours ago, 3 articles, 2 publishers",
+            "Header metadata label combines elements cleanly without dot artifacts")
 
         // Lead image label
         let leadImageWithCaptionAndCredit = OverviewLeadImage(
@@ -254,22 +289,32 @@ struct EventOverviewAccessibilityTests {
             credit: "Associated Press"
         )
         let leadLabel1 = EventOverviewReaderView.leadImageAccessibilityLabel(leadImageWithCaptionAndCredit)
-        assertEqual(leadLabel1, "Summit floor in Geneva. Credit: Associated Press", "Lead image combines caption and credit cleanly")
+        assertEqual(
+            leadLabel1, "Summit floor in Geneva. Credit: Associated Press",
+            "Lead image combines caption and credit cleanly")
 
-        let leadImageNoCaption = OverviewLeadImage(url: "https://example.com/photo.jpg", caption: nil, credit: "Reuters")
+        let leadImageNoCaption = OverviewLeadImage(
+            url: "https://example.com/photo.jpg", caption: nil, credit: "Reuters")
         let leadLabel2 = EventOverviewReaderView.leadImageAccessibilityLabel(leadImageNoCaption)
-        assertEqual(leadLabel2, "Event lead image. Credit: Reuters", "Lead image falls back to generic caption with credit")
+        assertEqual(
+            leadLabel2, "Event lead image. Credit: Reuters", "Lead image falls back to generic caption with credit")
 
         // Citation pill label
-        let citLabel = EventOverviewReaderView.citationAccessibilityLabel(sourceName: "Reuters", quote: "Targets were agreed unanimously.")
-        assertEqual(citLabel, "Citation from Reuters: Targets were agreed unanimously.", "Citation pill label is descriptive")
+        let citLabel = EventOverviewReaderView.citationAccessibilityLabel(
+            sourceName: "Reuters", quote: "Targets were agreed unanimously.")
+        assertEqual(
+            citLabel, "Citation from Reuters: Targets were agreed unanimously.", "Citation pill label is descriptive")
 
         // Source article action labels
         let readLabel = EventOverviewReaderView.readArticleAccessibilityLabel(title: "Summit Treaty", source: "Reuters")
-        assertEqual(readLabel, "Read Summit Treaty from Reuters in Source publication mode", "Read button has distinct context for VoiceOver rotor")
+        assertEqual(
+            readLabel, "Read Summit Treaty from Reuters in Source publication mode",
+            "Read button has distinct context for VoiceOver rotor")
 
-        let openWebLabel = EventOverviewReaderView.openWebArticleAccessibilityLabel(title: "Summit Treaty", source: "Reuters")
-        assertEqual(openWebLabel, "Open original publication: Summit Treaty on Reuters", "Web button has distinct context")
+        let openWebLabel = EventOverviewReaderView.openWebArticleAccessibilityLabel(
+            title: "Summit Treaty", source: "Reuters")
+        assertEqual(
+            openWebLabel, "Open original publication: Summit Treaty on Reuters", "Web button has distinct context")
     }
 
     // MARK: - 4. Increase Contrast Scalers
@@ -277,16 +322,27 @@ struct EventOverviewAccessibilityTests {
         print("  - Testing Increase Contrast Scalers...")
 
         // Divider opacity
-        assertEqual(EventOverviewReaderView.dividerOpacity(for: .standard), 0.20, "Standard divider opacity is subtle (0.20)")
-        assertEqual(EventOverviewReaderView.dividerOpacity(for: .increased), 0.60, "Increased contrast divider opacity is strong (0.60)")
+        assertEqual(
+            EventOverviewReaderView.dividerOpacity(for: .standard), 0.20, "Standard divider opacity is subtle (0.20)")
+        assertEqual(
+            EventOverviewReaderView.dividerOpacity(for: .increased), 0.60,
+            "Increased contrast divider opacity is strong (0.60)")
 
         // Pill border opacity
-        assertEqual(EventOverviewReaderView.pillBorderOpacity(for: .standard), 0.0, "Standard citation pill has no border stroke")
-        assertEqual(EventOverviewReaderView.pillBorderOpacity(for: .increased), 0.60, "Increased contrast citation pill has visible stroke (0.60)")
+        assertEqual(
+            EventOverviewReaderView.pillBorderOpacity(for: .standard), 0.0,
+            "Standard citation pill has no border stroke")
+        assertEqual(
+            EventOverviewReaderView.pillBorderOpacity(for: .increased), 0.60,
+            "Increased contrast citation pill has visible stroke (0.60)")
 
         // Pill background opacity
-        assertEqual(EventOverviewReaderView.pillBackgroundOpacity(for: .standard), 0.12, "Standard pill background opacity is 0.12")
-        assertEqual(EventOverviewReaderView.pillBackgroundOpacity(for: .increased), 0.22, "Increased contrast pill background opacity is 0.22")
+        assertEqual(
+            EventOverviewReaderView.pillBackgroundOpacity(for: .standard), 0.12,
+            "Standard pill background opacity is 0.12")
+        assertEqual(
+            EventOverviewReaderView.pillBackgroundOpacity(for: .increased), 0.22,
+            "Increased contrast pill background opacity is 0.22")
     }
 
     // MARK: - 5. Reduce Motion Policy
@@ -315,6 +371,8 @@ struct EventOverviewAccessibilityTests {
         assertEqual(widthCapped, 720.0 * 1.3, "Scaled reading width caps at 1.3x to prevent excessive column width")
 
         // Padding matches design system pageInset (24.0) to prevent overflow on narrow 380px windows
-        assertEqual(EventOverviewReaderView.horizontalPageInset, 24.0, "Horizontal page inset matches AppLayout.pageInset (24.0)")
+        assertEqual(
+            EventOverviewReaderView.horizontalPageInset, 24.0,
+            "Horizontal page inset matches AppLayout.pageInset (24.0)")
     }
 }

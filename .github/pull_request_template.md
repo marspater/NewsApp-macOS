@@ -10,6 +10,7 @@
 
 - [ ] Based on a fresh `origin/main`
 - [ ] Checks required by [CONTRIBUTING.md](../CONTRIBUTING.md) for this change
+- [ ] UI changes: [DESIGN.md](../docs/DESIGN.md) review checklist completed in the description
 - [ ] App changes: arm64 ad-hoc staged build in an isolated directory, and launch
 - [ ] Migration review on a copied database (rollback, saved and read state) and diff review
 - [ ] Focused Conventional Commits

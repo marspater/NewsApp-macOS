@@ -1,6 +1,11 @@
 #!/bin/bash
 set -e
 
+# Own this run's migration-test domain so its empty plist can be removed after process exit.
+NEWS_TEST_RUN_ID="$(uuidgen)"
+export NEWS_TEST_RUN_ID
+trap 'rm -f "$HOME/Library/Preferences/com.marspater.news.test.$NEWS_TEST_RUN_ID.plist"' EXIT
+
 TARGET_MACOS="${TARGET_MACOS:-15.0}"
 export CLANG_MODULE_CACHE_PATH="${CLANG_MODULE_CACHE_PATH:-${TMPDIR:-/tmp}/news-module-cache}"
 export SWIFT_MODULECACHE_PATH="$CLANG_MODULE_CACHE_PATH"
@@ -8,10 +13,15 @@ export SWIFT_MODULECACHE_PATH="$CLANG_MODULE_CACHE_PATH"
 
 TEST_OPT_FLAGS=()
 for argument in "$@"; do
-    if [[ "$argument" == "--performance-baseline" || "$argument" == "--transport-cancellation" ]]; then TEST_OPT_FLAGS=(-O); fi
+    if [[ "$argument" == "--performance-baseline" || "$argument" == "--transport-cancellation" || "$argument" == "--publisher-cancellation" ]]; then TEST_OPT_FLAGS=(-O); fi
 done
 
+script/design_lint.sh
 python3 script/evaluation/evaluate.py
+python3 script/evaluation/publisher_review.py
+python3 script/evaluation/publisher_dates.py
+python3 script/evaluation/overview_review.py
+python3 script/evaluation/importance_review.py
 
 echo "Compiling tests for macOS ${TARGET_MACOS} ($(uname -m))..."
 swiftc "${TEST_OPT_FLAGS[@]}" -target $(uname -m)-apple-macos${TARGET_MACOS} \
@@ -44,6 +54,8 @@ swiftc "${TEST_OPT_FLAGS[@]}" -target $(uname -m)-apple-macos${TARGET_MACOS} \
     Sources/Intelligence/EventCandidates.swift \
     Sources/Intelligence/EventMatcher.swift \
     Sources/Intelligence/EventClustering.swift \
+    Sources/Intelligence/EventJudge.swift \
+    Sources/Intelligence/StoryImportance.swift \
     Sources/Intelligence/ContentExtractionPipeline.swift \
     Sources/Intelligence/EnrichmentQueue.swift \
     Sources/Intelligence/OverviewGenerationCoordinator.swift \
@@ -52,7 +64,6 @@ swiftc "${TEST_OPT_FLAGS[@]}" -target $(uname -m)-apple-macos${TARGET_MACOS} \
     Sources/Services/SecureHTTPClient.swift \
     Sources/App/AppSettings.swift \
     Sources/Services/FeedXMLParser.swift \
-    Sources/Intelligence/WebContentExtractor.swift \
     Sources/Coordinators/NotificationService.swift \
     Sources/Services/FeedFetcher.swift \
     Sources/Services/JSONFeedParser.swift \

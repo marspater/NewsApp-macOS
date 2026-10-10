@@ -1,0 +1,29 @@
+{
+  "byLanguage": {},
+  "bySource": {},
+  "captureFiles": 2,
+  "differentURLCandidates": {
+    "candidates": 0,
+    "different": 0,
+    "precision": null,
+    "precisionLowerBound95": null,
+    "sameDocument": 0,
+    "unlabeled": 0
+  },
+  "eligibleObservationsByLanguage": {
+    "en": 192
+  },
+  "falseMergeUpperBound95": 0.021600468785290733,
+  "fingerprintEligibleDocuments": 174,
+  "fingerprintEligibleObservations": 192,
+  "gate": "holdout split, every candidate adjudicated, false merges at most 1% of eligible documents (Wilson 95% upper bound), and precision >= 0.99 once there are at least 100 candidates",
+  "limitation": "False merges and precision of different-URL fingerprint matches in captured feeds only; recall and event accuracy are not measured",
+  "observations": 1704,
+  "releaseGatePassed": false,
+  "sameURLPairsSharingFingerprint": 0,
+  "sameURLPairsWithoutSharedFingerprint": 19,
+  "split": "tuning",
+  "supportedLanguages": [
+    "en"
+  ]
+}

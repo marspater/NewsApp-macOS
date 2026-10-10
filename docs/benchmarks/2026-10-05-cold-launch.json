@@ -1,0 +1,58 @@
+{
+  "library_stories": 10000,
+  "launches": [
+    {
+      "launch": 1,
+      "process_start_to_first_card_ms": 1203.309,
+      "open_to_first_card_ms": 1265.272,
+      "footprint_at_first_card_mib": 59.1,
+      "footprint_settled_mib": 58.8,
+      "footprint_peak_mib": 66.2
+    },
+    {
+      "launch": 2,
+      "process_start_to_first_card_ms": 613.143,
+      "open_to_first_card_ms": 673.69,
+      "footprint_at_first_card_mib": 59.3,
+      "footprint_settled_mib": 59.0,
+      "footprint_peak_mib": 66.8
+    },
+    {
+      "launch": 3,
+      "process_start_to_first_card_ms": 626.516,
+      "open_to_first_card_ms": 666.138,
+      "footprint_at_first_card_mib": 59.4,
+      "footprint_settled_mib": 58.7,
+      "footprint_peak_mib": 66.5
+    },
+    {
+      "launch": 4,
+      "process_start_to_first_card_ms": 629.771,
+      "open_to_first_card_ms": 670.854,
+      "footprint_at_first_card_mib": 59.2,
+      "footprint_settled_mib": 58.7,
+      "footprint_peak_mib": 66.9
+    },
+    {
+      "launch": 5,
+      "process_start_to_first_card_ms": 625.043,
+      "open_to_first_card_ms": 660.585,
+      "footprint_at_first_card_mib": 67.6,
+      "footprint_settled_mib": 67.0,
+      "footprint_peak_mib": 74.6
+    }
+  ],
+  "settle_seconds_before_memory_sample": 5,
+  "macos": "27.0.1",
+  "hardware": [
+    "Apple M5",
+    "25769803776",
+    "Mac17,3"
+  ],
+  "conditions": {
+    "cache": "sudo purge immediately before the script; the script then built the bundle and seeded its library, so the first measured launch follows a purge and a fresh build",
+    "source": "local main checkout 03a0a8e (launch path unchanged on origin/main 8ac3a4d)",
+    "bundle": "com.marspater.news.launchcheck, ad-hoc signed arm64, seeded 10,000-story library",
+    "network": "feed points at a reserved .invalid host"
+  }
+}

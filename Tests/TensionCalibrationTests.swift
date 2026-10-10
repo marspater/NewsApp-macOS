@@ -1,6 +1,7 @@
 import Foundation
+
 #if canImport(AppKit)
-import AppKit
+    import AppKit
 #endif
 
 /// Comprehensive tests for the News Tension Index historical calibration (#158)
@@ -109,10 +110,10 @@ final class TensionCalibrationTests {
             methodologyVersion: 1,
             type: .armedConflict,
             typeEvidence: ["f1"],
-            deaths: .tens, // 1.5
-            affected: .units, // 1.1
+            deaths: .tens,  // 1.5
+            affected: .units,  // 1.1
             magnitudeEvidence: ["f2"],
-            escalation: .escalating, // 1.3
+            escalation: .escalating,  // 1.3
             escalationEvidence: ["f3"],
             factCount: 3
         )
@@ -120,7 +121,7 @@ final class TensionCalibrationTests {
         let event = TensionEventDay(
             key: "evt-test-1",
             articleIDs: ["a1", "a2"],
-            reporting: [bbc, aj, cbc], // 3 regions -> 1.15
+            reporting: [bbc, aj, cbc],  // 3 regions -> 1.15
             classification: classification
         )
 
@@ -158,7 +159,7 @@ final class TensionCalibrationTests {
     static func testDayScoringSufficientAndInsufficient() {
         print("  - Testing day scoring under sufficient vs insufficient coverage...")
         let weights = TensionWeights.calibratedV1
-        let dayInterval = DateInterval(start: Date(timeIntervalSince1970: 1700000000), duration: 86400)
+        let dayInterval = DateInterval(start: Date(timeIntervalSince1970: 1_700_000_000), duration: 86400)
 
         // 1. Insufficient coverage
         let insufficientCoverage = TensionCoverage(reporting: [], regions: [], status: .insufficient)
@@ -210,13 +211,15 @@ final class TensionCalibrationTests {
     static func testGapsNeverTreatedAsZero() {
         print("  - Testing normative invariant: gaps are NEVER treated as zero...")
         let weights = TensionWeights.calibratedV1
-        let dayStart = Date(timeIntervalSince1970: 1700000000)
+        let dayStart = Date(timeIntervalSince1970: 1_700_000_000)
 
         // Day 1: High tension (index ~ 80.0)
         let d1 = TensionDayAssessment(
             methodologyVersion: 1,
             day: DateInterval(start: dayStart, duration: 86400),
-            coverage: TensionCoverage(reporting: TensionMethodology.v1.panel, regions: TensionMethodology.v1.panelRegions, status: .sufficient),
+            coverage: TensionCoverage(
+                reporting: TensionMethodology.v1.panel, regions: TensionMethodology.v1.panelRegions, status: .sufficient
+            ),
             isProvisional: false,
             events: [
                 TensionEventDay(
@@ -251,7 +254,9 @@ final class TensionCalibrationTests {
         let d3 = TensionDayAssessment(
             methodologyVersion: 1,
             day: DateInterval(start: dayStart.addingTimeInterval(86400 * 2), duration: 86400),
-            coverage: TensionCoverage(reporting: TensionMethodology.v1.panel, regions: TensionMethodology.v1.panelRegions, status: .sufficient),
+            coverage: TensionCoverage(
+                reporting: TensionMethodology.v1.panel, regions: TensionMethodology.v1.panelRegions, status: .sufficient
+            ),
             isProvisional: false,
             events: [
                 TensionEventDay(
@@ -291,15 +296,18 @@ final class TensionCalibrationTests {
 
         // Expected Day 3 smoothed: alpha * day3Calibrated + (1 - alpha) * day1Smoothed
         // It should NOT be: alpha * day3Calibrated + (1 - alpha) * 0.0 !
-        let expectedDay3Smoothed = weights.smoothingAlpha * day3Calibrated + (1.0 - weights.smoothingAlpha) * day1Smoothed
-        assert(abs(day3Smoothed - expectedDay3Smoothed) < 0.001,
-               "Day 3 smoothed must be based on prior valid smoothed value, got \(day3Smoothed), expected \(expectedDay3Smoothed)")
+        let expectedDay3Smoothed =
+            weights.smoothingAlpha * day3Calibrated + (1.0 - weights.smoothingAlpha) * day1Smoothed
+        assert(
+            abs(day3Smoothed - expectedDay3Smoothed) < 0.001,
+            "Day 3 smoothed must be based on prior valid smoothed value, got \(day3Smoothed), expected \(expectedDay3Smoothed)"
+        )
     }
 
     static func testSeriesSmoothingWithGaps() {
         print("  - Testing chronological EMA smoothing across multiple assessments...")
         let weights = TensionWeights.calibratedV1
-        let start = Date(timeIntervalSince1970: 1700000000)
+        let start = Date(timeIntervalSince1970: 1_700_000_000)
 
         var assessments: [TensionDayAssessment] = []
         for i in 0..<5 {
@@ -333,7 +341,8 @@ final class TensionCalibrationTests {
 
     static func testHistoricalSampleCorpusFixture() async throws {
         print("  - Testing historical sample corpus fixture against Swift classifier and calibrator...")
-        var fixtureURL = Bundle.main.url(forResource: "historical-sample", withExtension: "json", subdirectory: "Fixtures/tension-corpus")
+        var fixtureURL = Bundle.main.url(
+            forResource: "historical-sample", withExtension: "json", subdirectory: "Fixtures/tension-corpus")
         if fixtureURL == nil {
             let localPath = "Tests/Fixtures/tension-corpus/historical-sample.json"
             if FileManager.default.fileExists(atPath: localPath) {
@@ -347,7 +356,8 @@ final class TensionCalibrationTests {
 
         let data = try Data(contentsOf: fixtureURL)
         guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let sampleDays = json["sampleDays"] as? [[String: Any]] else {
+            let sampleDays = json["sampleDays"] as? [[String: Any]]
+        else {
             fatalError("Malformed historical-sample.json")
         }
 
@@ -362,10 +372,11 @@ final class TensionCalibrationTests {
 
         for dayDict in sampleDays {
             guard let dayID = dayDict["id"] as? String,
-                  let dateStr = dayDict["date"] as? String,
-                  let date = isoFormatter.date(from: dateStr),
-                  let expectedStatusStr = dayDict["expectedCoverageStatus"] as? String,
-                  let reportingFeedIDs = dayDict["reportingFeedCatalogIDs"] as? [String] else {
+                let dateStr = dayDict["date"] as? String,
+                let date = isoFormatter.date(from: dateStr),
+                let expectedStatusStr = dayDict["expectedCoverageStatus"] as? String,
+                let reportingFeedIDs = dayDict["reportingFeedCatalogIDs"] as? [String]
+            else {
                 fatalError("Invalid day entry in sample")
             }
 
@@ -376,18 +387,20 @@ final class TensionCalibrationTests {
             let reportingURLs = Set(reportingMembers.map(\.url))
             let coverage = methodology.coverage(reportingFeedURLs: reportingURLs)
 
-            assert(coverage.status.rawValue == expectedStatusStr,
-                   "Coverage status mismatch for \(dayID): got \(coverage.status.rawValue), expected \(expectedStatusStr)")
+            assert(
+                coverage.status.rawValue == expectedStatusStr,
+                "Coverage status mismatch for \(dayID): got \(coverage.status.rawValue), expected \(expectedStatusStr)")
 
             var eventDays: [TensionEventDay] = []
             if let eventsList = dayDict["events"] as? [[String: Any]] {
                 for evtDict in eventsList {
                     guard let evtID = evtDict["id"] as? String,
-                          let expDeaths = evtDict["expectedDeaths"] as? String,
-                          let expAffected = evtDict["expectedAffected"] as? String,
-                          let expEsc = evtDict["expectedEscalation"] as? String,
-                          let reportingCatIDs = evtDict["reportingCatalogIDs"] as? [String],
-                          let factsList = evtDict["facts"] as? [[String: Any]] else {
+                        let expDeaths = evtDict["expectedDeaths"] as? String,
+                        let expAffected = evtDict["expectedAffected"] as? String,
+                        let expEsc = evtDict["expectedEscalation"] as? String,
+                        let reportingCatIDs = evtDict["reportingCatalogIDs"] as? [String],
+                        let factsList = evtDict["facts"] as? [[String: Any]]
+                    else {
                         fatalError("Invalid event entry in \(dayID)")
                     }
                     let expType = evtDict["expectedType"] as? String
@@ -395,21 +408,34 @@ final class TensionCalibrationTests {
                     var facts: [PassageAnchoredFact] = []
                     for fDict in factsList {
                         guard let fid = fDict["id"] as? String,
-                              let quote = fDict["quote"] as? String else { continue }
-                        facts.append(PassageAnchoredFact(id: fid, statement: quote, passageID: "p-\(fid)", quote: quote, articleID: "art-\(fid)"))
+                            let quote = fDict["quote"] as? String
+                        else { continue }
+                        facts.append(
+                            PassageAnchoredFact(
+                                id: fid, statement: quote, passageID: "p-\(fid)", quote: quote, articleID: "art-\(fid)")
+                        )
                     }
 
                     let classification = TensionEventClassifier.classify(facts, methodology: methodology)
 
                     // Verify classification accuracy
-                    assert(classification.type?.rawValue == expType,
-                           "Type mismatch in \(evtID): got \(String(describing: classification.type?.rawValue)), expected \(String(describing: expType))")
-                    assert(classification.deaths.rawValue == TensionMagnitude.allCases.first(where: { String(describing: $0) == expDeaths })?.rawValue,
-                           "Deaths mismatch in \(evtID): got \(classification.deaths), expected \(expDeaths)")
-                    assert(classification.affected.rawValue == TensionMagnitude.allCases.first(where: { String(describing: $0) == expAffected })?.rawValue,
-                           "Affected mismatch in \(evtID): got \(classification.affected), expected \(expAffected)")
-                    assert(classification.escalation.rawValue == expEsc,
-                           "Escalation mismatch in \(evtID): got \(classification.escalation.rawValue), expected \(expEsc)")
+                    assert(
+                        classification.type?.rawValue == expType,
+                        "Type mismatch in \(evtID): got \(String(describing: classification.type?.rawValue)), expected \(String(describing: expType))"
+                    )
+                    assert(
+                        classification.deaths.rawValue
+                            == TensionMagnitude.allCases.first(where: { String(describing: $0) == expDeaths })?.rawValue,
+                        "Deaths mismatch in \(evtID): got \(classification.deaths), expected \(expDeaths)")
+                    assert(
+                        classification.affected.rawValue
+                            == TensionMagnitude.allCases.first(where: { String(describing: $0) == expAffected })?
+                            .rawValue,
+                        "Affected mismatch in \(evtID): got \(classification.affected), expected \(expAffected)")
+                    assert(
+                        classification.escalation.rawValue == expEsc,
+                        "Escalation mismatch in \(evtID): got \(classification.escalation.rawValue), expected \(expEsc)"
+                    )
 
                     let reportingForEvent = methodology.panel.filter { reportingCatIDs.contains($0.catalogID) }
                     eventDays.append(
@@ -458,7 +484,8 @@ final class TensionCalibrationTests {
         // Validate Day 10 (ceasefire collapse reversal)
         let day10 = scoredSeries[9]
         assert(day10.coverageStatus == .sufficient)
-        assert(day10.calibratedIndex! > 50.0, "Day 10 ceasefire collapse should be > 50.0, got \(day10.calibratedIndex!)")
+        assert(
+            day10.calibratedIndex! > 50.0, "Day 10 ceasefire collapse should be > 50.0, got \(day10.calibratedIndex!)")
 
         // Validate Day 11 (historical treaty years)
         let day11 = scoredSeries[10]
@@ -509,8 +536,10 @@ final class TensionCalibrationTests {
         assert(!originalSubscribed.isEmpty)
 
         // When opted out: effectiveFeedURLs == feedURLs
-        assert(settings.effectiveFeedURLs == originalSubscribed,
-               "When opted out, effectiveFeedURLs must equal user-subscribed feedURLs")
+        assert(
+            settings.effectiveFeedURLs == originalSubscribed,
+            "When opted out, effectiveFeedURLs must equal user-subscribed feedURLs")
+        assert(settings.tensionRetainedFeedURLs.isEmpty, "When opted out, no feed is kept through waiting-story expiry")
 
         // When opted in: effectiveFeedURLs expands to include all 12 panel feeds
         settings.setTensionCollectionOptIn(true)
@@ -520,6 +549,10 @@ final class TensionCalibrationTests {
         for pURL in panelURLs {
             assert(effective.contains(pURL), "effectiveFeedURLs must contain panel feed: \(pURL)")
         }
+
+        assert(
+            settings.tensionRetainedFeedURLs == panelURLs,
+            "When opted in, exactly the panel feeds outlive waiting-story expiry")
 
         // Verify no duplicate URLs
         let uniqueCount = Set(effective).count
@@ -563,14 +596,14 @@ final class TensionCalibrationTests {
 
         var notifiedIDs = Set<String>()
         let notifiableArticles = allParsed.filter {
-            insertedIDs.contains($0.id) &&
-            userSubscribed.contains($0.identityFeedURL ?? "") &&
-            notifiedIDs.insert($0.id).inserted
+            insertedIDs.contains($0.id) && userSubscribed.contains($0.identityFeedURL ?? "")
+                && notifiedIDs.insert($0.id).inserted
         }
 
         assert(notifiableArticles.count == 1, "Only 1 article should be notifiable")
         assert(notifiableArticles[0].id == "art-user-1", "Only article from user feed should be notifiable")
-        assert(!notifiableArticles.contains(where: { $0.id == "art-panel-1" }),
-               "Articles from panel feeds that user didn't subscribe to must NEVER notify")
+        assert(
+            !notifiableArticles.contains(where: { $0.id == "art-panel-1" }),
+            "Articles from panel feeds that user didn't subscribe to must NEVER notify")
     }
 }

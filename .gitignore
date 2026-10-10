@@ -19,3 +19,6 @@ powerlog/
 
 # Python evaluation tooling cache
 script/evaluation/__pycache__/
+
+# Codacy local CLI state
+.codacy/
