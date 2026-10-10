@@ -133,7 +133,9 @@ struct MainView: View {
             }
             if !articlePath.isEmpty { articlePath = NavigationPath() }
         }
-        .onChange(of: searchTokens) { _, _ in
+        .onChange(of: searchTokens) { _, tokens in
+            let kept = ArchiveSearchToken.latestPerField(tokens)
+            if kept != tokens { searchTokens = kept }
             if !articlePath.isEmpty { articlePath = NavigationPath() }
         }
         // Notification Deep Link & Section Jump Routing
@@ -212,7 +214,8 @@ struct MainView: View {
             }
         }
         if let token = ArchiveSearchToken(completedExpression: word),
-           lowered.hasPrefix("source:") || lowered.hasPrefix("category:") {
+            lowered.hasPrefix("source:") || lowered.hasPrefix("category:")
+        {
             Text("Filter: \(token.expression)")
                 .searchCompletion(token)
         }

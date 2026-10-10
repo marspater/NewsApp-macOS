@@ -11,12 +11,25 @@ struct ArchiveSearchToken: Hashable, Identifiable {
         if ["is:unread", "is:read", "is:saved"].contains(candidate) {
             expression = candidate
         } else if (candidate.hasPrefix("source:") && candidate.count > "source:".count)
-                    || (candidate.hasPrefix("category:") && candidate.count > "category:".count) {
+            || (candidate.hasPrefix("category:") && candidate.count > "category:".count)
+        {
             guard !candidate.contains(where: \.isWhitespace) else { return nil }
             expression = candidate
         } else {
             return nil
         }
+    }
+
+    /// The ArticleFilterQuery field this chip sets; is:read and is:unread share one.
+    private var field: Substring {
+        expression.hasPrefix("is:") && expression != "is:saved" ? "is:read" : expression.prefix { $0 != ":" }
+    }
+
+    /// The parser keeps the last value per field, so only that chip stays visible.
+    static func latestPerField(_ tokens: [ArchiveSearchToken]) -> [ArchiveSearchToken] {
+        tokens.enumerated()
+            .filter { index, token in !tokens[(index + 1)...].contains { $0.field == token.field } }
+            .map(\.element)
     }
 
     static func query(text: String, tokens: [ArchiveSearchToken]) -> String {
@@ -32,8 +45,9 @@ struct ArchiveSearchToken: Hashable, Identifiable {
         var remaining: [String] = []
         var tokens: [ArchiveSearchToken] = []
         for (index, word) in words.enumerated() {
-            if (index < words.count - 1 || endsWithSpace),
-               let token = ArchiveSearchToken(completedExpression: word) {
+            if index < words.count - 1 || endsWithSpace,
+                let token = ArchiveSearchToken(completedExpression: word)
+            {
                 tokens.append(token)
             } else {
                 remaining.append(word)
