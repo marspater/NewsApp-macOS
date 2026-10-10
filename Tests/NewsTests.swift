@@ -15187,6 +15187,18 @@ struct NewsTests {
                 "Minister Édouard Geffray", "3,000 substitute teachers would be hired"
             ),
             (
+                "Foreign Secretary Ed Miliband told the BBC that his country does not accept the expulsion of its diplomats.",
+                "Foreign Secretary Ed Miliband", "his country does not accept the expulsion of its diplomats"
+            ),
+            (
+                "Spokesperson John Smith told a news conference that negotiations are scheduled to resume next week.",
+                "Spokesperson John Smith", "negotiations are scheduled to resume next week"
+            ),
+            (
+                "Ambassador Marco Rossi told an Italian news agency that bilateral trade had increased sharply.",
+                "Ambassador Marco Rossi", "bilateral trade had increased sharply"
+            ),
+            (
                 "The figures were published at noon. Mayor Elena Rostova says the evacuation routes are open again.",
                 "Mayor Elena Rostova", "the evacuation routes are open again"
             ),

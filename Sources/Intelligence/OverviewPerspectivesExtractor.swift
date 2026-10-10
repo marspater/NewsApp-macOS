@@ -458,7 +458,7 @@ struct OverviewPerspectivesExtractor: Sendable {
         let time =
             #"(?:\s+(?:(?:on|late on|earlier on|late|early)\s+)?(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday|this week|last week|this month|last month|earlier|later)(?:\s+(?:night|morning|evening|afternoon))?(?:\s+\([^)]{1,30}\))?)?(?:\s+(?:in a statement|in an interview|in a report|in a post|at a news conference|during a news conference)[^:,]{0,30}[:,]?)?"#
         let patternReported =
-            #"(\p{Lu}[\p{L}0-9\s,'’\-]{1,60}?)\s+(?:(?:said|says)\#(time)\s+(?:that\s+)?|told\s+\p{Lu}[\p{L}0-9\s]{1,40}?\#(time)\s+that\s+)(?!(?:in|on|at|of|for|during|after|before|while|with|is|are|was|were|has|have|had|would|will|could|should|can)\b|\p{Ll}+ing\b)([\p{L}0-9“\"][^\.\n]{15,200})"#
+            #"(\p{Lu}[\p{L}0-9\s,'’\-]{1,60}?)\s+(?:(?:said|says)\#(time)\s+(?:that\s+)?|told\s+(?:(?:[Tt]he|[Aa]n?)\s+[\p{L}0-9\s]{1,40}?|\p{Lu}[\p{L}0-9\s]{1,40}?)\#(time)\s+that\s+)(?!(?:in|on|at|of|for|during|after|before|while|with|is|are|was|were|has|have|had|would|will|could|should|can)\b|\p{Ll}+ing\b)([\p{L}0-9“\"][^\.\n]{15,200})"#
         // Pattern 3: According to [Participant], [Statement].
         let patternAccordingTo = #"According to\s+([A-Z][A-Za-z0-9\s,\.\-]{2,60}),\s+([^\.\n]{15,200})"#
 

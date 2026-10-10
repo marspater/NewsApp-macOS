@@ -13,7 +13,7 @@ The existing patterns required a quotation or an adjacent "said that". Speaker c
 
 ## Change
 
-- A reported-speech pattern: a capitalized speaker of up to 60 characters with no full stop, followed by "said" or "says" (with an optional time or channel such as "on Thursday night" or "in a statement:" and an optional "that"), or by "told OUTLET … that". It rejects statements that begin with a preposition, an auxiliary verb or an -ing word, which signal a mis-cut speaker.
+- A reported-speech pattern: a capitalized speaker of up to 60 characters with no full stop, followed by "said" or "says" (with an optional time or channel such as "on Thursday night" or "in a statement:" and an optional "that"), or by "told OUTLET … that" (including outlet names preceded by "the", "a", or "an", such as "the BBC"). It rejects statements that begin with a preposition, an auxiliary verb or an -ing word, which signal a mis-cut speaker.
 - Speaker cleanup applies to every pattern:
   - keeps only the last sentence;
   - drops leading adverbials (including weekdays and months) and participle clauses;
