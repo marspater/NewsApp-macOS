@@ -1,0 +1,53 @@
+{
+  "date": "2026-10-02",
+  "drained_response_bytes": 65536,
+  "hardware": {
+    "cpu": "Apple M5",
+    "memory_bytes": 25769803776,
+    "model": "Mac17,3"
+  },
+  "library_rows": 0,
+  "measurement": "ContinuousClock: immediately before FeedManager.stopBackgroundWork to return from fetchFeedsAsync; excludes observer polling and compilation",
+  "response_bytes_declared": 1048576,
+  "response_bytes_sent": 4096,
+  "samples_ms": {
+    "body": [
+      0.172833,
+      0.133292,
+      0.143083,
+      0.13525,
+      0.138708
+    ],
+    "headers": [
+      0.774958,
+      0.156167,
+      0.197167,
+      0.131,
+      0.113916
+    ]
+  },
+  "samples_per_phase": 5,
+  "socket_close_deadline_seconds": 2,
+  "software": {
+    "Swift": "6.4",
+    "Xcode": "27.0 (27A266a)",
+    "architecture": "arm64",
+    "deployment_target": "15.0",
+    "macOS": "27.0.1 (26A434)",
+    "optimization": "-O"
+  },
+  "summary_ms": {
+    "body": {
+      "investigation_budget": 0.3,
+      "maximum": 0.172833,
+      "median": 0.138708
+    },
+    "headers": {
+      "investigation_budget": 1.0,
+      "maximum": 0.774958,
+      "median": 0.156167
+    }
+  },
+  "synchronization": "Server observes complete request; body phase waits for partial write completion; no assertion about client byte-iterator position",
+  "transport": "URLSession -> production SOCKS proxy -> controlled TCP fixture"
+}

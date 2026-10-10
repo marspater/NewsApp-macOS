@@ -1,0 +1,97 @@
+{
+  "command": "./test.sh --performance-baseline --active-work-cancellation",
+  "completion_deadline_seconds": 2,
+  "date": "2026-10-02",
+  "hardware": {
+    "cpu": "Apple M5",
+    "memory_bytes": 25769803776,
+    "model": "Mac17,3"
+  },
+  "measurement": "systemUptime immediately before Task.cancel to completion of the cancelled parse inside its task; the cancel follows a sleep of one quarter of the uncancelled parse time",
+  "parsing_feed_bytes": 863206,
+  "parsing_feed_items": 500,
+  "raw_runs": [
+    {
+      "clustering_library_rows": 400,
+      "clustering_pending_at_cancel": [
+        399,
+        399,
+        399,
+        399,
+        399
+      ],
+      "ingestion_batch_rows": 20001,
+      "ingestion_body_characters": 8360,
+      "parsing_feed_bytes": 863206,
+      "parsing_feed_items": 500,
+      "parsing_uncancelled_ms": 1232.7419583161827,
+      "samples_ms": {
+        "clustering": [
+          0.5449166637845337,
+          2.859791653463617,
+          0.5765833193436265,
+          0.615708326222375,
+          0.4855833249166608
+        ],
+        "feed_parsing": [
+          0.6074999982956797,
+          2.158000017516315,
+          1.3460416812449694,
+          0.6524999917019159,
+          0.7461249770130962
+        ],
+        "ingestion_rollback": [
+          12.6215833297465,
+          14.303375006420538,
+          12.719749996904284,
+          12.506916653364897,
+          13.180374982766807
+        ]
+      },
+      "samples_per_operation": 5,
+      "sqlite_version": "3.54.0",
+      "wal_spill_threshold_bytes": 1048576
+    },
+    {
+      "clustering_library_rows": 400,
+      "clustering_pending_at_cancel": [
+        399,
+        399,
+        399,
+        399,
+        399
+      ],
+      "ingestion_batch_rows": 20001,
+      "ingestion_body_characters": 8360,
+      "parsing_feed_bytes": 863206,
+      "parsing_feed_items": 500,
+      "parsing_uncancelled_ms": 1207.1769166796003,
+      "samples_ms": {
+        "clustering": [
+          1.4488750020973384,
+          0.2099999983329326,
+          0.10904166265390813,
+          0.6660416547674686,
+          1.1273333220742643
+        ],
+        "feed_parsing": [
+          2.1009999909438193,
+          1.8873749941121787,
+          0.5674583371728659,
+          0.4211250052321702,
+          1.1548333277460188
+        ],
+        "ingestion_rollback": [
+          18.001333344727755,
+          12.865833326941356,
+          8.2434999931138,
+          12.522125005489215,
+          13.841999985743314
+        ]
+      },
+      "samples_per_operation": 5,
+      "sqlite_version": "3.54.0",
+      "wal_spill_threshold_bytes": 1048576
+    }
+  ]
+}

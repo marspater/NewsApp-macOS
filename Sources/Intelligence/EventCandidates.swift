@@ -19,14 +19,16 @@ struct EventMatchKey: Hashable, Sendable {
         func add(_ term: String) {
             let trimmed = term.trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters))
             guard terms.count < Self.maximumTerms, trimmed.count >= Self.minimumWordLength,
-                  trimmed.contains(where: \.isLetter), seen.insert(trimmed.lowercased()).inserted else { return }
+                trimmed.contains(where: \.isLetter), seen.insert(trimmed.lowercased()).inserted
+            else { return }
             terms.append(trimmed)
         }
         // Named participants and places first, then distinctive title words.
         let tagger = NLTagger(tagSchemes: [.nameType])
         tagger.string = text
         let options: NLTagger.Options = [.omitWhitespace, .omitPunctuation, .joinNames]
-        tagger.enumerateTags(in: text.startIndex..<text.endIndex, unit: .word, scheme: .nameType, options: options) { tag, range in
+        tagger.enumerateTags(in: text.startIndex..<text.endIndex, unit: .word, scheme: .nameType, options: options) {
+            tag, range in
             if let tag, [.personalName, .placeName, .organizationName].contains(tag) { add(String(text[range])) }
             return true
         }
@@ -44,11 +46,12 @@ struct EventMatchKey: Hashable, Sendable {
     }
 
     /// Dominant language when the recognizer is reasonably sure; nil otherwise.
-    static func language(of text: String) -> String? {
-        let recognizer = NLLanguageRecognizer()
+    static func language(of text: String, using recognizer: NLLanguageRecognizer = NLLanguageRecognizer()) -> String? {
+        recognizer.reset()
         recognizer.processString(text)
         guard let language = recognizer.dominantLanguage,
-              (recognizer.languageHypotheses(withMaximum: 1)[language] ?? 0) >= 0.5 else { return nil }
+            (recognizer.languageHypotheses(withMaximum: 1)[language] ?? 0) >= 0.5
+        else { return nil }
         return language.rawValue
     }
 
@@ -93,11 +96,18 @@ enum EventCandidateFinder {
             activeSince: now.addingTimeInterval(-policy.activeEventLifetime),
             excluding: article.id, limit: policy.limit * 2)
         var candidates: [EventCandidate] = []
+        // Reset between candidates so language evidence cannot leak from the previous article.
+        let recognizer = NLLanguageRecognizer()
         for row in rows where candidates.count < policy.limit {
             try Task.checkCancellation()
             // Different languages are not compared directly; unknown languages stay eligible.
-            if let language = key.language, let other = EventMatchKey.language(of: row.title + "\n" + String(row.description.prefix(600))),
-               other != language { continue }
+            if let language = key.language,
+                let other = EventMatchKey.language(
+                    of: row.title + "\n" + String(row.description.prefix(600)), using: recognizer),
+                other != language
+            {
+                continue
+            }
             candidates.append(EventCandidate(articleID: row.id, eventID: row.eventID))
         }
         return candidates

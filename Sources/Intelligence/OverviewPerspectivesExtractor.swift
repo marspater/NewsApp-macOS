@@ -3,6 +3,10 @@ import NaturalLanguage
 
 /// Result of deterministically validating an overview perspective against evidence passages and rules.
 struct OverviewPerspectiveValidationResult: Sendable, Equatable {
+    enum Rule: String, Sendable, Codable {
+        case noCitation, unknownCitation, emptyQuote, shortParticipant, vagueParticipant, shortPosition, ungrounded
+    }
+
     let isValid: Bool
     let rejectionReason: String?
 
@@ -10,6 +14,39 @@ struct OverviewPerspectiveValidationResult: Sendable, Equatable {
         self.isValid = isValid
         self.rejectionReason = rejectionReason
     }
+
+    /// Stable rule name for aggregate reports; unlike `rejectionReason`, it never contains participant text.
+    var rule: Rule? {
+        guard let reason = rejectionReason else { return nil }
+        return Self.reasonEndings.first { reason.hasSuffix($0.ending) }?.rule
+    }
+
+    /// Each rejection reason in `OverviewPerspectivesValidator` ends with fixed text after any quoted value.
+    private static let reasonEndings: [(ending: String, rule: Rule)] = [
+        ("Perspective has no source citation", .noCitation),
+        ("not found in overview citations", .unknownCitation),
+        ("has empty quote", .emptyQuote),
+        ("Participant name is empty or too short", .shortParticipant),
+        ("is an unattributed generality", .vagueParticipant),
+        ("Position statement is empty or too short", .shortPosition),
+        ("is not grounded in cited passage text (synthetic or hallucinated claim)", .ungrounded),
+    ]
+}
+
+/// Counts why an event's perspectives section is absent or thin (#313). Holds no passage or speaker text.
+struct OverviewPerspectivesDiagnosis: Sendable, Equatable, Codable {
+    var passages = 0
+    var uncitedPassages = 0
+    var passagesWithCandidates = 0
+    /// Passages without a candidate that still contain a quotation mark or a speech verb.
+    var passagesWithUnmatchedSpeech = 0
+    /// Passages using typographic quotation marks; the attribution patterns match straight quotes only.
+    var passagesWithTypographicQuotes = 0
+    var candidates = 0
+    var vagueCandidates = 0
+    var voices = 0
+    var rejections: [String: Int] = [:]
+    var perspectives = 0
 }
 
 /// Enforces the four core rules of overview perspectives:
@@ -25,7 +62,7 @@ struct OverviewPerspectivesValidator: Sendable {
         "some people", "people", "many people", "many believe", "analysts", "analysts say",
         "sources", "sources say", "sources claim", "unnamed sources", "anonymous sources",
         "opponents", "opponents claim", "opponents argue", "skeptics", "the other side",
-        "officials say", "experts", "experts say", "commentators"
+        "officials say", "experts", "experts say", "commentators",
     ]
 
     /// Evaluates whether a participant string represents a vague anonymous generality.
@@ -112,7 +149,8 @@ struct OverviewPerspectivesValidator: Sendable {
             if !citedPassages.isEmpty {
                 let combinedText = citedPassages.map(\.text).joined(separator: " ").lowercased()
                 let normalizedPosition = positionCleaned.lowercased()
-                let positionWords = normalizedPosition
+                let positionWords =
+                    normalizedPosition
                     .components(separatedBy: CharacterSet.alphanumerics.inverted)
                     .filter { $0.count >= 4 }
 
@@ -122,7 +160,8 @@ struct OverviewPerspectivesValidator: Sendable {
                     if matchRatio < 0.35 {
                         return OverviewPerspectiveValidationResult(
                             isValid: false,
-                            rejectionReason: "Position statement is not grounded in cited passage text (synthetic or hallucinated claim)"
+                            rejectionReason:
+                                "Position statement is not grounded in cited passage text (synthetic or hallucinated claim)"
                         )
                     }
                 }
@@ -145,7 +184,7 @@ struct OverviewPerspectivesExtractor: Sendable {
         ("Bloomberg", ["bloomberg news", "bloomberg", "— bloomberg"]),
         ("UPI", ["united press international", "(upi)", "upi"]),
         ("PR Newswire", ["pr newswire", "(pr newswire)"]),
-        ("Business Wire", ["business wire", "(business wire)"])
+        ("Business Wire", ["business wire", "(business wire)"]),
     ]
 
     /// Candidate attributed perspective discovered during text extraction.
@@ -172,100 +211,152 @@ struct OverviewPerspectivesExtractor: Sendable {
         articles: [FeedArticle],
         existingCitations: [String: OverviewCitation]
     ) -> [OverviewPerspective] {
+        evaluate(passages: passages, articles: articles, existingCitations: existingCitations).perspectives
+    }
+
+    /// Runs the same extraction and reports how many passages, candidates and voices each step kept (#313).
+    static func diagnosePerspectives(
+        passages: [EvidencePassage],
+        articles: [FeedArticle],
+        existingCitations: [String: OverviewCitation]
+    ) -> OverviewPerspectivesDiagnosis {
+        evaluate(passages: passages, articles: articles, existingCitations: existingCitations).diagnosis
+    }
+
+    /// One voice: its first statement and every citation of a reprint or repeat.
+    private typealias Voice = (primary: ExtractedCandidate, citationIDs: Set<String>)
+
+    private static func evaluate(
+        passages: [EvidencePassage],
+        articles: [FeedArticle],
+        existingCitations: [String: OverviewCitation]
+    ) -> (perspectives: [OverviewPerspective], diagnosis: OverviewPerspectivesDiagnosis) {
+        var diagnosis = OverviewPerspectivesDiagnosis()
+        diagnosis.passages = passages.count
+        let candidates = attributedCandidates(
+            passages: passages, articles: articles, existingCitations: existingCitations, diagnosis: &diagnosis)
+        diagnosis.candidates = candidates.count
+        let voices = collapseVoices(candidates, diagnosis: &diagnosis)
+        diagnosis.voices = voices.count
+        let perspectives = validatedPerspectives(
+            voices, existingCitations: existingCitations, passages: passages, diagnosis: &diagnosis)
+        diagnosis.perspectives = perspectives.count
+        // Sorted deterministically by participant name; no verified perspective leaves the section absent.
+        return (perspectives.sorted { $0.participant < $1.participant }, diagnosis)
+    }
+
+    /// Attributed statements in cited passages, counting passages that yield none.
+    private static func attributedCandidates(
+        passages: [EvidencePassage],
+        articles: [FeedArticle],
+        existingCitations: [String: OverviewCitation],
+        diagnosis: inout OverviewPerspectivesDiagnosis
+    ) -> [ExtractedCandidate] {
         let articlesByID = Dictionary(uniqueKeysWithValues: articles.map { ($0.id, $0) })
 
         // Reverse-index passages to citation IDs
-        var passageToCitationID: [String: String] = [:]
-        for (citID, citation) in existingCitations {
-            passageToCitationID[citation.passageID] = citID
-        }
+        let passageToCitationID = Dictionary(
+            existingCitations.map { ($0.value.passageID, $0.key) }, uniquingKeysWith: { _, last in last })
 
         var candidates: [ExtractedCandidate] = []
-
         for passage in passages {
+            if passage.text.contains("\u{201C}") || passage.text.contains("\u{201D}") {
+                diagnosis.passagesWithTypographicQuotes += 1
+            }
             guard let citID = passageToCitationID[passage.id] else {
+                diagnosis.uncitedPassages += 1
                 continue
             }
-            let article = articlesByID[passage.articleID]
-            let wire = detectWireSource(in: passage.text, articleSource: article?.source)
-            let publisher = article?.source
-
+            let source = articlesByID[passage.articleID]?.source
             let passageCandidates = extractAttributedQuotes(
                 text: passage.text,
                 citationID: citID,
                 passageID: passage.id,
                 articleID: passage.articleID,
-                wireSource: wire,
-                publisher: publisher
+                wireSource: detectWireSource(in: passage.text, articleSource: source),
+                publisher: source
             )
+            if !passageCandidates.isEmpty {
+                diagnosis.passagesWithCandidates += 1
+            } else if containsSpeechCue(passage.text) {
+                diagnosis.passagesWithUnmatchedSpeech += 1
+            }
             candidates.append(contentsOf: passageCandidates)
         }
+        return candidates
+    }
 
-        // Rule 3: Reprints are not presented as independent voices
-        // Group and collapse duplicate statements from identical participants or syndicated wire stories
-        var collapsed: [(primary: ExtractedCandidate, citationIDs: Set<String>)] = []
-
+    /// Rule 3: reprints are not presented as independent voices. Vague speakers are dropped; statements from the same
+    /// participant or a syndicated wire story collapse into one voice that keeps every citation.
+    private static func collapseVoices(
+        _ candidates: [ExtractedCandidate], diagnosis: inout OverviewPerspectivesDiagnosis
+    ) -> [Voice] {
+        var collapsed: [Voice] = []
         for cand in candidates {
-            // Check for vague participants
             guard !OverviewPerspectivesValidator.isVagueParticipant(cand.participant) else {
+                diagnosis.vagueCandidates += 1
                 continue
             }
-
             if let index = collapsed.firstIndex(where: { isSameVoice(existing: $0.primary, candidate: cand) }) {
                 collapsed[index].citationIDs.insert(cand.citationID)
-                let existingPrimary = collapsed[index].primary
-                let wire = existingPrimary.originalWireSource ?? cand.originalWireSource
-                let publisher = existingPrimary.sourcePublisher ?? cand.sourcePublisher
-                let bestParticipant = existingPrimary.participant.count >= cand.participant.count ? existingPrimary.participant : cand.participant
-
-                collapsed[index].primary = ExtractedCandidate(
-                    participant: bestParticipant,
-                    position: existingPrimary.position,
-                    quote: existingPrimary.quote,
-                    citationID: existingPrimary.citationID,
-                    passageID: existingPrimary.passageID,
-                    articleID: existingPrimary.articleID,
-                    originalWireSource: wire,
-                    sourcePublisher: publisher
-                )
+                collapsed[index].primary = merged(collapsed[index].primary, with: cand)
             } else {
                 collapsed.append((primary: cand, citationIDs: [cand.citationID]))
             }
         }
+        return collapsed
+    }
 
-        // Validate each collapsed candidate
-        var validatedPerspectives: [OverviewPerspective] = []
+    /// The voice's first statement, with the longer participant name and any wire or publisher credit.
+    private static func merged(_ existing: ExtractedCandidate, with cand: ExtractedCandidate) -> ExtractedCandidate {
+        ExtractedCandidate(
+            participant: existing.participant.count >= cand.participant.count ? existing.participant : cand.participant,
+            position: existing.position,
+            quote: existing.quote,
+            citationID: existing.citationID,
+            passageID: existing.passageID,
+            articleID: existing.articleID,
+            originalWireSource: existing.originalWireSource ?? cand.originalWireSource,
+            sourcePublisher: existing.sourcePublisher ?? cand.sourcePublisher
+        )
+    }
 
-        for item in collapsed {
+    /// Validates each voice against its cited passages, counting rejections by rule.
+    private static func validatedPerspectives(
+        _ voices: [Voice],
+        existingCitations: [String: OverviewCitation],
+        passages: [EvidencePassage],
+        diagnosis: inout OverviewPerspectivesDiagnosis
+    ) -> [OverviewPerspective] {
+        var validated: [OverviewPerspective] = []
+        for item in voices {
             let primary = item.primary
-            let sortedCitationIDs = Array(item.citationIDs).sorted()
-
             let perspective = OverviewPerspective(
                 id: "persp_\(primary.passageID)_\(abs(primary.participant.hashValue % 10000))",
                 participant: primary.participant,
                 position: primary.position,
-                citationIDs: sortedCitationIDs,
+                citationIDs: Array(item.citationIDs).sorted(),
                 sourcePublisher: primary.sourcePublisher,
                 originalWireSource: primary.originalWireSource
             )
-
             let validation = OverviewPerspectivesValidator.validatePerspective(
-                perspective,
-                against: existingCitations,
-                passages: passages
-            )
+                perspective, against: existingCitations, passages: passages)
             if validation.isValid {
-                validatedPerspectives.append(perspective)
+                validated.append(perspective)
+            } else {
+                diagnosis.rejections[validation.rule?.rawValue ?? "unknown", default: 0] += 1
             }
         }
+        return validated
+    }
 
-        // Absent sections rule: section is omitted if no verified attributed perspective exists
-        guard !validatedPerspectives.isEmpty else {
-            return []
-        }
+    private static let speechVerbs = try? NSRegularExpression(
+        pattern: #"\b(?:said|says|told|added|stated|announced|warned)\b"#, options: [.caseInsensitive])
 
-        // Sort deterministically by participant name
-        return validatedPerspectives.sorted { $0.participant < $1.participant }
+    /// A quotation mark or speech verb, so a passage without a candidate may hold a missed attribution.
+    private static func containsSpeechCue(_ text: String) -> Bool {
+        if text.contains("\"") || text.contains("\u{201C}") || text.contains("\u{201D}") { return true }
+        return speechVerbs?.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)) != nil
     }
 
     /// Evaluates whether two extracted candidates represent the same voice or syndicated reprint.
@@ -327,6 +418,40 @@ struct OverviewPerspectivesExtractor: Sendable {
         return nil
     }
 
+    /// One compiled attribution pattern with its capture groups and minimum statement length.
+    private struct Attribution {
+        let regex: NSRegularExpression
+        let participantGroup: Int
+        let statementGroup: Int
+        let minimumLength: Int
+
+        init?(_ pattern: String, participantGroup: Int, statementGroup: Int, minimumLength: Int) {
+            guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
+            self.regex = regex
+            self.participantGroup = participantGroup
+            self.statementGroup = statementGroup
+            self.minimumLength = minimumLength
+        }
+    }
+
+    // Compiled once; matches keep pattern order.
+    private static let attributions: [Attribution] = {
+        // Pattern 1: "[Quote]," (said|announced|stated|argued|warned|noted) [Participant].
+        let patternQuoteFirst =
+            #"\"([^\"]{10,250})\",?\s*(?:said|stated|announced|noted|argued|warned|confirmed|declared|emphasized|urged|reiterated|cautioned|explained)\s+([A-Z][A-Za-z0-9\s,\.\-]{2,60})"#
+        // Pattern 2: [Participant] (said that|stated that|announced that|argued that|warned that|noted that|confirmed that) [Statement].
+        let patternSpeakerFirst =
+            #"([A-Z][A-Za-z0-9\s,\.\-]{2,60})\s+(?:said that|stated that|announced that|argued that|warned that|noted that|confirmed that|emphasized that|urged that)\s+([^\.\n]{15,200})"#
+        // Pattern 3: According to [Participant], [Statement].
+        let patternAccordingTo = #"According to\s+([A-Z][A-Za-z0-9\s,\.\-]{2,60}),\s+([^\.\n]{15,200})"#
+
+        return [
+            Attribution(patternQuoteFirst, participantGroup: 2, statementGroup: 1, minimumLength: 0),
+            Attribution(patternSpeakerFirst, participantGroup: 1, statementGroup: 2, minimumLength: 10),
+            Attribution(patternAccordingTo, participantGroup: 1, statementGroup: 2, minimumLength: 10),
+        ].compactMap { $0 }
+    }()
+
     /// Extracts quotes and statements with attribution to participants.
     private static func extractAttributedQuotes(
         text: String,
@@ -336,39 +461,28 @@ struct OverviewPerspectivesExtractor: Sendable {
         wireSource: String?,
         publisher: String?
     ) -> [ExtractedCandidate] {
-        // Pattern 1: "[Quote]," (said|announced|stated|argued|warned|noted) [Participant].
-        let patternQuoteFirst = #"\"([^\"]{10,250})\",?\s*(?:said|stated|announced|noted|argued|warned|confirmed|declared|emphasized|urged|reiterated|cautioned|explained)\s+([A-Z][A-Za-z0-9\s,\.\-]{2,60})"#
-        // Pattern 2: [Participant] (said that|stated that|announced that|argued that|warned that|noted that|confirmed that) [Statement].
-        let patternSpeakerFirst = #"([A-Z][A-Za-z0-9\s,\.\-]{2,60})\s+(?:said that|stated that|announced that|argued that|warned that|noted that|confirmed that|emphasized that|urged that)\s+([^\.\n]{15,200})"#
-        // Pattern 3: According to [Participant], [Statement].
-        let patternAccordingTo = #"According to\s+([A-Z][A-Za-z0-9\s,\.\-]{2,60}),\s+([^\.\n]{15,200})"#
-
-        // Group order and minimum statement length per pattern; matches keep pattern order.
-        let attributions: [(pattern: String, participantGroup: Int, statementGroup: Int, minimumLength: Int)] = [
-            (patternQuoteFirst, 2, 1, 0),
-            (patternSpeakerFirst, 1, 2, 10),
-            (patternAccordingTo, 1, 2, 10)
-        ]
         var results: [ExtractedCandidate] = []
+        let nsString = text as NSString
         for attribution in attributions {
             let matches = attributedMatches(
-                of: attribution.pattern,
-                in: text,
+                of: attribution.regex,
+                in: nsString,
                 participantGroup: attribution.participantGroup,
                 statementGroup: attribution.statementGroup,
                 minimumStatementLength: attribution.minimumLength
             )
             for match in matches {
-                results.append(ExtractedCandidate(
-                    participant: match.participant,
-                    position: match.statement,
-                    quote: match.statement,
-                    citationID: citationID,
-                    passageID: passageID,
-                    articleID: articleID,
-                    originalWireSource: wireSource,
-                    sourcePublisher: publisher
-                ))
+                results.append(
+                    ExtractedCandidate(
+                        participant: match.participant,
+                        position: match.statement,
+                        quote: match.statement,
+                        citationID: citationID,
+                        passageID: passageID,
+                        articleID: articleID,
+                        originalWireSource: wireSource,
+                        sourcePublisher: publisher
+                    ))
             }
         }
 
@@ -378,19 +492,18 @@ struct OverviewPerspectivesExtractor: Sendable {
     /// Runs one attribution pattern and keeps matches that name a participant and carry a statement
     /// of at least `minimumStatementLength` characters.
     private static func attributedMatches(
-        of pattern: String,
-        in text: String,
+        of regex: NSRegularExpression,
+        in nsString: NSString,
         participantGroup: Int,
         statementGroup: Int,
         minimumStatementLength: Int
     ) -> [(participant: String, statement: String)] {
-        guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
-        let nsString = text as NSString
-        let matches = regex.matches(in: text, range: NSRange(location: 0, length: nsString.length))
+        let matches = regex.matches(in: nsString as String, range: NSRange(location: 0, length: nsString.length))
         return matches.compactMap { match -> (participant: String, statement: String)? in
             guard match.numberOfRanges >= 3 else { return nil }
             let participant = cleanParticipant(nsString.substring(with: match.range(at: participantGroup)))
-            let statement = nsString.substring(with: match.range(at: statementGroup)).trimmingCharacters(in: .whitespacesAndNewlines)
+            let statement = nsString.substring(with: match.range(at: statementGroup)).trimmingCharacters(
+                in: .whitespacesAndNewlines)
             guard !participant.isEmpty, statement.count >= minimumStatementLength else { return nil }
             return (participant, statement)
         }

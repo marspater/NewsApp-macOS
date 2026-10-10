@@ -12,7 +12,8 @@ public struct EvidencePassage: Codable, Hashable, Sendable, Identifiable {
         self.id = id
         self.articleID = articleID
         self.text = text
-        self.fingerprint = fingerprint ?? ArticleIdentity.sha256Hex(text.trimmingCharacters(in: .whitespacesAndNewlines))
+        self.fingerprint =
+            fingerprint ?? ArticleIdentity.sha256Hex(text.trimmingCharacters(in: .whitespacesAndNewlines))
         self.ordinal = ordinal
     }
 }
@@ -202,38 +203,64 @@ public struct OverviewThematicAngle: Codable, Hashable, Sendable, Identifiable {
     public let title: String
     public let summary: String
     public let citationIDs: [String]
+    public let facts: [OverviewFact]
 
     public init(
         id: String = UUID().uuidString,
         title: String,
         summary: String,
-        citationIDs: [String] = []
+        citationIDs: [String] = [],
+        facts: [OverviewFact] = []
     ) {
         self.id = id
         self.title = title
         self.summary = summary
         self.citationIDs = citationIDs
+        self.facts = facts
     }
 }
 
-/// Optional structured evidence sections: chronological timeline, participant perspectives, and thematic angle.
+/// Optional evaluated tone of coverage; omitted when evidence or corpus evaluation does not justify it.
+public struct OverviewCoverageSentiment: Codable, Hashable, Sendable {
+    public let score: Double
+    public let label: String
+    public let confidence: Double
+    public let rationale: String?
+
+    public init(score: Double, label: String, confidence: Double, rationale: String? = nil) {
+        self.score = score
+        self.label = label
+        self.confidence = confidence
+        self.rationale = rationale
+    }
+}
+
+/// Optional structured evidence sections: chronological timeline, participant perspectives, thematic angle, and evaluated coverage sentiment.
 public struct OverviewEvidenceSections: Codable, Hashable, Sendable {
+    /// Sentence-level citations for a model-written introduction; absent in older and extractive documents.
+    public let introduction: [OverviewFact]?
     public let timeline: [OverviewTimelineItem]
     public let perspectives: [OverviewPerspective]
     public let thematicAngle: OverviewThematicAngle?
+    public let coverageSentiment: OverviewCoverageSentiment?
 
     public var isEmpty: Bool {
-        timeline.isEmpty && perspectives.isEmpty && thematicAngle == nil
+        introduction?.isEmpty != false && timeline.isEmpty && perspectives.isEmpty && thematicAngle == nil
+            && coverageSentiment == nil
     }
 
     public init(
         timeline: [OverviewTimelineItem] = [],
         perspectives: [OverviewPerspective] = [],
-        thematicAngle: OverviewThematicAngle? = nil
+        thematicAngle: OverviewThematicAngle? = nil,
+        coverageSentiment: OverviewCoverageSentiment? = nil,
+        introduction: [OverviewFact]? = nil
     ) {
         self.timeline = timeline
         self.perspectives = perspectives
         self.thematicAngle = thematicAngle
+        self.coverageSentiment = coverageSentiment
+        self.introduction = introduction
     }
 }
 
@@ -314,8 +341,9 @@ public struct OverviewProvenance: Codable, Hashable, Sendable {
 /// Derived overview document model bound to membership version, input text hashes, schema version, and analysis version.
 public struct EventOverviewDocument: Codable, Hashable, Sendable, Identifiable {
     public static let currentSchemaVersion = 1
-    /// 2: sourced timeline items (#143). Overviews stored at an older version are regenerated.
-    public static let currentAnalysisVersion = 2
+    /// 4: verified plain-text synthesis with introduction citations and strict support parsing. Older overviews, and
+    /// provisional ones stored at 0 (`OverviewGenerationCoordinator`), regenerate.
+    public static let currentAnalysisVersion = 4
 
     public let id: String
     public let eventID: String
@@ -329,6 +357,7 @@ public struct EventOverviewDocument: Codable, Hashable, Sendable, Identifiable {
     public var analysisVersion: Int { version.analysisVersion }
     public var title: String { content.title }
     public var summary: String { content.summary }
+    public var allClaims: [OverviewFact] { (content.evidenceSections?.introduction ?? []) + facts }
     public var facts: [OverviewFact] { content.facts }
     public var citations: [String: OverviewCitation] { content.citations }
     public var leadImage: OverviewLeadImage? { content.leadImage }
@@ -336,6 +365,7 @@ public struct EventOverviewDocument: Codable, Hashable, Sendable, Identifiable {
     public var timeline: [OverviewTimelineItem] { evidenceSections?.timeline ?? [] }
     public var perspectives: [OverviewPerspective] { evidenceSections?.perspectives ?? [] }
     public var thematicAngle: OverviewThematicAngle? { evidenceSections?.thematicAngle }
+    public var coverageSentiment: OverviewCoverageSentiment? { evidenceSections?.coverageSentiment }
     public var memberArticleIDs: [String] { provenance.memberArticleIDs }
     public var kind: OverviewKind { provenance.kind }
     public var createdAt: Date { provenance.createdAt }
@@ -424,12 +454,12 @@ public struct EventOverviewDocument: Codable, Hashable, Sendable, Identifiable {
     /// Evaluates if an existing overview is stale relative to updated membership, inputs, or versions.
     public func isStale(
         currentMembershipVersion: Int,
-        currentInputTextHash: String,
+        currentInputTextHash: String? = nil,
         targetSchemaVersion: Int = currentSchemaVersion,
         targetAnalysisVersion: Int = currentAnalysisVersion
     ) -> Bool {
         membershipVersion != currentMembershipVersion
-            || inputTextHash != currentInputTextHash
+            || (currentInputTextHash != nil && inputTextHash != currentInputTextHash)
             || schemaVersion != targetSchemaVersion
             || analysisVersion != targetAnalysisVersion
     }

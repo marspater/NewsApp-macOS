@@ -56,9 +56,13 @@ swiftc -swift-version 6 -O -parse-as-library -target arm64-apple-macos${TARGET_M
     Sources/Intelligence/OverviewClaimVerifier.swift \
     Sources/Intelligence/OverviewTimelineExtractor.swift \
     Sources/Intelligence/OverviewPerspectivesExtractor.swift \
+    Sources/Intelligence/OverviewThematicAngleExtractor.swift \
+    Sources/Intelligence/CoverageSentimentEvaluator.swift \
     Sources/Intelligence/EventCandidates.swift \
     Sources/Intelligence/EventMatcher.swift \
     Sources/Intelligence/EventClustering.swift \
+    Sources/Intelligence/EventJudge.swift \
+    Sources/Intelligence/StoryImportance.swift \
     Sources/Intelligence/ContentExtractionPipeline.swift \
     Sources/Intelligence/EnrichmentQueue.swift \
     Sources/Intelligence/OverviewGenerationCoordinator.swift \
@@ -67,7 +71,6 @@ swiftc -swift-version 6 -O -parse-as-library -target arm64-apple-macos${TARGET_M
     Sources/Services/SecureHTTPClient.swift \
     Sources/App/AppSettings.swift \
     Sources/Services/FeedXMLParser.swift \
-    Sources/Intelligence/WebContentExtractor.swift \
     Sources/Coordinators/NotificationService.swift \
     Sources/Services/FeedFetcher.swift \
     Sources/Services/JSONFeedParser.swift \
@@ -85,6 +88,7 @@ swiftc -swift-version 6 -O -parse-as-library -target arm64-apple-macos${TARGET_M
     Sources/Views/ArticleListView.swift \
     Sources/Views/ArticleDetailView.swift \
     Sources/Views/EventOverviewReaderView.swift \
+    Sources/Views/TensionIndexView.swift \
     Sources/Views/MainView.swift \
     Sources/Views/SettingsView.swift \
     Sources/Views/FeedCatalogView.swift \
@@ -119,7 +123,7 @@ cat > "${CONTENTS_DIR}/Info.plist" <<EOF
     <key>CFBundleIconName</key>
     <string>AppIcon</string>
     <key>CFBundleShortVersionString</key>
-    <string>2.0</string>
+    <string>2.0.0</string>
     <key>CFBundleVersion</key>
     <string>3</string>
     <key>LSMinimumSystemVersion</key>

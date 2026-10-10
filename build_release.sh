@@ -52,9 +52,13 @@ SWIFT_SOURCES=(
     Sources/Intelligence/OverviewClaimVerifier.swift
     Sources/Intelligence/OverviewTimelineExtractor.swift
     Sources/Intelligence/OverviewPerspectivesExtractor.swift
+    Sources/Intelligence/OverviewThematicAngleExtractor.swift
+    Sources/Intelligence/CoverageSentimentEvaluator.swift
     Sources/Intelligence/EventCandidates.swift
     Sources/Intelligence/EventMatcher.swift
     Sources/Intelligence/EventClustering.swift
+    Sources/Intelligence/EventJudge.swift
+    Sources/Intelligence/StoryImportance.swift
     Sources/Intelligence/ContentExtractionPipeline.swift
     Sources/Intelligence/EnrichmentQueue.swift
     Sources/Intelligence/OverviewGenerationCoordinator.swift
@@ -63,7 +67,6 @@ SWIFT_SOURCES=(
     Sources/Services/SecureHTTPClient.swift
     Sources/App/AppSettings.swift
     Sources/Services/FeedXMLParser.swift
-    Sources/Intelligence/WebContentExtractor.swift
     Sources/Coordinators/NotificationService.swift
     Sources/Services/FeedFetcher.swift
     Sources/Services/JSONFeedParser.swift
@@ -81,6 +84,7 @@ SWIFT_SOURCES=(
     Sources/Views/ArticleListView.swift
     Sources/Views/ArticleDetailView.swift
     Sources/Views/EventOverviewReaderView.swift
+    Sources/Views/TensionIndexView.swift
     Sources/Views/MainView.swift
     Sources/Views/SettingsView.swift
     Sources/Views/FeedCatalogView.swift

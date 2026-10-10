@@ -1,0 +1,1774 @@
+{
+  "native_completion_verified_run": {
+    "complete": true,
+    "feeds": [
+      "https://feeds.bbci.co.uk/news/world/rss.xml",
+      "https://www.theguardian.com/world/rss",
+      "https://www.aljazeera.com/xml/rss/all.xml",
+      "https://rss.dw.com/xml/rss-en-top",
+      "https://www.channelnewsasia.com/rssfeeds/8395884"
+    ],
+    "footprint_3s_after_close_mib": 129.5,
+    "footprint_after_each_pass_mib": [
+      133,
+      155.8
+    ],
+    "footprint_before_reading_mib": 18.3,
+    "footprint_highest_sampled_mib": 189.6,
+    "footprint_lifetime_peak_mib": 195.8,
+    "full_app_components": true,
+    "image_failures": 0,
+    "library_rows": 133,
+    "os": "Version 27.0.1 (Build 26A434)",
+    "overviews": [
+      {
+        "citations": 7,
+        "footprint_mib": 173.7,
+        "generation_and_persistence_ms": 100.44395830482244,
+        "sample": 1,
+        "view_capture_ms": 258.34662502165884
+      },
+      {
+        "citations": 7,
+        "footprint_mib": 146.3,
+        "generation_and_persistence_ms": 39.9794583208859,
+        "sample": 2,
+        "view_capture_ms": 36.80033335695043
+      },
+      {
+        "citations": 7,
+        "footprint_mib": 144.9,
+        "generation_and_persistence_ms": 54.27695834077895,
+        "sample": 3,
+        "view_capture_ms": 39.070583356078714
+      },
+      {
+        "citations": 7,
+        "footprint_mib": 145.1,
+        "generation_and_persistence_ms": 56.42687500221655,
+        "sample": 4,
+        "view_capture_ms": 38.92262501176447
+      },
+      {
+        "citations": 7,
+        "footprint_mib": 144.2,
+        "generation_and_persistence_ms": 55.0543749704957,
+        "sample": 5,
+        "view_capture_ms": 41.97550000390038
+      },
+      {
+        "citations": 7,
+        "footprint_mib": 144.1,
+        "generation_and_persistence_ms": 46.88104166416451,
+        "sample": 6,
+        "view_capture_ms": 38.9844166347757
+      },
+      {
+        "citations": 7,
+        "footprint_mib": 145.3,
+        "generation_and_persistence_ms": 55.76779169496149,
+        "sample": 7,
+        "view_capture_ms": 41.35449999012053
+      },
+      {
+        "citations": 7,
+        "footprint_mib": 145.1,
+        "generation_and_persistence_ms": 53.757916670292616,
+        "sample": 8,
+        "view_capture_ms": 41.03441664483398
+      },
+      {
+        "citations": 7,
+        "footprint_mib": 144.6,
+        "generation_and_persistence_ms": 55.60820834944025,
+        "sample": 9,
+        "view_capture_ms": 40.84154166048393
+      },
+      {
+        "citations": 7,
+        "footprint_mib": 144.6,
+        "generation_and_persistence_ms": 56.25554168364033,
+        "sample": 10,
+        "view_capture_ms": 39.38391664996743
+      }
+    ],
+    "per_story": [
+      {
+        "blocks": 21,
+        "document_ready": true,
+        "figures": 2,
+        "footprint_mib": 70.6,
+        "images": 2,
+        "images_loaded": 2,
+        "pass": 1,
+        "seconds": 1.2,
+        "source": "Al Jazeera \u2013 Breaking News, World News and Video from Al Jazeera"
+      },
+      {
+        "blocks": 40,
+        "document_ready": true,
+        "figures": 2,
+        "footprint_mib": 92.1,
+        "images": 2,
+        "images_loaded": 2,
+        "pass": 1,
+        "seconds": 1.7,
+        "source": "BBC News"
+      },
+      {
+        "blocks": 27,
+        "document_ready": true,
+        "figures": 0,
+        "footprint_mib": 85.9,
+        "images": 0,
+        "images_loaded": 0,
+        "pass": 1,
+        "seconds": 1.6,
+        "source": "Deutsche Welle: DW.com"
+      },
+      {
+        "blocks": 25,
+        "document_ready": true,
+        "figures": 3,
+        "footprint_mib": 101.9,
+        "images": 3,
+        "images_loaded": 3,
+        "pass": 1,
+        "seconds": 1.3,
+        "source": "World news"
+      },
+      {
+        "blocks": 34,
+        "document_ready": true,
+        "figures": 4,
+        "footprint_mib": 95.9,
+        "images": 4,
+        "images_loaded": 4,
+        "pass": 1,
+        "seconds": 2,
+        "source": "Latest News"
+      },
+      {
+        "blocks": 33,
+        "document_ready": true,
+        "figures": 2,
+        "footprint_mib": 96.6,
+        "images": 2,
+        "images_loaded": 2,
+        "pass": 1,
+        "seconds": 1.1,
+        "source": "Al Jazeera \u2013 Breaking News, World News and Video from Al Jazeera"
+      },
+      {
+        "blocks": 4,
+        "document_ready": true,
+        "figures": 0,
+        "footprint_mib": 99.2,
+        "images": 1,
+        "images_loaded": 1,
+        "pass": 1,
+        "seconds": 1.2,
+        "source": "BBC News"
+      },
+      {
+        "blocks": 19,
+        "document_ready": true,
+        "figures": 1,
+        "footprint_mib": 98.2,
+        "images": 1,
+        "images_loaded": 1,
+        "pass": 1,
+        "seconds": 1.4,
+        "source": "Deutsche Welle: DW.com"
+      },
+      {
+        "blocks": 35,
+        "document_ready": true,
+        "figures": 2,
+        "footprint_mib": 114.5,
+        "images": 2,
+        "images_loaded": 2,
+        "pass": 1,
+        "seconds": 1.3,
+        "source": "World news"
+      },
+      {
+        "blocks": 34,
+        "document_ready": true,
+        "figures": 4,
+        "footprint_mib": 110.5,
+        "images": 4,
+        "images_loaded": 4,
+        "pass": 1,
+        "seconds": 1.6,
+        "source": "Latest News"
+      },
+      {
+        "blocks": 14,
+        "document_ready": true,
+        "figures": 1,
+        "footprint_mib": 103.8,
+        "images": 1,
+        "images_loaded": 1,
+        "pass": 1,
+        "seconds": 1.1,
+        "source": "Al Jazeera \u2013 Breaking News, World News and Video from Al Jazeera"
+      },
+      {
+        "blocks": 41,
+        "document_ready": true,
+        "figures": 2,
+        "footprint_mib": 119.4,
+        "images": 2,
+        "images_loaded": 2,
+        "pass": 1,
+        "seconds": 1.2,
+        "source": "BBC News"
+      },
+      {
+        "blocks": 41,
+        "document_ready": true,
+        "figures": 1,
+        "footprint_mib": 114.1,
+        "images": 1,
+        "images_loaded": 1,
+        "pass": 1,
+        "seconds": 1.7,
+        "source": "Deutsche Welle: DW.com"
+      },
+      {
+        "blocks": 22,
+        "document_ready": true,
+        "figures": 2,
+        "footprint_mib": 123.2,
+        "images": 2,
+        "images_loaded": 2,
+        "pass": 1,
+        "seconds": 1.3,
+        "source": "World news"
+      },
+      {
+        "blocks": 26,
+        "document_ready": true,
+        "figures": 2,
+        "footprint_mib": 116.7,
+        "images": 2,
+        "images_loaded": 2,
+        "pass": 1,
+        "seconds": 1.6,
+        "source": "Latest News"
+      },
+      {
+        "blocks": 5,
+        "document_ready": true,
+        "figures": 1,
+        "footprint_mib": 112.9,
+        "images": 1,
+        "images_loaded": 1,
+        "pass": 1,
+        "seconds": 1.1,
+        "source": "Al Jazeera \u2013 Breaking News, World News and Video from Al Jazeera"
+      },
+      {
+        "blocks": 27,
+        "document_ready": true,
+        "figures": 3,
+        "footprint_mib": 133,
+        "images": 3,
+        "images_loaded": 3,
+        "pass": 1,
+        "seconds": 1.2,
+        "source": "BBC News"
+      },
+      {
+        "blocks": 12,
+        "document_ready": true,
+        "figures": 1,
+        "footprint_mib": 121.1,
+        "images": 1,
+        "images_loaded": 1,
+        "pass": 1,
+        "seconds": 1.4,
+        "source": "Deutsche Welle: DW.com"
+      },
+      {
+        "blocks": 31,
+        "document_ready": true,
+        "figures": 4,
+        "footprint_mib": 163.3,
+        "images": 4,
+        "images_loaded": 4,
+        "pass": 1,
+        "seconds": 1.4,
+        "source": "World news"
+      },
+      {
+        "blocks": 43,
+        "document_ready": true,
+        "figures": 1,
+        "footprint_mib": 133,
+        "images": 1,
+        "images_loaded": 1,
+        "pass": 1,
+        "seconds": 1.6,
+        "source": "Latest News"
+      },
+      {
+        "blocks": 21,
+        "document_ready": true,
+        "figures": 2,
+        "footprint_mib": 136.4,
+        "images": 2,
+        "images_loaded": 2,
+        "pass": 2,
+        "seconds": 1.1,
+        "source": "Al Jazeera \u2013 Breaking News, World News and Video from Al Jazeera"
+      },
+      {
+        "blocks": 40,
+        "document_ready": true,
+        "figures": 2,
+        "footprint_mib": 146.6,
+        "images": 2,
+        "images_loaded": 2,
+        "pass": 2,
+        "seconds": 0.9,
+        "source": "BBC News"
+      },
+      {
+        "blocks": 27,
+        "document_ready": true,
+        "figures": 0,
+        "footprint_mib": 139,
+        "images": 0,
+        "images_loaded": 0,
+        "pass": 2,
+        "seconds": 0.5,
+        "source": "Deutsche Welle: DW.com"
+      },
+      {
+        "blocks": 25,
+        "document_ready": true,
+        "figures": 3,
+        "footprint_mib": 153.9,
+        "images": 3,
+        "images_loaded": 3,
+        "pass": 2,
+        "seconds": 1,
+        "source": "World news"
+      },
+      {
+        "blocks": 34,
+        "document_ready": true,
+        "figures": 4,
+        "footprint_mib": 143.9,
+        "images": 4,
+        "images_loaded": 4,
+        "pass": 2,
+        "seconds": 0.9,
+        "source": "Latest News"
+      },
+      {
+        "blocks": 33,
+        "document_ready": true,
+        "figures": 2,
+        "footprint_mib": 143.5,
+        "images": 2,
+        "images_loaded": 2,
+        "pass": 2,
+        "seconds": 0.9,
+        "source": "Al Jazeera \u2013 Breaking News, World News and Video from Al Jazeera"
+      },
+      {
+        "blocks": 4,
+        "document_ready": true,
+        "figures": 0,
+        "footprint_mib": 140.4,
+        "images": 1,
+        "images_loaded": 1,
+        "pass": 2,
+        "seconds": 0.7,
+        "source": "BBC News"
+      },
+      {
+        "blocks": 19,
+        "document_ready": true,
+        "figures": 1,
+        "footprint_mib": 141.1,
+        "images": 1,
+        "images_loaded": 1,
+        "pass": 2,
+        "seconds": 0.8,
+        "source": "Deutsche Welle: DW.com"
+      },
+      {
+        "blocks": 35,
+        "document_ready": true,
+        "figures": 2,
+        "footprint_mib": 154.7,
+        "images": 2,
+        "images_loaded": 2,
+        "pass": 2,
+        "seconds": 1.1,
+        "source": "World news"
+      },
+      {
+        "blocks": 34,
+        "document_ready": true,
+        "figures": 4,
+        "footprint_mib": 150.1,
+        "images": 4,
+        "images_loaded": 4,
+        "pass": 2,
+        "seconds": 0.9,
+        "source": "Latest News"
+      },
+      {
+        "blocks": 14,
+        "document_ready": true,
+        "figures": 1,
+        "footprint_mib": 143.1,
+        "images": 1,
+        "images_loaded": 1,
+        "pass": 2,
+        "seconds": 0.8,
+        "source": "Al Jazeera \u2013 Breaking News, World News and Video from Al Jazeera"
+      },
+      {
+        "blocks": 41,
+        "document_ready": true,
+        "figures": 2,
+        "footprint_mib": 153.3,
+        "images": 2,
+        "images_loaded": 2,
+        "pass": 2,
+        "seconds": 0.8,
+        "source": "BBC News"
+      },
+      {
+        "blocks": 41,
+        "document_ready": true,
+        "figures": 1,
+        "footprint_mib": 148.8,
+        "images": 1,
+        "images_loaded": 1,
+        "pass": 2,
+        "seconds": 0.8,
+        "source": "Deutsche Welle: DW.com"
+      },
+      {
+        "blocks": 22,
+        "document_ready": true,
+        "figures": 2,
+        "footprint_mib": 155.8,
+        "images": 2,
+        "images_loaded": 2,
+        "pass": 2,
+        "seconds": 1.1,
+        "source": "World news"
+      },
+      {
+        "blocks": 26,
+        "document_ready": true,
+        "figures": 2,
+        "footprint_mib": 146.8,
+        "images": 2,
+        "images_loaded": 2,
+        "pass": 2,
+        "seconds": 1,
+        "source": "Latest News"
+      },
+      {
+        "blocks": 5,
+        "document_ready": true,
+        "figures": 1,
+        "footprint_mib": 142.9,
+        "images": 1,
+        "images_loaded": 1,
+        "pass": 2,
+        "seconds": 0.8,
+        "source": "Al Jazeera \u2013 Breaking News, World News and Video from Al Jazeera"
+      },
+      {
+        "blocks": 27,
+        "document_ready": true,
+        "figures": 3,
+        "footprint_mib": 159.6,
+        "images": 3,
+        "images_loaded": 3,
+        "pass": 2,
+        "seconds": 0.9,
+        "source": "BBC News"
+      },
+      {
+        "blocks": 12,
+        "document_ready": true,
+        "figures": 1,
+        "footprint_mib": 148.8,
+        "images": 1,
+        "images_loaded": 1,
+        "pass": 2,
+        "seconds": 0.8,
+        "source": "Deutsche Welle: DW.com"
+      },
+      {
+        "blocks": 31,
+        "document_ready": true,
+        "figures": 4,
+        "footprint_mib": 189.6,
+        "images": 4,
+        "images_loaded": 4,
+        "pass": 2,
+        "seconds": 1.3,
+        "source": "World news"
+      },
+      {
+        "blocks": 43,
+        "document_ready": true,
+        "figures": 1,
+        "footprint_mib": 155.8,
+        "images": 1,
+        "images_loaded": 1,
+        "pass": 2,
+        "seconds": 2.1,
+        "source": "Latest News"
+      }
+    ],
+    "physical_memory_bytes": 25769803776,
+    "scope": "Production ArticleDetailView reading live panel stories one after another in one window, twice, with real extraction and image loading through the app's network client; isolated temporary storage and settings, AI off. Footprint includes the harness and live fetch setup. Combined sandboxed bundle uses production CacheManager configuration, ten controlled deterministic overview generation/persistence/view captures and five protected public HTTPS Web view loads. Excludes notification authorization, NewsApp scenes, memory pressure and WebKit auxiliary-process footprint.",
+    "stories": 20,
+    "url_cache_disk_capacity_bytes": 536870912,
+    "url_cache_memory_capacity_bytes": 67108864,
+    "url_cache_memory_usage_before_reading_bytes": 226542,
+    "url_cache_memory_usage_bytes": 12956074,
+    "web": [
+      {
+        "footprint_mib": 129.4,
+        "loaded": true,
+        "sample": 1,
+        "seconds": 0.5023548333556391,
+        "source": "Al Jazeera \u2013 Breaking News, World News and Video from Al Jazeera"
+      },
+      {
+        "footprint_mib": 129,
+        "loaded": true,
+        "sample": 2,
+        "seconds": 0.5208845833549276,
+        "source": "BBC News"
+      },
+      {
+        "footprint_mib": 129.2,
+        "loaded": true,
+        "sample": 3,
+        "seconds": 0.47027912497287616,
+        "source": "Deutsche Welle: DW.com"
+      },
+      {
+        "footprint_mib": 129.6,
+        "loaded": true,
+        "sample": 4,
+        "seconds": 0.6268417916726321,
+        "source": "World news"
+      },
+      {
+        "footprint_mib": 129.6,
+        "loaded": true,
+        "sample": 5,
+        "seconds": 1.4347828750032932,
+        "source": "Latest News"
+      }
+    ],
+    "window_height": 800,
+    "window_width": 1100,
+    "source_revision": "0828ec4e5385a8d7aed12e041305480735d6a1ae",
+    "source_has_local_changes": true,
+    "hardware": [
+      "Apple M5",
+      "Mac17,3"
+    ],
+    "toolchain": "Apple Swift version 6.4 (swiftlang-6.4.0.34.1 clang-2100.3.34.1)\nTarget: arm64-apple-macosx27.0.0",
+    "bundle_identifier": "com.marspater.news.workloadcheck"
+  },
+  "earlier_sizing_runs": [
+    {
+      "complete": true,
+      "feeds": [
+        "https://feeds.bbci.co.uk/news/world/rss.xml",
+        "https://www.theguardian.com/world/rss",
+        "https://www.aljazeera.com/xml/rss/all.xml",
+        "https://rss.dw.com/xml/rss-en-top",
+        "https://www.channelnewsasia.com/rssfeeds/8395884"
+      ],
+      "footprint_3s_after_close_mib": 117.7,
+      "footprint_after_each_pass_mib": [
+        133.2,
+        145.2
+      ],
+      "footprint_before_reading_mib": 18.3,
+      "footprint_highest_sampled_mib": 183.6,
+      "footprint_lifetime_peak_mib": 185.1,
+      "full_app_components": true,
+      "image_failures": 0,
+      "os": "Version 27.0.1 (Build 26A434)",
+      "overviews": [
+        {
+          "citations": 7,
+          "footprint_mib": 158.9,
+          "generation_and_persistence_ms": 137.75308337062597,
+          "sample": 1,
+          "view_capture_ms": 441.0610416671261
+        },
+        {
+          "citations": 7,
+          "footprint_mib": 130.2,
+          "generation_and_persistence_ms": 149.51266668504104,
+          "sample": 2,
+          "view_capture_ms": 241.9545416487381
+        },
+        {
+          "citations": 7,
+          "footprint_mib": 131.5,
+          "generation_and_persistence_ms": 139.35304171172902,
+          "sample": 3,
+          "view_capture_ms": 221.48508328245953
+        },
+        {
+          "citations": 7,
+          "footprint_mib": 132.9,
+          "generation_and_persistence_ms": 125.34000002779067,
+          "sample": 4,
+          "view_capture_ms": 205.25733334943652
+        },
+        {
+          "citations": 7,
+          "footprint_mib": 132.5,
+          "generation_and_persistence_ms": 137.20337499398738,
+          "sample": 5,
+          "view_capture_ms": 215.9400833188556
+        },
+        {
+          "citations": 7,
+          "footprint_mib": 132.2,
+          "generation_and_persistence_ms": 113.68670832598582,
+          "sample": 6,
+          "view_capture_ms": 224.7135000070557
+        },
+        {
+          "citations": 7,
+          "footprint_mib": 132.3,
+          "generation_and_persistence_ms": 150.9020000230521,
+          "sample": 7,
+          "view_capture_ms": 227.24141663638875
+        },
+        {
+          "citations": 7,
+          "footprint_mib": 132.8,
+          "generation_and_persistence_ms": 153.5790833295323,
+          "sample": 8,
+          "view_capture_ms": 229.00295828003436
+        },
+        {
+          "citations": 7,
+          "footprint_mib": 132.6,
+          "generation_and_persistence_ms": 145.81408334197477,
+          "sample": 9,
+          "view_capture_ms": 234.83270831638947
+        },
+        {
+          "citations": 7,
+          "footprint_mib": 132.2,
+          "generation_and_persistence_ms": 149.9631666811183,
+          "sample": 10,
+          "view_capture_ms": 230.22054164903238
+        }
+      ],
+      "per_story": [
+        {
+          "blocks": 21,
+          "document_ready": true,
+          "figures": 2,
+          "footprint_mib": 70.5,
+          "images": 2,
+          "images_loaded": 2,
+          "pass": 1,
+          "seconds": 1.2,
+          "source": "Al Jazeera \u2013 Breaking News, World News and Video from Al Jazeera"
+        },
+        {
+          "blocks": 40,
+          "document_ready": true,
+          "figures": 2,
+          "footprint_mib": 94.6,
+          "images": 2,
+          "images_loaded": 2,
+          "pass": 1,
+          "seconds": 1.7,
+          "source": "BBC News"
+        },
+        {
+          "blocks": 25,
+          "document_ready": true,
+          "figures": 3,
+          "footprint_mib": 103.2,
+          "images": 3,
+          "images_loaded": 3,
+          "pass": 1,
+          "seconds": 1.4,
+          "source": "World news"
+        },
+        {
+          "blocks": 27,
+          "document_ready": true,
+          "figures": 0,
+          "footprint_mib": 91,
+          "images": 0,
+          "images_loaded": 0,
+          "pass": 1,
+          "seconds": 1.6,
+          "source": "Deutsche Welle: DW.com"
+        },
+        {
+          "blocks": 34,
+          "document_ready": true,
+          "figures": 4,
+          "footprint_mib": 98.4,
+          "images": 4,
+          "images_loaded": 4,
+          "pass": 1,
+          "seconds": 1.7,
+          "source": "Latest News"
+        },
+        {
+          "blocks": 33,
+          "document_ready": true,
+          "figures": 2,
+          "footprint_mib": 99.7,
+          "images": 2,
+          "images_loaded": 2,
+          "pass": 1,
+          "seconds": 1.2,
+          "source": "Al Jazeera \u2013 Breaking News, World News and Video from Al Jazeera"
+        },
+        {
+          "blocks": 4,
+          "document_ready": true,
+          "figures": 0,
+          "footprint_mib": 101.9,
+          "images": 1,
+          "images_loaded": 1,
+          "pass": 1,
+          "seconds": 1.2,
+          "source": "BBC News"
+        },
+        {
+          "blocks": 35,
+          "document_ready": true,
+          "figures": 2,
+          "footprint_mib": 115.7,
+          "images": 2,
+          "images_loaded": 2,
+          "pass": 1,
+          "seconds": 1.3,
+          "source": "World news"
+        },
+        {
+          "blocks": 9,
+          "document_ready": true,
+          "figures": 1,
+          "footprint_mib": 103.2,
+          "images": 1,
+          "images_loaded": 1,
+          "pass": 1,
+          "seconds": 1.4,
+          "source": "Deutsche Welle: DW.com"
+        },
+        {
+          "blocks": 34,
+          "document_ready": true,
+          "figures": 4,
+          "footprint_mib": 111.7,
+          "images": 4,
+          "images_loaded": 4,
+          "pass": 1,
+          "seconds": 1.7,
+          "source": "Latest News"
+        },
+        {
+          "blocks": 14,
+          "document_ready": true,
+          "figures": 1,
+          "footprint_mib": 105.5,
+          "images": 1,
+          "images_loaded": 1,
+          "pass": 1,
+          "seconds": 1.1,
+          "source": "Al Jazeera \u2013 Breaking News, World News and Video from Al Jazeera"
+        },
+        {
+          "blocks": 41,
+          "document_ready": true,
+          "figures": 2,
+          "footprint_mib": 118.9,
+          "images": 2,
+          "images_loaded": 2,
+          "pass": 1,
+          "seconds": 1.2,
+          "source": "BBC News"
+        },
+        {
+          "blocks": 22,
+          "document_ready": true,
+          "figures": 2,
+          "footprint_mib": 122.4,
+          "images": 2,
+          "images_loaded": 2,
+          "pass": 1,
+          "seconds": 1.3,
+          "source": "World news"
+        },
+        {
+          "blocks": 41,
+          "document_ready": true,
+          "figures": 1,
+          "footprint_mib": 116,
+          "images": 1,
+          "images_loaded": 1,
+          "pass": 1,
+          "seconds": 1.5,
+          "source": "Deutsche Welle: DW.com"
+        },
+        {
+          "blocks": 26,
+          "document_ready": true,
+          "figures": 2,
+          "footprint_mib": 117.6,
+          "images": 2,
+          "images_loaded": 2,
+          "pass": 1,
+          "seconds": 1.7,
+          "source": "Latest News"
+        },
+        {
+          "blocks": 5,
+          "document_ready": true,
+          "figures": 1,
+          "footprint_mib": 113.2,
+          "images": 1,
+          "images_loaded": 1,
+          "pass": 1,
+          "seconds": 1,
+          "source": "Al Jazeera \u2013 Breaking News, World News and Video from Al Jazeera"
+        },
+        {
+          "blocks": 27,
+          "document_ready": true,
+          "figures": 3,
+          "footprint_mib": 133,
+          "images": 3,
+          "images_loaded": 3,
+          "pass": 1,
+          "seconds": 1.2,
+          "source": "BBC News"
+        },
+        {
+          "blocks": 31,
+          "document_ready": true,
+          "figures": 4,
+          "footprint_mib": 162.8,
+          "images": 4,
+          "images_loaded": 4,
+          "pass": 1,
+          "seconds": 1.4,
+          "source": "World news"
+        },
+        {
+          "blocks": 12,
+          "document_ready": true,
+          "figures": 1,
+          "footprint_mib": 138.9,
+          "images": 1,
+          "images_loaded": 1,
+          "pass": 1,
+          "seconds": 1.4,
+          "source": "Deutsche Welle: DW.com"
+        },
+        {
+          "blocks": 43,
+          "document_ready": true,
+          "figures": 1,
+          "footprint_mib": 133.2,
+          "images": 1,
+          "images_loaded": 1,
+          "pass": 1,
+          "seconds": 1.6,
+          "source": "Latest News"
+        },
+        {
+          "blocks": 21,
+          "document_ready": true,
+          "figures": 2,
+          "footprint_mib": 134.4,
+          "images": 2,
+          "images_loaded": 2,
+          "pass": 2,
+          "seconds": 0.9,
+          "source": "Al Jazeera \u2013 Breaking News, World News and Video from Al Jazeera"
+        },
+        {
+          "blocks": 40,
+          "document_ready": true,
+          "figures": 2,
+          "footprint_mib": 143.9,
+          "images": 2,
+          "images_loaded": 2,
+          "pass": 2,
+          "seconds": 0.9,
+          "source": "BBC News"
+        },
+        {
+          "blocks": 25,
+          "document_ready": true,
+          "figures": 3,
+          "footprint_mib": 154.7,
+          "images": 3,
+          "images_loaded": 3,
+          "pass": 2,
+          "seconds": 2.7,
+          "source": "World news"
+        },
+        {
+          "blocks": 27,
+          "document_ready": true,
+          "figures": 0,
+          "footprint_mib": 137,
+          "images": 0,
+          "images_loaded": 0,
+          "pass": 2,
+          "seconds": 0.9,
+          "source": "Deutsche Welle: DW.com"
+        },
+        {
+          "blocks": 34,
+          "document_ready": true,
+          "figures": 4,
+          "footprint_mib": 150.9,
+          "images": 4,
+          "images_loaded": 4,
+          "pass": 2,
+          "seconds": 1.5,
+          "source": "Latest News"
+        },
+        {
+          "blocks": 33,
+          "document_ready": true,
+          "figures": 2,
+          "footprint_mib": 151.8,
+          "images": 2,
+          "images_loaded": 2,
+          "pass": 2,
+          "seconds": 2.1,
+          "source": "Al Jazeera \u2013 Breaking News, World News and Video from Al Jazeera"
+        },
+        {
+          "blocks": 4,
+          "document_ready": true,
+          "figures": 0,
+          "footprint_mib": 143.9,
+          "images": 1,
+          "images_loaded": 1,
+          "pass": 2,
+          "seconds": 2.2,
+          "source": "BBC News"
+        },
+        {
+          "blocks": 35,
+          "document_ready": true,
+          "figures": 2,
+          "footprint_mib": 161.4,
+          "images": 2,
+          "images_loaded": 2,
+          "pass": 2,
+          "seconds": 3.3,
+          "source": "World news"
+        },
+        {
+          "blocks": 9,
+          "document_ready": true,
+          "figures": 1,
+          "footprint_mib": 141.3,
+          "images": 1,
+          "images_loaded": 1,
+          "pass": 2,
+          "seconds": 1.5,
+          "source": "Deutsche Welle: DW.com"
+        },
+        {
+          "blocks": 34,
+          "document_ready": true,
+          "figures": 4,
+          "footprint_mib": 151.8,
+          "images": 4,
+          "images_loaded": 4,
+          "pass": 2,
+          "seconds": 2.5,
+          "source": "Latest News"
+        },
+        {
+          "blocks": 14,
+          "document_ready": true,
+          "figures": 1,
+          "footprint_mib": 144.3,
+          "images": 1,
+          "images_loaded": 1,
+          "pass": 2,
+          "seconds": 1.8,
+          "source": "Al Jazeera \u2013 Breaking News, World News and Video from Al Jazeera"
+        },
+        {
+          "blocks": 41,
+          "document_ready": true,
+          "figures": 2,
+          "footprint_mib": 159.8,
+          "images": 2,
+          "images_loaded": 2,
+          "pass": 2,
+          "seconds": 1.9,
+          "source": "BBC News"
+        },
+        {
+          "blocks": 22,
+          "document_ready": true,
+          "figures": 2,
+          "footprint_mib": 152.8,
+          "images": 2,
+          "images_loaded": 2,
+          "pass": 2,
+          "seconds": 3.6,
+          "source": "World news"
+        },
+        {
+          "blocks": 41,
+          "document_ready": true,
+          "figures": 1,
+          "footprint_mib": 149.6,
+          "images": 1,
+          "images_loaded": 1,
+          "pass": 2,
+          "seconds": 2.1,
+          "source": "Deutsche Welle: DW.com"
+        },
+        {
+          "blocks": 26,
+          "document_ready": true,
+          "figures": 2,
+          "footprint_mib": 142.7,
+          "images": 2,
+          "images_loaded": 2,
+          "pass": 2,
+          "seconds": 2.6,
+          "source": "Latest News"
+        },
+        {
+          "blocks": 5,
+          "document_ready": true,
+          "figures": 1,
+          "footprint_mib": 140,
+          "images": 1,
+          "images_loaded": 1,
+          "pass": 2,
+          "seconds": 1.7,
+          "source": "Al Jazeera \u2013 Breaking News, World News and Video from Al Jazeera"
+        },
+        {
+          "blocks": 27,
+          "document_ready": true,
+          "figures": 3,
+          "footprint_mib": 151,
+          "images": 3,
+          "images_loaded": 3,
+          "pass": 2,
+          "seconds": 2.1,
+          "source": "BBC News"
+        },
+        {
+          "blocks": 31,
+          "document_ready": true,
+          "figures": 4,
+          "footprint_mib": 183.6,
+          "images": 4,
+          "images_loaded": 4,
+          "pass": 2,
+          "seconds": 4.4,
+          "source": "World news"
+        },
+        {
+          "blocks": 12,
+          "document_ready": true,
+          "figures": 1,
+          "footprint_mib": 137.3,
+          "images": 1,
+          "images_loaded": 1,
+          "pass": 2,
+          "seconds": 1.8,
+          "source": "Deutsche Welle: DW.com"
+        },
+        {
+          "blocks": 43,
+          "document_ready": true,
+          "figures": 1,
+          "footprint_mib": 145.2,
+          "images": 1,
+          "images_loaded": 1,
+          "pass": 2,
+          "seconds": 2.9,
+          "source": "Latest News"
+        }
+      ],
+      "physical_memory_bytes": 25769803776,
+      "scope": "Production ArticleDetailView reading live panel stories one after another in one window, twice, with real extraction and image loading through the app's network client; isolated temporary storage and settings, AI off. Footprint includes the harness and live fetch setup. Combined sandboxed bundle uses production CacheManager configuration, ten controlled deterministic overview generation/persistence/view captures and five protected public HTTPS Web view loads. Excludes notification authorization, NewsApp scenes, memory pressure and WebKit auxiliary-process footprint.",
+      "stories": 20,
+      "url_cache_disk_capacity_bytes": 536870912,
+      "url_cache_memory_capacity_bytes": 67108864,
+      "url_cache_memory_usage_before_reading_bytes": 226544,
+      "url_cache_memory_usage_bytes": 12946449,
+      "web": [
+        {
+          "footprint_mib": 117.8,
+          "loaded": true,
+          "sample": 1,
+          "seconds": 0.5891190416296013,
+          "source": "Al Jazeera \u2013 Breaking News, World News and Video from Al Jazeera"
+        },
+        {
+          "footprint_mib": 117.5,
+          "loaded": true,
+          "sample": 2,
+          "seconds": 0.7072624583379366,
+          "source": "BBC News"
+        },
+        {
+          "footprint_mib": 117.5,
+          "loaded": true,
+          "sample": 3,
+          "seconds": 0.6039417083375156,
+          "source": "World news"
+        },
+        {
+          "footprint_mib": 117.6,
+          "loaded": true,
+          "sample": 4,
+          "seconds": 0.4892589999944903,
+          "source": "Deutsche Welle: DW.com"
+        },
+        {
+          "footprint_mib": 117.8,
+          "loaded": true,
+          "sample": 5,
+          "seconds": 0.8934743333375081,
+          "source": "Latest News"
+        }
+      ],
+      "window_height": 800,
+      "window_width": 1100,
+      "source_revision": "0828ec4e5385a8d7aed12e041305480735d6a1ae",
+      "source_has_local_changes": true,
+      "hardware": [
+        "Apple M5",
+        "Mac17,3"
+      ],
+      "toolchain": "Apple Swift version 6.4 (swiftlang-6.4.0.34.1 clang-2100.3.34.1)\nTarget: arm64-apple-macosx27.0.0",
+      "bundle_identifier": "com.marspater.news.workloadcheck"
+    },
+    {
+      "complete": true,
+      "feeds": [
+        "https://feeds.bbci.co.uk/news/world/rss.xml",
+        "https://www.theguardian.com/world/rss",
+        "https://www.aljazeera.com/xml/rss/all.xml",
+        "https://rss.dw.com/xml/rss-en-top",
+        "https://www.channelnewsasia.com/rssfeeds/8395884"
+      ],
+      "footprint_3s_after_close_mib": 131.3,
+      "footprint_after_each_pass_mib": [
+        173.6,
+        194.6
+      ],
+      "footprint_before_reading_mib": 18.5,
+      "footprint_highest_sampled_mib": 213.2,
+      "footprint_lifetime_peak_mib": 214.2,
+      "full_app_components": true,
+      "image_failures": 0,
+      "library_rows": 133,
+      "os": "Version 27.0.1 (Build 26A434)",
+      "overviews": [
+        {
+          "citations": 7,
+          "footprint_mib": 214.2,
+          "generation_and_persistence_ms": 57.981458376161754,
+          "sample": 1,
+          "view_capture_ms": 80.75104164890945
+        },
+        {
+          "citations": 7,
+          "footprint_mib": 164.3,
+          "generation_and_persistence_ms": 54.78649999713525,
+          "sample": 2,
+          "view_capture_ms": 38.78762503154576
+        },
+        {
+          "citations": 7,
+          "footprint_mib": 165,
+          "generation_and_persistence_ms": 46.992791641969234,
+          "sample": 3,
+          "view_capture_ms": 38.33745833253488
+        },
+        {
+          "citations": 7,
+          "footprint_mib": 146.5,
+          "generation_and_persistence_ms": 56.081333314068615,
+          "sample": 4,
+          "view_capture_ms": 38.806041702628136
+        },
+        {
+          "citations": 7,
+          "footprint_mib": 146.4,
+          "generation_and_persistence_ms": 55.07170833880082,
+          "sample": 5,
+          "view_capture_ms": 40.170958323869854
+        },
+        {
+          "citations": 7,
+          "footprint_mib": 144.7,
+          "generation_and_persistence_ms": 53.14195831306279,
+          "sample": 6,
+          "view_capture_ms": 39.68783334130421
+        },
+        {
+          "citations": 7,
+          "footprint_mib": 145.3,
+          "generation_and_persistence_ms": 54.85608335584402,
+          "sample": 7,
+          "view_capture_ms": 40.38004163885489
+        },
+        {
+          "citations": 7,
+          "footprint_mib": 146.3,
+          "generation_and_persistence_ms": 30.087249993812293,
+          "sample": 8,
+          "view_capture_ms": 37.0167083456181
+        },
+        {
+          "citations": 7,
+          "footprint_mib": 146.6,
+          "generation_and_persistence_ms": 54.64887502603233,
+          "sample": 9,
+          "view_capture_ms": 39.541375008411705
+        },
+        {
+          "citations": 7,
+          "footprint_mib": 146.5,
+          "generation_and_persistence_ms": 35.84654163569212,
+          "sample": 10,
+          "view_capture_ms": 40.66487500676885
+        }
+      ],
+      "per_story": [
+        {
+          "blocks": 21,
+          "document_ready": true,
+          "figures": 2,
+          "footprint_mib": 70.7,
+          "images": 2,
+          "images_loaded": 2,
+          "pass": 1,
+          "seconds": 1.1,
+          "source": "Al Jazeera \u2013 Breaking News, World News and Video from Al Jazeera"
+        },
+        {
+          "blocks": 27,
+          "document_ready": true,
+          "figures": 0,
+          "footprint_mib": 75.4,
+          "images": 0,
+          "images_loaded": 0,
+          "pass": 1,
+          "seconds": 1.3,
+          "source": "Deutsche Welle: DW.com"
+        },
+        {
+          "blocks": 40,
+          "document_ready": true,
+          "figures": 2,
+          "footprint_mib": 97.9,
+          "images": 2,
+          "images_loaded": 2,
+          "pass": 1,
+          "seconds": 1.7,
+          "source": "BBC News"
+        },
+        {
+          "blocks": 34,
+          "document_ready": true,
+          "figures": 4,
+          "footprint_mib": 97.3,
+          "images": 4,
+          "images_loaded": 4,
+          "pass": 1,
+          "seconds": 1.6,
+          "source": "Latest News"
+        },
+        {
+          "blocks": 25,
+          "document_ready": true,
+          "figures": 3,
+          "footprint_mib": 108,
+          "images": 3,
+          "images_loaded": 3,
+          "pass": 1,
+          "seconds": 1.2,
+          "source": "World news"
+        },
+        {
+          "blocks": 33,
+          "document_ready": true,
+          "figures": 2,
+          "footprint_mib": 102.7,
+          "images": 2,
+          "images_loaded": 2,
+          "pass": 1,
+          "seconds": 1.1,
+          "source": "Al Jazeera \u2013 Breaking News, World News and Video from Al Jazeera"
+        },
+        {
+          "blocks": 9,
+          "document_ready": true,
+          "figures": 1,
+          "footprint_mib": 92.4,
+          "images": 1,
+          "images_loaded": 1,
+          "pass": 1,
+          "seconds": 1.4,
+          "source": "Deutsche Welle: DW.com"
+        },
+        {
+          "blocks": 4,
+          "document_ready": true,
+          "figures": 0,
+          "footprint_mib": 103,
+          "images": 1,
+          "images_loaded": 1,
+          "pass": 1,
+          "seconds": 1.2,
+          "source": "BBC News"
+        },
+        {
+          "blocks": 34,
+          "document_ready": true,
+          "figures": 4,
+          "footprint_mib": 110.5,
+          "images": 4,
+          "images_loaded": 4,
+          "pass": 1,
+          "seconds": 1.6,
+          "source": "Latest News"
+        },
+        {
+          "blocks": 35,
+          "document_ready": true,
+          "figures": 2,
+          "footprint_mib": 120.2,
+          "images": 2,
+          "images_loaded": 2,
+          "pass": 1,
+          "seconds": 1.3,
+          "source": "World news"
+        },
+        {
+          "blocks": 14,
+          "document_ready": true,
+          "figures": 1,
+          "footprint_mib": 109,
+          "images": 1,
+          "images_loaded": 1,
+          "pass": 1,
+          "seconds": 1.1,
+          "source": "Al Jazeera \u2013 Breaking News, World News and Video from Al Jazeera"
+        },
+        {
+          "blocks": 41,
+          "document_ready": true,
+          "figures": 1,
+          "footprint_mib": 111.7,
+          "images": 1,
+          "images_loaded": 1,
+          "pass": 1,
+          "seconds": 1.6,
+          "source": "Deutsche Welle: DW.com"
+        },
+        {
+          "blocks": 41,
+          "document_ready": true,
+          "figures": 2,
+          "footprint_mib": 121.1,
+          "images": 2,
+          "images_loaded": 2,
+          "pass": 1,
+          "seconds": 1.2,
+          "source": "BBC News"
+        },
+        {
+          "blocks": 26,
+          "document_ready": true,
+          "figures": 2,
+          "footprint_mib": 116.3,
+          "images": 2,
+          "images_loaded": 2,
+          "pass": 1,
+          "seconds": 1.6,
+          "source": "Latest News"
+        },
+        {
+          "blocks": 22,
+          "document_ready": true,
+          "figures": 2,
+          "footprint_mib": 127.3,
+          "images": 2,
+          "images_loaded": 2,
+          "pass": 1,
+          "seconds": 1.3,
+          "source": "World news"
+        },
+        {
+          "blocks": 5,
+          "document_ready": true,
+          "figures": 1,
+          "footprint_mib": 115.5,
+          "images": 1,
+          "images_loaded": 1,
+          "pass": 1,
+          "seconds": 1,
+          "source": "Al Jazeera \u2013 Breaking News, World News and Video from Al Jazeera"
+        },
+        {
+          "blocks": 12,
+          "document_ready": true,
+          "figures": 1,
+          "footprint_mib": 115.1,
+          "images": 1,
+          "images_loaded": 1,
+          "pass": 1,
+          "seconds": 1.3,
+          "source": "Deutsche Welle: DW.com"
+        },
+        {
+          "blocks": 27,
+          "document_ready": true,
+          "figures": 3,
+          "footprint_mib": 134.4,
+          "images": 3,
+          "images_loaded": 3,
+          "pass": 1,
+          "seconds": 1.2,
+          "source": "BBC News"
+        },
+        {
+          "blocks": 43,
+          "document_ready": true,
+          "figures": 1,
+          "footprint_mib": 132.9,
+          "images": 1,
+          "images_loaded": 1,
+          "pass": 1,
+          "seconds": 1.8,
+          "source": "Latest News"
+        },
+        {
+          "blocks": 31,
+          "document_ready": true,
+          "figures": 4,
+          "footprint_mib": 173.6,
+          "images": 4,
+          "images_loaded": 4,
+          "pass": 1,
+          "seconds": 1.4,
+          "source": "World news"
+        },
+        {
+          "blocks": 21,
+          "document_ready": true,
+          "figures": 2,
+          "footprint_mib": 156.5,
+          "images": 2,
+          "images_loaded": 2,
+          "pass": 2,
+          "seconds": 0.9,
+          "source": "Al Jazeera \u2013 Breaking News, World News and Video from Al Jazeera"
+        },
+        {
+          "blocks": 27,
+          "document_ready": true,
+          "figures": 0,
+          "footprint_mib": 157.1,
+          "images": 0,
+          "images_loaded": 0,
+          "pass": 2,
+          "seconds": 0.5,
+          "source": "Deutsche Welle: DW.com"
+        },
+        {
+          "blocks": 40,
+          "document_ready": true,
+          "figures": 2,
+          "footprint_mib": 150.1,
+          "images": 2,
+          "images_loaded": 2,
+          "pass": 2,
+          "seconds": 0.9,
+          "source": "BBC News"
+        },
+        {
+          "blocks": 34,
+          "document_ready": true,
+          "figures": 4,
+          "footprint_mib": 148.3,
+          "images": 4,
+          "images_loaded": 4,
+          "pass": 2,
+          "seconds": 0.9,
+          "source": "Latest News"
+        },
+        {
+          "blocks": 25,
+          "document_ready": true,
+          "figures": 3,
+          "footprint_mib": 157.8,
+          "images": 3,
+          "images_loaded": 3,
+          "pass": 2,
+          "seconds": 1,
+          "source": "World news"
+        },
+        {
+          "blocks": 33,
+          "document_ready": true,
+          "figures": 2,
+          "footprint_mib": 149.8,
+          "images": 2,
+          "images_loaded": 2,
+          "pass": 2,
+          "seconds": 0.8,
+          "source": "Al Jazeera \u2013 Breaking News, World News and Video from Al Jazeera"
+        },
+        {
+          "blocks": 9,
+          "document_ready": true,
+          "figures": 1,
+          "footprint_mib": 140.6,
+          "images": 1,
+          "images_loaded": 1,
+          "pass": 2,
+          "seconds": 0.8,
+          "source": "Deutsche Welle: DW.com"
+        },
+        {
+          "blocks": 4,
+          "document_ready": true,
+          "figures": 0,
+          "footprint_mib": 145.6,
+          "images": 1,
+          "images_loaded": 1,
+          "pass": 2,
+          "seconds": 0.7,
+          "source": "BBC News"
+        },
+        {
+          "blocks": 34,
+          "document_ready": true,
+          "figures": 4,
+          "footprint_mib": 151.1,
+          "images": 4,
+          "images_loaded": 4,
+          "pass": 2,
+          "seconds": 0.9,
+          "source": "Latest News"
+        },
+        {
+          "blocks": 35,
+          "document_ready": true,
+          "figures": 2,
+          "footprint_mib": 158.5,
+          "images": 2,
+          "images_loaded": 2,
+          "pass": 2,
+          "seconds": 1.1,
+          "source": "World news"
+        },
+        {
+          "blocks": 14,
+          "document_ready": true,
+          "figures": 1,
+          "footprint_mib": 147.9,
+          "images": 1,
+          "images_loaded": 1,
+          "pass": 2,
+          "seconds": 0.8,
+          "source": "Al Jazeera \u2013 Breaking News, World News and Video from Al Jazeera"
+        },
+        {
+          "blocks": 41,
+          "document_ready": true,
+          "figures": 1,
+          "footprint_mib": 149.1,
+          "images": 1,
+          "images_loaded": 1,
+          "pass": 2,
+          "seconds": 0.8,
+          "source": "Deutsche Welle: DW.com"
+        },
+        {
+          "blocks": 41,
+          "document_ready": true,
+          "figures": 2,
+          "footprint_mib": 155.3,
+          "images": 2,
+          "images_loaded": 2,
+          "pass": 2,
+          "seconds": 0.8,
+          "source": "BBC News"
+        },
+        {
+          "blocks": 26,
+          "document_ready": true,
+          "figures": 2,
+          "footprint_mib": 148.4,
+          "images": 2,
+          "images_loaded": 2,
+          "pass": 2,
+          "seconds": 0.9,
+          "source": "Latest News"
+        },
+        {
+          "blocks": 22,
+          "document_ready": true,
+          "figures": 2,
+          "footprint_mib": 158.2,
+          "images": 2,
+          "images_loaded": 2,
+          "pass": 2,
+          "seconds": 1.1,
+          "source": "World news"
+        },
+        {
+          "blocks": 5,
+          "document_ready": true,
+          "figures": 1,
+          "footprint_mib": 148,
+          "images": 1,
+          "images_loaded": 1,
+          "pass": 2,
+          "seconds": 0.8,
+          "source": "Al Jazeera \u2013 Breaking News, World News and Video from Al Jazeera"
+        },
+        {
+          "blocks": 12,
+          "document_ready": true,
+          "figures": 1,
+          "footprint_mib": 146.4,
+          "images": 1,
+          "images_loaded": 1,
+          "pass": 2,
+          "seconds": 0.8,
+          "source": "Deutsche Welle: DW.com"
+        },
+        {
+          "blocks": 27,
+          "document_ready": true,
+          "figures": 3,
+          "footprint_mib": 162,
+          "images": 3,
+          "images_loaded": 3,
+          "pass": 2,
+          "seconds": 0.8,
+          "source": "BBC News"
+        },
+        {
+          "blocks": 43,
+          "document_ready": true,
+          "figures": 1,
+          "footprint_mib": 155,
+          "images": 1,
+          "images_loaded": 1,
+          "pass": 2,
+          "seconds": 0.9,
+          "source": "Latest News"
+        },
+        {
+          "blocks": 31,
+          "document_ready": true,
+          "figures": 4,
+          "footprint_mib": 194.6,
+          "images": 4,
+          "images_loaded": 4,
+          "pass": 2,
+          "seconds": 1.3,
+          "source": "World news"
+        }
+      ],
+      "physical_memory_bytes": 25769803776,
+      "scope": "Production ArticleDetailView reading live panel stories one after another in one window, twice, with real extraction and image loading through the app's network client; isolated temporary storage and settings, AI off. Footprint includes the harness and live fetch setup. Combined sandboxed bundle uses production CacheManager configuration, ten controlled deterministic overview generation/persistence/view captures and five protected public HTTPS Web view loads. Excludes notification authorization, NewsApp scenes, memory pressure and WebKit auxiliary-process footprint.",
+      "stories": 20,
+      "url_cache_disk_capacity_bytes": 536870912,
+      "url_cache_memory_capacity_bytes": 67108864,
+      "url_cache_memory_usage_before_reading_bytes": 226500,
+      "url_cache_memory_usage_bytes": 12946512,
+      "web": [
+        {
+          "footprint_mib": 131,
+          "loaded": true,
+          "sample": 1,
+          "seconds": 0.4947505000163801,
+          "source": "Al Jazeera \u2013 Breaking News, World News and Video from Al Jazeera"
+        },
+        {
+          "footprint_mib": 131,
+          "loaded": true,
+          "sample": 2,
+          "seconds": 0.372016541659832,
+          "source": "Deutsche Welle: DW.com"
+        },
+        {
+          "footprint_mib": 131.2,
+          "loaded": true,
+          "sample": 3,
+          "seconds": 0.46908324997639284,
+          "source": "BBC News"
+        },
+        {
+          "footprint_mib": 131.3,
+          "loaded": true,
+          "sample": 4,
+          "seconds": 0.8324282083194703,
+          "source": "Latest News"
+        },
+        {
+          "footprint_mib": 131.3,
+          "loaded": true,
+          "sample": 5,
+          "seconds": 0.6221452916506678,
+          "source": "World news"
+        }
+      ],
+      "window_height": 800,
+      "window_width": 1100,
+      "source_revision": "0828ec4e5385a8d7aed12e041305480735d6a1ae",
+      "source_has_local_changes": true,
+      "hardware": [
+        "Apple M5",
+        "Mac17,3"
+      ],
+      "toolchain": "Apple Swift version 6.4 (swiftlang-6.4.0.34.1 clang-2100.3.34.1)\nTarget: arm64-apple-macosx27.0.0",
+      "bundle_identifier": "com.marspater.news.workloadcheck"
+    }
+  ],
+  "earlier_sizing_limits": "Earlier sizing runs verify identical overview persistence/rendering and app memory. Their Web samples used ended loading state, so only the final run proves native didFinish. The run3 close sample retained the hosting content; it is not a teardown result."
+}

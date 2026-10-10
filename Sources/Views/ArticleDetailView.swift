@@ -1,13 +1,50 @@
 // ArticleDetailView.swift
 // NewsApp Article Detail Reading Experience & Native Toolbar
 
-import SwiftUI
 import AppKit
+import SwiftUI
 
 enum DetailViewMode: String, CaseIterable, Identifiable {
     case reader = "Reader"
     case web = "Web"
     var id: String { rawValue }
+}
+
+/// The reader's toolbar modes: the event overview (events only), the extracted story, or the publisher's page.
+enum ReaderMode: Hashable {
+    case overview
+    case story
+    case web
+
+    static let webShortcut: KeyEquivalent = "r"
+    static let webShortcutModifiers: EventModifiers = [.command, .shift]
+    var toggledPublicationMode: ReaderMode { self == .web ? .story : .web }
+}
+
+/// Window-scoped bindings and actions let menu commands operate on the same reader as its toolbar.
+struct ReaderCommandActions {
+    let mode: Binding<ReaderMode>
+    let textScale: Binding<CGFloat>
+    let hasOverview: Bool
+    let back: () -> Void
+    let reload: (() -> Void)?
+    let copyLink: () -> Void
+    let webBack: (() -> Void)?
+    let webForward: (() -> Void)?
+}
+
+private struct ReaderCommandActionsKey: FocusedValueKey { typealias Value = ReaderCommandActions }
+private struct SelectedStoryKey: FocusedValueKey { typealias Value = FeedArticle }
+
+extension FocusedValues {
+    var readerActions: ReaderCommandActions? {
+        get { self[ReaderCommandActionsKey.self] }
+        set { self[ReaderCommandActionsKey.self] = newValue }
+    }
+    var selectedStory: FeedArticle? {
+        get { self[SelectedStoryKey.self] }
+        set { self[SelectedStoryKey.self] = newValue }
+    }
 }
 
 enum ArticleContentState: Equatable {
@@ -27,6 +64,8 @@ struct ArticleDetailView: View {
     @EnvironmentObject private var savedStories: SavedStoriesManager
     @EnvironmentObject private var readManager: ReadManager
     @EnvironmentObject private var themeManager: ThemeManager
+    @Environment(\.effectiveContrast) private var contrast
+    @Environment(\.effectiveReduceMotion) private var reduceMotion
 
     @State private var viewMode: DetailViewMode = .reader
     @State private var isWebLoading: Bool = false
@@ -35,6 +74,7 @@ struct ArticleDetailView: View {
     @State private var webLoadError: String?
     @State private var webAction: WebNavigationAction? = nil
 
+    @State private var publisherRevisions: [PublisherContentRevision] = []
     @State private var analysis: ArticleAnalysis? = nil
     @State private var isAnalyzing: Bool = false
     @State private var analysisError: String? = nil
@@ -47,6 +87,9 @@ struct ArticleDetailView: View {
     @State private var currentOverview: EventOverviewDocument? = nil
     @State private var highlightedPassage: String? = nil
     @State private var eventMemberArticles: [FeedArticle] = []
+    @State private var isOverviewLoading: Bool = false
+    /// Identifies this reader to the overview coordinator, so closing it never clears another reader's event.
+    @State private var overviewOwner = UUID()
 
     @FocusState private var isViewFocused: Bool
 
@@ -61,6 +104,7 @@ struct ArticleDetailView: View {
         self.allArticles = allArticles
         self._path = path
         self._currentOverview = State(initialValue: overview)
+        self._readerTextScale = State(initialValue: SystemSettingsOverrides.from().textScale ?? 1.0)
         if let mode = initialExperienceMode {
             self._experienceMode = State(initialValue: mode)
         } else if overview != nil {
@@ -94,13 +138,87 @@ struct ArticleDetailView: View {
         return idx + 1 < allArticles.count
     }
 
+    private var readerCommandActions: ReaderCommandActions {
+        ReaderCommandActions(
+            mode: readerModeBinding, textScale: $readerTextScale, hasOverview: currentOverview != nil,
+            back: { if !path.isEmpty { path.removeLast() } },
+            reload: contentState == .loading ? nil : { reloadReaderContent() },
+            copyLink: copyStoryLink,
+            webBack: readerModeBinding.wrappedValue == .web && webCanGoBack ? { webAction = .goBack } : nil,
+            webForward: readerModeBinding.wrappedValue == .web && webCanGoForward ? { webAction = .goForward } : nil
+        )
+    }
+
     var body: some View {
+        contentLayer
+            .background(AppColor.background)
+            .navigationTitle(displaySource)
+            .toolbar(removing: .title)
+            .toolbar { readerToolbar }
+            .focusedSceneValue(\.selectedStory, currentArticle)
+            .focusedSceneValue(\.readerActions, readerCommandActions)
+            .focusable()
+            .focusEffectDisabled()
+            .focused($isViewFocused)
+            .onKeyPress { press in
+                handleKeyPress(press: press)
+            }
+            .transaction { transaction in
+                if reduceMotion {
+                    transaction.animation = nil
+                }
+            }
+            .modifier(
+                ArticleNavigationCommands(
+                    onNextArticle: nextArticle,
+                    onPrevArticle: prevArticle,
+                    onToggleRead: { readManager.toggleRead(currentArticle.id) },
+                    onToggleSave: toggleSave,
+                    onOpenInBrowser: openInBrowser
+                )
+            )
+            // Publisher-input changes invalidate the stored overview; request it again from current inputs.
+            .task(id: "\(activeArticle.id):\(currentArticle.publisherInputHash)") {
+                await loadEventOverviewForActiveArticle()
+            }
+            .task(id: activeArticleContentTaskID) {
+                await refreshActiveArticleFromStore()
+                await ensureContentExtracted(forceRefresh: reloadGeneration > 0)
+            }
+            .task(id: summaryExpanded ? "\(activeArticle.id):\(currentArticle.publisherInputHash)" : nil) {
+                guard summaryExpanded else { return }
+                await startArticleAnalysis()
+            }
+            .task(id: "\(activeArticle.id):\(articleStore.revision)") {
+                let id = activeArticle.id
+                let revisions = try? await articleStore.database.publisherContentRevisions(for: id)
+                guard !Task.isCancelled, activeArticle.id == id else { return }
+                publisherRevisions = revisions ?? []
+            }
+            .onChange(of: currentArticle.publisherInputHash) { _, _ in
+                analysis = nil
+                analysisError = nil
+                isAnalyzing = false
+                // Keep the overview mode so the regenerated overview returns by itself.
+                currentOverview = nil
+            }
+            .onAppear { isViewFocused = true }
+            .onDisappear {
+                let owner = overviewOwner
+                Task {
+                    await OverviewGenerationCoordinator.shared.clearVisibleEvent(owner: owner)
+                }
+            }
+    }
+
+    private var contentLayer: some View {
         Group {
-            // Content Layer
+            // Content Layer: descendants enable focus effects for their own interactive controls
             if experienceMode == .eventOverview, let overview = currentOverview {
                 EventOverviewReaderView(
                     overview: overview,
                     memberArticles: eventMemberArticles.isEmpty ? [currentArticle] : eventMemberArticles,
+                    textScale: readerTextScale,
                     onSelectArticle: { article in
                         activeArticle = article
                         highlightedPassage = nil
@@ -115,64 +233,20 @@ struct ArticleDetailView: View {
                     }
                 )
                 .id(overview.id)
+                .focusEffectDisabled(false)
             } else if viewMode == .reader {
-                readerView.id(activeArticle.id)
+                readerView
+                    .id(activeArticle.id)
+                    .focusEffectDisabled(false)
             } else {
                 webViewContainer
+                    .focusEffectDisabled(false)
             }
         }
-        .background(AppColor.background)
-        .softScrollEdge()
-        .toolbar { readerToolbar }
-        .toolbarBackground(.visible, for: .windowToolbar)
-        .focusable()
-        .focusEffectDisabled()
-        .focused($isViewFocused)
-        .onKeyPress { press in
-            handleKeyPress(press: press)
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .nextArticleCommand)) { _ in nextArticle() }
-        .onReceive(NotificationCenter.default.publisher(for: .prevArticleCommand)) { _ in prevArticle() }
-        .onReceive(NotificationCenter.default.publisher(for: .toggleReadCommand)) { _ in
-            readManager.toggleRead(currentArticle.id)
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .toggleSaveCommand)) { _ in
-            toggleSave()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .openInBrowserCommand)) { _ in
-            openInBrowser()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .toggleViewModeCommand)) { _ in
-            if currentOverview != nil {
-                experienceMode = (experienceMode == .eventOverview ? .sourcePublication : .eventOverview)
-            } else {
-                viewMode = (viewMode == .reader) ? .web : .reader
-            }
-        }
-        .task(id: activeArticle.id) {
-            if currentOverview == nil || !(currentOverview?.memberArticleIDs.contains(activeArticle.id) ?? false) {
-                if let ov = try? await articleStore.fetchEventOverview(forArticleID: activeArticle.id) {
-                    currentOverview = ov
-                    let members = articleStore.articles.filter { ov.memberArticleIDs.contains($0.id) }
-                    eventMemberArticles = members
-                } else {
-                    currentOverview = nil
-                    eventMemberArticles = []
-                    experienceMode = .sourcePublication
-                }
-            } else if let ov = currentOverview {
-                let members = articleStore.articles.filter { ov.memberArticleIDs.contains($0.id) }
-                eventMemberArticles = members
-            }
-        }
-        .task(id: "\(activeArticle.id):\(reloadGeneration)") {
-            await ensureContentExtracted(forceRefresh: reloadGeneration > 0)
-        }
-        .task(id: summaryExpanded ? activeArticle.id : nil) {
-            guard summaryExpanded else { return }
-            await startArticleAnalysis()
-        }
-        .onAppear { isViewFocused = true }
+    }
+
+    private var activeArticleContentTaskID: String {
+        "\(activeArticle.id):\(reloadGeneration)"
     }
 
     // MARK: - Reader View
@@ -185,43 +259,55 @@ struct ArticleDetailView: View {
                     // Highlighted passage cited in Event Overview
                     if let passage = highlightedPassage {
                         HStack(alignment: .top, spacing: 10) {
-                            Image(systemName: "quote.bubble.fill")
-                                .font(.system(size: 14))
-                                .foregroundColor(AppColor.accent)
-                                .padding(.top, 2)
-
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text("Cited in Event Overview")
-                                    .font(.system(size: 11, weight: .bold))
+                            HStack(alignment: .top, spacing: 10) {
+                                Image(systemName: "quote.bubble.fill")
+                                    .font(.system(size: 14))
                                     .foregroundColor(AppColor.accent)
+                                    .padding(.top, 2)
+                                    .accessibilityHidden(true)
 
-                                Text("“\(passage)”")
-                                    .font(.system(size: 13, weight: .medium, design: .serif))
-                                    .foregroundColor(AppColor.primaryText)
-                                    .lineSpacing(2)
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("Cited in Event Overview")
+                                        .font(.system(size: 11, weight: .bold))
+                                        .foregroundColor(AppColor.accent)
+
+                                    Text("“\(passage)”")
+                                        .font(.system(size: 13, weight: .medium, design: .serif))
+                                        .foregroundColor(AppColor.primaryText)
+                                        .lineSpacing(2)
+                                        .textSelection(.enabled)
+                                }
                             }
+                            .accessibilityElement(children: .combine)
+                            .accessibilityLabel("Cited passage in event overview: \(passage)")
 
                             Spacer()
 
                             Button {
-                                highlightedPassage = nil
+                                if reduceMotion {
+                                    highlightedPassage = nil
+                                } else {
+                                    withAnimation(Self.readerAnimation(reduceMotion: reduceMotion)) {
+                                        highlightedPassage = nil
+                                    }
+                                }
                             } label: {
                                 Image(systemName: "xmark.circle.fill")
                                     .font(.system(size: 13))
                                     .foregroundColor(AppColor.secondaryText)
                             }
                             .buttonStyle(.plain)
+                            .buttonBorderShape(.circle)
                             .help("Dismiss citation highlight")
+                            .accessibilityLabel("Dismiss citation highlight")
                         }
                         .padding(12)
                         .background(AppColor.accent.opacity(0.1))
-                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        .clipShape(RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous))
                         .overlay(
-                            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                .stroke(AppColor.accent.opacity(0.3), lineWidth: 1)
+                            RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous)
+                                .stroke(AppColor.accent.opacity(contrast == .increased ? 1 : 0.3), lineWidth: 1)
                         )
-                        .accessibilityElement(children: .combine)
-                        .accessibilityLabel("Cited passage in event overview: \(passage)")
                     }
 
                     // Eyebrow: Source, Date, Reading Time
@@ -232,31 +318,43 @@ struct ArticleDetailView: View {
                             .foregroundColor(AppColor.accent)
 
                         Text("·")
-                            .foregroundColor(AppColor.tertiaryText)
+                            .foregroundColor(tertiaryText)
 
                         Text(currentArticle.publicationDateText)
                             .font(.system(size: 12, weight: .medium))
                             .foregroundColor(AppColor.secondaryText)
 
                         Text("·")
-                            .foregroundColor(AppColor.tertiaryText)
+                            .foregroundColor(tertiaryText)
 
                         Text(readingTimeEstimate)
                             .font(.system(size: 12, weight: .medium))
                             .foregroundColor(AppColor.secondaryText)
                     }
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(
+                        Self.sourceLineAccessibilityLabel(
+                            source: displaySource,
+                            publicationDateText: currentArticle.publicationDateText,
+                            readingTimeEstimate: readingTimeEstimate
+                        ))
 
                     // Headline
                     Text(currentArticle.title)
                         .font(AppTypography.titleFont(for: themeManager.articleTheme, scale: readerTextScale))
                         .foregroundColor(AppColor.primaryText)
                         .lineSpacing(3)
+                        .accessibilityAddTraits(.isHeader)
+                        .accessibilityHeading(.h1)
+                        .textSelection(.enabled)
+
+                    publisherUpdates
 
                     // On-device AI Analysis Section
                     heroImageHeader
 
                     if appSettings.aiEnabled || currentArticle.aiSummary != nil {
-                        DisclosureGroup("On-device summary", isExpanded: $summaryExpanded) {
+                        DisclosureGroup("On-device summary", isExpanded: summaryExpandedBinding) {
                             aiAnalysisSection.padding(.top, AppSpacing.sm)
                         }
                         .font(AppTypography.bodySmall)
@@ -280,7 +378,6 @@ struct ArticleDetailView: View {
                     // Terminal Affordance: "Read original article on <source>"
                     terminalAffordance
 
-
                 }
                 .padding(.horizontal, AppLayout.pageInset)
                 .padding(.vertical, AppSpacing.xl)
@@ -288,18 +385,44 @@ struct ArticleDetailView: View {
                 .frame(maxWidth: .infinity, alignment: .center)
             }
         }
-        .softScrollEdge()
+    }
 
+    @ViewBuilder
+    private var publisherUpdates: some View {
+        let updates = publisherRevisions.filter { $0.kind == .publisherUpdate }
+        if let latest = updates.first {
+            DisclosureGroup("Publisher updated · \(latest.observedAt.formatted(date: .abbreviated, time: .shortened))")
+            {
+                VStack(alignment: .leading, spacing: AppSpacing.sm) {
+                    Text("Changes observed on this Mac. An update is not a verified correction.")
+                    ForEach(updates) { revision in
+                        Text(
+                            "Version \(revision.version) · \(revision.changeDescription) · \(revision.observedAt.formatted(date: .abbreviated, time: .shortened))"
+                        )
+                    }
+                }
+                .font(AppTypography.caption)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.top, AppSpacing.sm)
+            }
+            .font(AppTypography.bodySmall)
+            .foregroundStyle(AppColor.secondaryText)
+        }
     }
 
     @ViewBuilder
     private var heroImageHeader: some View {
-        if let imageUrl = currentArticle.readerDocument?.selectedImage(fallback: currentArticle.imageUrl) ?? (currentArticle.readerDocument == nil ? currentArticle.imageUrl : nil), let url = URL(string: imageUrl),
-           currentArticle.readerDocument?.blocks.contains(where: { $0.kind == .figure && $0.imageURL == imageUrl }) != true {
+        if let imageUrl = currentArticle.readerDocument?.selectedImage(fallback: currentArticle.imageUrl)
+            ?? (currentArticle.readerDocument == nil ? currentArticle.imageUrl : nil), let url = URL(string: imageUrl),
+            currentArticle.readerDocument?.blocks.contains(where: { $0.kind == .figure && $0.imageURL == imageUrl })
+                != true
+        {
             let candidate = currentArticle.readerDocument?.images?.first { $0.url == imageUrl }
-            ReaderFigureView(block: ReaderBlock(kind: .figure, text: candidate?.caption ?? "",
-                imageURL: imageUrl, imageAlt: candidate?.alt, imageCredit: candidate?.credit,
-                imageWidth: candidate?.width, imageHeight: candidate?.height), url: url, textScale: readerTextScale)
+            ReaderFigureView(
+                block: ReaderBlock(
+                    kind: .figure, text: candidate?.caption ?? "",
+                    imageURL: imageUrl, imageAlt: candidate?.alt, imageCredit: candidate?.credit,
+                    imageWidth: candidate?.width, imageHeight: candidate?.height), url: url, textScale: readerTextScale)
         }
     }
 
@@ -325,6 +448,8 @@ struct ArticleDetailView: View {
                 .font(.system(size: 13, weight: .medium))
                 .foregroundColor(AppColor.secondaryText)
         }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Loading full article")
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.vertical, AppSpacing.lg)
     }
@@ -335,6 +460,7 @@ struct ArticleDetailView: View {
                 Image(systemName: "doc.text.magnifyingglass")
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundColor(AppColor.secondaryText)
+                    .accessibilityHidden(true)
                 Text("Full article unavailable in reader")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundColor(AppColor.primaryText)
@@ -344,6 +470,7 @@ struct ArticleDetailView: View {
                 } label: {
                     HStack(spacing: 4) {
                         Image(systemName: "arrow.clockwise")
+                            .accessibilityHidden(true)
                         Text("Retry")
                     }
                     .font(.system(size: 11, weight: .medium))
@@ -356,30 +483,33 @@ struct ArticleDetailView: View {
                 } label: {
                     HStack(spacing: 4) {
                         Image(systemName: "safari")
+                            .accessibilityHidden(true)
                         Text("Open Web View (W)")
                     }
                     .font(.system(size: 11, weight: .semibold))
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
+                .accessibilityLabel("Open Web View")
             }
 
             Text(reason)
                 .font(.system(size: 12))
                 .foregroundColor(AppColor.secondaryText)
 
-            Divider().opacity(0.15)
+            Divider().opacity(Self.dividerOpacity(for: contrast))
 
             Text(currentArticle.fullContent == nil ? "FEED SUMMARY PREVIEW" : "PREVIOUSLY SAVED TEXT")
                 .font(.system(size: 10, weight: .bold))
                 .tracking(1.0)
-                .foregroundColor(AppColor.tertiaryText)
+                .foregroundColor(tertiaryText)
 
             articleDescriptionParagraphs
         }
         .padding(16)
         .background(AppColor.surface.opacity(0.55), in: RoundedRectangle(cornerRadius: AppRadius.card))
-        .overlay(RoundedRectangle(cornerRadius: AppRadius.card).stroke(AppColor.borderSubtle, lineWidth: 1))
+        .overlay(
+            RoundedRectangle(cornerRadius: AppRadius.card).stroke(borderColor(AppColor.borderSubtle), lineWidth: 1))
     }
 
     @ViewBuilder
@@ -389,7 +519,7 @@ struct ArticleDetailView: View {
             ForEach(Array(paragraphs.enumerated()), id: \.offset) { _, paragraph in
                 Text(paragraph)
                     .font(AppTypography.bodyFont(for: themeManager.articleTheme, scale: readerTextScale))
-                    .foregroundColor(AppColor.primaryText.opacity(0.9))
+                    .foregroundColor(readableText(0.9))
                     .lineSpacing(AppTypography.bodyLineSpacing(for: themeManager.articleTheme))
                     .textSelection(.enabled)
             }
@@ -398,13 +528,29 @@ struct ArticleDetailView: View {
 
     private var articleContentParagraphs: some View {
         let storedBlocks = currentArticle.readerDocument?.blocks ?? []
-        let blocks = storedBlocks.isEmpty ? displayParagraphs.map {
-            ReaderBlock(kind: .paragraph, text: $0)
-        } : storedBlocks
+        // Documents stored before a boilerplate or image rule existed are cleaned here too.
+        var blocks =
+            storedBlocks.isEmpty
+            ? displayParagraphs.map {
+                ReaderBlock(kind: .paragraph, text: $0)
+            }
+            : storedBlocks.filter { block in
+                block.kind == .figure
+                    ? ReaderImageCandidate.usable(
+                        url: block.imageURL ?? "", width: block.imageWidth, height: block.imageHeight)
+                    : !ArticleContentRedactor.isBoilerplateLine(block.text)
+            }
+        // The page's own headline repeats the title above it.
+        if let first = blocks.firstIndex(where: { $0.kind != .figure }),
+            EventFeedSummary.titleKey(blocks[first].text) == EventFeedSummary.titleKey(currentArticle.title)
+        {
+            blocks.remove(at: first)
+        }
+        let leadIndex = blocks.firstIndex { $0.kind == .paragraph }
         return VStack(alignment: .leading, spacing: AppSpacing.lg * readerTextScale) {
             // Positions are stable within the immutable, article-keyed reader document.
             ForEach(Array(blocks.enumerated()), id: \.offset) { index, block in
-                readerBlock(block, isLead: index == 0)
+                readerBlock(block, isLead: index == leadIndex)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -419,14 +565,22 @@ struct ArticleDetailView: View {
             }
         case .heading, .subheading:
             Text(readerText(block))
-                .font(.system(size: (block.kind == .heading ? 22 : 15) * readerTextScale, weight: block.kind == .heading ? .bold : .semibold))
+                .font(
+                    .system(
+                        size: (block.kind == .heading ? 22 : 15) * readerTextScale,
+                        weight: block.kind == .heading ? .bold : .semibold)
+                )
                 .foregroundStyle(AppColor.primaryText)
                 .padding(.top, AppSpacing.md)
                 .accessibilityAddTraits(.isHeader)
+                .accessibilityHeading(block.kind == .heading ? .h2 : .h3)
                 .textSelection(.enabled)
         case .quote:
             HStack(alignment: .top, spacing: AppSpacing.md) {
-                Rectangle().fill(AppColor.accent.opacity(0.5)).frame(width: 3)
+                Rectangle()
+                    .fill(AppColor.accent.opacity(Self.quoteBarOpacity(for: contrast)))
+                    .frame(width: 3)
+                    .accessibilityHidden(true)
                 Text(readerText(block))
                     .font(AppTypography.bodyFont(for: themeManager.articleTheme, scale: readerTextScale).italic())
                     .lineSpacing(AppTypography.bodyLineSpacing(for: themeManager.articleTheme) * readerTextScale)
@@ -442,6 +596,7 @@ struct ArticleDetailView: View {
             }
             .font(AppTypography.bodyFont(for: themeManager.articleTheme, scale: readerTextScale))
             .lineSpacing(AppTypography.bodyLineSpacing(for: themeManager.articleTheme) * readerTextScale)
+            .accessibilityElement(children: .combine)
         case .code:
             Text(readerText(block))
                 .font(.system(.body, design: .monospaced))
@@ -451,7 +606,11 @@ struct ArticleDetailView: View {
                 .background(AppColor.surface, in: RoundedRectangle(cornerRadius: AppRadius.control))
         case .paragraph:
             Text(readerText(block))
-                .font(isLead ? AppTypography.leadFont(for: themeManager.articleTheme, scale: readerTextScale) : AppTypography.bodyFont(for: themeManager.articleTheme, scale: readerTextScale))
+                .font(
+                    isLead
+                        ? AppTypography.leadFont(for: themeManager.articleTheme, scale: readerTextScale)
+                        : AppTypography.bodyFont(for: themeManager.articleTheme, scale: readerTextScale)
+                )
                 .foregroundStyle(AppColor.primaryText)
                 .lineSpacing(AppTypography.bodyLineSpacing(for: themeManager.articleTheme) * readerTextScale)
                 .fixedSize(horizontal: false, vertical: true)
@@ -465,15 +624,17 @@ struct ArticleDetailView: View {
             .foregroundStyle(emphasized ? AppColor.accent : AppColor.secondaryText)
             .padding(.horizontal, AppSpacing.sm)
             .padding(.vertical, 6)
-            .background(emphasized ? AppColor.accent.opacity(0.10) : AppColor.badgeBackground,
-                        in: RoundedRectangle(cornerRadius: AppRadius.control))
+            .background(
+                emphasized ? AppColor.accent.opacity(0.10) : AppColor.badgeBackground,
+                in: RoundedRectangle(cornerRadius: AppRadius.control)
+            )
             .fixedSize(horizontal: false, vertical: true)
     }
 
     private var terminalAffordance: some View {
         VStack(spacing: AppSpacing.md) {
             Divider()
-                .opacity(0.15)
+                .opacity(Self.dividerOpacity(for: contrast))
                 .padding(.vertical, AppSpacing.sm)
 
             HStack(spacing: AppSpacing.md) {
@@ -495,6 +656,7 @@ struct ArticleDetailView: View {
                 } label: {
                     HStack(spacing: 6) {
                         Image(systemName: "safari")
+                            .accessibilityHidden(true)
                         Text("Open Web View (W)")
                     }
                     .font(.system(size: 12, weight: .medium))
@@ -503,10 +665,15 @@ struct ArticleDetailView: View {
                     .padding(.vertical, 8)
                     .background(AppColor.surface.opacity(0.85))
                     .clipShape(Capsule())
-                    .overlay(Capsule().stroke(Color.primary.opacity(0.08), lineWidth: 0.5))
+                    .overlay(
+                        Capsule().stroke(
+                            borderColor(Color.primary.opacity(Self.capsuleBorderOpacity(for: contrast))), lineWidth: 0.5
+                        ))
                 }
                 .buttonStyle(.plain)
+                .buttonBorderShape(.capsule)
                 .help("Open Web View (W)")
+                .accessibilityLabel("Open Web View")
 
                 if URL(string: currentArticle.link) != nil {
                     Button {
@@ -514,6 +681,7 @@ struct ArticleDetailView: View {
                     } label: {
                         HStack(spacing: 5) {
                             Image(systemName: "arrow.up.right")
+                                .accessibilityHidden(true)
                             Text("External")
                         }
                         .font(.system(size: 12, weight: .medium))
@@ -522,10 +690,15 @@ struct ArticleDetailView: View {
                         .padding(.vertical, 8)
                         .background(AppColor.surface.opacity(0.6))
                         .clipShape(Capsule())
-                        .overlay(Capsule().stroke(Color.primary.opacity(0.06), lineWidth: 0.5))
+                        .overlay(
+                            Capsule().stroke(
+                                borderColor(Color.primary.opacity(Self.capsuleBorderOpacity(for: contrast))),
+                                lineWidth: 0.5))
                     }
                     .buttonStyle(.plain)
+                    .buttonBorderShape(.capsule)
                     .help("Open in default web browser (O)")
+                    .accessibilityLabel("Open in default web browser")
                 }
             }
         }
@@ -613,43 +786,58 @@ struct ArticleDetailView: View {
             .help("Next article (J)")
         }
         ToolbarItemGroup(placement: .principal) {
-            if currentOverview != nil {
-                Picker("Experience mode", selection: $experienceMode) {
-                    Text("Event overview").tag(ReaderExperienceMode.eventOverview)
-                    Text("Source publication").tag(ReaderExperienceMode.sourcePublication)
+            // One mode control; in the toolbar it takes the system Liquid Glass on macOS 26 and later.
+            Picker("Reading mode", selection: readerModeBinding) {
+                if currentOverview != nil {
+                    Text("Overview").tag(ReaderMode.overview)
                 }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .help("Switch between event overview and source publication")
+                Text("Story").tag(ReaderMode.story)
+                Text("Web").tag(ReaderMode.web)
             }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .fixedSize()
+            .help(
+                currentOverview != nil
+                    ? "Show the event overview, the publisher's story or its page (W)"
+                    : "Show the publisher's story or its page (W)"
+            )
+            .accessibilityLabel("Reading mode")
 
-            if currentOverview == nil || experienceMode == .sourcePublication {
-                Toggle(isOn: Binding(get: { viewMode == .reader }, set: { if $0 { viewMode = .reader } })) {
-                    Label("Reader", systemImage: "doc.richtext")
+            if isOverviewLoading && currentOverview == nil {
+                HStack(spacing: 6) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("Loading event overview…")
+                        .font(AppTypography.caption)
+                        .foregroundColor(AppColor.secondaryText)
                 }
-                .toggleStyle(.button)
-                .help("Read extracted article (W)")
-                Toggle(isOn: Binding(get: { viewMode == .web }, set: { if $0 { viewMode = .web } })) {
-                    Label("Web", systemImage: "globe")
-                }
-                .toggleStyle(.button)
-                .help("View publisher website (W)")
+                .help("Generating evidence-backed event overview…")
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("Loading event overview")
             }
         }
         ToolbarItemGroup(placement: .primaryAction) {
-            if viewMode == .web {
-                Button { webAction = .goBack } label: {
+            if readerModeBinding.wrappedValue == .web {
+                Button {
+                    webAction = .goBack
+                } label: {
                     Label("Browser back", systemImage: "arrow.left")
                 }
                 .disabled(!webCanGoBack)
-                Button { webAction = .goForward } label: {
+                .help("Browser back")
+                Button {
+                    webAction = .goForward
+                } label: {
                     Label("Browser forward", systemImage: "arrow.right")
                 }
                 .disabled(!webCanGoForward)
+                .help("Browser forward")
             }
             Button(action: toggleSave) {
-                Label(isSaved ? "Remove from Saved Stories" : "Save Story",
-                      systemImage: isSaved ? "bookmark.fill" : "bookmark")
+                Label(
+                    isSaved ? "Remove from Saved Stories" : "Save Story",
+                    systemImage: isSaved ? "bookmark.fill" : "bookmark")
             }
             .help(isSaved ? "Remove from Saved Stories (S)" : "Save Story (S)")
 
@@ -657,6 +845,8 @@ struct ArticleDetailView: View {
                 ShareLink(item: url, subject: Text(currentArticle.title)) {
                     Label("Share story", systemImage: "square.and.arrow.up")
                 }
+                .help("Share story")
+                .accessibilityLabel("Share story")
             }
             Menu {
                 Picker("Text size", selection: $readerTextScale) {
@@ -671,29 +861,50 @@ struct ArticleDetailView: View {
                 }
                 Divider()
                 Button("Reload reader content", systemImage: "arrow.clockwise") {
-                    summaryExpanded = false
-                    analysis = nil
-                    reloadGeneration += 1
+                    reloadReaderContent()
                 }
                 .disabled(contentState == .loading)
                 Button("Copy link", systemImage: "link") {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(currentArticle.link, forType: .string)
+                    copyStoryLink()
                 }
                 Button("Open in browser", systemImage: "safari", action: openInBrowser)
             } label: {
                 Label("Reading options", systemImage: "textformat.size")
             }
             .help("Reading style and article actions")
+            .accessibilityLabel("Reading style and article actions")
         }
+    }
+
+    /// The toolbar's single mode choice, mapped onto the overview and reader/web state it replaces.
+    private var readerModeBinding: Binding<ReaderMode> {
+        Binding(
+            get: {
+                if experienceMode == .eventOverview && currentOverview != nil { return .overview }
+                return viewMode == .web ? .web : .story
+            },
+            set: { mode in
+                switch mode {
+                case .overview:
+                    experienceMode = .eventOverview
+                case .story:
+                    experienceMode = .sourcePublication
+                    viewMode = .reader
+                case .web:
+                    experienceMode = .sourcePublication
+                    viewMode = .web
+                }
+            }
+        )
     }
 
     // MARK: - Navigation & Actions
 
     private func nextArticle() {
         guard !allArticles.isEmpty,
-              let idx = allArticles.firstIndex(where: { $0.id == activeArticle.id }),
-              idx + 1 < allArticles.count else { return }
+            let idx = allArticles.firstIndex(where: { $0.id == activeArticle.id }),
+            idx + 1 < allArticles.count
+        else { return }
         resetReaderState()
         let next = allArticles[idx + 1]
         activeArticle = next
@@ -702,12 +913,24 @@ struct ArticleDetailView: View {
 
     private func prevArticle() {
         guard !allArticles.isEmpty,
-              let idx = allArticles.firstIndex(where: { $0.id == activeArticle.id }),
-              idx > 0 else { return }
+            let idx = allArticles.firstIndex(where: { $0.id == activeArticle.id }),
+            idx > 0
+        else { return }
         resetReaderState()
         let prev = allArticles[idx - 1]
         activeArticle = prev
         readManager.markAsRead(prev.id)
+    }
+
+    private func reloadReaderContent() {
+        summaryExpanded = false
+        analysis = nil
+        reloadGeneration += 1
+    }
+
+    private func copyStoryLink() {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(currentArticle.link, forType: .string)
     }
 
     private func toggleSave() {
@@ -724,8 +947,12 @@ struct ArticleDetailView: View {
         }
     }
 
+    static func shouldPassThroughToSystem(modifiers: EventModifiers) -> Bool {
+        !modifiers.intersection([.command, .control, .option]).isEmpty
+    }
+
     private func handleKeyPress(press: KeyPress) -> KeyPress.Result {
-        guard press.modifiers.intersection([.command, .control, .option]).isEmpty else { return .ignored }
+        guard !Self.shouldPassThroughToSystem(modifiers: press.modifiers) else { return .ignored }
         if press.key == .escape {
             if !path.isEmpty { path.removeLast() }
             return .handled
@@ -763,15 +990,63 @@ struct ArticleDetailView: View {
         return .ignored
     }
 
-    private var displaySource: String {
-        (currentArticle.source.components(separatedBy: "\n").first ?? currentArticle.source)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+    private var summaryExpandedBinding: Binding<Bool> {
+        Binding(
+            get: { summaryExpanded },
+            set: { val in
+                if reduceMotion {
+                    summaryExpanded = val
+                } else {
+                    withAnimation(Self.readerAnimation(reduceMotion: reduceMotion)) {
+                        summaryExpanded = val
+                    }
+                }
+            }
+        )
     }
+
+    static func readerAnimation(reduceMotion: Bool) -> Animation? {
+        reduceMotion ? nil : .easeInOut(duration: 0.2)
+    }
+
+    static func sourceLineAccessibilityLabel(source: String, publicationDateText: String, readingTimeEstimate: String)
+        -> String
+    {
+        "\(source), \(publicationDateText), \(readingTimeEstimate)"
+    }
+
+    static func dividerOpacity(for contrast: ColorSchemeContrast) -> Double {
+        contrast == .increased ? 0.60 : 0.15
+    }
+
+    static func quoteBarOpacity(for contrast: ColorSchemeContrast) -> Double {
+        contrast == .increased ? 1.0 : 0.5
+    }
+
+    static func capsuleBorderOpacity(for contrast: ColorSchemeContrast) -> Double {
+        contrast == .increased ? 0.35 : 0.08
+    }
+
+    private var tertiaryText: Color {
+        contrast == .increased ? AppColor.secondaryText : AppColor.tertiaryText
+    }
+
+    /// Increase Contrast restores full-strength text that is otherwise slightly softened.
+    private func readableText(_ opacity: Double) -> Color {
+        contrast == .increased ? AppColor.primaryText : AppColor.primaryText.opacity(opacity)
+    }
+
+    private func borderColor(_ standard: Color) -> Color {
+        contrast == .increased ? AppColor.primaryText.opacity(0.3) : standard
+    }
+
+    private var displaySource: String { currentArticle.publisherName }
 
     private var displayCategory: String? {
         let raw = analysis?.category ?? currentArticle.category
         guard let raw = raw, !raw.isEmpty else { return nil }
-        let firstLine = raw.components(separatedBy: .newlines)
+        let firstLine =
+            raw.components(separatedBy: .newlines)
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .first(where: { !$0.isEmpty }) ?? ""
         guard !firstLine.isEmpty else { return nil }
@@ -794,6 +1069,8 @@ struct ArticleDetailView: View {
                     .font(.system(size: 13, weight: .medium))
                     .foregroundColor(AppColor.intelligence)
             }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("Analyzing article with on-device AI")
             .padding(12)
             .background(AppColor.surface, in: RoundedRectangle(cornerRadius: AppRadius.card))
         } else if let analysis = analysis {
@@ -803,15 +1080,20 @@ struct ArticleDetailView: View {
                     Image(systemName: "sparkles")
                         .font(.system(size: 12))
                         .foregroundColor(AppColor.intelligence)
-                    Text(analysis.modelIdentifier == "apple.natural-language.fallback" ? "Extractive summary" : "AI-generated summary")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(AppColor.primaryText)
+                        .accessibilityHidden(true)
+                    Text(
+                        analysis.modelIdentifier == "apple.natural-language.fallback"
+                            ? "Extractive summary" : "AI-generated summary"
+                    )
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(AppColor.primaryText)
                 }
 
                 Text(analysis.summary)
                     .font(.system(size: 14, weight: .regular))
-                    .foregroundColor(AppColor.primaryText.opacity(0.92))
+                    .foregroundColor(readableText(0.92))
                     .lineSpacing(AppTypography.bodyLineSpacing(for: themeManager.articleTheme))
+                    .textSelection(.enabled)
 
                 // Key Takeaways
                 if !analysis.keyPoints.isEmpty {
@@ -827,9 +1109,11 @@ struct ArticleDetailView: View {
                                     .fill(AppColor.intelligence.opacity(0.8))
                                     .frame(width: 5, height: 5)
                                     .padding(.top, 6)
+                                    .accessibilityHidden(true)
                                 Text(point)
                                     .font(.system(size: 13))
-                                    .foregroundColor(AppColor.primaryText.opacity(0.88))
+                                    .foregroundColor(readableText(0.88))
+                                    .textSelection(.enabled)
                             }
                         }
                     }
@@ -860,7 +1144,13 @@ struct ArticleDetailView: View {
                     .foregroundColor(AppColor.secondaryText)
                 Spacer()
                 Button("Close summary") {
-                    summaryExpanded = false
+                    if reduceMotion {
+                        summaryExpanded = false
+                    } else {
+                        withAnimation(Self.readerAnimation(reduceMotion: reduceMotion)) {
+                            summaryExpanded = false
+                        }
+                    }
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
@@ -873,6 +1163,7 @@ struct ArticleDetailView: View {
                     Image(systemName: "sparkles")
                         .font(.system(size: 12))
                         .foregroundColor(AppColor.intelligence)
+                        .accessibilityHidden(true)
                     Text("AI-generated summary")
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundColor(AppColor.primaryText)
@@ -880,8 +1171,9 @@ struct ArticleDetailView: View {
 
                 Text(ai)
                     .font(.system(size: 14, weight: .regular))
-                    .foregroundColor(AppColor.primaryText.opacity(0.92))
+                    .foregroundColor(readableText(0.92))
                     .lineSpacing(AppTypography.bodyLineSpacing(for: themeManager.articleTheme))
+                    .textSelection(.enabled)
             }
             .padding(14)
             .background(AppColor.surface, in: RoundedRectangle(cornerRadius: AppRadius.card))
@@ -890,9 +1182,25 @@ struct ArticleDetailView: View {
 
     // MARK: - Independent Extraction & Analysis
 
+    /// Lists and briefings may hold an older snapshot. Guarded writes compare against stored publisher
+    /// inputs, so the reader starts from them.
+    private func refreshActiveArticleFromStore() async {
+        let id = activeArticle.id
+        guard let stored = try? await articleStore.database.fetchArticles(limit: 1, id: id).first,
+            !Task.isCancelled, activeArticle.id == id, stored.id == id,
+            stored.publisherInputHash != activeArticle.publisherInputHash
+        else { return }
+        activeArticle = stored
+    }
+
     private func ensureContentExtracted(forceRefresh: Bool = false) async {
-        if !forceRefresh, currentArticle.readerDocument.map({ (1...ReaderDocument.currentVersion).contains($0.version) }) == true,
-           let existing = currentArticle.fullContent, !ArticleContentRedactor.redactAndSplit(existing).isEmpty {
+        // A stored document stands in for extraction only with publisher text; feed media alone does not.
+        if !forceRefresh,
+            currentArticle.readerDocument.map({
+                (1...ReaderDocument.currentVersion).contains($0.version) && $0.hasPublisherText
+            }) == true,
+            let existing = currentArticle.fullContent, !ArticleContentRedactor.redactAndSplit(existing).isEmpty
+        {
             contentState = .ready
             return
         }
@@ -904,6 +1212,7 @@ struct ArticleDetailView: View {
         }
         let allowInsecure = appSettings.allowInsecureHTTP
         let targetId = currentArticle.id
+        let expectedInputHash = currentArticle.publisherInputHash
 
         guard !Task.isCancelled else { return }
         contentState = .loading
@@ -919,23 +1228,29 @@ struct ArticleDetailView: View {
             case .success(let content, let imageUrl, let extractedDocument):
                 var document = extractedDocument
                 if let extractedDocument {
-                    document = extractedDocument.curated(feedImage: currentArticle.imageUrl, title: currentArticle.title)
+                    document = extractedDocument.curated(
+                        feedImage: currentArticle.imageUrl, title: currentArticle.title)
                     do {
                         let repeated = try await articleStore.database.repeatedImageURLs(source: currentArticle.source)
                         try Task.checkCancellation()
                         guard activeArticle.id == targetId else { return }
                         document = document?.curated(feedImage: nil, title: currentArticle.title, excluding: repeated)
-                    } catch is CancellationError { return }
-                    catch { /* Recurrence is optional; protected images still use local filters. */ }
+                    } catch is CancellationError { return } catch
+                    { /* Recurrence is optional; protected images still use local filters. */  }
                 }
-                await articleStore.updateEnrichment(
+                let saved = await articleStore.updateEnrichment(
                     id: targetId,
                     content: content,
                     image: imageUrl,
                     readerDocument: document,
-                    identityEvidence: extraction.evidence
+                    identityEvidence: extraction.evidence,
+                    expectedInputHash: expectedInputHash
                 )
                 guard !Task.isCancelled, activeArticle.id == targetId else { return }
+                guard saved else {
+                    contentState = .fallback(reason: "Publisher content changed while loading. Reload to try again.")
+                    return
+                }
                 var updated = self.activeArticle
                 updated.fullContent = content
                 updated.readerDocument = document
@@ -962,12 +1277,15 @@ struct ArticleDetailView: View {
     private func startArticleAnalysis() async {
         guard !Task.isCancelled else { return }
         let targetID = activeArticle.id
+        let targetArticle = currentArticle
         analysisError = nil
         isAnalyzing = false
 
         // Preserve persisted model identity and analysis version.
-        if let cached = await articleStore.fetchArticleAnalysis(for: activeArticle.id), cached.analysisVersion >= 2 {
-            guard !Task.isCancelled, activeArticle.id == targetID else { return }
+        if let cached = await articleStore.fetchArticleAnalysis(for: activeArticle.id), cached.analysisVersion >= 3 {
+            guard !Task.isCancelled, activeArticle.id == targetID,
+                currentArticle.publisherInputHash == targetArticle.publisherInputHash
+            else { return }
             self.analysis = cached
             return
         }
@@ -976,7 +1294,6 @@ struct ArticleDetailView: View {
         guard !Task.isCancelled, activeArticle.id == targetID, appSettings.aiEnabled else { return }
 
         isAnalyzing = true
-        let targetArticle = currentArticle
 
         do {
             try Task.checkCancellation()
@@ -996,8 +1313,14 @@ struct ArticleDetailView: View {
 
             try Task.checkCancellation()
 
-            await articleStore.saveArticleAnalysis(result, for: targetArticle.id)
+            let saved = await articleStore.saveArticleAnalysis(
+                result, for: targetArticle.id, expectedInputHash: targetArticle.publisherInputHash)
             guard !Task.isCancelled, activeArticle.id == targetArticle.id else { return }
+            guard saved, currentArticle.publisherInputHash == targetArticle.publisherInputHash else {
+                isAnalyzing = false
+                analysisError = "Publisher content changed during analysis. Open the summary again to retry."
+                return
+            }
             self.analysis = result
             self.isAnalyzing = false
         } catch is CancellationError {
@@ -1006,6 +1329,78 @@ struct ArticleDetailView: View {
             if !Task.isCancelled, activeArticle.id == targetID {
                 self.analysisError = error.localizedDescription
                 self.isAnalyzing = false
+            }
+        }
+    }
+
+    private func loadEventOverviewForActiveArticle() async {
+        let articleID = activeArticle.id
+        let inputHash = currentArticle.publisherInputHash
+        guard !Task.isCancelled else { return }
+        let summaries = (try? await articleStore.eventFeedSummaries(for: [articleID])) ?? []
+        guard !Task.isCancelled, activeArticle.id == articleID,
+            currentArticle.publisherInputHash == inputHash
+        else { return }
+        guard let summary = summaries.first, summary.isConfirmed, summary.sources.count >= 2 else {
+            isOverviewLoading = false
+            currentOverview = nil
+            eventMemberArticles = []
+            experienceMode = .sourcePublication
+            await OverviewGenerationCoordinator.shared.clearVisibleEvent(owner: overviewOwner)
+            return
+        }
+
+        let eventID = summary.eventID
+        let membershipVersion = summary.membershipVersion
+
+        if let existing = currentOverview,
+            existing.eventID == eventID,
+            !existing.isStale(currentMembershipVersion: membershipVersion)
+        {
+            isOverviewLoading = false
+            let members = (try? await articleStore.eventMemberArticles(eventID: eventID)) ?? []
+            guard !Task.isCancelled, activeArticle.id == articleID,
+                currentArticle.publisherInputHash == inputHash
+            else { return }
+            eventMemberArticles = members.isEmpty ? [activeArticle] : members
+            return
+        }
+
+        let members = (try? await articleStore.eventMemberArticles(eventID: eventID)) ?? []
+        guard !Task.isCancelled, activeArticle.id == articleID,
+            currentArticle.publisherInputHash == inputHash
+        else { return }
+        let resolvedMembers = members.isEmpty ? [activeArticle] : members
+        let eventTitle = resolvedMembers.first?.title ?? summary.members.first?.title ?? activeArticle.title
+
+        // Never show another event's overview while this one loads. The reader returns to the overview by
+        // itself only if it was already showing one (J/K across events); otherwise it stays on the article.
+        let returnToOverview = experienceMode == .eventOverview
+        if currentOverview?.eventID != eventID {
+            currentOverview = nil
+            experienceMode = .sourcePublication
+        }
+        isOverviewLoading = true
+
+        let doc = await OverviewGenerationCoordinator.shared.setVisibleEvent(
+            eventID: eventID,
+            eventTitle: eventTitle,
+            membershipVersion: membershipVersion,
+            articles: resolvedMembers,
+            store: articleStore,
+            owner: overviewOwner
+        )
+
+        guard !Task.isCancelled, activeArticle.id == articleID,
+            currentArticle.publisherInputHash == inputHash
+        else { return }
+
+        isOverviewLoading = false
+        if let doc = doc {
+            currentOverview = doc
+            eventMemberArticles = resolvedMembers
+            if returnToOverview && viewMode == .reader {
+                experienceMode = .eventOverview
             }
         }
     }
@@ -1036,8 +1431,9 @@ private struct ReaderTagLayout: Layout {
     func placeSubviews(in bounds: CGRect, proposal _: ProposedViewSize, subviews: Subviews, cache _: inout ()) {
         let layout = arrange(width: bounds.width, subviews: subviews)
         for (index, item) in layout.items.enumerated() {
-            subviews[index].place(at: CGPoint(x: bounds.minX + item.minX, y: bounds.minY + item.minY),
-                                 proposal: ProposedViewSize(item.size))
+            subviews[index].place(
+                at: CGPoint(x: bounds.minX + item.minX, y: bounds.minY + item.minY),
+                proposal: ProposedViewSize(item.size))
         }
     }
 
@@ -1062,22 +1458,29 @@ private struct ReaderTagLayout: Layout {
     }
 }
 
-
 /// Whole-image fit plus a fixed ratio keeps known media stable before loading.
 struct ReaderFigureView: View {
     let block: ReaderBlock
     let url: URL
     var textScale: CGFloat = 1
 
+    static func effectiveImageAlt(for block: ReaderBlock) -> String {
+        if let alt = block.imageAlt?.trimmingCharacters(in: .whitespacesAndNewlines), !alt.isEmpty {
+            return alt
+        }
+        return "Article image"
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: AppSpacing.sm) {
             ArticleRemoteImage(url: url) { phase in
                 ZStack {
                     AppColor.surface
+                        .accessibilityHidden(true)
                     switch phase {
                     case .success(let image):
                         image.resizable().aspectRatio(contentMode: .fit)
-                            .accessibilityLabel(block.imageAlt ?? "Article image")
+                            .accessibilityLabel(Self.effectiveImageAlt(for: block))
                     case .failure:
                         Label("Image unavailable", systemImage: "photo").foregroundStyle(AppColor.secondaryText)
                     case .empty:
@@ -1090,11 +1493,14 @@ struct ReaderFigureView: View {
                 .clipShape(RoundedRectangle(cornerRadius: AppRadius.card))
             }
             if !block.text.isEmpty {
-                Text(block.text).font(.system(size: 11 * textScale)).foregroundStyle(AppColor.secondaryText).textSelection(.enabled)
+                Text(block.text).font(.system(size: 11 * textScale)).foregroundStyle(AppColor.secondaryText)
+                    .textSelection(.enabled)
             }
             if let credit = block.imageCredit, !credit.isEmpty {
-                Text(credit).font(.system(size: 11 * textScale)).foregroundStyle(AppColor.secondaryText).textSelection(.enabled)
-                    .accessibilityLabel("Image credit: " + credit)
+                Text(credit).font(.system(size: 11 * textScale)).foregroundStyle(AppColor.secondaryText).textSelection(
+                    .enabled
+                )
+                .accessibilityLabel("Image credit: " + credit)
             }
             Text("Image source: " + (url.host ?? "Publisher"))
                 .font(.system(size: 11 * textScale)).foregroundStyle(AppColor.secondaryText).textSelection(.enabled)
@@ -1107,8 +1513,27 @@ struct ReaderFigureView: View {
     }
 }
 
+private struct ArticleNavigationCommands: ViewModifier {
+    let onNextArticle: () -> Void
+    let onPrevArticle: () -> Void
+    let onToggleRead: () -> Void
+    let onToggleSave: () -> Void
+    let onOpenInBrowser: () -> Void
+
+    func body(content: Content) -> some View {
+        content
+            .onReceive(NotificationCenter.default.publisher(for: .nextArticleCommand)) { _ in onNextArticle() }
+            .onReceive(NotificationCenter.default.publisher(for: .prevArticleCommand)) { _ in onPrevArticle() }
+            .onReceive(NotificationCenter.default.publisher(for: .toggleReadCommand)) { _ in onToggleRead() }
+            .onReceive(NotificationCenter.default.publisher(for: .toggleSaveCommand)) { _ in onToggleSave() }
+            .onReceive(NotificationCenter.default.publisher(for: .openInBrowserCommand)) { _ in onOpenInBrowser() }
+    }
+}
+
 func readerText(_ block: ReaderBlock) -> AttributedString {
-    guard let runs = block.inlineRuns, runs.map(\.text).joined() == block.text else { return AttributedString(block.text) }
+    guard let runs = block.inlineRuns, runs.map(\.text).joined() == block.text else {
+        return AttributedString(block.text)
+    }
     var text = AttributedString()
     for run in runs {
         var part = AttributedString(run.text)

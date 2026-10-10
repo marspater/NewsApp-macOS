@@ -1,0 +1,143 @@
+{
+  "clustering_library_rows": 400,
+  "clustering_pending_at_cancel": [
+    399,
+    399,
+    399,
+    399,
+    399,
+    399,
+    399,
+    399,
+    399,
+    399
+  ],
+  "completion_deadline_seconds": 2,
+  "date": "2026-10-02",
+  "hardware": {
+    "cpu": "Apple M5",
+    "memory_bytes": 25769803776,
+    "model": "Mac17,3"
+  },
+  "ingestion_batch_rows": 20001,
+  "ingestion_body_characters": 8360,
+  "measurement": "systemUptime immediately before Task.cancel to completion of the cancelled operation, including rollback; observer polling excluded",
+  "raw_runs": [
+    {
+      "clustering_library_rows": 400,
+      "clustering_pending_at_cancel": [
+        399,
+        399,
+        399,
+        399,
+        399
+      ],
+      "ingestion_batch_rows": 20001,
+      "ingestion_body_characters": 8360,
+      "samples_ms": {
+        "clustering": [
+          0.7309583306778222,
+          1.2465000036172569,
+          0.2925416629295796,
+          2.1306666603777558,
+          2.1049999922979623
+        ],
+        "ingestion_rollback": [
+          6.441916688345373,
+          6.032500008586794,
+          6.320041662547737,
+          5.981125024845824,
+          6.282999995164573
+        ]
+      },
+      "samples_per_operation": 5,
+      "sqlite_version": "3.54.0",
+      "wal_spill_threshold_bytes": 1048576
+    },
+    {
+      "clustering_library_rows": 400,
+      "clustering_pending_at_cancel": [
+        399,
+        399,
+        399,
+        399,
+        399
+      ],
+      "ingestion_batch_rows": 20001,
+      "ingestion_body_characters": 8360,
+      "samples_ms": {
+        "clustering": [
+          0.6614166777580976,
+          1.3888750108890235,
+          0.6653333257418126,
+          1.3805833295919,
+          0.513250008225441
+        ],
+        "ingestion_rollback": [
+          7.093083317158744,
+          6.931124982656911,
+          17.098416661610827,
+          6.641458341619,
+          7.320083328522742
+        ]
+      },
+      "samples_per_operation": 5,
+      "sqlite_version": "3.54.0",
+      "wal_spill_threshold_bytes": 1048576
+    }
+  ],
+  "samples_ms": {
+    "clustering": [
+      0.7309583306778222,
+      1.2465000036172569,
+      0.2925416629295796,
+      2.1306666603777558,
+      2.1049999922979623,
+      0.6614166777580976,
+      1.3888750108890235,
+      0.6653333257418126,
+      1.3805833295919,
+      0.513250008225441
+    ],
+    "ingestion_rollback": [
+      6.441916688345373,
+      6.032500008586794,
+      6.320041662547737,
+      5.981125024845824,
+      6.282999995164573,
+      7.093083317158744,
+      6.931124982656911,
+      17.098416661610827,
+      6.641458341619,
+      7.320083328522742
+    ]
+  },
+  "samples_per_operation": 10,
+  "samples_per_run": 5,
+  "software": {
+    "Swift": "6.4",
+    "Xcode": "27.0 (27A266a)",
+    "architecture": "arm64",
+    "deployment_target": "15.0",
+    "macOS": "27.0.1 (26A434)",
+    "optimization": "-O"
+  },
+  "source_base": "49f03964cb2310ab6383f03b7b64abcf111a85ca",
+  "sqlite_version": "3.54.0",
+  "summary_ms": {
+    "clustering": {
+      "investigation_budget": 2.7,
+      "maximum": 2.1306666603777558,
+      "median": 0.9887291671475396,
+      "sample_p95": 2.1306666603777558
+    },
+    "ingestion_rollback": {
+      "investigation_budget": 21.4,
+      "maximum": 17.098416661610827,
+      "median": 6.541687514982186,
+      "sample_p95": 17.098416661610827
+    }
+  },
+  "synchronization_deadline_seconds": 60,
+  "wal_spill_threshold_bytes": 1048576
+}

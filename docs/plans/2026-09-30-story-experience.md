@@ -2,23 +2,86 @@
 
 План від 30 вересня 2026. Статус: виконується; поточний стан наведено нижче та в [#90](https://github.com/marspater/NewsApp-macOS/issues/90). Основа: поточний код News на `codex/kite-practices`, дослідження Kite на коміті `08d15108f82fb8728832f55fc8c3799a2836bfd6` та чотири надані скриншоти. Незакомічені попередні зміни збережено.
 
-## Поточний прогрес — 2 жовтня 2026
+## Current release status — 9 October 2026
 
-Злито в `main`: ідентичність і дедуплікацію (B), reader і зображення (C), кластеризацію подій і стабільну стрічку (D), каталог і refresh (G), частину огляду з доказами (E, виконує окремий агент), а також інструменти оцінювання (A). Повний suite проходить на macOS CI.
+Core phases A–H (#90–#98) are closed for the earlier accepted English-only scope. Later behavior changes need their own acceptance; the 5 October event result does not validate the current matcher. The dated scope and progress snapshots below are historical, superseded by this section.
+
+Merged follow-ups:
+
+| Work | Implementation and evidence | Remaining acceptance |
+| --- | --- | --- |
+| Event grouping (#286–#288) | Country aliases, casualty changes, whole-event compatibility, fragment merges and on-device judging; tune precision 0.957, recall 0.710 | [Current English regression replay](../audits/2026-10-09-current-matcher-replay.md) fails the ≥0.97 precision target: judge-off 0.955 / 0.553 precision/recall; judge-on 0.545 / 0.947. Narrowing and a fresh release sample remain in #307; the 5 October acceptance applies to the earlier matcher |
+| Importance / waiting (#289; #292 closed) | 667 active publications rated; 64 waiting; zero rated-major publications hidden | Independent labels and stability in #309; the predicate measurement does not validate model ratings |
+| Publisher images (#290; #293 closed) | 466 / 473 active cards had usable images (98.5%); all 128 added URLs decoded | Seven placeholders remain; in-article figure fallback in #312 |
+| Plain-text overviews (#291; #294 closed) | Five of eight live drafts accepted, 40 retained claims reviewed with zero detected critical errors; the three labelled controls fell back | Independent accepted-draft controls, error bounds and latency in #308 |
+| Reliability (#296/#297) | Parser/card/clustering corrections, image-URL index, provisional overview/summary retry and schema v20 model-generation invalidation after macOS updates | Copied-library v16 → v20 migration, preserved state and regeneration passed; #305 awaits audit PR #332 merge. OS notification delivery is deferred to the real compiled app in #334 |
+| Tension retention (#321; #310 closed) | Waiting-story expiry preserves panel history while collection is enabled | Real-panel calibration #235 remains outside the core release |
+| PR maintenance (#299–#303/#306, #325–#327) | Reviewed cleanup, bounded read/save alias resolution, synchronized completion-claim regression and reused cache size keys | No new release gate; this does not replace #305/#307/#308 |
+
+The [curation/image audit](../audits/2026-10-09-story-curation-images.md) and [overview audit](../audits/2026-10-09-plain-text-overviews.md) retain aggregate measurements and their limits; [Codacy corrections](../audits/2026-10-09-codacy-slices.md) and [Sonar corrections](../audits/2026-10-09-sonar-slices.md) record follow-up verification. Publisher passages and private evaluation data remain local. The installed app/library has not been upgraded by this documentation work.
+
+Follow-up status as of this update:
+
+| Issue | Status / scope | Work |
+| --- | --- | --- |
+| #305 | Done · P1 · [PR #332](https://github.com/marspater/NewsApp-macOS/pull/332) merged | Isolated copied-library migration, preservation, regeneration and live UI checks passed; real-app notification delivery is tracked separately in #334 |
+| #307 | In review · P1 · replay evidence | Frozen historical English replay completed once per judge mode; 30 judge-on false pairs in four mixed events. Narrowing, a fresh post-9-October release sample and Mars acceptance remain open |
+| #308 | Ready · P1 | Independent overview claim review, error bounds and latency |
+| #309 | Ready · P2 | Mars settled the three borderline importance cases; implement the rules, then measure independent labels and stability |
+| #311 | Done · P2 · [PR #328](https://github.com/marspater/NewsApp-macOS/pull/328) merged | Full suite leaves no new test plist; exact-run cleanup and narrow legacy instructions are merged |
+| #312 | Backlog · P2 | Figure fallback for card images, with furniture rejection and a coverage remeasurement |
+| #315 | Done · P2 · [PR #329](https://github.com/marspater/NewsApp-macOS/pull/329) merged | README, plan status and Unreleased date are updated; this audit reconciles the later status changes |
+| #330/#331 | Backlog · P2 | Live reader newsletter removal and diagnosis of the inherited saved-state orphan; no production-data repair yet |
+| #334 | Backlog · P1 · deferred | Validate actual notification delivery and timing in the real compiled app; Mars deferred this from the isolated migration check |
+| #313/#314 | Backlog · ideas | Perspective coverage and related-event timeline proposals; not release dependencies |
+| #264/#268 | Parked | Non-English event matching and spoken VoiceOver; resume only at Mars's request |
+| #99/#235/#244 | Optional / outside core release | Tension experiment/calibration and source discovery |
+
+The [9 October work log and migration audit](../audits/2026-10-09-real-library-migration.md#work-log-and-remaining-queue--9-october-2026) records completed checks, the approved temporary-bundle retry, deferred real-app validation and current PR/issue states. PRs #328/#329 are merged; #332 is the remaining review PR. New-head and merged-main hosted checks must complete before claiming CI acceptance.
+
+## Historical scope decision — 5 October 2026
+
+Рішення Mars: перший реліз — **лише англійською**.
+
+- Каталог пропонує тільки англомовні канали (`FeedCatalog.supportedLanguages`). Канали українською, німецькою, французькою, італійською, нідерландською й польською лишаються в коді як відкладені, а попередні підписки на них знімаються під час запуску (#269). Причина: macOS не має моделі частин мови для цих мов, тож їхні матеріали не утворюють подій; словниковий fallback не пройшов перевірку точності на живих даних (#264, відкладено).
+- Живу перевірку VoiceOver (мовлення, ротор, рівні заголовків) відкладено (#268); #155 закрито. Нативна доступність у коді лишається.
+- Задачі з міткою `parked` не входять у реліз; братися за них лише після рішення Mars.
+- Holdout подій виміряно один раз: точність 0.958 (23/24) проти цілі ≥97%, повнота 0.291; Mars прийняв результат 5 жовтня 2026 — у #102 ([аудит](../audits/2026-10-05-event-corpus-holdout.md)). Embeddings не впроваджено (#127).
+
+## Historical release status — 5 October 2026
+
+| Work | Current state | Remaining acceptance |
+| --- | --- | --- |
+| Performance #104/#153 | Done; PR #271 merged at `617c934` | Documented workload limits remain; no new performance task |
+| Phase C #93 | Done; extraction #246/#261 and native QA #123/#155 complete | Spoken VoiceOver is parked in #268 |
+| Phase E #95 | Done for deterministic overviews; integration, provenance and shared QA complete | No new model path or model audit in this release |
+| Phase A/B #91/#92 | Acceptance complete; closure pending final evidence PR merge | #102 fingerprint holdout passed |
+| Final verification/program #98/#90 | In review with final evidence consolidation | Merge the final evidence PR |
+| Optional #99/#235 and #244 | Backlog, outside core release | No new work in this completion queue |
+
+#102's event holdout is accepted by Mars (23/24, recall 0.291); it was not replayed and the matcher is unchanged. PR #272 is merged at `7ffc3e3`, limiting capture/review to the English-only policy while preserving historical files. Count-only readiness established 841 distinct eligible held-out English documents without comparing pairs, reading labels or writing review files. The final fingerprint acceptance then ran once: zero different-URL matches, undefined precision, Wilson 95% false-merge upper bound **0.455%**, and `releaseGatePassed=true`. [Final holdout and core evidence reconciliation](../audits/2026-10-05-core-release-acceptance.md). The core phases are ready to close when this final evidence PR merges. Non-English matching #264 and live VoiceOver #268 remain parked; optional #99/#235/#244 remain outside the release. Existing capture scheduling was not changed or duplicated; further samples are not required for this gate.
+
+The earlier progress table below is a dated snapshot, superseded by this reconciliation.
+
+## Історичний прогрес — 3 жовтня 2026 (вечір)
+
+Злито в `main`: ідентичність і дедуплікацію (B), reader і зображення (C), кластеризацію подій і стабільну стрічку (D), детерміновані огляди з доказами (E), додаткові секції (F), каталог і refresh (G), а також інструменти оцінювання (A). Огляди доступні за запитом у reader; шлях генеративної моделі поки не має викликів. Реалізація не замінює відкриті перевірки якості та нативного інтерфейсу.
 
 | Етап | Стан | Що лишилося |
 | --- | --- | --- |
-| A | Фікстури та інструменти корпусу злито | Розмічений holdout (#102, відкладено), проба моделі (#103) і baseline застосунку (#104) на Mac |
-| B | Реалізацію завершено | Точність відбитків ≥99% на holdout (#102) |
-| C | Реалізацію завершено | Сторінки зі «стіною тексту» від користувача (#115), нативна перевірка доступності (#123) |
-| D | Реалізацію завершено | Точність кластерів ≥97% на holdout (#102), рішення щодо необов’язкових embeddings (#127: порівняння готове, чекає на той самий holdout), нативна перевірка (#155) |
-| E | Виконується | Режим огляду (#140), генерація й кеш (#141), аудит якості (#142) |
-| F | Виконується | Хронологія (#143) на розгляді; позиції (#144), тематичний ракурс (#145), оцінка тональності (#146) |
+| A | Фікстури, інструменти корпусу та пробу моделі злито; baseline запуску й пам’яті застосунку (#234), реальне оновлення й скасування через HTTPS (#239) виміряно | Розмічений holdout (#102); холодний запуск після `purge` і пам’ять під час читання (#104) |
+| B | Реалізацію завершено; цільовий збір 3 жовтня не дав жодного збігу відбитків з різними URL, тому ворота переглянуто | Хибні злиття відбитками ≤1% придатних holdout-документів (різних канонічних URL; верхня межа Wilson 95%) на свіжому захопленні; precision ≥99%, щойно є 100 збігів (#102) |
+| C | Реалізацію завершено; нативну перевірку доступності (#123) закрито (#240); причину «стіни тексту» знайдено скануванням 98 матеріалів і виправлено (#241); межі статті та «меблі» сторінки виправлено (#242, #245: збої витягу 14 → 4 з 96) | Сторінки від користувача, якщо є (#115); структурні сигнали для віджетів і карток (#246) |
+| D | Реалізацію завершено; нативну перевірку (#155) закрито (#240); підтримку мов embeddings на реальному Mac зафіксовано (#243: en, de) | Рішення щодо holdout 0.958 (23/24) проти цілі ≥97% (#102); embeddings не впроваджено (#127); не-англійські мови відкладено (#264) |
+| E | Детермінований огляд інтегровано в reader (#219, #222); нативну перевірку (#155) закрито (#240) | Аудит моделі лише після підключення генеративного шляху (#95) |
+| F | Завершено | — |
 | G | Завершено | — |
-| H | Міграції (схема v14) і мережа/сон перевірено | Бюджети швидкодії (#153), нативна перевірка (#155), повторна перевірка після змін схеми в E |
-| I | Не розпочато | Спершу методика (#157); числа лише після історичної вибірки (#158) |
+| H | Міграції (схема v15), мережу/сон і supersession оглядів перевірено; Reduce Motion виправлено; скасування під час парсингу (#233), запуск (#234) і скасування через TLS реальних видавців (#239) виміряно; нативну перевірку з системними налаштуваннями на ізольованій збірці виконано (#240) | Пам’ять під час читання та завантаження зображень (#153) |
+| I | Методику (#157), калібрування на синтетичній вибірці (#158), opt-in збір (#160) і вікно з графіком (#159) злито | Реальна вибірка панелі показує насичення шкали v1 на 95–100; повторне калібрування на кількох тижнях зібраних даних (#235) — до цього індекс не випускати; збір увімкнено ще не було |
 
 Пороги точності на holdout ще не виміряні; наведені числа залишаються цілями. Датовані докази кожного зрізу, починаючи з [першого](../audits/2026-10-01-story-foundation.md), — у [`docs/audits/`](../audits/).
+
+Поточні зрізи перевірки #104/#153: [інтегрований baseline і бюджети](../audits/2026-10-02-integrated-performance-budgets.md), [скасування парсингу](../audits/2026-10-02-feed-parsing-cancellation.md) та [запуск і пам’ять застосунку](../audits/2026-10-02-launch-baseline.md) (медіана 656.8 мс від старту процесу до першої картки на 10 000 матеріалів, пік 88.2 MiB) та [оновлення й скасування через HTTPS](../audits/2026-10-03-publisher-cancellation.md) (12 стрічок за 0.7–1.5 с; зупинка за медіаною 1.0 мс). Незмінний архів не запускає повторне зіставлення; щільний stress-тест 200 матеріалів виміряно окремо від refresh. Ці вимірювання не закривають холодний запуск після `purge`, пам’ять під час читання або holdout.
 
 ## Рішення
 
@@ -113,7 +176,7 @@ Foundation Models може допомогти з коротким викладо
 
 Сторонній текст — дані, ніколи інструкції для моделі. Генерація не отримує права виконувати дії чи довільно ходити за URL. При непідтверджених твердженнях показуємо перевірені витяги та список джерел, а не зберігаємо невдалий переказ як готовий.
 
-Перевіряємо availability і мови під час виконання. На macOS 15 або без доступної Apple Intelligence працюють reader, дедуплікація, список джерел і детерміноване групування. Українська генерація та міжмовне групування — окрема перевірка, не обіцянка. Cloud AI чи завантаження іншої моделі не входять у базовий план.
+Перевіряємо availability і мови під час виконання. На macOS 15 або без доступної Apple Intelligence працюють reader, дедуплікація, список джерел і детерміноване групування. Українська генерація та міжмовне групування — окрема перевірка, не обіцянка; перший реліз підтримує лише англійські канали (#264). Cloud AI чи завантаження іншої моделі не входять у базовий план.
 
 ### 5. Timeline, perspectives, angle, sentiment
 
@@ -175,14 +238,14 @@ Cmd-R/Refresh запускає збір нових матеріалів одра
 
 Наведені числові пороги — початкові цілі, не вже виміряні результати.
 
-- **Корпус:** 300–500 розмічених пар і близько 100 подій, включно зі складними негативними прикладами. Відокремити holdout від налаштування порогів; рахувати якість окремо за мовами й джерелами. Вибірка не доводить ту саму точність для всього інтернету.
-- **Дедуплікація:** ціль precision ≥99% на holdout; відсутність втрати збережень/історії; GUID collision, змінені дати, tracking URLs, кілька feeds, ідентичні заголовки різних документів.
+- **Корпус:** 300–500 розмічених пар і близько 100 подій, включно зі складними негативними прикладами. Відокремити holdout від налаштування порогів; рахувати якість окремо за мовами й джерелами (у першому релізі — лише англійська, #264). Вибірка не доводить ту саму точність для всього інтернету.
+- **Дедуплікація:** на holdout не більше 1% хибних злиттів серед придатних документів (різних канонічних URL; верхня межа Wilson 95%) і precision ≥99%, щойно є щонайменше 100 збігів з різними URL; відсутність втрати збережень/історії; GUID collision, змінені дати, tracking URLs, кілька feeds, ідентичні заголовки різних документів.
 - **Кластери:** початкова ціль precision ≥97%; окремо виміряти recall і false merges. Рішення про реліз залежить і від характеру помилок, не лише середнього відсотка.
 - **Огляд:** усі citation ID існують, кожне фактичне твердження має доказову прив’язку; ручний аудит підтримки тверджень. Критичні помилки чисел/дат/атрибуції на контрольній вибірці блокують генеративний реліз. Схема сама по собі не перевіряє істину.
 - **Reader:** fixtures щонайменше десяти різних структур сторінок; DOM-порядок, списки/цитати/підписи, приховані елементи, відсутня картинка, велике зображення, malformed HTML, RSS-only та paywall fallback.
 - **Швидкодія:** вимірюємо refresh, час до першої картки, p50/p95 часу огляду, пікову пам’ять і скасування. Числові бюджети фіксуємо після baseline на реальному Mac. Новий refresh не перераховує весь архів; MainActor не виконує парсинг/кластеризацію.
 - **Стійкість:** offline, 304/429/500, sleep/wake, закриття reader під час генерації, зміна статті, недоступна модель, context overflow, непідтримувана мова. Старий результат не записується поверх нової версії.
-- **Native QA:** keyboard-only, VoiceOver, різні ширини вікна, масштаб тексту, контраст, світла/темна тема; тести на ізольованих даних без зміни реальної бібліотеки.
+- **Native QA:** keyboard-only, VoiceOver (живу перевірку відкладено, #268), різні ширини вікна, масштаб тексту, контраст, світла/темна тема; тести на ізольованих даних без зміни реальної бібліотеки.
 - **Publication:** актуальний origin/main, потрібні перевірки CONTRIBUTING, arm64 ad-hoc staged build і запуск, review міграцій/дифу, focused commits та готовий до review PR. Не інсталювати поверх реального застосунку без окремого запиту.
 
 ## Порядок PR та межі
@@ -205,3 +268,7 @@ Cmd-R/Refresh запускає збір нових матеріалів одра
 - [Apple: мови та локалі](https://developer.apple.com/documentation/foundationmodels/supporting-languages-and-locales-with-foundation-models), [SystemLanguageModel](https://developer.apple.com/documentation/foundationmodels/systemlanguagemodel): доступність і мовна підтримка визначають fallback.
 
 Цей документ — оцінка та план. Benchmark багатоджерельного синтезу на локальній моделі та вимірювання точності кластерів і відбитків на holdout ще не виконані; стан реалізації — у розділі «Поточний прогрес».
+
+## Performance verification — 5 October 2026
+
+#104/#153: the cold launch after purge plus rebuild is recorded in [the launch audit](../audits/2026-10-05-cold-launch.md). The existing reading harness now measures the isolated production cache, reader, deterministic overview persistence/rendering and protected publisher Web view together; [results and scoped budgets](../audits/2026-10-05-full-app-workload.md). The evidence is complete for this bounded workload; the implementation is merged in PR #271 (`617c934`); #104/#153 are closed and Done. Memory pressure and WebKit auxiliary-process totals remain unverified, without restoring parked #264/#268 to release gates.

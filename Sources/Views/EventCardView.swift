@@ -1,37 +1,42 @@
 // EventCardView.swift
 // NewsApp Event Card & Source List
 
-import SwiftUI
 import AppKit
+import SwiftUI
 
 /// One card for a confirmed event: the representative publication as an ordinary card, followed by
 /// the event's coverage and, on request, every member publication. Publisher text is never replaced.
 struct EventCardView: View {
     let representative: FeedArticle
     let summary: EventFeedSummary
+    /// Members listed on this page, used for the card image when the representative has none.
+    var visibleMembers: [FeedArticle] = []
     var isSelected = false
     var compact = false
+    var isLead = false
     @Binding var isExpanded: Bool
     let openRepresentative: () -> Void
     let openMember: (FeedArticle, [FeedArticle]) -> Void
     let separate: (FeedArticle) -> Void
 
     @EnvironmentObject private var articleStore: ArticleStore
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.effectiveReduceMotion) private var reduceMotion
     @State private var members: [FeedArticle] = []
     @State private var loadFailed = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: AppSpacing.xs) {
-            ArticleCardView(article: representative, isSelected: isSelected, compact: compact, action: openRepresentative)
+            ArticleCardView(
+                article: representative, isSelected: isSelected, compact: compact,
+                imageFallbacks: (members.isEmpty ? visibleMembers : members).filter { $0.id != representative.id },
+                isLead: isLead, action: openRepresentative)
             coverageToggle
             if isExpanded {
                 sourceList
                     .transition(reduceMotion ? .identity : .opacity)
             }
         }
-        .task(id: isExpanded ? "\(summary.eventID):\(summary.membershipVersion)" : nil) {
-            guard isExpanded else { return }
+        .task(id: "\(summary.eventID):\(summary.membershipVersion):\(isExpanded)") {
             do {
                 let loaded = try await articleStore.eventMemberArticles(eventID: summary.eventID)
                 try Task.checkCancellation()
@@ -55,7 +60,7 @@ struct EventCardView: View {
         } label: {
             HStack(spacing: AppSpacing.xs) {
                 Image(systemName: "square.stack.3d.up")
-                    .font(.system(size: 11, weight: .medium))
+                    .font(AppTypography.label)
                 Text(summary.coverageText)
                     .font(AppTypography.label)
                 if let latest = summary.latestDate {
@@ -64,16 +69,11 @@ struct EventCardView: View {
                         .foregroundStyle(AppColor.tertiaryText)
                 }
                 if summary.hasSubstantiveUpdate {
-                    Text("Updated")
-                        .font(.system(size: 9, weight: .bold))
-                        .foregroundStyle(AppColor.accent)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(Capsule().fill(AppColor.accent.opacity(0.12)))
+                    TagView(title: "Updated", tint: AppColor.accent)
                 }
                 Spacer(minLength: AppSpacing.xs)
                 Image(systemName: "chevron.down")
-                    .font(.system(size: 10, weight: .semibold))
+                    .font(AppTypography.eyebrow)
                     .rotationEffect(.degrees(isExpanded ? 180 : 0))
             }
             .foregroundStyle(AppColor.secondaryText)
@@ -83,6 +83,7 @@ struct EventCardView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .buttonBorderShape(.roundedRectangle(radius: AppRadius.control))
         .help(isExpanded ? "Hide the sources covering this event (E)" : "Show every source covering this event (E)")
         .accessibilityLabel(coverageDescription)
         .accessibilityValue(isExpanded ? "Expanded" : "Collapsed")
@@ -146,7 +147,7 @@ private struct EventSourceRow: View {
 
     private var isRead: Bool { readManager.isRead(article.id) }
     private var isSaved: Bool { savedStories.isSaved(article) }
-    private var source: String { EventFeedSummary.displaySource(article.source) }
+    private var source: String { article.publisherName }
 
     var body: some View {
         Button(action: open) {
@@ -154,12 +155,8 @@ private struct EventSourceRow: View {
                 Circle()
                     .fill(isRead ? Color.clear : AppColor.unreadDot)
                     .frame(width: 6, height: 6)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(source.uppercased())
-                        .font(AppTypography.metadata)
-                        .foregroundStyle(AppColor.secondaryText)
-                        .tracking(AppTypography.sourceEyebrowTracking)
-                        .lineLimit(1)
+                VStack(alignment: .leading, spacing: AppSpacing.textStack) {
+                    EyebrowText(source)
                     Text(article.title)
                         .font(AppTypography.bodySmall)
                         .foregroundStyle(isRead ? AppColor.secondaryText : AppColor.primaryText)
@@ -169,7 +166,7 @@ private struct EventSourceRow: View {
                 Spacer(minLength: AppSpacing.xs)
                 if isSaved {
                     Image(systemName: "bookmark.fill")
-                        .font(.system(size: 10))
+                        .font(AppTypography.eyebrow)
                         .foregroundStyle(AppColor.accent)
                 }
                 Text(article.publicationDateText)
@@ -181,16 +178,26 @@ private struct EventSourceRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .buttonBorderShape(.roundedRectangle(radius: AppRadius.card))
         .contextMenu {
-            Button { readManager.toggleRead(article.id) } label: {
-                Label(isRead ? "Mark as Unread" : "Mark as Read", systemImage: isRead ? "circle" : "checkmark.circle.fill")
+            Button {
+                readManager.toggleRead(article.id)
+            } label: {
+                Label(
+                    isRead ? "Mark as Unread" : "Mark as Read", systemImage: isRead ? "circle" : "checkmark.circle.fill"
+                )
             }
-            Button { toggleSaved() } label: {
-                Label(isSaved ? "Remove from Saved" : "Save Story", systemImage: isSaved ? "bookmark.slash" : "bookmark")
+            Button {
+                toggleSaved()
+            } label: {
+                Label(
+                    isSaved ? "Remove from Saved" : "Save Story", systemImage: isSaved ? "bookmark.slash" : "bookmark")
             }
             if canSeparate {
                 Divider()
-                Button { separate() } label: {
+                Button {
+                    separate()
+                } label: {
                     Label("Not the Same Event", systemImage: "rectangle.split.2x1")
                 }
             }
@@ -202,14 +209,22 @@ private struct EventSourceRow: View {
                 Label("Copy Link", systemImage: "link")
             }
             if let url = URL(string: article.link) {
-                Button { NSWorkspace.shared.open(url) } label: {
+                Button {
+                    NSWorkspace.shared.open(url)
+                } label: {
                     Label("Open in Browser", systemImage: "safari")
                 }
             }
         }
-        .help(canSeparate ? "Open this publication. Use the context menu if it reports a different event." : "Open this publication")
+        .help(
+            canSeparate
+                ? "Open this publication. Use the context menu if it reports a different event."
+                : "Open this publication"
+        )
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(article.title), from \(source), published \(article.publicationDateText). \(isRead ? "Read" : "Unread")\(isSaved ? ", saved in your library" : "").")
+        .accessibilityLabel(
+            "\(article.title), from \(source), published \(article.publicationDateText). \(isRead ? "Read" : "Unread")\(isSaved ? ", saved in your library" : "")."
+        )
         .accessibilityAddTraits(.isButton)
         .accessibilityActions {
             Button(isRead ? "Mark as Unread" : "Mark as Read") { readManager.toggleRead(article.id) }

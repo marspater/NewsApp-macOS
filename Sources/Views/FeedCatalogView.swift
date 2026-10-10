@@ -2,6 +2,11 @@ import SwiftUI
 
 /// Opt-in browser for the curated starter catalog. Nothing is subscribed until the user chooses it.
 struct FeedCatalogView: View {
+    static let navigationTitleText = "Feed Catalog"
+    static let showsDoneInToolbar = true
+    static let hasBottomDoneBar = false
+    static let hasCustomSheetBackground = false
+
     @EnvironmentObject private var appSettings: AppSettings
     @EnvironmentObject private var feedManager: FeedManager
     @Environment(\.dismiss) private var dismiss
@@ -13,10 +18,12 @@ struct FeedCatalogView: View {
                     .font(AppTypography.title)
                     .foregroundColor(AppColor.primaryText)
                     .accessibilityAddTraits(.isHeader)
-                Text("Choose a set or single feeds. Nothing is subscribed automatically, and every subscription can be removed in Subscriptions. Details describe how each feed looked when checked on \(FeedCatalog.verifiedOn); they say nothing about the accuracy of a publisher's reporting.")
-                    .font(AppTypography.bodySmall)
-                    .foregroundColor(AppColor.secondaryText)
-                    .fixedSize(horizontal: false, vertical: true)
+                Text(
+                    "Choose a set or single feeds. Nothing is subscribed automatically, and every subscription can be removed in Subscriptions. Details describe how each feed looked when checked on \(FeedCatalog.verifiedOn); they say nothing about the accuracy of a publisher's reporting."
+                )
+                .font(AppTypography.callout)
+                .foregroundColor(AppColor.secondaryText)
+                .fixedSize(horizontal: false, vertical: true)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(AppLayout.pageInset)
@@ -24,7 +31,7 @@ struct FeedCatalogView: View {
             Divider()
 
             List {
-                ForEach(CatalogSet.allCases) { set in
+                ForEach(CatalogSet.offered) { set in
                     Section {
                         ForEach(FeedCatalog.feeds(in: set)) { feed in
                             row(feed)
@@ -35,17 +42,16 @@ struct FeedCatalogView: View {
                 }
             }
             .listStyle(.inset)
-
-            Divider()
-
-            HStack {
-                Spacer()
+        }
+        .frame(minWidth: 620, idealWidth: 680, minHeight: 560)
+        .navigationTitle(Self.navigationTitleText)
+        .toolbar(removing: .title)
+        .toolbar {
+            ToolbarItem(placement: .confirmationAction) {
                 Button("Done") { dismiss() }
                     .keyboardShortcut(.defaultAction)
             }
-            .padding(AppSpacing.md)
         }
-        .frame(minWidth: 620, idealWidth: 680, minHeight: 560)
         .task { await feedManager.reloadFeedHealth() }
     }
 
@@ -69,7 +75,10 @@ struct FeedCatalogView: View {
                     .font(AppTypography.label)
                     .foregroundColor(AppColor.success)
             } else {
-                Button(remaining.count == feeds.count ? "Subscribe to Set (\(feeds.count))" : "Subscribe to Remaining (\(remaining.count))") {
+                Button(
+                    remaining.count == feeds.count
+                        ? "Subscribe to Set (\(feeds.count))" : "Subscribe to Remaining (\(remaining.count))"
+                ) {
                     feedManager.addCatalogFeeds(remaining)
                 }
                 .accessibilityLabel("Subscribe to Set, \(remaining.count) feeds in \(set.title)")
@@ -119,13 +128,16 @@ struct FeedCatalogView: View {
     private func details(_ feed: CatalogFeed) -> String {
         let locale = Locale.current
         let language = locale.localizedString(forLanguageCode: feed.language) ?? feed.language
-        let region = feed.region == "global" ? "International" : (locale.localizedString(forRegionCode: feed.region) ?? feed.region)
+        let region =
+            feed.region == "global"
+            ? "International" : (locale.localizedString(forRegionCode: feed.region) ?? feed.region)
         let content: String
         switch feed.fullText {
         case .full: content = "Full text in feed"
         case .partial: content = "Partial text in feed"
         case .summary: content = "Summaries in feed"
         }
-        return [feed.publisher, language, region, content, feed.hasImages ? "Images" : nil].compactMap { $0 }.joined(separator: " · ")
+        return [feed.publisher, language, region, content, feed.hasImages ? "Images" : nil].compactMap { $0 }.joined(
+            separator: " · ")
     }
 }

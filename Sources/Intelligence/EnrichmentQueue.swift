@@ -3,8 +3,8 @@ import os
 
 /// Priority levels for enrichment jobs.
 enum EnrichmentPriority: Int, Comparable, Sendable {
-    case background = 0   // Batch feed ingest backlog
-    case high = 1         // Visible unread headlines in active section
+    case background = 0  // Batch feed ingest backlog
+    case high = 1  // Visible unread headlines in active section
     case interactive = 2  // Currently focused / opened by user
 
     static func < (lhs: EnrichmentPriority, rhs: EnrichmentPriority) -> Bool {
@@ -61,7 +61,7 @@ actor EnrichmentQueue {
     private let logger = Logger(subsystem: "com.marspater.news", category: "EnrichmentQueue")
 
     private struct Job: Identifiable {
-        let id: String // article.id
+        let id: String  // article.id
         let generation = UUID()
         let article: FeedArticle
         let allowHTTP: Bool
@@ -73,7 +73,7 @@ actor EnrichmentQueue {
 
     private let maxConcurrency: Int = 3
     private var activeCount: Int = 0
-    private var jobs: [String: Job] = [:] // Indexed by articleId
+    private var jobs: [String: Job] = [:]  // Indexed by articleId
 
     private let store: ArticleStore?
 
@@ -90,42 +90,51 @@ actor EnrichmentQueue {
         priority: EnrichmentPriority = .background,
         allowHTTP: Bool = false
     ) {
-        let articleId = article.id
+        enqueue(articles: [article], priority: priority, allowHTTP: allowHTTP)
+    }
 
-        // 1. Check for existing job (Duplicate-Job Prevention)
-        if var existing = jobs[articleId] {
-            switch existing.state {
-            case .queued(let currentPriority):
-                if priority > currentPriority {
-                    logger.debug("Promoting article '\(articleId)' from \(currentPriority.rawValue) to \(priority.rawValue)")
-                    existing.priority = priority
-                    existing.state = .queued(priority)
-                    jobs[articleId] = existing
+    /// Enqueues a batch of articles for NLP analysis, summary, and content scraping.
+    /// If an article is already queued with a lower priority, promotes it.
+    func enqueue(
+        articles: [FeedArticle],
+        priority: EnrichmentPriority = .background,
+        allowHTTP: Bool = false
+    ) {
+        guard !articles.isEmpty else { return }
+        for article in articles {
+            let articleId = article.id
+
+            // 1. Check for existing job (Duplicate-Job Prevention)
+            if var existing = jobs[articleId] {
+                switch existing.state {
+                case .queued(let currentPriority):
+                    if priority > currentPriority {
+                        logger.debug(
+                            "Promoting article '\(articleId)' from \(currentPriority.rawValue) to \(priority.rawValue)")
+                        existing.priority = priority
+                        existing.state = .queued(priority)
+                        jobs[articleId] = existing
+                    }
+                    continue
+                case .running, .completed:
+                    continue
+                case .cancelled, .failed:
+                    break
                 }
-                return
-            case .running:
-                // Already running
-                return
-            case .completed:
-                // Already enriched
-                return
-            case .cancelled, .failed:
-                // Re-enqueue
-                break
             }
-        }
 
-        // 2. Create new job
-        let job = Job(
-            id: articleId,
-            article: article,
-            allowHTTP: allowHTTP,
-            priority: priority,
-            queuedAt: Date(),
-            state: .queued(priority),
-            task: nil
-        )
-        jobs[articleId] = job
+            // 2. Create new job
+            let job = Job(
+                id: articleId,
+                article: article,
+                allowHTTP: allowHTTP,
+                priority: priority,
+                queuedAt: Date(),
+                state: .queued(priority),
+                task: nil
+            )
+            jobs[articleId] = job
+        }
 
         processNextJobs()
     }
@@ -197,9 +206,13 @@ actor EnrichmentQueue {
             return await operation()
         }
         overviewTasks[eventID] = task
-        defer { overviewTasks.removeValue(forKey: eventID) }
+        defer { if overviewTasks[eventID] == task { overviewTasks.removeValue(forKey: eventID) } }
 
-        return await task.value
+        return await withTaskCancellationHandler {
+            await task.value
+        } onCancel: {
+            task.cancel()
+        }
     }
 
     /// Cancels overview generation for a specific event.
@@ -285,7 +298,8 @@ actor EnrichmentQueue {
             return
         }
 
-        let signpostState = NewsSignposts.begin(NewsSignposts.enrichment, name: "EnrichmentJob", metadata: "source=\(article.source)")
+        let signpostState = NewsSignposts.begin(
+            NewsSignposts.enrichment, name: "EnrichmentJob", metadata: "source=\(article.source)")
         defer { NewsSignposts.end(NewsSignposts.enrichment, name: "EnrichmentJob", state: signpostState) }
 
         // Background feed ingestion: strictly lightweight topic classification.
@@ -326,7 +340,8 @@ actor EnrichmentQueue {
             entities: nil,
             topics: nil,
             content: nil,
-            image: nil
+            image: nil,
+            expectedInputHash: article.publisherInputHash
         )
 
         guard jobs[articleId]?.generation == generation, !Task.isCancelled else { return }

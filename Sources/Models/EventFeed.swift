@@ -11,6 +11,8 @@ struct EventMatchRow: Hashable, Sendable {
     /// Publication date, or ingestion time for undated articles.
     let date: Date
     let eventID: String?
+    /// A matcher version processed the article since its title and description last changed.
+    var previouslyMatched = false
 }
 
 /// A matcher decision, applied by the database only if the state it was made against still holds.
@@ -71,7 +73,9 @@ struct EventFeedSummary: Hashable, Sendable {
     var hasSubstantiveUpdate: Bool {
         guard let seenVersion, seenVersion < membershipVersion else { return false }
         let known = Set(members.filter { $0.joinedVersion <= seenVersion }.map { Self.titleKey($0.title) })
-        return members.contains { $0.joinedVersion > seenVersion && !$0.isRead && !known.contains(Self.titleKey($0.title)) }
+        return members.contains {
+            $0.joinedVersion > seenVersion && !$0.isRead && !known.contains(Self.titleKey($0.title))
+        }
     }
 
     /// "5 sources" or, for one publisher, "3 articles from Example News".
@@ -116,7 +120,8 @@ enum FeedEntry: Identifiable, Hashable, Sendable {
 enum EventFeedGrouping {
     /// Groups an already filtered, ordered list. Grouping never removes a listed article: each
     /// confirmed event appears once, at its first listed member, with that member on the card.
-    static func entries(for articles: [FeedArticle], events: [EventFeedSummary], mode: FeedGroupingMode) -> [FeedEntry] {
+    static func entries(for articles: [FeedArticle], events: [EventFeedSummary], mode: FeedGroupingMode) -> [FeedEntry]
+    {
         var seenArticles = Set<String>()
         let articles = articles.filter { seenArticles.insert($0.id).inserted }
         guard mode == .events else { return articles.map(FeedEntry.article) }
@@ -136,7 +141,8 @@ enum EventFeedGrouping {
                 continue
             }
             guard emitted.insert(summary.eventID).inserted else { continue }
-            entries.append(.event(summary, representative: article, visibleMembers: listed[summary.eventID] ?? [article]))
+            entries.append(
+                .event(summary, representative: article, visibleMembers: listed[summary.eventID] ?? [article]))
         }
         return entries
     }
@@ -214,7 +220,9 @@ struct FeedUpdateBuffer: Equatable, Sendable {
     /// A refreshed first page. `hasMore` says further pages follow it, so pages already loaded
     /// beyond it are a continuation and stay when the first page is unchanged.
     @discardableResult
-    mutating func receive(_ snapshot: FeedSnapshot, holding: Bool, mode: FeedGroupingMode, hasMore: Bool = false) -> FeedUpdateResult {
+    mutating func receive(_ snapshot: FeedSnapshot, holding: Bool, mode: FeedGroupingMode, hasMore: Bool = false)
+        -> FeedUpdateResult
+    {
         guard !displayed.articles.isEmpty else {
             replace(with: snapshot)
             return .replaced
@@ -254,4 +262,51 @@ struct FeedUpdateBuffer: Equatable, Sendable {
             !entry.visibleArticles.contains { listed.contains($0.id) }
         }.count
     }
+}
+
+// MARK: - Optional finite briefing
+
+/// A window-local reading session. Membership, order and publisher snapshots stay frozen
+/// until the reader explicitly starts another briefing; ordinary refresh is independent.
+struct FiniteBriefing: Equatable, Sendable {
+    static let maximumStories = 10
+    static let candidateLimit = 500
+    static let duration: TimeInterval = 24 * 60 * 60
+
+    let startedAt: Date
+    let articles: [FeedArticle]
+
+    init(candidates: [FeedArticle], readIDs: Set<String>, now: Date = Date()) {
+        startedAt = now
+        var seen = Set<String>()
+        var remaining = candidates.filter {
+            !readIDs.contains($0.id) && $0.pubDate >= now.addingTimeInterval(-Self.duration)
+                && $0.pubDate <= now && seen.insert($0.id).inserted
+        }.sorted { $0.pubDate == $1.pubDate ? $0.id < $1.id : $0.pubDate > $1.pubDate }
+        remaining = Array(remaining.prefix(Self.candidateLimit))
+        var selected: [FeedArticle] = []
+        var sources: [String: Int] = [:]
+        var categories: [String: Int] = [:]
+        func source(_ article: FeedArticle) -> String { EventFeedSummary.displaySource(article.source).lowercased() }
+        func category(_ article: FeedArticle) -> String { (article.category ?? "Uncategorized").lowercased() }
+        // ponytail: scan at most 500 candidates ten times; use buckets if the briefing cap grows.
+        while selected.count < Self.maximumStories && !remaining.isEmpty {
+            let index = remaining.indices.min { left, right in
+                let a = remaining[left]
+                let b = remaining[right]
+                let aSource = sources[source(a), default: 0]
+                let bSource = sources[source(b), default: 0]
+                return (aSource + categories[category(a), default: 0], aSource, left)
+                    < (bSource + categories[category(b), default: 0], bSource, right)
+            }!
+            let article = remaining.remove(at: index)
+            selected.append(article)
+            sources[source(article), default: 0] += 1
+            categories[category(article), default: 0] += 1
+        }
+        articles = selected
+    }
+
+    func readCount(_ readIDs: Set<String>) -> Int { articles.filter { readIDs.contains($0.id) }.count }
+    func isComplete(_ readIDs: Set<String>) -> Bool { !articles.isEmpty && readCount(readIDs) == articles.count }
 }

@@ -1,28 +1,56 @@
 // ArticleListView.swift
 // NewsApp Article Grid List View & Navigation Coordinator
 
-import SwiftUI
 import AppKit
+import SwiftUI
+
+struct ListCommandActions {
+    let canGroupStories: Bool
+    let newBriefing: (() -> Void)?
+}
+
+private struct ListCommandActionsKey: FocusedValueKey { typealias Value = ListCommandActions }
+
+extension FocusedValues {
+    var listActions: ListCommandActions? {
+        get { self[ListCommandActionsKey.self] }
+        set { self[ListCommandActionsKey.self] = newValue }
+    }
+}
+
+/// Presentation-only choice: never sort, filter or change the feed's ordered entries.
+/// An event may borrow the image of one of its currently visible publications.
+enum LeadStoryPresentation {
+    static func firstEligibleID(in entries: [FeedEntry], selectedTopic: String?, isSearching: Bool) -> String? {
+        let location = selectedTopic ?? "Today"
+        guard !isSearching, location == "Today" || location == "Briefing" else { return nil }
+        for entry in entries {
+            let articles = [entry.representative] + entry.visibleArticles.filter { $0.id != entry.representative.id }
+            if FeedArticle.bestCardImage(in: articles) != nil { return entry.id }
+        }
+        return nil
+    }
+}
 
 struct ArticleListView: View {
     @Binding var selectedTopic: String?
     @Binding var searchText: String
     @Binding var articlePath: NavigationPath
-    @Binding var columnVisibility: NavigationSplitViewVisibility
-    
+
     @EnvironmentObject private var appSettings: AppSettings
     @EnvironmentObject private var articleStore: ArticleStore
     @EnvironmentObject private var feedManager: FeedManager
     @EnvironmentObject private var themeManager: ThemeManager
     @EnvironmentObject private var readManager: ReadManager
     @EnvironmentObject private var savedStories: SavedStoriesManager
-    
+
     @AppStorage("articleGridLayout") private var gridLayout = false
     @AppStorage("groupsEventCoverage") private var groupsEvents = true
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.appearsActive) private var appearsActive
+    @Environment(\.effectiveReduceMotion) private var reduceMotion
     @State private var focusedArticleID: String? = nil
-    @State private var isShortcutsHelpPresented: Bool = false
-    
+
+    @State private var briefing: FiniteBriefing?
     @State private var buffer = FeedUpdateBuffer()
     @State private var pageRequest = 0
     @State private var loadedPageRequest = 0
@@ -38,30 +66,40 @@ struct ArticleListView: View {
     @State private var isPointerInList = false
     /// Set by the reader's own regrouping actions, which apply at once.
     @State private var appliesNextUpdate = false
+    /// Reloads the list once a refresh the reader asked for has finished.
+    @State private var refreshReloads = 0
     /// Stories the reader's muting removes from this list, across every page.
     @State private var mutedCount = 0
     @State private var showsMuted = false
+    /// Stories this list hides until more publishers cover them (`StoryVisibilityPolicy`).
+    @State private var waitingCount = 0
+    @State private var showsWaiting = false
     @State private var confirmsUnmuteAll = false
 
     private var isSearching: Bool {
         !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
+    private var isBriefing: Bool { selectedTopic == "Briefing" && !isSearching }
+
     /// Muting applies to the feed lists and search; Saved Stories and History list everything the reader kept or opened.
     private var listMuting: MuteRules {
-        isSearching || (selectedTopic != "Saved Stories" && selectedTopic != "History") ? appSettings.muteRules : MuteRules()
+        isSearching || (selectedTopic != "Saved Stories" && selectedTopic != "History")
+            ? appSettings.muteRules : MuteRules()
     }
 
     private var queryIdentity: String {
         let muting = listMuting
-        return "\(selectedTopic ?? "Today"):\(searchText):\(themeManager.autoHideRead):\(muting.sourceParameter)|\(muting.topicParameter):\(showsMuted)"
+        return
+            "\(selectedTopic ?? "Today"):\(searchText):\(themeManager.autoHideRead):\(muting.sourceParameter)|\(muting.topicParameter):\(showsMuted):\(showsWaiting)"
     }
 
     var filteredArticles: [FeedArticle] { buffer.displayed.articles }
 
     /// Saved Stories and History list exactly what the reader kept or opened.
     private var groupingMode: FeedGroupingMode {
-        groupsEvents && selectedTopic != "Saved Stories" && selectedTopic != "History" ? .events : .publications
+        groupsEvents && !isBriefing && selectedTopic != "Saved Stories" && selectedTopic != "History"
+            ? .events : .publications
     }
 
     private var entries: [FeedEntry] { buffer.displayed.entries(groupingMode) }
@@ -71,36 +109,64 @@ struct ArticleListView: View {
         !appliesNextUpdate && (!articlePath.isEmpty || isScrolledAway || isPointerInList || focusedArticleID != nil)
     }
 
+    private var queuedUpdateCount: Int {
+        buffer.newEntryCount(groupingMode)
+    }
+
+    private func handleQueuedUpdatesChange(previous: Int, count: Int) {
+        if count > previous {
+            announceUpdates(count)
+        }
+    }
+
+    @ViewBuilder
+    private func listContent(proxy: ScrollViewProxy) -> some View {
+        if filteredArticles.isEmpty && isLoadingPage {
+            ProgressView("Loading articles…").padding(AppSpacing.xl)
+        } else if filteredArticles.isEmpty && queryError != nil {
+            ContentUnavailableView("Couldn’t Load Articles", systemImage: "exclamationmark.triangle")
+        } else if filteredArticles.isEmpty && isSearching && mutedCount == 0 {
+            ContentUnavailableView.search(text: searchText)
+                .padding(.top, 80)
+        } else if filteredArticles.isEmpty {
+            emptyStateView
+        } else {
+            articleGrid(proxy: proxy)
+            if isBriefing { briefingCompletion }
+            if hasMoreResults {
+                Button("Load more articles") { pageRequest += 1 }
+                    .disabled(isLoadingPage)
+                    .padding(.bottom, AppSpacing.lg)
+            }
+        }
+        if let queryError {
+            VStack(spacing: AppSpacing.sm) {
+                Text(queryError).foregroundStyle(AppColor.secondaryText)
+                Button("Retry") { pageRequest += 1 }
+            }.padding()
+        }
+    }
+
+    private var selectedStory: FeedArticle? {
+        guard articlePath.isEmpty, let focusedArticleID else { return nil }
+        return filteredArticles.first { $0.id == focusedArticleID }
+    }
+
+    private var listCommandActions: ListCommandActions? {
+        guard articlePath.isEmpty else { return nil }
+        return ListCommandActions(canGroupStories: !isBriefing, newBriefing: isBriefing ? { startNewBriefing() } : nil)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             ScrollViewReader { proxy in
                 ScrollView {
-                    if filteredArticles.isEmpty && isLoadingPage {
-                        ProgressView("Loading articles…").padding(AppSpacing.xl)
-                    } else if filteredArticles.isEmpty && queryError != nil {
-                        ContentUnavailableView("Couldn’t Load Articles", systemImage: "exclamationmark.triangle")
-                    } else if filteredArticles.isEmpty {
-                        emptyStateView
-                    } else {
-                        articleGrid(proxy: proxy)
-                        if hasMoreResults {
-                            Button("Load more articles") { pageRequest += 1 }
-                                .disabled(isLoadingPage)
-                                .padding(.bottom, AppSpacing.lg)
-                        }
-                    }
-                    if let queryError {
-                        VStack(spacing: AppSpacing.sm) {
-                            Text(queryError).foregroundStyle(AppColor.secondaryText)
-                            Button("Retry") { pageRequest += 1 }
-                        }.padding()
-                    }
+                    masthead
+                    listContent(proxy: proxy)
                 }
-                .safeAreaInset(edge: .top, spacing: 0) {
-                    VStack(spacing: 0) {
-                        headerBar
-                        if buffer.pending != nil { updatesButton(proxy: proxy) }
-                    }
+                // Queued updates float over the list (DESIGN.md 8.4); the list keeps its place underneath.
+                .overlay(alignment: .top) {
+                    if buffer.pending != nil { updatesButton(proxy: proxy) }
                 }
                 .onScrollGeometryChange(for: Bool.self) { geometry in
                     geometry.contentOffset.y + geometry.contentInsets.top > 24
@@ -108,10 +174,7 @@ struct ArticleListView: View {
                     isScrolledAway = scrolled
                 }
                 .onHover { isPointerInList = $0 }
-                .onChange(of: buffer.newEntryCount(groupingMode)) { previous, count in
-                    if count > previous { announceUpdates(count) }
-                }
-                .softScrollEdge()
+                .onChange(of: queuedUpdateCount, handleQueuedUpdatesChange)
                 .focusable()
                 .focusEffectDisabled()
                 .onKeyPress { press in
@@ -136,7 +199,8 @@ struct ArticleListView: View {
                 }
                 .onReceive(NotificationCenter.default.publisher(for: .toggleSaveCommand)) { _ in
                     if articlePath.isEmpty, let id = focusedArticleID,
-                       let art = filteredArticles.first(where: { $0.id == id }) {
+                        let art = filteredArticles.first(where: { $0.id == id })
+                    {
                         if savedStories.isSaved(art) {
                             savedStories.remove(art)
                         } else {
@@ -146,17 +210,52 @@ struct ArticleListView: View {
                 }
                 .onReceive(NotificationCenter.default.publisher(for: .openInBrowserCommand)) { _ in
                     if articlePath.isEmpty, let id = focusedArticleID,
-                       let art = filteredArticles.first(where: { $0.id == id }),
-                       let url = URL(string: art.link) {
+                        let art = filteredArticles.first(where: { $0.id == id }),
+                        let url = URL(string: art.link)
+                    {
                         NSWorkspace.shared.open(url)
                     }
                 }
             }
         }
-        .task(id: "\(queryIdentity):\(articleStore.revision):\(articleStore.eventRevision):\(pageRequest)") {
+        .focusedSceneValue(\.selectedStory, selectedStory)
+        .focusedSceneValue(\.listActions, listCommandActions)
+        .navigationTitle(locationTitle)
+        // The masthead shows the location, so the toolbar does not repeat it (DESIGN.md 5).
+        .toolbar(removing: .title)
+        .toolbar { listToolbar }
+        .task(
+            id:
+                "\(queryIdentity):\(articleStore.revision):\(articleStore.eventRevision):\(pageRequest):\(refreshReloads)"
+        ) {
             let identity = queryIdentity
             let runID = UUID()
             queryRunID = runID
+            if isBriefing {
+                queryError = nil
+                isLoadingPage = true
+                defer { if queryRunID == runID { isLoadingPage = false } }
+                do {
+                    if briefing == nil {
+                        let now = Date()
+                        let candidates = try await articleStore.database.fetchArticles(
+                            isRead: false, limit: FiniteBriefing.candidateLimit,
+                            publicationWindow: now.addingTimeInterval(-FiniteBriefing.duration)...now,
+                            muting: appSettings.muteRules, hidingWaitingStories: true)
+                        try Task.checkCancellation()
+                        briefing = FiniteBriefing(candidates: candidates, readIDs: readManager.readArticles, now: now)
+                    }
+                    buffer.replace(with: FeedSnapshot(articles: briefing?.articles ?? []))
+                    hasMoreResults = false
+                    mutedCount = 0
+                    loadedQuery = identity
+                } catch is CancellationError {
+                    // A newer selection owns the results.
+                } catch {
+                    if queryRunID == runID { queryError = "Could not load the briefing. Please try again." }
+                }
+                return
+            }
             let isNewQuery = loadedQuery != identity
             let isPaging = !isNewQuery && pageRequest != loadedPageRequest && cursor != nil
             loadedPageRequest = pageRequest
@@ -173,13 +272,16 @@ struct ArticleListView: View {
             do {
                 if !isPaging { try await Task.sleep(for: .milliseconds(180)) }
                 let muting = listMuting
-                let fetched = try await fetchPage(after: isPaging ? cursor : nil, muting: showsMuted ? MuteRules() : muting)
+                let fetched = try await fetchPage(
+                    after: isPaging ? cursor : nil, muting: showsMuted ? MuteRules() : muting)
                 try Task.checkCancellation()
                 if !isPaging {
                     var hidden = 0
                     if !muting.isEmpty { hidden = try await countMuted(muting) }
+                    let waiting = hidesWaitingStories || showsWaiting ? try await countWaiting(muting: muting) : 0
                     try Task.checkCancellation()
                     mutedCount = hidden
+                    waitingCount = waiting
                 }
                 let page = Array(fetched.prefix(200))
                 let listed = isPaging ? buffer.displayed.articles + page : page
@@ -222,20 +324,39 @@ struct ArticleListView: View {
     private var listFilters: (topic: String, read: Bool?, saved: Bool?) {
         let topic = selectedTopic ?? "Today"
         let read: Bool?
-        if topic == "History" { read = true }
-        else if topic == "Unread" || (themeManager.autoHideRead && topic != "Saved Stories") { read = false }
-        else { read = nil }
+        if topic == "History" {
+            read = true
+        } else if topic == "Unread" || (themeManager.autoHideRead && topic != "Saved Stories") {
+            read = false
+        } else {
+            read = nil
+        }
         return (topic, read, topic == "Saved Stories" ? true : nil)
     }
 
+    /// Main lists hide stories that wait for more coverage; search, Saved Stories and History list everything.
+    private var listsWaitingStories: Bool {
+        !isSearching && selectedTopic != "Saved Stories" && selectedTopic != "History"
+    }
+
+    private var hidesWaitingStories: Bool { listsWaitingStories && !showsWaiting }
+
     private func fetchPage(after pageCursor: ArticleQueryCursor?, muting: MuteRules) async throws -> [FeedArticle] {
         if isSearching {
-            return try await articleStore.database.searchArticles(query: searchText, limit: 201, after: pageCursor, muting: muting)
+            return try await articleStore.database.searchArticles(
+                query: searchText, limit: 201, after: pageCursor, muting: muting)
         }
         let filters = listFilters
         return try await articleStore.database.fetchArticles(
             section: filters.topic, isRead: filters.read, isSaved: filters.saved,
-            limit: 201, after: pageCursor, muting: muting)
+            limit: 201, after: pageCursor, muting: muting, hidingWaitingStories: hidesWaitingStories)
+    }
+
+    private func countWaiting(muting: MuteRules) async throws -> Int {
+        guard listsWaitingStories else { return 0 }
+        let filters = listFilters
+        return try await articleStore.database.waitingStoryCount(
+            section: filters.topic, isRead: filters.read, isSaved: filters.saved, muting: muting)
     }
 
     private func countMuted(_ muting: MuteRules) async throws -> Int {
@@ -256,16 +377,20 @@ struct ArticleListView: View {
             Divider()
             Button("Unmute All…", role: .destructive) { confirmsUnmuteAll = true }
         } label: {
-            Label(showsMuted ? "Showing \(mutedCount) muted" : "\(mutedCount) hidden by muting",
-                  systemImage: showsMuted ? "eye" : "eye.slash")
-                .font(AppTypography.caption)
-                .foregroundStyle(AppColor.secondaryText)
+            Label(
+                showsMuted ? "Showing \(mutedCount) muted" : "\(mutedCount) hidden by muting",
+                systemImage: showsMuted ? "eye" : "eye.slash"
+            )
+            .font(AppTypography.caption)
+            .foregroundStyle(AppColor.secondaryText)
         }
         .menuStyle(.button)
         .buttonStyle(.plain)
         .fixedSize()
         .help(showsMuted ? "Muted stories are shown in this list" : "Stories hidden by your muted sources and topics")
-        .accessibilityLabel(showsMuted ? "Showing \(mutedCount) muted stories" : "\(mutedCount) stories hidden by muting")
+        .accessibilityLabel(
+            showsMuted ? "Showing \(mutedCount) muted stories" : "\(mutedCount) stories hidden by muting"
+        )
         .confirmationDialog("Unmute every source and topic?", isPresented: $confirmsUnmuteAll) {
             Button("Unmute All", role: .destructive) { appSettings.clearMuting() }
         } message: {
@@ -280,15 +405,15 @@ struct ArticleListView: View {
         return Button {
             applyPendingUpdates(proxy: proxy)
         } label: {
-            Label(count > 0 ? "\(count) new \(count == 1 ? "story" : "stories")" : "Show updates", systemImage: "arrow.up")
-                .font(AppTypography.label)
-                .foregroundStyle(AppColor.accent)
-                .padding(.horizontal, AppSpacing.sm)
-                .padding(.vertical, 6)
-                .background(Capsule().fill(AppColor.accent.opacity(0.14)))
+            Label(
+                count > 0 ? "\(count) new \(count == 1 ? "story" : "stories")" : "Show updates", systemImage: "arrow.up"
+            )
+            .font(AppTypography.label)
         }
-        .buttonStyle(.plain)
-        .padding(.bottom, AppSpacing.xs)
+        .nativeGlassButtonStyle()
+        .buttonBorderShape(.capsule)
+        .opacity(appearsActive ? 1 : 0.5)
+        .padding(.top, AppSpacing.xs)
         .help("Show the latest stories (U). The list keeps its place until you do.")
         .accessibilityHint("Moves to the top of the updated list")
     }
@@ -310,59 +435,83 @@ struct ArticleListView: View {
     private func announceUpdates(_ count: Int) {
         guard let application = NSApp else { return }
         let message = count == 1 ? "1 new story available" : "\(count) new stories available"
-        NSAccessibility.post(element: application, notification: .announcementRequested, userInfo: [
-            .announcement: message,
-            .priority: NSAccessibilityPriorityLevel.medium.rawValue
-        ])
+        NSAccessibility.post(
+            element: application, notification: .announcementRequested,
+            userInfo: [
+                .announcement: message,
+                .priority: NSAccessibilityPriorityLevel.medium.rawValue,
+            ])
     }
 
-    // MARK: - Header Bar
-    
-    private var headerBar: some View {
-        HStack(spacing: AppSpacing.sm) {
-            Button {
-                withAnimation(.easeInOut(duration: 0.2)) {
-                    columnVisibility = (columnVisibility == .detailOnly ? .all : .detailOnly)
-                }
-            } label: {
-                Image(systemName: "sidebar.leading")
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundColor(AppColor.secondaryText)
-            }
-            .buttonStyle(.plain)
-            .help("Toggle Sidebar (⌃⌘S)")
-            .accessibilityLabel("Toggle Sidebar")
-            
-            VStack(alignment: .leading, spacing: AppSpacing.xxs) {
-                Text(searchText.isEmpty ? (selectedTopic ?? "Today") : "Search")
-                    .font(AppTypography.display)
-                    .foregroundStyle(AppColor.primaryText)
-                HStack(spacing: AppSpacing.xs) {
-                    Text("\(entries.count) stories · Your personal edition")
+    // MARK: - Masthead
+
+    private var locationTitle: String {
+        isSearching ? "Search" : (selectedTopic ?? "Today")
+    }
+
+    /// The location title and one status line, scrolling with the list under the toolbar (DESIGN.md 8.1).
+    private var masthead: some View {
+        VStack(alignment: .leading, spacing: AppSpacing.xxs) {
+            Text(locationTitle)
+                .font(AppTypography.masthead)
+                .foregroundStyle(AppColor.primaryText)
+                .accessibilityAddTraits(.isHeader)
+                .accessibilityHeading(.h1)
+            HStack(spacing: AppSpacing.xs) {
+                Text(listSubtitle)
+                    .font(AppTypography.caption)
+                    .foregroundStyle(AppColor.secondaryText)
+                    .monospacedDigit()
+                if waitingCount > 0 && !isBriefing {
+                    Text("·")
                         .font(AppTypography.caption)
                         .foregroundStyle(AppColor.secondaryText)
-                    if mutedCount > 0 && !listMuting.isEmpty {
-                        Text("·")
-                            .font(AppTypography.caption)
-                            .foregroundStyle(AppColor.secondaryText)
-                            .accessibilityHidden(true)
-                        mutingMenu
+                        .accessibilityHidden(true)
+                    Button(showsWaiting ? "Hide \(waitingCount) waiting" : "\(waitingCount) waiting for more sources") {
+                        showsWaiting.toggle()
                     }
+                    .buttonStyle(.plain)
+                    .font(AppTypography.caption)
+                    .foregroundStyle(AppColor.secondaryText)
+                    .help(
+                        showsWaiting
+                            ? "Hide minor stories until more publishers cover them"
+                            : "Minor stories appear once \(StoryVisibilityPolicy.minorStorySources + 1) publishers cover them; unread ones expire after a day"
+                    )
+                }
+                if mutedCount > 0 && !listMuting.isEmpty {
+                    Text("·")
+                        .font(AppTypography.caption)
+                        .foregroundStyle(AppColor.secondaryText)
+                        .accessibilityHidden(true)
+                    mutingMenu
                 }
             }
-            
-            Spacer()
-            
-            Toggle(isOn: $groupsEvents) {
-                Image(systemName: "square.stack.3d.up")
-                    .font(.system(size: 14, weight: .medium))
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, AppLayout.pageInset)
+        .padding(.top, AppSpacing.md)
+        .padding(.bottom, AppLayout.cardGap)
+    }
+
+    // MARK: - Toolbar
+
+    @ToolbarContentBuilder
+    private var listToolbar: some ToolbarContent {
+        ToolbarItemGroup(placement: .primaryAction) {
+            Toggle(isOn: $groupsEvents.animation(reduceMotion ? nil : AppMotion.state)) {
+                Label(
+                    "Group Stories by Event",
+                    systemImage: groupsEvents ? "square.stack.3d.up.fill" : "square.stack.3d.up")
             }
             .toggleStyle(.button)
-            .buttonStyle(.plain)
-            .foregroundColor(groupsEvents ? AppColor.accent : AppColor.secondaryText)
-            .help(groupsEvents ? "Showing one card per event. Show individual publications (G)" : "Showing individual publications. Group coverage of the same event (G)")
+            .help(
+                groupsEvents
+                    ? "Showing one card per event. Show individual publications (G)"
+                    : "Showing individual publications. Group coverage of the same event (G)"
+            )
+            .disabled(isBriefing)
             .accessibilityLabel("Group Coverage by Event")
-            .accessibilityValue(groupsEvents ? "On" : "Off")
 
             Picker("Article layout", selection: $gridLayout) {
                 Image(systemName: "list.bullet").tag(false)
@@ -373,90 +522,177 @@ struct ArticleListView: View {
             .pickerStyle(.segmented)
             .labelsHidden()
             .fixedSize()
-            .frame(width: 80)
             .help("Choose list or grid layout")
+        }
 
-            Button {
-                isShortcutsHelpPresented.toggle()
-            } label: {
-                Image(systemName: "keyboard")
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundColor(AppColor.secondaryText)
+        if #available(macOS 26.0, *) {
+            ToolbarSpacer(.fixed, placement: .primaryAction)
+        }
+
+        // Xcode 26.3 (CodeQL tracing) cannot resolve this newer SwiftUI modifier.
+        #if compiler(>=6.4)
+            if #available(macOS 26.1, *) {
+                refreshToolbarItem.visibilityPriority(.high)
+            } else {
+                refreshToolbarItem
             }
-            .buttonStyle(.plain)
-            .popover(isPresented: $isShortcutsHelpPresented) {
-                shortcutsHelpView
+        #else
+            refreshToolbarItem
+        #endif
+        if isBriefing {
+            if #available(macOS 26, *) { ToolbarSpacer(.fixed, placement: .primaryAction) }
+            ToolbarItem(placement: .primaryAction) {
+                Button("New Briefing", action: startNewBriefing)
+                    .help("Select a new briefing from the latest unread stories")
             }
-            .help("Keyboard Shortcuts")
-            .accessibilityLabel("Keyboard Shortcuts")
-            
+        }
+    }
+
+    // Repeated refreshes join the running request, so keep the control enabled and its size stable.
+    private var refreshToolbarItem: some ToolbarContent {
+        ToolbarItem(placement: .primaryAction) {
             Button {
                 refreshFeeds()
             } label: {
-                if feedManager.isAnyFeedLoading {
-                    ProgressView()
-                        .controlSize(.small)
-                        .scaleEffect(0.8)
-                        .frame(width: 18, height: 18)
-                } else {
-                    Image(systemName: "arrow.clockwise")
-                        .font(.system(size: 15, weight: .medium))
-                        .foregroundColor(AppColor.secondaryText)
-                }
+                Label("Refresh Feeds", systemImage: "arrow.clockwise")
+                    .symbolEffect(
+                        .rotate, options: .repeat(.continuous), isActive: feedManager.isAnyFeedLoading && !reduceMotion)
             }
-            .buttonStyle(.plain)
-            .disabled(feedManager.isAnyFeedLoading)
-            .help("Refresh Feeds (R or ⌘R)")
+            .help(feedManager.isAnyFeedLoading ? "Refreshing feeds…" : "Refresh Feeds (R or ⌘R)")
             .accessibilityLabel("Refresh Feeds")
+            .accessibilityValue(feedManager.isAnyFeedLoading ? "Refreshing" : "")
         }
-        .padding(.horizontal, AppLayout.pageInset)
-        .padding(.top, 24)
-        .padding(.bottom, AppLayout.cardGap)
     }
-    
+
+    /// Story count, how many cards group an event's coverage, and when feeds last refreshed.
+    private var listSubtitle: String {
+        if isBriefing { return "Up to 10 unread stories · Last 24 hours" }
+        var parts = ["\(entries.count) \(entries.count == 1 ? "story" : "stories")"]
+        if !isSearching && (selectedTopic ?? "Today") == "Today" {
+            parts.insert(Date().formatted(.dateTime.weekday(.wide).month(.wide).day()), at: 0)
+        }
+        let events = entries.filter { if case .event = $0 { return true } else { return false } }.count
+        if events > 0 { parts.append("\(events) grouped \(events == 1 ? "event" : "events")") }
+        if !isSearching, let refreshed = feedManager.lastRefreshCompletedAt {
+            parts.append("Updated \(refreshed.formatted(date: .omitted, time: .shortened))")
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    private func startNewBriefing() {
+        briefing = nil
+        pageRequest += 1
+    }
+
+    private var briefingCompletion: some View {
+        VStack(spacing: AppSpacing.sm) {
+            if let briefing {
+                Text(
+                    briefing.isComplete(readManager.readArticles)
+                        ? "Briefing complete"
+                        : "\(briefing.readCount(readManager.readArticles)) of \(briefing.articles.count) stories read"
+                )
+                .font(AppTypography.headline)
+                Text(
+                    "Selection frozen at \(briefing.startedAt.formatted(date: .omitted, time: .shortened)). New stories stay in your regular feed."
+                )
+                .font(AppTypography.caption)
+                .foregroundStyle(AppColor.secondaryText)
+                Button("Back to Today") { selectedTopic = "Today" }
+            }
+        }
+        .padding(AppSpacing.lg)
+        .frame(maxWidth: .infinity)
+        .accessibilityElement(children: .contain)
+    }
+
     // MARK: - Article Grid
-    
+
+    /// The lead takes the full detail-column width, including the edge by the sidebar.
+    /// Both collections retain their original ordering and existing lazy rendering.
     private func articleGrid(proxy _: ScrollViewProxy) -> some View {
-        Group {
-            if gridLayout {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 300, maximum: 420), spacing: AppLayout.cardGap)], spacing: AppLayout.cardGap) {
-                    articleCards
+        let listed = entries
+        let leadID: String? = {
+            if #available(macOS 26, *) {
+                return LeadStoryPresentation.firstEligibleID(
+                    in: listed, selectedTopic: selectedTopic, isSearching: isSearching
+                )
+            }
+            return nil
+        }()
+
+        return VStack(spacing: AppLayout.cardGap) {
+            if let leadID, let leadIndex = listed.firstIndex(where: { $0.id == leadID }) {
+                if leadIndex > 0 {
+                    cardCollection(Array(listed[..<leadIndex]))
+                        .padding(.horizontal, AppLayout.pageInset)
+                }
+                entryCard(listed[leadIndex], isLead: true)
+                    .frame(maxWidth: .infinity)
+                if leadIndex + 1 < listed.count {
+                    cardCollection(Array(listed[(leadIndex + 1)...]))
+                        .padding(.horizontal, AppLayout.pageInset)
                 }
             } else {
-                LazyVStack(spacing: AppSpacing.sm) {
-                    articleCards
-                }
-                .frame(maxWidth: 1000)
-                .frame(maxWidth: .infinity)
+                cardCollection(listed)
+                    .padding(.horizontal, AppLayout.pageInset)
             }
         }
-        .padding(.horizontal, AppLayout.pageInset)
         .padding(.bottom, AppSpacing.xl)
     }
 
-    private var articleCards: some View {
-        ForEach(entries) { entry in
-            switch entry {
-            case .article(let article):
-                ArticleCardView(article: article, isSelected: article.id == focusedArticleID, compact: !gridLayout) {
-                    openArticle(article)
-                }
-                .id(entry.id)
-            case .event(let summary, let representative, _):
-                EventCardView(
-                    representative: representative,
-                    summary: summary,
-                    isSelected: representative.id == focusedArticleID,
-                    compact: !gridLayout,
-                    isExpanded: expansionBinding(summary.eventID),
-                    openRepresentative: { openEvent(summary.eventID, article: representative) },
-                    openMember: { member, members in
-                        openEvent(summary.eventID, article: member, context: members)
-                    },
-                    separate: { member in separate(member, from: summary.eventID) }
-                )
-                .id(entry.id)
+    @ViewBuilder
+    private func cardCollection(_ listed: [FeedEntry]) -> some View {
+        if gridLayout {
+            LazyVGrid(
+                columns: [
+                    GridItem(
+                        .adaptive(
+                            minimum: AppLayout.gridColumnMinimum,
+                            maximum: AppLayout.gridColumnMaximum), spacing: AppLayout.cardGap)
+                ],
+                spacing: AppLayout.cardGap
+            ) {
+                ForEach(listed) { entry in entryCard(entry) }
             }
+        } else {
+            LazyVStack(spacing: AppSpacing.sm) {
+                ForEach(listed) { entry in entryCard(entry) }
+            }
+            .frame(maxWidth: AppLayout.listMaxWidth)
+            .frame(maxWidth: .infinity)
+        }
+    }
+
+    @ViewBuilder
+    private func entryCard(_ entry: FeedEntry, isLead: Bool = false) -> some View {
+        switch entry {
+        case .article(let article):
+            ArticleCardView(
+                article: article, isSelected: article.id == focusedArticleID,
+                compact: !gridLayout, isLead: isLead
+            ) {
+                openArticle(article)
+            }
+            .id(entry.id)
+            .onAppear(perform: NewsSignposts.firstCardAppeared)
+        case .event(let summary, let representative, let visibleMembers):
+            EventCardView(
+                representative: representative,
+                summary: summary,
+                visibleMembers: visibleMembers,
+                isSelected: representative.id == focusedArticleID,
+                compact: !gridLayout,
+                isLead: isLead,
+                isExpanded: expansionBinding(summary.eventID),
+                openRepresentative: { openEvent(summary.eventID, article: representative) },
+                openMember: { member, members in
+                    openEvent(summary.eventID, article: member, context: members)
+                },
+                separate: { member in separate(member, from: summary.eventID) }
+            )
+            .id(entry.id)
+            .onAppear(perform: NewsSignposts.firstCardAppeared)
         }
     }
 
@@ -470,31 +706,33 @@ struct ArticleListView: View {
     }
 
     // MARK: - Empty States & Diagnostics
-    
+
     private var emptyStateView: some View {
         VStack(spacing: AppSpacing.md) {
             let failedFeeds = feedManager.feedStatuses.filter {
                 if case .failed = $0.value { return true }
                 return false
             }
-            
-            if feedManager.isAnyFeedLoading {
+
+            if !isBriefing && feedManager.isAnyFeedLoading {
                 ProgressView()
                     .controlSize(.regular)
                     .padding(.bottom, 4)
                 Text("Refreshing news feeds...")
                     .font(AppTypography.body)
                     .foregroundColor(AppColor.secondaryText)
-            } else if (selectedTopic != "Saved Stories" && selectedTopic != "History") && !failedFeeds.isEmpty && filteredArticles.isEmpty {
+            } else if !isBriefing && (selectedTopic != "Saved Stories" && selectedTopic != "History")
+                && !failedFeeds.isEmpty && filteredArticles.isEmpty
+            {
                 VStack(spacing: 12) {
                     Image(systemName: "exclamationmark.triangle")
                         .font(.system(size: 32))
                         .foregroundColor(AppColor.warning)
-                    
+
                     Text("\(failedFeeds.count) feeds couldn't be refreshed")
                         .font(AppTypography.headline)
                         .foregroundColor(AppColor.primaryText)
-                    
+
                     VStack(spacing: 4) {
                         ForEach(Array(failedFeeds.keys.prefix(4)), id: \.self) { urlString in
                             let host = URL(string: urlString)?.host ?? urlString
@@ -503,7 +741,7 @@ struct ArticleListView: View {
                                 .foregroundColor(AppColor.secondaryText)
                         }
                     }
-                    
+
                     HStack(spacing: 10) {
                         Button("Retry Feeds") {
                             refreshFeeds()
@@ -513,7 +751,7 @@ struct ArticleListView: View {
                         .controlSize(.small)
                     }
                     .padding(.top, 4)
-                    
+
                     DisclosureGroup("Technical Details") {
                         VStack(alignment: .leading, spacing: 6) {
                             ForEach(Array(failedFeeds.keys), id: \.self) { urlString in
@@ -545,11 +783,11 @@ struct ArticleListView: View {
                 Image(systemName: emptyStateIcon)
                     .font(.system(size: 36))
                     .foregroundColor(AppColor.tertiaryText)
-                
+
                 Text(emptyStateTitle)
                     .font(AppTypography.headline)
                     .foregroundColor(AppColor.primaryText)
-                
+
                 Text(emptyStateText)
                     .font(AppTypography.bodySmall)
                     .foregroundColor(AppColor.secondaryText)
@@ -557,11 +795,13 @@ struct ArticleListView: View {
                     .frame(maxWidth: 340)
 
                 if mutedCount > 0 && !showsMuted && !listMuting.isEmpty {
-                    Button(mutedCount == 1 ? "Show 1 Muted Story" : "Show \(mutedCount) Muted Stories") { showsMuted = true }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
+                    Button(mutedCount == 1 ? "Show 1 Muted Story" : "Show \(mutedCount) Muted Stories") {
+                        showsMuted = true
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
                 }
-                
+
                 if selectedTopic == "Today" || selectedTopic == "Unread" {
                     Button("Refresh Feeds") {
                         refreshFeeds()
@@ -575,18 +815,20 @@ struct ArticleListView: View {
         .frame(maxWidth: .infinity)
         .padding(.top, 80)
     }
-    
+
     private var emptyStateIcon: String {
         switch selectedTopic {
+        case "Briefing": return "text.book.closed"
         case "Today", "Unread": return "newspaper"
         case "Saved Stories": return "bookmark"
         case "History": return "clock"
         default: return "tray"
         }
     }
-    
+
     private var emptyStateTitle: String {
         switch selectedTopic {
+        case "Briefing": return "No Stories for This Briefing"
         case "Today": return "No Articles Yet"
         case "Unread": return "All Caught Up"
         case "Saved Stories": return "No Saved Stories"
@@ -594,23 +836,28 @@ struct ArticleListView: View {
         default: return "Nothing in \(selectedTopic ?? "Section")"
         }
     }
-    
+
     private var emptyStateText: String {
         switch selectedTopic {
+        case "Briefing":
+            return
+                "There are no unread, unmuted stories published in the last 24 hours. Your archive and normal feed remain available."
         case "Today": return "Subscribe to feeds or click refresh to load the latest stories."
         case "Unread": return "You've read all stories in your feeds. Check back later for updates."
         case "Saved Stories": return "Stories you bookmark will be kept here for easy reading."
         case "History": return "Articles you have opened will appear here."
-        default: return "New articles matching \(selectedTopic ?? "this section") will appear here once your feeds refresh."
+        default:
+            return "New articles matching \(selectedTopic ?? "this section") will appear here once your feeds refresh."
         }
     }
-    
+
     // MARK: - Keyboard Handling
-    
+
     private func handleKeyPress(press: KeyPress, proxy: ScrollViewProxy) -> KeyPress.Result {
         guard articlePath.isEmpty,
-              press.modifiers.intersection([.command, .control, .option]).isEmpty else { return .ignored }
-        
+            press.modifiers.intersection([.command, .control, .option]).isEmpty
+        else { return .ignored }
+
         switch press.key {
         case .downArrow:
             navigateList(offset: 1, proxy: proxy)
@@ -647,6 +894,7 @@ struct ArticleListView: View {
                 toggleFocusedEventSources()
                 return .handled
             } else if press.characters == "g" {
+                guard !isBriefing else { return .ignored }
                 groupsEvents.toggle()
                 return .handled
             } else if press.characters == "u" {
@@ -654,7 +902,8 @@ struct ArticleListView: View {
                 return .handled
             } else if press.characters == "o" {
                 if let id = focusedArticleID, let art = filteredArticles.first(where: { $0.id == id }),
-                   let url = URL(string: art.link) {
+                    let url = URL(string: art.link)
+                {
                     NSWorkspace.shared.open(url)
                 }
                 return .handled
@@ -662,7 +911,7 @@ struct ArticleListView: View {
             return .ignored
         }
     }
-    
+
     private func navigateList(offset: Int, proxy: ScrollViewProxy) {
         let listed = entries
         guard !listed.isEmpty else { return }
@@ -679,7 +928,7 @@ struct ArticleListView: View {
             proxy.scrollTo(target.id, anchor: .center)
         }
     }
-    
+
     private func openFocusedArticle() {
         let listed = entries
         guard let entry = listed.first(where: { $0.id == focusedArticleID }) ?? listed.first else { return }
@@ -691,7 +940,8 @@ struct ArticleListView: View {
 
     private func toggleFocusedEventSources() {
         guard let entry = entries.first(where: { $0.id == focusedArticleID }),
-              case .event(let summary, _, _) = entry else { return }
+            case .event(let summary, _, _) = entry
+        else { return }
         let binding = expansionBinding(summary.eventID)
         withAnimation(reduceMotion ? nil : AppMotion.state) { binding.wrappedValue.toggle() }
         if binding.wrappedValue {
@@ -724,74 +974,71 @@ struct ArticleListView: View {
             }
         }
     }
-    
+
+    /// The reader asked for these stories, so they are shown when the refresh ends instead of waiting behind
+    /// the update button.
     private func refreshFeeds() {
-        feedManager.fetchFeeds()
+        Task {
+            await feedManager.fetchFeedsAsync()
+            // An open article keeps the list still; its updates wait as usual.
+            guard articlePath.isEmpty else { return }
+            appliesNextUpdate = true
+            refreshReloads += 1
+        }
     }
-    
-    // MARK: - Shortcuts Help View
-    
-    private var shortcutsHelpView: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Keyboard Shortcuts")
-                .font(AppTypography.headline)
-                .foregroundColor(AppColor.primaryText)
-                .padding(.bottom, 2)
-            
-            VStack(alignment: .leading, spacing: 6) {
-                Text("NAVIGATION")
-                    .font(AppTypography.metadata)
-                    .foregroundColor(AppColor.tertiaryText)
-                    .tracking(AppTypography.sourceEyebrowTracking)
-                shortcutRow("J / ↓", "Next article")
-                shortcutRow("K / ↑", "Previous article")
-                shortcutRow("Space / ↵", "Open focused article")
-                shortcutRow("Esc / ←", "Back to list")
-            }
-            
-            Divider()
-            
-            VStack(alignment: .leading, spacing: 6) {
-                Text("ACTIONS")
-                    .font(AppTypography.metadata)
-                    .foregroundColor(AppColor.tertiaryText)
-                    .tracking(AppTypography.sourceEyebrowTracking)
-                shortcutRow("M", "Toggle read / unread")
-                shortcutRow("S", "Bookmark story")
-                shortcutRow("O", "Open in browser")
-                shortcutRow("E", "Show or hide event sources")
-                shortcutRow("G", "Group by event / publications")
-                shortcutRow("U", "Show queued updates")
-                shortcutRow("W", "Toggle Reader / Web view")
-            }
-            
-            Divider()
-            
-            VStack(alignment: .leading, spacing: 6) {
-                Text("GLOBAL")
-                    .font(AppTypography.metadata)
-                    .foregroundColor(AppColor.tertiaryText)
-                    .tracking(AppTypography.sourceEyebrowTracking)
-                shortcutRow("R / ⌘R", "Refresh all feeds")
-                shortcutRow("⌘1 - ⌘4", "Jump to section")
+}
+
+// MARK: - Keyboard Shortcuts Window
+
+/// Help → Keyboard Shortcuts. Lists the single-key shortcuts that menus cannot show.
+struct KeyboardShortcutsView: View {
+    private static let sections: [(title: String, rows: [(keys: String, action: String)])] = [
+        (
+            "Navigation",
+            [
+                ("J or ↓", "Next story"),
+                ("K or ↑", "Previous story"),
+                ("Space or ↵", "Open focused story"),
+                ("Esc or ←", "Back to list"),
+            ]
+        ),
+        (
+            "Story",
+            [
+                ("M", "Mark as read or unread"),
+                ("S", "Save or remove from Saved Stories"),
+                ("O", "Open in browser"),
+                ("E", "Show or hide event coverage"),
+                ("W or ⇧⌘R", "Switch between Story and Web"),
+            ]
+        ),
+        (
+            "List",
+            [
+                ("G", "Group coverage by event"),
+                ("U", "Show queued updates"),
+                ("R or ⌘R", "Refresh feeds"),
+                ("⌘1 – ⌘4", "Today, Unread, Saved Stories, History"),
+            ]
+        ),
+    ]
+
+    var body: some View {
+        Form {
+            ForEach(Self.sections, id: \.title) { section in
+                Section(section.title) {
+                    ForEach(section.rows, id: \.keys) { row in
+                        LabeledContent(row.action) {
+                            Text(row.keys)
+                                .monospaced()
+                                .foregroundStyle(AppColor.secondaryText)
+                        }
+                    }
+                }
             }
         }
-        .padding(14)
-        .frame(width: 270)
-    }
-    
-    private func shortcutRow(_ keys: String, _ desc: String) -> some View {
-        HStack {
-            Text(keys)
-                .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                .padding(.horizontal, 6)
-                .padding(.vertical, 3)
-                .background(AppColor.badgeBackground)
-                .clipShape(RoundedRectangle(cornerRadius: AppRadius.control))
-            Spacer()
-            Text(desc)
-                .font(AppTypography.caption)
-                .foregroundColor(AppColor.secondaryText)
-        }
+        .formStyle(.grouped)
+        .frame(width: 380)
+        .fixedSize(horizontal: false, vertical: true)
     }
 }
