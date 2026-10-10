@@ -186,6 +186,7 @@ actor ExtractionLog {
     }
     func end() { active -= 1 }
     func count(_ link: String) -> Int { links.filter { $0 == link }.count }
+    var isIdle: Bool { active == 0 }
 }
 
 /// Scripted publisher pages for overview evidence tests.
@@ -194,13 +195,15 @@ actor TestPages {
         var outcome: ExtractionOutcome = .emptyContent
         var delay: Duration = .zero
         var during: (@Sendable () async -> Void)?
+        /// Held until opened, ignoring cancellation, like an extractor that does not cooperate.
+        var gate: OpenGate?
     }
     private var replies: [String: Reply] = [:]
     func set(
         _ link: String, _ outcome: ExtractionOutcome, delay: Duration = .zero,
-        during: (@Sendable () async -> Void)? = nil
+        during: (@Sendable () async -> Void)? = nil, gate: OpenGate? = nil
     ) {
-        replies[link] = Reply(outcome: outcome, delay: delay, during: during)
+        replies[link] = Reply(outcome: outcome, delay: delay, during: during, gate: gate)
     }
     func reply(for link: String) -> Reply { replies[link] ?? Reply() }
 }
@@ -10766,6 +10769,7 @@ struct NewsTests {
             await log.begin(link)
             let reply = await pages.reply(for: link)
             if reply.delay > .zero { try? await Task.sleep(for: reply.delay) }
+            await reply.gate?.wait()
             await log.end()
             await reply.during?()
             return reply.outcome
@@ -10897,6 +10901,44 @@ struct NewsTests {
             eventID: "after-cancel", eventTitle: "Harbor bridge", membershipVersion: 1, articles: [q, a])
         assertEqual(
             try await stored(q.id)?.fullContent, page("Publisher Q"), "Slots are released after cancelled fetches")
+
+        // An extractor that ignores cancellation cannot hold the overview past the deadline or store late text.
+        let (r, t) = (article("ev-r", "Publisher R"), article("ev-t", "Publisher T"))
+        _ = try await database.upsertArticles([r, t])
+        let stuck = OpenGate()
+        await pages.set(r.link, success(page("Publisher R")), gate: stuck)
+        await pages.set(t.link, success(page("Publisher T")))
+        let stubborn = coordinator(deadline: .milliseconds(300))
+        let stubbornStart = clock.now
+        let stubbornResult = await stubborn.requestOverview(
+            eventID: "stubborn", eventTitle: "Harbor bridge", membershipVersion: 1, articles: [r, t])
+        assertTrue(clock.now - stubbornStart < .seconds(3), "A fetch that ignores cancellation is not awaited")
+        assertTrue(stubbornResult != nil, "The overview is produced without the stuck page")
+        await stuck.open()
+        while !(await log.isIdle) { await Task.yield() }
+        try await Task.sleep(for: .milliseconds(100))
+        assertEqual(try await stored(r.id)?.fullContent, nil, "Text that arrives after the deadline is not stored")
+
+        // Nothing is fetched while the model may not run, and at most four representatives are fetched per event.
+        let (u, v) = (article("ev-u", "Publisher U"), article("ev-v", "Publisher V"))
+        _ = try await database.upsertArticles([u, v])
+        await pages.set(u.link, success(page("Publisher U")))
+        let gated = OverviewGenerationCoordinator(
+            store: store, queue: EnrichmentQueue(store: store), textModel: refusing, allowsModel: { false },
+            extractText: extractor)
+        _ = await gated.requestOverview(
+            eventID: "gated", eventTitle: "Harbor bridge", membershipVersion: 1, articles: [u, v])
+        assertEqual(await log.count(u.link), 0, "AI, Low Power and thermal policy also gate page fetches")
+        let five = ["ev-w1", "ev-w2", "ev-w3", "ev-w4", "ev-w5"].enumerated().map {
+            article($1, "Publisher W\($0)")
+        }
+        _ = try await database.upsertArticles(five)
+        for item in five { await pages.set(item.link, success(page(item.source))) }
+        _ = await coordinator().requestOverview(
+            eventID: "five", eventTitle: "Harbor bridge", membershipVersion: 1, articles: five)
+        var fetched = 0
+        for item in five { fetched += await log.count(item.link) }
+        assertEqual(fetched, OverviewGenerationCoordinator.maxEvidenceFetches, "Four representatives at most")
     }
 
     @MainActor

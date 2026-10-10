@@ -293,19 +293,30 @@ actor OverviewGenerationCoordinator {
         guard extractionTasks[article.id] == nil else { return }
         let deadline = extractionDeadline
         let task = Task {
-            let stored = await withTaskGroup(of: Bool?.self) { group in
-                group.addTask { await self.extractAndStore(article, store: store) }
-                group.addTask {
-                    try? await Task.sleep(for: deadline)
-                    return nil
-                }
-                let first = await group.next() ?? nil
-                group.cancelAll()
-                return first ?? false
-            }
+            let work = Task { await self.extractAndStore(article, store: store) }
+            let stored = await Self.result(of: work, cancellingAt: deadline)
             await self.finishExtraction(article, stored: stored)
         }
         extractionTasks[article.id] = task
+    }
+
+    /// The work's result, or false at the deadline. At the deadline the work is cancelled but not awaited, so an
+    /// extractor that ignores cancellation cannot hold the overview past it; a cancelled fetch never stores, and it
+    /// releases its slot only when it actually ends.
+    private static func result(of work: Task<Bool, Never>, cancellingAt deadline: Duration) async -> Bool {
+        let pending = OSAllocatedUnfairLock<CheckedContinuation<Bool, Never>?>(initialState: nil)
+        return await withCheckedContinuation { continuation in
+            pending.withLock { $0 = continuation }
+            Task {
+                let value = await work.value
+                pending.withLock { $0.take() }?.resume(returning: value)
+            }
+            Task {
+                try? await Task.sleep(for: deadline)
+                work.cancel()
+                pending.withLock { $0.take() }?.resume(returning: false)
+            }
+        }
     }
 
     /// Fetches the page and stores its text only if extraction passed its quality checks, the fetch was not cut off

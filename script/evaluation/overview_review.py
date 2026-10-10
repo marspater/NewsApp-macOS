@@ -29,7 +29,10 @@ DEFAULT_TARGET = 30
 # a refusal written as text, so it counts there; the raw causes stay in `fallbackCauses`.
 FALLBACK_GROUPS = {'refusal': ('refusal', 'unstructured'), 'format': ('lineCount',), 'weakDraft': ('weakDraft',),
                    'notAsked': ('noPassages', 'thinEvidence'), 'modelUnavailableOrError': ('unavailable', 'contextWindow', 'error')}
-STOPWORDS = set('a an and are as at be by for from has have in is it its of on or that the their to was were will with'.split())
+STOPWORDS = frozenset({
+    'a', 'an', 'and', 'are', 'as', 'at', 'be', 'by', 'for', 'from', 'has', 'have', 'in', 'is',
+    'it', 'its', 'of', 'on', 'or', 'that', 'the', 'their', 'to', 'was', 'were', 'will', 'with',
+})
 
 
 def require(condition, message):
