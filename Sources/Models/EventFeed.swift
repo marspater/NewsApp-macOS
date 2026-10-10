@@ -146,7 +146,7 @@ enum EventFeedGrouping {
         var seenArticles = Set<String>()
         var uniqueArticles: [FeedArticle] = []
         for article in articles {
-        for article in articles where seenArticles.insert(article.id).inserted { uniqueArticles.append(article) }
+            if seenArticles.insert(article.id).inserted { uniqueArticles.append(article) }
         }
         guard mode == .events else { return uniqueArticles.map(\.id) }
         var eventOf: [String: String] = [:]
