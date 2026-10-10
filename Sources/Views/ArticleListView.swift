@@ -135,11 +135,29 @@ struct ArticleListView: View {
 
     @ViewBuilder
     private func listContent(proxy: ScrollViewProxy) -> some View {
-        if filteredArticles.isEmpty && isLoadingPage {
-            ProgressView("Loading articles…").padding(AppSpacing.xl)
-        } else if filteredArticles.isEmpty && queryError != nil {
+        if !filteredArticles.isEmpty {
+            articleGrid(proxy: proxy)
+            if isBriefing { briefingCompletion }
+            if hasMoreResults {
+                Button("Load more articles") { pageRequest += 1 }
+                    .disabled(isLoadingPage)
+                    .padding(.bottom, AppSpacing.lg)
+            }
+            if queryError != nil {
+                queryFailureView
+                    .padding(.top, AppSpacing.xl)
+            }
+        }
+    }
+
+    /// Loading, failure, no results and empty sections, centered in the visible list area under the masthead.
+    @ViewBuilder
+    private var emptyListContent: some View {
+        if isLoadingPage {
+            ProgressView("Loading articles…")
+        } else if queryError != nil {
             queryFailureView
-        } else if filteredArticles.isEmpty && isSearching {
+        } else if isSearching {
             VStack(spacing: AppSpacing.md) {
                 ContentUnavailableView.search(text: searchText)
                 if mutedCount > 0 && !showsMuted && !listMuting.isEmpty {
@@ -148,20 +166,8 @@ struct ArticleListView: View {
                     }
                 }
             }
-            .padding(.top, AppSpacing.xl)
-        } else if filteredArticles.isEmpty {
-            emptyStateView
         } else {
-            articleGrid(proxy: proxy)
-            if isBriefing { briefingCompletion }
-            if hasMoreResults {
-                Button("Load more articles") { pageRequest += 1 }
-                    .disabled(isLoadingPage)
-                    .padding(.bottom, AppSpacing.lg)
-            }
-        }
-        if queryError != nil && !filteredArticles.isEmpty {
-            queryFailureView
+            emptyStateView
         }
     }
 
@@ -188,7 +194,6 @@ struct ArticleListView: View {
             }
         }
         .frame(maxWidth: .infinity)
-        .padding(.top, AppSpacing.xl)
     }
 
     private var selectedStory: FeedArticle? {
@@ -207,6 +212,14 @@ struct ArticleListView: View {
                 ScrollView {
                     masthead
                     listContent(proxy: proxy)
+                }
+                // An empty list keeps its masthead at the top and centers its state in the visible area.
+                .overlay {
+                    if filteredArticles.isEmpty {
+                        emptyListContent
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.horizontal, AppLayout.pageInset)
+                    }
                 }
                 // Queued updates float over the list (DESIGN.md 8.4); the list keeps its place underneath.
                 .overlay(alignment: .top) {
@@ -816,7 +829,6 @@ struct ArticleListView: View {
             }
         }
         .frame(maxWidth: .infinity)
-        .padding(.top, AppSpacing.xl)
     }
 
     private var emptyStateIcon: String {
