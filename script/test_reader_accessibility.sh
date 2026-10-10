@@ -6,7 +6,7 @@ export CLANG_MODULE_CACHE_PATH="${CLANG_MODULE_CACHE_PATH:-${TMPDIR:-/tmp}/news-
 export SWIFT_MODULECACHE_PATH="$CLANG_MODULE_CACHE_PATH"
 
 echo "Compiling Reader Accessibility Tests for macOS ${TARGET_MACOS} ($(uname -m))..."
-swiftc -swift-version 6 -O -parse-as-library -target $(uname -m)-apple-macos${TARGET_MACOS} \
+swiftc -swift-version 6 -O -parse-as-library -target "$(uname -m)-apple-macos${TARGET_MACOS}" \
     Sources/Services/DateParser.swift \
     Sources/Models/FeedError.swift \
     Sources/Models/FeedFetchState.swift \

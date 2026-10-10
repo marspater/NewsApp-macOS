@@ -306,7 +306,7 @@ struct TensionFigures: Equatable, Sendable {
         #"\b(?<h>killing|killed|kills|injuring|injured|wounding|wounded|displacing|displaced)\s+\#(qualifier)\#(number)\b"#,
         #"\b(?:death toll|toll)\b[^.;]{0,40}?\b(?:to|at|of|reached|hit|passed|surpassed|exceeded)\s+\#(qualifier)\#(number)\b"#,
         #"\b(?<q>dozens|scores|hundreds|thousands|millions)\s+(?:of\s+)?(?:[a-z]+\s+){0,2}?\#(auxiliary)\#(harm)\b"#,
-    ].map { try! NSRegularExpression(pattern: $0) }
+    ].compactMap { try? NSRegularExpression(pattern: $0) }
     private static let quantities = [
         "dozens": 24, "scores": 40, "hundreds": 200, "thousands": 2_000, "millions": 2_000_000,
     ]

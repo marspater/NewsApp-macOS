@@ -3797,9 +3797,9 @@ actor DatabaseEngine {
         let id = try inEventTransaction { () throws -> String in
             let source = try liveEvent(eventID)
             let moving = try resolvedMembers(articleIDs)
-            let current = Set(
-                try eventRows("SELECT article_id FROM event_members WHERE event_id = ?;", [.text(source.id)]).compactMap
-                { $0[0] })
+            let memberRows = try eventRows(
+                "SELECT article_id FROM event_members WHERE event_id = ?;", [.text(source.id)])
+            let current = Set(memberRows.compactMap { $0[0] })
             guard !moving.isEmpty, Set(moving).isSubset(of: current), moving.count < current.count else {
                 throw Self.eventError("A split moves some, but not all, members of the event")
             }

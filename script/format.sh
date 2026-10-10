@@ -18,7 +18,7 @@ else
 fi
 
 CONFIG_ARG=()
-if [ -f ".swift-format" ]; then
+if [[ -f ".swift-format" ]]; then
     CONFIG_ARG=(--configuration ".swift-format")
 fi
 
@@ -37,10 +37,10 @@ MODE="${1:-}"
 case "$MODE" in
     --staged)
         STAGED_FILES=$(git diff --cached --name-only --diff-filter=d | grep '\.swift$' || true)
-        if [ -n "$STAGED_FILES" ]; then
+        if [[ -n "$STAGED_FILES" ]]; then
             echo "🎨 Running swift-format on staged files..."
             while IFS= read -r file; do
-                if [ -f "$file" ]; then
+                if [[ -f "$file" ]]; then
                     # If the file has unstaged modifications, do not auto-add unstaged lines
                     if ! git diff --quiet -- "$file"; then
                         if ! run_lint_file "$file" >/dev/null 2>&1; then
@@ -58,9 +58,9 @@ case "$MODE" in
         ;;
     --lint-staged)
         STAGED_FILES=$(git diff --cached --name-only --diff-filter=d | grep '\.swift$' || true)
-        if [ -n "$STAGED_FILES" ]; then
+        if [[ -n "$STAGED_FILES" ]]; then
             while IFS= read -r file; do
-                if [ -f "$file" ]; then
+                if [[ -f "$file" ]]; then
                     run_lint_file "$file"
                 fi
             done <<< "$STAGED_FILES"
@@ -83,7 +83,7 @@ case "$MODE" in
     "")
         # Default: format staged files if any, otherwise print usage
         STAGED_FILES=$(git diff --cached --name-only --diff-filter=d | grep '\.swift$' || true)
-        if [ -n "$STAGED_FILES" ]; then
+        if [[ -n "$STAGED_FILES" ]]; then
             "$0" --staged
         else
             echo "Usage: $0 [--staged | --lint-staged | --all | --lint-all | <file.swift> ...]"
@@ -92,7 +92,7 @@ case "$MODE" in
     *)
         # Format individual passed files
         for file in "$@"; do
-            if [ -f "$file" ]; then
+            if [[ -f "$file" ]]; then
                 echo "🎨 Formatting $file..."
                 run_format_file "$file"
             else

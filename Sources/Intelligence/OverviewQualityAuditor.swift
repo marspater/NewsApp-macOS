@@ -493,22 +493,22 @@ public struct OverviewQualityAuditor: Sendable {
     private static let numberPattern: NSRegularExpression = {
         let pattern =
             #"(?:[\$€£¥])?\s*\b\d+(?:[.,]\d+)*(?:\s*(?:billion|million|trillion|thousand|gigawatts?|megawatts?|%|percent))?\b"#
-        return try! NSRegularExpression(pattern: pattern, options: [.caseInsensitive])
+        return (try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive])) ?? NSRegularExpression()
     }()
 
     private static let monthPattern: NSRegularExpression = {
         let pattern = #"\b(?:January|February|March|April|May|June|July|August|September|October|November|December)\b"#
-        return try! NSRegularExpression(pattern: pattern, options: [.caseInsensitive])
+        return (try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive])) ?? NSRegularExpression()
     }()
 
     private static let yearPattern: NSRegularExpression = {
         let pattern = #"\b(?:19|20)\d{2}\b"#
-        return try! NSRegularExpression(pattern: pattern)
+        return (try? NSRegularExpression(pattern: pattern)) ?? NSRegularExpression()
     }()
 
     private static let attributionPhrasePattern: NSRegularExpression = {
         let pattern = #"(?i)\b(?:according to|reported by|stated by|announced by|said by)\s+([A-Z][a-zA-Z\s]{2,30})\b"#
-        return try! NSRegularExpression(pattern: pattern)
+        return (try? NSRegularExpression(pattern: pattern)) ?? NSRegularExpression()
     }()
 
     // MARK: - Single Claim Audit

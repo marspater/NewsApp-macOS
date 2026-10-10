@@ -697,8 +697,8 @@ public final class ProseContentCleaner: ContentCleaning {
         var contentWordCount = 0
         var totalWordCount = 0
 
-        tagger.enumerateTags(in: text.startIndex..<text.endIndex, unit: .word, scheme: .lexicalClass, options: options)
-        { tag, _ in
+        let range = text.startIndex..<text.endIndex
+        tagger.enumerateTags(in: range, unit: .word, scheme: .lexicalClass, options: options) { tag, _ in
             totalWordCount += 1
             if let tag = tag {
                 switch tag {

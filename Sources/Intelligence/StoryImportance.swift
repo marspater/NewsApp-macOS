@@ -119,17 +119,20 @@ enum StoryCurator {
         var changed: Bool { rated > 0 || expired > 0 || imagesChecked > 0 }
     }
 
+    private static let standardImageBudget = 30
+    private static let standardActiveLifetime = EventCandidatePolicy.standard.activeEventLifetime
+
     static func run(
         in database: DatabaseEngine,
         judge: StoryImportanceJudge,
         imageFinder: StoryImageFinder = .unavailable,
         budget: Int = 60,
-        imageBudget: Int = 30,
         muting: MuteRules = MuteRules(),
         keepingFeedURLs: [String] = [],
-        activeLifetime: TimeInterval = EventCandidatePolicy.standard.activeEventLifetime,
         now: Date = Date()
     ) async throws -> Report {
+        let activeLifetime = standardActiveLifetime
+        let imageBudget = standardImageBudget
         var report = Report()
         if judge.isAvailable, budget > 0 {
             for row in try await database.pendingImportanceRows(

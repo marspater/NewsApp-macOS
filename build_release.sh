@@ -101,7 +101,7 @@ SWIFT_SOURCES=(
 
 echo "⚙️ Compiling arm64 slice..."
 swiftc -swift-version 6 -O -whole-module-optimization -parse-as-library \
-    -target arm64-apple-macos${TARGET_MACOS} \
+    -target "arm64-apple-macos${TARGET_MACOS}" \
     "${SWIFT_SOURCES[@]}" \
     -o "${BUILD_TMP}/News_arm64"
 
