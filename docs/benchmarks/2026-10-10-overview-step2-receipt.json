@@ -2,18 +2,25 @@
   "run": "overview-evidence-step2-fixed",
   "issue": 308,
   "receiptType": "retrospective",
-  "receiptNote": "Generated retrospectively from preserved run artifacts to document reported provenance. Not recorded synchronously at execution time.",
-  "producerCommit": "8f5377088c1ea61696124ab9369790bce88d601f",
+  "receiptNote": "Retrospectively reconstructed to document reported provenance. Not recorded synchronously at execution time. The library mtime is not the generation capture time; current library SHA does not bind the original run; article-date extrema are not selection bounds; clean-tree status at run time is unproved.",
+  "provenanceLimitations": [
+    "Library mtime (09:37 UTC) does not reflect generation capture time (packet written at 09:13 UTC).",
+    "Current library SHA-256 describes a later modified copy and does not bind the original run inputs.",
+    "Article-date extrema (2026-10-06T17:20:35Z to 2026-10-08T17:10:00Z) are database content extrema, not the harness's selection bounds.",
+    "Clean-tree status at run time is unproved; reported provenance from commit 8f53770 is not proven contemporaneous."
+  ],
+  "producerCommit": "8f5377088c1ea61696124ab9369790bce88d601f (reported)",
   "reportedProvenance": "claude/verifier-long-passages at 8f53770 / bbfd8a9",
-  "dirtyCodeFingerprint": "clean (0 uncommitted changes reported)",
-  "captureTimeUTC": "2026-10-10T09:37:30Z",
+  "dirtyCodeFingerprint": "unproved (clean state reported retrospectively)",
+  "captureTimeUTC": "unproved (packet files written ~09:13:00Z; library modified 2026-10-10T09:37:30Z)",
   "windowBoundsUTC": {
-    "start": "2026-10-06T17:20:35Z",
-    "end": "2026-10-08T17:10:00Z"
+    "articleDateExtremaStart": "2026-10-06T17:20:35Z",
+    "articleDateExtremaEnd": "2026-10-08T17:10:00Z",
+    "selectionBounds": "unrecorded in original run"
   },
   "library": {
     "path": "/private/tmp/news-overview-step2/library.sqlite3",
-    "sha256": "84a63dfb3f9669703a653832035498843773358ac4013946b05e0da0c57a33d9",
+    "sha256": "84a63dfb3f9669703a653832035498843773358ac4013946b05e0da0c57a33d9 (post-run snapshot at 09:37 UTC, unproved for 09:13 generation)",
     "articleCount": 1659,
     "multiSourceActiveEvents": 58
   },
@@ -37,5 +44,5 @@
     }
   },
   "sampleClassification": "overlapping older sample (7–8 October window)",
-  "acceptanceStatus": "development evidence only; no fresh-window acceptance"
+  "acceptanceStatus": "development evidence only; zero claims of fresh-window acceptance"
 }

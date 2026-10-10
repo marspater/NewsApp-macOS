@@ -74,10 +74,10 @@ Against the step-2 targets, format fallbacks (0 %), end-to-end time and requests
 ## Retrospective execution receipt and provenance
 
 - **Receipt**: [overview-step2-receipt.json](../benchmarks/2026-10-10-overview-step2-receipt.json) (retrospectively constructed to document reported provenance; not captured synchronously by the execution runner).
-- **Reported producer commit**: `8f5377088c1ea61696124ab9369790bce88d601f` (worktree `claude/verifier-long-passages` at `bbfd8a9b33a93addba86629723344c24d28f12aa`, reported clean dirty-code fingerprint).
-- **Capture time**: 2026-10-10T09:37:30Z.
-- **UTC window bounds**: 2026-10-06T17:20:35Z to 2026-10-08T17:10:00Z (7–8 October window; 1,659 articles across 58 multi-source events).
-- **Library SHA-256**: `84a63dfb3f9669703a653832035498843773358ac4013946b05e0da0c57a33d9`.
+- **Reported producer commit**: `8f5377088c1ea61696124ab9369790bce88d601f` (worktree `claude/verifier-long-passages` at `bbfd8a9b33a93addba86629723344c24d28f12aa`). Clean-tree status at run time is unproved.
+- **Capture time**: Contemporaneously unproved. The library mtime (09:37 UTC) is not the generation capture time (packet files written at ~09:13 UTC).
+- **Selection bounds**: Database article-date extrema are 2026-10-06T17:20:35Z to 2026-10-08T17:10:00Z (7–8 October window; 1,659 articles across 58 multi-source events). Article-date extrema are not the harness selection bounds.
+- **Library SHA-256**: `84a63dfb3f9669703a653832035498843773358ac4013946b05e0da0c57a33d9` (snapshot at 09:37 UTC). Current library SHA does not bind the original run.
 - **Output SHA-256**:
   - `claims-review-private.csv`: `f539dce48f131ac39104c2d0859fa3880137122d4cbf271b9bf56cd7fb96b73a` (167 claims)
   - `overview-evaluation.json`: `109d34b911ee4b472c82121eb2ff798c92e7ade0d62c7daa4b4087bfc79a257d`
@@ -86,6 +86,7 @@ Against the step-2 targets, format fallbacks (0 %), end-to-end time and requests
 
 ## Limits and acceptance status
 
+- **Retrospective provenance**: The library mtime is not the generation capture time; current library SHA does not bind the original run; article-date extrema are not selection bounds; clean-tree status at run time is unproved.
 - **Overlapping older sample**: draws on the 7–8 October window matching #412. It is not a fresh or separate acceptance window.
 - **Development evidence only**: serves as diagnostic and tuning evidence. Zero claims of fresh-window acceptance.
 - The run's second pass retried pages that had failed.
