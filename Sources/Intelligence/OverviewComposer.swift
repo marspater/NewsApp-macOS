@@ -384,6 +384,10 @@ public struct OverviewComposer: Sendable {
     ) async throws -> (document: EventOverviewDocument, outcome: OverviewModelOutcome) {
         var outcome = OverviewModelOutcome(result: .noPassages)
         guard !passages.isEmpty else { return (fallback, outcome) }
+        guard hasSufficientEvidence(passages) else {
+            outcome.result = .thinEvidence
+            return (fallback, outcome)
+        }
         // Short local IDs are copied reliably; persisted citations always use the original passage and fingerprint.
         let promptPassages = passages.enumerated().map { index, passage in
             EvidencePassage(
@@ -412,6 +416,25 @@ public struct OverviewComposer: Sendable {
         }
         outcome.result = .accepted
         return (draft.document(replacing: fallback), outcome)
+    }
+
+    /// Whether the passages hold enough distinct material for the five-line draft (#308): at least five sentences of
+    /// six or more words, none repeated, from at least two articles. Feed summaries alone rarely qualify.
+    static func hasSufficientEvidence(_ passages: [EvidencePassage]) -> Bool {
+        var sentences = Set<String>()
+        var articles = Set<String>()
+        let tokenizer = NLTokenizer(unit: .sentence)
+        for passage in passages {
+            tokenizer.string = passage.text
+            for range in tokenizer.tokens(for: passage.text.startIndex..<passage.text.endIndex) {
+                let words = passage.text[range].split { !$0.isLetter && !$0.isNumber }
+                guard words.count >= 6, sentences.insert(words.joined(separator: " ").lowercased()).inserted else {
+                    continue
+                }
+                articles.insert(passage.articleID)
+            }
+        }
+        return sentences.count >= 5 && articles.count >= 2
     }
 
     private static func draftPrompt(title: String, passages: [EvidencePassage]) -> String {
@@ -574,6 +597,8 @@ struct OverviewModelOutcome: Sendable, Equatable, Codable {
         case accepted
         /// No stored passages, so the model was not asked.
         case noPassages
+        /// Too few distinct sentences or sources for a draft (`hasSufficientEvidence`), so the model was not asked.
+        case thinEvidence
         /// No INTRO or FACT line at all, for example a refusal written as prose.
         case unstructured
         /// Structured lines, but not the 5 to 8 lines the format requires.

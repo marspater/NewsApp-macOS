@@ -2,6 +2,7 @@
 
 ## Unreleased — 10 October 2026
 
+- Event overviews are written from publisher article text instead of feed summaries. Before generating, the app extracts up to four representative articles that have no text yet: at most two at a time, each cut off after four seconds, never twice for the same page. When the evidence is still too thin for a five-sentence draft, the deterministic overview is kept without asking the model (#308).
 - Reader figure captions appear once: publishers that repeat a figcaption per breakpoint (The Guardian) no longer show the caption twice, and an image credit the caption already prints is not repeated beneath it.
 - Event matching treats explicit model `DIFFERENT` verdicts and hard factual conflicts as vetoes, including when most members agree. Fragment coverage judgments cannot override them (#307).
 - Add the experimental, read-only backend for earlier related-event candidates (#314), with bounded retrieval, direct actor/place/topic evidence, cancellation and stable ordering. Reader exposure remains pending reviewed wrong-link measurements.
