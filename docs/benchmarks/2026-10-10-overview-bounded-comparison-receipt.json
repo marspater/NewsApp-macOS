@@ -1,0 +1,47 @@
+{
+  "run": "live-overview-bounded-comparison",
+  "issue": 308,
+  "receiptType": "synchronous",
+  "receiptNote": "Recorded synchronously before and at generation completion. SQLite snapshot created via VACUUM INTO before model generation.",
+  "producerCommit": "98234e2c3416e7e2de6c34a3387cc47f319fe425",
+  "gitBranch": "mars/agent2-overview-attribution",
+  "dirtyCodeFingerprint": "clean",
+  "captureTimeUTC": "2026-10-10T13:50:23Z",
+  "selectionBoundsUTC": {
+    "anchor": "2026-10-10T13:50:23Z",
+    "start": "2026-10-07T13:50:23Z",
+    "end": "2026-10-10T13:50:23Z"
+  },
+  "library": {
+    "snapshotPath": "/private/tmp/news-overview-bounded-comparison/library-snapshot.sqlite3",
+    "snapshotSHA256": "a8250b16258ed598a654aacd1f169465b3b4089587339e82b849332a5cb2e0ee",
+    "sourcePath": "/private/tmp/news-overview-step2/library.sqlite3",
+    "articleCount": 612,
+    "multiSourceActiveEvents": 55
+  },
+  "outputs": {
+    "claimsReviewCSV": {
+      "file": "claims-review-private.csv",
+      "sha256": "eb42dea0b3ce42c16cd0f26cc4129ad654548af23ea3056ab100f739cd833441",
+      "claimsCount": 195
+    },
+    "overviewEvaluationJSON": {
+      "file": "overview-evaluation.json",
+      "sha256": "55d4251771f82f08af2b43c4ca8067e3c7dea5b755f95f234370d24615cd822d"
+    },
+    "overviewsJSON": {
+      "file": "overviews.json",
+      "sha256": "f26357aba9f5ab84bbf821680088e7603a5b4f7351535b525f69dd01595cbe8c"
+    },
+    "perspectivesJSON": {
+      "file": "perspectives.json",
+      "sha256": "a32875bc8d19e872aad45ec432a0f5a76115e7a2357447e1f80bf13dd0858953"
+    },
+    "provenancePreGenerationJSON": {
+      "file": "provenance-pre-generation.json",
+      "sha256": "177fdc21f91808ea7d2b844e373d0de44aa13871d845b56888ab1cf9b41a491d"
+    }
+  },
+  "sampleClassification": "controlled development comparison on existing 58-event library",
+  "acceptanceStatus": "development evidence only; zero claims of fresh-window acceptance"
+}

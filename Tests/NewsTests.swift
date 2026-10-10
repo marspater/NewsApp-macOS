@@ -1,5 +1,6 @@
 // NewsTests.swift
 
+import CryptoKit
 import Darwin
 import Foundation
 import ImageIO
@@ -6966,14 +6967,122 @@ struct NewsTests {
             }
             guard !excluded.isEmpty else { throw NSError(domain: "LiveOverviews", code: 2) }
         }
-        let db = DatabaseEngine(path: url.path)
-        try await db.open()
         let directory = URL(fileURLWithPath: output)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+
+        func runGitCommand(_ arguments: [String]) -> String? {
+            let proc = Process()
+            proc.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+            proc.arguments = arguments
+            let pipe = Pipe()
+            proc.standardOutput = pipe
+            proc.standardError = Pipe()
+            do {
+                try proc.run()
+                proc.waitUntilExit()
+                guard proc.terminationStatus == 0 else { return nil }
+                let data = pipe.fileHandleForReading.readDataToEndOfFile()
+                return String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+            } catch {
+                return nil
+            }
+        }
+
+        func fileSHA256(_ fileURL: URL) -> String? {
+            guard let data = try? Data(contentsOf: fileURL) else { return nil }
+            return SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+        }
+
+        // Consistent snapshot of the input library, WAL included. The input opens read-only, so the
+        // snapshot never checkpoints or otherwise writes the library it reads.
+        let snapshotURL = directory.appendingPathComponent("library-snapshot.sqlite3")
+        if FileManager.default.fileExists(atPath: snapshotURL.path) {
+            try FileManager.default.removeItem(at: snapshotURL)
+        }
+        let inputFiles = [url, URL(fileURLWithPath: url.path + "-wal")]
+        let inputHashes = inputFiles.map(fileSHA256)
+        let sqliteProc = Process()
+        sqliteProc.executableURL = URL(fileURLWithPath: "/usr/bin/sqlite3")
+        sqliteProc.arguments = [
+            url.absoluteString + "?mode=ro",
+            "VACUUM INTO '\(snapshotURL.path.replacingOccurrences(of: "'", with: "''"))';",
+        ]
+        let sqliteErrPipe = Pipe()
+        sqliteProc.standardError = sqliteErrPipe
+        try sqliteProc.run()
+        sqliteProc.waitUntilExit()
+        guard sqliteProc.terminationStatus == 0, FileManager.default.fileExists(atPath: snapshotURL.path) else {
+            let errData = sqliteErrPipe.fileHandleForReading.readDataToEndOfFile()
+            let errMsg = String(decoding: errData, as: UTF8.self)
+            throw NSError(
+                domain: "LiveOverviews", code: 3,
+                userInfo: [NSLocalizedDescriptionKey: "Failed to create SQLite snapshot: \(errMsg)"])
+        }
+        guard inputFiles.map(fileSHA256) == inputHashes else {
+            throw NSError(
+                domain: "LiveOverviews", code: 5,
+                userInfo: [NSLocalizedDescriptionKey: "Snapshot changed the input library"])
+        }
+        guard let snapshotSHA256 = fileSHA256(snapshotURL) else {
+            throw NSError(
+                domain: "LiveOverviews", code: 4,
+                userInfo: [NSLocalizedDescriptionKey: "Failed to compute snapshot SHA256"])
+        }
+
+        let runLibraryURL = directory.appendingPathComponent("run-library.sqlite3")
+        if FileManager.default.fileExists(atPath: runLibraryURL.path) {
+            try FileManager.default.removeItem(at: runLibraryURL)
+        }
+        try FileManager.default.copyItem(at: snapshotURL, to: runLibraryURL)
+
+        let db = DatabaseEngine(path: runLibraryURL.path)
+        try await db.open()
+
+        let captureDate = Date()
+        let isoFormatter = ISO8601DateFormatter()
+        isoFormatter.timeZone = TimeZone(secondsFromGMT: 0)
+        let captureTimeUTC = isoFormatter.string(from: captureDate)
+
+        let selectionAnchor = captureDate
+        let selectionWindowStart = selectionAnchor.addingTimeInterval(-72 * 3600)
+        let selectionWindowEnd = selectionAnchor
+        let selectionAnchorUTC = isoFormatter.string(from: selectionAnchor)
+        let selectionStartUTC = isoFormatter.string(from: selectionWindowStart)
+        let selectionEndUTC = isoFormatter.string(from: selectionWindowEnd)
+
+        let gitCommit = runGitCommand(["rev-parse", "HEAD"]) ?? "unknown"
+        let gitBranch = runGitCommand(["rev-parse", "--abbrev-ref", "HEAD"]) ?? "unknown"
+        let gitStatus = runGitCommand(["status", "--porcelain"]) ?? ""
+        let dirtyFingerprint =
+            gitStatus.isEmpty ? "clean" : "dirty (\(gitStatus.split(separator: "\n").count) uncommitted changes)"
+
+        let preProvenance: [String: Any] = [
+            "stage": "pre-generation",
+            "run": environment["NEWS_OVERVIEWS_RUN_NAME"] ?? "live-overview-measurement",
+            "issue": 308,
+            "captureTimeUTC": captureTimeUTC,
+            "gitCommit": gitCommit,
+            "gitBranch": gitBranch,
+            "dirtyCodeFingerprint": dirtyFingerprint,
+            "selectionBoundsUTC": [
+                "anchor": selectionAnchorUTC,
+                "start": selectionStartUTC,
+                "end": selectionEndUTC,
+            ],
+            "librarySnapshot": [
+                "path": "library-snapshot.sqlite3",
+                "sha256": snapshotSHA256,
+                "sourcePath": url.path,
+            ],
+        ]
+        let preProvenanceData = try JSONSerialization.data(
+            withJSONObject: preProvenance, options: [.prettyPrinted, .sortedKeys])
+        try preProvenanceData.write(to: directory.appendingPathComponent("provenance-pre-generation.json"))
+
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         let active = try await db.fetchArticles(
-            limit: nil, publicationWindow: Date().addingTimeInterval(-72 * 3600)...Date(), hidingWaitingStories: true)
+            limit: nil, publicationWindow: selectionWindowStart...selectionWindowEnd, hidingWaitingStories: true)
         let events = try await db.eventFeedSummaries(forArticles: active.map(\.id)).filter { $0.sources.count > 1 }
             .sorted { $0.sources.count > $1.sources.count }
         var report = [
@@ -7152,6 +7261,51 @@ struct NewsTests {
         try encoder.encode(coverage).write(to: directory.appendingPathComponent("perspectives.json"))
         print("OVERVIEW_REPORT \(String(decoding: try encoder.encode(report), as: UTF8.self))")
         print("PERSPECTIVE_COVERAGE \(String(decoding: try encoder.encode(coverage), as: UTF8.self))")
+
+        // Automatically record synchronous run receipt and provenance (#308/#313).
+        var outputFiles: [String: [String: Any]] = [:]
+        if let enumerator = FileManager.default.enumerator(at: directory, includingPropertiesForKeys: nil) {
+            for case let fileURL as URL in enumerator.allObjects {
+                guard !fileURL.hasDirectoryPath,
+                    fileURL.lastPathComponent != "receipt.json",
+                    fileURL.lastPathComponent != "run-library.sqlite3",
+                    fileURL.lastPathComponent != "run-library.sqlite3-wal",
+                    fileURL.lastPathComponent != "run-library.sqlite3-shm"
+                else { continue }
+                if let hash = fileSHA256(fileURL) {
+                    outputFiles[fileURL.lastPathComponent] = [
+                        "sha256": hash
+                    ]
+                }
+            }
+        }
+
+        let receipt: [String: Any] = [
+            "run": environment["NEWS_OVERVIEWS_RUN_NAME"] ?? "live-overview-measurement",
+            "issue": 308,
+            "receiptType": "live",
+            "captureTimeUTC": captureTimeUTC,
+            "gitCommit": gitCommit,
+            "gitBranch": gitBranch,
+            "dirtyCodeFingerprint": dirtyFingerprint,
+            "selectionBoundsUTC": [
+                "anchor": selectionAnchorUTC,
+                "start": selectionStartUTC,
+                "end": selectionEndUTC,
+            ],
+            "library": [
+                "snapshotPath": "library-snapshot.sqlite3",
+                "snapshotSHA256": snapshotSHA256,
+                "sourcePath": url.path,
+                "articleCount": active.count,
+                "multiSourceActiveEvents": events.count,
+            ],
+            "outputs": outputFiles,
+        ]
+
+        let receiptData = try JSONSerialization.data(withJSONObject: receipt, options: [.prettyPrinted, .sortedKeys])
+        try receiptData.write(to: directory.appendingPathComponent("receipt.json"))
+        print("LIVE_RUN_RECEIPT \(String(decoding: receiptData, as: UTF8.self))")
         await db.close()
     }
 
@@ -14492,6 +14646,195 @@ struct NewsTests {
             flagged(failures("The governor said the work will go on."), negation: false),
             "A speaker absent from the passage is still flagged")
 
+        // 5e. Detached quotations (#308): unframed questions and unattributed first-person quotes.
+        let quotePassage = EvidencePassage(
+            id: "pass-quote", articleID: "art-gamma",
+            text:
+                "At the research station, Dr. Clara Oswald called the equipment activation at 6:29am \"the minute that changed our lives forever\".",
+            ordinal: 2)
+        let pikePassage = EvidencePassage(
+            id: "pass-dialogue", articleID: "art-gamma",
+            text:
+                "‘Where am I and who are you?’ Those were the first words patient Jordan Cole spoke after regaining consciousness, according to the attending physician.",
+            ordinal: 3)
+        func checkClaim(_ statement: String, passage: EvidencePassage) -> (
+            failures: [ClaimVerificationFailureReason], audit: ClaimAuditResult
+        ) {
+            let fact = PassageAnchoredFact(
+                id: "f-chk", statement: statement, passageID: passage.id, quote: passage.text, articleID: "art-gamma")
+            let overview = OverviewComposer.composeOverview(
+                eventID: "event-chk", eventTitle: "Quote test", verifiedFacts: [fact],
+                passages: [passage], articles: articles)
+            let f = OverviewClaimVerifier.verifyOverview(overview, passages: [passage], articles: articles)
+                .allFailureReasons
+            let of = OverviewFact(id: "f-chk", text: statement, citationIDs: [passage.id])
+            let cite = OverviewCitation(
+                id: passage.id, articleID: passage.articleID, passageID: passage.id,
+                passageFingerprint: passage.fingerprint, quote: passage.text)
+            let a = OverviewQualityAuditor.auditClaim(of, citations: [passage.id: cite], passages: [passage])
+            return (f, a)
+        }
+
+        let detached1 = checkClaim(
+            "the activation at 6:29am \"the minute that changed our lives forever\"",
+            passage: quotePassage)
+        assertTrue(
+            detached1.failures.contains(where: {
+                if case .detachedQuotation = $0 { return true }
+                return false
+            }), "Detached first-person quote without attributing speaker is flagged by verifier")
+        assertEqual(
+            detached1.audit.criticalErrorKind, .attributionError,
+            "Detached first-person quote is flagged as critical attribution error by auditor")
+
+        let detached2 = checkClaim("‘Where am I and who are you?’", passage: pikePassage)
+        assertTrue(
+            detached2.failures.contains(where: {
+                if case .detachedQuotation = $0 { return true }
+                return false
+            }), "Standalone unframed dialogue/question quote is flagged by verifier")
+        assertEqual(
+            detached2.audit.criticalErrorKind, .attributionError,
+            "Standalone quote is flagged as critical attribution error by auditor")
+
+        let validQuote1 = checkClaim(
+            "Dr. Clara Oswald called the equipment activation at 6:29am \"the minute that changed our lives forever\".",
+            passage: quotePassage)
+        assertFalse(
+            validQuote1.failures.contains(where: {
+                if case .detachedQuotation = $0 { return true }
+                return false
+            }), "Attributed quote with speaker is not flagged as detached quote")
+        assertEqual(validQuote1.audit.status, .supported, "Attributed quote with speaker is supported by auditor")
+
+        let stationPassage = EvidencePassage(
+            id: "pass-station", articleID: "art-gamma",
+            text:
+                "Station director Mara Lind said: “We will not leave the station.” The council's plan passed on Thursday.",
+            ordinal: 9)
+        func isDetached(_ statement: String) -> Bool {
+            checkClaim(statement, passage: stationPassage).failures.contains {
+                if case .detachedQuotation = $0 { return true }
+                return false
+            }
+        }
+        assertTrue(isDetached("He said: “We will not leave the station.”"), "A pronoun does not identify the speaker")
+        assertTrue(
+            isDetached("“I said we will not leave the station” on Thursday."),
+            "A reporting verb inside the quotation does not attribute it")
+        assertFalse(
+            isDetached("Station director Mara Lind said: “We will not leave the station.”"),
+            "A named speaker outside the quotation attributes it")
+        assertFalse(isDetached("The council's plan passed on Thursday."), "Apostrophes are not quotation marks")
+
+        // 5f. Dropped speaker attribution (#308): motives, military claims, and contested positions.
+        let motivePassage = EvidencePassage(
+            id: "pass-motive", articleID: "art-gamma",
+            text:
+                "Regional Commissioner Alan Grey said Thursday's move to downsize the field presence had followed a dialogue with municipal leadership in order to avoid an escalation of tensions between the two departments.",
+            ordinal: 4)
+        let droppedMotive = checkClaim(
+            "The move to downsize the field presence had followed a dialogue with municipal leadership in order to avoid an escalation of tensions between the two departments.",
+            passage: motivePassage)
+        assertTrue(
+            droppedMotive.failures.contains(where: {
+                if case .droppedAttribution = $0 { return true }
+                return false
+            }), "Dropping speaker attribution on administrative motive is flagged by verifier")
+        assertEqual(
+            droppedMotive.audit.criticalErrorKind, .attributionError,
+            "Dropping speaker on motive is flagged as critical attribution error")
+
+        let validMotive = checkClaim(
+            "Regional Commissioner Alan Grey said Thursday's move had followed a dialogue with municipal leadership in order to avoid an escalation of tensions between the two departments.",
+            passage: motivePassage)
+        assertFalse(
+            validMotive.failures.contains(where: {
+                if case .droppedAttribution = $0 { return true }
+                return false
+            }), "Preserving speaker on motive passes verifier")
+        assertEqual(validMotive.audit.status, .supported, "Preserving speaker on motive is supported by auditor")
+
+        let militaryPassage = EvidencePassage(
+            id: "pass-mil", articleID: "art-gamma",
+            text:
+                "The spokesperson for the coalition command, General Jordan Cole, said forces intercepted a drone north of the perimeter and destroyed a platform in the northern valley.",
+            ordinal: 5)
+        let droppedMil = checkClaim(
+            "forces intercepted a drone north of the perimeter and destroyed a platform in the northern valley.",
+            passage: militaryPassage)
+        assertTrue(
+            droppedMil.failures.contains(where: {
+                if case .droppedAttribution = $0 { return true }
+                return false
+            }), "Dropping coalition spokesperson on military interception is flagged by verifier")
+        assertEqual(
+            droppedMil.audit.criticalErrorKind, .attributionError,
+            "Dropping spokesperson on military claim is critical error in auditor")
+
+        let validMil = checkClaim(
+            "Coalition spokesman General Jordan Cole said forces intercepted a drone north of the perimeter and destroyed a platform in the northern valley.",
+            passage: militaryPassage)
+        assertFalse(
+            validMil.failures.contains(where: {
+                if case .droppedAttribution = $0 { return true }
+                return false
+            }), "Retaining coalition spokesperson passes verifier")
+        assertEqual(validMil.audit.status, .supported, "Retaining coalition spokesperson is supported by auditor")
+
+        let genericMil = checkClaim(
+            "Officials said forces intercepted a drone north of the perimeter and destroyed a platform in the northern valley.",
+            passage: militaryPassage)
+        assertTrue(
+            genericMil.failures.contains(where: {
+                if case .droppedAttribution(let speaker, _, _) = $0 { return speaker == "General Jordan Cole" }
+                return false
+            }), "Generic officials do not stand in for the named spokesperson")
+        assertEqual(
+            genericMil.audit.criticalErrorKind, .attributionError,
+            "Generic officials in place of the named spokesperson are a critical error in auditor")
+
+        // 5g. Citation grounding (#308): a place the cited passage never names is unsupported.
+        let inquiryPassage = EvidencePassage(
+            id: "pass-inquiry", articleID: "art-gamma",
+            text:
+                "Ms. Elena Varma travelled to Singapore on September 16 for medical treatment. She returned after filing a court petition seeking to prevent her detention, the agency reported.",
+            ordinal: 7)
+        let mismatchArrest = checkClaim(
+            "Sri Lanka arrests former director Varma in corruption inquiry", passage: inquiryPassage)
+        assertTrue(
+            mismatchArrest.failures.contains(where: {
+                if case .ungroundedCitation(let token, _) = $0 { return token == "sri lanka" }
+                return false
+            }), "Citing passage lacking 'Sri Lanka' flags ungroundedCitation")
+        assertEqual(
+            mismatchArrest.audit.status,
+            .unsupported(reason: "Claim names place 'sri lanka' not mentioned in cited passage"),
+            "Citing passage lacking 'Sri Lanka' is unsupported in auditor")
+
+        let abbreviatedPlace = checkClaim(
+            "US President Donald Trump said on Wednesday that he should win the prize.",
+            passage: EvidencePassage(
+                id: "pass-us", articleID: "art-gamma",
+                text: "U.S. President Donald Trump said on Wednesday that he should win the prize.", ordinal: 6))
+        assertFalse(
+            abbreviatedPlace.failures.contains(where: {
+                if case .ungroundedCitation = $0 { return true }
+                return false
+            }), "US matches U.S. in the cited passage")
+
+        // 5h. Valid controls: ordinary reported facts without attribution wrappers pass cleanly (#308)
+        let plainFactPassage = EvidencePassage(
+            id: "pass-plain", articleID: "art-gamma",
+            text: "The bridge reopened on Monday after repairs costing $4m.",
+            ordinal: 8)
+        let plainFact = checkClaim(
+            "The bridge reopened on Monday after repairs costing $4m.", passage: plainFactPassage)
+        assertTrue(
+            plainFact.failures.isEmpty,
+            "Ordinary reported fact without attribution wrapper passes verifier with zero failures")
+        assertEqual(plainFact.audit.status, .supported, "Ordinary reported fact is supported by auditor")
+
         // 6. Failure behavior: never store failed retelling as finished overview; show verified excerpts and source list
         let fallbackDoc = OverviewClaimVerifier.createFallbackOverview(
             from: numOverview,
@@ -15300,6 +15643,19 @@ struct NewsTests {
         let valVague3 = OverviewPerspectivesValidator.validatePerspective(vaguePerspective3, against: citations)
         assertFalse(valVague3.isValid, "Rule 1: Vague participant 'Some people' is rejected")
 
+        // A time phrase left over from "said Thursday" or "said earlier this year" is not a position (#313).
+        for position in ["earlier this year.", "Thursday, warning it could be among the strongest", "Friday night"] {
+            assertTrue(OverviewPerspectivesValidator.isTimePhrase(position), "Time phrase '\(position)' is no position")
+        }
+        assertFalse(
+            OverviewPerspectivesValidator.isTimePhrase("Monday's vote was not legitimate."),
+            "A possessive day name starts a real position")
+        let timePerspective = OverviewPerspective(
+            id: "p_time", participant: "Ahmad Mobeen", position: "earlier this year", citationIDs: ["c_1"])
+        assertEqual(
+            OverviewPerspectivesValidator.validatePerspective(timePerspective, against: citations).rule, .timePhrase,
+            "Time-phrase positions report their own rule")
+
         // 3. Rule 2: Never invent an "other side"
         // When only one side has spoken, extraction preserves that single perspective without fabricating an opposing stance
         let singleSidePerspectives = OverviewPerspectivesExtractor.extractPerspectives(
@@ -15504,8 +15860,24 @@ struct NewsTests {
             "He said Israel would also expel British representatives from the consulate.",
             "It said 224 schools were closed in the morning, down to 157 by lunchtime.",
             "Officials said the bridge would reopen to traffic next week.",
+            // Attribution regressions (#313): nearby places, clauses, poll results and time phrases.
+            "A letter from the attorney to the county commission in Florida said Trump offered to deem the club a presidential retreat.",
+            "The Death Penalty Information Center, which publishes data and analysis on capital punishment in the United States, said Pike was the first inmate to survive after being injected with lethal doses of execution drugs.",
+            "Trump, who waged war with Iran and has yet to broker peace in Ukraine, said on Wednesday that he should win.",
+            "First reported by the Palm Beach Post, an attorney who represents the golf course said Trump is offering.",
+            "At a base in southeast England housing US operations, police said an incident led to withdrawals.",
+            "A poll showed that 68% of Jewish Israelis said that the events were central.",
+            "A witness told The Associated Press, a day after the kingdom said an attack occurred.",
+            "Counter Terrorism Policing London is investigating and commander Helen Flanagan said officers were not linking it.",
+            "This is the 17th outbreak in the DRC and is said to be its deadliest.",
+            "Wednesday in which Saudi civil aviation authorities said three people were killed.",
+            "While the interior ministry said that 256,000 people protested nationwide, organisers put the figure higher.",
+            "Ahmad Mobeen, principal economist at S&P Global Market Intelligence, said earlier this year.",
+            "El Nino will intensify before peaking, the United Nations said Thursday, warning it could be among the strongest.",
         ] {
-            assertTrue(reported(text).isEmpty, "Pronouns and generic officials are not named participants")
+            assertTrue(
+                reported(text).isEmpty,
+                "Nearby places, passive/clause fragments, poll subjects and time phrases are excluded")
         }
     }
 
