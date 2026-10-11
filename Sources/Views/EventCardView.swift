@@ -29,7 +29,7 @@ struct EventCardView: View {
         VStack(alignment: .leading, spacing: AppSpacing.xs) {
             ArticleCardView(
                 article: representative, isSelected: isSelected, compact: compact,
-                imageFallbacks: (members.isEmpty ? visibleMembers : members).filter { $0.id != representative.id },
+                imageFallbacks: visibleMembers.filter { $0.id != representative.id },
                 isLead: isLead, action: openRepresentative)
             coverageToggle
             if isExpanded {
@@ -38,6 +38,8 @@ struct EventCardView: View {
             }
         }
         .task(id: "\(summary.eventID):\(summary.membershipVersion):\(isExpanded)") {
+            // Collapsed cards already have the visible page's image candidates. Fetch full coverage only on demand.
+            guard isExpanded else { return }
             do {
                 let loaded = try await articleStore.eventMemberArticles(eventID: summary.eventID)
                 try Task.checkCancellation()

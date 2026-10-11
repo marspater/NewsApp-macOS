@@ -78,11 +78,9 @@ struct EventFeedSummary: Hashable, Sendable {
         }
     }
 
-    /// "5 sources" or, for one publisher, "3 articles from Example News".
+    /// Keep article and distinct-publisher counts explicit, including repeated coverage by one publisher.
     var coverageText: String {
-        let sources = sources
-        if sources.count > 1 { return "\(sources.count) sources" }
-        return "\(members.count) \(members.count == 1 ? "article" : "articles") from \(sources.first ?? "one source")"
+        "\(members.count) \(members.count == 1 ? "story" : "stories") · \(sources.count) \(sources.count == 1 ? "publisher" : "publishers")"
     }
 
     static func displaySource(_ source: String) -> String {

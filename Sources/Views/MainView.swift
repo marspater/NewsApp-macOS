@@ -21,6 +21,7 @@ struct MainView: View {
     @State private var selectedTopic: String? = "Today"
     @State private var searchText: String = ""
     @State private var searchTokens: [ArchiveSearchToken] = []
+    @State private var searchPresented = false
     @State private var mastheadNotice: MastheadNotice?
     @State private var articlePath = NavigationPath()
 
@@ -145,10 +146,14 @@ struct MainView: View {
             tensionDayStart = TensionMethodology.day(containing: Date()).start
         }
         // One archive search in the trailing toolbar, shared by list and reader.
-        .searchable(text: $searchText, tokens: $searchTokens, placement: .toolbar, prompt: "Search archive") { token in
+        .searchable(
+            text: $searchText, tokens: $searchTokens, isPresented: $searchPresented, placement: .toolbar,
+            prompt: "Search archive"
+        ) { token in
             Text(token.expression)
         }
         .searchSuggestions { searchOperatorSuggestions }
+        .background(CompactArchiveSearch(expanded: searchPresented || !archiveQuery.isEmpty).frame(width: 0, height: 0))
         .frame(minWidth: 900, minHeight: 600)
         .onAppear {
             if feedManager.articles.isEmpty {
@@ -323,5 +328,42 @@ struct MainView: View {
             return true
         }
         return false
+    }
+}
+
+/// SwiftUI owns search, tokens and focus; this narrow bridge only bounds the native toolbar item's resting width.
+/// macOS exposes automatic space-based collapse, but no SwiftUI always-collapsed search behavior.
+private struct CompactArchiveSearch: NSViewRepresentable {
+    let expanded: Bool
+    func makeNSView(context: Context) -> SearchSizer { SearchSizer() }
+    func updateNSView(_ view: SearchSizer, context: Context) {
+        view.expanded = expanded
+        view.scheduleUpdate()
+    }
+    static func dismantleNSView(_ view: SearchSizer, coordinator: ()) { view.width?.isActive = false }
+
+    final class SearchSizer: NSView {
+        var expanded = false
+        var width: NSLayoutConstraint?
+        weak var field: NSSearchField?
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            scheduleUpdate()
+        }
+        func scheduleUpdate() {
+            DispatchQueue.main.async { [weak self] in self?.apply() }
+        }
+        func apply() {
+            guard let item = window?.toolbar?.items.compactMap({ $0 as? NSSearchToolbarItem }).first else { return }
+            item.preferredWidthForSearchField = AppLayout.archiveSearchWidth
+            if field !== item.searchField {
+                width?.isActive = false
+                field = item.searchField
+                width = item.searchField.widthAnchor.constraint(
+                    lessThanOrEqualToConstant: AppLayout.archiveSearchCollapsedWidth)
+                width?.priority = .init(999)
+            }
+            width?.isActive = !expanded
+        }
     }
 }

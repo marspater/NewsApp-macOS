@@ -26,6 +26,7 @@ NEWS_RELATED_RECLUSTER=1 ./test.sh --related-live /private/tmp/library-backup.sq
 python3 script/evaluation/relation_review.py sheet /private/tmp/relation-report  # #314: blind private sheet of links and controls (never overwrites a sheet)
 python3 script/evaluation/relation_review.py report /private/tmp/relation-report # #314: aggregate-only wrong-link rate and related controls with Wilson bounds
 ./test.sh --performance-baseline --active-work-cancellation # Active clustering, ingestion and feed parsing cancellation; temporary stress fixtures
+NEWS_NATIVE_SEARCH_QA=1 ./script/native_performance_baseline.sh # Native compact/expanded search at narrow and wide window sizes
 ./script/native_performance_baseline.sh # Isolated MainView window, rendered-card samples and process memory
 NEWS_NATIVE_HARNESS=Tests/NativeWorldTensionQA.swift ./script/native_performance_baseline.sh # Live on-device synthetic-headline assessment, Settings tab bounds and display callback cadence
 NEWS_NATIVE_HARNESS=Tests/NativeReadingMemory.swift ./script/native_performance_baseline.sh # Live: read 20 stories twice in the production reader, isolated; waits until each image is decoded

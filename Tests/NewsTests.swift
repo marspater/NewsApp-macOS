@@ -8508,6 +8508,21 @@ struct NewsTests {
         func summary() async throws -> EventFeedSummary? {
             try await db.eventFeedSummaries(forArticles: ["first"]).first
         }
+        let genericFeeds = [
+            "https://www.euronews.com/2026/10/11/test-report", "https://www.france24.com/en/test-report",
+        ]
+        let genericStories = genericFeeds.enumerated().map { index, link in
+            FeedArticle(
+                storedID: "generic-\(index)", title: "Shared report \(index)", link: link,
+                guid: "generic-\(index)", description: "Coverage", pubDate: now, source: "News")
+        }
+        try await db.upsertArticles(genericStories)
+        _ = try await db.createEvent(memberArticleIDs: genericStories.map(\.id), at: now)
+        let canonical = try await db.eventFeedSummaries(forArticles: genericStories.map(\.id)).first
+        assertEqual(
+            Set(canonical?.sources ?? []), Set(["Euronews", "France 24"]),
+            "Generic feed names resolve to distinct catalog publishers")
+        assertEqual(canonical?.coverageText, "2 stories · 2 publishers", "Coverage always exposes both counts")
         assertEqual(try await summary()?.seenVersion, nil, "An event starts unseen")
         assertFalse(try await summary()?.hasSubstantiveUpdate ?? true, "An unseen event is new, not updated")
         assertEqual(
@@ -8517,7 +8532,8 @@ struct NewsTests {
         try await db.addArticles(["reprint"], toEvent: event.id)
         assertFalse(
             try await summary()?.hasSubstantiveUpdate ?? true, "A reprint of a known headline is not new reporting")
-        assertEqual(try await summary()?.coverageText, "3 sources", "Coverage counts distinct publishers")
+        assertEqual(
+            try await summary()?.coverageText, "3 stories · 3 publishers", "Coverage counts distinct publishers")
         try await db.addArticles(["update"], toEvent: event.id)
         assertEqual(try await db.markEventSeen(event.id, version: 2), 2, "Reading overview version 2 records version 2")
         assertTrue(
@@ -8635,14 +8651,14 @@ struct NewsTests {
 
         assertEqual(
             EventFeedSummary(eventID: "e0", membershipVersion: 1, seenVersion: nil, members: []).coverageText,
-            "0 articles from one source", "Empty members coverageText fallback")
-        assertEqual(summary1.coverageText, "1 article from Wire One", "Single article from single source formatting")
+            "0 stories · 0 publishers", "Empty members coverageText fallback")
+        assertEqual(summary1.coverageText, "1 story · 1 publisher", "Single article from single source formatting")
         let summarySameSource = EventFeedSummary(
             eventID: "e3", membershipVersion: 1, seenVersion: nil, members: [member1, member2])
         assertEqual(
-            summarySameSource.coverageText, "2 articles from Wire One",
+            summarySameSource.coverageText, "2 stories · 1 publisher",
             "Multiple articles from single source formatting")
-        assertEqual(summaryMulti.coverageText, "2 sources", "Multiple sources coverageText formatting")
+        assertEqual(summaryMulti.coverageText, "3 stories · 2 publishers", "Multiple sources coverageText formatting")
 
         assertFalse(summaryMulti.hasSubstantiveUpdate, "Nil seenVersion returns false")
 
@@ -8709,7 +8725,7 @@ struct NewsTests {
             EventFeedGrouping.entries(for: [a, a, b], events: [], mode: .events).map(\.id), ["a", "b"],
             "No article is listed twice")
         assertEqual(event.sources, ["Wire One", "Daily Two"], "Sources are distinct display names")
-        assertEqual(single.coverageText, "1 article from Solo", "Single-publisher coverage names the publisher")
+        assertEqual(single.coverageText, "1 story · 1 publisher", "Single-publisher coverage names the publisher")
 
         var buffer = FeedUpdateBuffer()
         assertEqual(

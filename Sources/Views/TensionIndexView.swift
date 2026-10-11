@@ -257,24 +257,14 @@ struct TensionGlyph: View {
                 let height = size.height
                 switch level {
                 case .zen:
-                    // An open ensō ring with a slow breath; no heat, jitter or spinning navigation symbol.
-                    let breath = sin(time * 0.8) * 0.025
-                    let center = CGPoint(x: width * 0.5, y: height * 0.5)
-                    var ring = Path()
-                    ring.addArc(
-                        center: center, radius: width * (0.31 + breath),
-                        startAngle: .degrees(-70), endAngle: .degrees(245), clockwise: false)
-                    context.stroke(
-                        ring, with: .color(AppColor.tension(level)),
-                        style: StrokeStyle(lineWidth: AppLayout.tensionStrokeWidth, lineCap: .round))
-                    let halo = CGRect(
-                        x: width * (0.07 - breath), y: height * (0.07 - breath),
-                        width: width * (0.86 + breath * 2), height: height * (0.86 + breath * 2))
-                    context.stroke(
-                        Path(ellipseIn: halo), with: .color(AppColor.tension(level).opacity(0.2)),
-                        lineWidth: AppLayout.tensionStrokeWidth)
-                    let seed = CGRect(x: width * 0.47, y: height * 0.47, width: width * 0.06, height: height * 0.06)
-                    context.fill(Path(ellipseIn: seed), with: .color(AppColor.tension(level)))
+                    // A tapered brush stroke draws around the ring, holds, then fades before its next stroke.
+                    let phase = time.truncatingRemainder(dividingBy: 6)
+                    let linear = min(1, phase / 4)
+                    let progress = reduceMotion || scenePhase != .active ? 1 : linear * linear * (3 - 2 * linear)
+                    let opacity = reduceMotion || scenePhase != .active ? 1 : min(1, (6 - phase) / 0.7)
+                    context.fill(
+                        Self.enso(size: size, progress: progress),
+                        with: .color(AppColor.tension(level).opacity(opacity)))
                 case .mild:
                     // A warm sun and slow breathing halo; distinct from the water and flame states.
                     let pulse = 0.03 * sin(time * 1.2)
@@ -295,8 +285,9 @@ struct TensionGlyph: View {
                         context.scaleBy(x: 0.84, y: 0.8)
                     }
                     let intensity = level == .warm ? 0.0 : level == .hot ? 0.5 : 1.0
-                    let drift = sin(time * (1.5 + intensity)) * (0.035 + intensity * 0.015)
-                    let lift = sin(time * (2.1 + intensity)) * 0.025
+                    let fireTime = time * (level == .boiling ? 1.8 : 1)
+                    let drift = sin(fireTime * (1.5 + intensity)) * (0.035 + intensity * 0.015)
+                    let lift = sin(fireTime * (2.1 + intensity)) * 0.025
                     let flame = Self.flame(size: size, drift: drift, lift: lift)
                     context.fill(
                         flame,
@@ -312,10 +303,10 @@ struct TensionGlyph: View {
                             Gradient(colors: [AppColor.warning, AppColor.flameCore]), startPoint: .zero,
                             endPoint: CGPoint(x: 0, y: height)))
                     if level != .warm {
-                        // Hot has two slow embers; boiling has five faster, narrower jets.
-                        let count = level == .hot ? 2 : 5
+                        // Boiling throws a denser, faster stream of sparks.
+                        let count = level == .hot ? 2 : 18
                         for ember in 0..<count {
-                            let phase = (time * (level == .hot ? 0.35 : 0.65) + Double(ember) / Double(count))
+                            let phase = (time * (level == .hot ? 0.35 : 1.3) + Double(ember) / Double(count))
                                 .truncatingRemainder(dividingBy: 1)
                             let x = width * (0.5 + sin(Double(ember) * 2.4 + time) * 0.23)
                             let y = height * (0.4 - phase * 0.35)
@@ -331,6 +322,27 @@ struct TensionGlyph: View {
         .frame(width: AppLayout.tensionIllustrationSize, height: AppLayout.tensionIllustrationSize)
         .accessibilityHidden(true)
         .allowsHitTesting(false)
+    }
+
+    private static func enso(size: CGSize, progress: Double) -> Path {
+        let steps = max(1, Int(140 * progress))
+        let center = CGPoint(x: size.width * 0.5, y: size.height * 0.5)
+        func edge(_ index: Int, outer: Bool) -> CGPoint {
+            let fraction = Double(index) / 140
+            let angle = (125 + fraction * 325) * Double.pi / 180
+            let taper = pow(sin(fraction * Double.pi), 0.6)
+            let brush = 0.018 + 0.065 * taper * (1 + 0.16 * sin(fraction * 19))
+            let radius = 0.34 + 0.008 * sin(fraction * 31) + (outer ? brush : -brush)
+            return CGPoint(
+                x: center.x + size.width * radius * cos(angle),
+                y: center.y + size.height * radius * sin(angle))
+        }
+        var stroke = Path()
+        stroke.move(to: edge(0, outer: true))
+        for index in 1...steps { stroke.addLine(to: edge(index, outer: true)) }
+        for index in (0...steps).reversed() { stroke.addLine(to: edge(index, outer: false)) }
+        stroke.closeSubpath()
+        return stroke
     }
 
     private static func flame(size: CGSize, drift: Double, lift: Double) -> Path {
