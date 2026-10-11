@@ -1195,6 +1195,17 @@ struct NewsTests {
             "Feed views receive extracted text immediately")
         assertEqual(
             manager.articles.first?.category, "Science", "Category changes propagate without another feed refresh")
+        let classifiedRevision = store.revision
+        var publications = 0
+        let observation = store.$articles.dropFirst().sink { _ in publications += 1 }
+        assertTrue(
+            await store.updateEnrichment(id: article.id, category: "Science"), "Repeated classification persists")
+        assertEqual(store.revision, classifiedRevision, "Unchanged enrichment does not invalidate feed or reader")
+        assertEqual(publications, 0, "Unchanged enrichment does not republish the article collection")
+        await store.updateEnrichment(id: article.id, category: "World")
+        assertEqual(store.revision, classifiedRevision + 1, "A changed classification still invalidates queries")
+        assertEqual(publications, 1, "A changed classification publishes once")
+        observation.cancel()
 
         let delegate = SecureSessionDelegateCoordinator()
         let request = URLRequest(url: URL(string: "https://example.com")!)

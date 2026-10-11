@@ -368,7 +368,11 @@ private struct CompactArchiveSearch: NSViewRepresentable {
                 initializedFocus = true
                 NotificationCenter.default.removeObserver(self)
                 // Scene restoration can focus the first toolbar field even when no search was requested.
-                if item.searchField.stringValue.isEmpty { item.endSearchInteraction() }
+                if item.searchField.stringValue.isEmpty {
+                    window?.initialFirstResponder = window?.contentView
+                    item.endSearchInteraction()
+                    window?.makeFirstResponder(window?.contentView)
+                }
             }
             item.preferredWidthForSearchField = AppLayout.archiveSearchWidth
             if field !== item.searchField {
