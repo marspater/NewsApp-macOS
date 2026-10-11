@@ -1,6 +1,6 @@
 # Tension motion, archive search and event-card scrolling
 
-Follow-up to #433. Zen uses a tapered open ensō brush stroke: eased four-second draw, hold, then fade and redraw. Reduced Motion/inactive rendering retains the completed stroke. Boiling has 18 faster sparks and faster flame deformation; motion remains confined to the tension sheet.
+Follow-up to #433. Zen draws a dry-brush ensō: a heavy rounded press that thins and splits into bristle streaks. It holds, dissolves, pauses and is brushed again with a rounded head in an eight-second cycle. Every glyph starts from its resting pose, freezes while inactive and resumes from the same frame. Restarts are invisible: the ensō restarts while fully faded, and each spark fades in and out on its own flight. Flames combine two waves per parameter instead of a single sine. Boiling has 18 faster sparks; motion remains confined to the tension sheet. Reduced Motion and inactive rendering show the resting pose.
 
 The shared SwiftUI archive search retains native tokens, focus, menu behavior and system Liquid Glass. A narrow AppKit bridge bounds the resting NSSearchToolbarItem field to 36 pt; native focus expands it, dismissal with an empty query collapses it. The same search owner covers list and reader. The selected macOS SDK has no SwiftUI always-collapsed search behavior; SearchToolbarBehavior.minimize is unavailable on macOS.
 

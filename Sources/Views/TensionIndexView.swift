@@ -248,75 +248,22 @@ struct TensionGlyph: View {
     let level: TensionLevel
     @Environment(\.effectiveReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
+    /// Motion time starts at the resting pose and freezes while paused, so it resumes where it stopped.
+    @State private var origin = Date()
+    @State private var frozen: TimeInterval = 0
+
+    private var paused: Bool { reduceMotion || scenePhase != .active }
 
     var body: some View {
-        TimelineView(.animation(paused: reduceMotion || scenePhase != .active)) { timeline in
-            let time = reduceMotion || scenePhase != .active ? 0 : timeline.date.timeIntervalSinceReferenceDate
-            Canvas { context, size in
-                let width = size.width
-                let height = size.height
-                switch level {
-                case .zen:
-                    // A tapered brush stroke draws around the ring, holds, then fades before its next stroke.
-                    let phase = time.truncatingRemainder(dividingBy: 6)
-                    let linear = min(1, phase / 4)
-                    let progress = reduceMotion || scenePhase != .active ? 1 : linear * linear * (3 - 2 * linear)
-                    let opacity = reduceMotion || scenePhase != .active ? 1 : min(1, (6 - phase) / 0.7)
-                    context.fill(
-                        Self.enso(size: size, progress: progress),
-                        with: .color(AppColor.tension(level).opacity(opacity)))
-                case .mild:
-                    // A warm sun and slow breathing halo; distinct from the water and flame states.
-                    let pulse = 0.03 * sin(time * 1.2)
-                    let halo = CGRect(
-                        x: width * (0.14 - pulse), y: height * (0.14 - pulse), width: width * (0.72 + pulse * 2),
-                        height: height * (0.72 + pulse * 2))
-                    context.stroke(
-                        Path(ellipseIn: halo), with: .color(AppColor.tension(level).opacity(0.4)),
-                        lineWidth: AppLayout.tensionStrokeWidth)
-                    context.fill(
-                        Path(
-                            ellipseIn: CGRect(
-                                x: width * 0.28, y: height * 0.28, width: width * 0.44, height: height * 0.44)),
-                        with: .color(AppColor.tension(level)))
-                case .warm, .hot, .boiling:
-                    if level == .warm {
-                        context.translateBy(x: width * 0.08, y: height * 0.2)
-                        context.scaleBy(x: 0.84, y: 0.8)
-                    }
-                    let intensity = level == .warm ? 0.0 : level == .hot ? 0.5 : 1.0
-                    let fireTime = time * (level == .boiling ? 1.8 : 1)
-                    let drift = sin(fireTime * (1.5 + intensity)) * (0.035 + intensity * 0.015)
-                    let lift = sin(fireTime * (2.1 + intensity)) * 0.025
-                    let flame = Self.flame(size: size, drift: drift, lift: lift)
-                    context.fill(
-                        flame,
-                        with: .linearGradient(
-                            Gradient(colors: [AppColor.tension(level), AppColor.tension(level), AppColor.warning]),
-                            startPoint: CGPoint(x: width * 0.5, y: 0), endPoint: CGPoint(x: width * 0.5, y: height)))
-                    var inner = context
-                    inner.translateBy(x: width * 0.25, y: height * 0.4)
-                    inner.scaleBy(x: 0.5, y: 0.6)
-                    inner.fill(
-                        Self.flame(size: size, drift: -drift, lift: -lift),
-                        with: .linearGradient(
-                            Gradient(colors: [AppColor.warning, AppColor.flameCore]), startPoint: .zero,
-                            endPoint: CGPoint(x: 0, y: height)))
-                    if level != .warm {
-                        // Boiling throws a denser, faster stream of sparks.
-                        let count = level == .hot ? 2 : 18
-                        for ember in 0..<count {
-                            let phase = (time * (level == .hot ? 0.35 : 1.3) + Double(ember) / Double(count))
-                                .truncatingRemainder(dividingBy: 1)
-                            let x = width * (0.5 + sin(Double(ember) * 2.4 + time) * 0.23)
-                            let y = height * (0.4 - phase * 0.35)
-                            let radius = width * 0.025 * (1 - phase)
-                            context.fill(
-                                Path(ellipseIn: CGRect(x: x, y: y, width: radius, height: radius * 1.7)),
-                                with: .color(AppColor.caution.opacity(1 - phase)))
-                        }
-                    }
-                }
+        TimelineView(.animation(paused: paused)) { timeline in
+            let time = reduceMotion ? 0 : paused ? frozen : timeline.date.timeIntervalSince(origin)
+            Canvas { context, size in Self.draw(level, in: &context, size: size, time: time) }
+        }
+        .onChange(of: paused) { _, isPaused in
+            if isPaused {
+                frozen = reduceMotion ? 0 : Date().timeIntervalSince(origin)
+            } else {
+                origin = Date().addingTimeInterval(-frozen)
             }
         }
         .frame(width: AppLayout.tensionIllustrationSize, height: AppLayout.tensionIllustrationSize)
@@ -324,25 +271,145 @@ struct TensionGlyph: View {
         .allowsHitTesting(false)
     }
 
-    private static func enso(size: CGSize, progress: Double) -> Path {
-        let steps = max(1, Int(140 * progress))
-        let center = CGPoint(x: size.width * 0.5, y: size.height * 0.5)
-        func edge(_ index: Int, outer: Bool) -> CGPoint {
-            let fraction = Double(index) / 140
-            let angle = (125 + fraction * 325) * Double.pi / 180
-            let taper = pow(sin(fraction * Double.pi), 0.6)
-            let brush = 0.018 + 0.065 * taper * (1 + 0.16 * sin(fraction * 19))
-            let radius = 0.34 + 0.008 * sin(fraction * 31) + (outer ? brush : -brush)
-            return CGPoint(
-                x: center.x + size.width * radius * cos(angle),
-                y: center.y + size.height * radius * sin(angle))
+    /// Draws one frame. Time zero is the resting pose shown with Reduce Motion; every motion is continuous in time,
+    /// and anything that restarts (the ensō stroke, each spark) is invisible at its restart.
+    private static func draw(_ level: TensionLevel, in context: inout GraphicsContext, size: CGSize, time: Double) {
+        let width = size.width
+        let height = size.height
+        switch level {
+        case .zen:
+            // Hold the ensō, let it dissolve, pause, then brush a fresh stroke that settles back into the hold.
+            let cycle = time.truncatingRemainder(dividingBy: 8)
+            let dissolve = smooth((cycle - 2.4) / 1.2)
+            let opacity = cycle < 4 ? 1 - dissolve : smooth((cycle - 4) / 0.2)
+            let progress = cycle < 4 ? 1 : smooth((cycle - 4) / 3)
+            let scale = cycle < 4 ? 1 + 0.05 * dissolve : 1
+            context.opacity = opacity
+            context.translateBy(x: width / 2, y: height / 2)
+            context.scaleBy(x: scale, y: scale)
+            context.translateBy(x: -width / 2, y: -height / 2)
+            enso(in: &context, size: size, progress: progress, color: AppColor.tension(level))
+        case .mild:
+            // A warm sun whose halo breathes and releases one faint ripple per breath.
+            let breath = time / 5
+            let pulse = 0.03 * sin(breath * 2 * .pi)
+            let halo = 0.36 + pulse
+            context.stroke(
+                Path(ellipseIn: square(size, radius: halo)), with: .color(AppColor.tension(level).opacity(0.4)),
+                lineWidth: AppLayout.tensionStrokeWidth)
+            let ripple = breath - floor(breath)
+            context.stroke(
+                Path(ellipseIn: square(size, radius: 0.24 + ripple * 0.25)),
+                with: .color(AppColor.tension(level).opacity(0.3 * sin(ripple * .pi) * (1 - ripple))),
+                lineWidth: AppLayout.tensionStrokeWidth * (1 - 0.5 * ripple))
+            context.fill(Path(ellipseIn: square(size, radius: 0.22)), with: .color(AppColor.tension(level)))
+        case .warm, .hot, .boiling:
+            let heat = level == .warm ? 0.0 : level == .hot ? 0.5 : 1.0
+            if level == .warm {
+                context.translateBy(x: width * 0.08, y: height * 0.2)
+                context.scaleBy(x: 0.84, y: 0.8)
+            }
+            // Two incommensurate waves per parameter, so the flicker never visibly repeats or resets.
+            let fire = time * (1 + heat)
+            let drift = (0.03 + heat * 0.015) * (sin(fire * 1.6) + 0.4 * sin(fire * 4.1 + 1))
+            let lift = 0.025 * (sin(fire * 2.2 + 0.5) + 0.5 * sin(fire * 5.3))
+            let innerDrift = (0.03 + heat * 0.015) * (sin(fire * 2.1 + 2) + 0.4 * sin(fire * 4.7))
+            let innerLift = 0.03 * sin(fire * 3.1 + 1.3)
+            context.fill(
+                flame(size: size, drift: drift, lift: lift),
+                with: .linearGradient(
+                    Gradient(colors: [AppColor.tension(level), AppColor.tension(level), AppColor.warning]),
+                    startPoint: CGPoint(x: width * 0.5, y: 0), endPoint: CGPoint(x: width * 0.5, y: height)))
+            var inner = context
+            inner.translateBy(x: width * 0.25, y: height * 0.4)
+            inner.scaleBy(x: 0.5, y: 0.6)
+            inner.fill(
+                flame(size: size, drift: innerDrift, lift: innerLift),
+                with: .linearGradient(
+                    Gradient(colors: [AppColor.warning, AppColor.flameCore]), startPoint: .zero,
+                    endPoint: CGPoint(x: 0, y: height)))
+            guard level != .warm else { return }
+            // Sparks rise and fade; each one fades in from nothing and starts its next flight elsewhere.
+            let count = level == .hot ? 4 : 18
+            let rate = level == .hot ? 0.4 : 1.2
+            for ember in 0..<count {
+                let clock = time * rate + Double(ember) / Double(count)
+                let phase = clock - floor(clock)
+                let seed = Double(ember) * 7.3 + floor(clock) * 13.1
+                let origin = 0.36 + 0.28 * noise(seed)
+                let x = width * (origin + (origin - 0.5) * 0.6 * phase + 0.04 * sin(phase * 6 + seed) * phase)
+                let y = height * (0.45 - phase * (0.36 + 0.1 * noise(seed + 1)))
+                let radius = width * (0.022 + 0.01 * noise(seed + 2)) * (1 - 0.6 * phase)
+                context.fill(
+                    Path(ellipseIn: CGRect(x: x - radius / 2, y: y - radius, width: radius, height: radius * 1.7)),
+                    with: .color(AppColor.caution.opacity(smooth(phase / 0.12) * (1 - phase))))
+            }
         }
-        var stroke = Path()
-        stroke.move(to: edge(0, outer: true))
-        for index in 1...steps { stroke.addLine(to: edge(index, outer: true)) }
-        for index in (0...steps).reversed() { stroke.addLine(to: edge(index, outer: false)) }
-        stroke.closeSubpath()
-        return stroke
+    }
+
+    /// An open ensō brushed clockwise from the lower left: a heavy rounded press that thins and splits into dry
+    /// bristles toward its tail. `progress` reveals the stroke with a rounded brush head.
+    private static func enso(in context: inout GraphicsContext, size: CGSize, progress: Double, color: Color) {
+        guard progress > 0 else { return }
+        let weight = 0.075
+        func halfWidth(_ f: Double) -> Double {
+            // Round caps: a quarter-circle profile over roughly one brush width at each end.
+            func cap(_ distance: Double) -> Double {
+                let t = min(1, max(0, distance / 0.04))
+                return sqrt(1 - (1 - t) * (1 - t))
+            }
+            return weight * cap(f) * cap(progress - f) * (1 - 0.55 * smooth((f - 0.1) / 0.9))
+        }
+        func band(from start: Double, offset: Double, half: @escaping (Double) -> Double) -> Path {
+            var path = Path()
+            guard progress > start else { return path }
+            let samples = max(8, Int(240 * (progress - start)))
+            func point(_ index: Int, _ side: Double) -> CGPoint {
+                let f = start + (progress - start) * Double(index) / Double(samples)
+                let angle = (115 + 330 * f) * .pi / 180
+                let radius = 0.325 + 0.02 * f + offset * halfWidth(f) + side * half(f)
+                return CGPoint(
+                    x: size.width * (0.5 + radius * cos(angle)), y: size.height * (0.5 + radius * sin(angle)))
+            }
+            path.move(to: point(0, 1))
+            for index in 1...samples { path.addLine(to: point(index, 1)) }
+            for index in (0...samples).reversed() { path.addLine(to: point(index, -1)) }
+            path.closeSubpath()
+            return path
+        }
+        // Dry-brush gaps: offset across the stroke, where the gap opens and how wide it grows.
+        let gaps: [(offset: Double, start: Double, width: Double)] = [
+            (0.88, 0.04, 0.07), (-0.86, 0.22, 0.07), (0.8, 0.16, 0.13), (0.45, 0.3, 0.1), (-0.72, 0.36, 0.11),
+            (-0.2, 0.48, 0.12),
+            (0.15, 0.6, 0.1), (0.62, 0.7, 0.08), (-0.48, 0.76, 0.08),
+        ]
+        context.drawLayer { layer in
+            layer.fill(band(from: 0, offset: 0, half: halfWidth), with: .color(color))
+            layer.blendMode = .destinationOut
+            for gap in gaps {
+                layer.fill(
+                    band(from: gap.start, offset: gap.offset) { f in
+                        weight * gap.width * smooth((f - gap.start) / (1 - gap.start))
+                    }, with: .color(color))
+            }
+        }
+    }
+
+    private static func square(_ size: CGSize, radius: Double) -> CGRect {
+        CGRect(
+            x: size.width * (0.5 - radius), y: size.height * (0.5 - radius), width: size.width * radius * 2,
+            height: size.height * radius * 2)
+    }
+
+    private static func smooth(_ x: Double) -> Double {
+        let t = min(1, max(0, x))
+        return t * t * (3 - 2 * t)
+    }
+
+    /// A repeatable pseudo-random value in 0..<1.
+    private static func noise(_ seed: Double) -> Double {
+        let value = sin(seed * 12.9898) * 43758.5453
+        return value - floor(value)
     }
 
     private static func flame(size: CGSize, drift: Double, lift: Double) -> Path {
