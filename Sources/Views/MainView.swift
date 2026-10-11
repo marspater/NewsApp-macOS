@@ -347,15 +347,29 @@ private struct CompactArchiveSearch: NSViewRepresentable {
         var expanded = false
         var width: NSLayoutConstraint?
         weak var field: NSSearchField?
+        private var initializedFocus = false
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
+            NotificationCenter.default.removeObserver(self)
+            if let window {
+                NotificationCenter.default.addObserver(
+                    self, selector: #selector(windowBecameKey),
+                    name: NSWindow.didBecomeKeyNotification, object: window)
+            }
             scheduleUpdate()
         }
+        @objc private func windowBecameKey() { scheduleUpdate() }
         func scheduleUpdate() {
             DispatchQueue.main.async { [weak self] in self?.apply() }
         }
         func apply() {
             guard let item = window?.toolbar?.items.compactMap({ $0 as? NSSearchToolbarItem }).first else { return }
+            if !initializedFocus, window?.isKeyWindow == true {
+                initializedFocus = true
+                NotificationCenter.default.removeObserver(self)
+                // Scene restoration can focus the first toolbar field even when no search was requested.
+                if item.searchField.stringValue.isEmpty { item.endSearchInteraction() }
+            }
             item.preferredWidthForSearchField = AppLayout.archiveSearchWidth
             if field !== item.searchField {
                 width?.isActive = false
