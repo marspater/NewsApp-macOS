@@ -274,76 +274,89 @@ struct TensionGlyph: View {
     /// Draws one frame. Time zero is the resting pose shown with Reduce Motion; every motion is continuous in time,
     /// and anything that restarts (the ensō stroke, each spark) is invisible at its restart.
     private static func draw(_ level: TensionLevel, in context: inout GraphicsContext, size: CGSize, time: Double) {
+        switch level {
+        case .zen: drawZen(in: &context, size: size, time: time)
+        case .mild: drawSun(in: &context, size: size, time: time)
+        case .warm, .hot, .boiling: drawFire(level, in: &context, size: size, time: time)
+        }
+    }
+
+    private static func drawZen(in context: inout GraphicsContext, size: CGSize, time: Double) {
         let width = size.width
         let height = size.height
-        switch level {
-        case .zen:
-            // Hold the ensō, let it dissolve, pause, then brush a fresh stroke that settles back into the hold.
-            let cycle = time.truncatingRemainder(dividingBy: 8)
-            let dissolve = smooth((cycle - 2.4) / 1.2)
-            let opacity = cycle < 4 ? 1 - dissolve : smooth((cycle - 4) / 0.2)
-            let progress = cycle < 4 ? 1 : smooth((cycle - 4) / 3)
-            let scale = cycle < 4 ? 1 + 0.05 * dissolve : 1
-            context.opacity = opacity
-            context.translateBy(x: width / 2, y: height / 2)
-            context.scaleBy(x: scale, y: scale)
-            context.translateBy(x: -width / 2, y: -height / 2)
-            enso(in: &context, size: size, progress: progress, color: AppColor.tension(level))
-        case .mild:
-            // A warm sun whose halo breathes and releases one faint ripple per breath.
-            let breath = time / 5
-            let pulse = 0.03 * sin(breath * 2 * .pi)
-            let halo = 0.36 + pulse
-            context.stroke(
-                Path(ellipseIn: square(size, radius: halo)), with: .color(AppColor.tension(level).opacity(0.4)),
-                lineWidth: AppLayout.tensionStrokeWidth)
-            let ripple = breath - floor(breath)
-            context.stroke(
-                Path(ellipseIn: square(size, radius: 0.24 + ripple * 0.25)),
-                with: .color(AppColor.tension(level).opacity(0.3 * sin(ripple * .pi) * (1 - ripple))),
-                lineWidth: AppLayout.tensionStrokeWidth * (1 - 0.5 * ripple))
-            context.fill(Path(ellipseIn: square(size, radius: 0.22)), with: .color(AppColor.tension(level)))
-        case .warm, .hot, .boiling:
-            let heat = level == .warm ? 0.0 : level == .hot ? 0.5 : 1.0
-            if level == .warm {
-                context.translateBy(x: width * 0.08, y: height * 0.2)
-                context.scaleBy(x: 0.84, y: 0.8)
-            }
-            // Two incommensurate waves per parameter, so the flicker never visibly repeats or resets.
-            let fire = time * (1 + heat)
-            let drift = (0.03 + heat * 0.015) * (sin(fire * 1.6) + 0.4 * sin(fire * 4.1 + 1))
-            let lift = 0.025 * (sin(fire * 2.2 + 0.5) + 0.5 * sin(fire * 5.3))
-            let innerDrift = (0.03 + heat * 0.015) * (sin(fire * 2.1 + 2) + 0.4 * sin(fire * 4.7))
-            let innerLift = 0.03 * sin(fire * 3.1 + 1.3)
+        // Hold the ensō, let it dissolve, pause, then brush a fresh stroke that settles back into the hold.
+        let cycle = time.truncatingRemainder(dividingBy: 8)
+        let dissolve = smooth((cycle - 2.4) / 1.2)
+        let opacity = cycle < 4 ? 1 - dissolve : smooth((cycle - 4) / 0.2)
+        let progress = cycle < 4 ? 1 : smooth((cycle - 4) / 3)
+        let scale = cycle < 4 ? 1 + 0.05 * dissolve : 1
+        context.opacity = opacity
+        context.translateBy(x: width / 2, y: height / 2)
+        context.scaleBy(x: scale, y: scale)
+        context.translateBy(x: -width / 2, y: -height / 2)
+        enso(in: &context, size: size, progress: progress, color: AppColor.tension(.zen))
+    }
+
+    private static func drawSun(in context: inout GraphicsContext, size: CGSize, time: Double) {
+        // A warm sun whose halo breathes and releases one faint ripple per breath.
+        let breath = time / 5
+        let pulse = 0.03 * sin(breath * 2 * .pi)
+        let halo = 0.36 + pulse
+        context.stroke(
+            Path(ellipseIn: square(size, radius: halo)), with: .color(AppColor.tension(.mild).opacity(0.4)),
+            lineWidth: AppLayout.tensionStrokeWidth)
+        let ripple = breath - floor(breath)
+        context.stroke(
+            Path(ellipseIn: square(size, radius: 0.24 + ripple * 0.25)),
+            with: .color(AppColor.tension(.mild).opacity(0.3 * sin(ripple * .pi) * (1 - ripple))),
+            lineWidth: AppLayout.tensionStrokeWidth * (1 - 0.5 * ripple))
+        context.fill(Path(ellipseIn: square(size, radius: 0.22)), with: .color(AppColor.tension(.mild)))
+    }
+
+    private static func drawFire(
+        _ level: TensionLevel, in context: inout GraphicsContext, size: CGSize, time: Double
+    ) {
+        let width = size.width
+        let height = size.height
+        let heat = level == .warm ? 0.0 : level == .hot ? 0.5 : 1.0
+        if level == .warm {
+            context.translateBy(x: width * 0.08, y: height * 0.2)
+            context.scaleBy(x: 0.84, y: 0.8)
+        }
+        // Two incommensurate waves per parameter, so the flicker never visibly repeats or resets.
+        let fire = time * (1 + heat)
+        let drift = (0.03 + heat * 0.015) * (sin(fire * 1.6) + 0.4 * sin(fire * 4.1 + 1))
+        let lift = 0.025 * (sin(fire * 2.2 + 0.5) + 0.5 * sin(fire * 5.3))
+        let innerDrift = (0.03 + heat * 0.015) * (sin(fire * 2.1 + 2) + 0.4 * sin(fire * 4.7))
+        let innerLift = 0.03 * sin(fire * 3.1 + 1.3)
+        context.fill(
+            flame(size: size, drift: drift, lift: lift),
+            with: .linearGradient(
+                Gradient(colors: [AppColor.tension(level), AppColor.tension(level), AppColor.warning]),
+                startPoint: CGPoint(x: width * 0.5, y: 0), endPoint: CGPoint(x: width * 0.5, y: height)))
+        var inner = context
+        inner.translateBy(x: width * 0.25, y: height * 0.4)
+        inner.scaleBy(x: 0.5, y: 0.6)
+        inner.fill(
+            flame(size: size, drift: innerDrift, lift: innerLift),
+            with: .linearGradient(
+                Gradient(colors: [AppColor.warning, AppColor.flameCore]), startPoint: .zero,
+                endPoint: CGPoint(x: 0, y: height)))
+        guard level != .warm else { return }
+        // Sparks rise and fade; each one fades in from nothing and starts its next flight elsewhere.
+        let count = level == .hot ? 4 : 18
+        let rate = level == .hot ? 0.4 : 1.2
+        for ember in 0..<count {
+            let clock = time * rate + Double(ember) / Double(count)
+            let phase = clock - floor(clock)
+            let seed = Double(ember) * 7.3 + floor(clock) * 13.1
+            let origin = 0.36 + 0.28 * noise(seed)
+            let x = width * (origin + (origin - 0.5) * 0.6 * phase + 0.04 * sin(phase * 6 + seed) * phase)
+            let y = height * (0.45 - phase * (0.36 + 0.1 * noise(seed + 1)))
+            let radius = width * (0.022 + 0.01 * noise(seed + 2)) * (1 - 0.6 * phase)
             context.fill(
-                flame(size: size, drift: drift, lift: lift),
-                with: .linearGradient(
-                    Gradient(colors: [AppColor.tension(level), AppColor.tension(level), AppColor.warning]),
-                    startPoint: CGPoint(x: width * 0.5, y: 0), endPoint: CGPoint(x: width * 0.5, y: height)))
-            var inner = context
-            inner.translateBy(x: width * 0.25, y: height * 0.4)
-            inner.scaleBy(x: 0.5, y: 0.6)
-            inner.fill(
-                flame(size: size, drift: innerDrift, lift: innerLift),
-                with: .linearGradient(
-                    Gradient(colors: [AppColor.warning, AppColor.flameCore]), startPoint: .zero,
-                    endPoint: CGPoint(x: 0, y: height)))
-            guard level != .warm else { return }
-            // Sparks rise and fade; each one fades in from nothing and starts its next flight elsewhere.
-            let count = level == .hot ? 4 : 18
-            let rate = level == .hot ? 0.4 : 1.2
-            for ember in 0..<count {
-                let clock = time * rate + Double(ember) / Double(count)
-                let phase = clock - floor(clock)
-                let seed = Double(ember) * 7.3 + floor(clock) * 13.1
-                let origin = 0.36 + 0.28 * noise(seed)
-                let x = width * (origin + (origin - 0.5) * 0.6 * phase + 0.04 * sin(phase * 6 + seed) * phase)
-                let y = height * (0.45 - phase * (0.36 + 0.1 * noise(seed + 1)))
-                let radius = width * (0.022 + 0.01 * noise(seed + 2)) * (1 - 0.6 * phase)
-                context.fill(
-                    Path(ellipseIn: CGRect(x: x - radius / 2, y: y - radius, width: radius, height: radius * 1.7)),
-                    with: .color(AppColor.caution.opacity(smooth(phase / 0.12) * (1 - phase))))
-            }
+                Path(ellipseIn: CGRect(x: x - radius / 2, y: y - radius, width: radius, height: radius * 1.7)),
+                with: .color(AppColor.caution.opacity(smooth(phase / 0.12) * (1 - phase))))
         }
     }
 
@@ -377,11 +390,12 @@ struct TensionGlyph: View {
             path.closeSubpath()
             return path
         }
-        // Dry-brush gaps: offset across the stroke, where the gap opens and how wide it grows.
-        let gaps: [(offset: Double, start: Double, width: Double)] = [
-            (0.88, 0.04, 0.07), (-0.86, 0.22, 0.07), (0.8, 0.16, 0.13), (0.45, 0.3, 0.1), (-0.72, 0.36, 0.11),
-            (-0.2, 0.48, 0.12),
-            (0.15, 0.6, 0.1), (0.62, 0.7, 0.08), (-0.48, 0.76, 0.08),
+        let gaps = [
+            DryBrushGap(offset: 0.88, start: 0.04, width: 0.07), DryBrushGap(offset: -0.86, start: 0.22, width: 0.07),
+            DryBrushGap(offset: 0.8, start: 0.16, width: 0.13), DryBrushGap(offset: 0.45, start: 0.3, width: 0.1),
+            DryBrushGap(offset: -0.72, start: 0.36, width: 0.11), DryBrushGap(offset: -0.2, start: 0.48, width: 0.12),
+            DryBrushGap(offset: 0.15, start: 0.6, width: 0.1), DryBrushGap(offset: 0.62, start: 0.7, width: 0.08),
+            DryBrushGap(offset: -0.48, start: 0.76, width: 0.08),
         ]
         context.drawLayer { layer in
             layer.fill(band(from: 0, offset: 0, half: halfWidth), with: .color(color))
@@ -393,6 +407,13 @@ struct TensionGlyph: View {
                     }, with: .color(color))
             }
         }
+    }
+
+    /// A dry-brush gap: offset across the stroke, where along it the gap opens, and how wide it grows.
+    private struct DryBrushGap {
+        let offset: Double
+        let start: Double
+        let width: Double
     }
 
     private static func square(_ size: CGSize, radius: Double) -> CGRect {
