@@ -236,6 +236,7 @@ struct ArticleListView: View {
                 .focusable()
                 .focused($listHasFocus)
                 .defaultFocus($listHasFocus, true)
+                .onAppear { listHasFocus = true }
                 .focusEffectDisabled()
                 .onKeyPress { press in
                     handleKeyPress(press: press, proxy: proxy)
