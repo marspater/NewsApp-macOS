@@ -354,6 +354,27 @@ final class AppSettings: ObservableObject {
         setMuteRules(rules)
     }
 
+    /// The muting action for a story link's publisher host: unmute the rules covering it, or mute the host.
+    func sourceMuting(for link: String) -> (title: String, apply: () -> Void)? {
+        let covering = muteRules.matchedSources(link: link)
+        if let rule = covering.first {
+            return (
+                "Unmute \(rule)",
+                { [weak self] in
+                    guard let self = self else { return }
+                    for source in covering { self.unmuteSource(source) }
+                }
+            )
+        }
+        guard let host = MuteRules.host(link) else { return nil }
+        return (
+            "Mute \(host)",
+            { [weak self] in
+                _ = self?.muteSource(host)
+            }
+        )
+    }
+
     /// Removes every muting rule.
     func clearMuting() {
         setMuteRules(MuteRules())

@@ -85,6 +85,7 @@ struct ArticleDetailView: View {
     @State private var webAction: WebNavigationAction? = nil
 
     @State private var publisherRevisions: [PublisherContentRevision] = []
+    @State private var publisherUpdatesExpanded = false
     @State private var analysis: ArticleAnalysis? = nil
     @State private var isAnalyzing: Bool = false
     @State private var analysisError: String? = nil
@@ -222,6 +223,9 @@ struct ArticleDetailView: View {
                 let revisions = try? await articleStore.database.publisherContentRevisions(for: id)
                 guard !Task.isCancelled, activeArticle.id == id else { return }
                 publisherRevisions = revisions ?? []
+            }
+            .onChange(of: activeArticle.id) { _, _ in
+                publisherUpdatesExpanded = false
             }
             .onChange(of: currentArticle.publisherInputHash) { _, _ in
                 analysis = nil
@@ -408,8 +412,10 @@ struct ArticleDetailView: View {
     private var publisherUpdates: some View {
         let updates = publisherRevisions.filter { $0.kind == .publisherUpdate }
         if let latest = updates.first {
-            DisclosureGroup("Publisher updated · \(latest.observedAt.formatted(date: .abbreviated, time: .shortened))")
-            {
+            DisclosureGroup(
+                "Publisher updated · \(latest.observedAt.formatted(date: .abbreviated, time: .shortened))",
+                isExpanded: $publisherUpdatesExpanded
+            ) {
                 VStack(alignment: .leading, spacing: AppSpacing.sm) {
                     Text("Changes observed on this Mac. An update is not a verified correction.")
                     ForEach(updates) { revision in
@@ -422,7 +428,7 @@ struct ArticleDetailView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.top, AppSpacing.sm)
             }
-            .font(AppTypography.body)
+            .font(AppTypography.caption)
             .foregroundStyle(AppColor.secondaryText)
         }
     }
@@ -461,12 +467,12 @@ struct ArticleDetailView: View {
         HStack(spacing: AppSpacing.sm) {
             ProgressView()
                 .controlSize(.small)
-            Text("Loading full article…")
+            Text("Loading full story…")
                 .font(AppTypography.label)
                 .foregroundColor(AppColor.secondaryText)
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("Loading full article")
+        .accessibilityLabel("Loading full story")
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.vertical, AppSpacing.lg)
     }
@@ -479,7 +485,7 @@ struct ArticleDetailView: View {
                         .font(AppTypography.sectionTitle)
                         .foregroundColor(AppColor.secondaryText)
                         .accessibilityHidden(true)
-                    Text("Full article unavailable in reader")
+                    Text("Full story unavailable in reader")
                         .font(AppTypography.headline)
                         .foregroundColor(AppColor.primaryText)
                     Spacer()
@@ -504,7 +510,7 @@ struct ArticleDetailView: View {
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
-                    .help("Open Web View (W)")
+                    .help("Open web view (W)")
                 }
 
                 Text(reason)
@@ -647,7 +653,7 @@ struct ArticleDetailView: View {
                 .foregroundStyle(AppColor.secondaryText)
             HStack(spacing: AppSpacing.sm) {
                 Button("Open Web View", systemImage: "globe") { readerModeBinding.wrappedValue = .web }
-                    .help("Open Web View (W)")
+                    .help("Open web view (W)")
                 if URL(string: currentArticle.link) != nil {
                     Button("Open in Browser", systemImage: "safari", action: openInBrowser)
                         .help("Open in default browser (O or ⌘O)")
@@ -703,7 +709,7 @@ struct ArticleDetailView: View {
                     Image(systemName: "exclamationmark.triangle")
                         .imageScale(.large)
                         .foregroundColor(AppColor.secondaryText)
-                    Text("Invalid article URL")
+                    Text("Invalid story link")
                         .font(AppTypography.headline)
                         .foregroundColor(AppColor.secondaryText)
                     Spacer()
@@ -758,16 +764,7 @@ struct ArticleDetailView: View {
             .accessibilityLabel("Reading mode")
 
             if isOverviewLoading && currentOverview == nil {
-                HStack(spacing: AppSpacing.eyebrowGap) {
-                    ProgressView()
-                        .controlSize(.small)
-                    Text("Loading event overview…")
-                        .font(AppTypography.caption)
-                        .foregroundColor(AppColor.secondaryText)
-                }
-                .help("Generating evidence-backed event overview…")
-                .accessibilityElement(children: .combine)
-                .accessibilityLabel("Loading event overview")
+                ToolbarLoadingBubble()
             }
         }
         ToolbarItemGroup(placement: .primaryAction) {
@@ -778,27 +775,27 @@ struct ArticleDetailView: View {
                     Label("Web Back", systemImage: "arrow.left")
                 }
                 .disabled(!webCanGoBack)
-                .help("Web Back")
+                .help("Go back")
                 Button {
                     webAction = .goForward
                 } label: {
                     Label("Web Forward", systemImage: "arrow.right")
                 }
                 .disabled(!webCanGoForward)
-                .help("Web Forward")
+                .help("Go forward")
             }
             Button(action: toggleSave) {
                 Label(
                     isSaved ? "Remove from Saved Stories" : "Save Story",
                     systemImage: isSaved ? "bookmark.fill" : "bookmark")
             }
-            .help(isSaved ? "Remove from Saved Stories (S)" : "Save Story (S)")
+            .help(isSaved ? "Remove from saved stories (S)" : "Save story (S)")
 
             if let url = URL(string: currentArticle.link) {
                 ShareLink(item: url, subject: Text(currentArticle.title)) {
                     Label("Share Story", systemImage: "square.and.arrow.up")
                 }
-                .help("Share Story")
+                .help("Share story")
                 .accessibilityLabel("Share Story")
             }
         }
@@ -1055,7 +1052,7 @@ struct ArticleDetailView: View {
                     .foregroundColor(AppColor.secondaryText)
             }
             .accessibilityElement(children: .combine)
-            .accessibilityLabel("Analyzing article with on-device AI")
+            .accessibilityLabel("Analyzing story with on-device AI")
             .padding(AppSpacing.sm)
             .background(AppColor.surface, in: RoundedRectangle(cornerRadius: AppRadius.card))
         } else if let analysis = analysis {
@@ -1176,7 +1173,7 @@ struct ArticleDetailView: View {
 
         let link = currentArticle.link
         guard !link.isEmpty, let url = URL(string: link), url.scheme == "http" || url.scheme == "https" else {
-            contentState = .fallback(reason: "Invalid article URL")
+            contentState = .fallback(reason: "Invalid story link")
             return
         }
         let allowInsecure = appSettings.allowInsecureHTTP
@@ -1229,7 +1226,7 @@ struct ArticleDetailView: View {
                 self.activeArticle = updated
                 self.contentState = .ready
             case .qualityValidationFailed(let reason):
-                self.contentState = .fallback(reason: "Article quality check not met: \(reason)")
+                self.contentState = .fallback(reason: "Story quality check not met: \(reason)")
             case .httpError(let status):
                 self.contentState = .fallback(reason: "Publisher returned HTTP \(status)")
             case .securityBlocked(let reason):
@@ -1237,7 +1234,7 @@ struct ArticleDetailView: View {
             case .emptyContent:
                 self.contentState = .fallback(reason: "Publisher returned empty content")
             case .contentParsingFailed(let reason):
-                self.contentState = .fallback(reason: "Could not extract article body: \(reason)")
+                self.contentState = .fallback(reason: "Could not extract story body: \(reason)")
             case .networkError(let reason):
                 self.contentState = .fallback(reason: "Network error: \(reason)")
             }
@@ -1303,6 +1300,16 @@ struct ArticleDetailView: View {
         }
     }
 
+    private func setOverviewLoading(_ loading: Bool) {
+        if reduceMotion {
+            isOverviewLoading = loading
+        } else {
+            withAnimation(Self.readerAnimation(reduceMotion: reduceMotion)) {
+                isOverviewLoading = loading
+            }
+        }
+    }
+
     private func loadEventOverviewForActiveArticle() async {
         let articleID = activeArticle.id
         let inputHash = currentArticle.publisherInputHash
@@ -1312,7 +1319,7 @@ struct ArticleDetailView: View {
             currentArticle.publisherInputHash == inputHash
         else { return }
         guard let summary = summaries.first, summary.isConfirmed, summary.sources.count >= 2 else {
-            isOverviewLoading = false
+            setOverviewLoading(false)
             currentOverview = nil
             eventMemberArticles = []
             experienceMode = .sourcePublication
@@ -1327,7 +1334,7 @@ struct ArticleDetailView: View {
             existing.eventID == eventID,
             !existing.isStale(currentMembershipVersion: membershipVersion)
         {
-            isOverviewLoading = false
+            setOverviewLoading(false)
             let members = (try? await articleStore.eventMemberArticles(eventID: eventID)) ?? []
             guard !Task.isCancelled, activeArticle.id == articleID,
                 currentArticle.publisherInputHash == inputHash
@@ -1350,7 +1357,7 @@ struct ArticleDetailView: View {
             currentOverview = nil
             experienceMode = .sourcePublication
         }
-        isOverviewLoading = true
+        setOverviewLoading(true)
 
         let doc = await OverviewGenerationCoordinator.shared.setVisibleEvent(
             eventID: eventID,
@@ -1366,7 +1373,7 @@ struct ArticleDetailView: View {
             currentArticle.publisherInputHash == inputHash
         else { return }
 
-        isOverviewLoading = false
+        setOverviewLoading(false)
         if let doc = doc {
             currentOverview = doc
             eventMemberArticles = resolvedMembers
@@ -1455,7 +1462,7 @@ struct ReaderFigureView: View {
                     case .failure:
                         Label("Image unavailable", systemImage: "photo").foregroundStyle(AppColor.secondaryText)
                     case .empty:
-                        ProgressView().accessibilityLabel("Loading article image")
+                        ProgressView().accessibilityLabel("Loading story image")
                     @unknown default: EmptyView()
                     }
                 }
@@ -1520,4 +1527,30 @@ func readerText(_ block: ReaderBlock) -> AttributedString {
         text.append(part)
     }
     return text
+}
+
+/// An isolated, fixed-height loading indicator bubble in the reader toolbar.
+private struct ToolbarLoadingBubble: View {
+    var body: some View {
+        HStack(alignment: .center, spacing: AppSpacing.xs) {
+            ProgressView()
+                .controlSize(.small)
+            Text("Loading event overview…")
+                .font(AppTypography.caption)
+                .foregroundColor(AppColor.secondaryText)
+        }
+        .frame(height: 24)
+        .padding(.horizontal, AppSpacing.sm)
+        .padding(.vertical, AppSpacing.xxs)
+        .transition(
+            .asymmetric(
+                insertion: .opacity.combined(with: .scale(scale: 0.95)),
+                removal: .opacity
+            )
+            .animation(.easeInOut(duration: 0.25))
+        )
+        .help("Generating evidence-backed event overview…")
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Loading event overview")
+    }
 }

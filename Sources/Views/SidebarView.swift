@@ -78,9 +78,9 @@ struct SidebarView: View {
                 Button {
                     isSubscribePopoverPresented = true
                 } label: {
-                    Image(systemName: "plus")
+                    Label("Add Feed Subscription", systemImage: "plus")
                 }
-                .help("Add New Feed Subscription")
+                .help("Add feed subscription")
                 .accessibilityLabel("Add Feed Subscription")
                 .popover(isPresented: $isSubscribePopoverPresented) {
                     subscribePopover
@@ -170,20 +170,30 @@ struct SidebarView: View {
         Section("Suggested") {
             ForEach(suggestedTopics, id: \.0) { topic, icon in
                 if !feedManager.userSections.contains(topic) {
-                    Button {
-                        feedManager.addSection(topic)
-                    } label: {
-                        HStack {
-                            Label(topic, systemImage: icon)
-                                .foregroundColor(AppColor.secondaryText)
-                            Spacer()
+                    HStack {
+                        Label(topic, systemImage: icon)
+                            .foregroundStyle(AppColor.secondaryText)
+                        Spacer()
+                        Button {
+                            feedManager.addSection(topic)
+                        } label: {
                             Image(systemName: "plus")
                                 .imageScale(.small)
                                 .foregroundStyle(AppColor.tertiaryText)
                         }
+                        .buttonStyle(.plain)
+                        .help("Add \(topic) to sections")
+                        .accessibilityLabel("Add \(topic) to sections")
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Add \(topic) to sections")
+                    .tag(topic)
+                    .contextMenu {
+                        Button {
+                            feedManager.addSection(topic)
+                        } label: {
+                            Label("Add to Sections", systemImage: "plus.circle")
+                        }
+                    }
+                    .accessibilityLabel("Suggested topic \(topic)")
                 }
             }
         }

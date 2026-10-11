@@ -601,6 +601,14 @@ struct NativeUIQAChecks {
         }
         _ = AppColor.separator
         _ = AppColor.borderSubtle
+        let sampleStory = FeedArticle(
+            title: "Sample Story", link: "https://example.com/sample", guid: "sample_g", description: "Desc",
+            pubDate: Date(),
+            source: "Example"
+        )
+        _ = StoryContextMenuItems(article: sampleStory)
+        let muteCheck = AppSettings.shared.sourceMuting(for: "https://example.com/story")
+        assertEqual(muteCheck?.title, "Mute example.com", "Muting action for unmuted host proposes mute")
         assertEqual(AppSpacing.textStack, CGFloat(2), "Text-stack spacing token remains 2 pt")
         assertEqual(AppSpacing.eyebrowGap, CGFloat(6), "Eyebrow micro-gap remains 6 pt")
         assertEqual(AppSpacing.xxs, CGFloat(4), "Smallest standard grid step remains 4 pt")

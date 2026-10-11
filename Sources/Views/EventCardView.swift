@@ -145,6 +145,7 @@ private struct EventSourceRow: View {
 
     @EnvironmentObject private var readManager: ReadManager
     @EnvironmentObject private var savedStories: SavedStoriesManager
+    @EnvironmentObject private var appSettings: AppSettings
     @Environment(\.effectiveContrast) private var contrast
 
     private var isRead: Bool { readManager.isRead(article.id) }
@@ -182,39 +183,14 @@ private struct EventSourceRow: View {
         .buttonStyle(.plain)
         .buttonBorderShape(.roundedRectangle(radius: AppRadius.card))
         .contextMenu {
-            Button {
-                readManager.toggleRead(article.id)
-            } label: {
-                Label(
-                    isRead ? "Mark as Unread" : "Mark as Read", systemImage: isRead ? "circle" : "checkmark.circle.fill"
-                )
-            }
-            Button {
-                toggleSaved()
-            } label: {
-                Label(
-                    isSaved ? "Remove from Saved" : "Save Story", systemImage: isSaved ? "bookmark.slash" : "bookmark")
-            }
-            if canSeparate {
-                Divider()
-                Button {
-                    separate()
-                } label: {
-                    Label("Not the Same Event", systemImage: "rectangle.split.2x1")
-                }
-            }
-            Divider()
-            Button {
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(article.link, forType: .string)
-            } label: {
-                Label("Copy Link", systemImage: "link")
-            }
-            if let url = URL(string: article.link) {
-                Button {
-                    NSWorkspace.shared.open(url)
-                } label: {
-                    Label("Open in Browser", systemImage: "safari")
+            StoryContextMenuItems(article: article) {
+                if canSeparate {
+                    Divider()
+                    Button {
+                        separate()
+                    } label: {
+                        Label("Not the Same Event", systemImage: "rectangle.split.2x1")
+                    }
                 }
             }
         }
@@ -231,6 +207,9 @@ private struct EventSourceRow: View {
         .accessibilityActions {
             Button(isRead ? "Mark as Unread" : "Mark as Read") { readManager.toggleRead(article.id) }
             Button(isSaved ? "Remove from Saved" : "Save Story") { toggleSaved() }
+            if let muting = appSettings.sourceMuting(for: article.link) {
+                Button(muting.title, action: muting.apply)
+            }
             if canSeparate {
                 Button("Not the Same Event") { separate() }
             }

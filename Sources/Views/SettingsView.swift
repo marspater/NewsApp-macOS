@@ -103,14 +103,14 @@ struct SettingsView: View {
                 }
                 .pickerStyle(.menu)
 
-                Text("Periodic feed updates occur in the background when NewsApp is running.")
+                Text("Periodic feed updates occur in the background when News is running.")
                     .font(AppTypography.caption)
                     .foregroundColor(AppColor.secondaryText)
             }
 
             Section("Reading Behavior") {
-                Toggle("Auto-Hide Read Articles", isOn: $themeManager.autoHideRead)
-                Text("Articles will disappear from filtered views once marked as read.")
+                Toggle("Auto-Hide Read Stories", isOn: $themeManager.autoHideRead)
+                Text("Stories will disappear from filtered views once marked as read.")
                     .font(AppTypography.caption)
                     .foregroundColor(AppColor.secondaryText)
             }
@@ -442,7 +442,7 @@ struct SettingsView: View {
         Form {
             Section("On-Device Intelligence") {
                 Toggle(
-                    "Enable AI Article Analysis",
+                    "Enable AI Story Analysis",
                     isOn: Binding(
                         get: { appSettings.aiEnabled },
                         set: { appSettings.setAIEnabled($0) }
@@ -479,7 +479,7 @@ struct SettingsView: View {
                                 .font(AppTypography.label)
                                 .foregroundColor(AppColor.primaryText)
                             Text(
-                                "Analysis runs lazily only when you open an article for reading, preserving battery, CPU, and Neural Engine resources."
+                                "Analysis runs lazily only when you open a story for reading, preserving battery, CPU, and Neural Engine resources."
                             )
                             .font(AppTypography.caption)
                             .foregroundColor(AppColor.secondaryText)
@@ -513,7 +513,7 @@ struct SettingsView: View {
                         set: { feedManager.setTensionCollectionOptIn($0) }
                     ))
                 Text(
-                    "Fetches articles from the 12 international panel feeds to calculate the news tension indicator. These articles are stored locally for tension analysis and will not generate unread notifications unless you subscribe to the feeds directly."
+                    "Fetches stories from the 12 international panel feeds to calculate the news tension indicator. These stories are stored locally for tension analysis and will not generate unread notifications unless you subscribe to the feeds directly."
                 )
                 .font(AppTypography.caption)
                 .foregroundColor(AppColor.secondaryText)
@@ -566,7 +566,7 @@ struct SettingsView: View {
                             Text("Hardened Runtime & App Sandbox")
                                 .font(AppTypography.label)
                                 .foregroundColor(AppColor.primaryText)
-                            Text("Restricts file system and process access to NewsApp's isolated container.")
+                            Text("Restricts file system and process access to News's isolated container.")
                                 .font(AppTypography.caption)
                                 .foregroundColor(AppColor.secondaryText)
                         }
@@ -608,7 +608,7 @@ struct SettingsView: View {
                 .pickerStyle(.segmented)
 
                 Text(
-                    "Select whether NewsApp follows your macOS system appearance or stays locked to light or dark mode."
+                    "Select whether News follows your macOS system appearance or stays locked to light or dark mode."
                 )
                 .font(AppTypography.caption)
                 .foregroundColor(AppColor.secondaryText)
@@ -714,14 +714,16 @@ struct SettingsView: View {
                 HStack {
                     VStack(alignment: .leading, spacing: AppSpacing.textStack) {
                         HStack(spacing: AppSpacing.eyebrowGap) {
-                            Text("Article Content Cache")
+                            Text("Story Content Cache")
                                 .font(AppTypography.sectionTitle)
                                 .foregroundColor(AppColor.primaryText)
-                            Text("\(articleStore.articles.count) \(articleStore.articles.count == 1 ? "story" : "stories")")
-                                .font(AppTypography.label.monospacedDigit())
-                                .foregroundColor(AppColor.secondaryText)
+                            Text(
+                                "\(articleStore.articles.count) \(articleStore.articles.count == 1 ? "story" : "stories")"
+                            )
+                            .font(AppTypography.label.monospacedDigit())
+                            .foregroundColor(AppColor.secondaryText)
                         }
-                        Text("Cached full article bodies. Subscriptions and saved stories are kept.")
+                        Text("Cached full story bodies. Subscriptions and saved stories are kept.")
                             .font(AppTypography.caption)
                             .foregroundColor(AppColor.secondaryText)
                     }
@@ -745,7 +747,7 @@ struct SettingsView: View {
                                 .font(AppTypography.label.monospacedDigit())
                                 .foregroundColor(AppColor.secondaryText)
                         }
-                        Text("Generated summaries, key points, and entities. Subscriptions and articles remain.")
+                        Text("Generated summaries, key points, and entities. Subscriptions and stories remain.")
                             .font(AppTypography.caption)
                             .foregroundColor(AppColor.secondaryText)
                     }
@@ -790,7 +792,7 @@ struct SettingsView: View {
                             .font(AppTypography.sectionTitle)
                             .foregroundColor(AppColor.danger)
                         Text(
-                            "Purges web cache, article content, and AI analysis. Preserves subscriptions, saved stories, and read history."
+                            "Purges web cache, story content, and AI analysis. Preserves subscriptions, saved stories, and read history."
                         )
                         .font(AppTypography.caption)
                         .foregroundColor(AppColor.secondaryText)
@@ -822,7 +824,7 @@ struct SettingsView: View {
                 .padding(.top, AppSpacing.lg)
 
             VStack(spacing: AppSpacing.xxs) {
-                Text("NewsApp for macOS")
+                Text("News for macOS")
                     .font(AppTypography.sectionTitle.bold())
                     .foregroundColor(AppColor.primaryText)
                 Text("Version \(updateChecker.currentAppVersion)")
@@ -945,7 +947,7 @@ struct SettingsView: View {
             do {
                 try await articleStore.clearArticleCache()
                 calculateStorageSizes()
-                showActionMessage("Article body cache cleared.")
+                showActionMessage("Story body cache cleared.")
             } catch {
                 showActionMessage("Cache cleanup failed: \(error.localizedDescription)", failed: true)
             }
