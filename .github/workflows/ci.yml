@@ -3,8 +3,16 @@ name: CI
 on:
   push:
     branches: [ main ]
+    paths-ignore:
+      - 'docs/**'
+      - '**.md'
+      - 'LICENSE'
   pull_request:
     branches: [ main ]
+    paths-ignore:
+      - 'docs/**'
+      - '**.md'
+      - 'LICENSE'
   workflow_dispatch:
 
 concurrency:
@@ -43,7 +51,6 @@ jobs:
     name: Build Verification (Apple Silicon)
     runs-on: xcode-27
     timeout-minutes: 20
-    needs: test-arm64
     steps:
       - name: Checkout Code
         uses: actions/checkout@v7

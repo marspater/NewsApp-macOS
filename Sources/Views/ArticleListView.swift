@@ -210,73 +210,7 @@ struct ArticleListView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             ScrollViewReader { proxy in
-                ScrollView {
-                    masthead
-                    listContent(proxy: proxy)
-                }
-                // An empty list keeps its masthead at the top and centers its state in the visible area.
-                .overlay {
-                    if filteredArticles.isEmpty {
-                        emptyListContent
-                            .fixedSize(horizontal: false, vertical: true)
-                            .padding(.horizontal, AppLayout.pageInset)
-                    }
-                }
-                // Queued updates float over the list (DESIGN.md 8.4); the list keeps its place underneath.
-                .overlay(alignment: .top) {
-                    if buffer.pending != nil { updatesButton(proxy: proxy) }
-                }
-                .onScrollGeometryChange(for: Bool.self) { geometry in
-                    geometry.contentOffset.y + geometry.contentInsets.top > 24
-                } action: { _, scrolled in
-                    isScrolledAway = scrolled
-                }
-                .onHover { isPointerInList = $0 }
-                .onChange(of: queuedUpdateCount, handleQueuedUpdatesChange)
-                .focusable()
-                .focused($listHasFocus)
-                .defaultFocus($listHasFocus, true)
-                .onAppear { listHasFocus = true }
-                .focusEffectDisabled()
-                .onKeyPress { press in
-                    handleKeyPress(press: press, proxy: proxy)
-                }
-                .onReceive(NotificationCenter.default.publisher(for: .showFeedUpdatesCommand)) { _ in
-                    if articlePath.isEmpty { applyPendingUpdates(proxy: proxy) }
-                }
-                .onReceive(NotificationCenter.default.publisher(for: .nextArticleCommand)) { _ in
-                    if articlePath.isEmpty { navigateList(offset: 1, proxy: proxy) }
-                }
-                .onReceive(NotificationCenter.default.publisher(for: .prevArticleCommand)) { _ in
-                    if articlePath.isEmpty { navigateList(offset: -1, proxy: proxy) }
-                }
-                .onReceive(NotificationCenter.default.publisher(for: .refreshFeedsCommand)) { _ in
-                    refreshFeeds()
-                }
-                .onReceive(NotificationCenter.default.publisher(for: .toggleReadCommand)) { _ in
-                    if articlePath.isEmpty, let id = focusedArticleID {
-                        readManager.toggleRead(id)
-                    }
-                }
-                .onReceive(NotificationCenter.default.publisher(for: .toggleSaveCommand)) { _ in
-                    if articlePath.isEmpty, let id = focusedArticleID,
-                        let art = filteredArticles.first(where: { $0.id == id })
-                    {
-                        if savedStories.isSaved(art) {
-                            savedStories.remove(art)
-                        } else {
-                            savedStories.save(art)
-                        }
-                    }
-                }
-                .onReceive(NotificationCenter.default.publisher(for: .openInBrowserCommand)) { _ in
-                    if articlePath.isEmpty, let id = focusedArticleID,
-                        let art = filteredArticles.first(where: { $0.id == id }),
-                        let url = URL(string: art.link)
-                    {
-                        NSWorkspace.shared.open(url)
-                    }
-                }
+                scrollView(proxy: proxy)
             }
         }
         .focusedSceneValue(\.selectedStory, selectedStory)
@@ -285,100 +219,202 @@ struct ArticleListView: View {
         // The masthead shows the location, so the toolbar does not repeat it (DESIGN.md 5).
         .toolbar(removing: .title)
         .toolbar { listToolbar }
-        .task(
-            id:
-                "\(queryIdentity):\(articleStore.revision):\(articleStore.eventRevision):\(pageRequest):\(refreshReloads)"
-        ) {
-            let identity = queryIdentity
-            let runID = UUID()
-            queryRunID = runID
-            if isBriefing {
-                queryError = nil
-                isLoadingPage = true
-                defer { if queryRunID == runID { isLoadingPage = false } }
-                do {
-                    if briefing == nil {
-                        let now = Date()
-                        let candidates = try await articleStore.database.fetchArticles(
-                            isRead: false, limit: FiniteBriefing.candidateLimit,
-                            publicationWindow: now.addingTimeInterval(-FiniteBriefing.duration)...now,
-                            muting: appSettings.muteRules, hidingWaitingStories: true)
-                        try Task.checkCancellation()
-                        briefing = FiniteBriefing(candidates: candidates, readIDs: readManager.readArticles, now: now)
-                    }
-                    buffer.replace(with: FeedSnapshot(articles: briefing?.articles ?? []))
-                    hasMoreResults = false
-                    mutedCount = 0
-                    loadedQuery = identity
-                } catch is CancellationError {
-                    // A newer selection owns the results.
-                } catch {
-                    if queryRunID == runID { queryError = "Could not load the briefing. Please try again." }
-                }
-                return
+        .task(id: taskQueryReloadKey) {
+            await performQueryReload()
+        }
+    }
+
+    @ViewBuilder
+    private func scrollView(proxy: ScrollViewProxy) -> some View {
+        attachNavigationCommands(
+            to: ScrollView {
+                masthead
+                listContent(proxy: proxy)
             }
-            let isNewQuery = loadedQuery != identity
-            let isPaging = !isNewQuery && pageRequest != loadedPageRequest && cursor != nil
-            loadedPageRequest = pageRequest
-            if isNewQuery {
-                buffer = FeedUpdateBuffer()
-                cursor = nil
-                hasMoreResults = false
-                expandedEvents = []
-                loadedQuery = identity
+            // An empty list keeps its masthead at the top and centers its state in the visible area.
+            .overlay { emptyListOverlay }
+            // Queued updates float over the list (DESIGN.md 8.4); the list keeps its place underneath.
+            .overlay(alignment: .top) { updatesOverlay(proxy: proxy) }
+            .onScrollGeometryChange(for: Bool.self) { geometry in
+                geometry.contentOffset.y + geometry.contentInsets.top > 24
+            } action: { _, scrolled in
+                isScrolledAway = scrolled
             }
+            .onHover { isPointerInList = $0 }
+            .onChange(of: queuedUpdateCount, handleQueuedUpdatesChange)
+            .focusable()
+            .focused($listHasFocus)
+            .defaultFocus($listHasFocus, true)
+            .onAppear { listHasFocus = true }
+            .focusEffectDisabled()
+            .onKeyPress { press in
+                handleKeyPress(press: press, proxy: proxy)
+            },
+            proxy: proxy
+        )
+    }
+
+    @ViewBuilder
+    private func attachNavigationCommands<Content: View>(to content: Content, proxy: ScrollViewProxy) -> some View {
+        content
+            .onReceive(NotificationCenter.default.publisher(for: .showFeedUpdatesCommand)) { _ in
+                if articlePath.isEmpty { applyPendingUpdates(proxy: proxy) }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .nextArticleCommand)) { _ in
+                if articlePath.isEmpty { navigateList(offset: 1, proxy: proxy) }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .prevArticleCommand)) { _ in
+                if articlePath.isEmpty { navigateList(offset: -1, proxy: proxy) }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .refreshFeedsCommand)) { _ in
+                refreshFeeds()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .toggleReadCommand)) { _ in
+                handleToggleRead()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .toggleSaveCommand)) { _ in
+                handleToggleSave()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .openInBrowserCommand)) { _ in
+                handleOpenInBrowser()
+            }
+    }
+
+    @ViewBuilder
+    private var emptyListOverlay: some View {
+        if filteredArticles.isEmpty {
+            emptyListContent
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, AppLayout.pageInset)
+        }
+    }
+
+    @ViewBuilder
+    private func updatesOverlay(proxy: ScrollViewProxy) -> some View {
+        if buffer.pending != nil {
+            updatesButton(proxy: proxy)
+        }
+    }
+
+    private func handleToggleRead() {
+        if articlePath.isEmpty, let id = focusedArticleID {
+            readManager.toggleRead(id)
+        }
+    }
+
+    private func handleToggleSave() {
+        guard articlePath.isEmpty, let id = focusedArticleID,
+            let art = filteredArticles.first(where: { $0.id == id })
+        else { return }
+        if savedStories.isSaved(art) {
+            savedStories.remove(art)
+        } else {
+            savedStories.save(art)
+        }
+    }
+
+    private func handleOpenInBrowser() {
+        guard articlePath.isEmpty, let id = focusedArticleID,
+            let art = filteredArticles.first(where: { $0.id == id }),
+            let url = URL(string: art.link)
+        else { return }
+        NSWorkspace.shared.open(url)
+    }
+
+    private var taskQueryReloadKey: String {
+        "\(queryIdentity):\(articleStore.revision):\(articleStore.eventRevision):\(pageRequest):\(refreshReloads)"
+    }
+
+    private func performQueryReload() async {
+        let identity = queryIdentity
+        let runID = UUID()
+        queryRunID = runID
+        if isBriefing {
             queryError = nil
             isLoadingPage = true
             defer { if queryRunID == runID { isLoadingPage = false } }
             do {
-                if !isPaging { try await Task.sleep(for: .milliseconds(180)) }
-                let muting = listMuting
-                let fetched = try await fetchPage(
-                    after: isPaging ? cursor : nil, muting: showsMuted ? MuteRules() : muting)
-                try Task.checkCancellation()
-                if !isPaging {
-                    var hidden = 0
-                    if !muting.isEmpty { hidden = try await countMuted(muting) }
-                    let waiting = hidesWaitingStories || showsWaiting ? try await countWaiting(muting: muting) : 0
+                if briefing == nil {
+                    let now = Date()
+                    let candidates = try await articleStore.database.fetchArticles(
+                        isRead: false, limit: FiniteBriefing.candidateLimit,
+                        publicationWindow: now.addingTimeInterval(-FiniteBriefing.duration)...now,
+                        muting: appSettings.muteRules, hidingWaitingStories: true)
                     try Task.checkCancellation()
-                    mutedCount = hidden
-                    waitingCount = waiting
+                    briefing = FiniteBriefing(candidates: candidates, readIDs: readManager.readArticles, now: now)
                 }
-                let page = Array(fetched.prefix(200))
-                let listed = isPaging ? buffer.displayed.articles + page : page
-                let events = try await articleStore.eventFeedSummaries(for: listed.map(\.id))
+                buffer.replace(with: FeedSnapshot(articles: briefing?.articles ?? []))
+                hasMoreResults = false
+                mutedCount = 0
+                loadedQuery = identity
+            } catch is CancellationError {
+                // A newer selection owns the results.
+            } catch {
+                if queryRunID == runID { queryError = "Could not load the briefing. Please try again." }
+            }
+            return
+        }
+        let isNewQuery = loadedQuery != identity
+        let isPaging = !isNewQuery && pageRequest != loadedPageRequest && cursor != nil
+        loadedPageRequest = pageRequest
+        if isNewQuery {
+            buffer = FeedUpdateBuffer()
+            cursor = nil
+            hasMoreResults = false
+            expandedEvents = []
+            loadedQuery = identity
+        }
+        queryError = nil
+        isLoadingPage = true
+        defer { if queryRunID == runID { isLoadingPage = false } }
+        do {
+            if !isPaging { try await Task.sleep(for: .milliseconds(180)) }
+            let muting = listMuting
+            let fetched = try await fetchPage(
+                after: isPaging ? cursor : nil, muting: showsMuted ? MuteRules() : muting)
+            try Task.checkCancellation()
+            if !isPaging {
+                var hidden = 0
+                if !muting.isEmpty { hidden = try await countMuted(muting) }
+                let waiting = hidesWaitingStories || showsWaiting ? try await countWaiting(muting: muting) : 0
                 try Task.checkCancellation()
-                let morePages = fetched.count > 200
-                if isPaging {
-                    buffer.append(page, events: events)
-                    cursor = buffer.displayed.articles.last.map(ArticleQueryCursor.init)
-                    hasMoreResults = morePages
-                } else if isNewQuery {
-                    buffer.replace(with: FeedSnapshot(articles: page, events: events))
+                mutedCount = hidden
+                waitingCount = waiting
+            }
+            let page = Array(fetched.prefix(200))
+            let listed = isPaging ? buffer.displayed.articles + page : page
+            let events = try await articleStore.eventFeedSummaries(for: listed.map(\.id))
+            try Task.checkCancellation()
+            let morePages = fetched.count > 200
+            if isPaging {
+                buffer.append(page, events: events)
+                cursor = buffer.displayed.articles.last.map(ArticleQueryCursor.init)
+                hasMoreResults = morePages
+            } else if isNewQuery {
+                buffer.replace(with: FeedSnapshot(articles: page, events: events))
+                cursor = page.last.map(ArticleQueryCursor.init)
+                hasMoreResults = morePages
+            } else {
+                let snapshot = FeedSnapshot(articles: page, events: events)
+                let holding = isHoldingList
+                appliesNextUpdate = false
+                let result = withAnimation(reduceMotion ? nil : AppMotion.state) {
+                    buffer.receive(snapshot, holding: holding, mode: groupingMode, hasMore: morePages)
+                }
+                switch result {
+                case .replaced:
                     cursor = page.last.map(ArticleQueryCursor.init)
                     hasMoreResults = morePages
-                } else {
-                    let snapshot = FeedSnapshot(articles: page, events: events)
-                    let holding = isHoldingList
-                    appliesNextUpdate = false
-                    let result = withAnimation(reduceMotion ? nil : AppMotion.state) {
-                        buffer.receive(snapshot, holding: holding, mode: groupingMode, hasMore: morePages)
-                    }
-                    switch result {
-                    case .replaced:
-                        cursor = page.last.map(ArticleQueryCursor.init)
-                        hasMoreResults = morePages
-                    case .refreshedInPlace:
-                        break
-                    case .waiting:
-                        pendingHasMore = morePages
-                    }
+                case .refreshedInPlace:
+                    break
+                case .waiting:
+                    pendingHasMore = morePages
                 }
-            } catch is CancellationError {
-                // A newer query owns the results.
-            } catch {
-                if queryRunID == runID { queryError = "Could not load stories. Please try again." }
             }
+        } catch is CancellationError {
+            // A newer query owns the results.
+        } catch {
+            if queryRunID == runID { queryError = "Could not load stories. Please try again." }
         }
     }
 
