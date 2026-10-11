@@ -33,9 +33,9 @@ struct MainView: View {
 
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
     /// The tension series behind the sidebar reading; the sheet opens with it.
-    @State private var tensionHistory: [TensionHistoryDay] = []
+    @State private var tensionHistory: [WorldTensionReading] = []
     @State private var showsTension = false
-    @State private var tensionUpdatedAt: Date?
+    @State private var tensionStatus = "Not assessed"
     /// The UTC day the reading belongs to; it advances at midnight UTC so the sidebar moves to the new day's reading.
     @State private var tensionDayStart = TensionMethodology.day(containing: Date()).start
     @State private var isWindowDropTargeted = false
@@ -45,7 +45,8 @@ struct MainView: View {
             SidebarView(
                 selectedTopic: $selectedTopic, mastheadNotice: $mastheadNotice,
                 showsTensionReading: appSettings.tensionCollectionOptIn,
-                tensionReading: TensionHistory.latestReading(in: tensionHistory),
+                tensionReading: appSettings.aiEnabled ? tensionHistory.last : nil,
+                tensionStatus: tensionStatus,
                 openTension: { showsTension = true }
             )
             .environmentObject(appSettings)
@@ -105,7 +106,7 @@ struct MainView: View {
         .navigationSplitViewStyle(.balanced)
         // A sheet, so the rest of the window waits until the reader closes it.
         .sheet(isPresented: $showsTension) {
-            TensionIndexView(history: tensionHistory, updatedAt: tensionUpdatedAt)
+            TensionIndexView(history: tensionHistory, onUpdate: { tensionHistory = $0 })
                 .environmentObject(articleStore)
                 .environmentObject(appSettings)
         }
@@ -113,15 +114,29 @@ struct MainView: View {
             if NewsTensionRequest.take() { showsTension = true }
         }
         .task(id: tensionReloadKey) {
-            guard appSettings.tensionCollectionOptIn, articleStore.isReady else {
+            guard appSettings.tensionCollectionOptIn, appSettings.aiEnabled, articleStore.isReady else {
                 tensionHistory = []
+                tensionStatus =
+                    !appSettings.aiEnabled
+                    ? "AI is off" : !appSettings.tensionCollectionOptIn ? "Collection is off" : "Collecting headlines"
                 return
             }
-            guard let loaded = try? await TensionHistory.load(from: articleStore.database, now: Date()),
-                !Task.isCancelled
-            else { return }
-            tensionHistory = loaded
-            tensionUpdatedAt = Date()
+            tensionStatus = "Assessing headlines"
+            do {
+                let loaded = try await WorldTensionService.shared.assess(
+                    database: articleStore.database,
+                    now: Date(), aiEnabled: appSettings.aiEnabled, collectionEnabled: appSettings.tensionCollectionOptIn
+                )
+                try Task.checkCancellation()
+                tensionHistory = loaded
+                tensionStatus = "World Tension"
+            } catch {
+                guard !Task.isCancelled else { return }
+                let accepted = try? await articleStore.database.worldTensionHistory()
+                guard !Task.isCancelled, appSettings.aiEnabled, appSettings.tensionCollectionOptIn else { return }
+                tensionHistory = accepted ?? []
+                tensionStatus = "Assessment unavailable"
+            }
         }
         .task(id: tensionDayStart) {
             let nextDay = TensionMethodology.day(containing: Date()).end
@@ -134,7 +149,6 @@ struct MainView: View {
             Text(token.expression)
         }
         .searchSuggestions { searchOperatorSuggestions }
-        .searchSuggestions(.hidden, for: .menu)
         .frame(minWidth: 900, minHeight: 600)
         .onAppear {
             if feedManager.articles.isEmpty {
@@ -213,7 +227,7 @@ struct MainView: View {
 
     /// The sidebar reading is rescored when collection is turned on, after each refresh and when a new UTC day begins.
     private var tensionReloadKey: String {
-        "\(appSettings.tensionCollectionOptIn):\(articleStore.isReady):\(feedManager.lastRefreshCompletedAt?.timeIntervalSince1970 ?? 0):\(tensionDayStart.timeIntervalSince1970)"
+        "\(appSettings.tensionCollectionOptIn):\(appSettings.aiEnabled):\(articleStore.isReady):\(feedManager.lastRefreshCompletedAt?.timeIntervalSince1970 ?? 0):\(tensionDayStart.timeIntervalSince1970)"
     }
 
     // MARK: - Search Operators

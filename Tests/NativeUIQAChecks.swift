@@ -726,12 +726,18 @@ struct NativeUIQAChecks {
         assertEqual(SettingsPane.updates.rawValue, "updates", "Updates pane raw value")
         assertEqual(SettingsView.lastPaneStorageKey, "lastSettingsPane", "Last pane storage key matches standard")
         assertEqual(SettingsView.paneWidth, 720, "Settings pane width fits all nine tabs")
+        assertEqual(SettingsView.paneHeight, 560, "All settings tabs share stable content bounds")
+        assertEqual(SettingsView.predefinedCategory(for: "Tech"), .technology, "Legacy predefined alias is recognized")
+        assertEqual(
+            SettingsView.predefinedCategory(for: "Health & Wellness"), .health, "Legacy health alias is recognized")
+        assertEqual(
+            SettingsView.predefinedCategory(for: "World markets watchlist"), nil, "Custom sections are preserved")
     }
 
     static func testSecondaryWindowAndSheetChrome() {
         print("  - Testing Secondary Window and Sheet Chrome Rules (#357)...")
         assertEqual(FeedCatalogView.navigationTitleText, "Feed Catalog", "Feed catalog navigation title")
-        assertEqual(TensionIndexView.navigationTitleText, "News Tension", "News tension navigation title")
+        assertEqual(TensionIndexView.navigationTitleText, "World Tension", "World tension navigation title")
         assertTrue(FeedCatalogView.showsDoneInToolbar, "Feed catalog presents Done in confirmationAction toolbar")
         assertFalse(
             FeedCatalogView.hasBottomDoneBar, "Feed catalog does not put Done or critical controls at the bottom")

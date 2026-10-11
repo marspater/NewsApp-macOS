@@ -718,7 +718,7 @@ extension TensionHistory {
 /// Names for ranges of the 0–100 index, so a reading can say "44° Warm". Presentation only: the bands never feed
 /// back into scoring, and they describe what the panel reported, not how dangerous the world is.
 enum TensionLevel: String, CaseIterable, Sendable {
-    case calm = "Calm"
+    case zen = "Zen"
     case mild = "Mild"
     case warm = "Warm"
     case hot = "Hot"
@@ -726,7 +726,7 @@ enum TensionLevel: String, CaseIterable, Sendable {
 
     init(index: Double) {
         switch index {
-        case ..<20: self = .calm
+        case ..<20: self = .zen
         case ..<40: self = .mild
         case ..<60: self = .warm
         case ..<80: self = .hot

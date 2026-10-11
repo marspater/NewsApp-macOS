@@ -989,7 +989,7 @@ struct ArticleDetailView: View {
     }
 
     static func readerAnimation(reduceMotion: Bool) -> Animation? {
-        reduceMotion ? nil : .easeInOut(duration: 0.2)
+        reduceMotion ? nil : AppMotion.navigation
     }
 
     static func sourceLineAccessibilityLabel(source: String, publicationDateText: String, readingTimeEstimate: String)
@@ -1531,6 +1531,7 @@ func readerText(_ block: ReaderBlock) -> AttributedString {
 
 /// An isolated, fixed-height loading indicator bubble in the reader toolbar.
 private struct ToolbarLoadingBubble: View {
+    @Environment(\.effectiveReduceMotion) private var reduceMotion
     var body: some View {
         HStack(alignment: .center, spacing: AppSpacing.xs) {
             ProgressView()
@@ -1542,13 +1543,7 @@ private struct ToolbarLoadingBubble: View {
         .frame(height: 24)
         .padding(.horizontal, AppSpacing.sm)
         .padding(.vertical, AppSpacing.xxs)
-        .transition(
-            .asymmetric(
-                insertion: .opacity.combined(with: .scale(scale: 0.95)),
-                removal: .opacity
-            )
-            .animation(.easeInOut(duration: 0.25))
-        )
+        .transition(.opacity.animation(reduceMotion ? nil : AppMotion.state))
         .help("Generating evidence-backed event overview…")
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Loading event overview")

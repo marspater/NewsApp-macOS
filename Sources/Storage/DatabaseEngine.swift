@@ -10,6 +10,7 @@ actor DatabaseEngine {
     private let logger = Logger(subsystem: "com.marspater.news", category: "DatabaseEngine")
     private var db: OpaquePointer?
     private let dbPath: String
+    private var inMemoryWorldTension: [WorldTensionReading] = []
 
     // sqliteTransient destructor constant (-1 converted to unsafe pointer)
     private static let sqliteTransient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
@@ -2627,6 +2628,7 @@ actor DatabaseEngine {
     /// Articles and subscriptions remain completely intact.
     func clearArticleEnrichment() throws {
         guard db != nil else { return }
+        try clearWorldTensionHistory()
         try executeSimple("DELETE FROM article_enrichment;")
         logger.info("Cleared all article enrichment data.")
     }
@@ -2651,6 +2653,7 @@ actor DatabaseEngine {
 
     /// Clears replaceable data; article headers, read history and saved bodies are user data.
     func clearAllDatabaseCache() throws {
+        try clearWorldTensionHistory()
         try beginTransaction()
         do {
             try executeSimple("DELETE FROM article_enrichment;")
@@ -3110,6 +3113,56 @@ actor DatabaseEngine {
     }
 
     // MARK: - Row Parser
+
+    /// AI methodology v2 has its own atomic history; v1 formula scores are never relabelled as AI assessments.
+    func worldTensionStorageKey() -> String { dbPath + ":world-tension-v2" }
+
+    private var worldTensionURL: URL {
+        URL(fileURLWithPath: dbPath + ".world-tension-v2.json")
+    }
+
+    private func clearWorldTensionHistory() throws {
+        if dbPath == ":memory:" {
+            inMemoryWorldTension = []
+            return
+        }
+        if FileManager.default.fileExists(atPath: worldTensionURL.path) {
+            try Data("[]".utf8).write(to: worldTensionURL, options: .atomic)
+        }
+    }
+
+    func worldTensionHistory() throws -> [WorldTensionReading] {
+        guard db != nil else { throw CocoaError(.fileReadUnknown) }
+        if dbPath == ":memory:" { return inMemoryWorldTension }
+        guard FileManager.default.fileExists(atPath: worldTensionURL.path) else { return [] }
+        let file = try FileHandle(forReadingFrom: worldTensionURL)
+        defer { try? file.close() }
+        let data = try file.read(upToCount: 4 * 1024 * 1024 + 1) ?? Data()
+        guard data.count <= 4 * 1024 * 1024 else { throw CocoaError(.fileReadCorruptFile) }
+        let history = try JSONDecoder().decode([WorldTensionReading].self, from: data)
+        guard history.count <= 30, Set(history.map(\.id)).count == history.count,
+            history.allSatisfy({
+                $0.assessment.isValid(headlines: $0.headlines) && $0.evaluatedAt.timeIntervalSince1970.isFinite
+            })
+        else { throw CocoaError(.fileReadCorruptFile) }
+        return history.sorted { $0.evaluatedAt < $1.evaluatedAt }
+    }
+
+    func saveWorldTensionReading(_ reading: WorldTensionReading) throws {
+        try Task.checkCancellation()
+        guard reading.assessment.isValid(headlines: reading.headlines),
+            reading.evaluatedAt.timeIntervalSince1970.isFinite
+        else { throw CocoaError(.fileWriteInvalidFileName) }
+        var history = try worldTensionHistory().filter { $0.id != reading.id }
+        history.append(reading)
+        history.sort { $0.evaluatedAt < $1.evaluatedAt }
+        history = Array(history.suffix(30))
+        if dbPath == ":memory:" {
+            inMemoryWorldTension = history
+            return
+        }
+        try JSONEncoder().encode(history).write(to: worldTensionURL, options: .atomic)
+    }
 
     private func parseArticleRow(_ stmt: OpaquePointer?) -> FeedArticle? {
         guard let stmt = stmt else { return nil }
