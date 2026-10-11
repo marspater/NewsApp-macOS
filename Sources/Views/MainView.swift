@@ -336,12 +336,12 @@ struct MainView: View {
 /// macOS exposes automatic space-based collapse, but no SwiftUI always-collapsed search behavior.
 private struct CompactArchiveSearch: NSViewRepresentable {
     let expanded: Bool
-    func makeNSView(context: Context) -> SearchSizer { SearchSizer() }
-    func updateNSView(_ view: SearchSizer, context: Context) {
+    func makeNSView(context _: Context) -> SearchSizer { SearchSizer() }
+    func updateNSView(_ view: SearchSizer, context _: Context) {
         view.expanded = expanded
         view.scheduleUpdate()
     }
-    static func dismantleNSView(_ view: SearchSizer, coordinator: ()) { view.width?.isActive = false }
+    static func dismantleNSView(_ view: SearchSizer, coordinator _: ()) { view.width?.isActive = false }
 
     final class SearchSizer: NSView {
         var expanded = false
