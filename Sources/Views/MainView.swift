@@ -42,192 +42,270 @@ struct MainView: View {
     @State private var isWindowDropTargeted = false
 
     var body: some View {
-        NavigationSplitView(columnVisibility: $columnVisibility) {
-            SidebarView(
-                selectedTopic: $selectedTopic, mastheadNotice: $mastheadNotice,
-                showsTensionReading: appSettings.tensionCollectionOptIn,
-                tensionReading: appSettings.aiEnabled ? tensionHistory.last : nil,
-                tensionStatus: tensionStatus,
-                openTension: { showsTension = true }
-            )
-            .environmentObject(appSettings)
-            .environmentObject(feedManager)
-            .environmentObject(savedStories)
-            .environmentObject(readManager)
-        } detail: {
-            NavigationStack(path: $articlePath) {
-                ZStack {
-                    AppColor.background
-
-                    ArticleListView(
-                        selectedTopic: $selectedTopic,
-                        searchText: Binding(
-                            get: { archiveQuery },
-                            set: { searchText = $0 }
-                        ),
-                        mastheadNotice: $mastheadNotice,
-                        articlePath: $articlePath
-                    )
-                    .environmentObject(appSettings)
-                    .environmentObject(articleStore)
-                    .environmentObject(feedManager)
-                    .environmentObject(themeManager)
-                    .environmentObject(readManager)
-                    .environmentObject(savedStories)
-                }
-                .navigationDestination(for: FeedArticleWrap.self) { wrap in
-                    ArticleDetailView(
-                        article: wrap.article,
-                        allArticles: wrap.contextArticles.isEmpty ? feedManager.articles : wrap.contextArticles,
-                        path: $articlePath
-                    )
-                    .navigationBarBackButtonHidden(true)
-                    // In full screen the toolbar steps aside for the story and returns on hover.
-                    .windowToolbarFullScreenVisibility(.onHover)
-                    .environmentObject(appSettings)
-                    .environmentObject(articleStore)
-                    .environmentObject(feedManager)
-                    .environmentObject(savedStories)
-                    .environmentObject(readManager)
-                    .environmentObject(themeManager)
-                }
+        splitView
+            .alert(
+                "Operation failed",
+                isPresented: operationErrorBinding
+            ) {
+                Button("OK") { articleStore.operationError = nil }
+            } message: {
+                Text(articleStore.operationError ?? "Please try again.")
             }
-        }
-        .alert(
-            "Operation failed",
-            isPresented: Binding(
-                get: { articleStore.operationError != nil },
-                set: { if !$0 { articleStore.operationError = nil } }
-            )
-        ) {
-            Button("OK") { articleStore.operationError = nil }
-        } message: {
-            Text(articleStore.operationError ?? "Please try again.")
-        }
-        .navigationSplitViewStyle(.balanced)
-        // A sheet, so the rest of the window waits until the reader closes it.
-        .sheet(isPresented: $showsTension) {
-            TensionIndexView(history: tensionHistory, onUpdate: { tensionHistory = $0 })
-                .environmentObject(articleStore)
-                .environmentObject(appSettings)
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .showNewsTensionCommand)) { _ in
-            if NewsTensionRequest.take() { showsTension = true }
-        }
-        .task(id: tensionReloadKey) {
-            guard appSettings.tensionCollectionOptIn, appSettings.aiEnabled, articleStore.isReady else {
-                tensionHistory = []
-                tensionStatus =
-                    !appSettings.aiEnabled
-                    ? "AI is off" : !appSettings.tensionCollectionOptIn ? "Collection is off" : "Collecting headlines"
-                return
+            .navigationSplitViewStyle(.balanced)
+            // A sheet, so the rest of the window waits until the reader closes it.
+            .sheet(isPresented: $showsTension, content: tensionSheetContent)
+            .onReceive(NotificationCenter.default.publisher(for: .showNewsTensionCommand)) { _ in
+                handleNewsTensionCommand()
             }
-            tensionStatus = "Assessing headlines"
-            do {
-                let loaded = try await WorldTensionService.shared.assess(
-                    database: articleStore.database,
-                    now: Date(), aiEnabled: appSettings.aiEnabled, collectionEnabled: appSettings.tensionCollectionOptIn
+            .task(id: tensionReloadKey) {
+                await reloadTension()
+            }
+            .task(id: tensionDayStart) {
+                await scheduleTensionDayRollover()
+            }
+            // One archive search in the trailing toolbar, shared by list and reader.
+            .modifier(
+                ArchiveSearchToolbar(
+                    searchText: $searchText,
+                    searchTokens: $searchTokens,
+                    searchPresented: $searchPresented,
+                    archiveQuery: archiveQuery,
+                    presentSearch: presentSearch,
+                    suggestions: searchOperatorSuggestions
                 )
-                try Task.checkCancellation()
-                tensionHistory = loaded
-                tensionStatus = "World Tension"
-            } catch {
-                guard !Task.isCancelled else { return }
-                let accepted = try? await articleStore.database.worldTensionHistory()
-                guard !Task.isCancelled, appSettings.aiEnabled, appSettings.tensionCollectionOptIn else { return }
-                tensionHistory = accepted ?? []
-                tensionStatus = "Assessment unavailable"
+            )
+            .frame(minWidth: 900, minHeight: 600)
+            .onAppear(perform: handleAppear)
+            .onDrop(of: [.fileURL], isTargeted: $isWindowDropTargeted) { providers in
+                handleWindowOPMLDrop(providers: providers)
+            }
+            .onChange(of: mastheadNotice, handleMastheadNoticeAnnouncement)
+            .task(id: mastheadNotice) {
+                await handleMastheadNoticeTimeout()
+            }
+            .onChange(of: selectedTopic) { _, _ in
+                articlePath = NavigationPath()
+            }
+            .onChange(of: searchText, handleSearchTextChange)
+            .onChange(of: searchTokens, handleSearchTokensChange)
+            // Notification Deep Link & Section Jump Routing
+            .onReceive(NotificationCenter.default.publisher(for: .jumpToTodayCommand)) { _ in
+                selectedTopic = "Today"
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .jumpToUnreadCommand)) { _ in
+                selectedTopic = "Unread"
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .jumpToSavedCommand)) { _ in
+                selectedTopic = "Saved Stories"
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .jumpToHistoryCommand)) { _ in
+                selectedTopic = "History"
+            }
+            .task(id: pendingNavigationToken) {
+                await handlePendingNavigation()
+            }
+    }
+
+    // MARK: - Subviews
+
+    @ViewBuilder
+    private var splitView: some View {
+        NavigationSplitView(columnVisibility: $columnVisibility) {
+            sidebarView
+        } detail: {
+            detailView
+        }
+    }
+
+    @ViewBuilder
+    private var sidebarView: some View {
+        SidebarView(
+            selectedTopic: $selectedTopic, mastheadNotice: $mastheadNotice,
+            showsTensionReading: appSettings.tensionCollectionOptIn,
+            tensionReading: currentTensionReading,
+            tensionStatus: tensionStatus,
+            openTension: { showsTension = true }
+        )
+        .environmentObject(appSettings)
+        .environmentObject(feedManager)
+        .environmentObject(savedStories)
+        .environmentObject(readManager)
+    }
+
+    @ViewBuilder
+    private var detailView: some View {
+        NavigationStack(path: $articlePath) {
+            ZStack {
+                AppColor.background
+
+                ArticleListView(
+                    selectedTopic: $selectedTopic,
+                    searchText: searchBinding,
+                    mastheadNotice: $mastheadNotice,
+                    articlePath: $articlePath
+                )
+                .environmentObject(appSettings)
+                .environmentObject(articleStore)
+                .environmentObject(feedManager)
+                .environmentObject(themeManager)
+                .environmentObject(readManager)
+                .environmentObject(savedStories)
+            }
+            .navigationDestination(for: FeedArticleWrap.self) { wrap in
+                detailDestination(for: wrap)
             }
         }
-        .task(id: tensionDayStart) {
-            let nextDay = TensionMethodology.day(containing: Date()).end
-            try? await Task.sleep(for: .seconds(max(1, nextDay.timeIntervalSinceNow + 1)))
+    }
+
+    @ViewBuilder
+    private func detailDestination(for wrap: FeedArticleWrap) -> some View {
+        ArticleDetailView(
+            article: wrap.article,
+            allArticles: wrap.contextArticles.isEmpty ? feedManager.articles : wrap.contextArticles,
+            path: $articlePath
+        )
+        .navigationBarBackButtonHidden(true)
+        // In full screen the toolbar steps aside for the story and returns on hover.
+        .windowToolbarFullScreenVisibility(.onHover)
+        .environmentObject(appSettings)
+        .environmentObject(articleStore)
+        .environmentObject(feedManager)
+        .environmentObject(savedStories)
+        .environmentObject(readManager)
+        .environmentObject(themeManager)
+    }
+
+    @ViewBuilder
+    private func tensionSheetContent() -> some View {
+        TensionIndexView(history: tensionHistory, onUpdate: { tensionHistory = $0 })
+            .environmentObject(articleStore)
+            .environmentObject(appSettings)
+    }
+
+    // MARK: - Bindings & State Helpers
+
+    private var currentTensionReading: WorldTensionReading? {
+        appSettings.aiEnabled ? tensionHistory.last : nil
+    }
+
+    private var searchBinding: Binding<String> {
+        Binding(
+            get: { archiveQuery },
+            set: { searchText = $0 }
+        )
+    }
+
+    private var operationErrorBinding: Binding<Bool> {
+        Binding(
+            get: { articleStore.operationError != nil },
+            set: { if !$0 { articleStore.operationError = nil } }
+        )
+    }
+
+    private var pendingNavigationToken: UUID? {
+        articleStore.isReady ? articleStore.pendingNavigation?.token : nil
+    }
+
+    private func presentSearch() {
+        searchPresented = true
+    }
+
+    // MARK: - Lifecycle & Navigation Handlers
+
+    private func handleAppear() {
+        if feedManager.articles.isEmpty {
+            feedManager.fetchFeeds()
+        }
+        // A window Settings reopened missed the notification; the request is still pending.
+        handleNewsTensionCommand()
+    }
+
+    private func handleNewsTensionCommand() {
+        if NewsTensionRequest.take() { showsTension = true }
+    }
+
+    private func handleMastheadNoticeAnnouncement(_: MastheadNotice?, _ notice: MastheadNotice?) {
+        guard let notice, let application = NSApp else { return }
+        NSAccessibility.post(
+            element: application, notification: .announcementRequested,
+            userInfo: [
+                .announcement: notice.message,
+                .priority: NSAccessibilityPriorityLevel.medium.rawValue,
+            ])
+    }
+
+    private func handleMastheadNoticeTimeout() async {
+        guard let current = mastheadNotice else { return }
+        try? await Task.sleep(for: .seconds(5))
+        if !Task.isCancelled && mastheadNotice == current { mastheadNotice = nil }
+    }
+
+    private func handleSearchTextChange(_: String, _ updatedText: String) {
+        let promoted = ArchiveSearchToken.promoteCompleted(in: updatedText)
+        if !promoted.tokens.isEmpty {
+            for token in promoted.tokens where !searchTokens.contains(token) {
+                searchTokens.append(token)
+            }
+            searchText = promoted.text
+        }
+        if !articlePath.isEmpty { articlePath = NavigationPath() }
+    }
+
+    private func handleSearchTokensChange(_: [ArchiveSearchToken], _ tokens: [ArchiveSearchToken]) {
+        let kept = ArchiveSearchToken.latestPerField(tokens)
+        if kept != tokens { searchTokens = kept }
+        if !articlePath.isEmpty { articlePath = NavigationPath() }
+    }
+
+    private func reloadTension() async {
+        guard appSettings.tensionCollectionOptIn, appSettings.aiEnabled, articleStore.isReady else {
+            tensionHistory = []
+            tensionStatus =
+                !appSettings.aiEnabled
+                ? "AI is off" : !appSettings.tensionCollectionOptIn ? "Collection is off" : "Collecting headlines"
+            return
+        }
+        tensionStatus = "Assessing headlines"
+        do {
+            let loaded = try await WorldTensionService.shared.assess(
+                database: articleStore.database,
+                now: Date(), aiEnabled: appSettings.aiEnabled, collectionEnabled: appSettings.tensionCollectionOptIn
+            )
+            try Task.checkCancellation()
+            tensionHistory = loaded
+            tensionStatus = "World Tension"
+        } catch {
             guard !Task.isCancelled else { return }
-            tensionDayStart = TensionMethodology.day(containing: Date()).start
+            let accepted = try? await articleStore.database.worldTensionHistory()
+            guard !Task.isCancelled, appSettings.aiEnabled, appSettings.tensionCollectionOptIn else { return }
+            tensionHistory = accepted ?? []
+            tensionStatus = "Assessment unavailable"
         }
-        // One archive search in the trailing toolbar, shared by list and reader.
-        .searchable(
-            text: $searchText, tokens: $searchTokens, isPresented: $searchPresented, placement: .toolbar,
-            prompt: "Search archive"
-        ) { token in
-            Text(token.expression)
-        }
-        .searchSuggestions { searchOperatorSuggestions }
-        .focusedSceneValue(\.archiveSearch, { searchPresented = true })
-        .background(CompactArchiveSearch(expanded: searchPresented || !archiveQuery.isEmpty).frame(width: 0, height: 0))
-        .frame(minWidth: 900, minHeight: 600)
-        .onAppear {
-            if feedManager.articles.isEmpty {
-                feedManager.fetchFeeds()
+    }
+
+    private func scheduleTensionDayRollover() async {
+        let nextDay = TensionMethodology.day(containing: Date()).end
+        try? await Task.sleep(for: .seconds(max(1, nextDay.timeIntervalSinceNow + 1)))
+        guard !Task.isCancelled else { return }
+        tensionDayStart = TensionMethodology.day(containing: Date()).start
+    }
+
+    private func handlePendingNavigation() async {
+        guard articleStore.isReady, let request = articleStore.pendingNavigation else { return }
+        do {
+            let article = try await articleStore.articleForNavigation(request)
+            guard !Task.isCancelled, articleStore.pendingNavigation == request else { return }
+            if let article {
+                articlePath = NavigationPath()
+                readManager.markAsRead(article.id)
+                articlePath.append(FeedArticleWrap(article: article))
+            } else {
+                articleStore.operationError = "This story is no longer available in your archive."
             }
-            // A window Settings reopened missed the notification; the request is still pending.
-            if NewsTensionRequest.take() { showsTension = true }
-        }
-        .onDrop(of: [.fileURL], isTargeted: $isWindowDropTargeted) { providers in
-            handleWindowOPMLDrop(providers: providers)
-        }
-        .onChange(of: mastheadNotice) { _, notice in
-            guard let notice, let application = NSApp else { return }
-            NSAccessibility.post(
-                element: application, notification: .announcementRequested,
-                userInfo: [
-                    .announcement: notice.message,
-                    .priority: NSAccessibilityPriorityLevel.medium.rawValue,
-                ])
-        }
-        .task(id: mastheadNotice) {
-            guard let current = mastheadNotice else { return }
-            try? await Task.sleep(for: .seconds(5))
-            if !Task.isCancelled && mastheadNotice == current { mastheadNotice = nil }
-        }
-        .onChange(of: selectedTopic) { _, _ in
-            articlePath = NavigationPath()
-        }
-        .onChange(of: searchText) { _, updatedText in
-            let promoted = ArchiveSearchToken.promoteCompleted(in: updatedText)
-            if !promoted.tokens.isEmpty {
-                for token in promoted.tokens where !searchTokens.contains(token) {
-                    searchTokens.append(token)
-                }
-                searchText = promoted.text
-            }
-            if !articlePath.isEmpty { articlePath = NavigationPath() }
-        }
-        .onChange(of: searchTokens) { _, tokens in
-            let kept = ArchiveSearchToken.latestPerField(tokens)
-            if kept != tokens { searchTokens = kept }
-            if !articlePath.isEmpty { articlePath = NavigationPath() }
-        }
-        // Notification Deep Link & Section Jump Routing
-        .onReceive(NotificationCenter.default.publisher(for: .jumpToTodayCommand)) { _ in
-            selectedTopic = "Today"
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .jumpToUnreadCommand)) { _ in
-            selectedTopic = "Unread"
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .jumpToSavedCommand)) { _ in
-            selectedTopic = "Saved Stories"
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .jumpToHistoryCommand)) { _ in
-            selectedTopic = "History"
-        }
-        .task(id: articleStore.isReady ? articleStore.pendingNavigation?.token : nil) {
-            guard articleStore.isReady, let request = articleStore.pendingNavigation else { return }
-            do {
-                let article = try await articleStore.articleForNavigation(request)
-                guard !Task.isCancelled, articleStore.pendingNavigation == request else { return }
-                if let article {
-                    articlePath = NavigationPath()
-                    readManager.markAsRead(article.id)
-                    articlePath.append(FeedArticleWrap(article: article))
-                } else {
-                    articleStore.operationError = "This story is no longer available in your archive."
-                }
-                articleStore.pendingNavigation = nil
-            } catch {
-                guard !Task.isCancelled else { return }
-                articleStore.operationError = "The notification story could not be loaded. Please try again."
-            }
+            articleStore.pendingNavigation = nil
+        } catch {
+            guard !Task.isCancelled else { return }
+            articleStore.operationError = "The notification story could not be loaded. Please try again."
         }
     }
 
@@ -329,6 +407,31 @@ struct MainView: View {
             return true
         }
         return false
+    }
+}
+
+private struct ArchiveSearchToolbar<Suggestions: View>: ViewModifier {
+    @Binding var searchText: String
+    @Binding var searchTokens: [ArchiveSearchToken]
+    @Binding var searchPresented: Bool
+    let archiveQuery: String
+    let presentSearch: () -> Void
+    let suggestions: Suggestions
+
+    func body(content: Content) -> some View {
+        content
+            .searchable(
+                text: $searchText, tokens: $searchTokens, isPresented: $searchPresented, placement: .toolbar,
+                prompt: "Search archive"
+            ) { token in
+                Text(token.expression)
+            }
+            .searchSuggestions { suggestions }
+            .focusedSceneValue(\.archiveSearch, presentSearch)
+            .background(
+                CompactArchiveSearch(expanded: searchPresented || !archiveQuery.isEmpty)
+                    .frame(width: 0, height: 0)
+            )
     }
 }
 
