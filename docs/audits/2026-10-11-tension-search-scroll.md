@@ -14,3 +14,4 @@ Coverage consistently shows story and distinct-publisher counts. Event-summary r
 - Native search probe: resting 36 pt → focused 325 pt → dismissed 36 pt. The system includes its own field insets around the preferred width.
 - A 10,000-story native scrolling bitmap probe could not find the detail NSScrollView on this macOS version and failed with `scrollCaptureUnavailable`. Do not interpret that run as a scrolling-performance pass or FPS measurement.
 - Reproduce compact search QA with `NEWS_NATIVE_SEARCH_QA=1 ./script/native_performance_baseline.sh /private/tmp/native-search-qa`.
+- Installed-app CPU samples during reader scrolling did not reproduce the reported intermittent stall. The feed-card change cannot explain a reader stall, which remains unresolved pending a reproducible trace. CPU sampling and automated page scrolling do not establish smooth trackpad momentum or 120 Hz rendering.
