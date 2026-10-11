@@ -149,7 +149,6 @@ struct MainView: View {
             Text(token.expression)
         }
         .searchSuggestions { searchOperatorSuggestions }
-        .searchSuggestions(.hidden, for: .menu)
         .frame(minWidth: 900, minHeight: 600)
         .onAppear {
             if feedManager.articles.isEmpty {

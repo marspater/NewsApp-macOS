@@ -18,7 +18,8 @@ Settings uses common 720 × 560 content bounds. Predefined category toggles live
 - `script/test_native_ui_qa.sh`: **160 checks, zero failures**.
 - Final arm64 `build_release.sh`: passed with sandbox entitlements and ad-hoc signing.
 - Isolated native runtime harness: **27 Settings tab changes**, constant content/window size; five-state light/dark captures; reduced-motion and inactive-scene frame captures remained identical after 500 ms; live on-device acceptance, persistence and rendered sheet.
-- Installed Settings: twenty tab changes retained the same 1440 × 1296 pixel captured window bounds. Native list scrolling was exercised without opening or marking stories read. The installed toolbar visually used the system glass controls and sampled sidebar background.
+- Final installed Settings: all nine panes retained 1440 × 1296 pixel window captures, and General was restored.
+- Initial installed Settings: twenty tab changes retained the same 1440 × 1296 pixel captured window bounds. Native list scrolling was exercised without opening or marking stories read. The installed toolbar visually used the system glass controls and sampled sidebar background.
 - Display-link probe over three seconds per request: at requested 60 Hz, 180 callbacks; at requested 120 Hz, 180 callbacks. Both p50/p95 intervals were **16.666 ms** on the connected **60 Hz** display. Callback cadence is not proof of GPU presentation FPS. Actual 120 Hz rendering needs a 120 Hz display.
 
 Reproduce the isolated live probe with:
@@ -36,6 +37,10 @@ The lowest band is now **Zen**, with a green open ensō ring, breathing halo and
 The frozen installed-library copy still produced unsupported reasoning after event-matched prior context was introduced; these readings were rejected. Focused factor-by-factor generation also failed the contract and was not added to production. A verifier false rejection was isolated: it invented potential spillover to reject a valid absence-of-evidence limit. A native verifier diagnostic accepted the supported peaceful report and rejected both a fabricated nuclear attack and the inaccurate live draft after the check was confined to factual accuracy. Risk judgments remain subjective, not calibrated estimates. Successful synthetic controls do not establish reliable real-world reasoning. This remains an experimental feature, and no current score is shown when the native model cannot produce supported reasoning.
 
 The final production-service native control on 11 October passed at **20 Mild**, with four factors, missing novelty context explicitly acknowledged, persistence and a rendered sheet. Including a fresh rejection check for a fabricated nuclear attack, the model work took **3.31 seconds**. Settings, all five-state captures, Reduce Motion/inactive freezes and display cadence completed in the same clean run.
+
+The final installed launch exposed a separate regression from merged #432: `.searchSuggestions(.hidden, for: .menu)` produced AppKit negative-width/height faults and a blank main window. Removing this redundant suppression restored Today, the native toolbar and sidebar immediately. The existing conditional builder still supplies no suggestions until typing starts. Empty/typed archive search and returning from Settings were exercised in the installed app. A temporary reader opening during a window-layout check was returned to unread; the displayed unread count returned to its previous value.
+
+The final installed World Tension sheet displayed the explicit unsupported-assessment state for the refreshed real library. The supported native synthetic control above proves generation/persistence/rendering, not acceptance of that real-news corpus.
 
 ## Verification limits
 
