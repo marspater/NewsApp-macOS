@@ -35,12 +35,12 @@ enum AppColor {
     static let flameCore = Color(.displayP3, red: 1, green: 0.97, blue: 0.72)
     static let critical = Color(NSColor.systemPurple)
 
-    /// The news tension scale from calm to boiling, for the gauge, glyph and trend points.
+    /// The World Tension scale from Zen to Boiling, for the gauge, glyph and trend points.
     static let tensionScale = Gradient(colors: [success, warning, caution, danger, critical])
 
     static func tension(_ level: TensionLevel) -> Color {
         switch level {
-        case .calm: return success
+        case .zen: return success
         case .mild: return warning
         case .warm: return caution
         case .hot: return danger

@@ -3447,11 +3447,16 @@ struct NewsTests {
         let encoded = String(decoding: try JSONEncoder().encode(answer), as: UTF8.self)
         let headlines = [WorldTensionHeadline(id: "C1", title: "Peace talks resume", publisher: "Panel")]
         let report =
-            (["Score: 28", "Summary: \(answer.summary)"]
-            + answer.reasons.map {
+            (answer.reasons.map {
                 "\($0.factor.rawValue): \($0.explanation)"
-            }).joined(separator: "\n")
+            } + ["Summary: \(answer.summary)", "Score: 28"]).joined(separator: "\n")
         assertEqual(WorldTensionAssessment.parse(report, headlines: headlines), answer, "Native report contract parses")
+        let boldReport = report.components(separatedBy: "\n").map { line in
+            line.replacingOccurrences(of: ": ", with: ":** ")
+        }.map { "**" + $0 }.joined(separator: "\n")
+        assertEqual(
+            WorldTensionAssessment.parse(boldReport, headlines: headlines), answer,
+            "Bold labels preserve the report contract")
         assertEqual(
             WorldTensionAssessment.parse(
                 report.replacingOccurrences(of: "Scope of impact", with: "Novelty"), headlines: headlines), nil,
@@ -3508,7 +3513,15 @@ struct NewsTests {
                 source: "Panel \(i)")
             try await database.upsertArticles([article], feedUrl: member.url)
         }
-        let model = NewsTextModel { prompt, _ in prompt.contains("Reply YES only") ? "YES" : encoded }
+        let unrelated = FeedArticle(
+            title: "Unrelated previous incident must not establish novelty", link: "https://example.com/world/old",
+            guid: "world-old", description: "", pubDate: now.addingTimeInterval(-2 * 86400), source: "Panel")
+        try await database.upsertArticles([unrelated], feedUrl: TensionMethodology.v1.panel[0].url)
+        let model = NewsTextModel { prompt, _ in
+            assertFalse(
+                prompt.contains(unrelated.title), "Unrelated prior events are excluded from the novelty baseline")
+            return prompt.contains("Reply YES only") ? "YES" : encoded
+        }
         let service = WorldTensionService(model: model)
         let history = try await service.assess(database: database, now: now, aiEnabled: true, collectionEnabled: true)
         assertEqual(history.count, 1, "AI assessments create their own history")
@@ -3575,8 +3588,9 @@ struct NewsTests {
                 "Panel feed \(member.catalogID) publishes in the methodology language")
         }
         assertEqual(methodology.panelRegions.count, 6, "The v1 panel spans six regions")
-        assertEqual(TensionLevel(index: 0), .calm, "Zero reads as calm")
-        assertEqual(TensionLevel(index: 19.9), .calm, "Bands are half-open: 19.9 is still calm")
+        assertEqual(TensionLevel(index: 0), .zen, "Zero reads as Zen")
+        assertEqual(TensionLevel(index: 0).rawValue, "Zen", "The lowest band is named Zen")
+        assertEqual(TensionLevel(index: 19.9), .zen, "Bands are half-open: 19.9 is still Zen")
         assertEqual(TensionLevel(index: 20), .mild, "20 starts the mild band")
         assertEqual(TensionLevel(index: 44), .warm, "44 reads as warm")
         assertEqual(TensionLevel(index: 60), .hot, "60 starts the hot band")
@@ -3618,11 +3632,11 @@ struct NewsTests {
                 + "Today's reading is provisional and can still change.",
             "The displayed paragraph contains only scored facts and attributed headlines")
         let lowerBrief = TensionBriefFacts(
-            day: brief.day, degrees: 19, level: .calm, change: -3, typicalDegrees: 38,
+            day: brief.day, degrees: 19, level: .zen, change: -3, typicalDegrees: 38,
             isProvisional: false, drivers: [])
         assertEqual(
             lowerBrief.deterministicParagraph,
-            "News tension reads 19° (calm), down 3° from the previous day, below its 30-day average of 38°.",
+            "News tension reads 19° (zen), down 3° from the previous day, below its 30-day average of 38°.",
             "A new reading recomputes the band, direction and average comparison without cached prose")
         let firstBrief = TensionBriefFacts(
             day: brief.day, degrees: 44, level: .warm, change: nil, typicalDegrees: nil,

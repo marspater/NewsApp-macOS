@@ -35,6 +35,7 @@ struct TensionIndexView: View {
     @State private var loading = false
     @State private var errorMessage: String?
     @State private var selectedDay: Date?
+    @State private var reassessment = 0
     private let onUpdate: ([WorldTensionReading]) -> Void
 
     init(history: [WorldTensionReading] = [], onUpdate: @escaping ([WorldTensionReading]) -> Void = { _ in }) {
@@ -87,7 +88,9 @@ struct TensionIndexView: View {
             }
         }
         .frame(width: AppLayout.tensionSheetWidth, height: AppLayout.tensionSheetHeight)
-        .task(id: "\(appSettings.aiEnabled):\(appSettings.tensionCollectionOptIn)") { await load() }
+        .task(id: "\(appSettings.aiEnabled):\(appSettings.tensionCollectionOptIn):\(reassessment)") {
+            await load(force: reassessment > 0)
+        }
     }
 
     private var selected: WorldTensionReading? {
@@ -206,7 +209,7 @@ struct TensionIndexView: View {
             HStack {
                 Spacer()
                 if loading { ProgressView().controlSize(.small) }
-                Button("Reassess") { Task { await load(force: true) } }.disabled(loading)
+                Button("Reassess") { reassessment += 1 }.disabled(loading)
             }.font(AppTypography.callout)
             Text("On-device AI · methodology v2 · last 24 hours · 12 international panel feeds")
                 .font(AppTypography.caption).foregroundStyle(AppColor.tertiaryText)
@@ -253,20 +256,25 @@ struct TensionGlyph: View {
                 let width = size.width
                 let height = size.height
                 switch level {
-                case .calm:
-                    // Three gently travelling ripples: calm water, no heat or flame.
-                    for row in 0..<3 {
-                        var path = Path()
-                        for step in 0...40 {
-                            let x = Double(step) / 40
-                            let y = 0.36 + Double(row) * 0.16 + sin(x * .pi * 2 + time * 0.7 + Double(row)) * 0.035
-                            let point = CGPoint(x: width * x, y: height * y)
-                            if step == 0 { path.move(to: point) } else { path.addLine(to: point) }
-                        }
-                        context.stroke(
-                            path, with: .color(AppColor.tension(level).opacity(1 - Double(row) * 0.2)),
-                            lineWidth: AppLayout.tensionStrokeWidth)
-                    }
+                case .zen:
+                    // An open ensō ring with a slow breath; no heat, jitter or spinning navigation symbol.
+                    let breath = sin(time * 0.8) * 0.025
+                    let center = CGPoint(x: width * 0.5, y: height * 0.5)
+                    var ring = Path()
+                    ring.addArc(
+                        center: center, radius: width * (0.31 + breath),
+                        startAngle: .degrees(-70), endAngle: .degrees(245), clockwise: false)
+                    context.stroke(
+                        ring, with: .color(AppColor.tension(level)),
+                        style: StrokeStyle(lineWidth: AppLayout.tensionStrokeWidth, lineCap: .round))
+                    let halo = CGRect(
+                        x: width * (0.07 - breath), y: height * (0.07 - breath),
+                        width: width * (0.86 + breath * 2), height: height * (0.86 + breath * 2))
+                    context.stroke(
+                        Path(ellipseIn: halo), with: .color(AppColor.tension(level).opacity(0.2)),
+                        lineWidth: AppLayout.tensionStrokeWidth)
+                    let seed = CGRect(x: width * 0.47, y: height * 0.47, width: width * 0.06, height: height * 0.06)
+                    context.fill(Path(ellipseIn: seed), with: .color(AppColor.tension(level)))
                 case .mild:
                     // A warm sun and slow breathing halo; distinct from the water and flame states.
                     let pulse = 0.03 * sin(time * 1.2)
@@ -364,7 +372,7 @@ struct TensionSidebarButton: View {
                     )
                     .font(AppTypography.headline).monospacedDigit()
                     Text(reading == nil ? status : TensionIndexView.navigationTitleText)
-                        .font(AppTypography.caption).foregroundStyle(AppColor.secondaryText).lineLimit(2)
+                        .font(AppTypography.caption).foregroundStyle(AppColor.secondaryText).lineLimit(1)
                 }
                 Spacer(minLength: 0)
             }.contentShape(Rectangle())

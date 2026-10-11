@@ -116,7 +116,9 @@ struct MainView: View {
         .task(id: tensionReloadKey) {
             guard appSettings.tensionCollectionOptIn, appSettings.aiEnabled, articleStore.isReady else {
                 tensionHistory = []
-                tensionStatus = appSettings.aiEnabled ? "Collecting headlines" : "AI is off"
+                tensionStatus =
+                    !appSettings.aiEnabled
+                    ? "AI is off" : !appSettings.tensionCollectionOptIn ? "Collection is off" : "Collecting headlines"
                 return
             }
             tensionStatus = "Assessing headlines"
@@ -133,7 +135,7 @@ struct MainView: View {
                 let accepted = try? await articleStore.database.worldTensionHistory()
                 guard !Task.isCancelled, appSettings.aiEnabled, appSettings.tensionCollectionOptIn else { return }
                 tensionHistory = accepted ?? []
-                tensionStatus = error.localizedDescription
+                tensionStatus = "Assessment unavailable"
             }
         }
         .task(id: tensionDayStart) {
