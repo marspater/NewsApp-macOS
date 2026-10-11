@@ -14,12 +14,12 @@ Settings uses common 720 × 560 content bounds. Predefined category toggles live
 
 ## Completed checks
 
-- Full `./test.sh` regressions: passed. New checks cover report shape, factor uniqueness, score bounds, current-headline requirements, repeated-headline selection, rejected model support, AI/collection policy before warm cache, daily replacement, reopen persistence and clearing derived AI history without deleting source articles.
+- Full `./test.sh` regressions: passed. New checks cover report shape, factor uniqueness, score bounds, current-headline requirements, repeated-headline selection, rejected model support, AI/collection policy before warm cache, caller cancellation, daily replacement, reopen persistence and clearing derived AI history without deleting source articles.
 - `script/test_native_ui_qa.sh`: **160 checks, zero failures**.
 - Final arm64 `build_release.sh`: passed with sandbox entitlements and ad-hoc signing.
 - Isolated native runtime harness: **27 Settings tab changes**, constant content/window size; five-state light/dark captures; reduced-motion and inactive-scene frame captures remained identical after 500 ms; live on-device acceptance, persistence and rendered sheet.
 - Installed Settings: twenty tab changes retained the same 1440 × 1296 pixel captured window bounds. Native list scrolling was exercised without opening or marking stories read. The installed toolbar visually used the system glass controls and sampled sidebar background.
-- Display-link probe over three seconds per request: at requested 60 Hz, 179 callbacks; at requested 120 Hz, 180 callbacks. Both p50/p95 intervals were **16.666 ms** on the connected **60 Hz** display. Callback cadence is not proof of GPU presentation FPS. Actual 120 Hz rendering needs a 120 Hz display.
+- Display-link probe over three seconds per request: at requested 60 Hz, 180 callbacks; at requested 120 Hz, 180 callbacks. Both p50/p95 intervals were **16.666 ms** on the connected **60 Hz** display. Callback cadence is not proof of GPU presentation FPS. Actual 120 Hz rendering needs a 120 Hz display.
 
 Reproduce the isolated live probe with:
 
@@ -33,7 +33,9 @@ It uses temporary SQLite/preferences and synthetic headlines. It needs an active
 
 The lowest band is now **Zen**, with a green open ensō ring, breathing halo and central seed. A live library-copy diagnostic revealed unsupported novelty and international-scope claims; these drafts were rejected rather than stored. The report now reasons before choosing a number, limits the input to 12 current and 8 previous headlines, restricts prior context to the same existing event clusters and treats missing comparable history as unknown novelty, and accepts harmless bold label markup while retaining the six-field contract. Reassess uses the sheet’s cancellable task. Sidebar status is kept to a stable single-line caption; detailed failure reasons remain in the sheet. The latest main loading bubble now respects Reduce Motion and the shared transition token.
 
-The frozen installed-library copy still produced unsupported reasoning after event-matched prior context was introduced; these readings were rejected. Focused factor-by-factor generation also failed the contract and was not added to production. Successful synthetic controls do not establish reliable real-world reasoning. This remains an experimental feature, and no current score is shown when the native model cannot produce supported reasoning.
+The frozen installed-library copy still produced unsupported reasoning after event-matched prior context was introduced; these readings were rejected. Focused factor-by-factor generation also failed the contract and was not added to production. A verifier false rejection was isolated: it invented potential spillover to reject a valid absence-of-evidence limit. A native verifier diagnostic accepted the supported peaceful report and rejected both a fabricated nuclear attack and the inaccurate live draft after the check was confined to factual accuracy. Risk judgments remain subjective, not calibrated estimates. Successful synthetic controls do not establish reliable real-world reasoning. This remains an experimental feature, and no current score is shown when the native model cannot produce supported reasoning.
+
+The final production-service native control on 11 October passed at **20 Mild**, with four factors, missing novelty context explicitly acknowledged, persistence and a rendered sheet. Including a fresh rejection check for a fabricated nuclear attack, the model work took **3.31 seconds**. Settings, all five-state captures, Reduce Motion/inactive freezes and display cadence completed in the same clean run.
 
 ## Verification limits
 

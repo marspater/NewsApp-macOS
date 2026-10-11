@@ -201,6 +201,12 @@ private final class WorldTensionQADelegate: NSObject, NSApplicationDelegate {
             database: database, now: now,
             aiEnabled: true, collectionEnabled: true)
         guard let reading = readings.last else { throw QAError.noAssessment }
+        let invented = try WorldTensionService.supportPrompt(
+            "Summary: A nuclear attack destroyed a capital city yesterday. Score: 95", headlines: reading.headlines)
+        let rejection = try await NewsTextModel.onDevice.respond(invented, 4)
+            .trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        guard rejection == "NO" else { throw QAError.fabricatedClaimAccepted }
+        print("Fresh factual verifier rejected a fabricated nuclear attack")
         try JSONEncoder().encode(reading).write(to: output.appendingPathComponent("live-model.json"))
         print(
             "Live on-device assessment: score \(reading.assessment.score), \(reading.assessment.reasons.count) supported factors, \(ProcessInfo.processInfo.systemUptime - modelStart) seconds"
@@ -220,5 +226,7 @@ private final class WorldTensionQADelegate: NSObject, NSApplicationDelegate {
         await database.close()
     }
 
-    private enum QAError: Error { case render, storage, settingsShrank, noFrames, noAssessment, motionDidNotPause }
+    private enum QAError: Error {
+        case render, storage, settingsShrank, noFrames, noAssessment, motionDidNotPause, fabricatedClaimAccepted
+    }
 }

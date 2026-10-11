@@ -3548,6 +3548,25 @@ struct NewsTests {
         assertEqual(
             try await database.worldTensionHistory(), history,
             "A rejected reassessment preserves the previous supported reading")
+        let gate = OpenGate()
+        let cancellable = WorldTensionService(
+            model: NewsTextModel { prompt, _ in
+                if prompt.contains("Reply YES only") { return "YES" }
+                await gate.wait()
+                return encoded
+            })
+        let cancelled = Task {
+            try await cancellable.assess(
+                database: database, now: now, aiEnabled: true, collectionEnabled: true, force: true)
+        }
+        await eventually("Cancelled assessment reaches the model") { await gate.arrivals == 1 }
+        cancelled.cancel()
+        await gate.open()
+        do {
+            _ = try await cancelled.value
+            assertTrue(false, "A cancelled caller must not publish a completed assessment")
+        } catch is CancellationError {}
+        assertEqual(try await database.worldTensionHistory(), history, "Cancellation preserves accepted history")
         let older = WorldTensionReading(
             evaluatedAt: now.addingTimeInterval(-86400), inputHash: "older", modelGeneration: NewsTextModel.generation,
             headlines: headlines, assessment: answer)
