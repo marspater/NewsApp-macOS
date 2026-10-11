@@ -282,6 +282,12 @@ final class ArticleStore: ObservableObject {
     /// Hydrate the persisted result, including fields invalidated by publisher-input changes.
     private func publishStoredArticle(_ id: String) async throws {
         guard let updated = try await database.fetchArticles(limit: 1, id: id).first else { return }
+        // Reclassifying an unchanged story must not invalidate every feed card and the open reader.
+        if articles.contains(where: { $0.id == id && $0 == updated }),
+            !savedArticles.contains(where: { $0.id == id && $0 != updated })
+        {
+            return
+        }
         if let index = articles.firstIndex(where: { $0.id == id }) { articles[index] = updated }
         if let index = savedArticles.firstIndex(where: { $0.id == id }) {
             savedArticles[index] = updated

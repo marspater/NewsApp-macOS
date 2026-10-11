@@ -77,6 +77,8 @@ enum AppColor {
 enum AppLayout {
     static let settingsPaneWidth: CGFloat = 720
     static let settingsPaneHeight: CGFloat = 560
+    static let archiveSearchWidth: CGFloat = 300
+    static let archiveSearchCollapsedWidth: CGFloat = 36
     static let tensionIllustrationSize: CGFloat = 88
     static let tensionDotSize: CGFloat = 10
     static let tensionStrokeWidth: CGFloat = 3

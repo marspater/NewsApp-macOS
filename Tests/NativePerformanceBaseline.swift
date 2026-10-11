@@ -142,6 +142,31 @@ private final class BaselineDelegate: NSObject, NSApplicationDelegate {
                 }
                 guard capturedAt - start < 15 else { throw Failure.cardTimeout }
             }
+            if ProcessInfo.processInfo.environment["NEWS_NATIVE_SEARCH_QA"] == "1" {
+                try await Task.sleep(for: .milliseconds(300))
+                guard let search = current.toolbar?.items.compactMap({ $0 as? NSSearchToolbarItem }).first else {
+                    throw Failure.render
+                }
+                let collapsed = search.searchField.frame.width
+                guard collapsed <= 50 else { throw Failure.render }
+                search.beginSearchInteraction()
+                try await Task.sleep(for: .milliseconds(500))
+                let expanded = search.searchField.frame.width
+                guard expanded > 100 else { throw Failure.render }
+                search.endSearchInteraction()
+                try await Task.sleep(for: .milliseconds(500))
+                guard search.searchField.frame.width <= 50 else { throw Failure.render }
+                for width in [900.0, 1600.0] {
+                    current.setContentSize(NSSize(width: width, height: 800))
+                    try await Task.sleep(for: .milliseconds(200))
+                    guard search.searchField.frame.width <= 50 else { throw Failure.render }
+                }
+                print(
+                    "Native search: compact → expanded → dismissed, narrow/wide: passed (\(collapsed), \(expanded) pt)")
+                current.close()
+                await database.close()
+                return
+            }
             // A captured-frame sample after a bounded scroll. This is a
             // render/readback upper bound, not a GPU frame-time or FPS claim.
             guard let scroller = Self.detailScroller(in: view) else { throw Failure.scrollCaptureUnavailable }

@@ -16,6 +16,7 @@ extension Notification.Name {
 
 @main
 struct NewsApp: App {
+    @FocusedValue(\.archiveSearch) private var archiveSearch
     @FocusedValue(\.selectedStory) private var selectedStory
     @FocusedValue(\.readerActions) private var readerActions
     @FocusedValue(\.listActions) private var listActions
@@ -46,6 +47,11 @@ struct NewsApp: App {
         .commands {
             SidebarCommands()
             KeyboardShortcutsCommands()
+            CommandGroup(after: .textEditing) {
+                Button("Search Archive") { archiveSearch?() }
+                    .keyboardShortcut("f", modifiers: .command)
+                    .disabled(archiveSearch == nil)
+            }
             CommandGroup(after: .appInfo) {
                 Button("Check for Updates…") {
                     Task { @MainActor in

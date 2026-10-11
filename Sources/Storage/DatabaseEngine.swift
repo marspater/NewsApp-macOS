@@ -4270,7 +4270,7 @@ actor DatabaseEngine {
             let rows = try eventRows(
                 """
                 SELECT m.event_id, e.membership_version, st.seen_version, a.id, a.source, a.title,
-                       \(Self.articleDateOrder), m.joined_version, s.is_read, s.is_saved
+                       \(Self.articleDateOrder), m.joined_version, s.is_read, s.is_saved, a.canonical_url
                 FROM event_members m
                 JOIN events e ON e.id = m.event_id
                 JOIN articles a ON a.id = m.article_id
@@ -4293,7 +4293,8 @@ actor DatabaseEngine {
                 }
                 current?.members.append(
                     EventFeedMember(
-                        articleID: articleID, source: row[4] ?? "", title: row[5] ?? "",
+                        articleID: articleID, source: FeedCatalog.publisher(forLink: row[10] ?? "") ?? row[4] ?? "",
+                        title: row[5] ?? "",
                         date: Date(timeIntervalSince1970: row[6].flatMap { Double($0) } ?? 0),
                         joinedVersion: row[7].flatMap { Int($0) } ?? 1,
                         isRead: row[8] == "1", isSaved: row[9] == "1"))

@@ -1,0 +1,18 @@
+# Tension motion, archive search and event-card scrolling
+
+Follow-up to #433. Zen draws a dry-brush ensō: a heavy rounded press that thins and splits into bristle streaks. It holds, dissolves, pauses and is brushed again with a rounded head in an eight-second cycle. Every glyph starts from its resting pose, freezes while inactive and resumes from the same frame. Restarts are invisible: the ensō restarts while fully faded, and each spark fades in and out on its own flight. Flames combine two waves per parameter instead of a single sine. Boiling has 18 faster sparks; motion remains confined to the tension sheet. Reduced Motion and inactive rendering show the resting pose.
+
+The shared SwiftUI archive search retains native tokens, focus, menu behavior and system Liquid Glass. A narrow AppKit bridge bounds the resting NSSearchToolbarItem field to 36 pt; native focus expands it, dismissal with an empty query collapses it. The same search owner covers list and reader. The selected macOS SDK has no SwiftUI always-collapsed search behavior; SearchToolbarBehavior.minimize is unavailable on macOS.
+
+Collapsed event cards previously queried all event members whenever they appeared, then replaced visible image candidates with the asynchronously loaded full membership. Full membership is now fetched only for an expanded source list; the card's image candidates remain those already loaded in the visible feed page, so opening coverage cannot replace its image. This removes avoidable cold-scroll database/model hydration and card image churn; it does not establish absence of every compositor hitch.
+
+Coverage consistently shows story and distinct-publisher counts. Event-summary reads resolve known publisher names from canonical URLs through the existing catalog, instead of counting generic feed titles such as “News” as one publisher. Unknown publishers retain their feed-provided names. No migration or library repair is needed.
+
+## Evidence
+
+- Native render: 180 frames/six-second looping preview generated directly from TensionGlyph.
+- Native search probe: resting 36 pt → focused 325 pt → dismissed 36 pt. The system includes its own field insets around the preferred width.
+- A 10,000-story native scrolling bitmap probe could not find the detail NSScrollView on this macOS version and failed with `scrollCaptureUnavailable`. Do not interpret that run as a scrolling-performance pass or FPS measurement.
+- Reproduce compact search QA with `NEWS_NATIVE_SEARCH_QA=1 ./script/native_performance_baseline.sh /private/tmp/native-search-qa`.
+- Installed-app CPU samples during reader scrolling did not reproduce the reported intermittent stall. The feed-card change cannot explain a reader stall, which remains unresolved pending a reproducible trace. CPU sampling and automated page scrolling do not establish smooth trackpad momentum or 120 Hz rendering.
+- A later installed-app sample during post-refresh activity showed most main-thread samples in SwiftUI graph updates, including card reconstruction and description redaction. The 25.8-second Animation Hitches trace reported 35 hitch events (maximum 50 ms; total 683 ms), often labelled potentially expensive app updates. Background classification was republishing articles even when persisted values were unchanged. `publishStoredArticle` now suppresses identical cached results; a regression asserts zero article publications/revisions for repeated classification and one publication for a real category change. This addresses a shared source of feed/reader invalidation, without claiming every intermittent hitch has been eliminated.
