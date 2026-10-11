@@ -153,6 +153,7 @@ struct MainView: View {
             Text(token.expression)
         }
         .searchSuggestions { searchOperatorSuggestions }
+        .focusedSceneValue(\.archiveSearch, { searchPresented = true })
         .background(CompactArchiveSearch(expanded: searchPresented || !archiveQuery.isEmpty).frame(width: 0, height: 0))
         .frame(minWidth: 900, minHeight: 600)
         .onAppear {
@@ -365,5 +366,13 @@ private struct CompactArchiveSearch: NSViewRepresentable {
             }
             width?.isActive = !expanded
         }
+    }
+}
+
+private struct ArchiveSearchKey: FocusedValueKey { typealias Value = () -> Void }
+extension FocusedValues {
+    var archiveSearch: (() -> Void)? {
+        get { self[ArchiveSearchKey.self] }
+        set { self[ArchiveSearchKey.self] = newValue }
     }
 }

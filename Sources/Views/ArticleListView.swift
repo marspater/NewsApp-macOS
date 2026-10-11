@@ -56,6 +56,7 @@ struct ArticleListView: View {
     @AppStorage("groupsEventCoverage") private var groupsEvents = true
     @Environment(\.appearsActive) private var appearsActive
     @Environment(\.effectiveReduceMotion) private var reduceMotion
+    @FocusState private var listHasFocus: Bool
     @State private var focusedArticleID: String? = nil
 
     @State private var briefing: FiniteBriefing?
@@ -233,6 +234,8 @@ struct ArticleListView: View {
                 .onHover { isPointerInList = $0 }
                 .onChange(of: queuedUpdateCount, handleQueuedUpdatesChange)
                 .focusable()
+                .focused($listHasFocus)
+                .defaultFocus($listHasFocus, true)
                 .focusEffectDisabled()
                 .onKeyPress { press in
                     handleKeyPress(press: press, proxy: proxy)
