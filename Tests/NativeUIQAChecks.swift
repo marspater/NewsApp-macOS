@@ -223,9 +223,9 @@ struct NativeUIQAChecks {
         assertEqual(overridesCLI.textScale, 1.35, "CLI --text-scale parses to 1.35")
 
         // Standard macOS arguments in UserDefaults (-key value)
-        let suite = "test.settings.overrides.\(UUID().uuidString)"
+        let suite = testDefaultsSuite("test.settings.overrides")
         let defaults = UserDefaults(suiteName: suite)!
-        defer { defaults.removePersistentDomain(forName: suite) }
+        defer { removeTestDefaults(suite) }
 
         defaults.set(true, forKey: "AppleIncreaseContrast")
         defaults.set(true, forKey: "AppleReduceMotion")
@@ -475,9 +475,9 @@ struct NativeUIQAChecks {
     }
 
     static func testPersistedReaderTextSize() {
-        let suite = "test.reader.options.\(UUID().uuidString)"
+        let suite = testDefaultsSuite("test.reader.options")
         let defaults = UserDefaults(suiteName: suite)!
-        defer { defaults.removePersistentDomain(forName: suite) }
+        defer { removeTestDefaults(suite) }
         let first = ThemeManager(defaults: defaults)
         assertEqual(first.readerTextScale, 1, "New reader uses actual size")
         first.readerTextScale = ReaderTextSize.adjusted(first.readerTextScale, by: 1)

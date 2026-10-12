@@ -39,10 +39,10 @@ private final class BaselineDelegate: NSObject, NSApplicationDelegate {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
             "news-native-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let suite = "test.native.performance.\(UUID().uuidString)"
+        let suite = testDefaultsSuite("test.native.performance")
         let defaults = UserDefaults(suiteName: suite)!
         defer {
-            defaults.removePersistentDomain(forName: suite)
+            removeTestDefaults(suite)
             try? FileManager.default.removeItem(at: directory)
         }
         let settings = AppSettings(defaults: defaults)

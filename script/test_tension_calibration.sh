@@ -71,6 +71,7 @@ swiftc -target "$(uname -m)-apple-macos${TARGET_MACOS}" \
     Sources/App/UpdateChecker.swift \
     Tests/TensionCalibrationTests.swift \
     Tests/TensionCalibrationRunner.swift \
+    Tests/TestDefaults.swift \
     -o tension_test_runner
 
 echo "=== 3. Executing Native Tension Calibration Tests ==="

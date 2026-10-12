@@ -78,6 +78,7 @@ swiftc -swift-version 6 -O -parse-as-library -target "$(uname -m)-apple-macos${T
     Sources/Views/TensionIndexView.swift \
     Sources/Views/SettingsView.swift \
     Tests/NativeUIQAChecks.swift \
+    Tests/TestDefaults.swift \
     -o native_ui_qa_runner
 
 echo "Running Native UI QA Checks..."
