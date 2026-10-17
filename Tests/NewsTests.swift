@@ -6491,10 +6491,19 @@ struct NewsTests {
             link: fixtureRoot.appendingPathComponent("relations/near").absoluteString, guid: "near",
             description: "Volodymyr Zelenskyy congratulated football fans after the national team won a league match.",
             pubDate: now.addingTimeInterval(-3 * 3600), source: "Publisher near")
+        let window = EventStoryRelation.window / 3600
         try await copy.upsertArticles([articles[0], articles[1], near])
+        for (id, hours) in [
+            ("old-in", -2), ("old-out", -window - 2), ("continuing-in", -2), ("continuing-after", 1),
+        ] {
+            try await copy.upsertArticles([article(id, hours: hours)])
+        }
         _ = try await copy.createEvent(memberArticleIDs: ["current"], at: now)
         let linkedEvent = try await copy.createEvent(memberArticleIDs: ["earlier"], at: now)
         let nearEvent = try await copy.createEvent(memberArticleIDs: ["near"], at: now)
+        let olderEvent = try await copy.createEvent(memberArticleIDs: ["old-in", "old-out"], at: now)
+        let continuingEvent = try await copy.createEvent(
+            memberArticleIDs: ["continuing-in", "continuing-after"], at: now)
         await copy.close()
         let output = run.appendingPathComponent("report").path
         try await measureLiveRelations(path: run.appendingPathComponent("library.sqlite3").path, output: output)
@@ -6509,6 +6518,19 @@ struct NewsTests {
             rows.filter { $0["kind"] == "control" }.map { $0["earlierEvent"] }, [nearEvent.id],
             "A rejected earlier event sharing an actor is the control")
         assertTrue(rows.allSatisfy { $0["later"]?.isEmpty == false }, "Pairs carry reviewable text")
+        let misses =
+            try JSONSerialization.jsonObject(
+                with: Data(contentsOf: URL(fileURLWithPath: output).appendingPathComponent("near-misses-private.json")))
+            as? [[String: String]] ?? []
+        let missStages = Dictionary(misses.map { ($0["earlierEvent"] ?? "", $0["kind"] ?? "") }) { a, _ in a }
+        assertEqual(missStages[olderEvent.id], "olderThanWindow", "Coverage that began too early is a window stage")
+        assertEqual(
+            missStages[continuingEvent.id], "continuesAfterStart", "Coverage past the target's start is a window stage")
+        assertTrue(missStages[nearEvent.id] != nil, "Rejected in-window candidates join the recall sample")
+        assertTrue(missStages[linkedEvent.id] == nil, "Linked candidates are not near misses")
+        assertTrue(
+            Dictionary(grouping: misses, by: { $0["kind"] ?? "" }).values.allSatisfy { $0.count <= 25 },
+            "The recall sample keeps at most 25 candidates per stage")
         do {
             try await measureLiveRelations(path: run.appendingPathComponent("library.sqlite3").path, output: output)
             assertTrue(false, "A second run must not replace the first run's pairs")
