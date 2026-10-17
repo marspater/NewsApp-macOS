@@ -24,6 +24,8 @@ struct EventFeatures: Hashable, Sendable {
     var periods: Set<String> = []
     var years: Set<String> = []
     var weekdays: Set<String> = []
+    /// Non-place headline terms from the primary clause when the headline has a trailing/leading background clause.
+    var primaryTitleTerms: Set<String> = []
 
     var anchors: Set<String> { people.union(organizations).union(places).union(names) }
     /// Places that name a country, canonicalized to a region code (`@US`).
@@ -80,7 +82,8 @@ enum EventPlaces {
     /// `@` plus the region code for a country, its alias or demonym; any other place unchanged.
     static func canonical(_ place: String) -> String {
         let name = EventFeatures.normalized(place)
-        guard let code = aliases[name] ?? demonyms[name] ?? countryNames[name] else { return name }
+        let singularDemonym = name.hasSuffix("s") ? demonyms[String(name.dropLast())] : nil
+        guard let code = aliases[name] ?? demonyms[name] ?? singularDemonym ?? countryNames[name] else { return name }
         return "@" + code
     }
 }
@@ -127,6 +130,18 @@ extension EventFeatures {
             pattern: #"\b(first|second|1st|2nd)[\s-]+half\b"#, options: [.caseInsensitive]
         )) ?? NSRegularExpression()
     private static let markupPattern = (try? NSRegularExpression(pattern: #"<[^>]*>"#)) ?? NSRegularExpression()
+    private static let leadingBackgroundPattern =
+        (try? NSRegularExpression(
+            pattern:
+                #"^\s*(?:(?:hours|days|weeks|months|moments|shortly|soon|just)\s+)?(?:after|following)\b[^,;:—–-]*[,;:—–-]\s*(.+)$"#,
+            options: [.caseInsensitive]
+        )) ?? NSRegularExpression()
+    private static let trailingBackgroundPattern =
+        (try? NSRegularExpression(
+            pattern:
+                #"\b(?:following|in\s+(?:the\s+)?wake\s+of|(?:hours|days|weeks|months|moments|shortly|soon)\s+after|after)\b"#,
+            options: [.caseInsensitive]
+        )) ?? NSRegularExpression()
 
     static func normalized(_ value: String) -> String {
         var text = value.folding(options: [.caseInsensitive, .diacriticInsensitive, .widthInsensitive], locale: nil)
@@ -139,6 +154,21 @@ extension EventFeatures {
         let range = NSRange(text.startIndex..., in: text)
         return markupPattern.stringByReplacingMatches(in: text, range: range, withTemplate: " ")
             .replacingOccurrences(of: "&nbsp;", with: " ").replacingOccurrences(of: "&amp;", with: "&")
+    }
+
+    private static func primaryClauseRange(in title: String) -> Range<String.Index>? {
+        let nsRange = NSRange(title.startIndex..., in: title)
+        if let leading = leadingBackgroundPattern.firstMatch(in: title, range: nsRange),
+            let clause = Range(leading.range(at: 1), in: title)
+        {
+            return clause
+        }
+        guard let trailing = trailingBackgroundPattern.firstMatch(in: title, range: nsRange),
+            let connector = Range(trailing.range, in: title)
+        else { return nil }
+        let prefix = title[title.startIndex..<connector.lowerBound]
+        guard prefix.split(whereSeparator: { !$0.isLetter && !$0.isNumber }).count >= 2 else { return nil }
+        return title.startIndex..<connector.lowerBound
     }
 
     /// Extracts features with on-device NaturalLanguage only. Results depend on the OS models for the
@@ -157,8 +187,10 @@ extension EventFeatures {
         var periods = Set<String>()
         var years = Set<String>()
         var weekdays = Set<String>()
+        var primaryTitleTerms = Set<String>()
         let whole = text.startIndex..<text.endIndex
         let titleEnd = text.index(text.startIndex, offsetBy: title.count)
+        let primaryRange = Self.primaryClauseRange(in: title)
 
         let tagger = NLTagger(tagSchemes: [.nameType, .lexicalClass, .lemma])
         tagger.string = text
@@ -178,11 +210,19 @@ extension EventFeatures {
                 if let surname = name.split(separator: " ").last, surname.count >= 3, String(surname) != name {
                     people.insert(String(surname))
                 }
-            case .placeName: places.insert(EventPlaces.canonical(name))
-            case .organizationName: organizations.insert(name)
+                nameTokens.formUnion(name.split(separator: " ").map(String.init))
+            case .placeName:
+                places.insert(EventPlaces.canonical(name))
+                if !name.contains(" ") { nameTokens.insert(name) }
+            case .organizationName:
+                organizations.insert(name)
+                let canonicalPlace = EventPlaces.canonical(name)
+                if canonicalPlace.hasPrefix("@") {
+                    places.insert(canonicalPlace)
+                }
+                if !name.contains(" ") { nameTokens.insert(name) }
             default: return true
             }
-            nameTokens.formUnion(name.split(separator: " ").map(String.init))
             return true
         }
 
@@ -216,9 +256,18 @@ extension EventFeatures {
         }
         tagger.enumerateTags(in: whole, unit: .word, scheme: .lexicalClass, options: wordOptions) { tag, range in
             let token = String(text[range])
-            let word = Self.normalized(token)
+            var word = Self.normalized(token)
             guard !word.isEmpty else { return true }
             let inTitle = range.lowerBound < titleEnd
+            let inPrimaryClause = primaryRange.map { $0.overlaps(range) } ?? false
+
+            if word.contains("-") {
+                for part in word.split(separator: "-").map(String.init) where part.count >= 2 {
+                    let canonicalPart = EventPlaces.canonical(part)
+                    if canonicalPart.hasPrefix("@") { places.insert(canonicalPart) }
+                }
+                if word == "co-pilot" { word = "copilot" }
+            }
 
             if word.count == 2, let letter = word.first, let digit = word.last,
                 (letter == "q" && "1234".contains(digit)) || (letter == "h" && "12".contains(digit))
@@ -227,12 +276,17 @@ extension EventFeatures {
                 return true
             }
             if word.contains(where: \.isNumber) {
+                if token.first?.isUppercase == true, word.first?.isLetter == true {
+                    organizations.insert(word)
+                    return true
+                }
                 let digits = word.filter { $0.isNumber || $0 == "." }.trimmingCharacters(
                     in: CharacterSet(charactersIn: "."))
                 if digits.count == 4, let year = Int(digits), (1900...2100).contains(year) {
                     years.insert(digits)
                 } else if inTitle, !digits.isEmpty {
                     titleNumbers.insert(digits)
+                    if inPrimaryClause { primaryTitleTerms.insert(digits) }
                 }
                 return true
             }
@@ -242,27 +296,42 @@ extension EventFeatures {
             }
             if inTitle, let number = Self.numberWords[word] {
                 titleNumbers.insert(number)
+                if inPrimaryClause { primaryTitleTerms.insert(number) }
+                return true
+            }
+            let canonicalWordPlace = EventPlaces.canonical(word)
+            if canonicalWordPlace.hasPrefix("@"), token.first?.isUppercase == true {
+                places.insert(canonicalWordPlace)
                 return true
             }
             guard word.count >= 3, word.contains(where: \.isLetter), !Self.stopwords.contains(word),
                 !Self.monthNames.contains(word), !Self.numberWords.keys.contains(word)
             else { return true }
 
-            // A capitalized word inside a sentence is most likely a name the tagger did not type.
+            // A capitalized word inside a sentence (or sentence-initial without a common lemma) is a name the tagger missed.
+            let isUntypedInitialName =
+                Self.startsSentence(range.lowerBound, in: text) && lemmas[range.lowerBound] == nil
+                && !word.contains("-")
             if usesCapitalization, token.first?.isUppercase == true, !(inTitle && titleCase),
-                !Self.startsSentence(range.lowerBound, in: text)
+                !Self.startsSentence(range.lowerBound, in: text) || isUntypedInitialName
             {
-                if !nameTokens.contains(word) { names.insert(word) }
+                if !nameTokens.contains(word) {
+                    names.insert(word)
+                }
                 return true
             }
             guard !nameTokens.contains(word) else { return true }
             if let tag {
                 guard [.noun, .verb, .adjective].contains(tag) else { return true }
                 let keyword = lemmas[range.lowerBound].flatMap { $0.isEmpty ? nil : $0 } ?? word
-                if keyword.count >= 3, !Self.stopwords.contains(keyword) { keywords.insert(keyword) }
+                if keyword.count >= 3, !Self.stopwords.contains(keyword) {
+                    keywords.insert(keyword)
+                    if inPrimaryClause { primaryTitleTerms.insert(keyword) }
+                }
             } else if word.count >= 4 {
                 // No lexical model for this language: keep longer words as plain terms.
                 keywords.insert(word)
+                if inPrimaryClause { primaryTitleTerms.insert(word) }
             }
             return true
         }
@@ -280,7 +349,7 @@ extension EventFeatures {
             language: language, people: people, organizations: organizations, places: places, names: names,
             keywords: keywords, date: date, titleNumbers: titleNumbers.subtracting(tollNumbers),
             tollNumbers: tollNumbers,
-            periods: periods, years: years, weekdays: weekdays)
+            periods: periods, years: years, weekdays: weekdays, primaryTitleTerms: primaryTitleTerms)
     }
 
     private static let casualtyWords =
@@ -388,10 +457,12 @@ enum EventMatcher {
         -> EventPairAssessment
     {
         let gap = abs(a.date.timeIntervalSince(b.date))
-        let sharedAnchors = a.anchors.intersection(b.anchors).count
+        let crossSpecific = a.specificAnchors.intersection(b.keywords).union(b.specificAnchors.intersection(a.keywords))
+        let sharedAnchors = a.anchors.intersection(b.anchors).union(crossSpecific).count
         let sharedKeywords = a.keywords.intersection(b.keywords).count
         let what = cosine(sharedKeywords, a.keywords.count, b.keywords.count)
-        let entity = overlap(sharedAnchors, a.anchors.count, b.anchors.count)
+        let entity = overlap(
+            sharedAnchors, max(a.anchors.count, sharedAnchors), max(b.anchors.count, sharedAnchors))
         let time =
             gap <= policy.fullTimeCredit
             ? 1
@@ -399,12 +470,26 @@ enum EventMatcher {
         let score = 0.4 * what + 0.4 * entity + 0.2 * time
 
         var conflict: EventConflict?
-        let sharedSpecific = a.specificAnchors.intersection(b.specificAnchors).count
-        // Equal casualty tolls are evidence of one incident.
-        let sharedEvidence = sharedKeywords + (a.tollNumbers.isDisjoint(with: b.tollNumbers) ? 0 : 1)
+        let sharedSpecific = a.specificAnchors.intersection(b.specificAnchors).union(crossSpecific).count
+        // Equal casualty tolls or headline figures are corroborating evidence of one incident.
+        let sharedEvidence =
+            sharedKeywords
+            + (a.tollNumbers.isDisjoint(with: b.tollNumbers) ? 0 : 1)
+            + (a.titleNumbers.isDisjoint(with: b.titleNumbers) ? 0 : 1)
         func disjoint(_ lhs: Set<String>, _ rhs: Set<String>) -> Bool {
             !lhs.isEmpty && !rhs.isEmpty && lhs.isDisjoint(with: rhs)
         }
+        func nonPlaceTerms(_ features: EventFeatures) -> Set<String> {
+            features.keywords.union(features.titleNumbers).union(features.tollNumbers)
+        }
+        let primaryDisjoint =
+            (!a.primaryTitleTerms.isEmpty && a.primaryTitleTerms.isDisjoint(with: nonPlaceTerms(b)))
+            || (!b.primaryTitleTerms.isEmpty && b.primaryTitleTerms.isDisjoint(with: nonPlaceTerms(a)))
+        let sharesPlace =
+            !a.places.isDisjoint(with: b.places)
+            || !a.localPlaces.isDisjoint(with: b.specificAnchors)
+            || !b.localPlaces.isDisjoint(with: a.specificAnchors)
+
         if a.date == DateParser.unknownDate || b.date == DateParser.unknownDate {
             conflict = .unknownDate
         } else if let left = a.language, let right = b.language, left != right {
@@ -425,7 +510,7 @@ enum EventMatcher {
         }
         // Different countries are different events. Places below country level ("Madrid" against "Spain", one city
         // against another) only conflict when no place is shared. No model overrides the conflict.
-        else if a.places.isDisjoint(with: b.places) {
+        else if !sharesPlace {
             if disjoint(a.countries, b.countries) {
                 conflict = .places
             } else if disjoint(a.localPlaces, b.localPlaces) {
@@ -434,15 +519,15 @@ enum EventMatcher {
         }
 
         let isMatch =
-            conflict == nil && sharedSpecific >= 1
+            conflict == nil && !primaryDisjoint && sharedSpecific >= 1
             && sharedEvidence >= 2
             && sharedAnchors + sharedEvidence >= policy.minimumSharedTerms
             && what >= policy.minimumWhat && score >= policy.matchScore
             && (gap <= policy.strictTimeGap || (what >= policy.strictWhat && sharedEvidence >= 3))
         let isCompatible =
-            conflict == nil && sharedSpecific >= 1 && score >= policy.compatibilityScore
+            conflict == nil && !primaryDisjoint && sharedSpecific >= 1 && score >= policy.compatibilityScore
         let isBorderline =
-            !isMatch && conflict == nil
+            !isMatch && conflict == nil && !primaryDisjoint
             && ((sharedAnchors >= 1 && sharedEvidence >= 1 && score >= policy.borderlineScore)
                 || (sharedEvidence >= 3 && what >= policy.minimumWhat))
         let needsConfirmation = isMatch && (sharedSpecific == 0 || what < policy.strictWhat)

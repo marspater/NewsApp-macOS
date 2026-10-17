@@ -6731,6 +6731,74 @@ struct NewsTests {
                 EventMatcher.eventScore(pairs: [pair, pair, hard]) == nil,
                 "A hard \(conflict) minority vetoes admission")
         }
+
+        // #307 bounded corrections: background-clause false merges, cross-tagged anchors and false place/weekday vetoes.
+        let bridgeStrike = EventFeatures(
+            title: "Russia hits second major bridge in Ukraine's capital Kyiv",
+            description:
+                "The strike on the Pivnichnyi (Northern) Bridge comes after repeat attacks on another major bridge in Ukraine's capital.",
+            date: now)
+        let pontoonFollowUp = EventFeatures(
+            title: "Pontoon crossings coming to Kyiv following Russian strikes on key bridges, media reports",
+            description:
+                "A Ukrainian official said that the construction of pontoon crossings could take up to three months and would help traffic move through the capital, which remains heavily restricted after multiple bridge attacks.",
+            date: now.addingTimeInterval(1800))
+        let pontoonPlan = EventFeatures(
+            title:
+                "Kyiv is preparing pontoon crossings in case of bridge strikes and planning tunnel under Dnipro River – minister",
+            description:
+                "Ukraine's Recovery Minister Mykola Kalashnyk has announced plans to build reserve pontoon crossings and potentially a tunnel under the Dnipro River in Kyiv.",
+            date: now.addingTimeInterval(-3600))
+        assertFalse(
+            EventMatcher.assess(pontoonFollowUp, bridgeStrike).isMatch
+                || EventMatcher.assess(pontoonFollowUp, bridgeStrike).isCompatible,
+            "A follow-up plan whose primary headline clause shares only a city with a prior strike must not merge into the strike"
+        )
+        assertTrue(
+            EventMatcher.assess(pontoonFollowUp, pontoonPlan).isMatch,
+            "Reports sharing the primary headline subject and action still match")
+
+        let lowerBrand = EventFeatures(
+            title: "‘I was fighting for my life’: Indian pilot hailed as hero recalls flydubai cockpit attack",
+            description:
+                "The Indian pilot who helped thwart an apparent attempt to crash a flydubai flight to Tel Aviv said his faith allowed him to open the cockpit door.",
+            date: now)
+        let camelBrand = EventFeatures(
+            title: "'I was fighting for my life': Indian pilot hailed as hero recalls FlyDubai cockpit attack",
+            description:
+                "The Indian airline captain who helped thwart an apparent attempt to crash a FlyDubai flight described Friday how he fought for his life after his co-pilot stabbed him.",
+            date: now.addingTimeInterval(3600))
+        assertTrue(
+            EventMatcher.assess(lowerBrand, camelBrand).isMatch,
+            "Case differences on an untyped brand name still count as shared specific evidence")
+
+        let fairfordPlace = EventFeatures(
+            title: "UK-Iran national arrested over alleged bomb plot at RAF Fairford released on bail",
+            description:
+                "A sixth man who was arrested in connection with a suspected terrorist plot at RAF Fairford has been released on bail. The 25-year-old, a dual UK-Iranian national, was arrested on suspicion of preparing terrorist acts.",
+            date: now)
+        let fairfordOrg = EventFeatures(
+            title: "Man arrested for alleged terror threat on US airbase RAF Fairford released on bail",
+            description:
+                "The U.K.-Iranian dual national who was arrested in connection with an alleged terror threat against a U.S.-operated military base in England was released on bail, British authorities confirmed Saturday.",
+            date: now.addingTimeInterval(2 * 3600))
+        assertTrue(
+            EventMatcher.assess(fairfordPlace, fairfordOrg).isMatch,
+            "Shared base and hyphenated dual nationality match without a tagger category-flip place conflict")
+
+        let g7First = EventFeatures(
+            title: "G7 nations agree to release 100 million barrels of oil, including diesel, boost for Trump",
+            description:
+                "The national average for a gallon of diesel in the U.S. was $6.37 on Friday, according to AAA.",
+            date: now)
+        let g7Second = EventFeatures(
+            title: "G7 nations agree to release 100 million barrels of oil, including diesel, amid energy crunch",
+            description:
+                "The release would begin immediately and take four months, starting with a substantial diesel release.",
+            date: now.addingTimeInterval(900))
+        assertTrue(
+            EventMatcher.assess(g7First, g7Second).isMatch,
+            "Alphanumeric group names like G7 act as specific anchors rather than headline figures")
     }
 
     static func testEventFragmentMergingAndJudge(fixtureRoot: URL) async throws {
