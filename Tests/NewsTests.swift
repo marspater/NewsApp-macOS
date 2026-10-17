@@ -6379,7 +6379,7 @@ struct NewsTests {
             var other = later
             switch field {
             case "actor": other.people = ["another person"]
-            case "place": other.places = ["@US"]
+            case "place": other.places = ["lakeside"]
             case "country": other.places = ["riverside", "@CA"]
             case "language": other.language = nil
             case "topic": other.keywords = ["football", "score"]
@@ -6391,9 +6391,12 @@ struct NewsTests {
             assertFalse(
                 EventStoryRelation.supports(first, other), "Weak or conflicting \(field) evidence rejects a link")
         }
+        var country = later
+        country.places = ["@US"]
+        assertTrue(EventStoryRelation.supports(earlier, country), "A shared country counts as a shared place")
         var boundary = earlier
         boundary.date = now.addingTimeInterval(-EventStoryRelation.window)
-        assertTrue(EventStoryRelation.supports(boundary, later), "The 72-hour boundary is inclusive")
+        assertTrue(EventStoryRelation.supports(boundary, later), "The seven-day boundary is inclusive")
         boundary.date = boundary.date.addingTimeInterval(-1)
         assertFalse(EventStoryRelation.supports(boundary, later), "Older pairs are excluded")
 
@@ -6413,9 +6416,10 @@ struct NewsTests {
         }
         let articles = [
             article("current", hours: 0), article("earlier", hours: -1),
-            article("old", hours: -73), article("future", hours: 1),
+            article("old", hours: -EventStoryRelation.window / 3600 - 1), article("future", hours: 1),
             article("mixed-1", hours: -2), article("mixed-2", hours: -2, unrelated: true),
             article("mixed-3", hours: -2, unrelated: true),
+            article("half-1", hours: -3), article("half-2", hours: -3, unrelated: true),
         ]
         try await db.upsertArticles(articles)
         let current = try await db.createEvent(memberArticleIDs: ["current"], at: now)
@@ -6423,10 +6427,12 @@ struct NewsTests {
         _ = try await db.createEvent(memberArticleIDs: ["old"], at: now)
         _ = try await db.createEvent(memberArticleIDs: ["future"], at: now)
         _ = try await db.createEvent(memberArticleIDs: ["mixed-1", "mixed-2", "mixed-3"], at: now)
+        let half = try await db.createEvent(memberArticleIDs: ["half-1", "half-2"], at: now)
         try await db.markRead(articleId: "earlier", isRead: true)
         try await db.setSaved(articleId: "current", isSaved: true)
         let links = try await EventStoryRelation.find(eventID: current.id, in: db)
         assertEqual(links.map(\.eventID), [previous.id], "Only directly supported, wholly earlier events link")
+        assertFalse(links.map(\.eventID).contains(half.id), "Support from half the members is not enough")
         assertEqual(links.first?.articleID, "earlier", "Navigation carries a stored member ID")
         assertEqual(try await db.fetchEvent(id: current.id), current, "Lookup does not change the target event")
         assertEqual(try await db.fetchEvent(id: previous.id), previous, "Lookup does not change earlier membership")
@@ -7050,8 +7056,9 @@ struct NewsTests {
     }
 
     /// Opt-in #314 measurement on a copied library: every event's related-story links, each mixed with a hard near-miss
-    /// control (an earlier candidate sharing a person, organization or place that the rule rejected). Private text stays
-    /// in the temporary audit directory; `script/evaluation/relation_review.py` builds the blind sheet and the report.
+    /// control (an earlier candidate sharing a person, organization or place that the rule rejected), plus
+    /// `near-misses-private.json`: up to 25 rejected candidates per stage for a recall read. Private text stays in the
+    /// temporary audit directory; `script/evaluation/relation_review.py` builds the blind sheet and the report.
     static func measureLiveRelations(path: String, output: String) async throws {
         let url = URL(fileURLWithPath: path).resolvingSymlinksInPath()
         guard url.path.hasPrefix("/private/tmp/") || url.path.hasPrefix("/tmp/"), output.hasPrefix("/private/tmp/")
@@ -7093,6 +7100,8 @@ struct NewsTests {
             let later: [EventMatchRow]
         }
         var pairs: [Pair] = []
+        // Rejected candidates by stage, so a recall sample can show which condition loses real developing stories.
+        var nearMisses: [Pair] = []
         for event in events {
             let snapshot = try await db.relatedStoryEventRows(eventID: event.eventID)
             let links = try EventStoryRelation.links(target: snapshot.target, candidates: snapshot.candidates)
@@ -7108,6 +7117,27 @@ struct NewsTests {
             }
             let later = snapshot.target.map {
                 EventFeatures(title: $0.title, description: $0.description, date: $0.date)
+            }
+            // Candidates the window rule skips before any pair is compared, and how many of them would link on their
+            // earlier, in-window members alone.
+            for candidate in snapshot.candidates where !candidate.members.isEmpty {
+                let inWindow = candidate.members.filter {
+                    $0.date < start && start.timeIntervalSince($0.date) <= EventStoryRelation.window
+                }
+                guard inWindow.count < candidate.members.count else { continue }
+                let stage =
+                    candidate.members.contains { $0.date >= start } ? "continuesAfterStart" : "olderThanWindow"
+                report["candidateStage_\(stage)", default: 0] += 1
+                nearMisses.append(
+                    Pair(
+                        kind: stage, earlierID: candidate.id, laterID: event.eventID, earlier: candidate.members,
+                        later: snapshot.target))
+                if !inWindow.isEmpty,
+                    try !EventStoryRelation.links(target: snapshot.target, candidates: [(candidate.id, inWindow)])
+                        .isEmpty
+                {
+                    report["windowBlocked_\(stage)_wouldLink", default: 0] += 1
+                }
             }
             // Aggregate rejection stages over earlier candidates within the window: the first condition no pair meets.
             for candidate in snapshot.candidates
@@ -7128,12 +7158,18 @@ struct NewsTests {
                         earlier.allSatisfy { $0.people.isEmpty && $0.organizations.isEmpty }
                             || later.allSatisfy { $0.people.isEmpty && $0.organizations.isEmpty }
                             ? "noActorOnOneSide" : "differentActors"
-                    } else if !pairs.contains(where: { !$0.localPlaces.isDisjoint(with: $1.localPlaces) }) {
-                        "noSharedLocalPlace"
+                    } else if !pairs.contains(where: { !$0.places.isDisjoint(with: $1.places) }) {
+                        "noSharedPlace"
                     } else if !pairs.contains(where: { EventStoryRelation.supports($0, $1) }) {
                         "noPairMeetsAll"
                     } else if linked.contains(candidate.id) { "linked" } else { "belowTwoThirdsSupport" }
                 report["candidateStage_\(stage)", default: 0] += 1
+                if stage != "linked" {
+                    nearMisses.append(
+                        Pair(
+                            kind: stage, earlierID: candidate.id, laterID: event.eventID, earlier: candidate.members,
+                            later: snapshot.target))
+                }
             }
             // The hardest rejected candidate: earlier, within the window, sharing an actor or a local place.
             let control = snapshot.candidates.first { candidate in
@@ -7163,8 +7199,7 @@ struct NewsTests {
             let titles = rows.prefix(3).map { "\($0.title) (\($0.source))" }.joined(separator: " | ")
             return (titles, String((rows.first?.description ?? "").prefix(300)), rows.map(\.date).min() ?? .distantPast)
         }
-        // Pairs sorted by a hash, so links and controls interleave; `relation_review.py sheet` hides their kind.
-        let rows = pairs.map { pair -> (String, [String: Any]) in
+        func row(_ pair: Pair) -> (String, [String: Any]) {
             let (earlier, later) = (describe(pair.earlier), describe(pair.later))
             let hash = ArticleIdentity.sha256Hex(pair.earlierID + ">" + pair.laterID)
             return (
@@ -7176,11 +7211,24 @@ struct NewsTests {
                     "gap_hours": String(format: "%.1f", later.first.timeIntervalSince(earlier.first) / 3600),
                 ]
             )
-        }.sorted { $0.0 < $1.0 }.map(\.1)
+        }
+        // Pairs sorted by a hash, so links and controls interleave; `relation_review.py sheet` hides their kind.
+        let rows = pairs.map(row).sorted { $0.0 < $1.0 }.map(\.1)
         let directory = URL(fileURLWithPath: output)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         try JSONSerialization.data(withJSONObject: rows, options: [.prettyPrinted, .sortedKeys]).write(
             to: directory.appendingPathComponent("relations-private.json"), options: .withoutOverwriting)
+        // Recall sample: up to 25 rejected candidates per stage, chosen by hash. `kind` names the rejecting stage.
+        var perStage: [String: Int] = [:]
+        var sample: [[String: Any]] = []
+        for (_, fields) in nearMisses.map(row).sorted(by: { $0.0 < $1.0 }) {
+            let stage = fields["kind"] as? String ?? ""
+            guard perStage[stage, default: 0] < 25 else { continue }
+            perStage[stage, default: 0] += 1
+            sample.append(fields)
+        }
+        try JSONSerialization.data(withJSONObject: sample, options: [.prettyPrinted, .sortedKeys]).write(
+            to: directory.appendingPathComponent("near-misses-private.json"), options: .withoutOverwriting)
         let encoded = try JSONSerialization.data(withJSONObject: report, options: [.sortedKeys])
         print("RELATION_REPORT \(String(decoding: encoded, as: UTF8.self))")
         await db.close()
