@@ -103,10 +103,12 @@ struct OverviewRepresentativeSelector: Sendable {
                 if assignedArticleIDs.contains(articleB.id) { continue }
 
                 let fingerprintsB = Set(ArticleIdentity.publisherTextFingerprints(articleB))
-                let sharesFingerprint = !fingerprintsA.isEmpty && !fingerprintsB.isEmpty && !fingerprintsA.isDisjoint(with: fingerprintsB)
+                let sharesFingerprint =
+                    !fingerprintsA.isEmpty && !fingerprintsB.isEmpty && !fingerprintsA.isDisjoint(with: fingerprintsB)
 
                 let textB = normalizedTextPreview(articleB)
-                let isWireReprint = isSubstantiveReprint(textA: textA, textB: textB, titleA: articleA.title, titleB: articleB.title)
+                let isWireReprint = isSubstantiveReprint(
+                    textA: textA, textB: textB, titleA: articleA.title, titleB: articleB.title)
 
                 if sharesFingerprint || isWireReprint {
                     currentGroup.append(articleB)
@@ -330,7 +332,10 @@ struct OverviewPassageSelector: Sendable {
         if let blocks = article.readerDocument?.blocks, !blocks.isEmpty {
             for (index, block) in blocks.enumerated() {
                 // Keep only prose blocks; skip figure, caption, code, or tiny snippets
-                guard block.kind == .paragraph || block.kind == .quote || block.kind == .subheading || block.kind == .listItem else {
+                guard
+                    block.kind == .paragraph || block.kind == .quote || block.kind == .subheading
+                        || block.kind == .listItem
+                else {
                     continue
                 }
                 let clean = block.text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -389,7 +394,7 @@ struct OverviewPassageSelector: Sendable {
         let lower = text.lowercased()
         let triggers = [
             "sign up", "newsletter", "subscribe", "follow us on", "photo credit",
-            "advertisement", "all rights reserved", "terms of service", "cookie policy"
+            "advertisement", "all rights reserved", "terms of service", "cookie policy",
         ]
         return triggers.contains { lower.contains($0) }
     }
@@ -399,16 +404,19 @@ struct OverviewPassageSelector: Sendable {
     }
 
     private func trimToKeySentences(_ text: String, maxChars: Int) -> String {
-        let sentences = text.components(separatedBy: ". ")
-        guard let first = sentences.first, !first.isEmpty else {
-            return String(text.prefix(maxChars))
+        let tokenizer = NLTokenizer(unit: .sentence)
+        tokenizer.string = text
+        var end = text.startIndex
+        var count = 0
+        tokenizer.enumerateTokens(in: text.startIndex..<text.endIndex) { range, _ in
+            // Keep the first sentence whole even when it exceeds the soft budget.
+            guard count == 0 || text.distance(from: text.startIndex, to: range.upperBound) <= maxChars else {
+                return false
+            }
+            end = range.upperBound
+            count += 1
+            return count < 2
         }
-        var result = first
-        if !result.hasSuffix(".") { result += "." }
-        if sentences.count > 1 && (result.count + sentences[1].count + 2) <= maxChars {
-            result += " " + sentences[1]
-            if !result.hasSuffix(".") { result += "." }
-        }
-        return result
+        return String(text[..<end]).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }

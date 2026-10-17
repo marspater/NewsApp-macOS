@@ -35,6 +35,11 @@ workflows:
           #!/usr/bin/env bash
           set -euo pipefail
           ./test.sh 2>&1 | tee build/ci/tests.log
+      - name: Verify publisher excerpts
+        script: |
+          #!/usr/bin/env bash
+          set -euo pipefail
+          NEWS_NATIVE_HARNESS=Tests/PublisherExcerptTests.swift ./script/native_performance_baseline.sh build/ci/excerpts 2>&1 | tee build/ci/excerpts.log
       - name: Verify SwiftPM app target
         script: |
           #!/usr/bin/env bash

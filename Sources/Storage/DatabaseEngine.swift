@@ -705,7 +705,7 @@ actor DatabaseEngine {
             try beginTransaction()
             do {
                 try Task.checkCancellation()
-                // Story importance (StoryVisibilityPolicy) and stories that expired before more publishers covered them.
+                // Historical importance ratings and expiry tombstones; current visibility/retention ignore importance.
                 try executeSimple(
                     """
                     CREATE TABLE IF NOT EXISTS story_importance (
@@ -1349,16 +1349,6 @@ actor DatabaseEngine {
                 userInfo: [NSLocalizedDescriptionKey: "Failed to prepare article existence query"])
         }
         defer { sqlite3_finalize(existenceStmt) }
-        var expiredStmt: OpaquePointer?
-        guard
-            sqlite3_prepare_v2(db, "SELECT 1 FROM expired_stories WHERE key IN (?, ?);", -1, &expiredStmt, nil)
-                == SQLITE_OK
-        else {
-            throw NSError(
-                domain: "DatabaseEngine", code: -1,
-                userInfo: [NSLocalizedDescriptionKey: "Failed to prepare expired story query"])
-        }
-        defer { sqlite3_finalize(expiredStmt) }
         var insertedIDs = Set<String>()
         let now = Date().timeIntervalSince1970
 
@@ -1380,11 +1370,6 @@ actor DatabaseEngine {
                     userInfo: [NSLocalizedDescriptionKey: "Failed to check stored article identity"])
             }
             if existenceStatus == SQLITE_DONE {
-                // A story that expired while waiting for coverage is not brought back by feeds that still list it.
-                sqlite3_reset(expiredStmt)
-                sqlite3_bind_text(expiredStmt, 1, id, -1, Self.sqliteTransient)
-                sqlite3_bind_text(expiredStmt, 2, canonical, -1, Self.sqliteTransient)
-                if sqlite3_step(expiredStmt) == SQLITE_ROW { continue }
                 insertedIDs.insert(id)
             }
 
@@ -1614,16 +1599,6 @@ actor DatabaseEngine {
         "SELECT article_id FROM article_state WHERE is_saved = 1 UNION SELECT r.duplicate_id FROM article_reconciliations r JOIN article_state s ON s.article_id = r.survivor_id WHERE s.is_saved = 1"
     private static let visibleArticle =
         "NOT EXISTS (SELECT 1 FROM article_reconciliations r WHERE r.duplicate_id = a.id)"
-    /// A story waiting for more coverage (`StoryVisibilityPolicy`): rated below important, no report of its event rated
-    /// important, and no more than `minorStorySources` publishers in its event. Unrated stories never wait.
-    private static let waitingStory = """
-        (EXISTS (SELECT 1 FROM story_importance i WHERE i.article_id = a.id AND i.level < \(StoryVisibilityPolicy.importantLevel.rawValue))
-         AND NOT EXISTS (SELECT 1 FROM event_members m JOIN event_members peer ON peer.event_id = m.event_id
-            JOIN story_importance pi ON pi.article_id = peer.article_id
-            WHERE m.article_id = a.id AND pi.level >= \(StoryVisibilityPolicy.importantLevel.rawValue))
-         AND coalesce((SELECT count(DISTINCT x.source) FROM event_members m JOIN event_members peer ON peer.event_id = m.event_id
-            JOIN articles x ON x.id = peer.article_id WHERE m.article_id = a.id), 1) <= \(StoryVisibilityPolicy.minorStorySources))
-        """
     /// Binds `MuteRules.sourceParameter` and `MuteRules.topicParameter`, in that order.
     private static let mutedArticle =
         "(news_muted_source(a.canonical_url, ?) OR news_muted_topic(a.title, a.description, ?))"
@@ -1814,7 +1789,6 @@ actor DatabaseEngine {
             query += " AND NOT " + Self.mutedArticle
             params += Self.mutingParameters(criteria.muting)
         }
-        if criteria.hidingWaitingStories { query += " AND NOT " + Self.waitingStory }
         if let after = criteria.after {
             let filter = cursorConditions(after)
             query += filter.sql
@@ -2793,39 +2767,11 @@ actor DatabaseEngine {
 
     // MARK: - Story Visibility
 
-    /// Stories a list hides while they wait for more coverage, under the list's own filters and muting.
+    /// Compatibility for historical audit callers. Importance no longer hides stories.
     func waitingStoryCount(
         section: String? = nil, isRead: Bool? = nil, isSaved: Bool? = nil, muting: MuteRules = MuteRules()
     ) throws -> Int {
-        guard let db = db else {
-            throw NSError(
-                domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Database not open"])
-        }
-        let conditions = listConditions(section: section, isRead: isRead, isSaved: isSaved)
-        var sql =
-            "SELECT count(*) FROM articles a JOIN article_state s ON s.article_id = a.id WHERE "
-            + Self.visibleArticle + conditions.sql + " AND " + Self.waitingStory
-        var params = conditions.params
-        if !muting.isEmpty {
-            sql += " AND NOT " + Self.mutedArticle
-            params += Self.mutingParameters(muting)
-        }
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
-            throw NSError(
-                domain: "DatabaseEngine", code: -1,
-                userInfo: [
-                    NSLocalizedDescriptionKey: "Failed to prepare waiting count: \(String(cString: sqlite3_errmsg(db)))"
-                ])
-        }
-        defer { sqlite3_finalize(stmt) }
-        bind(params, to: stmt)
-        guard sqlite3_step(stmt) == SQLITE_ROW else {
-            throw NSError(
-                domain: "DatabaseEngine", code: -1,
-                userInfo: [NSLocalizedDescriptionKey: String(cString: sqlite3_errmsg(db))])
-        }
-        return Int(sqlite3_column_int64(stmt, 0))
+        0
     }
 
     /// Recent stories without an importance rating, best-covered and newest first.
@@ -2873,58 +2819,60 @@ actor DatabaseEngine {
         return sqlite3_changes(db) > 0
     }
 
-    /// Committed stories eligible for notification after curation; expired or waiting stories are excluded.
+    /// Committed, unreconciled stories eligible for notification, independent of importance.
     func notificationStoryIDs(_ articleIDs: [String]) throws -> Set<String> {
         var eligible = Set<String>()
         for start in stride(from: 0, to: articleIDs.count, by: 500) {
             let ids = Array(articleIDs[start..<min(start + 500, articleIDs.count)])
             let placeholders = Array(repeating: "?", count: ids.count).joined(separator: ",")
             let rows = try eventRows(
-                "SELECT a.id FROM articles a WHERE a.id IN (\(placeholders)) AND \(Self.visibleArticle) AND NOT \(Self.waitingStory);",
+                "SELECT a.id FROM articles a WHERE a.id IN (\(placeholders)) AND \(Self.visibleArticle);",
                 ids.map { .text($0) })
             eligible.formUnion(rows.compactMap { $0[0] })
         }
         return eligible
     }
 
-    /// Deletes stories that waited longer than `minorStoryLifetime` (counted from the first report of their event) and
-    /// remembers their IDs and document URLs, so feeds that still list them do not bring them back. Saved, read and cited
-    /// stories stay, and so do stories delivered by `keepingFeedURLs` (the tension panel while collection is on, whose
-    /// past days are rebuilt from stored articles). Forgets expiries after `expiryMemory`. Returns the number removed.
+    /// Compatibility for historical audit callers. Only ordinary user-configured retention deletes stories.
     @discardableResult
     func expireWaitingStories(now: Date = Date(), keepingFeedURLs: [String] = []) throws -> Int {
-        let cutoff = now.timeIntervalSince1970 - StoryVisibilityPolicy.minorStoryLifetime
-        let kept = Array(repeating: "?", count: keepingFeedURLs.count).joined(separator: ", ")
-        let expired = """
-            SELECT a.id FROM articles a JOIN article_state s ON s.article_id = a.id
-            WHERE s.is_read = 0 AND s.is_saved = 0 AND \(Self.visibleArticle) AND \(Self.waitingStory)
-                AND coalesce((SELECT min(x.created_at) FROM event_members m JOIN event_members peer ON peer.event_id = m.event_id
-                    JOIN articles x ON x.id = peer.article_id WHERE m.article_id = a.id), a.created_at) < ?
-                AND NOT EXISTS (SELECT 1 FROM event_overview_citations c WHERE c.article_id = a.id)
-                AND NOT EXISTS (SELECT 1 FROM article_feeds af WHERE af.article_id = a.id AND af.feed_url IN (\(kept)))
-            """
-        let expiredValues: [EventValue] = [.real(cutoff)] + keepingFeedURLs.map { .text($0) }
-        let removed = try inEventTransaction { () throws -> Int in
-            let rows = try eventRows(
-                """
-                SELECT id, canonical_url FROM articles WHERE id IN (\(expired)
-                    UNION SELECT r.duplicate_id FROM article_reconciliations r WHERE r.survivor_id IN (\(expired)));
-                """, expiredValues + expiredValues)
-            for row in rows {
-                for key in [row[0], row[1].flatMap { Self.isDocumentURL($0) ? $0 : nil }].compactMap({ $0 }) {
-                    try eventRows(
-                        "INSERT OR REPLACE INTO expired_stories(key, expired_at) VALUES (?, ?);",
-                        [.text(key), .real(now.timeIntervalSince1970)])
-                }
-                if let id = row[0] { try eventRows("DELETE FROM articles WHERE id = ?;", [.text(id)]) }
-            }
-            try eventRows(
-                "DELETE FROM expired_stories WHERE expired_at < ?;",
-                [.real(now.timeIntervalSince1970 - StoryVisibilityPolicy.expiryMemory)])
-            return rows.count
+        0
+    }
+
+    /// Stored signals only: one bounded read for the Briefing's at most 500 candidates and their event members.
+    func briefingPriorities(articleIDs: [String]) throws -> [String: BriefingPriority] {
+        let ids = Array(Set(articleIDs)).sorted()
+        guard !ids.isEmpty else { return [:] }
+        guard ids.count <= FiniteBriefing.candidateLimit else {
+            throw Self.eventError("Too many Briefing candidates")
         }
-        if removed > 0 { try pruneEmptyEvents() }
-        return removed
+        let placeholders = Array(repeating: "?", count: ids.count).joined(separator: ",")
+        let rows = try eventRows(
+            """
+            SELECT candidate.id, a.source, a.canonical_url, i.level
+            FROM articles candidate
+            LEFT JOIN event_members mine ON mine.article_id = candidate.id
+            LEFT JOIN event_members peer ON peer.event_id = mine.event_id
+            JOIN articles a ON a.id = coalesce(peer.article_id, candidate.id)
+            LEFT JOIN story_importance i ON i.article_id = a.id
+            WHERE candidate.id IN (\(placeholders)) AND \(Self.visibleArticle)
+            ORDER BY candidate.id, a.id;
+            """, ids.map { .text($0) })
+        var publishers: [String: Set<String>] = [:]
+        var levels: [String: StoryImportance] = [:]
+        for row in rows {
+            try Task.checkCancellation()
+            guard let id = row[0] else { continue }
+            let publisher = FeedCatalog.publisher(forLink: row[2] ?? "") ?? row[1] ?? ""
+            publishers[id, default: []].insert(EventFeedSummary.displaySource(publisher).lowercased())
+            if let raw = row[3].flatMap(Int.init), let level = StoryImportance(rawValue: raw) {
+                levels[id] = max(levels[id] ?? level, level)
+            }
+        }
+        return Dictionary(
+            uniqueKeysWithValues: publishers.map {
+                ($0.key, BriefingPriority(sourceCount: max(1, $0.value.count), importance: levels[$0.key]))
+            })
     }
 
     // MARK: - Story Images
@@ -2939,7 +2887,7 @@ actor DatabaseEngine {
             """
             SELECT a.id, a.canonical_url, m.event_id FROM articles a
             LEFT JOIN event_members m ON m.article_id = a.id
-            WHERE \(Self.articleDateOrder) >= ? AND \(Self.visibleArticle) AND NOT \(Self.waitingStory)
+            WHERE \(Self.articleDateOrder) >= ? AND \(Self.visibleArticle)
                 AND NOT \(Self.mutedArticle)
                 AND NOT EXISTS (SELECT 1 FROM story_images si WHERE si.article_id = a.id)
             ORDER BY (SELECT count(*) FROM event_members peer WHERE peer.event_id = m.event_id) DESC, \(Self.articleDateOrder) DESC, a.id
@@ -3718,7 +3666,9 @@ actor DatabaseEngine {
             guard try eventRows("SELECT value FROM model_generation WHERE id = 1;").first?[0] != current else {
                 return false
             }
-            try eventRows("UPDATE event_overviews SET analysis_version = 0;")
+            try eventRows(
+                "UPDATE event_overviews SET analysis_version = 0 WHERE kind != ?;",
+                [.text(OverviewKind.fallbackExcerpts.rawValue)])
             try eventRows("UPDATE article_enrichment SET analysis_version = 0 WHERE summary IS NOT NULL;")
             try eventRows("INSERT OR REPLACE INTO model_generation(id, value) VALUES (1, ?);", [.text(current)])
             return true
@@ -4028,7 +3978,7 @@ actor DatabaseEngine {
     // MARK: - Event Matching
 
     private static let eventMatchColumns = """
-        SELECT a.id, a.title, coalesce(a.description, ''), a.source, \(DatabaseEngine.articleDateOrder), m.event_id,
+        SELECT a.id, a.title, coalesce(a.description, ''), a.source, a.published_at, m.event_id,
             ms.article_id IS NOT NULL
         FROM articles a
         LEFT JOIN event_members m ON m.article_id = a.id
@@ -4045,18 +3995,23 @@ actor DatabaseEngine {
         }
     }
 
-    /// Visible articles dated after `activeSince` that the current matcher has not processed, oldest
-    /// first. Older articles are never matched again, so the archive is not recomputed. Rows pending
-    /// only because an older matcher processed them report `previouslyMatched`.
+    /// Pending recent articles and members of still-active events, oldest first. This also upgrades
+    /// active events whose last publication is older than the window; inactive archived groups stay untouched.
     func pendingEventMatchRows(activeSince: Date, matcherVersion: Int, limit: Int) throws -> [EventMatchRow] {
         try eventMatchRows(
             """
             \(Self.eventMatchColumns)
             WHERE (ms.article_id IS NULL OR ms.matcher_version < ?)
-                AND \(Self.articleDateOrder) >= ? AND \(Self.visibleArticle)
+                AND (\(Self.articleDateOrder) >= ? OR EXISTS (
+                    SELECT 1 FROM events active WHERE active.id = m.event_id AND active.updated_at >= ?))
+                AND \(Self.visibleArticle)
             ORDER BY \(Self.articleDateOrder), a.id
             LIMIT ?;
-            """, [.integer(matcherVersion), .real(activeSince.timeIntervalSince1970), .integer(limit)])
+            """,
+            [
+                .integer(matcherVersion), .real(activeSince.timeIntervalSince1970),
+                .real(activeSince.timeIntervalSince1970), .integer(limit),
+            ])
     }
 
     func eventMatchRows(articleIDs: [String]) throws -> [EventMatchRow] {
@@ -4093,6 +4048,41 @@ actor DatabaseEngine {
         return versions.compactMap { row in
             guard let id = row[0], let members = byEvent[id], !members.isEmpty else { return nil }
             return (id, row[1].flatMap { Int($0) } ?? 1, members.sorted { $0.id < $1.id })
+        }
+    }
+
+    /// Apply a matcher upgrade only to the exact active membership/text snapshot that was assessed.
+    /// The first group retains the event ID; all moves, invalidation and processed markers commit together.
+    func repartitionEvent(
+        _ eventID: String, expectedVersion: Int, expectedMembers: [EventMatchRow], groups: [[String]],
+        matcherVersion: Int, activeSince: Date, at now: Date
+    ) throws -> Set<String>? {
+        try inEventTransaction {
+            guard let event = try fetchEvent(id: eventID), event.id == eventID,
+                event.membershipVersion == expectedVersion, event.updatedAt >= activeSince,
+                let current = try eventMatchMembers(eventID: eventID),
+                Set(current.members) == Set(expectedMembers)
+            else { return nil }
+            let ids = groups.flatMap { $0 }
+            guard !groups.isEmpty, groups.allSatisfy({ !$0.isEmpty }),
+                ids.count == expectedMembers.count, Set(ids).count == ids.count,
+                Set(ids) == Set(expectedMembers.map(\.id))
+            else { throw Self.eventError("Invalid matcher partition") }
+            for group in groups {
+                for member in group where try excluded(member, from: group) {
+                    throw Self.eventError("Excluded reports cannot share a matcher partition")
+                }
+            }
+            var changed: Set<String> = []
+            if groups.count > 1 {
+                changed.insert(eventID)
+                for group in groups.dropFirst() {
+                    changed.insert(try insertEvent(members: group, at: now.timeIntervalSince1970))
+                }
+                try eventRows("DELETE FROM event_overviews WHERE event_id = ?;", [.text(eventID)])
+            }
+            for id in ids { try markMatched(id, matcherVersion: matcherVersion, at: now.timeIntervalSince1970) }
+            return changed
         }
     }
 

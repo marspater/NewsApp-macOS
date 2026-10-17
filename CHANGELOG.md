@@ -1,6 +1,16 @@
 # Changelog
 
-## Unreleased — 10 October 2026
+## Unreleased — 17 October 2026
+
+- Event overviews show publisher headlines and cited excerpts without generated introduction or factual prose. AI-disabled requests are final; older generated overviews regenerate. Energy policy still bounds publisher extraction and warmups; model updates preserve current excerpts.
+- Minor-rated stories remain visible, eligible for image lookup and notifications, and subject only to ordinary retention. Old importance-expiry tombstones no longer suppress returning feed items. Refresh no longer schedules importance scoring.
+- Briefing keeps source/category diversity first, then ranks by publisher coverage, existing stored importance and recency. Today/archive remain chronological; an existing Briefing stays frozen.
+- Event matching requires shared specific evidence and no conflict on every compared pair, retaining two-thirds compatibility and removing model promotions. Active legacy groups are revalidated transactionally on matcher upgrade; article IDs and read/save state remain intact, and inactive archived groups are preserved.
+- The developing-story relation backend is parked outside release. The isolated collector was snapshotted and disabled; its files and prior evidence were preserved.
+
+### Earlier implementation notes — 10 October 2026
+
+The entries below record earlier work; current visibility and matching behavior is described above.
 
 - Test runs no longer leave empty preference plists behind. Tests keep temporary defaults suites in the temporary directory and delete them afterwards; previously every `./test.sh` run added about 30 files to `~/Library/Preferences`.
 - Zen draws a dry-brush green ensō, and all tension illustrations loop without visible restarts. Boiling has faster flames with more sparks. Archive search rests as a compact native toolbar button in both feed and reader, expands on click or ⌘F, and collapses after an empty search is dismissed. Event coverage consistently names both story and publisher counts; collapsed cards avoid fetching full membership or replacing their visible image candidates.

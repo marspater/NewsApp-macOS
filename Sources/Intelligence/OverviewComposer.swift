@@ -96,23 +96,8 @@ public struct OverviewComposer: Sendable {
         // Timeline items come from every valid fact, not only the key facts shown above them.
         let timeline = OverviewTimelineBuilder.build(facts: validFacts, passages: passages, articles: articles)
 
-        // If fewer than 3 verified facts, provide a safe fallback overview
-        if validFacts.count < 3 {
-            return attaching(
-                timeline,
-                to: composeFallbackOverview(
-                    eventID: eventID,
-                    eventTitle: eventTitle,
-                    validFacts: validFacts,
-                    passages: passages,
-                    articles: articles,
-                    versionContext: versionContext,
-                    leadImage: leadImage
-                ))
-        }
-
-        // Synthesize 3 to 5 key facts
-        let targetFactCount = min(5, max(3, validFacts.count))
+        // Select up to 5 verified key facts
+        let targetFactCount = min(5, validFacts.count)
         let selectedFacts = Array(validFacts.prefix(targetFactCount))
 
         var overviewFacts: [OverviewFact] = []
@@ -152,9 +137,6 @@ public struct OverviewComposer: Sendable {
             )
             overviewFacts.append(overviewFact)
         }
-
-        // Build one or two paragraph introduction
-        let introduction = formatIntroduction(eventTitle: eventTitle, facts: selectedFacts)
 
         // Additional evidence sections: chronological timeline & attributed perspectives
         var allCitations = citations
@@ -220,9 +202,13 @@ public struct OverviewComposer: Sendable {
             evidenceSections = nil
         }
 
+        let headline =
+            articles.first(where: { !$0.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty })?.title
+            ?? eventTitle
+
         let content = OverviewContent(
-            title: eventTitle,
-            summary: introduction,
+            title: headline,
+            summary: "",
             facts: overviewFacts,
             citations: allCitations,
             leadImage: leadImage,
@@ -231,7 +217,7 @@ public struct OverviewComposer: Sendable {
 
         let provenance = OverviewProvenance(
             memberArticleIDs: memberArticleIDs,
-            kind: .synthesized,
+            kind: .fallbackExcerpts,
             createdAt: Date(),
             updatedAt: Date()
         )
@@ -270,97 +256,6 @@ public struct OverviewComposer: Sendable {
             version: document.version,
             content: content,
             provenance: document.provenance
-        )
-    }
-
-    /// Formats a concise 1 or 2 paragraph introduction strictly from the verified facts.
-    private static func formatIntroduction(eventTitle: String, facts: [PassageAnchoredFact]) -> String {
-        guard !facts.isEmpty else { return eventTitle }
-
-        // Paragraph 1: Headline synthesis from the first 2 facts
-        let leadingStatements = facts.prefix(2).map { $0.statement }
-        let p1 = leadingStatements.joined(separator: " ")
-
-        // Paragraph 2 (if 3 or more facts): Contextual elaboration from subsequent facts
-        if facts.count >= 3 {
-            let subsequentStatements = facts.dropFirst(2).prefix(2).map { $0.statement }
-            let p2 = subsequentStatements.joined(separator: " ")
-            return "\(p1)\n\n\(p2)"
-        }
-
-        return p1
-    }
-
-    /// Composes a fallback excerpt overview when insufficient verified facts exist for full synthesis.
-    private static func composeFallbackOverview(
-        eventID: String,
-        eventTitle: String,
-        validFacts: [PassageAnchoredFact],
-        passages: [EvidencePassage],
-        articles: [FeedArticle],
-        versionContext: OverviewVersionContext,
-        leadImage: OverviewLeadImage?
-    ) -> EventOverviewDocument {
-        let passagesByID = Dictionary(uniqueKeysWithValues: passages.map { ($0.id, $0) })
-        let articlesByID = Dictionary(uniqueKeysWithValues: articles.map { ($0.id, $0) })
-        let memberArticleIDs = articles.map(\.id)
-
-        var overviewFacts: [OverviewFact] = []
-        var citations: [OverviewCitation] = []
-
-        for (index, fact) in validFacts.enumerated() {
-            let citationID = "cite_fb_\(fact.passageID)_\(index + 1)"
-            let passage = passagesByID[fact.passageID]
-            let article = articlesByID[fact.articleID]
-
-            let meta: OverviewSourceMetadata?
-            if let art = article {
-                meta = OverviewSourceMetadata(
-                    title: art.title, name: art.source, url: art.link, publishedAt: art.pubDate)
-            } else {
-                meta = nil
-            }
-
-            let citation = OverviewCitation(
-                id: citationID,
-                articleID: fact.articleID,
-                passageID: fact.passageID,
-                passageFingerprint: passage?.fingerprint ?? ArticleIdentity.sha256Hex(fact.quote),
-                quote: fact.quote,
-                source: meta
-            )
-            citations.append(citation)
-
-            overviewFacts.append(
-                OverviewFact(
-                    id: "fb_fact_\(index + 1)",
-                    text: fact.statement,
-                    citationIDs: [citationID]
-                ))
-        }
-
-        let summary = validFacts.isEmpty ? eventTitle : validFacts.map { $0.statement }.joined(separator: " ")
-
-        let content = OverviewContent(
-            title: eventTitle,
-            summary: summary,
-            facts: overviewFacts,
-            citations: citations,
-            leadImage: leadImage
-        )
-
-        let provenance = OverviewProvenance(
-            memberArticleIDs: memberArticleIDs,
-            kind: .fallbackExcerpts,
-            createdAt: Date(),
-            updatedAt: Date()
-        )
-
-        return EventOverviewDocument(
-            eventID: eventID,
-            version: versionContext,
-            content: content,
-            provenance: provenance
         )
     }
 
