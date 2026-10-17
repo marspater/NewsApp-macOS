@@ -320,7 +320,7 @@ struct EventOverviewReaderView: View {
 
                 if overview.kind == .fallbackExcerpts {
                     TagView(
-                        title: "Verified excerpts", tint: currentSecondaryTextColor,
+                        title: "Publisher excerpts", tint: currentSecondaryTextColor,
                         font: AppTypography.overviewFont(.eyebrow, scale: textScale))
                 }
             }

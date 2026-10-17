@@ -49,6 +49,7 @@ actor OverviewGenerationCoordinator {
     private let queue: EnrichmentQueue
     private let textModel: NewsTextModel
     private let allowsModel: @Sendable () async -> Bool
+    private let allowsEnergy: @Sendable () async -> Bool
 
     /// Publisher text for an overview's representatives (#308). Nil keeps the stored text only, as in tests.
     nonisolated let extractText: (@Sendable (_ link: String) async -> ExtractionOutcome)?
@@ -72,6 +73,7 @@ actor OverviewGenerationCoordinator {
             return enabled && !info.isLowPowerModeEnabled
                 && info.thermalState.rawValue < ProcessInfo.ThermalState.serious.rawValue
         },
+        allowsEnergy: (@Sendable () async -> Bool)? = nil,
         extractText: (@Sendable (_ link: String) async -> ExtractionOutcome)? = nil,
         extractionDeadline: Duration = .seconds(4)
     ) {
@@ -79,6 +81,12 @@ actor OverviewGenerationCoordinator {
         self.queue = queue
         self.textModel = textModel
         self.allowsModel = allowsModel
+        self.allowsEnergy =
+            allowsEnergy ?? {
+                let info = ProcessInfo.processInfo
+                return !info.isLowPowerModeEnabled
+                    && info.thermalState.rawValue < ProcessInfo.ThermalState.serious.rawValue
+            }
         self.extractText = extractText
         self.extractionDeadline = extractionDeadline
     }
@@ -98,8 +106,7 @@ actor OverviewGenerationCoordinator {
         excludingFromExtraction excluded: Set<String> = []
     ) async -> EventOverviewDocument? {
         guard !Task.isCancelled else { return nil }
-        let modelAllowed = await allowsModel()
-        let model = textModel
+        let energyAllowed = await allowsEnergy()
         guard !Task.isCancelled else { return nil }
 
         let targetStore: ArticleStore
@@ -114,7 +121,7 @@ actor OverviewGenerationCoordinator {
         // Publisher text first: storing it changes the articles' inputs, so the inputs, cache key and
         // expected article versions below are all taken from the reloaded articles.
         let articles =
-            modelAllowed && multiSource
+            energyAllowed && multiSource
             ? await articlesWithPublisherText(articles, excluding: excluded, store: targetStore) : articles
         guard !Task.isCancelled else { return nil }
         // Storage rejects the result if any article's publisher input changed while it was generated.
@@ -187,21 +194,7 @@ actor OverviewGenerationCoordinator {
                     membershipVersion: membershipVersion
                 )
 
-                guard multiSource else { return overview }
-                guard modelAllowed else { return Self.provisional(overview) }
-                do {
-                    return try await OverviewComposer.composeWithModel(
-                        fallback: overview, passages: passages, articles: articles, model: model)
-                } catch is CancellationError {
-                    return nil
-                } catch let error as URLError where error.code == .resourceUnavailable {
-                    // No on-device model on this Mac: the deterministic overview is final.
-                    return Task.isCancelled ? nil : overview
-                } catch {
-                    // A model that is switched off, still downloading, refused or rate-limited: show the deterministic
-                    // overview and retry on the next request.
-                    return Task.isCancelled ? nil : Self.provisional(overview)
-                }
+                return overview
             }
 
             guard let generated = document, !Task.isCancelled else { return nil }
@@ -389,14 +382,13 @@ actor OverviewGenerationCoordinator {
 
     // MARK: - Visible Event Management & Automatic Cancellation
 
-    /// Warm only three covered events from the current visible feed, under the same model/energy policy.
+    /// Warm only three covered events from the current visible feed, under the same energy policy.
     func warmVisibleOverviews(store: ArticleStore, muting: MuteRules) async {
-        guard await allowsModel(), !Task.isCancelled else { return }
+        guard await allowsEnergy(), !Task.isCancelled else { return }
         guard
             let articles = try? await store.database.fetchArticles(
                 limit: 100,
-                publicationWindow: Date().addingTimeInterval(-72 * 3600)...Date(), muting: muting,
-                hidingWaitingStories: true),
+                publicationWindow: Date().addingTimeInterval(-72 * 3600)...Date(), muting: muting),
             let events = try? await store.eventFeedSummaries(for: articles.map(\.id))
         else { return }
         let top = events.filter { $0.sources.count > 1 }.sorted {
@@ -404,7 +396,7 @@ actor OverviewGenerationCoordinator {
             return ($0.latestDate ?? .distantPast) > ($1.latestDate ?? .distantPast)
         }.prefix(3)
         for event in top {
-            guard !Task.isCancelled, await allowsModel(),
+            guard !Task.isCancelled, await allowsEnergy(),
                 let members = try? await store.database.fetchArticles(
                     limit: nil, eventID: event.eventID, muting: muting),
                 let first = members.first

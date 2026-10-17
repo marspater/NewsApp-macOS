@@ -96,23 +96,8 @@ public struct OverviewComposer: Sendable {
         // Timeline items come from every valid fact, not only the key facts shown above them.
         let timeline = OverviewTimelineBuilder.build(facts: validFacts, passages: passages, articles: articles)
 
-        // If fewer than 3 verified facts, provide a safe fallback overview
-        if validFacts.count < 3 {
-            return attaching(
-                timeline,
-                to: composeFallbackOverview(
-                    eventID: eventID,
-                    eventTitle: eventTitle,
-                    validFacts: validFacts,
-                    passages: passages,
-                    articles: articles,
-                    versionContext: versionContext,
-                    leadImage: leadImage
-                ))
-        }
-
-        // Synthesize 3 to 5 key facts
-        let targetFactCount = min(5, max(3, validFacts.count))
+        // Select up to 5 verified key facts
+        let targetFactCount = min(5, validFacts.count)
         let selectedFacts = Array(validFacts.prefix(targetFactCount))
 
         var overviewFacts: [OverviewFact] = []
@@ -152,9 +137,6 @@ public struct OverviewComposer: Sendable {
             )
             overviewFacts.append(overviewFact)
         }
-
-        // Build one or two paragraph introduction
-        let introduction = formatIntroduction(eventTitle: eventTitle, facts: selectedFacts)
 
         // Additional evidence sections: chronological timeline & attributed perspectives
         var allCitations = citations
@@ -220,9 +202,13 @@ public struct OverviewComposer: Sendable {
             evidenceSections = nil
         }
 
+        let headline =
+            articles.first(where: { !$0.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty })?.title
+            ?? eventTitle
+
         let content = OverviewContent(
-            title: eventTitle,
-            summary: introduction,
+            title: headline,
+            summary: "",
             facts: overviewFacts,
             citations: allCitations,
             leadImage: leadImage,
@@ -231,7 +217,7 @@ public struct OverviewComposer: Sendable {
 
         let provenance = OverviewProvenance(
             memberArticleIDs: memberArticleIDs,
-            kind: .synthesized,
+            kind: .fallbackExcerpts,
             createdAt: Date(),
             updatedAt: Date()
         )
@@ -339,11 +325,13 @@ public struct OverviewComposer: Sendable {
                 ))
         }
 
-        let summary = validFacts.isEmpty ? eventTitle : validFacts.map { $0.statement }.joined(separator: " ")
+        let headline =
+            articles.first(where: { !$0.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty })?.title
+            ?? eventTitle
 
         let content = OverviewContent(
-            title: eventTitle,
-            summary: summary,
+            title: headline,
+            summary: "",
             facts: overviewFacts,
             citations: citations,
             leadImage: leadImage
