@@ -6522,10 +6522,14 @@ struct NewsTests {
             try JSONSerialization.jsonObject(
                 with: Data(contentsOf: URL(fileURLWithPath: output).appendingPathComponent("near-misses-private.json")))
             as? [[String: String]] ?? []
-        let missStages = Dictionary(misses.map { ($0["earlierEvent"] ?? "", $0["kind"] ?? "") }) { a, _ in a }
-        assertEqual(missStages[olderEvent.id], "olderThanWindow", "Coverage that began too early is a window stage")
-        assertEqual(
-            missStages[continuingEvent.id], "continuesAfterStart", "Coverage past the target's start is a window stage")
+        // One candidate can miss several targets at different stages, so compare the stages each one reached.
+        let missStages = Dictionary(misses.map { ($0["earlierEvent"] ?? "", Set([$0["kind"] ?? ""])) }) { $0.union($1) }
+        assertTrue(
+            missStages[olderEvent.id]?.contains("olderThanWindow") == true,
+            "Coverage that began too early is a window stage")
+        assertTrue(
+            missStages[continuingEvent.id]?.contains("continuesAfterStart") == true,
+            "Coverage past the target's start is a window stage")
         assertTrue(missStages[nearEvent.id] != nil, "Rejected in-window candidates join the recall sample")
         assertTrue(missStages[linkedEvent.id] == nil, "Linked candidates are not near misses")
         assertTrue(
