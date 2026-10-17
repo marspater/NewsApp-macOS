@@ -935,10 +935,10 @@ struct NewsTests {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
             "news-baseline-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let suite = "test.performance.\(UUID().uuidString)"
+        let suite = testDefaultsSuite("test.performance")
         let defaults = UserDefaults(suiteName: suite)!
         defer {
-            defaults.removePersistentDomain(forName: suite)
+            removeTestDefaults(suite)
             try? FileManager.default.removeItem(at: directory)
         }
         let settings = AppSettings(defaults: defaults)
@@ -1179,9 +1179,9 @@ struct NewsTests {
 
     @MainActor
     static func testReaderStoreUpdates() async {
-        let suiteName = "test.reader.\(UUID().uuidString)"
+        let suiteName = testDefaultsSuite("test.reader")
         let defaults = UserDefaults(suiteName: suiteName)!
-        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defer { removeTestDefaults(suiteName) }
         let store = ArticleStore(database: DatabaseEngine(path: ":memory:"))
         await store.initialize()
         let manager = FeedManager(settings: AppSettings(defaults: defaults), store: store, schedulesRefresh: false)
@@ -2264,9 +2264,9 @@ struct NewsTests {
                 attribute.contains("false") ? "" : fixtureRoot.appendingPathComponent("permalink").absoluteString,
                 "RSS GUID fallback respects explicit non-permalink identifiers")
         }
-        let suite = "test.audit.settings.\(UUID().uuidString)"
+        let suite = testDefaultsSuite("test.audit.settings")
         let defaults = UserDefaults(suiteName: suite)!
-        defer { defaults.removePersistentDomain(forName: suite) }
+        defer { removeTestDefaults(suite) }
         let settings = AppSettings(defaults: defaults)
         let feed = fixtureRoot.appendingPathComponent("rss").absoluteString
         assertEqual(settings.addFeed(url: feed), feed, "New feed reports addition")
@@ -2471,9 +2471,9 @@ struct NewsTests {
         let fresh = FeedArticle(
             title: "Fresh", link: fixtureRoot.appendingPathComponent("fresh").absoluteString, guid: "fresh",
             description: "", pubDate: DateParser.unknownDate, source: "Publisher")
-        let suite = "test.audit.refresh.\(UUID().uuidString)"
+        let suite = testDefaultsSuite("test.audit.refresh")
         let defaults = UserDefaults(suiteName: suite)!
-        defer { defaults.removePersistentDomain(forName: suite) }
+        defer { removeTestDefaults(suite) }
         let settings = AppSettings(defaults: defaults)
         settings.feedURLs = [
             fixtureRoot.appendingPathComponent("rss").absoluteString,
@@ -2566,9 +2566,9 @@ struct NewsTests {
         let db = DatabaseEngine(path: path)
         let store = ArticleStore(database: db)
         await store.initialize()
-        let suite = "test.conditional.\(UUID().uuidString)"
+        let suite = testDefaultsSuite("test.conditional")
         let defaults = UserDefaults(suiteName: suite)!
-        defer { defaults.removePersistentDomain(forName: suite) }
+        defer { removeTestDefaults(suite) }
         let settings = AppSettings(defaults: defaults)
         let feed = feedURL.absoluteString
         settings.feedURLs = [feed]
@@ -2888,9 +2888,9 @@ struct NewsTests {
         assertEqual(try await db.feedFetchStates()[cancelled], nil, "Cancellation records no failure")
 
         // End to end: Cmd-R inside the wait shows when the feed resumes and sends nothing.
-        let suite = "test.backoff.\(UUID().uuidString)"
+        let suite = testDefaultsSuite("test.backoff")
         let defaults = UserDefaults(suiteName: suite)!
-        defer { defaults.removePersistentDomain(forName: suite) }
+        defer { removeTestDefaults(suite) }
         let settings = AppSettings(defaults: defaults)
         let shown = "https://8.8.4.4/manager.xml"
         settings.feedURLs = [shown]
@@ -2939,9 +2939,9 @@ struct NewsTests {
     @MainActor
     static func testRefreshEndsAtCollection() async throws {
         print("  - Testing that refresh ends at collection and background work follows energy state...")
-        let suite = "test.refresh-collection.\(UUID().uuidString)"
+        let suite = testDefaultsSuite("test.refresh-collection")
         let defaults = UserDefaults(suiteName: suite)!
-        defer { defaults.removePersistentDomain(forName: suite) }
+        defer { removeTestDefaults(suite) }
         let settings = AppSettings(defaults: defaults)
         let feed = "https://8.8.8.8/news.xml"
         settings.feedURLs = [feed]
@@ -3046,9 +3046,9 @@ struct NewsTests {
         assertFalse(CatalogSet.offered.contains(.europe), "A set with only parked feeds is not shown")
 
         // Earlier subscriptions to parked catalog feeds end at launch; custom and English feeds stay.
-        let parkedSuite = "test.catalog.parked.\(UUID().uuidString)"
+        let parkedSuite = testDefaultsSuite("test.catalog.parked")
         let parkedDefaults = UserDefaults(suiteName: parkedSuite)!
-        defer { parkedDefaults.removePersistentDomain(forName: parkedSuite) }
+        defer { removeTestDefaults(parkedSuite) }
         let kept = ["https://example.com/custom.xml", feeds[0].url]
         parkedDefaults.set([kept[0], FeedCatalog.parkedFeeds[0].url, kept[1]], forKey: AppSettings.feedURLsKey)
         assertEqual(
@@ -3096,9 +3096,9 @@ struct NewsTests {
             AppSettings(defaults: parkedDefaults).feedURLs, [kept[0], nyt], "A later manual subscription stays")
 
         // Opt-in: a fresh install subscribes to nothing from the catalog beyond its own defaults.
-        let suite = "test.catalog.\(UUID().uuidString)"
+        let suite = testDefaultsSuite("test.catalog")
         let defaults = UserDefaults(suiteName: suite)!
-        defer { defaults.removePersistentDomain(forName: suite) }
+        defer { removeTestDefaults(suite) }
         let settings = AppSettings(defaults: defaults)
         assertEqual(
             feeds.filter(settings.isSubscribed).map(\.id), ["ars-technica"],
@@ -3214,9 +3214,9 @@ struct NewsTests {
         assertTrue(allSubscribedGaps.isEmpty, "Fully covered reading diet has 0 gaps")
 
         // 6. Advisory dismissal persistence and invariant checks
-        let dismissSuite = "test.catalog.dismissal.\(UUID().uuidString)"
+        let dismissSuite = testDefaultsSuite("test.catalog.dismissal")
         let dismissDefaults = UserDefaults(suiteName: dismissSuite)!
-        defer { dismissDefaults.removePersistentDomain(forName: dismissSuite) }
+        defer { removeTestDefaults(dismissSuite) }
 
         let testSettings = AppSettings(defaults: dismissDefaults)
         let targetFeed = "https://www.france24.com/en/rss"
@@ -3413,9 +3413,9 @@ struct NewsTests {
         await db.close()
 
         // Rules persist with the reader's settings; Unmute All clears them.
-        let suite = "test.muting.\(UUID().uuidString)"
+        let suite = testDefaultsSuite("test.muting")
         let defaults = UserDefaults(suiteName: suite)!
-        defer { defaults.removePersistentDomain(forName: suite) }
+        defer { removeTestDefaults(suite) }
         let settings = AppSettings(defaults: defaults)
         assertTrue(settings.muteRules.isEmpty, "Nothing is muted by default")
         assertEqual(
@@ -4049,9 +4049,9 @@ struct NewsTests {
         let mockConfig = URLSessionConfiguration.default
         mockConfig.protocolClasses = [MockURLProtocol.self]
         defer { MockURLProtocol.requestHandler = nil }
-        let suite = "test.health.\(UUID().uuidString)"
+        let suite = testDefaultsSuite("test.health")
         let defaults = UserDefaults(suiteName: suite)!
-        defer { defaults.removePersistentDomain(forName: suite) }
+        defer { removeTestDefaults(suite) }
         let settings = AppSettings(defaults: defaults)
         let live = "https://8.8.4.4/live.xml"
         settings.feedURLs = [live]
@@ -5542,9 +5542,9 @@ struct NewsTests {
             "Migration preserves conflicting historical text as ambiguous")
         await db.close()
 
-        let suite = "test.text.refresh.\(UUID().uuidString)"
+        let suite = testDefaultsSuite("test.text.refresh")
         let defaults = UserDefaults(suiteName: suite)!
-        defer { defaults.removePersistentDomain(forName: suite) }
+        defer { removeTestDefaults(suite) }
         let settings = AppSettings(defaults: defaults)
         settings.feedURLs = ["https://publisher.example/feed"]
         settings.aiEnabled = false
@@ -5726,9 +5726,9 @@ struct NewsTests {
             "Copied library retains originals and colliding document")
         await migrated.close()
 
-        let suite = "test.guid.refresh.\(UUID().uuidString)"
+        let suite = testDefaultsSuite("test.guid.refresh")
         let defaults = UserDefaults(suiteName: suite)!
-        defer { defaults.removePersistentDomain(forName: suite) }
+        defer { removeTestDefaults(suite) }
         let settings = AppSettings(defaults: defaults)
         settings.feedURLs = feeds
         settings.aiEnabled = false
@@ -6010,13 +6010,9 @@ struct NewsTests {
     static func testMigrationCoordinatorAtomicity() async throws {
         print("  - Testing MigrationCoordinator Atomic Transaction & ID Reconciliation...")
 
-        let runID = ProcessInfo.processInfo.environment["NEWS_TEST_RUN_ID"].flatMap(UUID.init(uuidString:)) ?? UUID()
-        let suiteName = "com.marspater.news.test.\(runID.uuidString)"
+        let suiteName = testDefaultsSuite("com.marspater.news.test")
         let tempDefaults = UserDefaults(suiteName: suiteName)!
-        defer {
-            tempDefaults.removePersistentDomain(forName: suiteName)
-            tempDefaults.synchronize()
-        }
+        defer { removeTestDefaults(suiteName) }
 
         let db = DatabaseEngine(path: ":memory:")
         try? await db.open()
@@ -6032,22 +6028,16 @@ struct NewsTests {
         assertTrue(neededBefore, "Migration should be needed initially")
 
         // Test isMigrationNeeded explicitly across various version states (unmigrated, current, future)
-        let v0Suite = "com.marspater.news.test.\(UUID().uuidString)"
+        let v0Suite = testDefaultsSuite("com.marspater.news.test")
         let version0Defaults = UserDefaults(suiteName: v0Suite)!
-        defer {
-            version0Defaults.removePersistentDomain(forName: v0Suite)
-            version0Defaults.synchronize()
-        }
+        defer { removeTestDefaults(v0Suite) }
         let coordinatorV0 = MigrationCoordinator(database: db, userDefaults: version0Defaults, fileManager: .default)
         assertTrue(
             await coordinatorV0.isMigrationNeeded(), "Migration should be needed when version is lower than current")
 
-        let currentSuite = "com.marspater.news.test.\(UUID().uuidString)"
+        let currentSuite = testDefaultsSuite("com.marspater.news.test")
         let currentDefaults = UserDefaults(suiteName: currentSuite)!
-        defer {
-            currentDefaults.removePersistentDomain(forName: currentSuite)
-            currentDefaults.synchronize()
-        }
+        defer { removeTestDefaults(currentSuite) }
         currentDefaults.set(
             MigrationCoordinator.currentMigrationVersion, forKey: MigrationCoordinator.migrationVersionKey)
         let coordinatorCurrent = MigrationCoordinator(
@@ -6055,12 +6045,9 @@ struct NewsTests {
         assertFalse(
             await coordinatorCurrent.isMigrationNeeded(), "Migration should not be needed when version equals current")
 
-        let futureSuite = "com.marspater.news.test.\(UUID().uuidString)"
+        let futureSuite = testDefaultsSuite("com.marspater.news.test")
         let futureDefaults = UserDefaults(suiteName: futureSuite)!
-        defer {
-            futureDefaults.removePersistentDomain(forName: futureSuite)
-            futureDefaults.synchronize()
-        }
+        defer { removeTestDefaults(futureSuite) }
         futureDefaults.set(
             MigrationCoordinator.currentMigrationVersion + 1, forKey: MigrationCoordinator.migrationVersionKey)
         let coordinatorFuture = MigrationCoordinator(database: db, userDefaults: futureDefaults, fileManager: .default)
@@ -6081,7 +6068,7 @@ struct NewsTests {
         // Real legacy data: a saved story, and a read list that also names a story no longer cached.
         let legacySuite = suiteName + ".legacy"
         let legacyDefaults = UserDefaults(suiteName: legacySuite)!
-        defer { legacyDefaults.removePersistentDomain(forName: legacySuite) }
+        defer { removeTestDefaults(legacySuite) }
         let savedStory = FeedArticle(
             title: "Legacy saved story", link: "https://news.example/legacy-saved", guid: "legacy-saved",
             description: "", pubDate: Date(), source: "Legacy")
@@ -7682,9 +7669,9 @@ struct NewsTests {
             try await curated.notificationStoryIDs(["c2"]).contains("c2"), "The changed, now unrated headline shows")
         await curated.close()
 
-        let suite = "test.importance-notifications.\(UUID().uuidString)"
+        let suite = testDefaultsSuite("test.importance-notifications")
         let defaults = UserDefaults(suiteName: suite)!
-        defer { defaults.removePersistentDomain(forName: suite) }
+        defer { removeTestDefaults(suite) }
         let settings = AppSettings(defaults: defaults)
         settings.feedURLs = [fixtureRoot.appendingPathComponent("feed.xml").absoluteString]
         settings.aiEnabled = true
@@ -8887,9 +8874,9 @@ struct NewsTests {
     @MainActor
     static func testRefreshClustersEvents(fixtureRoot: URL) async throws {
         print("  - Testing clustering after refresh, off the main actor and outside the refresh path...")
-        let suite = "test.refresh-events.\(UUID().uuidString)"
+        let suite = testDefaultsSuite("test.refresh-events")
         let defaults = UserDefaults(suiteName: suite)!
-        defer { defaults.removePersistentDomain(forName: suite) }
+        defer { removeTestDefaults(suite) }
         let settings = AppSettings(defaults: defaults)
         let feeds = ["https://8.8.8.8/one.xml", "https://8.8.4.4/two.xml"]
         settings.feedURLs = feeds
@@ -10303,9 +10290,9 @@ struct NewsTests {
             "0 new articles from 1 source", "Edge case: 0 articles, 1 source")
 
         // 2. AppSettings Migration Semantics
-        let suiteName = "test.notifications.migration.\(UUID().uuidString)"
+        let suiteName = testDefaultsSuite("test.notifications.migration")
         let tempDefaults = UserDefaults(suiteName: suiteName)!
-        defer { tempDefaults.removePersistentDomain(forName: suiteName) }
+        defer { removeTestDefaults(suiteName) }
 
         // Case A: legacy privateNotificationsEnabled = true -> migrates to .private
         tempDefaults.set(true, forKey: AppSettings.privateNotificationsEnabledKey)
@@ -10318,9 +10305,9 @@ struct NewsTests {
             "Migrated key should be written to defaults")
 
         // Case B: legacy privateNotificationsEnabled = false -> migrates to .full
-        let suiteNameB = "test.notifications.migration.b.\(UUID().uuidString)"
+        let suiteNameB = testDefaultsSuite("test.notifications.migration.b")
         let tempDefaultsB = UserDefaults(suiteName: suiteNameB)!
-        defer { tempDefaultsB.removePersistentDomain(forName: suiteNameB) }
+        defer { removeTestDefaults(suiteNameB) }
         tempDefaultsB.set(false, forKey: AppSettings.privateNotificationsEnabledKey)
         let settingsB = AppSettings(defaults: tempDefaultsB)
         assertEqual(
@@ -10353,9 +10340,9 @@ struct NewsTests {
 
     @MainActor
     static func testFeedRemovalAndShutdown() async throws {
-        let suite = "test.feed-lifecycle.\(UUID().uuidString)"
+        let suite = testDefaultsSuite("test.feed-lifecycle")
         let defaults = UserDefaults(suiteName: suite)!
-        defer { defaults.removePersistentDomain(forName: suite) }
+        defer { removeTestDefaults(suite) }
         let settings = AppSettings(defaults: defaults)
         settings.feedURLs = ["https://example.com/feed"]
         settings.aiEnabled = false
@@ -10408,9 +10395,9 @@ struct NewsTests {
     @MainActor
     static func testSleepAndWakeRefresh() async throws {
         print("  - Testing sleep and wake: interrupted refreshes store nothing, stale feeds refresh after wake...")
-        let suite = "test.sleep-wake.\(UUID().uuidString)"
+        let suite = testDefaultsSuite("test.sleep-wake")
         let defaults = UserDefaults(suiteName: suite)!
-        defer { defaults.removePersistentDomain(forName: suite) }
+        defer { removeTestDefaults(suite) }
         let settings = AppSettings(defaults: defaults)
         settings.feedURLs = ["https://example.com/feed"]
         settings.aiEnabled = false
@@ -10668,7 +10655,8 @@ struct NewsTests {
                 let db = DatabaseEngine(path: ":memory:")
                 let store = ArticleStore(database: db)
                 await store.initialize()
-                let suite = "test.transport-cancellation.\(UUID().uuidString)"
+                let suite = testDefaultsSuite("test.transport-cancellation")
+                defer { removeTestDefaults(suite) }
                 let defaults = UserDefaults(suiteName: suite)!
                 let settings = AppSettings(defaults: defaults)
                 let feed = "http://93.184.216.34/\(phase)/\(index).xml"
@@ -10709,7 +10697,6 @@ struct NewsTests {
                 assertEqual(try await db.counts().total, 0, "Cancellation ingests no partial articles")
                 assertEqual(
                     try await db.feedFetchStates()[feed], nil, "Cancellation records no feed failure or validators")
-                defaults.removePersistentDomain(forName: suite)
                 await db.close()
             }
         }
@@ -10742,9 +10729,9 @@ struct NewsTests {
             let db = DatabaseEngine(path: path)
             let store = ArticleStore(database: db)
             await store.initialize()
-            let suite = "test.publisher-cancellation.\(UUID().uuidString)"
+            let suite = testDefaultsSuite("test.publisher-cancellation")
             let defaults = UserDefaults(suiteName: suite)!
-            defer { defaults.removePersistentDomain(forName: suite) }
+            defer { removeTestDefaults(suite) }
             let settings = AppSettings(defaults: defaults)
             settings.feedURLs = feeds
             settings.aiEnabled = false
@@ -11307,9 +11294,9 @@ struct NewsTests {
         assertEqual(invalidURL, nil, "Empty string should return nil")
 
         // 2. Injected UserDefaults Isolation
-        let suiteName = "test.settings.isolation.\(UUID().uuidString)"
+        let suiteName = testDefaultsSuite("test.settings.isolation")
         let tempDefaults = UserDefaults(suiteName: suiteName)!
-        defer { tempDefaults.removePersistentDomain(forName: suiteName) }
+        defer { removeTestDefaults(suiteName) }
 
         let settings = AppSettings(defaults: tempDefaults)
         _ = settings.addFeed(url: "https://isolated.example.com/rss.xml")
@@ -12947,9 +12934,9 @@ struct NewsTests {
     static func testAppContainerWiring() async {
         print("  - Testing AppContainer wiring...")
 
-        let suite = "test.container.\(UUID().uuidString)"
+        let suite = testDefaultsSuite("test.container")
         let defaults = UserDefaults(suiteName: suite)!
-        defer { defaults.removePersistentDomain(forName: suite) }
+        defer { removeTestDefaults(suite) }
         let settings = AppSettings(defaults: defaults)
         let store = ArticleStore(database: DatabaseEngine(path: ":memory:"))
         let feeds = FeedManager(settings: settings, store: store, schedulesRefresh: false)

@@ -68,10 +68,10 @@ private final class WorldTensionQADelegate: NSObject, NSApplicationDelegate {
         let output = URL(fileURLWithPath: CommandLine.arguments[1], isDirectory: true)
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("world-tension-qa-\(UUID())")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let suite = "test.world-tension.qa.\(UUID())"
+        let suite = testDefaultsSuite("test.world-tension.qa")
         let defaults = UserDefaults(suiteName: suite)!
         defer {
-            defaults.removePersistentDomain(forName: suite)
+            removeTestDefaults(suite)
             try? FileManager.default.removeItem(at: directory)
         }
         let settings = AppSettings(defaults: defaults)

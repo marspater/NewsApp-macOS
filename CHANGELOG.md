@@ -2,6 +2,7 @@
 
 ## Unreleased — 10 October 2026
 
+- Test runs no longer leave empty preference plists behind. Tests keep temporary defaults suites in the temporary directory and delete them afterwards; previously every `./test.sh` run added about 30 files to `~/Library/Preferences`.
 - Zen draws a dry-brush green ensō, and all tension illustrations loop without visible restarts. Boiling has faster flames with more sparks. Archive search rests as a compact native toolbar button in both feed and reader, expands on click or ⌘F, and collapses after an empty search is dismissed. Event coverage consistently names both story and publisher counts; collapsed cards avoid fetching full membership or replacing their visible image candidates.
 - Background enrichment no longer republishes an unchanged article collection or increments its revision, avoiding redundant feed and reader rebuilds after classification. Actual content, category and analysis changes still propagate.
 - Main-window launch avoids a macOS 27 layout failure caused by suppressing an empty native search menu. Suggestions remain absent until typing starts.

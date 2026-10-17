@@ -109,6 +109,7 @@ Native macOS, local-first RSS reader. This document defines the supported techno
 
 ### Tests (`Tests/`)
 - `Tests/NewsTests.swift`: automated test runner and unit test suites.
+- `Tests/TestDefaults.swift`: temporary defaults suites stored in the temporary directory, shared by the test runners and native harnesses.
 
 ### Platform / distribution
 - `News.entitlements`: sandbox/runtime capabilities.

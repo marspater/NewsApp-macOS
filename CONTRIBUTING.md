@@ -58,7 +58,7 @@ NEWS_LIVE_CATALOG_CHECK=1 ./test.sh # Optional: fetch every catalog feed through
 
 `make build` and `make release` compile SwiftPM executables; `make app` and `make run` use the app-bundle workflow. Packaging helpers live under `script/distribution/` and are inactive in development CI. Do not run notarization or build Intel slices in the current scope.
 
-Add deterministic regressions for changed parsing, classification, persistence, migrations, security boundaries and state transitions. Synchronize async tests on observable state rather than short sleeps; model-dependent tests must use deterministic fallbacks. Preserve tests rather than removing failing coverage. Keep tests isolated from real user settings, databases and logs.
+Add deterministic regressions for changed parsing, classification, persistence, migrations, security boundaries and state transitions. Synchronize async tests on observable state rather than short sleeps; model-dependent tests must use deterministic fallbacks. Preserve tests rather than removing failing coverage. Keep tests isolated from real user settings, databases and logs. Create temporary defaults with `testDefaultsSuite` and remove them with `removeTestDefaults` from `Tests/TestDefaults.swift`: a plain suite name leaves a plist in `~/Library/Preferences` that cfprefsd rewrites after deletion.
 
 The overview and importance reviewer sheets bind labels to the exact displayed inputs. Only `label`, `note` and row order may change. If a source capture or an input column changes, the report command rejects the sheet before writing aggregates. Keep the old capture and labels; prepare and review the changed capture in a new private directory. Sheets are never overwritten by the preparation command.
 

@@ -13,7 +13,7 @@ if [[ "${NEWS_READING_FULL_APP:-0}" == "1" ]]; then
     # Reuse the app-bundle build and production entitlements; never replace the installed app.
     rsync -a --exclude .git --exclude .antigravity --exclude .claude --exclude .build --exclude '*.app' ./ "$STAGE/src/"
     sed -i '' '/^@main$/d' "$STAGE/src/Sources/App/NewsApp.swift"
-    sed -i '' 's|Sources/App/NewsApp.swift \\|Sources/App/NewsApp.swift Tests/NativeReadingMemory.swift \\|; s|<string>com.marspater.news</string>|<string>com.marspater.news.workloadcheck</string>|' "$STAGE/src/build.sh"
+    sed -i '' 's|Sources/App/NewsApp.swift \\|Sources/App/NewsApp.swift Tests/NativeReadingMemory.swift Tests/TestDefaults.swift \\|; s|<string>com.marspater.news</string>|<string>com.marspater.news.workloadcheck</string>|' "$STAGE/src/build.sh"
     # Observe native didFinish, rather than treating cancellation as a successful Web load.
     # This hook exists only in the staged verification bundle, never in shipping sources.
     python3 - "$STAGE/src/Sources/Views/ArticleWebView.swift" <<'PY_WEB'
@@ -57,6 +57,6 @@ done < <(find Sources -name '*.swift' -print | sort)
 export CLANG_MODULE_CACHE_PATH="${CLANG_MODULE_CACHE_PATH:-${TMPDIR:-/tmp}/news-module-cache}"
 export SWIFT_MODULECACHE_PATH="$CLANG_MODULE_CACHE_PATH"
 swiftc -swift-version 6 -O -parse-as-library -target arm64-apple-macos15.0 \
-    "${SOURCES[@]}" "$STAGE/NewsApp.swift" "${NEWS_NATIVE_HARNESS:-Tests/NativePerformanceBaseline.swift}" -o "$STAGE/news_native_baseline"
+    "${SOURCES[@]}" "$STAGE/NewsApp.swift" "${NEWS_NATIVE_HARNESS:-Tests/NativePerformanceBaseline.swift}" Tests/TestDefaults.swift -o "$STAGE/news_native_baseline"
 "$STAGE/news_native_baseline" "$OUTPUT"
 echo "Native performance evidence: $OUTPUT"

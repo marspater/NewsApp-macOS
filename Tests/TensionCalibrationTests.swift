@@ -508,9 +508,9 @@ final class TensionCalibrationTests {
     @MainActor
     static func testAppSettingsOptInDefaultsAndToggle() {
         print("  - Testing AppSettings tensionCollectionOptIn default and persistence...")
-        let suiteName = "test.tension.optin.\(UUID().uuidString)"
+        let suiteName = testDefaultsSuite("test.tension.optin")
         let defaults = UserDefaults(suiteName: suiteName)!
-        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defer { removeTestDefaults(suiteName) }
 
         let settings = AppSettings(defaults: defaults)
         assert(settings.tensionCollectionOptIn == false, "tensionCollectionOptIn must default to false")
@@ -527,9 +527,9 @@ final class TensionCalibrationTests {
     @MainActor
     static func testEffectiveFeedURLsComputation() {
         print("  - Testing effectiveFeedURLs computation when opted out vs opted in...")
-        let suiteName = "test.effective.urls.\(UUID().uuidString)"
+        let suiteName = testDefaultsSuite("test.effective.urls")
         let defaults = UserDefaults(suiteName: suiteName)!
-        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defer { removeTestDefaults(suiteName) }
 
         let settings = AppSettings(defaults: defaults)
         let originalSubscribed = settings.feedURLs
