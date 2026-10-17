@@ -3666,7 +3666,9 @@ actor DatabaseEngine {
             guard try eventRows("SELECT value FROM model_generation WHERE id = 1;").first?[0] != current else {
                 return false
             }
-            try eventRows("UPDATE event_overviews SET analysis_version = 0;")
+            try eventRows(
+                "UPDATE event_overviews SET analysis_version = 0 WHERE kind != ?;",
+                [.text(OverviewKind.fallbackExcerpts.rawValue)])
             try eventRows("UPDATE article_enrichment SET analysis_version = 0 WHERE summary IS NOT NULL;")
             try eventRows("INSERT OR REPLACE INTO model_generation(id, value) VALUES (1, ?);", [.text(current)])
             return true

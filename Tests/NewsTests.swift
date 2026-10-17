@@ -11740,6 +11740,7 @@ struct NewsTests {
         {
             OverviewGenerationCoordinator(
                 store: store, queue: EnrichmentQueue(store: store), textModel: model, allowsModel: { true },
+                allowsEnergy: { true },
                 extractText: extractor, extractionDeadline: deadline)
         }
         func stored(_ id: String) async throws -> FeedArticle? {
@@ -11766,7 +11767,7 @@ struct NewsTests {
         let after = await extracting.requestOverview(
             eventID: "evidence", eventTitle: "Harbor bridge", membershipVersion: 1, articles: [a, b])
         assertEqual(try await stored(a.id)?.fullContent, page("Publisher A"), "Accepted publisher text is stored")
-        assertEqual(await prompts.value, 1, "The draft prompt carries the extracted text")
+        assertEqual(await prompts.value, 0, "Publisher extraction never schedules model prose")
         assertTrue(after?.inputTextHash != before?.inputTextHash, "Extracted text gives the overview new inputs")
         assertEqual(
             try await database.fetchEventOverview(eventID: "evidence")?.id, after?.id,
@@ -11774,7 +11775,7 @@ struct NewsTests {
         let again = await extracting.requestOverview(
             eventID: "evidence", eventTitle: "Harbor bridge", membershipVersion: 1, articles: [a, b])
         assertEqual(again?.id, after?.id, "Copies from before extraction still hit the stored overview")
-        assertEqual(await prompts.value, 1, "The stored overview is reused without another draft")
+        assertEqual(await prompts.value, 0, "The stored excerpt overview is reused without a model")
         assertEqual(await log.count(a.link), 1, "Stored text is never fetched again")
 
         // The reader's own article is left to the reader.
@@ -11886,10 +11887,11 @@ struct NewsTests {
         await pages.set(u.link, success(page("Publisher U")))
         let gated = OverviewGenerationCoordinator(
             store: store, queue: EnrichmentQueue(store: store), textModel: refusing, allowsModel: { false },
+            allowsEnergy: { false },
             extractText: extractor)
         _ = await gated.requestOverview(
             eventID: "gated", eventTitle: "Harbor bridge", membershipVersion: 1, articles: [u, v])
-        assertEqual(await log.count(u.link), 0, "AI, Low Power and thermal policy also gate page fetches")
+        assertEqual(await log.count(u.link), 0, "Low Power and thermal policy gate page fetches independently of AI")
         let five = ["ev-w1", "ev-w2", "ev-w3", "ev-w4", "ev-w5"].enumerated().map {
             article($1, "Publisher W\($0)")
         }
@@ -12127,51 +12129,54 @@ struct NewsTests {
             store: store, queue: EnrichmentQueue(store: store), textModel: coordinatedModel, allowsModel: { true })
         let coordinated = await coordinator.requestOverview(
             eventID: "plain", eventTitle: "Bridge reopening", membershipVersion: 1, articles: [article1, article2])
-        assertEqual(
-            coordinated?.content.evidenceSections?.introduction?.count, 2, "Reader request reaches the model composer")
-        assertEqual(
-            try await database.fetchEventOverview(eventID: "plain")?.allClaims.count, 5,
-            "SQLite retains introductory citations")
-        let before = await requests.value
+        assertEqual(coordinated?.summary, "", "Production requests omit generated prose")
+        assertEqual(coordinated?.kind, .fallbackExcerpts, "Production requests use publisher excerpts")
+        assertEqual(await requests.value, 0, "Production overview generation never calls the model")
+        let persisted = try await database.fetchEventOverview(eventID: "plain")
+        assertEqual(persisted?.id, coordinated?.id, "SQLite stores the generated excerpt document")
+        assertEqual(persisted?.summary, "", "SQLite preserves the empty summary")
+        assertTrue(!(persisted?.facts.isEmpty ?? true), "SQLite retains publisher facts and citations")
         let blocked = OverviewGenerationCoordinator(
             store: store, queue: EnrichmentQueue(store: store), textModel: coordinatedModel, allowsModel: { false })
-        _ = await blocked.requestOverview(
+        let aiOff = await blocked.requestOverview(
             eventID: "blocked", eventTitle: "Bridge", membershipVersion: 1, articles: [article1, article2])
-        assertEqual(await requests.value, before, "AI/energy policy prevents all model requests")
+        assertEqual(await requests.value, 0, "AI-disabled requests make no model calls")
         assertEqual(
-            try await database.fetchEventOverview(eventID: "blocked")?.isStale(currentMembershipVersion: 1), true,
-            "An overview made while the model was skipped is stored as provisional")
-        let upgraded = await coordinator.requestOverview(
+            try await database.fetchEventOverview(eventID: "blocked")?.isStale(currentMembershipVersion: 1), false,
+            "AI-disabled publisher excerpts are final")
+        let reused = await coordinator.requestOverview(
             eventID: "blocked", eventTitle: "Bridge", membershipVersion: 1, articles: [article1, article2])
-        assertEqual(
-            upgraded?.content.evidenceSections?.introduction?.count, 2,
-            "A provisional overview is regenerated once the model may run")
-        let failures = [
-            (NewsTextModel { _, _ in throw URLError(.timedOut) }, true),
-            (NewsTextModel { _, _ in throw NewsTextModel.TemporarilyUnavailable() }, true),
-            (NewsTextModel.unavailable, false),
-        ]
-        for (index, (failure, retried)) in failures.enumerated() {
-            let eventID = "failing-\(index)"
-            let failing = OverviewGenerationCoordinator(
-                store: store, queue: EnrichmentQueue(store: store), textModel: failure, allowsModel: { true })
-            let shown = await failing.requestOverview(
-                eventID: eventID, eventTitle: "Bridge", membershipVersion: 1, articles: [article1, article2])
-            assertTrue(shown != nil, "A failed model still shows the deterministic overview")
-            assertEqual(
-                try await database.fetchEventOverview(eventID: eventID)?.isStale(currentMembershipVersion: 1), retried,
-                "A failed model is retried later; a Mac without one keeps the deterministic overview")
-        }
-        // A cancelled background request stops waiting, but a reader that joined its generation still gets the result.
+        assertEqual(reused?.id, aiOff?.id, "Enabling AI reuses the same final excerpts")
+
+        let legacy = EventOverviewDocument(
+            eventID: "legacy",
+            version: OverviewVersionContext(
+                membershipVersion: 1, inputTextHash: coordinated!.inputTextHash, analysisVersion: 7),
+            content: OverviewContent(title: "Old generated headline", summary: "Old model prose."),
+            provenance: OverviewProvenance(memberArticleIDs: [article1.id, article2.id], kind: .synthesized))
+        assertTrue(try await database.recordEventOverview(legacy), "Seed a legacy generated overview")
+        let replacement = await blocked.requestOverview(
+            eventID: "legacy", eventTitle: "Bridge", membershipVersion: 1, articles: [article1, article2])
+        assertEqual(replacement?.summary, "", "A cached generated summary regenerates as excerpts")
+        assertEqual(replacement?.analysisVersion, EventOverviewDocument.currentAnalysisVersion, "Regeneration uses v8")
+        assertTrue(replacement?.id != legacy.id, "The legacy cached document is replaced")
+
+        // Hold the real queue, rather than a retired model call, to verify shared-generation cancellation.
         let gate = OpenGate()
-        let gatedModel = NewsTextModel { prompt, tokens in
-            await gate.wait()
-            return try await coordinatedModel.respond(prompt, tokens)
+        let queue = EnrichmentQueue(store: store)
+        let holders = (0..<3).map { index in
+            Task {
+                await queue.scheduleOverviewGeneration(eventID: "excerpt-hold-\(index)") {
+                    await gate.wait()
+                    return nil
+                }
+            }
         }
+        await eventually("Held jobs fill the excerpt queue") { await queue.activeJobCount() == 3 }
         let checks = TestCounter()
         let shared = OverviewGenerationCoordinator(
-            store: store, queue: EnrichmentQueue(store: store), textModel: gatedModel,
-            allowsModel: {
+            store: store, queue: queue, textModel: coordinatedModel,
+            allowsEnergy: {
                 await checks.increment()
                 return true
             })
@@ -12180,18 +12185,22 @@ struct NewsTests {
                 eventID: "joined", eventTitle: "Bridge", membershipVersion: 1,
                 articles: [article1, article2], priority: .background)
         }
-        while await gate.arrivals == 0 { await Task.yield() }
+        await eventually("Background excerpts wait in the queue") {
+            await shared.inFlightInputHash(for: "joined") != nil
+        }
         let reader = Task {
             await shared.requestOverview(
                 eventID: "joined", eventTitle: "Bridge", membershipVersion: 1, articles: [article1, article2])
         }
-        while await checks.value < 2 { await Task.yield() }
+        await eventually("The reader joins the same request") { await checks.value >= 2 }
         warmup.cancel()
         await gate.open()
         assertEqual(await warmup.value, nil, "The cancelled background request returns nothing")
-        assertEqual(
-            await reader.value?.content.evidenceSections?.introduction?.count, 2,
-            "Cancelling the background request does not cancel a reader's joined generation")
+        let joined = await reader.value
+        assertTrue(joined != nil, "Cancelling warmup preserves the reader's shared generation")
+        assertEqual(joined?.summary, "", "The joined generation returns excerpts")
+        for holder in holders { _ = await holder.value }
+        assertEqual(await requests.value, 0, "The shared generation also makes no model calls")
         // A macOS update can replace the on-device model: stored overviews and summaries regenerate with the new one.
         let summary = ArticleAnalysis(
             summary: "The bridge reopened.", keyPoints: ["Traffic resumed."], entities: [], category: "World",
@@ -12201,8 +12210,9 @@ struct NewsTests {
             try await database.reconcileModelGeneration("model-a"),
             "An unrecorded model generation invalidates stored results")
         assertEqual(
-            try await database.fetchEventOverview(eventID: "plain")?.analysisVersion, 0,
-            "Overviews from an earlier model are provisional")
+            try await database.fetchEventOverview(eventID: "plain")?.analysisVersion,
+            EventOverviewDocument.currentAnalysisVersion,
+            "Publisher excerpts remain final when the model changes")
         assertTrue(
             (await database.fetchArticleAnalysis(for: article1.id)?.analysisVersion ?? 3) < 3,
             "Summaries from an earlier model are redone")
@@ -13541,6 +13551,12 @@ struct NewsTests {
             overflowSelection.totalEstimatedTokens <= tightBudget.availablePassageTokens
                 || overflowSelection.isFallbackRecommended,
             "Either fits tightly in pruned budget or safely flags fallback recommendation")
+        for passage in overflowSelection.passages {
+            let source = candidates.first { $0.id == passage.articleID }!
+            assertTrue(
+                passageSelector.extractRankedPassages(from: source).contains { $0.text.contains(passage.text) },
+                "Budget pruning preserves exact publisher text, including punctuation")
+        }
         // Ensure reader does not fail: representatives and passages are returned
         assertTrue(!overflowSelection.representatives.isEmpty, "Representatives still returned during overflow")
     }
@@ -14103,13 +14119,9 @@ struct NewsTests {
         )
 
         // Acceptance criteria:
-        // A. One or two paragraph introduction
-        let paragraphs = doc.summary.components(separatedBy: "\n\n").filter {
-            !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        }
-        assertTrue(
-            paragraphs.count >= 1 && paragraphs.count <= 2,
-            "Introduction is strictly 1 or 2 paragraphs (actual: \(paragraphs.count))")
+        // Publisher headline and excerpts replace the stitched introduction.
+        assertEqual(doc.summary, "", "Publisher excerpts omit generated introduction")
+        assertEqual(doc.title, article1.title, "The title is a stored publisher headline")
 
         // B. Three to five key facts with citations
         assertTrue(
@@ -14147,7 +14159,7 @@ struct NewsTests {
             article3.fullContent, "Original complete publisher article content 3", "Article 3 full content unchanged")
 
         // E. Provenance and membership binding
-        assertEqual(doc.kind, OverviewKind.synthesized, "Overview kind is synthesized when >= 3 facts present")
+        assertEqual(doc.kind, OverviewKind.fallbackExcerpts, "Deterministic facts retain publisher-excerpt provenance")
         assertEqual(doc.eventID, "event-venus-1", "Event ID matches")
         assertTrue(doc.memberArticleIDs.contains("art-1"), "Member article IDs contain art-1")
         assertTrue(doc.memberArticleIDs.contains("art-2"), "Member article IDs contain art-2")
@@ -15444,8 +15456,8 @@ struct NewsTests {
             "Timelines bump the analysis version")
         let undatedOverview = OverviewComposer.composeOverview(
             eventID: "event-undated", eventTitle: "Storm",
-            verifiedFacts: [facts[3], facts[4]], passages: passages, articles: articles)
-        assertTrue(undatedOverview.evidenceSections == nil, "Without dated sentences the section is absent")
+            verifiedFacts: [facts[3]], passages: [passages[3]], articles: articles)
+        assertTrue(undatedOverview.timeline.isEmpty, "Without dated publisher sentences the timeline is absent")
     }
 
     static func testEventOverviewReaderMode(fixtureHost: String) async throws {

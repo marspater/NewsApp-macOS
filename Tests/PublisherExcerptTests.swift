@@ -43,7 +43,7 @@ struct PublisherExcerptTests {
         testCurrentAnalysisVersionBumped()
         testExactExcerptCitationCorrespondence()
         testAttributionControls()
-        testEmptySummaryRenderingAndStorage()
+        await testEmptySummaryRenderingAndStorage()
         testCachedProseInvalidation()
         testPublisherExcerptsDisplayTag()
         await testAIDisabledBehavior()
@@ -183,7 +183,7 @@ struct PublisherExcerptTests {
     }
 
     // MARK: - 4. Empty Summary Rendering & Storage
-    static func testEmptySummaryRenderingAndStorage() {
+    static func testEmptySummaryRenderingAndStorage() async {
         print("  - Testing empty summary rendering and JSON round-trip...")
 
         let sentence = "Negotiators presented the updated draft text early Monday morning."
@@ -222,6 +222,15 @@ struct PublisherExcerptTests {
             assertEqual(decoded.id, overview.id, "Round-trip preserves document ID")
             assertEqual(decoded.summary, "", "Round-trip preserves empty summary")
             assertEqual(decoded.kind, .fallbackExcerpts, "Round-trip preserves excerpt provenance kind")
+            let db = DatabaseEngine(path: ":memory:")
+            try await db.open()
+            _ = try await db.upsertArticles([article])
+            assertTrue(try await db.recordEventOverview(overview), "SQLite accepts an empty summary")
+            let stored = try await db.fetchEventOverview(eventID: overview.eventID)
+            assertEqual(stored?.summary, "", "SQLite preserves the empty summary")
+            assertEqual(stored?.facts, overview.facts, "SQLite preserves excerpt text")
+            assertEqual(stored?.citations, overview.citations, "SQLite preserves source citations")
+            await db.close()
             assertEqual(
                 decoded.analysisVersion, EventOverviewDocument.currentAnalysisVersion,
                 "Round-trip preserves analysis version")
@@ -340,6 +349,7 @@ struct PublisherExcerptTests {
             store: store,
             queue: queue,
             allowsModel: { false },
+            allowsEnergy: { true },
             extractText: nil
         )
 

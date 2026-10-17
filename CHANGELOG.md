@@ -2,6 +2,7 @@
 
 ## Unreleased — 17 October 2026
 
+- Event overviews show publisher headlines and cited excerpts without generated introduction or factual prose. AI-disabled requests are final; older generated overviews regenerate. Energy policy still bounds publisher extraction and warmups; model updates preserve current excerpts.
 - Minor-rated stories remain visible, eligible for image lookup and notifications, and subject only to ordinary retention. Old importance-expiry tombstones no longer suppress returning feed items. Refresh no longer schedules importance scoring.
 - Briefing keeps source/category diversity first, then ranks by publisher coverage, existing stored importance and recency. Today/archive remain chronological; an existing Briefing stays frozen.
 - Event matching requires shared specific evidence and no conflict on every compared pair, retaining two-thirds compatibility and removing model promotions. Active legacy groups are revalidated transactionally on matcher upgrade; article IDs and read/save state remain intact, and inactive archived groups are preserved.

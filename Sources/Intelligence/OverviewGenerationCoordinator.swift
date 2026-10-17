@@ -47,8 +47,6 @@ actor OverviewGenerationCoordinator {
 
     private let store: ArticleStore?
     private let queue: EnrichmentQueue
-    private let textModel: NewsTextModel
-    private let allowsModel: @Sendable () async -> Bool
     private let allowsEnergy: @Sendable () async -> Bool
 
     /// Publisher text for an overview's representatives (#308). Nil keeps the stored text only, as in tests.
@@ -66,21 +64,15 @@ actor OverviewGenerationCoordinator {
 
     init(
         store: ArticleStore? = nil, queue: EnrichmentQueue = .shared,
-        textModel: NewsTextModel = .onDevice,
-        allowsModel: @escaping @Sendable () async -> Bool = {
-            let enabled = AppSettings.shared.aiEnabled
-            let info = ProcessInfo.processInfo
-            return enabled && !info.isLowPowerModeEnabled
-                && info.thermalState.rawValue < ProcessInfo.ThermalState.serious.rawValue
-        },
+        // Compatibility for audit callers; production excerpts never use a model.
+        textModel _: NewsTextModel = .unavailable,
+        allowsModel _: @escaping @Sendable () async -> Bool = { false },
         allowsEnergy: (@Sendable () async -> Bool)? = nil,
         extractText: (@Sendable (_ link: String) async -> ExtractionOutcome)? = nil,
         extractionDeadline: Duration = .seconds(4)
     ) {
         self.store = store
         self.queue = queue
-        self.textModel = textModel
-        self.allowsModel = allowsModel
         self.allowsEnergy =
             allowsEnergy ?? {
                 let info = ProcessInfo.processInfo
@@ -222,17 +214,6 @@ actor OverviewGenerationCoordinator {
             inFlightTasks.removeValue(forKey: eventID)
         }
         return Task.isCancelled ? nil : result
-    }
-
-    /// Stored for its citations and input checks, but stale on the next request, so a model skipped for energy or
-    /// the AI setting, or one that failed, gets another chance instead of leaving the deterministic overview in place.
-    private static func provisional(_ overview: EventOverviewDocument) -> EventOverviewDocument {
-        EventOverviewDocument(
-            id: overview.id, eventID: overview.eventID,
-            version: OverviewVersionContext(
-                membershipVersion: overview.membershipVersion, inputTextHash: overview.inputTextHash,
-                schemaVersion: overview.schemaVersion, analysisVersion: 0),
-            content: overview.content, provenance: overview.provenance)
     }
 
     // MARK: - Publisher Text for Overview Evidence (#308)

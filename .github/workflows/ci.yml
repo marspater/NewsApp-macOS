@@ -44,6 +44,9 @@ jobs:
       - name: Run Unit Tests
         run: ./test.sh
 
+      - name: Verify Publisher Excerpts
+        run: NEWS_NATIVE_HARNESS=Tests/PublisherExcerptTests.swift ./script/native_performance_baseline.sh
+
       - name: Verify Swift Package Manager Build
         run: swift build --force-resolved-versions --target News
 

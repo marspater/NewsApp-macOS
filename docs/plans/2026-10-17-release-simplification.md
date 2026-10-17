@@ -84,3 +84,7 @@ Own exclusively:
 - Run full regressions, excerpt harness, SwiftPM compile, isolated arm64 build/signature, and affected native UI checks. Include design checklist in UI PRs.
 - #307 remains open until measured target and Mars acceptance. #308/#309 close only after replacement behavior is validated and merged. Do not claim installation or OS-notification acceptance.
 
+
+## Implementation progress
+- Codex core slice: `124e3a2`; full regressions, SwiftPM, 160 native UI checks, staged arm64/signature and copied-collector checks passed. Existing English tune precision 89.7% and holdout precision 92.3% miss the 97% target; #307 remains unresolved, and the original #409 private input remains missing.
+- Gemini completed `91fb5d4`, integrated as `972253b`. Codex owns subsequent shared tests, persistence/energy integration, CI and combined verification. No installation, hosted CI or release acceptance is implied.

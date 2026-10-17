@@ -521,7 +521,7 @@ class FeedManager: NSObject, ObservableObject {
             self.clusteringTask = nil
             self.clusteringRunID = nil
             self.overviewWarmupTask?.cancel()
-            if self.appSettings.aiEnabled, self.allowsBackgroundWork() {
+            if self.allowsBackgroundWork() {
                 let store = self.articleStore
                 let muting = self.appSettings.muteRules
                 self.overviewWarmupTask = Task {
