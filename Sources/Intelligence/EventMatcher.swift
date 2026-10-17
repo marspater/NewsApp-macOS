@@ -340,7 +340,7 @@ struct EventMatchPolicy: Sendable, Equatable {
     /// Share of an event's members a newcomer must be compatible with. One dissenting member of a larger event no
     /// longer keeps a matching report out; in a two-member event both must still agree.
     var compatibleShare = 2.0 / 3.0
-    /// Pairs at or above this score that share a name and a word may be settled by the on-device judge.
+    /// Legacy audit threshold; production clustering never asks the judge.
     var borderlineScore = 0.3
     /// The newcomer's mean score across the whole event.
     var eventScore = 0.45
@@ -352,13 +352,12 @@ struct EventMatchPolicy: Sendable, Equatable {
 
 /// Facts that rule a pair out regardless of how similar the rest of the text is.
 enum EventConflict: String, Sendable, Equatable {
-    case language, timeGap, period, year, weekday, titleNumbers, places, excluded, differentEvent
+    case language, unknownDate, timeGap, period, year, weekday, titleNumbers, places, excluded, differentEvent
 }
 
 struct EventPairAssessment: Sendable, Equatable {
     var conflict: EventConflict?
-    /// The conflict rests on facts that do not decide alone (different local places, different headline figures) while
-    /// the reports share specific names: an on-device judge may settle it.
+    /// Legacy audit field. Production conflicts are always final.
     var softConflict = false
     var hasHardConflict: Bool { conflict != nil && !softConflict }
 
@@ -370,6 +369,7 @@ struct EventPairAssessment: Sendable, Equatable {
     var what: Double
     var entity: Double
     var sharedAnchors: Int
+    var sharedSpecificAnchors: Int
     var sharedKeywords: Int
     /// Strong enough to justify a link on its own.
     var isMatch: Bool
@@ -378,9 +378,9 @@ struct EventPairAssessment: Sendable, Equatable {
 }
 
 enum EventMatcher {
-    /// Bump when matching changes; recent articles are then matched again. Event members whose
-    /// title and description are unchanged keep their events.
-    static let version = 4
+    /// Bump when matching changes; recent articles and active memberships are revalidated.
+    /// Unchanged archived memberships remain intact.
+    static let version = 5
 
     /// Who, what, where and when for one pair. Headline similarity alone never passes: a match needs
     /// a shared name or place, shared action terms, closeness in time and no contradicting facts.
@@ -399,14 +399,15 @@ enum EventMatcher {
         let score = 0.4 * what + 0.4 * entity + 0.2 * time
 
         var conflict: EventConflict?
-        var softConflict = false
         let sharedSpecific = a.specificAnchors.intersection(b.specificAnchors).count
         // Equal casualty tolls are evidence of one incident.
         let sharedEvidence = sharedKeywords + (a.tollNumbers.isDisjoint(with: b.tollNumbers) ? 0 : 1)
         func disjoint(_ lhs: Set<String>, _ rhs: Set<String>) -> Bool {
             !lhs.isEmpty && !rhs.isEmpty && lhs.isDisjoint(with: rhs)
         }
-        if let left = a.language, let right = b.language, left != right {
+        if a.date == DateParser.unknownDate || b.date == DateParser.unknownDate {
+            conflict = .unknownDate
+        } else if let left = a.language, let right = b.language, left != right {
             conflict = .language
         } else if gap > policy.maximumTimeGap {
             conflict = .timeGap
@@ -418,47 +419,38 @@ enum EventMatcher {
             conflict = .weekday
         }
         // Headline figures (a magnitude, a count) differ between separate incidents. Casualty tolls are not compared:
-        // they rise as one incident is reported. With shared specific names the difference is left to the judge.
+        // they rise as one incident is reported. Distinguishing figures always veto a match.
         else if disjoint(a.titleNumbers, b.titleNumbers) {
             conflict = .titleNumbers
-            softConflict = sharedSpecific >= 1 && sharedKeywords >= 2
         }
         // Different countries are different events. Places below country level ("Madrid" against "Spain", one city
-        // against another) only conflict when no place is shared, and a judge may settle that when names are shared.
+        // against another) only conflict when no place is shared. No model overrides the conflict.
         else if a.places.isDisjoint(with: b.places) {
             if disjoint(a.countries, b.countries) {
-                // Angles of one story can name different countries; strongly shared wording leaves it to the judge.
                 conflict = .places
-                softConflict = sharedKeywords >= 3 && what >= policy.minimumWhat
             } else if disjoint(a.localPlaces, b.localPlaces) {
                 conflict = .places
-                softConflict = sharedSpecific >= 1 && sharedKeywords >= 2
             }
         }
 
-        // A shared country alone is weak evidence: a match also needs a specific name, two shared places, or strongly
-        // shared wording.
-        let strongWording = sharedEvidence >= 4 && what >= policy.strictWhat
         let isMatch =
-            conflict == nil
-            && (sharedSpecific >= 1 || sharedAnchors >= 2 || (sharedAnchors >= 1 && strongWording))
+            conflict == nil && sharedSpecific >= 1
             && sharedEvidence >= 2
             && sharedAnchors + sharedEvidence >= policy.minimumSharedTerms
             && what >= policy.minimumWhat && score >= policy.matchScore
-            && (gap <= policy.strictTimeGap || (what >= policy.strictWhat && sharedKeywords >= 3))
+            && (gap <= policy.strictTimeGap || (what >= policy.strictWhat && sharedEvidence >= 3))
         let isCompatible =
-            conflict == nil
-            && (sharedAnchors >= 1 || sharedKeywords >= 2) && score >= policy.compatibilityScore
+            conflict == nil && sharedSpecific >= 1 && score >= policy.compatibilityScore
         let isBorderline =
-            !isMatch && (conflict == nil || softConflict)
+            !isMatch && conflict == nil
             && ((sharedAnchors >= 1 && sharedEvidence >= 1 && score >= policy.borderlineScore)
                 || (sharedEvidence >= 3 && what >= policy.minimumWhat))
         let needsConfirmation = isMatch && (sharedSpecific == 0 || what < policy.strictWhat)
         return EventPairAssessment(
-            conflict: conflict, softConflict: softConflict, isBorderline: isBorderline,
+            conflict: conflict, isBorderline: isBorderline,
             needsConfirmation: needsConfirmation,
             score: score, what: what, entity: entity,
-            sharedAnchors: sharedAnchors, sharedKeywords: sharedKeywords,
+            sharedAnchors: sharedAnchors, sharedSpecificAnchors: sharedSpecific, sharedKeywords: sharedKeywords,
             isMatch: isMatch, isCompatible: isCompatible)
     }
 
@@ -476,7 +468,7 @@ enum EventMatcher {
 
     /// A pair the on-device judge called one event counts as a match.
     static func confirmed(_ pair: EventPairAssessment, policy: EventMatchPolicy = .standard) -> EventPairAssessment {
-        guard !pair.hasHardConflict else { return pair }
+        guard pair.conflict == nil, pair.sharedSpecificAnchors >= 1 else { return pair }
         var pair = pair
         pair.conflict = nil
         pair.softConflict = false
@@ -501,7 +493,8 @@ enum EventMatcher {
     /// them in a two-member event). Any hard conflict vetoes admission regardless of the compatible majority.
     static func eventScore(pairs: [EventPairAssessment], policy: EventMatchPolicy = .standard) -> Double? {
         guard !pairs.isEmpty, pairs.count < policy.maximumEventSize,
-            !pairs.contains(where: \.hasHardConflict), pairs.contains(where: \.isMatch)
+            pairs.allSatisfy({ $0.conflict == nil && $0.sharedSpecificAnchors >= 1 }),
+            pairs.contains(where: \.isMatch)
         else {
             return nil
         }

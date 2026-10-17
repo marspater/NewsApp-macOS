@@ -8,7 +8,7 @@ A native, local-first RSS, Atom and JSON Feed reader built with SwiftUI, WebKit,
 ## Story experience — 9 October 2026
 
 - Group reports of one event into a card with its coverage and an overview; read and saved state stay with each publication.
-- Rate story importance on device. Minor stories wait until four publishers cover them; eligible unread waiting stories expire after a day, preserving saved/read stories, cited evidence and collected tension-panel history. Unrated stories remain visible, and the list can reveal waiting stories.
+- Keep stories visible regardless of importance. Today and archive stay chronological; Briefing balances publishers/categories, then prefers broader coverage and existing importance ratings. Refresh never runs importance scoring or deletes stories for being minor.
 - Fill missing card images from declared publisher images through bounded, protected page requests. Grouped cards choose a usable image across their members; pages without one retain the placeholder.
 - Generate multi-source overview introductions and key facts on device, with passage citations, deterministic checks and a separate model support judgment. Weak or refused drafts keep the extractive overview. This judgment is heuristic; independent quality evaluation remains open in [#308](https://github.com/marspater/NewsApp-macOS/issues/308).
 - Regenerate provisional overviews and summaries when next requested, including after a macOS update changes the on-device model. AI and energy settings gate generation; native reading and deterministic fallbacks remain available.

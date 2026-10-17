@@ -1,0 +1,35 @@
+{
+  "matcherVersion": 5,
+  "productionArticleBudget": 2000,
+  "judgeCalls": 0,
+  "embeddingPromotion": false,
+  "datasetSHA256": "868c62a0ec973d07aa2ca3d63de8623fbe866359d1e082fadacd7bd456acf2a0",
+  "sourceSHA256": {
+    "Sources/Intelligence/EventMatcher.swift": "f3535726ee9c0241e49a5f30d18c4c8c0811d15663538c553eeb216358239238",
+    "Sources/Intelligence/EventClustering.swift": "d67f5550993892a489bf6c7fd949a674dbf968db404dd4fabe9bfc7210de85eb",
+    "Sources/Intelligence/EventCandidates.swift": "8886c42ca3914223ec904ee4146ce2e142b4b59d9173b08327c20ed8983adb5b",
+    "Sources/Storage/DatabaseEngine.swift": "13bb6f100feb4e103a5d0a51a47af4bd15ca50308470937446e3c0287bffc856",
+    "Tests/StoryCorpus.swift": "f266902c16b1ef8d5e442b2205acefc28d34dbaff960460135fa556fac82384f",
+    "Tests/NewsTests.swift": "09dd7fc952509bc89f1ba29d4c55797423fc70835715cd46e0edd7836a9a022b"
+  },
+  "splits": {
+    "englishTune": {
+      "articles": 105,
+      "truePositivePairs": 26,
+      "falsePositivePairs": 3,
+      "falseNegativePairs": 67,
+      "impureEvents": 1
+    },
+    "englishHoldout": {
+      "articles": 49,
+      "truePositivePairs": 12,
+      "falsePositivePairs": 1,
+      "falseNegativePairs": 26,
+      "impureEvents": 1
+    }
+  },
+  "precisionTarget": 0.97,
+  "targetMet": false,
+  "freshIndependentAcceptance": false,
+  "diagnostic409": "original private replay export unavailable"
+}

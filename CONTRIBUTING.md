@@ -10,6 +10,8 @@ Build on Apple silicon with Xcode 27 selected. The deployment target remains mac
 
 ## Validation
 
+The current release simplification uses existing #102 labeled tune/English holdout regression inputs; the #409 comparison requires its original private replay export. Importance and overview review commands below remain opt-in historical audit tools, not new release requirements. Developing-story evaluation and its collector are parked with #314. See [the accepted plan](docs/plans/2026-10-17-release-simplification.md).
+
 ```sh
 ./test.sh                         # Full regressions; also run by the commit hook
 script/format.sh                  # swift-format; automatically formats staged Swift files in pre-commit hook

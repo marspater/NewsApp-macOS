@@ -1,5 +1,7 @@
 # News: структуроване читання та огляди подій
 
+> **17 October 2026:** The accepted [release simplification plan](2026-10-17-release-simplification.md), tracked in #439, supersedes earlier matcher/importance acceptance scope. Codex implements deterministic matching and visible stories with coverage-first Briefing ties; Gemini owns publisher-excerpt overviews. Existing #102/#409 data is reused without new annotation or multi-day collection. #314 is parked and #334 remains deferred. Implementation and validation are in progress; historical measurements below are not current-policy acceptance.
+
 План від 30 вересня 2026. Статус: виконується; поточний стан наведено нижче та в [#90](https://github.com/marspater/NewsApp-macOS/issues/90). Основа: поточний код News на `codex/kite-practices`, дослідження Kite на коміті `08d15108f82fb8728832f55fc8c3799a2836bfd6` та чотири надані скриншоти. Незакомічені попередні зміни збережено.
 
 ## Current release status — 10 October 2026

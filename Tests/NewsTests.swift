@@ -6676,14 +6676,14 @@ struct NewsTests {
             "Without strongly shared wording a country conflict is final")
         let syriaSameWords = features(
             ["kramatorsk"], ["strike", "bus", "kill"], hours: 1, places: [EventPlaces.canonical("Syria")])
-        assertTrue(
+        assertFalse(
             EventMatcher.assess(ukraine, syriaSameWords).softConflict,
-            "Angles of one story may name different countries; the judge decides")
+            "Strong wording cannot soften a country conflict")
         assertFalse(
             EventMatcher.assess(ukraine, syriaSameWords).isMatch, "Without a judge a country conflict never matches")
         assertTrue(
-            EventMatcher.assess(odesa, gdansk).softConflict && EventMatcher.assess(odesa, gdansk).isBorderline,
-            "Different cities with shared names are left open for the judge")
+            EventMatcher.assess(odesa, gdansk).hasHardConflict,
+            "Conflicting places remain a hard veto even with shared names")
         let canadian = EventFeatures(
             title: "Canadian writer Anne Carson wins 2026 Nobel Prize in Literature", description: "", date: now)
         assertTrue(
@@ -6691,7 +6691,8 @@ struct NewsTests {
             "An untyped nationality adjective is a country")
 
         // A judge settles soft conflicts, but a compatible majority cannot override hard contradictions.
-        assertTrue(EventMatcher.confirmed(EventMatcher.assess(odesa, gdansk)).isMatch, "A confirmed pair matches")
+        assertFalse(
+            EventMatcher.confirmed(EventMatcher.assess(odesa, gdansk)).isMatch, "SAME cannot override a place conflict")
         let d = features(
             ["afad"], ["earthquake", "magnitude", "damage", "building", "aid"], hours: 1, places: ["malatya"])
         assertTrue(
@@ -6706,6 +6707,15 @@ struct NewsTests {
         assertTrue(
             EventMatcher.eventScore(pairs: [pair, pair, weak]) != nil,
             "A noncontradictory weak minority remains allowed")
+        var generic = weak
+        generic.sharedSpecificAnchors = 0
+        assertTrue(
+            EventMatcher.eventScore(pairs: [pair, pair, generic]) == nil,
+            "Two-thirds compatibility cannot override missing specific evidence on a cross-pair")
+        var undated = quake
+        undated.date = DateParser.unknownDate
+        assertEqual(
+            EventMatcher.assess(undated, quakeLater).conflict, .unknownDate, "Unknown publication times cannot match")
         let rejected = EventMatcher.rejected(pair)
         assertTrue(rejected.hasHardConflict && !rejected.isCompatible, "DIFFERENT is an explicit contradiction")
         assertTrue(
@@ -6771,47 +6781,26 @@ struct NewsTests {
         assertEqual(try await EventClusterer.run(in: db, now: now).merged, 0, "A merged story is not merged again")
         await db.close()
 
-        // A seed matching two partners does not make those partners one occurrence. A settled
-        // DIFFERENT must also survive budget exhaustion when the remaining partner tries to join.
-        for separatesPartners in [true, false] {
-            let forming = DatabaseEngine(path: ":memory:")
-            try await forming.open()
-            try await forming.upsertArticles(Array(quake.prefix(3)))
-            var confirmation = EventMatchPolicy.standard
-            confirmation.strictWhat = 2  // Exercise the judge without a live model.
-            let controlled = EventJudge { a, b in
-                !separatesPartners || Set([a.id, b.id]) != Set(["m2", "m3"])
-            }
-            let formed = try await EventClusterer.run(
-                in: forming, matchPolicy: confirmation, judge: controlled, judgeBudget: 3, now: now)
-            let first = try await forming.eventID(forArticle: "m1")
-            let second = try await forming.eventID(forArticle: "m2")
-            let third = try await forming.eventID(forArticle: "m3")
-            assertTrue(first != nil, "Confirmed seed pairs still form an event")
-            if separatesPartners {
-                assertTrue(second == nil || second != third, "A DIFFERENT partner pair cannot share a new event")
-                assertEqual(formed.joined, 0, "The rejected partner cannot rejoin after the judge budget runs out")
-            } else {
-                assertTrue(first == second && first == third, "Three confirmed SAME pairs form one event")
-            }
-            assertEqual(formed.judged, 3, "Each of the three pairs is settled once within the budget")
-            await forming.close()
+        let forming = DatabaseEngine(path: ":memory:")
+        try await forming.open()
+        try await forming.upsertArticles(Array(quake.prefix(3)))
+        let neverCalled = EventJudge { _, _ in
+            assertTrue(false, "Deterministic clustering must not invoke an injected judge")
+            return true
         }
+        let formed = try await EventClusterer.run(in: forming, judge: neverCalled, judgeBudget: 3, now: now)
+        assertEqual(formed.judged, 0, "No judge work is scheduled")
+        let seedID = try await forming.eventID(forArticle: "m1")
+        assertTrue(seedID != nil, "Three independently worded reports still form an event")
+        assertEqual(try await forming.eventID(forArticle: "m2"), seedID, "Second publisher joins")
+        assertEqual(try await forming.eventID(forArticle: "m3"), seedID, "Third publisher joins")
+        await forming.close()
 
-        // One explicit DIFFERENT cross-pair vetoes a merge despite an otherwise compatible majority.
         let vetoed = try await library()
-        var confirmingPolicy = EventMatchPolicy.standard
-        confirmingPolicy.strictWhat = 2  // Force thin-match confirmation without a live model.
-        let veto = EventJudge { a, b in
-            !Set([a.id, b.id]).isSuperset(of: ["m1", "m3"])
-        }
         let vetoReport = try await EventClusterer.run(
-            in: vetoed, matchPolicy: confirmingPolicy, judge: veto, now: now, limit: 0)
-        assertTrue(vetoReport.judged > 0, "The controlled judge was exercised")
-        assertEqual(vetoReport.merged, 0, "A whole-coverage SAME cannot overrule an explicit pair DIFFERENT")
-        assertFalse(
-            try await vetoed.eventID(forArticle: "m1") == vetoed.eventID(forArticle: "m4"),
-            "Rejected fragments retain separate IDs")
+            in: vetoed, judge: neverCalled, now: now, limit: 0)
+        assertEqual(vetoReport.judged, 0, "Fragment merging does not invoke a judge")
+        assertEqual(vetoReport.merged, 1, "Supported fragments merge deterministically")
         await vetoed.close()
 
         // Newly merged members supply the terms needed to discover a third fragment.
@@ -6848,7 +6837,7 @@ struct NewsTests {
         let chainReport = try await EventClusterer.run(
             in: chain, matchPolicy: chainPolicy,
             judge: EventJudge { _, _ in true }, now: now, limit: 0)
-        assertEqual(chainReport.merged, 2, "A successful merge refreshes terms before considering the next fragment")
+        assertEqual(chainReport.merged, 1, "New vocabulary cannot bridge a cross-pair without shared specific evidence")
         await chain.close()
 
         // A local exclusion between fragments always wins.
@@ -6883,6 +6872,7 @@ struct NewsTests {
         let hardReport = try await EventClusterer.run(in: hard, judge: doubting, now: now)
         assertTrue(
             try await hard.eventID(forArticle: "h1") == nil, "Reports of strikes in different countries stay apart")
+        assertEqual(hardReport.judged, 0, "Hard negatives need no model")
         assertEqual(hardReport.created, 0, "No event forms across a country conflict")
         await hard.close()
         assertEqual(EventJudge.unavailable.isAvailable, false, "Without a model the deterministic decision stands")
@@ -7617,7 +7607,7 @@ struct NewsTests {
 
     @MainActor
     static func testStoryVisibility(fixtureRoot: URL) async throws {
-        print("  - Testing story importance, waiting stories, expiry and expired-story memory...")
+        print("  - Testing stored importance, visible stories, retained history and retired expiry...")
         let db = DatabaseEngine(path: ":memory:")
         try await db.open()
         let now = Date()
@@ -7647,10 +7637,8 @@ struct NewsTests {
             Set(try await db.fetchArticles(limit: nil, hidingWaitingStories: true).map(\.id))
         }
 
-        assertEqual(
-            try await listed(), ["major", "unrated", "wide-1", "wide-2", "wide-3", "wide-4"],
-            "Minor stories wait until four publishers cover them; important and unrated stories show")
-        assertEqual(try await db.waitingStoryCount(), 5, "Waiting stories are counted for the list")
+        assertEqual(try await listed(), Set(all.map(\.id)), "Importance never hides a publication")
+        assertEqual(try await db.waitingStoryCount(), 0, "No story waits for model approval")
         assertEqual(
             try await db.fetchArticles(limit: nil).count, all.count,
             "Lists that do not hide waiting stories list everything")
@@ -7663,8 +7651,8 @@ struct NewsTests {
             reviewed, ["minor", "saved", "read", "pair-1", "wide-1", "wide-2", "wide-3", "wide-4"],
             "The #309 review lists every minor-rated story in the window")
         assertEqual(
-            reviewed.subtracting(try await db.notificationStoryIDs(Array(reviewed))), ["minor", "saved", "read"],
-            "The review tells waiting minor stories from shown ones")
+            reviewed.subtracting(try await db.notificationStoryIDs(Array(reviewed))), [],
+            "Minor ratings do not remove notification eligibility")
         assertTrue(
             try await db.ratedImportanceRows(level: .minor, activeSince: now).isEmpty,
             "Stories before the window are not reviewed")
@@ -7672,22 +7660,38 @@ struct NewsTests {
         assertEqual(
             try await db.expireWaitingStories(now: now.addingTimeInterval(3600)), 0, "Nothing expires within a day")
         assertEqual(
-            try await db.expireWaitingStories(now: now.addingTimeInterval(25 * 3600)), 1,
-            "An unread minor story expires after a day")
-        assertTrue(try await db.fetchArticles(limit: 1, id: "minor").isEmpty, "The expired story is removed")
-        assertFalse(try await db.fetchArticles(limit: 1, id: "saved").isEmpty, "Saved stories never expire")
-        assertFalse(try await db.fetchArticles(limit: 1, id: "read").isEmpty, "Read history never expires")
-        assertTrue(
-            try await db.upsertArticles([story("minor", "One")]).isEmpty,
-            "A refresh does not bring an expired story back")
-        assertTrue(try await db.fetchArticles(limit: 1, id: "minor").isEmpty, "The expired story stays gone")
-        _ = try await db.expireWaitingStories(
-            now: now.addingTimeInterval(StoryVisibilityPolicy.expiryMemory + 26 * 3600))
-        assertFalse(
-            try await db.upsertArticles([story("minor", "One")]).isEmpty, "Expiries are forgotten after two weeks")
+            try await db.expireWaitingStories(now: now.addingTimeInterval(25 * 3600)), 0,
+            "Importance never expires an unread story")
+        assertEqual(try await listed(), Set(all.map(\.id)), "All publications remain after 24 hours")
+        assertTrue(try await db.isSaved(articleId: "saved"), "Saved state remains")
+        assertTrue(try await db.isRead(articleId: "read"), "Read history remains")
+        let priorities = try await db.briefingPriorities(articleIDs: all.map(\.id))
+        assertEqual(priorities["wide-1"]?.sourceCount, 4, "Coverage counts publishers across event members")
+        assertEqual(priorities["pair-1"]?.importance, .notable, "An event uses its highest stored rating")
+        assertEqual(priorities["unrated"]?.importance, nil, "Unrated metadata stays neutral")
+        assertEqual(priorities["minor"]?.sourceCount, 1, "A singleton has one publisher")
         await db.close()
 
-        // Tension panel stories outlive expiry while collection is on: past panel days are rebuilt from stored articles.
+        let legacyDirectory = FileManager.default.temporaryDirectory.appendingPathComponent("news-expiry-\(UUID())")
+        try FileManager.default.createDirectory(at: legacyDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: legacyDirectory) }
+        let legacyPath = legacyDirectory.appendingPathComponent("library.sqlite3").path
+        let legacy = DatabaseEngine(path: legacyPath)
+        try await legacy.open()
+        var legacyHandle: OpaquePointer?
+        assertEqual(sqlite3_open(legacyPath, &legacyHandle), SQLITE_OK, "Open old expiry fixture")
+        assertEqual(
+            sqlite3_exec(
+                legacyHandle, "INSERT INTO expired_stories(key, expired_at) VALUES('legacy', 1);", nil, nil, nil),
+            SQLITE_OK, "Preserve an old importance-expiry tombstone")
+        sqlite3_close(legacyHandle)
+        assertEqual(
+            try await legacy.upsertArticles([story("legacy", "One")]), ["legacy"],
+            "Old tombstones do not suppress feeds")
+        assertEqual(try await legacy.fetchArticles(limit: nil).count, 1, "The returning publisher story is readable")
+        await legacy.close()
+
+        // Panel retention remains intact; importance no longer deletes any publisher's stories.
         let panel = DatabaseEngine(path: ":memory:")
         try await panel.open()
         let panelFeed = TensionMethodology.v1.panel[0].url
@@ -7696,19 +7700,19 @@ struct NewsTests {
         for id in ["panel-minor", "other-minor"] { try await panel.recordImportance(id, .minor, at: now) }
         assertEqual(
             try await panel.expireWaitingStories(now: now.addingTimeInterval(25 * 3600), keepingFeedURLs: [panelFeed]),
-            1,
-            "Only the non-panel waiting story expires")
+            0,
+            "Neither panel nor ordinary minor stories expire")
         let panelDay = DateInterval(start: now.addingTimeInterval(-12 * 3600), duration: 24 * 3600)
         assertEqual(
             try await panel.tensionCorpus(day: panelDay, feedURLs: [panelFeed]).map(\.article.id), ["panel-minor"],
             "The waiting panel story still counts in its tension day")
-        assertTrue(
-            try await panel.fetchArticles(limit: nil, hidingWaitingStories: true).isEmpty,
-            "Kept panel stories still wait")
+        assertEqual(
+            try await panel.fetchArticles(limit: nil, hidingWaitingStories: true).count, 2,
+            "Panel and ordinary stories remain visible")
         let collectionOff = try await StoryCurator.run(
             in: panel, judge: .unavailable, now: now.addingTimeInterval(26 * 3600))
         assertEqual(
-            collectionOff.expired, 1, "With collection off, the curator expires the kept panel story on its next pass")
+            collectionOff.expired, 0, "Image/audit curation never expires a story, regardless of collection")
         await panel.close()
 
         // The curator rates unrated stories within its budget; without a model nothing is rated and nothing hides.
@@ -7726,11 +7730,11 @@ struct NewsTests {
             try await StoryCurator.run(in: curated, judge: rater, budget: 2, now: now).rated, 1,
             "A later pass rates the rest")
         assertEqual(
-            try await curated.fetchArticles(limit: nil, hidingWaitingStories: true).map(\.id), ["c1"],
-            "Only the important story shows")
+            Set(try await curated.fetchArticles(limit: nil, hidingWaitingStories: true).map(\.id)), ["c1", "c2", "c3"],
+            "Explicit audit ratings cannot hide stories")
         assertEqual(
-            try await curated.notificationStoryIDs(["c1", "c2", "c3", "missing"]), ["c1"],
-            "Waiting and deleted stories never notify")
+            try await curated.notificationStoryIDs(["c1", "c2", "c3", "missing"]), ["c1", "c2", "c3"],
+            "All existing stories remain eligible; missing stories do not notify")
         let changed = FeedArticle(
             storedID: "c2", title: "Updated national emergency", link: story("c2", "Two").link,
             guid: "c2", description: "A significant update", pubDate: now, source: "Two")
@@ -7768,15 +7772,18 @@ struct NewsTests {
             settings: settings, store: store, schedulesRefresh: false,
             fetchBatch: { urls, _ in urls.map { ($0, reports, nil, nil) } },
             notifyBatch: { articles, _ in notified += articles.map(\.title) },
-            importanceJudge: StoryImportanceJudge { $0.title == reports[0].title ? .major : .minor },
+            importanceJudge: StoryImportanceJudge { _ in
+                assertTrue(false, "Refresh must not schedule importance ratings")
+                return nil
+            },
             imageFinder: StoryImageFinder { _ in
                 await pages.wait()
                 return .none
             },
             allowsBackgroundWork: { true })
         let refresh = Task { await manager.fetchFeedsAsync() }
-        await eventually("Notifications are dispatched while image lookups wait") { notified == [reports[0].title] }
-        assertEqual(notified, [reports[0].title], "Refresh rates stories before dispatching notifications")
+        await eventually("Notifications are dispatched while image lookups wait") { notified == reports.map(\.title) }
+        assertEqual(notified, reports.map(\.title), "Refresh never filters eligible stories by model importance")
         await eventually("Image lookups follow clustering") { await pages.arrivals > 0 }
         await pages.open()
         await refresh.value
@@ -7980,8 +7987,8 @@ struct NewsTests {
         try await db.recordImportance("waiting", .minor, at: now)
         let rows = try await db.imagelessStoryRows(activeSince: now.addingTimeInterval(-86_400), limit: 20)
         assertEqual(
-            Set(rows.map(\.id)), ["plain", "e1", "e2", "down"],
-            "Shown stories without an image anywhere in their event are looked up; pictured events and waiting stories are not"
+            Set(rows.map(\.id)), ["plain", "e1", "e2", "down", "waiting"],
+            "Minor-rated stories retain image eligibility; pictured events need no lookup"
         )
         assertTrue(rows.first.map { ["e1", "e2"].contains($0.id) } == true, "Clustered stories come first")
         assertEqual(
@@ -7991,10 +7998,11 @@ struct NewsTests {
         let finder = StoryImageFinder { link in
             if link.hasSuffix("/down") { return .unreachable }
             if link.hasSuffix("/plain") { return .none }
+            if link.hasSuffix("/waiting") { return .found("https://cdn.example/waiting.jpg") }
             return .found("https://cdn.example/found.jpg")
         }
         let report = try await StoryCurator.run(in: db, judge: .unavailable, imageFinder: finder, now: now)
-        assertEqual(report.imagesFound, 1, "One lookup per event finds its image")
+        assertEqual(report.imagesFound, 2, "Both an event and a minor singleton receive images")
         assertEqual(
             try await db.storyImages(for: ["e1", "e2", "plain"]).count, 1,
             "Found images are stored; misses are not images")
@@ -8479,8 +8487,29 @@ struct NewsTests {
             try await EventClusterer.run(in: db, now: now).processed, 3,
             "Cancelled and bounded work waits for the next pass")
 
-        // A matcher version bump keeps unchanged members, even an earliest member that the whole-event
-        // check would now reject; a member whose text changed is still checked again.
+        // A partner outside the fetched batch consumes the same pass budget as its seed.
+        let boundedDB = DatabaseEngine(path: ":memory:")
+        try await boundedDB.open()
+        try await boundedDB.upsertArticles([
+            article(
+                "bounded-seed", "Valencia wildfire forces evacuations", "Firefighters battle wildfire in Valencia.",
+                hoursAgo: 3, source: "Bound One"),
+            article(
+                "bounded-other", "Chip maker reports quarterly sales", "Processors drive record sales.", hoursAgo: 2,
+                source: "Bound Two"),
+            article(
+                "bounded-partner", "Valencia wildfire forces evacuations", "Firefighters battle wildfire in Valencia.",
+                hoursAgo: 1, source: "Bound Three"),
+        ])
+        let bounded = try await EventClusterer.run(in: boundedDB, now: now, limit: 2)
+        assertEqual(bounded.created, 1, "The seed forms an event with its later partner")
+        assertEqual(bounded.processed, 2, "An out-of-batch partner cannot overspend the article budget")
+        assertEqual(
+            try await EventClusterer.run(in: boundedDB, now: now).processed, 1,
+            "The unrelated batch member stays pending")
+        await boundedDB.close()
+
+        // Active upgrades split invalid old groups once, retaining the earliest valid subgroup and user state.
         try await db.upsertArticles([
             article(
                 "upgrade-1", "Wildfire forces evacuations near Valencia in eastern Spain",
@@ -8499,6 +8528,8 @@ struct NewsTests {
             return assertTrue(false, "Seed an event matched by an older matcher")
         }
         let seededVersion = try await db.fetchEvent(id: upgradeEvent)?.membershipVersion
+        try await db.setSaved(articleId: "upgrade-3", isSaved: true)
+        try await db.markRead(articleId: "upgrade-1", isRead: true)
         let upgradePending = try await db.pendingEventMatchRows(
             activeSince: now.addingTimeInterval(-72 * 3600),
             matcherVersion: EventMatcher.version, limit: 10)
@@ -8516,29 +8547,101 @@ struct NewsTests {
                 for: upgradeFeatures(upgradePending[0]), members: upgradePending.dropFirst().map(upgradeFeatures))
                 == nil,
             "The earliest member fails the whole-event check against later members")
-        let upgraded = try await EventClusterer.run(in: db, now: now)
-        assertEqual(upgraded.processed, 3, "A matcher version bump matches the members again")
-        assertEqual(upgraded.detached, 0, "Unchanged members are not detached after a matcher version bump")
+        let oldOverview = EventOverviewDocument(
+            eventID: upgradeEvent,
+            version: OverviewVersionContext(membershipVersion: seededVersion ?? 1, inputTextHash: "old-input"),
+            content: OverviewContent(title: "Old overview", summary: "", facts: [], citations: []),
+            provenance: OverviewProvenance(
+                memberArticleIDs: ["upgrade-1", "upgrade-2", "upgrade-3"], kind: .fallbackExcerpts))
+        assertTrue(try await db.recordEventOverview(oldOverview), "Store an overview of the old membership")
+        execute(
+            "CREATE TRIGGER fail_upgrade BEFORE UPDATE OF event_id ON event_members WHEN old.article_id='upgrade-3' BEGIN SELECT RAISE(ABORT, 'test upgrade rollback'); END;"
+        )
+        do {
+            _ = try await EventClusterer.run(in: db, now: now)
+            assertTrue(false, "A failed partition must propagate")
+        } catch {
+            assertTrue(
+                error.localizedDescription.contains("test upgrade rollback"), "The intended membership write failed")
+        }
         assertEqual(
             try await db.fetchEvent(id: upgradeEvent)?.memberArticleIDs.sorted(),
-            ["upgrade-1", "upgrade-2", "upgrade-3"], "Unchanged members keep their event")
+            ["upgrade-1", "upgrade-2", "upgrade-3"], "Failed partition rolls back all memberships")
         assertEqual(
-            try await db.fetchEvent(id: upgradeEvent)?.membershipVersion, seededVersion,
-            "Keeping members does not bump the event version")
+            try await db.fetchEventOverview(eventID: upgradeEvent)?.id, oldOverview.id,
+            "Rollback retains the old overview")
+        assertEqual(
+            try await db.pendingEventMatchRows(
+                activeSince: now.addingTimeInterval(-72 * 3600),
+                matcherVersion: EventMatcher.version, limit: 10
+            ).count, 3, "Rollback leaves upgrade work pending")
+        execute("DROP TRIGGER fail_upgrade;")
+        let upgraded = try await EventClusterer.run(in: db, now: now)
+        assertEqual(
+            try await db.fetchEventOverview(eventID: upgradeEvent), nil,
+            "A committed split invalidates the old overview")
+        assertEqual(upgraded.processed, 3, "A matcher version bump matches the members again")
+        assertEqual(upgraded.detached, 1, "A known-invalid legacy member moves to its own event")
+        assertEqual(
+            try await db.fetchEvent(id: upgradeEvent)?.memberArticleIDs.sorted(),
+            ["upgrade-1", "upgrade-2"], "The earliest compatible subgroup retains the original ID")
+        assertEqual(
+            try await db.fetchEvent(id: upgradeEvent)?.membershipVersion, (seededVersion ?? 0) + 1,
+            "Splitting bumps the original membership version")
+        assertTrue(try await db.isSaved(articleId: "upgrade-3"), "A split preserves saving")
+        assertTrue(try await db.isRead(articleId: "upgrade-1"), "A split preserves read history")
+        assertEqual(try await EventClusterer.run(in: db, now: now).processed, 0, "The completed upgrade is idempotent")
         assertTrue(
             try await db.pendingEventMatchRows(
                 activeSince: now.addingTimeInterval(-72 * 3600),
                 matcherVersion: EventMatcher.version, limit: 1
             ).isEmpty, "Kept members are processed under the current matcher")
         execute(
-            "UPDATE articles SET description='Firefighters battled the blaze near Valencia overnight.' WHERE id='upgrade-1';"
+            "UPDATE articles SET title='Central bank holds interest rates', description='The central bank left its benchmark rate unchanged.' WHERE id='upgrade-1';"
         )
         let edited = try await EventClusterer.run(in: db, now: now)
         assertEqual(edited.processed, 1, "Only the edited member is matched again")
         assertEqual(edited.detached, 1, "An edited member is checked against its event again")
         assertEqual(
-            try await db.fetchEvent(id: upgradeEvent)?.memberArticleIDs.sorted(), ["upgrade-2", "upgrade-3"],
+            try await db.fetchEvent(id: upgradeEvent)?.memberArticleIDs.sorted(), ["upgrade-2"],
             "An edited member that no longer fits leaves its event")
+        let oldMembers = [
+            article(
+                "active-old-1", "Valencia wildfire forces evacuations", "Firefighters battle wildfire in Valencia.",
+                hoursAgo: 100, source: "Old One"),
+            article(
+                "active-old-2", "Chip maker reports quarterly sales", "Processors drive record sales.", hoursAgo: 99,
+                source: "Old Two"),
+        ]
+        try await db.upsertArticles(oldMembers)
+        let activeOld = try await db.createEvent(memberArticleIDs: oldMembers.map(\.id), at: now)
+        try await db.markEventMatchProcessed(oldMembers.map(\.id), matcherVersion: EventMatcher.version - 1, at: now)
+        assertEqual(
+            try await EventClusterer.run(in: db, now: now, limit: 1).processed, 0,
+            "An event partition waits rather than exceeding the remaining article budget")
+        assertEqual(
+            try await EventClusterer.run(in: db, now: now).detached, 1,
+            "An active legacy event is upgraded even when all publication dates are old")
+        assertEqual(
+            try await db.fetchEvent(id: activeOld.id)?.memberArticleIDs, ["active-old-1"],
+            "Oldest active member keeps the original ID")
+        let archive = try await db.createEvent(
+            memberArticleIDs: oldMembers.map(\.id), at: now.addingTimeInterval(-100 * 3600))
+        try await db.markEventMatchProcessed(oldMembers.map(\.id), matcherVersion: EventMatcher.version - 1, at: now)
+        _ = try await EventClusterer.run(in: db, now: now)
+        assertEqual(try await db.fetchEvent(id: archive.id), archive, "Inactive archived groups remain intact")
+
+        let unknown = oldMembers.enumerated().map { index, item in
+            FeedArticle(
+                storedID: "unknown-\(index)", title: oldMembers[0].title,
+                link: fixtureRoot.appendingPathComponent("unknown/\(index)").absoluteString, guid: nil,
+                description: oldMembers[0].description, pubDate: DateParser.unknownDate, source: item.source)
+        }
+        try await db.upsertArticles(unknown)
+        assertTrue(
+            try await db.eventMatchRows(articleIDs: unknown.map(\.id)).allSatisfy { $0.date == DateParser.unknownDate },
+            "Matching retains unknown publication dates rather than substituting ingestion time")
+        assertEqual(try await EventClusterer.run(in: db, now: now).created, 0, "Undated reports stay separate")
         await db.close()
         var handle: OpaquePointer?
         var statement: OpaquePointer?
@@ -9027,6 +9130,22 @@ struct NewsTests {
         assertFalse(
             FiniteBriefing(candidates: [], readIDs: [], now: now).isComplete([]),
             "An empty window is not a completed briefing")
+
+        let ranked = [
+            article("covered", age: 200), article("major", age: 0),
+            article("stored", age: 100), article("neutral", age: 20), article("minor", age: 10),
+        ]
+        let priority: [String: BriefingPriority] = [
+            "covered": .init(sourceCount: 3, importance: .minor),
+            "major": .init(sourceCount: 1, importance: .major),
+            "stored": .init(sourceCount: 2, importance: .major),
+            "neutral": .init(sourceCount: 2),
+            "minor": .init(sourceCount: 2, importance: .minor),
+        ]
+        assertEqual(
+            FiniteBriefing(candidates: ranked, readIDs: [], now: now, priorities: priority).articles.map(\.id),
+            ["covered", "stored", "neutral", "minor", "major"],
+            "Coverage wins ties before stored importance, and unrated importance is neutral")
 
         let db = DatabaseEngine(path: ":memory:")
         try await db.open()

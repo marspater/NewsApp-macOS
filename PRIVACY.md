@@ -45,8 +45,8 @@ NewsApp provides three distinct notification privacy modes with clear network an
 
 * **Local Machine Learning**: All article intelligence operations—topic categorization, sentiment scoring, named entity extraction, and content summarization—are executed locally on-device using Apple's `NaturalLanguage` and, when available, `FoundationModels` frameworks.
 * **Lead Images**: When a shown, unmuted story's group has no usable image, the app reads up to 256 KiB from the start of one report's article page (through the same protected client as the reader) to find its Open Graph, Twitter or schema.org article image. Publishers therefore receive requests for some stories you have not opened, at most 30 per refresh, outside Low Power Mode. Completed lookups are remembered; unreachable pages may retry. Article text from these lookups is not kept.
-* **Story Importance**: Whether a story is major, notable or minor is rated by the on-device model from its headline and feed summary, only while on-device AI is enabled. Minor stories wait for wider coverage; unread ones expire from the local library after a day.
-* **Event Grouping**: Deciding whether two stories report one event can use the on-device model and Apple's on-device sentence embeddings. Only headlines and feed summaries are compared, on your Mac, and only while on-device AI is enabled.
+* **Story Importance**: Existing local importance ratings can break Briefing ties after publisher coverage. Refresh and Briefing selection do not request new ratings. Importance never hides stories, deletes them or suppresses feed ingestion; ordinary user-configured retention still applies.
+* **Event Grouping**: Headlines and feed summaries are compared locally using deterministic NaturalLanguage signals. Event decisions do not invoke an LLM or sentence-embedding promotion, and grouping works independently of the on-device AI setting.
 * **Zero Cloud AI Egress**: Article content, summaries, and extracted metadata are never transmitted to third-party AI or cloud LLM APIs.
 
 ---

@@ -264,6 +264,12 @@ struct FeedUpdateBuffer: Equatable, Sendable {
 
 // MARK: - Optional finite briefing
 
+/// Existing local signals; selecting a Briefing never runs an importance model.
+struct BriefingPriority: Equatable, Sendable {
+    var sourceCount = 1
+    var importance: StoryImportance?
+}
+
 /// A window-local reading session. Membership, order and publisher snapshots stay frozen
 /// until the reader explicitly starts another briefing; ordinary refresh is independent.
 struct FiniteBriefing: Equatable, Sendable {
@@ -274,7 +280,10 @@ struct FiniteBriefing: Equatable, Sendable {
     let startedAt: Date
     let articles: [FeedArticle]
 
-    init(candidates: [FeedArticle], readIDs: Set<String>, now: Date = Date()) {
+    init(
+        candidates: [FeedArticle], readIDs: Set<String>, now: Date = Date(),
+        priorities: [String: BriefingPriority] = [:]
+    ) {
         startedAt = now
         var seen = Set<String>()
         var remaining = candidates.filter {
@@ -294,8 +303,18 @@ struct FiniteBriefing: Equatable, Sendable {
                 let b = remaining[right]
                 let aSource = sources[source(a), default: 0]
                 let bSource = sources[source(b), default: 0]
-                return (aSource + categories[category(a), default: 0], aSource, left)
-                    < (bSource + categories[category(b), default: 0], bSource, right)
+                let aDiversity = (aSource + categories[category(a), default: 0], aSource)
+                let bDiversity = (bSource + categories[category(b), default: 0], bSource)
+                if aDiversity != bDiversity { return aDiversity < bDiversity }
+                let aPriority = priorities[a.id] ?? BriefingPriority()
+                let bPriority = priorities[b.id] ?? BriefingPriority()
+                if aPriority.sourceCount != bPriority.sourceCount {
+                    return aPriority.sourceCount > bPriority.sourceCount
+                }
+                let aImportance = aPriority.importance ?? .notable
+                let bImportance = bPriority.importance ?? .notable
+                if aImportance != bImportance { return aImportance > bImportance }
+                return left < right
             }!
             let article = remaining.remove(at: index)
             selected.append(article)

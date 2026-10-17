@@ -13,17 +13,6 @@ enum StoryImportance: Int, Sendable, Comparable {
     static func < (lhs: Self, rhs: Self) -> Bool { lhs.rawValue < rhs.rawValue }
 }
 
-/// When a story appears in the main lists. An important story shows from its first report. A minor one waits until
-/// more than `minorStorySources` publishers cover it, and expires unread after `minorStoryLifetime`. A story whose
-/// importance is not known yet (no model, or not judged yet) shows, so nothing disappears for lack of a judgement.
-enum StoryVisibilityPolicy {
-    static let importantLevel = StoryImportance.notable
-    static let minorStorySources = 3
-    static let minorStoryLifetime: TimeInterval = 24 * 3600
-    /// Expired stories are not ingested again while feeds still list them.
-    static let expiryMemory: TimeInterval = 14 * 24 * 3600
-}
-
 /// Rates a story's importance; `nil` means no rating is available.
 struct StoryImportanceJudge: Sendable {
     var isAvailable = true
@@ -108,8 +97,7 @@ actor OnDeviceImportanceJudge {
     }
 }
 
-/// After clustering: rates stories that have no rating yet, expires stories that waited too long, then looks up lead
-/// images for shown stories whose events have none.
+/// Explicit rating audits and bounded publisher-image lookup. Refresh never schedules importance ratings.
 enum StoryCurator {
     struct Report: Equatable, Sendable {
         var rated = 0
@@ -145,7 +133,6 @@ enum StoryCurator {
                 }
             }
         }
-        report.expired = try await database.expireWaitingStories(now: now, keepingFeedURLs: keepingFeedURLs)
         if imageFinder.isAvailable, imageBudget > 0 {
             // ponytail: rows read once per pass; one lookup per event, the rest of an event waits for the next pass.
             var lookedUp = Set<String>()

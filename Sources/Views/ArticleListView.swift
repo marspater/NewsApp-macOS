@@ -83,9 +83,6 @@ struct ArticleListView: View {
     /// Stories the reader's muting removes from this list, across every page.
     @State private var mutedCount = 0
     @State private var showsMuted = false
-    /// Stories this list hides until more publishers cover them (`StoryVisibilityPolicy`).
-    @State private var waitingCount = 0
-    @State private var showsWaiting = false
     @State private var confirmsUnmuteAll = false
 
     private var isSearching: Bool {
@@ -103,7 +100,7 @@ struct ArticleListView: View {
     private var queryIdentity: String {
         let muting = listMuting
         return
-            "\(selectedTopic ?? "Today"):\(searchText):\(themeManager.autoHideRead):\(muting.sourceParameter)|\(muting.topicParameter):\(showsMuted):\(showsWaiting)"
+            "\(selectedTopic ?? "Today"):\(searchText):\(themeManager.autoHideRead):\(muting.sourceParameter)|\(muting.topicParameter):\(showsMuted)"
     }
 
     var filteredArticles: [FeedArticle] { buffer.displayed.articles }
@@ -339,9 +336,13 @@ struct ArticleListView: View {
                     let candidates = try await articleStore.database.fetchArticles(
                         isRead: false, limit: FiniteBriefing.candidateLimit,
                         publicationWindow: now.addingTimeInterval(-FiniteBriefing.duration)...now,
-                        muting: appSettings.muteRules, hidingWaitingStories: true)
+                        muting: appSettings.muteRules)
                     try Task.checkCancellation()
-                    briefing = FiniteBriefing(candidates: candidates, readIDs: readManager.readArticles, now: now)
+                    let priorities = try await articleStore.database.briefingPriorities(
+                        articleIDs: candidates.map(\.id))
+                    try Task.checkCancellation()
+                    briefing = FiniteBriefing(
+                        candidates: candidates, readIDs: readManager.readArticles, now: now, priorities: priorities)
                 }
                 buffer.replace(with: FeedSnapshot(articles: briefing?.articles ?? []))
                 hasMoreResults = false
@@ -376,10 +377,8 @@ struct ArticleListView: View {
             if !isPaging {
                 var hidden = 0
                 if !muting.isEmpty { hidden = try await countMuted(muting) }
-                let waiting = hidesWaitingStories || showsWaiting ? try await countWaiting(muting: muting) : 0
                 try Task.checkCancellation()
                 mutedCount = hidden
-                waitingCount = waiting
             }
             let page = Array(fetched.prefix(200))
             let listed = isPaging ? buffer.displayed.articles + page : page
@@ -431,13 +430,6 @@ struct ArticleListView: View {
         return (topic, read, topic == "Saved Stories" ? true : nil)
     }
 
-    /// Main lists hide stories that wait for more coverage; search, Saved Stories and History list everything.
-    private var listsWaitingStories: Bool {
-        !isSearching && selectedTopic != "Saved Stories" && selectedTopic != "History"
-    }
-
-    private var hidesWaitingStories: Bool { listsWaitingStories && !showsWaiting }
-
     private func fetchPage(after pageCursor: ArticleQueryCursor?, muting: MuteRules) async throws -> [FeedArticle] {
         if isSearching {
             return try await articleStore.database.searchArticles(
@@ -446,14 +438,7 @@ struct ArticleListView: View {
         let filters = listFilters
         return try await articleStore.database.fetchArticles(
             section: filters.topic, isRead: filters.read, isSaved: filters.saved,
-            limit: 201, after: pageCursor, muting: muting, hidingWaitingStories: hidesWaitingStories)
-    }
-
-    private func countWaiting(muting: MuteRules) async throws -> Int {
-        guard listsWaitingStories else { return 0 }
-        let filters = listFilters
-        return try await articleStore.database.waitingStoryCount(
-            section: filters.topic, isRead: filters.read, isSaved: filters.saved, muting: muting)
+            limit: 201, after: pageCursor, muting: muting)
     }
 
     private func countMuted(_ muting: MuteRules) async throws -> Int {
@@ -586,29 +571,14 @@ struct ArticleListView: View {
     /// The masthead notice and inline actions. `startsLine` drops the separator before the first one.
     @ViewBuilder
     private func statusExtras(startsLine: Bool) -> some View {
-        let showsWaitingAction = waitingCount > 0 && !isBriefing
         if let mastheadNotice {
             if !startsLine { statusSeparator }
             Text(mastheadNotice.message)
                 .font(AppTypography.caption)
                 .foregroundStyle(AppColor.secondaryText)
         }
-        if showsWaitingAction {
-            if !startsLine || mastheadNotice != nil { statusSeparator }
-            Button(showsWaiting ? "Hide \(waitingCount) waiting" : "\(waitingCount) waiting for more sources") {
-                showsWaiting.toggle()
-            }
-            .buttonStyle(.plain)
-            .font(AppTypography.caption)
-            .foregroundStyle(AppColor.secondaryText)
-            .help(
-                showsWaiting
-                    ? "Hide minor stories until more publishers cover them"
-                    : "Minor stories appear once \(StoryVisibilityPolicy.minorStorySources + 1) publishers cover them; unread ones expire after a day"
-            )
-        }
         if mutedCount > 0 && !listMuting.isEmpty {
-            if !startsLine || mastheadNotice != nil || showsWaitingAction { statusSeparator }
+            if !startsLine || mastheadNotice != nil { statusSeparator }
             mutingMenu
         }
     }
@@ -838,7 +808,9 @@ struct ArticleListView: View {
             return false
         }
         return VStack(spacing: AppSpacing.md) {
-            if !isBriefing && feedManager.isAnyFeedLoading && listsWaitingStories {
+            if !isBriefing && feedManager.isAnyFeedLoading && !isSearching && selectedTopic != "Saved Stories"
+                && selectedTopic != "History"
+            {
                 ProgressView("Refreshing news feeds…")
                     .controlSize(.regular)
             } else if !isBriefing && selectedTopic != "Saved Stories" && selectedTopic != "History"
