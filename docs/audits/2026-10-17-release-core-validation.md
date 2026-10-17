@@ -26,4 +26,3 @@ Article rows, read/save state, ratings, historical expiry tombstones and feed li
 ## Validation boundaries
 
 Full offline regressions, the SwiftPM app build, 160 native UI checks and an isolated arm64 app build with strict signature verification passed. The final guard has a dedicated regression for a partner outside the fetched batch. One final-suite attempt became idle in the existing socket-boundary regression and was stopped after sampling; rerunning the same binary with PTY output passed the complete suite. That interrupted attempt is not a passing check. No installed app, OS-notification delivery, hosted CI or release acceptance is established by these checks. #314 remains parked, #334 deferred, and #264/#268 untouched.
-
