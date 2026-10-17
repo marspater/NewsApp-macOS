@@ -127,7 +127,7 @@ struct RelatedStoryEvent: Hashable, Sendable {
 /// Experimental, read-only relation. Keep it out of the reader until reviewed wrong-link rates
 /// are acceptable. Missing signals deliberately produce no link.
 enum EventStoryRelation {
-    static let window: TimeInterval = 72 * 3600
+    static let window: TimeInterval = 7 * 86400
     static let candidateLimit = 40
     static let linkLimit = 3
     static let memberLimit = 100
@@ -154,7 +154,7 @@ enum EventStoryRelation {
             gap > 0, gap <= window,
             !earlier.people.isDisjoint(with: later.people)
                 || !earlier.organizations.isDisjoint(with: later.organizations),
-            !earlier.localPlaces.isDisjoint(with: later.localPlaces),
+            !earlier.places.isDisjoint(with: later.places),
             earlier.keywords.intersection(later.keywords)
                 .subtracting(earlier.anchors.union(later.anchors)).count >= 2
         else { return false }
