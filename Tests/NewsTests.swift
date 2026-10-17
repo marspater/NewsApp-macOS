@@ -10656,6 +10656,7 @@ struct NewsTests {
                 let store = ArticleStore(database: db)
                 await store.initialize()
                 let suite = testDefaultsSuite("test.transport-cancellation")
+                defer { removeTestDefaults(suite) }
                 let defaults = UserDefaults(suiteName: suite)!
                 let settings = AppSettings(defaults: defaults)
                 let feed = "http://93.184.216.34/\(phase)/\(index).xml"
@@ -10696,7 +10697,6 @@ struct NewsTests {
                 assertEqual(try await db.counts().total, 0, "Cancellation ingests no partial articles")
                 assertEqual(
                     try await db.feedFetchStates()[feed], nil, "Cancellation records no feed failure or validators")
-                removeTestDefaults(suite)
                 await db.close()
             }
         }
