@@ -193,7 +193,8 @@ struct PublisherExcerptTests {
             link: "https://example.com/draft",
             guid: "guid_1",
             description: sentence,
-            pubDate: Date(),
+            // Whole seconds round-trip exactly through SQLite's Unix timestamp representation.
+            pubDate: Date(timeIntervalSince1970: 1_729_000_000),
             source: "Example Wire"
         )
         let passage = EvidencePassage(id: "p1", articleID: "art_1", text: sentence)
