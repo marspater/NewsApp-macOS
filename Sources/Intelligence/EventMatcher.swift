@@ -156,46 +156,28 @@ extension EventFeatures {
             .replacingOccurrences(of: "&nbsp;", with: " ").replacingOccurrences(of: "&amp;", with: "&")
     }
 
-    private static func primaryClauseRange(in title: String) -> Range<String.Index>? {
-        let nsRange = NSRange(title.startIndex..., in: title)
-        if let leading = leadingBackgroundPattern.firstMatch(in: title, range: nsRange),
-            let clause = Range(leading.range(at: 1), in: title)
+    private static func primaryClauseRange(in text: String, titleEnd: String.Index) -> Range<String.Index>? {
+        let titleRange = text.startIndex..<titleEnd
+        let nsRange = NSRange(titleRange, in: text)
+        if let leading = leadingBackgroundPattern.firstMatch(in: text, range: nsRange),
+            let clause = Range(leading.range(at: 1), in: text)
         {
             return clause
         }
-        guard let trailing = trailingBackgroundPattern.firstMatch(in: title, range: nsRange),
-            let connector = Range(trailing.range, in: title)
+        guard let trailing = trailingBackgroundPattern.firstMatch(in: text, range: nsRange),
+            let connector = Range(trailing.range, in: text)
         else { return nil }
-        let prefix = title[title.startIndex..<connector.lowerBound]
+        let prefix = text[text.startIndex..<connector.lowerBound]
         guard prefix.split(whereSeparator: { !$0.isLetter && !$0.isNumber }).count >= 2 else { return nil }
-        return title.startIndex..<connector.lowerBound
+        return text.startIndex..<connector.lowerBound
     }
 
-    /// Extracts features with on-device NaturalLanguage only. Results depend on the OS models for the
-    /// language; when they are missing, the article simply has fewer signals and matches less.
-    init(title rawTitle: String, description rawDescription: String, date: Date) {
-        let title = Self.plain(rawTitle).trimmingCharacters(in: .whitespacesAndNewlines)
-        let description = String(Self.plain(rawDescription).prefix(Self.descriptionPrefix))
-        let text = title + "\n" + description
-        let language = EventMatchKey.language(of: text)
+    private static func collectEntities(
+        from tagger: NLTagger, in text: String, range whole: Range<String.Index>
+    ) -> (people: Set<String>, organizations: Set<String>, places: Set<String>, nameTokens: Set<String>) {
         var people = Set<String>()
         var organizations = Set<String>()
         var places = Set<String>()
-        var names = Set<String>()
-        var keywords = Set<String>()
-        var titleNumbers = Set<String>()
-        var periods = Set<String>()
-        var years = Set<String>()
-        var weekdays = Set<String>()
-        var primaryTitleTerms = Set<String>()
-        let whole = text.startIndex..<text.endIndex
-        let titleEnd = text.index(text.startIndex, offsetBy: title.count)
-        let primaryRange = Self.primaryClauseRange(in: title)
-
-        let tagger = NLTagger(tagSchemes: [.nameType, .lexicalClass, .lemma])
-        tagger.string = text
-        if let language { tagger.setLanguage(NLLanguage(rawValue: language), range: whole) }
-
         var nameTokens = Set<String>()
         tagger.enumerateTags(
             in: whole, unit: .word, scheme: .nameType, options: [.omitWhitespace, .omitPunctuation, .joinNames]
@@ -206,7 +188,6 @@ extension EventFeatures {
             switch tag {
             case .personalName:
                 people.insert(name)
-                // Later references often use the surname alone.
                 if let surname = name.split(separator: " ").last, surname.count >= 3, String(surname) != name {
                     people.insert(String(surname))
                 }
@@ -217,15 +198,17 @@ extension EventFeatures {
             case .organizationName:
                 organizations.insert(name)
                 let canonicalPlace = EventPlaces.canonical(name)
-                if canonicalPlace.hasPrefix("@") {
-                    places.insert(canonicalPlace)
-                }
+                if canonicalPlace.hasPrefix("@") { places.insert(canonicalPlace) }
                 if !name.contains(" ") { nameTokens.insert(name) }
             default: return true
             }
             return true
         }
+        return (people, organizations, places, nameTokens)
+    }
 
+    private static func collectPeriods(in text: String) -> Set<String> {
+        var periods = Set<String>()
         let lowered = text.lowercased()
         let loweredRange = NSRange(lowered.startIndex..., in: lowered)
         for match in Self.quarterPattern.matches(in: lowered, range: loweredRange) {
@@ -241,33 +224,131 @@ extension EventFeatures {
             guard let range = Range(match.range(at: 1), in: lowered) else { continue }
             periods.insert(["first", "1st"].contains(String(lowered[range])) ? "h1" : "h2")
         }
+        return periods
+    }
+
+    private static func normalizeHyphenatedWord(_ word: inout String, places: inout Set<String>) {
+        guard word.contains("-") else { return }
+        for part in word.split(separator: "-").map(String.init) where part.count >= 2 {
+            let canonicalPart = EventPlaces.canonical(part)
+            if canonicalPart.hasPrefix("@") { places.insert(canonicalPart) }
+        }
+        if word == "co-pilot" { word = "copilot" }
+    }
+
+    private static func promotePlaceNames(from names: inout Set<String>, into places: inout Set<String>) {
+        for name in names {
+            let place = EventPlaces.canonical(name)
+            if place.hasPrefix("@") {
+                names.remove(name)
+                places.insert(place)
+            }
+        }
+    }
+
+    private static func classifyNumberToken(
+        _ word: String, token: String, inTitle: Bool, inPrimaryClause: Bool,
+        organizations: inout Set<String>, years: inout Set<String>,
+        titleNumbers: inout Set<String>, primaryTitleTerms: inout Set<String>
+    ) {
+        if token.first?.isUppercase == true, word.first?.isLetter == true {
+            organizations.insert(word)
+            return
+        }
+        let digits = word.filter { $0.isNumber || $0 == "." }.trimmingCharacters(in: CharacterSet(charactersIn: "."))
+        if digits.count == 4, let year = Int(digits), (1900...2100).contains(year) {
+            years.insert(digits)
+        } else if inTitle, !digits.isEmpty {
+            titleNumbers.insert(digits)
+            if inPrimaryClause { primaryTitleTerms.insert(digits) }
+        }
+    }
+
+    private static func collectLemmas(from tagger: NLTagger, in whole: Range<String.Index>) -> [String.Index: String] {
+        var lemmas: [String.Index: String] = [:]
+        tagger.enumerateTags(in: whole, unit: .word, scheme: .lemma, options: [.omitWhitespace, .omitPunctuation]) {
+            tag, range in
+            if let tag { lemmas[range.lowerBound] = Self.normalized(tag.rawValue) }
+            return true
+        }
+        return lemmas
+    }
+
+    private static func classifyLexicalTerm(
+        _ word: String, token: String, tag: NLTag?, range: Range<String.Index>,
+        in text: String, inTitle: Bool, titleCase: Bool, usesCapitalization: Bool,
+        inPrimaryClause: Bool, lemmas: [String.Index: String], nameTokens: Set<String>,
+        names: inout Set<String>, keywords: inout Set<String>, primaryTitleTerms: inout Set<String>
+    ) {
+        guard word.count >= 3, word.contains(where: \.isLetter), !Self.stopwords.contains(word),
+            !Self.monthNames.contains(word), !Self.numberWords.keys.contains(word)
+        else { return }
+
+        let isUntypedInitialName =
+            Self.startsSentence(range.lowerBound, in: text) && lemmas[range.lowerBound] == nil
+            && !word.contains("-")
+        if usesCapitalization, token.first?.isUppercase == true, !(inTitle && titleCase),
+            !Self.startsSentence(range.lowerBound, in: text) || isUntypedInitialName
+        {
+            if !nameTokens.contains(word) { names.insert(word) }
+            return
+        }
+        guard !nameTokens.contains(word) else { return }
+        if let tag {
+            guard [.noun, .verb, .adjective].contains(tag) else { return }
+            let keyword = lemmas[range.lowerBound].flatMap { $0.isEmpty ? nil : $0 } ?? word
+            if keyword.count >= 3, !Self.stopwords.contains(keyword) {
+                keywords.insert(keyword)
+                if inPrimaryClause { primaryTitleTerms.insert(keyword) }
+            }
+        } else if word.count >= 4 {
+            keywords.insert(word)
+            if inPrimaryClause { primaryTitleTerms.insert(word) }
+        }
+    }
+
+    /// Extracts features with on-device NaturalLanguage only. Results depend on the OS models for the
+    /// language; when they are missing, the article simply has fewer signals and matches less.
+    init(title rawTitle: String, description rawDescription: String, date: Date) {
+        let title = Self.plain(rawTitle).trimmingCharacters(in: .whitespacesAndNewlines)
+        let description = String(Self.plain(rawDescription).prefix(Self.descriptionPrefix))
+        let text = title + "\n" + description
+        let language = EventMatchKey.language(of: text)
+        let whole = text.startIndex..<text.endIndex
+        let titleEnd = text.index(text.startIndex, offsetBy: title.count)
+        let primaryRange = Self.primaryClauseRange(in: text, titleEnd: titleEnd)
+
+        let tagger = NLTagger(tagSchemes: [.nameType, .lexicalClass, .lemma])
+        tagger.string = text
+        if let language { tagger.setLanguage(NLLanguage(rawValue: language), range: whole) }
+
+        let entities = Self.collectEntities(from: tagger, in: text, range: whole)
+        var organizations = entities.organizations
+        var places = entities.places
+        var names = Set<String>()
+        var keywords = Set<String>()
+        var titleNumbers = Set<String>()
+        var periods = Self.collectPeriods(in: text)
+        var years = Set<String>()
+        var weekdays = Set<String>()
+        var primaryTitleTerms = Set<String>()
 
         let titleWords = title.split(whereSeparator: { !$0.isLetter }).filter { $0.count >= 3 }
         let titleCase =
             !titleWords.isEmpty
             && Double(titleWords.filter { $0.first?.isUppercase == true }.count) / Double(titleWords.count) > 0.6
         let usesCapitalization = !(language.map(Self.capitalizedNounLanguages.contains) ?? false)
+        let lemmas = Self.collectLemmas(from: tagger, in: whole)
 
-        let wordOptions: NLTagger.Options = [.omitWhitespace, .omitPunctuation]
-        var lemmas: [String.Index: String] = [:]
-        tagger.enumerateTags(in: whole, unit: .word, scheme: .lemma, options: wordOptions) { tag, range in
-            if let tag { lemmas[range.lowerBound] = Self.normalized(tag.rawValue) }
-            return true
-        }
-        tagger.enumerateTags(in: whole, unit: .word, scheme: .lexicalClass, options: wordOptions) { tag, range in
+        tagger.enumerateTags(
+            in: whole, unit: .word, scheme: .lexicalClass, options: [.omitWhitespace, .omitPunctuation]
+        ) { tag, range in
             let token = String(text[range])
             var word = Self.normalized(token)
             guard !word.isEmpty else { return true }
             let inTitle = range.lowerBound < titleEnd
             let inPrimaryClause = primaryRange.map { $0.overlaps(range) } ?? false
-
-            if word.contains("-") {
-                for part in word.split(separator: "-").map(String.init) where part.count >= 2 {
-                    let canonicalPart = EventPlaces.canonical(part)
-                    if canonicalPart.hasPrefix("@") { places.insert(canonicalPart) }
-                }
-                if word == "co-pilot" { word = "copilot" }
-            }
+            Self.normalizeHyphenatedWord(&word, places: &places)
 
             if word.count == 2, let letter = word.first, let digit = word.last,
                 (letter == "q" && "1234".contains(digit)) || (letter == "h" && "12".contains(digit))
@@ -276,18 +357,10 @@ extension EventFeatures {
                 return true
             }
             if word.contains(where: \.isNumber) {
-                if token.first?.isUppercase == true, word.first?.isLetter == true {
-                    organizations.insert(word)
-                    return true
-                }
-                let digits = word.filter { $0.isNumber || $0 == "." }.trimmingCharacters(
-                    in: CharacterSet(charactersIn: "."))
-                if digits.count == 4, let year = Int(digits), (1900...2100).contains(year) {
-                    years.insert(digits)
-                } else if inTitle, !digits.isEmpty {
-                    titleNumbers.insert(digits)
-                    if inPrimaryClause { primaryTitleTerms.insert(digits) }
-                }
+                Self.classifyNumberToken(
+                    word, token: token, inTitle: inTitle, inPrimaryClause: inPrimaryClause,
+                    organizations: &organizations, years: &years,
+                    titleNumbers: &titleNumbers, primaryTitleTerms: &primaryTitleTerms)
                 return true
             }
             if Self.weekdayNames.contains(word) {
@@ -304,49 +377,18 @@ extension EventFeatures {
                 places.insert(canonicalWordPlace)
                 return true
             }
-            guard word.count >= 3, word.contains(where: \.isLetter), !Self.stopwords.contains(word),
-                !Self.monthNames.contains(word), !Self.numberWords.keys.contains(word)
-            else { return true }
-
-            // A capitalized word inside a sentence (or sentence-initial without a common lemma) is a name the tagger missed.
-            let isUntypedInitialName =
-                Self.startsSentence(range.lowerBound, in: text) && lemmas[range.lowerBound] == nil
-                && !word.contains("-")
-            if usesCapitalization, token.first?.isUppercase == true, !(inTitle && titleCase),
-                !Self.startsSentence(range.lowerBound, in: text) || isUntypedInitialName
-            {
-                if !nameTokens.contains(word) {
-                    names.insert(word)
-                }
-                return true
-            }
-            guard !nameTokens.contains(word) else { return true }
-            if let tag {
-                guard [.noun, .verb, .adjective].contains(tag) else { return true }
-                let keyword = lemmas[range.lowerBound].flatMap { $0.isEmpty ? nil : $0 } ?? word
-                if keyword.count >= 3, !Self.stopwords.contains(keyword) {
-                    keywords.insert(keyword)
-                    if inPrimaryClause { primaryTitleTerms.insert(keyword) }
-                }
-            } else if word.count >= 4 {
-                // No lexical model for this language: keep longer words as plain terms.
-                keywords.insert(word)
-                if inPrimaryClause { primaryTitleTerms.insert(word) }
-            }
+            Self.classifyLexicalTerm(
+                word, token: token, tag: tag, range: range, in: text,
+                inTitle: inTitle, titleCase: titleCase, usesCapitalization: usesCapitalization,
+                inPrimaryClause: inPrimaryClause, lemmas: lemmas, nameTokens: entities.nameTokens,
+                names: &names, keywords: &keywords, primaryTitleTerms: &primaryTitleTerms)
             return true
         }
 
-        // Nationality adjectives the tagger leaves untyped ("Canadian writer") are places too.
-        for name in names {
-            let place = EventPlaces.canonical(name)
-            if place.hasPrefix("@") {
-                names.remove(name)
-                places.insert(place)
-            }
-        }
+        Self.promotePlaceNames(from: &names, into: &places)
         let tollNumbers = Self.tolls(in: title.lowercased()).intersection(titleNumbers)
         self.init(
-            language: language, people: people, organizations: organizations, places: places, names: names,
+            language: language, people: entities.people, organizations: organizations, places: places, names: names,
             keywords: keywords, date: date, titleNumbers: titleNumbers.subtracting(tollNumbers),
             tollNumbers: tollNumbers,
             periods: periods, years: years, weekdays: weekdays, primaryTitleTerms: primaryTitleTerms)

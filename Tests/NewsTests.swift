@@ -6799,6 +6799,44 @@ struct NewsTests {
         assertTrue(
             EventMatcher.assess(g7First, g7Second).isMatch,
             "Alphanumeric group names like G7 act as specific anchors rather than headline figures")
+
+        let demonymReport = EventFeatures(
+            title: "Americans and Iranians meet in UAE for talks",
+            description: "Palestinians and Saudis also watched the diplomatic session closely.",
+            date: now)
+        assertTrue(
+            demonymReport.countries.isSuperset(of: ["@US", "@IR", "@AE", "@PS", "@SA"]),
+            "Plural demonyms and UAE canonicalize to country codes")
+
+        let figureFirst = EventFeatures(
+            title: "Amazon pledges 500 scholarships for engineering students",
+            description: "Amazon announced the scholarship fund for university students.",
+            date: now)
+        let figureSecond = EventFeatures(
+            title: "Amazon backs 500 student grants at universities",
+            description: "The company unveiled the 500 awards for students.",
+            date: now.addingTimeInterval(600))
+        assertTrue(
+            !figureFirst.titleNumbers.intersection(figureSecond.titleNumbers).isEmpty
+                && EventMatcher.assess(figureFirst, figureSecond).sharedAnchors >= 1,
+            "Shared headline figures are retained on both reports to corroborate lexical evidence")
+
+        let leadingClause = EventFeatures(
+            title: "Hours after winning architectural award, developer launches new housing project",
+            description: "The developer unveiled plans for the residential tower.",
+            date: now)
+        assertTrue(
+            leadingClause.primaryTitleTerms.contains("developer")
+                && !leadingClause.primaryTitleTerms.contains("architectural"),
+            "Leading temporal background clause is excluded from primaryTitleTerms")
+        let wakeClause = EventFeatures(
+            title: "Regulators tighten ferry inspections in the wake of harbor collision",
+            description: "Maritime officials ordered new safety checks across the fleet.",
+            date: now)
+        assertTrue(
+            wakeClause.primaryTitleTerms.contains("ferry")
+                && !wakeClause.primaryTitleTerms.contains("collision"),
+            "Trailing 'in the wake of' background clause is excluded from primaryTitleTerms")
     }
 
     static func testEventFragmentMergingAndJudge(fixtureRoot: URL) async throws {
