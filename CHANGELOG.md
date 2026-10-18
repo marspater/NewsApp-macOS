@@ -2,6 +2,8 @@
 
 ## Unreleased — 18 October 2026
 
+- Full notifications convert supported reader images such as WebP to bounded PNG attachments and reuse the selected reader lead image. Attachment failures now produce privacy-safe diagnostics; notification triage still does not wait for publisher-page image lookup.
+
 - On-device CoreML sentence embeddings (`all-MiniLM-L6-v2`) and SQLite v21 vector storage for articles, enabling sub-millisecond local inference and Accelerate `vDSP` cosine similarity calculations (#127, #307).
 - Hybrid EventMatcher v7 with semantic rescue for genuine paraphrases sharing specific anchors (cosine similarity $\ge 0.82$) and semantic veto for semantically divergent stories (cosine similarity $< 0.55$), preserving hard factual conflict invariants.
 - Reader extraction uses CSS metadata selection and a quality-checked HTML repair fallback. Feed parsing adds Dublin Core date and group-level media-credit handling, preserves relative XML bases, and accepts additional common RFC822 date forms. SwiftSoup and FeedKit are locked through SwiftPM and shared by app and QA builds.

@@ -32,6 +32,7 @@ struct NewsRegressionRunner {
         if !CommandLine.arguments.contains("--parsing-regressions") {
             do { try await FeedKitSwiftSoupTests.runEmbeddingIntegration() }
             catch { fatalError("Parser/embedding integration failed: \(error)") }
+            NotificationAttachmentTests.run()
             await NewsTests.main()
         }
     }
@@ -103,7 +104,7 @@ swiftc "${NEWS_DEPENDENCY_FLAGS[@]}" "${TEST_OPT_FLAGS[@]}" -target "$(uname -m)
     Sources/App/UpdateChecker.swift \
     Tests/StoryCorpus.swift \
     Tests/EventEmbeddingTests.swift \
-    "$TEST_STAGE/NewsTests.swift" Tests/FeedKitSwiftSoupTests.swift "$TEST_STAGE/Runner.swift" \
+    "$TEST_STAGE/NewsTests.swift" Tests/FeedKitSwiftSoupTests.swift Tests/NotificationAttachmentTests.swift "$TEST_STAGE/Runner.swift" \
     Tests/TestDefaults.swift \
     -o test_runner
 
