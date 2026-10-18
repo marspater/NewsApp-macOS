@@ -20,8 +20,23 @@ python3 script/evaluation/importance_review.py
 python3 script/evaluation/relation_review.py
 python3 script/evaluation/catalog_review.py
 
+TEST_STAGE=$(mktemp -d "${TMPDIR:-/tmp}/news-tests.XXXXXX")
+trap 'rm -rf "$TEST_STAGE"' EXIT
+# Keep the existing runner unchanged while including the dedicated parsing checks in every full regression run.
+sed '/^@main$/d' Tests/NewsTests.swift > "$TEST_STAGE/NewsTests.swift"
+cat > "$TEST_STAGE/Runner.swift" <<'SWIFT'
+@main
+struct NewsRegressionRunner {
+    static func main() async {
+        FeedKitSwiftSoupTests.run()
+        if !CommandLine.arguments.contains("--parsing-regressions") { await NewsTests.main() }
+    }
+}
+SWIFT
+
 echo "Compiling tests for macOS ${TARGET_MACOS} ($(uname -m))..."
-swiftc "${TEST_OPT_FLAGS[@]}" -target "$(uname -m)-apple-macos${TARGET_MACOS}" \
+source script/swiftpm_dependencies.sh
+swiftc "${NEWS_DEPENDENCY_FLAGS[@]}" "${TEST_OPT_FLAGS[@]}" -target "$(uname -m)-apple-macos${TARGET_MACOS}" \
     Sources/Services/DateParser.swift \
     Sources/Models/FeedError.swift \
     Sources/Models/FeedFetchState.swift \
@@ -84,7 +99,7 @@ swiftc "${TEST_OPT_FLAGS[@]}" -target "$(uname -m)-apple-macos${TARGET_MACOS}" \
     Sources/App/UpdateChecker.swift \
     Tests/StoryCorpus.swift \
     Tests/EventEmbeddingTests.swift \
-    Tests/NewsTests.swift \
+    "$TEST_STAGE/NewsTests.swift" Tests/FeedKitSwiftSoupTests.swift "$TEST_STAGE/Runner.swift" \
     Tests/TestDefaults.swift \
     -o test_runner
 

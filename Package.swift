@@ -7,15 +7,28 @@ let package = Package(
         .macOS(.v15)
     ],
     products: [
-        .executable(name: "News", targets: ["News"])
+        .executable(name: "News", targets: ["News"]),
+        .library(name: "NewsParsingDependencies", type: .static, targets: ["NewsParsingDependencies"]),
+    ],
+    dependencies: [
+        .package(url: "https://github.com/scinfu/SwiftSoup.git", from: "2.7.5"),
+        .package(url: "https://github.com/nmdias/FeedKit.git", from: "9.1.2"),
     ],
     targets: [
+        .target(
+            name: "NewsParsingDependencies",
+            dependencies: [
+                .product(name: "SwiftSoup", package: "SwiftSoup"), .product(name: "FeedKit", package: "FeedKit"),
+            ],
+            path: "BuildSupport"
+        ),
         .executableTarget(
             name: "News",
+            dependencies: [
+                .product(name: "SwiftSoup", package: "SwiftSoup"), .product(name: "FeedKit", package: "FeedKit"),
+            ],
             path: "Sources",
-            resources: [
-                .copy("Resources")
-            ]
-        )
+            resources: [.copy("ThirdPartyNotices.txt"), .copy("Resources")]
+        ),
     ]
 )

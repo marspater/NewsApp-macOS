@@ -1,4 +1,5 @@
 import Foundation
+import SwiftSoup
 import os
 
 /// Constructed only after protected fetching and document-equivalence checks.
@@ -482,7 +483,7 @@ enum HTMLDOMBuilder {
         "link", "meta", "param", "source", "track", "wbr",
     ]
 
-    private static let ignoredTags: Set<String> = [
+    fileprivate static let ignoredTags: Set<String> = [
         "script", "style", "iframe", "svg", "nav", "footer",
         "header", "form", "aside", "dialog", "time", "button",
     ]
@@ -771,14 +772,11 @@ final class ContentExtractionPipeline: Sendable {
         var urls = [finalURL.absoluteString]
         let dom = HTMLDOMBuilder.parse(html: html)
         let title = Self.normalizedEvidenceText(dom.findNodes(tag: "title").map { $0.combinedText() }.joined())
-        let links = dom.findNodes(tag: "head")
-            .flatMap { $0.findNodes(tag: "link") }
-            .filter {
-                ($0.attributes["rel"] ?? "").lowercased().split(whereSeparator: { $0.isWhitespace }).contains(
-                    "canonical")
-            }
+        let links = ((try? SwiftSoup.parse(html).select("head link[rel][href]").array()) ?? []).filter {
+            ((try? $0.attr("rel")) ?? "").lowercased().split(whereSeparator: { $0.isWhitespace }).contains("canonical")
+        }
         // ponytail: one same-origin canonical probe on demand; no canonical chains.
-        if links.count == 1, let href = links.first?.attributes["href"], href.utf8.count <= 8192,
+        if links.count == 1, let href = try? links.first?.attr("href"), href.utf8.count <= 8192,
             let candidate = URL(string: href, relativeTo: finalURL)?.absoluteURL,
             Self.documentURL(candidate), Self.sameOrigin(candidate, finalURL),
             ArticleIdentity.canonicalizeURL(candidate.absoluteString)
@@ -846,7 +844,13 @@ final class ContentExtractionPipeline: Sendable {
 
     /// Core DOM-aware extraction engine that processes HTML into structured article prose.
     func extractFromHTML(_ html: String, baseUrl: String? = nil, leadImage: String? = nil) -> ExtractionOutcome {
-        let effectiveImage = Self.readerImageURL(leadImage ?? extractLeadImage(from: html), baseURL: baseUrl)
+        guard !Task.isCancelled else { return .contentParsingFailed(reason: "Extraction cancelled") }
+        guard html.utf8.count <= SecureHTTPClient.defaultArticleLimit else {
+            return .contentParsingFailed(reason: "Article exceeds extraction limit")
+        }
+        let soup = try? SwiftSoup.parse(html)
+        let effectiveImage = Self.readerImageURL(
+            leadImage ?? soup.flatMap { leadImages(in: $0).first }, baseURL: baseUrl)
 
         // 1. Build DOM Tree
         let dom = HTMLDOMBuilder.parse(html: html)
@@ -861,6 +865,18 @@ final class ContentExtractionPipeline: Sendable {
             if docParas.filter({ $0.kind != .figure }).count > candidateParagraphs.filter({ $0.kind != .figure }).count
             {
                 candidateParagraphs = docParas
+            }
+        }
+
+        let prose = candidateParagraphs.filter { [.paragraph, .quote, .listItem].contains($0.kind) }.map(\.text)
+        if prose.count < 2 || ContentQualityValidator.validate(paragraphs: prose) != .valid,
+            let soup, let fallback = repairedReadingBlocks(in: soup), !Task.isCancelled
+        {
+            let repairedProse = fallback.filter { [.paragraph, .quote, .listItem].contains($0.kind) }.map(\.text)
+            if ContentQualityValidator.validate(paragraphs: repairedProse) == .valid,
+                prose.count < repairedProse.count || ContentQualityValidator.validate(paragraphs: prose) != .valid
+            {
+                candidateParagraphs = fallback
             }
         }
 
@@ -942,10 +958,11 @@ final class ContentExtractionPipeline: Sendable {
             if let effectiveImage, ReaderImageCandidate.usable(url: effectiveImage),
                 !images.contains(where: { $0.url == effectiveImage })
             {
-                let metadata = dom.findNodes(tag: "head").flatMap { $0.findNodes(tag: "meta") }
                 func dimension(_ property: String) -> Int? {
-                    metadata.first { $0.attributes["property"]?.lowercased() == property }?.attributes["content"]
-                        .flatMap(Int.init)
+                    guard let soup,
+                        let value = try? soup.select("meta[property=\"\(property)\"]").first()?.attr("content")
+                    else { return nil }
+                    return Int(value)
                 }
                 images.append(
                     ReaderImageCandidate(
@@ -975,6 +992,40 @@ final class ContentExtractionPipeline: Sendable {
     }
 
     // MARK: - Container Scoring Engine
+
+    private func repairedReadingBlocks(in document: SwiftSoup.Document) -> [ReaderBlock]? {
+        var count = 0
+        func attributes(_ element: SwiftSoup.Element) -> [String: String] {
+            Dictionary(
+                (element.getAttributes()?.asList() ?? []).map { ($0.getKey(), $0.getValue()) },
+                uniquingKeysWith: { first, _ in first })
+        }
+        func excluded(_ element: SwiftSoup.Element) -> Bool {
+            HTMLDOMBuilder.ignoredTags.contains(element.tagName()) || element.tagName() == "template"
+                || DOMElementNode(tag: element.tagName(), attributes: attributes(element)).isReaderExcluded
+        }
+        func convert(_ node: SwiftSoup.Node, depth: Int) -> DOMElementNode? {
+            guard !Task.isCancelled, depth < 128, count < 50_000 else { return nil }
+            count += 1
+            if let text = node as? SwiftSoup.TextNode {
+                return DOMElementNode(tag: "#text", text: text.getWholeText())
+            }
+            guard let element = node as? SwiftSoup.Element, !excluded(element) else { return nil }
+            return DOMElementNode(
+                tag: element.tagName(), attributes: attributes(element),
+                children: element.getChildNodes().compactMap { convert($0, depth: depth + 1) })
+        }
+        // ponytail: bounded repair of explicit article containers; no second readability scoring engine.
+        let containers = (try? document.select("[itemprop~=articleBody], article, main").array()) ?? []
+        for element in containers.prefix(32) {
+            guard !element.parents().array().contains(where: excluded) else { continue }
+            guard let node = convert(element, depth: 0), !node.isReaderExcluded else { continue }
+            let blocks = node.readingBlocks().compactMap(\.readerBlock)
+            let prose = blocks.filter { [.paragraph, .quote, .listItem].contains($0.kind) }.map(\.text)
+            if ContentQualityValidator.validate(paragraphs: prose) == .valid { return blocks }
+        }
+        return nil
+    }
 
     private func scoreAndExtractBestParagraphs(from root: DOMElementNode) -> [ReaderBlock] {
         var candidateContainers = [DOMElementNode]()
@@ -1169,28 +1220,26 @@ final class ContentExtractionPipeline: Sendable {
 
     // MARK: - Lead Image Extraction
 
-    private static let ogImageRegexes: [NSRegularExpression] = [
-        "<meta[^>]+property=[\"']og:image[\"'][^>]+content=[\"']([^\"']+)[\"']",
-        "<meta[^>]+content=[\"']([^\"']+)[\"'][^>]+property=[\"']og:image[\"']",
-        "<meta[^>]+name=[\"']twitter:image[\"'][^>]+content=[\"']([^\"']+)[\"']",
-        "<meta[^>]+content=[\"']([^\"']+)[\"'][^>]+name=[\"']twitter:image[\"']",
-    ].compactMap { try? NSRegularExpression(pattern: $0, options: .caseInsensitive) }
-
     func extractLeadImage(from html: String) -> String? {
         extractLeadImages(from: html).first
     }
 
-    private static let schemaImageRegex = try? NSRegularExpression(
-        pattern: #"<script\b[^>]*type\s*=\s*["']application/ld\+json["'][^>]*>(.*?)</script\s*>"#,
-        options: [.caseInsensitive, .dotMatchesLineSeparators])
-
     /// Declared article media only; Organization and WebSite images are usually logos.
     func extractLeadImages(from html: String) -> [String] {
+        guard !Task.isCancelled, html.utf8.count <= SecureHTTPClient.defaultArticleLimit,
+            let document = try? SwiftSoup.parse(html)
+        else { return [] }
+        return leadImages(in: document)
+    }
+
+    private func leadImages(in document: SwiftSoup.Document) -> [String] {
         var images: [String] = []
-        for regex in Self.ogImageRegexes {
-            for match in regex.matches(in: html, range: NSRange(html.startIndex..., in: html)).prefix(20) {
-                guard let range = Range(match.range(at: 1), in: html) else { continue }
-                let candidate = String(html[range]).trimmingCharacters(in: .whitespacesAndNewlines)
+        let metadata = (try? document.select("meta[property], meta[name]").array()) ?? []
+        for key in ["og:image", "twitter:image"] {
+            for element in metadata.filter({
+                ((try? $0.attr(key == "og:image" ? "property" : "name")) ?? "").lowercased() == key
+            }).prefix(20) {
+                let candidate = ((try? element.attr("content")) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
                 if !candidate.isEmpty { images.append(candidate) }
             }
         }
@@ -1215,11 +1264,13 @@ final class ContentExtractionPipeline: Sendable {
             }
             return object["@graph"].map { articleImages($0, depth: depth + 1) } ?? []
         }
-        for match in Self.schemaImageRegex?.matches(in: html, range: NSRange(html.startIndex..., in: html)).prefix(20)
-            ?? []
-        {
-            guard let range = Range(match.range(at: 1), in: html),
-                let json = try? JSONSerialization.jsonObject(with: Data(html[range].utf8))
+        let scripts = ((try? document.select("script[type]").array()) ?? []).filter {
+            ((try? $0.attr("type")) ?? "").lowercased().split(separator: ";").first?.trimmingCharacters(
+                in: .whitespaces) == "application/ld+json"
+        }
+        for script in scripts.prefix(20) {
+            guard !Task.isCancelled,
+                let json = try? JSONSerialization.jsonObject(with: Data(script.data().utf8))
             else { continue }
             images += articleImages(json)
         }

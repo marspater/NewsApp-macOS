@@ -56,7 +56,9 @@ sys.exit(code if code >= 0 else 128 - code)
 PY
 }
 echo "Compiling VoiceOver QA (arm64, macOS 15 deployment target)..."
-run_bounded 300 swiftc -swift-version 6 -warnings-as-errors -Onone -parse-as-library -target arm64-apple-macos15.0 \
+NEWS_DEPENDENCY_ARCH=arm64
+source script/swiftpm_dependencies.sh
+run_bounded 300 swiftc "${NEWS_DEPENDENCY_FLAGS[@]}" -swift-version 6 -warnings-as-errors -Onone -parse-as-library -target arm64-apple-macos15.0 \
     "${SOURCES[@]}" "$STAGE/NewsApp.swift" Tests/LiveVoiceOverQAHarness.swift -o "$STAGE/news_vo_live_qa"
 cp "$STAGE/news_vo_live_qa" "$APP/Contents/MacOS/news_vo_live_qa"
 codesign --force --sign - "$APP"

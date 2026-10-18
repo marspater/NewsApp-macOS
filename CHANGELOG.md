@@ -2,6 +2,8 @@
 
 ## Unreleased — 17 October 2026
 
+- Reader extraction uses CSS metadata selection and a quality-checked HTML repair fallback. Feed parsing adds Dublin Core date and group-level media-credit handling, preserves relative XML bases, and accepts additional common RFC822 date forms. SwiftSoup and FeedKit are locked through SwiftPM and shared by app and QA builds.
+
 - Event overviews show publisher headlines and cited excerpts without generated introduction or factual prose. AI-disabled requests are final; older generated overviews regenerate. Energy policy still bounds publisher extraction and warmups; model updates preserve current excerpts.
 - Minor-rated stories remain visible, eligible for image lookup and notifications, and subject only to ordinary retention. Old importance-expiry tombstones no longer suppress returning feed items. Refresh no longer schedules importance scoring.
 - Briefing keeps source/category diversity first, then ranks by publisher coverage, existing stored importance and recency. Today/archive remain chronological; an existing Briefing stays frozen.

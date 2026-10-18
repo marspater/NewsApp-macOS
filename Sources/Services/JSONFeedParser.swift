@@ -1,41 +1,9 @@
+import FeedKit
 import Foundation
-
-struct JSONFeed: Decodable {
-    let version: String?
-    let title: String?
-    let items: [JSONFeedItem]
-}
-
-struct JSONFeedItem: Decodable {
-    let id: String?
-    let url: String?
-    let title: String?
-    let contentHTML: String?
-    let contentText: String?
-    let summary: String?
-    let datePublished: String?
-    let image: String?
-    let tags: [String]?
-
-    // For RSS-in-JSON compatibility some apis use 'link' or 'pubDate' or 'thumbnail'
-    let link: String?
-    let pubDate: String?
-    let description: String?
-    let thumbnail: String?
-    let categories: [String]?
-
-    enum CodingKeys: String, CodingKey {
-        case id, url, title, summary, image, tags, link, pubDate, description, thumbnail, categories
-        case contentHTML = "content_html"
-        case contentText = "content_text"
-        case datePublished = "date_published"
-    }
-}
 
 class JSONFeedParser {
     static func parse(data: Data, feedURL: String) -> [FeedArticle]? {
-        let decoder = JSONDecoder()
-
+        guard let bounded = normalizedFeedData(data), let feed = decodeFeed(bounded) else { return nil }
         // Determine source
         var baseSource = "Feed"
         if let urlComponents = URL(string: feedURL), let host = urlComponents.host {
@@ -43,64 +11,97 @@ class JSONFeedParser {
                 .replacingOccurrences(of: "api.", with: "")
         }
 
-        // Try parsing strict JSON Feed format first
-        if let feed = try? decoder.decode(JSONFeed.self, from: data) {
-            let sourceName = feed.title ?? baseSource
+        let sourceName = feed.title ?? baseSource
+        var articles = [FeedArticle]()
+        for item in (feed.items ?? []).prefix(500) {
+            guard !Task.isCancelled else { return nil }
+            if let article = article(from: item, sourceName: sourceName) { articles.append(article) }
+        }
+        return Task.isCancelled ? nil : articles
+    }
 
-            var articles = [FeedArticle]()
-            for item in feed.items.prefix(500) {
-                if Task.isCancelled { return nil }
-                let link = item.url ?? item.link ?? item.id ?? ""
-                if link.isEmpty { continue }
-
-                let title = item.title ?? "Untitled"
-
-                let rawDate = item.datePublished ?? item.pubDate ?? ""
-                let pubDate = DateParser.parse(rawDate) ?? DateParser.unknownDate
-
-                let imageUrl = item.image ?? item.thumbnail
-
-                var category: String? = nil
-                if let tags = item.tags, !tags.isEmpty {
-                    category = tags.first
-                } else if let cats = item.categories, !cats.isEmpty {
-                    category = cats.first
-                }
-
-                let cleanDesc = item.summary ?? stripSimpleHTML(item.description ?? "")
-                let cleanContent = item.contentHTML.map(stripSimpleHTML) ?? item.contentText
-                let readableContent = cleanContent.flatMap {
-                    $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0
-                }
-
-                let extracted = item.contentHTML.map {
-                    ContentExtractionPipeline.shared.extractFromHTML($0, baseUrl: link)
-                }
-                let article = FeedArticle(
-                    title: title.trimmingCharacters(in: .whitespacesAndNewlines),
-                    link: link,
-                    guid: item.id,
-                    description: cleanDesc,
-                    pubDate: pubDate,
-                    source: sourceName,
-                    imageUrl: imageUrl,
-                    aiSummary: nil,
-                    fullContent: extracted?.content ?? readableContent,
-                    category: category,
-                    contentFetched: readableContent != nil,
-                    readerDocument: {
-                        if case .success(_, _, let document) = extracted {
-                            return document?.curated(feedImage: imageUrl, title: title)
-                        }
-                        return nil
-                    }()
-                )
-                articles.append(article)
+    private static func normalizedFeedData(_ data: Data) -> Data? {
+        guard !Task.isCancelled, data.count <= SecureHTTPClient.defaultFeedLimit,
+            var object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+            let items = object["items"] as? [[String: Any]]
+        else { return nil }
+        var normalized: [[String: Any]] = []
+        for var item in items.prefix(500) {
+            if Task.isCancelled { return nil }
+            // Preserve RSS-in-JSON aliases while FeedKit owns the JSON Feed model.
+            for (key, alias) in [
+                ("url", "link"), ("date_published", "pubDate"), ("image", "thumbnail"), ("tags", "categories"),
+            ] {
+                if item[key] == nil || item[key] is NSNull { item[key] = item[alias] }
             }
-            return articles
+            if (item["tags"] as? [String])?.isEmpty == true { item["tags"] = item["categories"] }
+            if item["summary"] == nil || item["summary"] is NSNull {
+                item["summary"] = stripSimpleHTML(item["description"] as? String ?? "")
+            }
+            // Unused optional FeedKit fields must not make an otherwise compatible feed fail decoding.
+            let fields: Set<String> = [
+                "id", "url", "title", "content_html", "content_text", "summary", "date_published", "image", "tags",
+            ]
+            normalized.append(item.filter { fields.contains($0.key) })
+        }
+        object = object.filter { ["version", "title"].contains($0.key) }
+        object["items"] = normalized
+        guard let bounded = try? JSONSerialization.data(withJSONObject: object), !Task.isCancelled else { return nil }
+        return bounded
+    }
+
+    private static func decodeFeed(_ data: Data) -> FeedKit.JSONFeed? {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .custom { decoder in
+            let raw = try decoder.singleValueContainer().decode(String.self)
+            return DateParser.parse(raw) ?? DateParser.unknownDate
+        }
+        return try? decoder.decode(FeedKit.JSONFeed.self, from: data)
+    }
+
+    private static func article(from item: FeedKit.JSONFeedItem, sourceName: String) -> FeedArticle? {
+        let link = item.url ?? item.id ?? ""
+        if link.isEmpty { return nil }
+
+        let title = item.title ?? "Untitled"
+
+        let pubDate = item.datePublished ?? DateParser.unknownDate
+
+        let imageUrl = item.image
+
+        var category: String? = nil
+        if let tags = item.tags, !tags.isEmpty {
+            category = tags.first
         }
 
-        return nil
+        let cleanDesc = item.summary ?? ""
+        let cleanContent = item.contentHtml.map(stripSimpleHTML) ?? item.contentText
+        let readableContent = cleanContent.flatMap {
+            $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0
+        }
+
+        let extracted = item.contentHtml.map {
+            ContentExtractionPipeline.shared.extractFromHTML($0, baseUrl: link)
+        }
+        return FeedArticle(
+            title: title.trimmingCharacters(in: .whitespacesAndNewlines),
+            link: link,
+            guid: item.id,
+            description: cleanDesc,
+            pubDate: pubDate,
+            source: sourceName,
+            imageUrl: imageUrl,
+            aiSummary: nil,
+            fullContent: extracted?.content ?? readableContent,
+            category: category,
+            contentFetched: readableContent != nil,
+            readerDocument: {
+                if case .success(_, _, let document) = extracted {
+                    return document?.curated(feedImage: imageUrl, title: title)
+                }
+                return nil
+            }()
+        )
     }
 
     private static func stripSimpleHTML(_ html: String) -> String {

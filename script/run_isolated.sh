@@ -35,7 +35,7 @@ for arg in "$@"; do
 done
 
 echo "Staging isolated build in ${STAGE}..."
-rsync -a --exclude .git --exclude .antigravity --exclude .claude --exclude '*.app' "$ROOT/" "$STAGE/src/"
+rsync -a --exclude .git --exclude .antigravity --exclude .claude --exclude .build --exclude '*.app' "$ROOT/" "$STAGE/src/"
 sed -i '' "s|<string>com.marspater.news</string>|<string>$BUNDLE_ID</string>|" "$STAGE/src/build.sh"
 
 echo "Building isolated News.app (bundle ID: ${BUNDLE_ID})..."

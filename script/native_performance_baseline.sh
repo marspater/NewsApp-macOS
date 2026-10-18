@@ -56,7 +56,9 @@ while IFS= read -r source; do
 done < <(find Sources -name '*.swift' -print | sort)
 export CLANG_MODULE_CACHE_PATH="${CLANG_MODULE_CACHE_PATH:-${TMPDIR:-/tmp}/news-module-cache}"
 export SWIFT_MODULECACHE_PATH="$CLANG_MODULE_CACHE_PATH"
-swiftc -swift-version 6 -O -parse-as-library -target arm64-apple-macos15.0 \
+NEWS_DEPENDENCY_ARCH=arm64
+source script/swiftpm_dependencies.sh
+swiftc "${NEWS_DEPENDENCY_FLAGS[@]}" -swift-version 6 -O -parse-as-library -target arm64-apple-macos15.0 \
     "${SOURCES[@]}" "$STAGE/NewsApp.swift" "${NEWS_NATIVE_HARNESS:-Tests/NativePerformanceBaseline.swift}" Tests/TestDefaults.swift -o "$STAGE/news_native_baseline"
 "$STAGE/news_native_baseline" "$OUTPUT"
 echo "Native performance evidence: $OUTPUT"

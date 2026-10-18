@@ -6,7 +6,8 @@ export CLANG_MODULE_CACHE_PATH="${CLANG_MODULE_CACHE_PATH:-${TMPDIR:-/tmp}/news-
 export SWIFT_MODULECACHE_PATH="$CLANG_MODULE_CACHE_PATH"
 
 echo "Compiling Event Overview Accessibility Tests for macOS ${TARGET_MACOS} ($(uname -m))..."
-swiftc -swift-version 6 -O -parse-as-library -target "$(uname -m)-apple-macos${TARGET_MACOS}" \
+source script/swiftpm_dependencies.sh
+swiftc "${NEWS_DEPENDENCY_FLAGS[@]}" -swift-version 6 -O -parse-as-library -target "$(uname -m)-apple-macos${TARGET_MACOS}" \
     Sources/Services/DateParser.swift \
     Sources/Models/FeedError.swift \
     Sources/Models/FeedFetchState.swift \
@@ -38,6 +39,7 @@ swiftc -swift-version 6 -O -parse-as-library -target "$(uname -m)-apple-macos${T
     Sources/Intelligence/EventCandidates.swift \
     Sources/Intelligence/EventMatcher.swift \
     Sources/Intelligence/EventClustering.swift \
+    Sources/Intelligence/SentenceEmbedder.swift \
     Sources/Intelligence/EventJudge.swift \
     Sources/Intelligence/StoryImportance.swift \
     Sources/Intelligence/ContentExtractionPipeline.swift \
