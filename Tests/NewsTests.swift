@@ -6837,6 +6837,96 @@ struct NewsTests {
             wakeClause.primaryTitleTerms.contains("ferry")
                 && !wakeClause.primaryTitleTerms.contains("collision"),
             "Trailing 'in the wake of' background clause is excluded from primaryTitleTerms")
+
+        // Supported leading connector forms and punctuation delimiters:
+        let followingLeading = EventFeatures(
+            title: "Following summit, President announces ceasefire accord",
+            description: "The leaders signed the diplomatic agreement.", date: now)
+        assertTrue(
+            !followingLeading.primaryTitleTerms.isEmpty
+                && !followingLeading.primaryTitleTerms.contains("summit"),
+            "Leading 'Following <clause>,' isolates primary clause terms")
+
+        let daysAfterLeading = EventFeatures(
+            title: "Days after volcano eruption, flights resume across archipelago",
+            description: "Airlines restored service as ash clouds cleared.", date: now)
+        assertTrue(
+            daysAfterLeading.primaryTitleTerms.contains("resume")
+                && !daysAfterLeading.primaryTitleTerms.contains("volcano"),
+            "Leading 'Days after <clause>,' isolates primary clause terms")
+
+        let colonLeading = EventFeatures(
+            title: "Shortly after verdict: protesters gather outside courthouse",
+            description: "Crowds assembled following the judge's ruling.", date: now)
+        assertTrue(
+            !colonLeading.primaryTitleTerms.isEmpty
+                && !colonLeading.primaryTitleTerms.contains("verdict"),
+            "Leading connector with colon delimiter isolates primary clause")
+
+        let emDashLeading = EventFeatures(
+            title: "Soon after power outage — subway lines reopen across city",
+            description: "Transit authorities restored train operations.", date: now)
+        assertTrue(
+            !emDashLeading.primaryTitleTerms.isEmpty
+                && !emDashLeading.primaryTitleTerms.contains("outage"),
+            "Leading connector with em-dash delimiter isolates primary clause")
+
+        let enDashLeading = EventFeatures(
+            title: "Just after rocket launch – satellites achieve orbit successfully",
+            description: "Space agency confirmed payload separation.", date: now)
+        assertTrue(
+            !enDashLeading.primaryTitleTerms.isEmpty
+                && !enDashLeading.primaryTitleTerms.contains("launch"),
+            "Leading connector with en-dash delimiter isolates primary clause")
+
+        // Supported trailing connector forms:
+        let followingTrailing = EventFeatures(
+            title: "Port workers end strike following mediation agreement",
+            description: "Labor union reached deal with terminal operators.", date: now)
+        assertTrue(
+            followingTrailing.primaryTitleTerms.contains("strike")
+                && !followingTrailing.primaryTitleTerms.contains("mediation"),
+            "Trailing 'following' background clause is excluded from primaryTitleTerms")
+
+        let shortlyAfterTrailing = EventFeatures(
+            title: "Bridge reopens shortly after inspection check",
+            description: "Engineers cleared the crossing for vehicle traffic.", date: now)
+        assertTrue(
+            !shortlyAfterTrailing.primaryTitleTerms.isEmpty
+                && !shortlyAfterTrailing.primaryTitleTerms.contains("inspection"),
+            "Trailing 'shortly after' background clause is excluded from primaryTitleTerms")
+
+        let afterTrailing = EventFeatures(
+            title: "Factory restarts operations after gas leak contained",
+            description: "Safety inspectors allowed workers to return to the facility.", date: now)
+        assertTrue(
+            !afterTrailing.primaryTitleTerms.isEmpty
+                && !afterTrailing.primaryTitleTerms.contains("contained"),
+            "Trailing 'after' background clause is excluded from primaryTitleTerms")
+
+        // Unicode and edge-case robustness:
+        let unicodeAccented = EventFeatures(
+            title: "Café chain expands across Madrid — hours after regional approval",
+            description: "The coffee retailer opened five new storefronts in the capital.", date: now)
+        assertTrue(
+            !unicodeAccented.primaryTitleTerms.isEmpty
+                && !unicodeAccented.primaryTitleTerms.contains("approval"),
+            "Accented characters and em-dashes maintain safe Unicode range alignment")
+
+        let unicodeEmoji = EventFeatures(
+            title: "🚨 Hospitals prepare emergency wards following toxic chemical spill",
+            description: "Medical teams mobilized across the province.", date: now)
+        assertTrue(
+            !unicodeEmoji.primaryTitleTerms.isEmpty
+                && !unicodeEmoji.primaryTitleTerms.contains("spill"),
+            "Surrogate pair emojis do not panic string indexing in background clause extraction")
+
+        let plainHeadline = EventFeatures(
+            title: "Telecom provider rolls out fiber network in suburban districts",
+            description: "Broadband speeds doubled for residential subscribers.", date: now)
+        assertTrue(
+            plainHeadline.primaryTitleTerms.isEmpty,
+            "Headlines without background clauses leave primaryTitleTerms empty")
     }
 
     static func testEventFragmentMergingAndJudge(fixtureRoot: URL) async throws {
@@ -8748,6 +8838,43 @@ struct NewsTests {
             try await db.eventMatchRows(articleIDs: unknown.map(\.id)).allSatisfy { $0.date == DateParser.unknownDate },
             "Matching retains unknown publication dates rather than substituting ingestion time")
         assertEqual(try await EventClusterer.run(in: db, now: now).created, 0, "Undated reports stay separate")
+
+        // Active-event upgrade from v5 to v6 with primary clause isolation:
+        let strikeArticles = [
+            article(
+                "v5-strike-1", "Dock workers launch strike across Liverpool ports",
+                "Union leaders announced indefinite walkout over wages.", hoursAgo: 5, source: "Maritime Wire"),
+            article(
+                "v5-strike-2",
+                "Cruise liners divert passengers to alternate docks hours after dock workers launch strike",
+                "Travel operators adjusted ship schedules to avoid port disruptions.", hoursAgo: 4.5,
+                source: "Travel News"),
+        ]
+        try await db.upsertArticles(strikeArticles)
+        let v5Event = try await db.createEvent(memberArticleIDs: strikeArticles.map(\.id), at: now)
+        try await db.markEventMatchProcessed(strikeArticles.map(\.id), matcherVersion: 5, at: now)
+        let v5Overview = EventOverviewDocument(
+            eventID: v5Event.id,
+            version: OverviewVersionContext(membershipVersion: 1, inputTextHash: "v5-overview"),
+            content: OverviewContent(title: "Strike overview", summary: "", facts: [], citations: []),
+            provenance: OverviewProvenance(
+                memberArticleIDs: strikeArticles.map(\.id), kind: .fallbackExcerpts))
+        assertTrue(try await db.recordEventOverview(v5Overview), "Store an overview for the v5 event")
+
+        let v5Run = try await EventClusterer.run(in: db, now: now)
+        assertEqual(v5Run.processed, 2, "Active v5 event members are processed under v6")
+        assertEqual(v5Run.detached, 1, "Disjoint primary-clause member is detached from the v5 event")
+        assertEqual(
+            try await db.fetchEvent(id: v5Event.id)?.memberArticleIDs, ["v5-strike-1"],
+            "Primary strike story retains the original event ID")
+        assertEqual(
+            try await db.fetchEventOverview(eventID: v5Event.id), nil,
+            "Re-partitioning active event invalidates the obsolete overview")
+        assertTrue(
+            try await db.pendingEventMatchRows(
+                activeSince: now.addingTimeInterval(-72 * 3600),
+                matcherVersion: EventMatcher.version, limit: 1
+            ).isEmpty, "All upgraded members are marked with current matcher version")
         await db.close()
         var handle: OpaquePointer?
         var statement: OpaquePointer?
