@@ -1,5 +1,7 @@
 import Foundation
+import ImageIO
 import NaturalLanguage
+import UniformTypeIdentifiers
 import UserNotifications
 import os
 
@@ -25,8 +27,11 @@ final class NotificationService: Sendable {
         let entityTagger = NLTagger(tagSchemes: [.nameType])
         entityTagger.string = fullText
         var entityCount = 0
-        entityTagger.enumerateTags(in: fullText.startIndex..<fullText.endIndex, unit: .word, scheme: .nameType, options: [.omitWhitespace, .omitPunctuation, .joinNames]) { tag, _ in
-            if let tag = tag, (tag == .personalName || tag == .organizationName || tag == .placeName) {
+        entityTagger.enumerateTags(
+            in: fullText.startIndex..<fullText.endIndex, unit: .word, scheme: .nameType,
+            options: [.omitWhitespace, .omitPunctuation, .joinNames]
+        ) { tag, _ in
+            if let tag = tag, tag == .personalName || tag == .organizationName || tag == .placeName {
                 entityCount += 1
             }
             return entityCount < 20
@@ -40,7 +45,7 @@ final class NotificationService: Sendable {
             "announces", "launches", "acquires", "dies", "killed",
             "arrested", "charged", "resigns", "fired", "recalled",
             "emergency", "crisis", "attack", "explosion", "earthquake",
-            "replace", "ceo", "president", "elected", "indicted"
+            "replace", "ceo", "president", "elected", "indicted",
         ]
         let lower = fullText.lowercased()
         let signalHits = breakingSignals.filter { lower.contains($0) }.count
@@ -104,12 +109,14 @@ final class NotificationService: Sendable {
         content.title = "News Update"
 
         // Deduplicate unique sources
-        let sources = Set(articles.map {
-            ($0.source.components(separatedBy: "\n").first ?? $0.source)
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-        }.filter { !$0.isEmpty })
+        let sources = Set(
+            articles.map {
+                ($0.source.components(separatedBy: "\n").first ?? $0.source)
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+            }.filter { !$0.isEmpty })
 
-        content.body = Self.formatMinimalSummary(articleCount: articles.count, uniqueSourcesCount: max(1, sources.count))
+        content.body = Self.formatMinimalSummary(
+            articleCount: articles.count, uniqueSourcesCount: max(1, sources.count))
         content.sound = .default
 
         guard Bundle.main.bundleIdentifier != nil else {
@@ -165,8 +172,9 @@ final class NotificationService: Sendable {
         content.sound = .default
         content.userInfo = ["articleLink": article.link, "articleID": article.id]
 
-        if let imageUrlString = article.imageUrl, let imageUrl = URL(string: imageUrlString),
-           let attachment = await downloadNotificationAttachment(from: imageUrl) {
+        if let imageUrl = FeedArticle.bestCardImage(in: [article]),
+            let attachment = await downloadNotificationAttachment(from: imageUrl)
+        {
             content.attachments = [attachment]
         }
 
@@ -174,7 +182,8 @@ final class NotificationService: Sendable {
         let request = UNNotificationRequest(identifier: identifier, content: content, trigger: nil)
         do {
             try await UNUserNotificationCenter.current().add(request)
-            logger.debug("Successfully scheduled full notification: \(identifier)")
+            logger.debug(
+                "Successfully scheduled full notification: \(identifier); attachments=\(content.attachments.count)")
         } catch {
             logger.error("Failed to schedule full notification '\(identifier)': \(error.localizedDescription)")
         }
@@ -182,28 +191,35 @@ final class NotificationService: Sendable {
 
     private func downloadNotificationAttachment(from url: URL) async -> UNNotificationAttachment? {
         do {
-            let (data, response) = try await SecureHTTPClient.shared.fetchImage(from: url, allowHTTP: false)
-
-            let mimeType = response.mimeType ?? "image/jpeg"
-            let ext: String
-            switch mimeType {
-            case "image/png": ext = "png"
-            case "image/gif": ext = "gif"
-            case "image/webp": ext = "webp"
-            default: ext = "jpg"
-            }
-
-            let tempDir = FileManager.default.temporaryDirectory
-            let fileURL = tempDir.appendingPathComponent("\(UUID().uuidString).\(ext)")
-            try data.write(to: fileURL)
-
-            return try UNNotificationAttachment(
-                identifier: UUID().uuidString,
-                url: fileURL,
-                options: [UNNotificationAttachmentOptionsThumbnailClippingRectKey: CGRect(x: 0, y: 0, width: 1, height: 1).dictionaryRepresentation]
-            )
+            let (data, _) = try await SecureHTTPClient.shared.fetchImage(from: url, allowHTTP: false)
+            try Task.checkCancellation()
+            return try Self.makeImageAttachment(data: data)
         } catch {
+            let error = error as NSError
+            logger.error(
+                "Notification image attachment failed: domain=\(error.domain, privacy: .public) code=\(error.code)")
             return nil
+        }
+    }
+
+    /// Notification attachments do not support every format the protected reader can decode (notably WebP/AVIF).
+    static func makeImageAttachment(data: Data) throws -> UNNotificationAttachment {
+        let image = try SecureHTTPClient.decodeReaderImage(data)
+        let encoded = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(encoded, UTType.png.identifier as CFString, 1, nil)
+        else { throw URLError(.cannotDecodeContentData) }
+        CGImageDestinationAddImage(destination, image, nil)
+        guard CGImageDestinationFinalize(destination), encoded.length <= 10_000_000 else {
+            throw URLError(.cannotDecodeContentData)
+        }
+        let fileURL = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).png")
+        do {
+            try (encoded as Data).write(to: fileURL)
+            // The notification framework takes ownership after successful attachment creation.
+            return try UNNotificationAttachment(identifier: UUID().uuidString, url: fileURL, options: nil)
+        } catch {
+            try? FileManager.default.removeItem(at: fileURL)
+            throw error
         }
     }
 }
