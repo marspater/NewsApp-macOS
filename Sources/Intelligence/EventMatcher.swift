@@ -479,45 +479,9 @@ enum EventMatcher {
             || (!b.primaryTitleTerms.isEmpty && b.primaryTitleTerms.isDisjoint(with: nonPlaceA))
     }
 
-    private static func matchClassification(
-        conflict: EventConflict?,
-        primaryDisjoint: Bool,
-        sharedSpecific: Int,
-        sharedEvidence: Int,
-        sharedAnchors: Int,
-        what: Double,
-        score: Double,
-        gap: TimeInterval,
-        policy: EventMatchPolicy,
-        embeddingSimilarity: Double?
-    ) -> (isMatch: Bool, isCompatible: Bool, isBorderline: Bool, needsConfirmation: Bool) {
-        let ruleMatch =
-            conflict == nil && !primaryDisjoint && sharedSpecific >= 1 && sharedEvidence >= 2
-            && sharedAnchors + sharedEvidence >= policy.minimumSharedTerms
-            && what >= policy.minimumWhat && score >= policy.matchScore
-            && (gap <= policy.strictTimeGap || (what >= policy.strictWhat && sharedEvidence >= 3))
-
-        let semanticRescue =
-            conflict == nil && !primaryDisjoint && sharedSpecific >= 1
-            && (embeddingSimilarity ?? 0) >= policy.semanticMatchThreshold && gap <= policy.maximumTimeGap
-
-        let isMatch = ruleMatch || semanticRescue
-        let isCompatible =
-            conflict == nil && !primaryDisjoint && sharedSpecific >= 1
-            && (score >= policy.compatibilityScore || (embeddingSimilarity ?? 0) >= policy.semanticFragmentThreshold)
-        let isBorderline =
-            !isMatch && conflict == nil && !primaryDisjoint
-            && ((sharedAnchors >= 1 && sharedEvidence >= 1 && score >= policy.borderlineScore)
-                || (sharedEvidence >= 3 && what >= policy.minimumWhat)
-                || ((embeddingSimilarity ?? 0) >= policy.semanticFragmentThreshold && sharedSpecific >= 1))
-        let needsConfirmation = isMatch && (sharedSpecific == 0 || what < policy.strictWhat)
-        return (isMatch, isCompatible, isBorderline, needsConfirmation)
-    }
-
     /// Who, what, where and when for one pair. Headline similarity alone never passes: a match needs
     /// a shared name or place, shared action terms, closeness in time and no contradicting facts.
-    /// When available, neural sentence embeddings (#127, #307) rescue paraphrased matches (>= 0.82)
-    /// and veto all candidate pairs below semantic threshold (< 0.55) with .semanticDivergence.
+    /// When available, neural sentence embeddings (#127, #307) veto semantic divergence and rescue paraphrased matches.
     static func assess(
         _ a: EventFeatures, _ b: EventFeatures, policy: EventMatchPolicy = .standard,
         embeddingSimilarity: Double? = nil
@@ -540,17 +504,30 @@ enum EventMatcher {
             + (a.titleNumbers.isDisjoint(with: b.titleNumbers) ? 0 : 1)
         let primaryDisjoint = isPrimaryDisjoint(a, b)
 
-        // Semantic embedding veto (#307): all conflict-free candidate pairs with available embeddings
-        // are vetoed with .semanticDivergence when cosine similarity falls below the veto threshold (0.55).
         if conflict == nil, let sim = embeddingSimilarity, sim < policy.semanticVetoThreshold {
             conflict = .semanticDivergence
         }
 
-        let (isMatch, isCompatible, isBorderline, needsConfirmation) = matchClassification(
-            conflict: conflict, primaryDisjoint: primaryDisjoint, sharedSpecific: sharedSpecific,
-            sharedEvidence: sharedEvidence, sharedAnchors: sharedAnchors, what: what, score: score,
-            gap: gap, policy: policy, embeddingSimilarity: embeddingSimilarity)
+        let ruleMatch =
+            conflict == nil && !primaryDisjoint && sharedSpecific >= 1 && sharedEvidence >= 2
+            && sharedAnchors + sharedEvidence >= policy.minimumSharedTerms
+            && what >= policy.minimumWhat && score >= policy.matchScore
+            && (gap <= policy.strictTimeGap || (what >= policy.strictWhat && sharedEvidence >= 3))
 
+        let semanticRescue =
+            conflict == nil && !primaryDisjoint && sharedSpecific >= 1
+            && (embeddingSimilarity ?? 0) >= policy.semanticMatchThreshold && gap <= policy.maximumTimeGap
+
+        let isMatch = ruleMatch || semanticRescue
+        let isCompatible =
+            conflict == nil && !primaryDisjoint && sharedSpecific >= 1
+            && (score >= policy.compatibilityScore || (embeddingSimilarity ?? 0) >= policy.semanticFragmentThreshold)
+        let isBorderline =
+            !isMatch && conflict == nil && !primaryDisjoint
+            && ((sharedAnchors >= 1 && sharedEvidence >= 1 && score >= policy.borderlineScore)
+                || (sharedEvidence >= 3 && what >= policy.minimumWhat)
+                || ((embeddingSimilarity ?? 0) >= policy.semanticFragmentThreshold && sharedSpecific >= 1))
+        let needsConfirmation = isMatch && (sharedSpecific == 0 || what < policy.strictWhat)
         return EventPairAssessment(
             conflict: conflict, isBorderline: isBorderline, needsConfirmation: needsConfirmation,
             score: max(score, embeddingSimilarity ?? 0.0), what: what, entity: entity, sharedAnchors: sharedAnchors,
