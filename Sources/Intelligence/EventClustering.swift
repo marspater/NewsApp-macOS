@@ -122,7 +122,6 @@ enum EventClusterer {
                 }
                 remaining -= 1
                 report.processed += 1
-                let article = features(row)
                 let excluded = try await database.eventExclusions(of: row.id)
 
                 // Active version upgrades were partitioned above. Archived unchanged groups stay intact;
@@ -130,11 +129,14 @@ enum EventClusterer {
                 if let current = row.eventID, let event = try await database.eventMatchMembers(eventID: current) {
                     let others = event.members.filter { $0.id != row.id }
                     if !others.isEmpty {
+                        var pairs: [EventPairAssessment] = []
+                        for other in others {
+                            pairs.append(await assessed(row, other))
+                        }
+                        let isExcluded = others.contains { excluded.contains($0.id) }
                         let fits =
                             row.previouslyMatched
-                            || EventMatcher.eventScore(
-                                for: article, members: others.map(features),
-                                excluded: others.contains { excluded.contains($0.id) }, policy: matchPolicy) != nil
+                            || (!isExcluded && EventMatcher.eventScore(pairs: pairs, policy: matchPolicy) != nil)
                         if fits {
                             try await database.markEventMatchProcessed(
                                 [row.id], matcherVersion: EventMatcher.version, at: now)

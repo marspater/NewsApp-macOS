@@ -62,6 +62,17 @@ actor DatabaseEngine {
             try registerFunctions()
 
             try migrateSchemaIfNeeded()
+
+            // Ensure article_embeddings table exists on all databases (including pre-existing v21 databases) (#127, #307)
+            try executeSimple(
+                """
+                CREATE TABLE IF NOT EXISTS article_embeddings (
+                    article_id TEXT PRIMARY KEY REFERENCES articles(id) ON DELETE CASCADE,
+                    model_version INTEGER NOT NULL,
+                    vector BLOB NOT NULL
+                );
+                """
+            )
         } catch {
             sqlite3_close(openDb)
             self.db = nil

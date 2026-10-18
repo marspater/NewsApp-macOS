@@ -10,19 +10,60 @@ extension NewsTests {
     static func testEventEmbeddingIntegration() async throws {
         print("  - Testing on-device sentence embeddings & hybrid matcher (#127, #307)...")
 
+        try testBertTokenizer()
         try await testSentenceEmbedderInference()
         try await testArticleEmbeddingsDatabaseRoundtrip()
+        try await testArticleEmbeddingsForeignKeyCascade()
         try await testHybridEventMatcherSemanticRescueAndVeto()
+        try await testEmbeddingAwareValidationOfAssignedMembers()
+    }
+
+    // MARK: - BertWordPieceTokenizer (#127)
+
+    private static func testBertTokenizer() throws {
+        let vocabURL =
+            Bundle.main.url(forResource: "vocab", withExtension: "txt", subdirectory: "Models")
+            ?? URL(fileURLWithPath: "Sources/Resources/Models/vocab.txt")
+        let tokenizer = try BertWordPieceTokenizer(vocabURL: vocabURL)
+
+        // 1. Punctuation handling, CLS/SEP tokens and padding
+        let (ids, mask) = tokenizer.encode("Apple Inc., valued at $3T - up 5%.", maxSequenceLength: 32)
+        assertEqual(ids.count, 32, "Padded tokens must reach maxSequenceLength")
+        assertEqual(mask.count, 32, "Attention mask must reach maxSequenceLength")
+
+        assertEqual(ids[0], 101, "First token must be [CLS]")
+
+        let validCount = mask.filter { $0 == 1 }.count
+        let padCount = mask.filter { $0 == 0 }.count
+        assertTrue(validCount > 6, "Must tokenize words and punctuation into separate tokens")
+        assertEqual(padCount, 32 - validCount, "Remaining tokens must be padded")
+        assertEqual(ids[validCount - 1], 102, "Last valid token must be [SEP]")
+
+        for i in validCount..<32 {
+            assertEqual(ids[i], 0, "Padding token must be [PAD] (0)")
+            assertEqual(mask[i], 0, "Padding mask must be 0")
+        }
+
+        // 2. Truncation bound
+        let (shortIDs, shortMask) = tokenizer.encode(
+            "Apple reports quarterly financial earnings and record revenues for institutional investors.",
+            maxSequenceLength: 8
+        )
+        assertEqual(shortIDs.count, 8, "Truncated length must not exceed maxSequenceLength")
+        assertEqual(shortIDs[0], 101, "Truncated sequence begins with [CLS]")
+        assertEqual(shortIDs[7], 102, "Truncated sequence ends with [SEP]")
+        assertEqual(shortMask, [Int32](repeating: 1, count: 8), "Truncated sequence has full attention mask")
     }
 
     // MARK: - SentenceEmbedder Inference & Normalization (#127)
 
     private static func testSentenceEmbedderInference() async throws {
         let embedder = SentenceEmbedder.shared
-        guard await embedder.isAvailable else {
-            print("    ⚠️ SentenceEmbedder model not available at default path; skipping live CoreML inference check.")
-            return
-        }
+        let isAvailable = await embedder.isAvailable
+        assertTrue(
+            isAvailable,
+            "SentenceEmbedder CoreML model and vocab must be available and loadable in bundle or Sources/Resources/Models"
+        )
 
         // 1. Verify embedding dimension and unit length
         let textA = "Apple reports record quarterly revenue driven by iPhone sales and services growth."
@@ -178,6 +219,50 @@ extension NewsTests {
         assertTrue(abs(reDot - 1.0) < 1e-5, "Updated vector roundtrip fidelity must be exact")
     }
 
+    // MARK: - SQLite Foreign-Key CASCADE Deletion (#127)
+
+    private static func testArticleEmbeddingsForeignKeyCascade() async throws {
+        let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let dbPath = tempDir.appendingPathComponent("test_cascade.sqlite").path
+        let db = DatabaseEngine(path: dbPath)
+        try await db.open()
+
+        let art = FeedArticle(
+            title: "Cascade Test Story",
+            link: "https://example.com/cascade",
+            guid: "cascade_guid",
+            description: "Testing cascade",
+            pubDate: Date(),
+            source: "Test Wire",
+            fullContent: "Testing foreign key cascade deletion of embeddings"
+        )
+        _ = try await db.upsertArticles([art])
+        let dummyVec = [Float](repeating: 0.1, count: 384)
+        try await db.upsertArticleEmbeddings([art.id: dummyVec], modelVersion: 1)
+
+        // Verify stored
+        let fetchedBefore = try await db.fetchArticleEmbeddings(articleIDs: [art.id], modelVersion: 1)
+        assertEqual(fetchedBefore.count, 1, "Embedding exists before article deletion")
+
+        // Delete parent article directly from SQLite with foreign keys enabled
+        var handle: OpaquePointer?
+        assertEqual(sqlite3_open(dbPath, &handle), SQLITE_OK, "Open DB handle for direct delete")
+        defer { sqlite3_close(handle) }
+        assertEqual(
+            sqlite3_exec(
+                handle, "PRAGMA foreign_keys = ON; DELETE FROM articles WHERE id = '\(art.id)';", nil, nil, nil),
+            SQLITE_OK,
+            "Delete parent article with foreign keys ON"
+        )
+
+        // Verify cascade deletion
+        let fetchedAfter = try await db.fetchArticleEmbeddings(articleIDs: [art.id], modelVersion: 1)
+        assertTrue(fetchedAfter.isEmpty, "Embedding must be cascade deleted when parent article is removed")
+    }
+
     // MARK: - Hybrid EventMatcher Semantic Rescue and Veto (#307)
 
     private static func testHybridEventMatcherSemanticRescueAndVeto() async throws {
@@ -285,5 +370,53 @@ extension NewsTests {
         assertFalse(
             placeConflictAssessment.isMatch, "Hard place conflict must never be overridden by high semantic similarity")
         assertEqual(placeConflictAssessment.conflict, .places, "Places conflict must remain intact")
+    }
+
+    // MARK: - Embedding-Aware Member Validation (#307)
+
+    private static func testEmbeddingAwareValidationOfAssignedMembers() async throws {
+        let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let dbPath = tempDir.appendingPathComponent("test_assigned.sqlite").path
+        let db = DatabaseEngine(path: dbPath)
+        try await db.open()
+
+        let now = Date()
+        let art1 = FeedArticle(
+            title: "Apple introduces M4 MacBook Pro with breakthrough AI performance",
+            link: "https://example.com/art1",
+            guid: "art1",
+            description: "Apple hardware launch Cupertino",
+            pubDate: now,
+            source: "Tech Wire",
+            fullContent: "Apple hardware launch Cupertino"
+        )
+        let art2 = FeedArticle(
+            title: "Magnitude 7.1 earthquake strikes eastern Turkey causing tremors",
+            link: "https://example.com/art2",
+            guid: "art2",
+            description: "Earthquake disaster in Malatya Turkey",
+            pubDate: now,
+            source: "Global Wire",
+            fullContent: "Earthquake disaster in Malatya Turkey"
+        )
+        _ = try await db.upsertArticles([art1, art2])
+
+        // Put both into an event
+        let event = try await db.createEvent(memberArticleIDs: [art1.id, art2.id], at: now)
+
+        // Run EventClusterer with embedding computation.
+        // Because art1 (Apple laptop) and art2 (Turkey earthquake) are semantically divergent (cosine < 0.20),
+        // the embedding-aware check detaches art2 from the event!
+        _ = try await EventClusterer.run(in: db, now: now)
+
+        let eventAfter = try await db.eventMatchMembers(eventID: event.id)
+        let memberIDs = eventAfter?.members.map(\.id) ?? []
+        assertFalse(
+            memberIDs.contains(art2.id) && memberIDs.contains(art1.id),
+            "Semantically divergent member must not remain clustered together after embedding validation"
+        )
     }
 }
