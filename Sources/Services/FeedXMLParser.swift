@@ -366,39 +366,30 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
         if source.isEmpty || source == "Unknown" {
             source = extractSourceFromURL(itemLink.trimmingCharacters(in: .whitespacesAndNewlines))
         }
-        trimSourceName(&source, separator: " - ", options: .backwards)
-        trimSourceName(&source, separator: " > ")
-        trimSourceName(&source, separator: " | ")
+        for (sep, backwards) in [(" - ", true), (" > ", false), (" | ", false)] {
+            trimSourceName(&source, separator: sep, options: backwards ? .backwards : [])
+        }
         return source.isEmpty ? "Feed" : source
     }
 
     private func itemContent(articleLink: String) -> (String?, ExtractionOutcome?) {
         let trimmed = itemContentEncoded.trimmingCharacters(in: .whitespacesAndNewlines)
-        // Keep publisher line breaks in plain content:encoded instead of collapsing them through HTML extraction.
         let plainText =
-            itemContentIsPlainText
-            || (!itemContentIsXHTML && !trimmed.contains("<") && trimmed.contains("\n"))
-        var content: String?
-        if !trimmed.isEmpty {
-            let cleaned = itemContentIsPlainText ? trimmed : stripHTMLSimple(trimmed)
-            content = cleaned.isEmpty ? nil : cleaned
-        }
+            itemContentIsPlainText || (!itemContentIsXHTML && !trimmed.contains("<") && trimmed.contains("\n"))
+        let content = trimmed.isEmpty ? nil : (itemContentIsPlainText ? trimmed : stripHTMLSimple(trimmed))
+        let cleaned = content?.isEmpty == true ? nil : content
         let extracted =
             plainText
-            ? nil
-            : ContentExtractionPipeline.shared.extractFromHTML(
-                trimmed, baseUrl: resolvedURL(articleLink))
-        return (content, extracted)
+            ? nil : ContentExtractionPipeline.shared.extractFromHTML(trimmed, baseUrl: resolvedURL(articleLink))
+        return (cleaned, extracted)
     }
 
     private func itemReaderDocument(from extracted: ExtractionOutcome?) -> ReaderDocument? {
-        var document: ReaderDocument?
-        if case .success(_, _, let extractedDocument) = extracted { document = extractedDocument }
+        var doc: ReaderDocument? = if case .success(_, _, let d) = extracted { d } else { nil }
         if !itemImageCandidates.isEmpty {
-            document = ReaderDocument(
-                blocks: document?.blocks ?? [], images: (document?.images ?? []) + itemImageCandidates)
+            doc = ReaderDocument(blocks: doc?.blocks ?? [], images: (doc?.images ?? []) + itemImageCandidates)
         }
-        return document?.curated(feedImage: itemImageUrl.isEmpty ? nil : resolvedURL(itemImageUrl), title: itemTitle)
+        return doc?.curated(feedImage: itemImageUrl.isEmpty ? nil : resolvedURL(itemImageUrl), title: itemTitle)
     }
 
     func parser(_ parser: XMLParser, foundInternalEntityDeclarationWithName _: String, value _: String?) {
