@@ -123,25 +123,22 @@ extension EventFeatures {
     private static let capitalizedNounLanguages: Set<String> = ["de", "lb"]
     private static let quarterPattern =
         (try? NSRegularExpression(
-            pattern: #"\b(first|second|third|fourth|1st|2nd|3rd|4th)[\s-]+quarter\b"#, options: [.caseInsensitive]
-        )) ?? NSRegularExpression()
+            pattern: #"\b(first|second|third|fourth|1st|2nd|3rd|4th)[\s-]+quarter\b"#, options: [.caseInsensitive]))
+        ?? NSRegularExpression()
     private static let halfPattern =
-        (try? NSRegularExpression(
-            pattern: #"\b(first|second|1st|2nd)[\s-]+half\b"#, options: [.caseInsensitive]
-        )) ?? NSRegularExpression()
+        (try? NSRegularExpression(pattern: #"\b(first|second|1st|2nd)[\s-]+half\b"#, options: [.caseInsensitive]))
+        ?? NSRegularExpression()
     private static let markupPattern = (try? NSRegularExpression(pattern: #"<[^>]*>"#)) ?? NSRegularExpression()
     private static let leadingBackgroundPattern =
         (try? NSRegularExpression(
             pattern:
                 #"^\s*(?:(?:hours|days|weeks|months|moments|shortly|soon|just)\s+)?(?:after|following)\b[^,;:—–-]*[,;:—–-]\s*(.+)$"#,
-            options: [.caseInsensitive]
-        )) ?? NSRegularExpression()
+            options: [.caseInsensitive])) ?? NSRegularExpression()
     private static let trailingBackgroundPattern =
         (try? NSRegularExpression(
             pattern:
                 #"\b(?:following|in\s+(?:the\s+)?wake\s+of|(?:hours|days|weeks|months|moments|shortly|soon)\s+after|after)\b"#,
-            options: [.caseInsensitive]
-        )) ?? NSRegularExpression()
+            options: [.caseInsensitive])) ?? NSRegularExpression()
 
     static func normalized(_ value: String) -> String {
         var text = value.folding(options: [.caseInsensitive, .diacriticInsensitive, .widthInsensitive], locale: nil)
@@ -157,8 +154,7 @@ extension EventFeatures {
     }
 
     private static func primaryClauseRange(in text: String, titleEnd: String.Index) -> Range<String.Index>? {
-        let titleRange = text.startIndex..<titleEnd
-        let nsRange = NSRange(titleRange, in: text)
+        let nsRange = NSRange(text.startIndex..<titleEnd, in: text)
         if let leading = leadingBackgroundPattern.firstMatch(in: text, range: nsRange),
             let clause = Range(leading.range(at: 1), in: text)
         {
@@ -168,143 +164,163 @@ extension EventFeatures {
             let connector = Range(trailing.range, in: text)
         else { return nil }
         let prefix = text[text.startIndex..<connector.lowerBound]
-        guard prefix.split(whereSeparator: { !$0.isLetter && !$0.isNumber }).count >= 2 else { return nil }
-        return text.startIndex..<connector.lowerBound
+        return prefix.split(whereSeparator: { !$0.isLetter && !$0.isNumber }).count >= 2
+            ? text.startIndex..<connector.lowerBound : nil
     }
 
-    private static func collectEntities(
-        from tagger: NLTagger, in text: String, range whole: Range<String.Index>
-    ) -> (people: Set<String>, organizations: Set<String>, places: Set<String>, nameTokens: Set<String>) {
-        var people = Set<String>()
-        var organizations = Set<String>()
-        var places = Set<String>()
-        var nameTokens = Set<String>()
-        tagger.enumerateTags(
-            in: whole, unit: .word, scheme: .nameType, options: [.omitWhitespace, .omitPunctuation, .joinNames]
-        ) { tag, range in
-            guard let tag else { return true }
-            let name = Self.normalized(String(text[range]))
-            guard name.count >= 2, name.contains(where: \.isLetter), !Self.stopwords.contains(name) else { return true }
-            switch tag {
-            case .personalName:
-                people.insert(name)
-                if let surname = name.split(separator: " ").last, surname.count >= 3, String(surname) != name {
-                    people.insert(String(surname))
+    private struct FeatureCollector {
+        let text: String
+        let whole: Range<String.Index>
+        let titleEnd: String.Index
+        let primaryRange: Range<String.Index>?
+        let titleCase: Bool
+        let usesCapitalization: Bool
+        var features: EventFeatures
+        var nameTokens: Set<String> = []
+        var lemmas: [String.Index: String] = [:]
+
+        mutating func collectEntities(from tagger: NLTagger) {
+            tagger.enumerateTags(
+                in: whole, unit: .word, scheme: .nameType, options: [.omitWhitespace, .omitPunctuation, .joinNames]
+            ) { tag, range in
+                guard let tag else { return true }
+                let name = EventFeatures.normalized(String(text[range]))
+                guard name.count >= 2, name.contains(where: \.isLetter), !EventFeatures.stopwords.contains(name) else {
+                    return true
                 }
-                nameTokens.formUnion(name.split(separator: " ").map(String.init))
-            case .placeName:
-                places.insert(EventPlaces.canonical(name))
-                if !name.contains(" ") { nameTokens.insert(name) }
-            case .organizationName:
-                organizations.insert(name)
-                let canonicalPlace = EventPlaces.canonical(name)
-                if canonicalPlace.hasPrefix("@") { places.insert(canonicalPlace) }
-                if !name.contains(" ") { nameTokens.insert(name) }
-            default: return true
+                if tag == .personalName {
+                    features.people.insert(name)
+                    if let surname = name.split(separator: " ").last, surname.count >= 3, String(surname) != name {
+                        features.people.insert(String(surname))
+                    }
+                    nameTokens.formUnion(name.split(separator: " ").map(String.init))
+                } else if tag == .placeName || tag == .organizationName {
+                    let canonicalPlace = EventPlaces.canonical(name)
+                    if tag == .placeName || canonicalPlace.hasPrefix("@") { features.places.insert(canonicalPlace) }
+                    if tag == .organizationName { features.organizations.insert(name) }
+                    if !name.contains(" ") { nameTokens.insert(name) }
+                }
+                return true
             }
-            return true
         }
-        return (people, organizations, places, nameTokens)
+
+        mutating func classifyNumberToken(_ word: String, token: String, inTitle: Bool, inPrimaryClause: Bool) {
+            if token.first?.isUppercase == true, word.first?.isLetter == true {
+                features.organizations.insert(word)
+                return
+            }
+            let digits = word.filter { $0.isNumber || $0 == "." }.trimmingCharacters(
+                in: CharacterSet(charactersIn: "."))
+            if digits.count == 4, let year = Int(digits), (1900...2100).contains(year) {
+                features.years.insert(digits)
+            } else if inTitle, !digits.isEmpty {
+                features.titleNumbers.insert(digits)
+                if inPrimaryClause { features.primaryTitleTerms.insert(digits) }
+            }
+        }
+
+        mutating func classifySpecialToken(
+            _ word: inout String, token: String, range: Range<String.Index>
+        ) -> Bool {
+            let inTitle = range.lowerBound < titleEnd
+            let inPrimaryClause = primaryRange.map { $0.overlaps(range) } ?? false
+            if word.contains("-") {
+                for part in word.split(separator: "-").map(String.init) where part.count >= 2 {
+                    let canonicalPart = EventPlaces.canonical(part)
+                    if canonicalPart.hasPrefix("@") { features.places.insert(canonicalPart) }
+                }
+                if word == "co-pilot" { word = "copilot" }
+            }
+            if ["q1", "q2", "q3", "q4", "h1", "h2"].contains(word) {
+                features.periods.insert(word)
+                return true
+            }
+            if word.contains(where: \.isNumber) {
+                classifyNumberToken(word, token: token, inTitle: inTitle, inPrimaryClause: inPrimaryClause)
+                return true
+            }
+            if EventFeatures.weekdayNames.contains(word) {
+                features.weekdays.insert(word)
+                return true
+            }
+            if inTitle, let number = EventFeatures.numberWords[word] {
+                features.titleNumbers.insert(number)
+                if inPrimaryClause { features.primaryTitleTerms.insert(number) }
+                return true
+            }
+            let canonicalWordPlace = EventPlaces.canonical(word)
+            if canonicalWordPlace.hasPrefix("@"), token.first?.isUppercase == true {
+                features.places.insert(canonicalWordPlace)
+                return true
+            }
+            return false
+        }
+
+        mutating func classifyLexicalTerm(_ word: String, token: String, tag: NLTag?, range: Range<String.Index>) {
+            guard word.count >= 3, word.contains(where: \.isLetter), !EventFeatures.stopwords.contains(word),
+                !EventFeatures.monthNames.contains(word), !EventFeatures.numberWords.keys.contains(word)
+            else { return }
+            let inTitle = range.lowerBound < titleEnd
+            let inPrimaryClause = primaryRange.map { $0.overlaps(range) } ?? false
+            let startsAtSentence = EventFeatures.startsSentence(range.lowerBound, in: text)
+            let isUntypedInitialName = startsAtSentence && lemmas[range.lowerBound] == nil && !word.contains("-")
+            if usesCapitalization, token.first?.isUppercase == true, !(inTitle && titleCase),
+                !startsAtSentence || isUntypedInitialName
+            {
+                if !nameTokens.contains(word) { features.names.insert(word) }
+                return
+            }
+            guard !nameTokens.contains(word) else { return }
+            if let tag {
+                guard [.noun, .verb, .adjective].contains(tag) else { return }
+                let keyword = lemmas[range.lowerBound].flatMap { $0.isEmpty ? nil : $0 } ?? word
+                if keyword.count >= 3, !EventFeatures.stopwords.contains(keyword) {
+                    features.keywords.insert(keyword)
+                    if inPrimaryClause { features.primaryTitleTerms.insert(keyword) }
+                }
+            } else if word.count >= 4 {
+                features.keywords.insert(word)
+                if inPrimaryClause { features.primaryTitleTerms.insert(word) }
+            }
+        }
+
+        mutating func collectLexicalFeatures(from tagger: NLTagger) {
+            let wordOptions: NLTagger.Options = [.omitWhitespace, .omitPunctuation]
+            tagger.enumerateTags(in: whole, unit: .word, scheme: .lemma, options: wordOptions) { tag, range in
+                if let tag { lemmas[range.lowerBound] = EventFeatures.normalized(tag.rawValue) }
+                return true
+            }
+            tagger.enumerateTags(in: whole, unit: .word, scheme: .lexicalClass, options: wordOptions) { tag, range in
+                let token = String(text[range])
+                var word = EventFeatures.normalized(token)
+                guard !word.isEmpty, !classifySpecialToken(&word, token: token, range: range) else { return true }
+                classifyLexicalTerm(word, token: token, tag: tag, range: range)
+                return true
+            }
+            for name in features.names {
+                let place = EventPlaces.canonical(name)
+                if place.hasPrefix("@") {
+                    features.names.remove(name)
+                    features.places.insert(place)
+                }
+            }
+        }
     }
 
     private static func collectPeriods(in text: String) -> Set<String> {
         var periods = Set<String>()
         let lowered = text.lowercased()
         let loweredRange = NSRange(lowered.startIndex..., in: lowered)
+        let quarterMap = ["first": "q1", "1st": "q1", "second": "q2", "2nd": "q2", "third": "q3", "3rd": "q3"]
         for match in Self.quarterPattern.matches(in: lowered, range: loweredRange) {
             guard let range = Range(match.range(at: 1), in: lowered) else { continue }
-            switch lowered[range] {
-            case "first", "1st": periods.insert("q1")
-            case "second", "2nd": periods.insert("q2")
-            case "third", "3rd": periods.insert("q3")
-            default: periods.insert("q4")
-            }
+            periods.insert(quarterMap[String(lowered[range])] ?? "q4")
         }
         for match in Self.halfPattern.matches(in: lowered, range: loweredRange) {
             guard let range = Range(match.range(at: 1), in: lowered) else { continue }
             periods.insert(["first", "1st"].contains(String(lowered[range])) ? "h1" : "h2")
         }
         return periods
-    }
-
-    private static func normalizeHyphenatedWord(_ word: inout String, places: inout Set<String>) {
-        guard word.contains("-") else { return }
-        for part in word.split(separator: "-").map(String.init) where part.count >= 2 {
-            let canonicalPart = EventPlaces.canonical(part)
-            if canonicalPart.hasPrefix("@") { places.insert(canonicalPart) }
-        }
-        if word == "co-pilot" { word = "copilot" }
-    }
-
-    private static func promotePlaceNames(from names: inout Set<String>, into places: inout Set<String>) {
-        for name in names {
-            let place = EventPlaces.canonical(name)
-            if place.hasPrefix("@") {
-                names.remove(name)
-                places.insert(place)
-            }
-        }
-    }
-
-    private static func classifyNumberToken(
-        _ word: String, token: String, inTitle: Bool, inPrimaryClause: Bool,
-        organizations: inout Set<String>, years: inout Set<String>,
-        titleNumbers: inout Set<String>, primaryTitleTerms: inout Set<String>
-    ) {
-        if token.first?.isUppercase == true, word.first?.isLetter == true {
-            organizations.insert(word)
-            return
-        }
-        let digits = word.filter { $0.isNumber || $0 == "." }.trimmingCharacters(in: CharacterSet(charactersIn: "."))
-        if digits.count == 4, let year = Int(digits), (1900...2100).contains(year) {
-            years.insert(digits)
-        } else if inTitle, !digits.isEmpty {
-            titleNumbers.insert(digits)
-            if inPrimaryClause { primaryTitleTerms.insert(digits) }
-        }
-    }
-
-    private static func collectLemmas(from tagger: NLTagger, in whole: Range<String.Index>) -> [String.Index: String] {
-        var lemmas: [String.Index: String] = [:]
-        tagger.enumerateTags(in: whole, unit: .word, scheme: .lemma, options: [.omitWhitespace, .omitPunctuation]) {
-            tag, range in
-            if let tag { lemmas[range.lowerBound] = Self.normalized(tag.rawValue) }
-            return true
-        }
-        return lemmas
-    }
-
-    private static func classifyLexicalTerm(
-        _ word: String, token: String, tag: NLTag?, range: Range<String.Index>,
-        in text: String, inTitle: Bool, titleCase: Bool, usesCapitalization: Bool,
-        inPrimaryClause: Bool, lemmas: [String.Index: String], nameTokens: Set<String>,
-        names: inout Set<String>, keywords: inout Set<String>, primaryTitleTerms: inout Set<String>
-    ) {
-        guard word.count >= 3, word.contains(where: \.isLetter), !Self.stopwords.contains(word),
-            !Self.monthNames.contains(word), !Self.numberWords.keys.contains(word)
-        else { return }
-
-        let isUntypedInitialName =
-            Self.startsSentence(range.lowerBound, in: text) && lemmas[range.lowerBound] == nil
-            && !word.contains("-")
-        if usesCapitalization, token.first?.isUppercase == true, !(inTitle && titleCase),
-            !Self.startsSentence(range.lowerBound, in: text) || isUntypedInitialName
-        {
-            if !nameTokens.contains(word) { names.insert(word) }
-            return
-        }
-        guard !nameTokens.contains(word) else { return }
-        if let tag {
-            guard [.noun, .verb, .adjective].contains(tag) else { return }
-            let keyword = lemmas[range.lowerBound].flatMap { $0.isEmpty ? nil : $0 } ?? word
-            if keyword.count >= 3, !Self.stopwords.contains(keyword) {
-                keywords.insert(keyword)
-                if inPrimaryClause { primaryTitleTerms.insert(keyword) }
-            }
-        } else if word.count >= 4 {
-            keywords.insert(word)
-            if inPrimaryClause { primaryTitleTerms.insert(word) }
-        }
     }
 
     /// Extracts features with on-device NaturalLanguage only. Results depend on the OS models for the
@@ -316,82 +332,28 @@ extension EventFeatures {
         let language = EventMatchKey.language(of: text)
         let whole = text.startIndex..<text.endIndex
         let titleEnd = text.index(text.startIndex, offsetBy: title.count)
-        let primaryRange = Self.primaryClauseRange(in: text, titleEnd: titleEnd)
-
-        let tagger = NLTagger(tagSchemes: [.nameType, .lexicalClass, .lemma])
-        tagger.string = text
-        if let language { tagger.setLanguage(NLLanguage(rawValue: language), range: whole) }
-
-        let entities = Self.collectEntities(from: tagger, in: text, range: whole)
-        var organizations = entities.organizations
-        var places = entities.places
-        var names = Set<String>()
-        var keywords = Set<String>()
-        var titleNumbers = Set<String>()
-        var periods = Self.collectPeriods(in: text)
-        var years = Set<String>()
-        var weekdays = Set<String>()
-        var primaryTitleTerms = Set<String>()
-
         let titleWords = title.split(whereSeparator: { !$0.isLetter }).filter { $0.count >= 3 }
         let titleCase =
             !titleWords.isEmpty
             && Double(titleWords.filter { $0.first?.isUppercase == true }.count) / Double(titleWords.count) > 0.6
         let usesCapitalization = !(language.map(Self.capitalizedNounLanguages.contains) ?? false)
-        let lemmas = Self.collectLemmas(from: tagger, in: whole)
 
-        tagger.enumerateTags(
-            in: whole, unit: .word, scheme: .lexicalClass, options: [.omitWhitespace, .omitPunctuation]
-        ) { tag, range in
-            let token = String(text[range])
-            var word = Self.normalized(token)
-            guard !word.isEmpty else { return true }
-            let inTitle = range.lowerBound < titleEnd
-            let inPrimaryClause = primaryRange.map { $0.overlaps(range) } ?? false
-            Self.normalizeHyphenatedWord(&word, places: &places)
+        let tagger = NLTagger(tagSchemes: [.nameType, .lexicalClass, .lemma])
+        tagger.string = text
+        if let language { tagger.setLanguage(NLLanguage(rawValue: language), range: whole) }
 
-            if word.count == 2, let letter = word.first, let digit = word.last,
-                (letter == "q" && "1234".contains(digit)) || (letter == "h" && "12".contains(digit))
-            {
-                periods.insert(word)
-                return true
-            }
-            if word.contains(where: \.isNumber) {
-                Self.classifyNumberToken(
-                    word, token: token, inTitle: inTitle, inPrimaryClause: inPrimaryClause,
-                    organizations: &organizations, years: &years,
-                    titleNumbers: &titleNumbers, primaryTitleTerms: &primaryTitleTerms)
-                return true
-            }
-            if Self.weekdayNames.contains(word) {
-                weekdays.insert(word)
-                return true
-            }
-            if inTitle, let number = Self.numberWords[word] {
-                titleNumbers.insert(number)
-                if inPrimaryClause { primaryTitleTerms.insert(number) }
-                return true
-            }
-            let canonicalWordPlace = EventPlaces.canonical(word)
-            if canonicalWordPlace.hasPrefix("@"), token.first?.isUppercase == true {
-                places.insert(canonicalWordPlace)
-                return true
-            }
-            Self.classifyLexicalTerm(
-                word, token: token, tag: tag, range: range, in: text,
-                inTitle: inTitle, titleCase: titleCase, usesCapitalization: usesCapitalization,
-                inPrimaryClause: inPrimaryClause, lemmas: lemmas, nameTokens: entities.nameTokens,
-                names: &names, keywords: &keywords, primaryTitleTerms: &primaryTitleTerms)
-            return true
-        }
+        var collector = FeatureCollector(
+            text: text, whole: whole, titleEnd: titleEnd,
+            primaryRange: Self.primaryClauseRange(in: text, titleEnd: titleEnd),
+            titleCase: titleCase, usesCapitalization: usesCapitalization,
+            features: EventFeatures(language: language, date: date, periods: Self.collectPeriods(in: text)))
+        collector.collectEntities(from: tagger)
+        collector.collectLexicalFeatures(from: tagger)
 
-        Self.promotePlaceNames(from: &names, into: &places)
-        let tollNumbers = Self.tolls(in: title.lowercased()).intersection(titleNumbers)
-        self.init(
-            language: language, people: entities.people, organizations: organizations, places: places, names: names,
-            keywords: keywords, date: date, titleNumbers: titleNumbers.subtracting(tollNumbers),
-            tollNumbers: tollNumbers,
-            periods: periods, years: years, weekdays: weekdays, primaryTitleTerms: primaryTitleTerms)
+        let tollNumbers = Self.tolls(in: title.lowercased()).intersection(collector.features.titleNumbers)
+        collector.features.titleNumbers.subtract(tollNumbers)
+        collector.features.tollNumbers = tollNumbers
+        self = collector.features
     }
 
     private static let casualtyWords =
@@ -426,8 +388,7 @@ extension EventFeatures {
             position = text.index(before: position)
             let character = text[position]
             if character.isNewline { return true }
-            if character.isWhitespace { continue }
-            return ".!?:;\"“”'‘’«»(|—–-".contains(character)
+            if !character.isWhitespace { return ".!?:;\"“”'‘’«»(|—–-".contains(character) }
         }
         return true
     }
@@ -437,27 +398,18 @@ extension EventFeatures {
 /// missed link over a wrong merge; they are to be tuned against the labeled corpus (#102), not
 /// claimed as measured.
 struct EventMatchPolicy: Sendable, Equatable {
-    /// Reports further apart than this never match.
     var maximumTimeGap: TimeInterval = 36 * 3600
-    /// Beyond this gap a match also needs `strictWhat` and three shared action terms.
     var strictTimeGap: TimeInterval = 12 * 3600
     var fullTimeCredit: TimeInterval = 6 * 3600
     var minimumWhat = 0.2
     var strictWhat = 0.35
     var minimumSharedTerms = 3
     var matchScore = 0.55
-    /// A member counts as compatible with a newcomer at this score.
     var compatibilityScore = 0.35
-    /// Share of an event's members a newcomer must be compatible with. One dissenting member of a larger event no
-    /// longer keeps a matching report out; in a two-member event both must still agree.
     var compatibleShare = 2.0 / 3.0
-    /// Legacy audit threshold; production clustering never asks the judge.
     var borderlineScore = 0.3
-    /// The newcomer's mean score across the whole event.
     var eventScore = 0.45
-    /// Events at this size stop growing; a later report starts a new event instead.
     var maximumEventSize = 100
-
     static let standard = EventMatchPolicy()
 }
 
@@ -468,13 +420,9 @@ enum EventConflict: String, Sendable, Equatable {
 
 struct EventPairAssessment: Sendable, Equatable {
     var conflict: EventConflict?
-    /// Legacy audit field. Production conflicts are always final.
     var softConflict = false
     var hasHardConflict: Bool { conflict != nil && !softConflict }
-
-    /// Open: not a match, but close enough that a judge's "same event" should make it one.
     var isBorderline = false
-    /// A match on thin evidence (few shared words, or only a shared country): a judge's "different events" undoes it.
     var needsConfirmation = false
     var score: Double
     var what: Double
@@ -482,16 +430,36 @@ struct EventPairAssessment: Sendable, Equatable {
     var sharedAnchors: Int
     var sharedSpecificAnchors: Int
     var sharedKeywords: Int
-    /// Strong enough to justify a link on its own.
     var isMatch: Bool
-    /// Weak enough to live in the same event as a matched newcomer.
     var isCompatible: Bool
 }
 
 enum EventMatcher {
-    /// Bump when matching changes; recent articles and active memberships are revalidated.
-    /// Unchanged archived memberships remain intact.
     static let version = 5
+
+    private static func pairConflict(
+        _ a: EventFeatures, _ b: EventFeatures, gap: TimeInterval, maximumTimeGap: TimeInterval
+    ) -> EventConflict? {
+        func disjoint(_ lhs: Set<String>, _ rhs: Set<String>) -> Bool {
+            !lhs.isEmpty && !rhs.isEmpty && lhs.isDisjoint(with: rhs)
+        }
+        let sharesPlace =
+            !a.places.isDisjoint(with: b.places)
+            || !a.localPlaces.isDisjoint(with: b.specificAnchors)
+            || !b.localPlaces.isDisjoint(with: a.specificAnchors)
+
+        if a.date == DateParser.unknownDate || b.date == DateParser.unknownDate { return .unknownDate }
+        if let left = a.language, let right = b.language, left != right { return .language }
+        if gap > maximumTimeGap { return .timeGap }
+        if disjoint(a.periods, b.periods) { return .period }
+        if disjoint(a.years, b.years) { return .year }
+        if disjoint(a.weekdays, b.weekdays) { return .weekday }
+        if disjoint(a.titleNumbers, b.titleNumbers) { return .titleNumbers }
+        if !sharesPlace && (disjoint(a.countries, b.countries) || disjoint(a.localPlaces, b.localPlaces)) {
+            return .places
+        }
+        return nil
+    }
 
     /// Who, what, where and when for one pair. Headline similarity alone never passes: a match needs
     /// a shared name or place, shared action terms, closeness in time and no contradicting facts.
@@ -511,58 +479,21 @@ enum EventMatcher {
             : max(0, 1 - (gap - policy.fullTimeCredit) / max(1, policy.maximumTimeGap - policy.fullTimeCredit))
         let score = 0.4 * what + 0.4 * entity + 0.2 * time
 
-        var conflict: EventConflict?
+        let conflict = pairConflict(a, b, gap: gap, maximumTimeGap: policy.maximumTimeGap)
         let sharedSpecific = a.specificAnchors.intersection(b.specificAnchors).union(crossSpecific).count
-        // Equal casualty tolls or headline figures are corroborating evidence of one incident.
         let sharedEvidence =
             sharedKeywords
             + (a.tollNumbers.isDisjoint(with: b.tollNumbers) ? 0 : 1)
             + (a.titleNumbers.isDisjoint(with: b.titleNumbers) ? 0 : 1)
-        func disjoint(_ lhs: Set<String>, _ rhs: Set<String>) -> Bool {
-            !lhs.isEmpty && !rhs.isEmpty && lhs.isDisjoint(with: rhs)
-        }
         func nonPlaceTerms(_ features: EventFeatures) -> Set<String> {
             features.keywords.union(features.titleNumbers).union(features.tollNumbers)
         }
         let primaryDisjoint =
             (!a.primaryTitleTerms.isEmpty && a.primaryTitleTerms.isDisjoint(with: nonPlaceTerms(b)))
             || (!b.primaryTitleTerms.isEmpty && b.primaryTitleTerms.isDisjoint(with: nonPlaceTerms(a)))
-        let sharesPlace =
-            !a.places.isDisjoint(with: b.places)
-            || !a.localPlaces.isDisjoint(with: b.specificAnchors)
-            || !b.localPlaces.isDisjoint(with: a.specificAnchors)
-
-        if a.date == DateParser.unknownDate || b.date == DateParser.unknownDate {
-            conflict = .unknownDate
-        } else if let left = a.language, let right = b.language, left != right {
-            conflict = .language
-        } else if gap > policy.maximumTimeGap {
-            conflict = .timeGap
-        } else if disjoint(a.periods, b.periods) {
-            conflict = .period
-        } else if disjoint(a.years, b.years) {
-            conflict = .year
-        } else if disjoint(a.weekdays, b.weekdays) {
-            conflict = .weekday
-        }
-        // Headline figures (a magnitude, a count) differ between separate incidents. Casualty tolls are not compared:
-        // they rise as one incident is reported. Distinguishing figures always veto a match.
-        else if disjoint(a.titleNumbers, b.titleNumbers) {
-            conflict = .titleNumbers
-        }
-        // Different countries are different events. Places below country level ("Madrid" against "Spain", one city
-        // against another) only conflict when no place is shared. No model overrides the conflict.
-        else if !sharesPlace {
-            if disjoint(a.countries, b.countries) {
-                conflict = .places
-            } else if disjoint(a.localPlaces, b.localPlaces) {
-                conflict = .places
-            }
-        }
 
         let isMatch =
-            conflict == nil && !primaryDisjoint && sharedSpecific >= 1
-            && sharedEvidence >= 2
+            conflict == nil && !primaryDisjoint && sharedSpecific >= 1 && sharedEvidence >= 2
             && sharedAnchors + sharedEvidence >= policy.minimumSharedTerms
             && what >= policy.minimumWhat && score >= policy.matchScore
             && (gap <= policy.strictTimeGap || (what >= policy.strictWhat && sharedEvidence >= 3))
@@ -574,14 +505,12 @@ enum EventMatcher {
                 || (sharedEvidence >= 3 && what >= policy.minimumWhat))
         let needsConfirmation = isMatch && (sharedSpecific == 0 || what < policy.strictWhat)
         return EventPairAssessment(
-            conflict: conflict, isBorderline: isBorderline,
-            needsConfirmation: needsConfirmation,
-            score: score, what: what, entity: entity,
-            sharedAnchors: sharedAnchors, sharedSpecificAnchors: sharedSpecific, sharedKeywords: sharedKeywords,
+            conflict: conflict, isBorderline: isBorderline, needsConfirmation: needsConfirmation,
+            score: score, what: what, entity: entity, sharedAnchors: sharedAnchors,
+            sharedSpecificAnchors: sharedSpecific, sharedKeywords: sharedKeywords,
             isMatch: isMatch, isCompatible: isCompatible)
     }
 
-    /// An explicit DIFFERENT verdict vetoes admission and fragment merging for this pair.
     static func rejected(_ pair: EventPairAssessment) -> EventPairAssessment {
         var pair = pair
         pair.conflict = .differentEvent
@@ -593,7 +522,6 @@ enum EventMatcher {
         return pair
     }
 
-    /// A pair the on-device judge called one event counts as a match.
     static func confirmed(_ pair: EventPairAssessment, policy: EventMatchPolicy = .standard) -> EventPairAssessment {
         guard pair.conflict == nil, pair.sharedSpecificAnchors >= 1 else { return pair }
         var pair = pair
@@ -607,7 +535,6 @@ enum EventMatcher {
         return pair
     }
 
-    /// Whole-event check without a judge. Returns the mean score when the newcomer may join, nil otherwise.
     static func eventScore(
         for article: EventFeatures, members: [EventFeatures], excluded: Bool = false,
         policy: EventMatchPolicy = .standard
@@ -616,15 +543,11 @@ enum EventMatcher {
         return eventScore(pairs: members.map { assess(article, $0, policy: policy) }, policy: policy)
     }
 
-    /// The newcomer must strongly match one member and be compatible with at least `compatibleShare` of them (all of
-    /// them in a two-member event). Any hard conflict vetoes admission regardless of the compatible majority.
     static func eventScore(pairs: [EventPairAssessment], policy: EventMatchPolicy = .standard) -> Double? {
         guard !pairs.isEmpty, pairs.count < policy.maximumEventSize,
             pairs.allSatisfy({ $0.conflict == nil && $0.sharedSpecificAnchors >= 1 }),
             pairs.contains(where: \.isMatch)
-        else {
-            return nil
-        }
+        else { return nil }
         let required = Int((Double(pairs.count) * policy.compatibleShare).rounded(.up))
         guard pairs.filter(\.isCompatible).count >= required else { return nil }
         let mean = pairs.map(\.score).reduce(0, +) / Double(pairs.count)
