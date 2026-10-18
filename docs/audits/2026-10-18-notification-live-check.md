@@ -12,7 +12,7 @@ The real compiled News app refreshed the real library, submitted three full noti
 
 - Source: clean `aa795a4c041e61b60260c2324afcda8b6d9d56ab` from `origin/main`; branch `fix/hindu-and-notification-audit`. Only audit documentation was added afterwards.
 - Command: `./build.sh`, exit 0, in the isolated worktree. The script emits `News.app` in its working directory, not `.build/News.app` as stated in the plan.
-- Executed bundle: `/Users/marspater/Projects/News/.codex-wave1/News.app`; observed PID 42330. No installed bundle was replaced or reinstalled.
+- Executed bundle: `<wave-1-worktree>/News.app`; observed PID 42330. No installed bundle was replaced or reinstalled.
 - Bundle ID `com.marspater.news`, arm64, ad-hoc signature with Hardened Runtime; `codesign --verify --strict` passed.
 - CDHash `aeddf772173d06080d486b764c3f34655a65b42d`.
 - Executable SHA-256 `3a231dddb7164ec78e4b2038313b8e0df876b4a494e4a37314034f447eb10508`.

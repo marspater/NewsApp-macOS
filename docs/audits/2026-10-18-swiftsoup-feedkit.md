@@ -27,3 +27,11 @@ The final source passed the full `./test.sh`, including the dedicated `FeedKitSw
 The final native harness runs passed: 160 Native UI QA checks and 46 publisher-excerpt checks, both with zero failures. Earlier native/release attempts rejected a source file edited during compilation; those attempts are failures, not passing evidence. Final validation uses frozen source.
 
 Private local logs are `/private/tmp/news-wave2-tests-final.log`, `/private/tmp/news-wave2-spm-final.log`, `/private/tmp/news-wave2-build.log`, `/private/tmp/news-wave2-release-final.log`, `/private/tmp/news-wave2-native-ui-final.log`, `/private/tmp/news-wave2-publisher-final.log`, `/private/tmp/news-wave2-format-check.log` and `/private/tmp/news-wave2-baseline-format.log`. Local results do not establish hosted CI success.
+
+## PR review follow-up
+
+PR #446 separates guarded XML parsing, enrichment, source normalization, item finalization, RSS/Atom mapping and media enrichment. JSON normalization, decoding and article mapping are separate helpers. Each captured item carries its effective base URL into FeedKit enrichment; URL attributes are still resolved at their streaming element scope. Two-item relative root/item/media-group tests verify URL and credit association. Entity declaration detection searches bytes directly; UTF-32 and Latin-1 tests supplement the existing UTF-16 and late-declaration checks. The dependency flag array has a narrow ShellCheck annotation because it is consumed by scripts that source the helper.
+
+The user-specific app path reported on merged PR #444 is redacted in this follow-up; the audit retains its bundle hash and PID.
+
+Review-fix validation: the full regression suite, `./build.sh` and `swift build --force-resolved-versions --target News` passed locally. Codacy CLI no longer reports the flagged item finalizer, FeedKit mapper, character handler or XML orchestration warnings; it still reports inherited start-element complexity and informational style findings. The sourced shell helper has no local findings. Final review logs are `/private/tmp/news-review-final-tests.log`, `/private/tmp/news-review-final-build.log` and `/private/tmp/news-review-final-spm.log`. Hosted results are checked separately after pushing.

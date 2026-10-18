@@ -64,6 +64,24 @@ enum FeedKitSwiftSoupTests {
             articles.first?.imageUrl == "https://example.com/reports/photo.jpg",
             "Relative media resolves inside its XML base")
 
+        let nestedMedia = """
+            <rss xml:base="../reports/" xmlns:m="http://search.yahoo.com/mrss/"><channel>
+            <item xml:base="first/"><title>First</title><link>story</link><m:group xml:base="photos/">
+            <m:credit>First photographer</m:credit><m:content url="one.jpg" type="image/jpeg" width="1200"/>
+            </m:group></item><item xml:base="second/"><title>Second</title><link>story</link>
+            <m:group xml:base="photos/"><m:credit>Second photographer</m:credit>
+            <m:content url="two.jpg" type="image/jpeg" width="1200"/></m:group></item></channel></rss>
+            """
+        let nestedArticles = FeedXMLParser(data: Data(nestedMedia.utf8), feedURL: base).parse()
+        check(
+            nestedArticles.map(\.imageUrl) == [
+                "https://example.com/reports/first/photos/one.jpg",
+                "https://example.com/reports/second/photos/two.jpg",
+            ], "Each item preserves root, item and media-group relative XML bases during FeedKit enrichment")
+        check(
+            nestedArticles.last?.readerDocument?.images?.first?.credit == "Second photographer",
+            "Separate item media credits remain associated with their own images")
+
         let rdf = """
             <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" xmlns="http://purl.org/rss/1.0/"
             xmlns:dc="http://purl.org/dc/elements/1.1/"><channel><title>RDF Publisher</title></channel>
@@ -91,6 +109,13 @@ enum FeedKitSwiftSoupTests {
         check(
             FeedXMLParser(data: malicious.data(using: .utf16)!, feedURL: base).parse().isEmpty,
             "UTF-16 entity declarations cannot bypass the prolog guard")
+        for encoding in [String.Encoding.utf32, .isoLatin1] {
+            let encoded = "<?xml version=\"1.0\"?><!-- café -->" + malicious
+            let parser = FeedXMLParser(data: encoded.data(using: encoding)!, feedURL: base)
+            check(
+                parser.parse().isEmpty && parser.parseError == "XML entity declarations are not allowed",
+                "Entity prolog detection does not depend on UTF-8 decoding")
+        }
         let deep =
             "<rss><channel>" + String(repeating: "<x>", count: 65) + String(repeating: "</x>", count: 65)
             + "</channel></rss>"
