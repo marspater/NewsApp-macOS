@@ -12,7 +12,10 @@ let package = Package(
     targets: [
         .executableTarget(
             name: "News",
-            path: "Sources"
+            path: "Sources",
+            resources: [
+                .copy("Resources")
+            ]
         )
     ]
 )

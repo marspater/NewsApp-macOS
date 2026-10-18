@@ -53,6 +53,7 @@ swiftc "${TEST_OPT_FLAGS[@]}" -target "$(uname -m)-apple-macos${TARGET_MACOS}" \
     Sources/Intelligence/EventCandidates.swift \
     Sources/Intelligence/EventMatcher.swift \
     Sources/Intelligence/EventClustering.swift \
+    Sources/Intelligence/SentenceEmbedder.swift \
     Sources/Intelligence/EventJudge.swift \
     Sources/Intelligence/StoryImportance.swift \
     Sources/Intelligence/ContentExtractionPipeline.swift \
@@ -82,6 +83,7 @@ swiftc "${TEST_OPT_FLAGS[@]}" -target "$(uname -m)-apple-macos${TARGET_MACOS}" \
     Sources/App/NewsSignposts.swift \
     Sources/App/UpdateChecker.swift \
     Tests/StoryCorpus.swift \
+    Tests/EventEmbeddingTests.swift \
     Tests/NewsTests.swift \
     Tests/TestDefaults.swift \
     -o test_runner

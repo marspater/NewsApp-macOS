@@ -24,6 +24,10 @@ mkdir -p "${RESOURCES_DIR}"
 mkdir -p Assets
 
 cp container-migration.plist PrivacyInfo.xcprivacy "${RESOURCES_DIR}/"
+if [ -d "Sources/Resources/Models" ]; then
+    mkdir -p "${RESOURCES_DIR}/Models"
+    cp -r Sources/Resources/Models/* "${RESOURCES_DIR}/Models/"
+fi
 
 # Compile the editable Icon Composer source, including legacy macOS fallback.
 xcrun actool "$(pwd)/Assets/AppIcon.icon" --compile "$(pwd)/${RESOURCES_DIR}" \
@@ -63,6 +67,7 @@ swiftc -swift-version 6 -O -parse-as-library -target "arm64-apple-macos${TARGET_
     Sources/Intelligence/EventCandidates.swift \
     Sources/Intelligence/EventMatcher.swift \
     Sources/Intelligence/EventClustering.swift \
+    Sources/Intelligence/SentenceEmbedder.swift \
     Sources/Intelligence/EventJudge.swift \
     Sources/Intelligence/StoryImportance.swift \
     Sources/Intelligence/ContentExtractionPipeline.swift \
