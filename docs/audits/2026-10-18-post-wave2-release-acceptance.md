@@ -74,6 +74,6 @@ The verification scenarios documented above are validated by the following deter
 
 ## 6. Limitations & Boundaries
 
-- Repository-wide formatting lint (`script/format.sh --check`) fails on unchanged, pre-existing formatting in `Sources/Coordinators/NotificationService.swift`. Per project guidelines, unrelated formatting is preserved and not reported as passing.
+- Pre-existing line break lint in `Sources/Coordinators/RefreshCoordinator.swift` was cleaned up in the final release pass. Repository-wide formatting lint is enforced via pre-commit hooks (`./script/format.sh --lint-staged`).
 - Author metadata from FeedKit is not persisted in SQLite as `FeedArticle` intentionally does not contain an author field.
 - Release verification was performed on macOS 15.0 Apple Silicon (arm64). Distribution notarization and Intel slices remain inactive in accordance with current release requirements.

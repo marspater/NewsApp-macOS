@@ -1,6 +1,8 @@
-# News tension — methodology v1
+# News tension — methodology v1 & v2
 
-Status: experimental, uncalibrated, not shown in the app. Issue [#157](https://github.com/marspater/NewsApp-macOS/issues/157) under phase I ([#99](https://github.com/marspater/NewsApp-macOS/issues/99)). Code: [`Sources/Intelligence/TensionMethodology.swift`](../../Sources/Intelligence/TensionMethodology.swift), which must change together with this document and bump `TensionMethodology.version`.
+Status: Superseded by World Tension v2 on-device reasoning ([`Sources/Intelligence/WorldTension.swift`](../../Sources/Intelligence/WorldTension.swift), [#99](https://github.com/marspater/NewsApp-macOS/issues/99), [#235](https://github.com/marspater/NewsApp-macOS/issues/235)). v1 deterministic cues and panel definitions remain in [`Sources/Intelligence/TensionMethodology.swift`](../../Sources/Intelligence/TensionMethodology.swift).
+
+> **World Tension v2 Note:** Production World Tension in `Sources/Intelligence/WorldTension.swift` and `Sources/Views/TensionIndexView.swift` implements methodology v2: an on-device four-factor reasoned assessment (`Novelty`, `Proximity to worst case`, `Reversibility`, `Scope of impact`) evaluated over unique representative event headlines across the balanced 12-feed international panel, with strict validation, cited explanations, and local atomic JSON history. It replaces the uncalibrated v1 formula ($S = 25$) while preserving the v1 12-feed panel, UTC day observation windows, and coverage threshold ($\ge 7$ feeds across $\ge 4$ regions).
 
 ## 1. What the indicator is
 
