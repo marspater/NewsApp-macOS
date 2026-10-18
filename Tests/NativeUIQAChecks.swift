@@ -4,6 +4,7 @@
 import AppKit
 import Foundation
 import SwiftUI
+import Vision
 
 extension Notification.Name {
     static let openArticleFromNotification = Notification.Name("openArticleFromNotification")
@@ -70,6 +71,7 @@ struct NativeUIQAChecks {
         testSettingsPanePersistenceAndSizing()
         testSecondaryWindowAndSheetChrome()
         await testReadingColumnBounds()
+        await testUnscoredTensionWithHistory()
         let forwardStart = ArticleListView.prefetchStart(visibleIndex: 100, currentStart: 0)
         assertTrue(
             forwardStart > 0 && forwardStart <= 100 && forwardStart + 30 > 100,
@@ -161,6 +163,95 @@ struct NativeUIQAChecks {
                 "Rendered prose stays within the reading measure at \(width) pt")
             assertTrue(measured.height > 100, "Publisher prose wraps instead of overflowing horizontally")
         }
+    }
+
+    static func testUnscoredTensionWithHistory() async {
+        print("  - Testing failed tension reassessment evidence with accepted history...")
+        let suite = testDefaultsSuite("native.tension-evidence")
+        defer { removeTestDefaults(suite) }
+        let settings = AppSettings(defaults: UserDefaults(suiteName: suite)!)
+        settings.aiEnabled = true
+        settings.tensionCollectionOptIn = true
+        let db = DatabaseEngine(path: ":memory:")
+        let store = ArticleStore(database: db)
+        await store.initialize()
+        let old = WorldTensionReading(
+            evaluatedAt: Date().addingTimeInterval(-86400), inputHash: "old", modelGeneration: "fixture",
+            headlines: [.init(id: "C1", title: "Earlier publisher headline", publisher: "Test")],
+            assessment: .init(
+                score: 20, summary: "Previously accepted assessment",
+                reasons: WorldTensionFactor.allCases.map {
+                    .init(factor: $0, explanation: "Earlier evidence supports this assessment.")
+                }))
+        do {
+            try await db.saveWorldTensionReading(old)
+            _ = try await db.upsertArticles(
+                [
+                    FeedArticle(
+                        title: "Current unscored panel evidence", link: "https://example.com/current-evidence",
+                        guid: "current-evidence", description: "Report", pubDate: Date(), source: "Test")
+                ], feedUrl: TensionMethodology.v1.panel[0].url)
+        } catch {
+            assertTrue(false, "Prepare isolated tension evidence: \(error)")
+            await db.close()
+            return
+        }
+        let host = NSHostingView(
+            rootView:
+                TensionIndexView(history: [old], service: WorldTensionService(model: .unavailable))
+                .environmentObject(settings).environmentObject(store))
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 700, height: 800),
+            styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = host
+        window.orderBack(nil)
+        defer { window.close() }
+        func findScrollView(_ view: NSView) -> NSScrollView? {
+            if let scroll = view as? NSScrollView { return scroll }
+            for sub in view.subviews {
+                if let found = findScrollView(sub) { return found }
+            }
+            return nil
+        }
+        func renderedText() -> String {
+            host.layoutSubtreeIfNeeded()
+            let target = findScrollView(host)?.documentView ?? host
+            target.layoutSubtreeIfNeeded()
+            guard target.bounds.width > 0, target.bounds.height > 0,
+                let bitmap = target.bitmapImageRepForCachingDisplay(in: target.bounds)
+            else { return "" }
+            target.cacheDisplay(in: target.bounds, to: bitmap)
+            guard let image = bitmap.cgImage else { return "" }
+            let request = VNRecognizeTextRequest()
+            request.recognitionLevel = .accurate
+            do { try VNImageRequestHandler(cgImage: image).perform([request]) } catch { return "" }
+            return (request.results ?? []).compactMap { $0.topCandidates(1).first?.string }.joined(separator: "\n")
+        }
+        let deadline = ContinuousClock.now + .seconds(5)
+        while !renderedText().contains("Current Panel Headlines"), ContinuousClock.now < deadline {
+            host.layoutSubtreeIfNeeded()
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        assertTrue(renderedText().contains("Previously accepted assessment"), "Accepted history remains visible")
+        assertTrue(
+            renderedText().contains("Current Panel Headlines"),
+            "Failed reassessments expose current evidence alongside history")
+        assertTrue(
+            renderedText().contains("Current unscored panel evidence"), "The current publisher headline is inspectable")
+        for disableAI in [true, false] {
+            settings.aiEnabled = !disableAI
+            settings.tensionCollectionOptIn = disableAI
+            let hiddenDeadline = ContinuousClock.now + .seconds(2)
+            while renderedText().contains("Current Panel Headlines"), ContinuousClock.now < hiddenDeadline {
+                host.layoutSubtreeIfNeeded()
+                try? await Task.sleep(for: .milliseconds(10))
+            }
+            assertFalse(
+                renderedText().contains("Current Panel Headlines"), "Disabling AI or collection hides unscored evidence"
+            )
+        }
+        await db.close()
     }
 
     static func testRemoteImageReuse() async {

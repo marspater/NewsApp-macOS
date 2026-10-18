@@ -10954,7 +10954,7 @@ struct NewsTests {
         let article = FeedArticle(
             title: "Late delivery", link: "https://example.com/late", guid: "late", description: "Report",
             pubDate: Date(), source: "Test")
-        for shutdown in [false, true] {
+        for shutdown in 0...2 {
             settings.feedURLs = ["https://example.com/feed"]
             let gate = FeedDeliveryGate()
             let manager = FeedManager(
@@ -10966,7 +10966,11 @@ struct NewsTests {
                 })
             let refresh = Task { await manager.fetchFeedsAsync() }
             while !(await gate.started) { await Task.yield() }
-            if shutdown { manager.stopBackgroundWork() } else { manager.removeFeed(url: "https://example.com/feed") }
+            switch shutdown {
+            case 0: manager.removeFeed(url: "https://example.com/feed")
+            case 1: manager.stopBackgroundWork()
+            default: NotificationCenter.default.post(name: NSApplication.willTerminateNotification, object: nil)
+            }
             await gate.deliver()
             await refresh.value
             assertTrue(
@@ -10982,6 +10986,33 @@ struct NewsTests {
         cancelled.cancel()
         assertTrue(await cancelled.value, "Cancelled database ingestion propagates cancellation")
         assertTrue(try await db.fetchArticles().isEmpty, "Cancelled ingestion rolls back its transaction")
+        let panelURL = TensionMethodology.v1.panel[0].url
+        let panelArticle = FeedArticle(
+            storedID: "subscription-scope", title: "Subscription scope fixture",
+            link: "https://example.com/subscription-scope", guid: "subscription-scope",
+            description: "Panel report", pubDate: Date(), source: "Test")
+        _ = try await db.upsertArticles([panelArticle], feedUrl: panelURL)
+        settings.feedURLs = []
+        let manager = FeedManager(settings: settings, store: store, schedulesRefresh: false)
+        await eventually("Initial subscription scope hides panel-only reports") {
+            (try? await db.fetchArticles())?.contains { $0.id == panelArticle.id } == false
+        }
+        settings.feedURLs = [panelURL]
+        await eventually("Adding a subscription reveals its previously collected panel reports") {
+            (try? await db.fetchArticles())?.contains { $0.id == panelArticle.id } == true
+        }
+        settings.feedURLs = []
+        settings.feedURLs = [panelURL]
+        settings.feedURLs = []
+        await eventually("Rapid subscription changes apply the latest panel scope") {
+            (try? await db.fetchArticles())?.contains { $0.id == panelArticle.id } == false
+        }
+        manager.stopBackgroundWork()
+        settings.feedURLs = [panelURL]
+        await manager.fetchFeedsAsync()
+        assertFalse(
+            try await db.fetchArticles().contains { $0.id == panelArticle.id },
+            "Stopped managers no longer observe subscription changes")
         await db.close()
     }
 

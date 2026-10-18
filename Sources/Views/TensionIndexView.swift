@@ -37,10 +37,15 @@ struct TensionIndexView: View {
     @State private var unscoredHeadlines: [WorldTensionHeadline] = []
     @State private var selectedDay: Date?
     @State private var reassessment = 0
+    private let service: WorldTensionService
     private let onUpdate: ([WorldTensionReading]) -> Void
 
-    init(history: [WorldTensionReading] = [], onUpdate: @escaping ([WorldTensionReading]) -> Void = { _ in }) {
+    init(
+        history: [WorldTensionReading] = [], service: WorldTensionService = .shared,
+        onUpdate: @escaping ([WorldTensionReading]) -> Void = { _ in }
+    ) {
         _history = State(initialValue: history)
+        self.service = service
         self.onUpdate = onUpdate
     }
 
@@ -80,7 +85,7 @@ struct TensionIndexView: View {
                             description: Text(
                                 errorMessage ?? "Enable on-device AI and international panel collection in Settings."))
                     }
-                    if selected == nil, appSettings.aiEnabled, appSettings.tensionCollectionOptIn,
+                    if appSettings.aiEnabled, appSettings.tensionCollectionOptIn,
                         !unscoredHeadlines.isEmpty
                     {
                         VStack(alignment: .leading, spacing: AppSpacing.sm) {
@@ -240,7 +245,7 @@ struct TensionIndexView: View {
         loading = true
         defer { loading = false }
         do {
-            let loaded = try await WorldTensionService.shared.assess(
+            let loaded = try await service.assess(
                 database: articleStore.database, now: Date(),
                 aiEnabled: appSettings.aiEnabled, collectionEnabled: appSettings.tensionCollectionOptIn, force: force)
             try Task.checkCancellation()

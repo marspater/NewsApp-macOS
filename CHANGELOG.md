@@ -2,6 +2,8 @@
 
 ## Unreleased — 18 October 2026
 
+- Failed World Tension reassessments keep current unscored panel headlines visible alongside accepted history. Feed subscription observers and pending scope updates stop at termination.
+
 - Use recognized categories for section membership and whole-word fallback, fixing substring topic matches (such as AI inside Dubai) and promotional “free app” text, repair stored classifications and publisher search labels in SQLite v22 (including custom Financial Times section feeds and `ft` search), and preserve separate RSS category boundaries.
 - Keep unsubscribed World Tension panel stories outside the reading feed, search, unread counts and Briefing; preserve the panel corpus and any read or saved stories.
 - Move queued stories into the leading toolbar. Updates uses native grouped settings; reader summaries scale with reading size and collapse unambiguous honorific aliases.

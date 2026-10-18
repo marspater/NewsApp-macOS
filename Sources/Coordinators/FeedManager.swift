@@ -41,6 +41,7 @@ class FeedManager: NSObject, ObservableObject {
     private var isStopped = false
     private var storeUpdates: AnyCancellable?
     private var subscriptionUpdates: AnyCancellable?
+    private var subscriptionTask: Task<Void, Never>?
     private var terminationObserver: AnyCancellable?
     /// Collection only: fetch, ingest and publish. Resolves to the newly stored articles.
     private var refreshTask: Task<[FeedArticle], Never>?
@@ -103,18 +104,35 @@ class FeedManager: NSObject, ObservableObject {
         self.wakeRefreshDelay = wakeRefreshDelay
         self.now = now
         super.init()
+        observeArticles()
+        observeSubscriptions()
+        observeLifecycle(powerEvents: powerEvents, schedulesRefresh: schedulesRefresh)
+        loadCachedArticles()
+        if schedulesRefresh { startBackgroundFetch() }
+    }
+
+    private func observeArticles() {
         storeUpdates = articleStore.$articles.sink { [weak self] articles in
             self?.articles = articles
         }
+    }
+
+    private func observeSubscriptions() {
         subscriptionUpdates = appSettings.$feedURLs
             .sink { [weak self] subscriptions in
-                guard let self else { return }
+                guard let self, !isStopped else { return }
                 let hidden = Set(TensionMethodology.v1.panel.map(\.url)).subtracting(subscriptions)
-                Task { [articleStore] in
+                subscriptionTask?.cancel()
+                subscriptionTask = Task { [articleStore] in
+                    guard !Task.isCancelled else { return }
                     await articleStore.database.setCollectionOnlyFeedURLs(Array(hidden))
+                    guard !Task.isCancelled else { return }
                     await articleStore.refreshState()
                 }
             }
+    }
+
+    private func observeLifecycle(powerEvents: NotificationCenter?, schedulesRefresh: Bool) {
         terminationObserver = NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)
             .sink { [weak self] _ in
                 MainActor.assumeIsolated { self?.stopBackgroundWork() }
@@ -130,8 +148,6 @@ class FeedManager: NSObject, ObservableObject {
                 },
             ]
         }
-        loadCachedArticles()
-        if schedulesRefresh { startBackgroundFetch() }
     }
 
     // MARK: - Feed URL Management (delegates to AppSettings)
@@ -374,6 +390,18 @@ class FeedManager: NSObject, ObservableObject {
 
     func stopBackgroundWork() {
         isStopped = true
+        subscriptionTask?.cancel()
+        subscriptionTask = nil
+        subscriptionUpdates?.cancel()
+        subscriptionUpdates = nil
+        storeUpdates?.cancel()
+        storeUpdates = nil
+        terminationObserver?.cancel()
+        terminationObserver = nil
+        for observer in powerObservers {
+            observer.cancel()
+        }
+        powerObservers.removeAll()
         backgroundTimer?.invalidate()
         backgroundTimer = nil
         backgroundActivity?.invalidate()

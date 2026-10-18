@@ -286,56 +286,65 @@ struct FiniteBriefing: Equatable, Sendable {
         priorities: [String: BriefingPriority] = [:], interests: [String: Int] = [:]
     ) {
         startedAt = now
-        var seen = Set<String>()
-        var remaining = candidates.filter {
-            !readIDs.contains($0.id) && $0.pubDate >= now.addingTimeInterval(-Self.duration)
-                && $0.pubDate <= now && seen.insert($0.id).inserted
-        }.sorted { $0.pubDate == $1.pubDate ? $0.id < $1.id : $0.pubDate > $1.pubDate }
-        remaining = Array(remaining.prefix(Self.candidateLimit))
+        var remaining = Self.prepareCandidates(candidates, readIDs: readIDs, now: now)
         var selected: [FeedArticle] = []
         var sources: [String: Int] = [:]
         var categories: [String: Int] = [:]
         var selectedEvents = Set<String>()
-        func source(_ article: FeedArticle) -> String {
-            EventFeedSummary.displaySource(article.publisherName).lowercased()
-        }
-        func category(_ article: FeedArticle) -> String {
-            (NewsCategory.match(from: article.category ?? "")?.rawValue ?? "Uncategorized").lowercased()
-        }
         // ponytail: scan at most 500 candidates ten times; use buckets if the briefing cap grows.
         while selected.count < Self.maximumStories && !remaining.isEmpty {
             remaining.removeAll {
-                sources[source($0), default: 0] >= 2 || priorities[$0.id]?.eventID.map(selectedEvents.contains) == true
+                sources[Self.source($0), default: 0] >= 2
+                    || priorities[$0.id]?.eventID.map(selectedEvents.contains) == true
             }
             guard !remaining.isEmpty else { break }
             let index = remaining.indices.min { left, right in
-                let a = remaining[left]
-                let b = remaining[right]
-                let aSource = sources[source(a), default: 0]
-                let bSource = sources[source(b), default: 0]
-                let aDiversity = (aSource + categories[category(a), default: 0], aSource)
-                let bDiversity = (bSource + categories[category(b), default: 0], bSource)
-                let aPriority = priorities[a.id] ?? BriefingPriority()
-                let bPriority = priorities[b.id] ?? BriefingPriority()
-                let aImportance = aPriority.importance ?? .notable
-                let bImportance = bPriority.importance ?? .notable
-                if aImportance != bImportance { return aImportance > bImportance }
-                if aPriority.sourceCount != bPriority.sourceCount {
-                    return aPriority.sourceCount > bPriority.sourceCount
+                func rank(_ article: FeedArticle) -> [Int] {
+                    Self.rank(
+                        priority: priorities[article.id] ?? BriefingPriority(),
+                        interest: interests[Self.category(article), default: 0],
+                        sourceCount: sources[Self.source(article), default: 0],
+                        categoryCount: categories[Self.category(article), default: 0])
                 }
-                if interests[category(a), default: 0] != interests[category(b), default: 0] {
-                    return interests[category(a), default: 0] > interests[category(b), default: 0]
-                }
-                if aDiversity != bDiversity { return aDiversity < bDiversity }
-                return left < right
+                let a = rank(remaining[left])
+                let b = rank(remaining[right])
+                return a == b ? left < right : b.lexicographicallyPrecedes(a)
             }!
             let article = remaining.remove(at: index)
             if let eventID = priorities[article.id]?.eventID { selectedEvents.insert(eventID) }
             selected.append(article)
-            sources[source(article), default: 0] += 1
-            categories[category(article), default: 0] += 1
+            sources[Self.source(article), default: 0] += 1
+            categories[Self.category(article), default: 0] += 1
         }
         articles = selected
+    }
+
+    private static func prepareCandidates(_ candidates: [FeedArticle], readIDs: Set<String>, now: Date) -> [FeedArticle]
+    {
+        var seen = Set<String>()
+        return Array(
+            candidates.filter {
+                !readIDs.contains($0.id) && $0.pubDate >= now.addingTimeInterval(-Self.duration)
+                    && $0.pubDate <= now && seen.insert($0.id).inserted
+            }.sorted { $0.pubDate == $1.pubDate ? $0.id < $1.id : $0.pubDate > $1.pubDate }.prefix(Self.candidateLimit))
+    }
+
+    private static func source(_ article: FeedArticle) -> String {
+        EventFeedSummary.displaySource(article.publisherName).lowercased()
+    }
+
+    private static func category(_ article: FeedArticle) -> String {
+        (NewsCategory.match(from: article.category ?? "")?.rawValue ?? "Uncategorized").lowercased()
+    }
+
+    /// Higher lexicographic ranks win; negative counts prefer underrepresented publishers and categories.
+    private static func rank(
+        priority: BriefingPriority, interest: Int, sourceCount: Int, categoryCount: Int
+    ) -> [Int] {
+        [
+            (priority.importance ?? .notable).rawValue, priority.sourceCount, interest,
+            -(sourceCount + categoryCount), -sourceCount,
+        ]
     }
 
     func readCount(_ readIDs: Set<String>) -> Int { articles.filter { readIDs.contains($0.id) }.count }
