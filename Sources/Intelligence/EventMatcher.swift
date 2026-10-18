@@ -413,12 +413,17 @@ struct EventMatchPolicy: Sendable, Equatable {
     var borderlineScore = 0.3
     var eventScore = 0.45
     var maximumEventSize = 100
+    /// Semantic embedding thresholds (#127, #307)
+    var semanticMatchThreshold: Double = 0.82
+    var semanticVetoThreshold: Double = 0.55
+    var semanticFragmentThreshold: Double = 0.70
     static let standard = EventMatchPolicy()
 }
 
 /// Facts that rule a pair out regardless of how similar the rest of the text is.
 enum EventConflict: String, Sendable, Equatable {
-    case language, unknownDate, timeGap, period, year, weekday, titleNumbers, places, excluded, differentEvent
+    case language, unknownDate, timeGap, period, year, weekday, titleNumbers, places, excluded, differentEvent,
+        semanticDivergence
 }
 
 struct EventPairAssessment: Sendable, Equatable {
@@ -435,12 +440,13 @@ struct EventPairAssessment: Sendable, Equatable {
     var sharedKeywords: Int
     var isMatch: Bool
     var isCompatible: Bool
+    var embeddingCosine: Double?
 }
 
 enum EventMatcher {
     /// Bump when matching changes; recent articles and active memberships are revalidated.
     /// Unchanged archived memberships remain intact.
-    static let version = 6
+    static let version = 7
 
     private static func pairConflict(
         _ a: EventFeatures, _ b: EventFeatures, gap: TimeInterval, maximumTimeGap: TimeInterval
@@ -468,9 +474,11 @@ enum EventMatcher {
 
     /// Who, what, where and when for one pair. Headline similarity alone never passes: a match needs
     /// a shared name or place, shared action terms, closeness in time and no contradicting facts.
-    static func assess(_ a: EventFeatures, _ b: EventFeatures, policy: EventMatchPolicy = .standard)
-        -> EventPairAssessment
-    {
+    /// When available, neural sentence embeddings (#127, #307) veto semantic divergence and rescue paraphrased matches.
+    static func assess(
+        _ a: EventFeatures, _ b: EventFeatures, policy: EventMatchPolicy = .standard,
+        embeddingSimilarity: Double? = nil
+    ) -> EventPairAssessment {
         let gap = abs(a.date.timeIntervalSince(b.date))
         let crossSpecific = a.specificAnchors.intersection(b.keywords).union(b.specificAnchors.intersection(a.keywords))
         let sharedAnchors = a.anchors.intersection(b.anchors).union(crossSpecific).count
@@ -484,7 +492,7 @@ enum EventMatcher {
             : max(0, 1 - (gap - policy.fullTimeCredit) / max(1, policy.maximumTimeGap - policy.fullTimeCredit))
         let score = 0.4 * what + 0.4 * entity + 0.2 * time
 
-        let conflict = pairConflict(a, b, gap: gap, maximumTimeGap: policy.maximumTimeGap)
+        var conflict = pairConflict(a, b, gap: gap, maximumTimeGap: policy.maximumTimeGap)
         let sharedSpecific = a.specificAnchors.intersection(b.specificAnchors).union(crossSpecific).count
         let sharedEvidence =
             sharedKeywords
@@ -497,23 +505,41 @@ enum EventMatcher {
             (!a.primaryTitleTerms.isEmpty && a.primaryTitleTerms.isDisjoint(with: nonPlaceTerms(b)))
             || (!b.primaryTitleTerms.isEmpty && b.primaryTitleTerms.isDisjoint(with: nonPlaceTerms(a)))
 
-        let isMatch =
+        // Semantic embedding veto (#307): if both articles are embedded and cosine similarity is below veto threshold,
+        // veto borderline rule matches from conflating different stories with shared generic entities.
+        if conflict == nil, let sim = embeddingSimilarity, sim < policy.semanticVetoThreshold {
+            conflict = .semanticDivergence
+        }
+
+        let ruleMatch =
             conflict == nil && !primaryDisjoint && sharedSpecific >= 1 && sharedEvidence >= 2
             && sharedAnchors + sharedEvidence >= policy.minimumSharedTerms
             && what >= policy.minimumWhat && score >= policy.matchScore
             && (gap <= policy.strictTimeGap || (what >= policy.strictWhat && sharedEvidence >= 3))
+
+        // Semantic embedding rescue (#127, #307): high neural cosine similarity + shared specific anchor
+        // links genuine paraphrases that have different surface action vocabulary.
+        let semanticRescue =
+            conflict == nil && !primaryDisjoint && sharedSpecific >= 1
+            && (embeddingSimilarity ?? 0) >= policy.semanticMatchThreshold
+            && gap <= policy.maximumTimeGap
+
+        let isMatch = ruleMatch || semanticRescue
+
         let isCompatible =
-            conflict == nil && !primaryDisjoint && sharedSpecific >= 1 && score >= policy.compatibilityScore
+            conflict == nil && !primaryDisjoint && sharedSpecific >= 1
+            && (score >= policy.compatibilityScore || (embeddingSimilarity ?? 0) >= policy.semanticFragmentThreshold)
         let isBorderline =
             !isMatch && conflict == nil && !primaryDisjoint
             && ((sharedAnchors >= 1 && sharedEvidence >= 1 && score >= policy.borderlineScore)
-                || (sharedEvidence >= 3 && what >= policy.minimumWhat))
+                || (sharedEvidence >= 3 && what >= policy.minimumWhat)
+                || ((embeddingSimilarity ?? 0) >= policy.semanticFragmentThreshold && sharedSpecific >= 1))
         let needsConfirmation = isMatch && (sharedSpecific == 0 || what < policy.strictWhat)
         return EventPairAssessment(
             conflict: conflict, isBorderline: isBorderline, needsConfirmation: needsConfirmation,
-            score: score, what: what, entity: entity, sharedAnchors: sharedAnchors,
+            score: max(score, embeddingSimilarity ?? 0.0), what: what, entity: entity, sharedAnchors: sharedAnchors,
             sharedSpecificAnchors: sharedSpecific, sharedKeywords: sharedKeywords,
-            isMatch: isMatch, isCompatible: isCompatible)
+            isMatch: isMatch, isCompatible: isCompatible, embeddingCosine: embeddingSimilarity)
     }
 
     static func rejected(_ pair: EventPairAssessment) -> EventPairAssessment {

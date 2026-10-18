@@ -784,6 +784,16 @@ actor DatabaseEngine {
                 try Task.checkCancellation()
                 // Page images found to be shared site defaults (#338), so a later story declaring one never keeps it.
                 try executeSimple("CREATE TABLE IF NOT EXISTS story_image_defaults (url TEXT PRIMARY KEY);")
+                // On-device neural sentence embeddings (384-dim normalized float32 vectors, 1536 bytes) (#127, #307).
+                try executeSimple(
+                    """
+                    CREATE TABLE IF NOT EXISTS article_embeddings (
+                        article_id TEXT PRIMARY KEY REFERENCES articles(id) ON DELETE CASCADE,
+                        model_version INTEGER NOT NULL,
+                        vector BLOB NOT NULL
+                    );
+                    """
+                )
                 try setUserVersion(21)
                 try commitTransaction()
             } catch {
@@ -4309,6 +4319,84 @@ actor DatabaseEngine {
                     AND NOT EXISTS (SELECT 1 FROM event_members m WHERE m.event_id = events.id)
                     AND NOT EXISTS (SELECT 1 FROM event_overviews o WHERE o.event_id = events.id);
                 """)
+        }
+    }
+
+    // MARK: - Article Embeddings (#127, #307)
+
+    /// Retrieves stored normalized embedding vectors for the given article IDs matching the model version.
+    func fetchArticleEmbeddings(articleIDs: [String], modelVersion: Int) throws -> [String: [Float]] {
+        guard !articleIDs.isEmpty else { return [:] }
+        var result: [String: [Float]] = [:]
+        for start in stride(from: 0, to: articleIDs.count, by: 400) {
+            let slice = Array(articleIDs[start..<min(start + 400, articleIDs.count)])
+            let placeholders = Array(repeating: "?", count: slice.count).joined(separator: ", ")
+            let sql =
+                "SELECT article_id, vector FROM article_embeddings WHERE model_version = ? AND article_id IN (\(placeholders));"
+            var statement: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+                throw NSError(
+                    domain: "DatabaseEngine", code: -1,
+                    userInfo: [NSLocalizedDescriptionKey: "Failed to prepare embedding query"])
+            }
+            defer { sqlite3_finalize(statement) }
+            sqlite3_bind_int(statement, 1, Int32(modelVersion))
+            for (idx, id) in slice.enumerated() {
+                sqlite3_bind_text(statement, Int32(idx + 2), id, -1, Self.sqliteTransient)
+            }
+            while sqlite3_step(statement) == SQLITE_ROW {
+                guard let idText = sqlite3_column_text(statement, 0),
+                    let blobBytes = sqlite3_column_blob(statement, 1)
+                else { continue }
+                let id = String(cString: idText)
+                let byteCount = Int(sqlite3_column_bytes(statement, 1))
+                let floatCount = byteCount / MemoryLayout<Float>.stride
+                guard floatCount == 384 else { continue }
+                let floats = blobBytes.withMemoryRebound(to: Float.self, capacity: floatCount) { buffer in
+                    Array(UnsafeBufferPointer(start: buffer, count: floatCount))
+                }
+                result[id] = floats
+            }
+        }
+        return result
+    }
+
+    /// Stores normalized float vectors for articles inside a single transaction.
+    func upsertArticleEmbeddings(_ embeddings: [String: [Float]], modelVersion: Int) throws {
+        guard !embeddings.isEmpty else { return }
+        try beginTransaction()
+        do {
+            let sql = """
+                INSERT INTO article_embeddings (article_id, model_version, vector) VALUES (?, ?, ?)
+                ON CONFLICT(article_id) DO UPDATE SET model_version = excluded.model_version, vector = excluded.vector;
+                """
+            var statement: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+                throw NSError(
+                    domain: "DatabaseEngine", code: -1,
+                    userInfo: [NSLocalizedDescriptionKey: "Failed to prepare embedding upsert"])
+            }
+            defer { sqlite3_finalize(statement) }
+
+            for (articleID, vector) in embeddings {
+                guard vector.count == 384 else { continue }
+                sqlite3_reset(statement)
+                sqlite3_bind_text(statement, 1, articleID, -1, Self.sqliteTransient)
+                sqlite3_bind_int(statement, 2, Int32(modelVersion))
+                let byteCount = vector.count * MemoryLayout<Float>.stride
+                _ = vector.withUnsafeBytes { raw in
+                    sqlite3_bind_blob(statement, 3, raw.baseAddress, Int32(byteCount), Self.sqliteTransient)
+                }
+                guard sqlite3_step(statement) == SQLITE_DONE else {
+                    throw NSError(
+                        domain: "DatabaseEngine", code: -1,
+                        userInfo: [NSLocalizedDescriptionKey: "Failed to insert article embedding for \(articleID)"])
+                }
+            }
+            try commitTransaction()
+        } catch {
+            try? rollbackTransaction()
+            throw error
         }
     }
 

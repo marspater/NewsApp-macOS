@@ -1,0 +1,102 @@
+[
+  {
+    "metadataOutputVersion" : "3.0",
+    "storagePrecision" : "Float16",
+    "outputSchema" : [
+      {
+        "hasShapeFlexibility" : "0",
+        "isOptional" : "0",
+        "dataType" : "Float32",
+        "formattedType" : "MultiArray (Float32)",
+        "shortDescription" : "Sequence of hidden-states at the output of the last layer of the model",
+        "shape" : "[]",
+        "name" : "last_hidden_state",
+        "type" : "MultiArray"
+      },
+      {
+        "hasShapeFlexibility" : "0",
+        "isOptional" : "0",
+        "dataType" : "Float32",
+        "formattedType" : "MultiArray (Float32)",
+        "shortDescription" : "Last layer hidden-state of the first token of the sequence",
+        "shape" : "[]",
+        "name" : "pooler_output",
+        "type" : "MultiArray"
+      }
+    ],
+    "modelParameters" : [
+
+    ],
+    "specificationVersion" : 6,
+    "mlProgramOperationTypeHistogram" : {
+      "Concat" : 25,
+      "Linear" : 37,
+      "SliceByIndex" : 3,
+      "Sub" : 1,
+      "LayerNorm" : 13,
+      "Transpose" : 24,
+      "Shape" : 26,
+      "Matmul" : 12,
+      "RealDiv" : 1,
+      "Gelu" : 6,
+      "Softmax" : 6,
+      "Mul" : 7,
+      "Cast" : 5,
+      "Tile" : 1,
+      "Add" : 20,
+      "ExpandDims" : 2,
+      "Reshape" : 24,
+      "Gather" : 52,
+      "Tanh" : 1
+    },
+    "computePrecision" : "Mixed (Float16, Float32, Int32)",
+    "isUpdatable" : "0",
+    "stateSchema" : [
+
+    ],
+    "availability" : {
+      "macOS" : "12.0",
+      "tvOS" : "15.0",
+      "visionOS" : "1.0",
+      "watchOS" : "8.0",
+      "iOS" : "15.0",
+      "macCatalyst" : "15.0"
+    },
+    "modelType" : {
+      "name" : "MLModelType_mlProgram"
+    },
+    "userDefinedMetadata" : {
+      "com.github.apple.coremltools.version" : "6.3.0",
+      "com.github.apple.coremltools.source" : "torch==1.13.1",
+      "transformers_version" : "4.8.2"
+    },
+    "inputSchema" : [
+      {
+        "dataType" : "Int32",
+        "hasShapeFlexibility" : "1",
+        "isOptional" : "0",
+        "shapeFlexibility" : "1 × 1...128",
+        "shapeRange" : "[[1, 1], [1, 128]]",
+        "formattedType" : "MultiArray (Int32 1 × 1)",
+        "type" : "MultiArray",
+        "shape" : "[1, 1]",
+        "name" : "input_ids",
+        "shortDescription" : "Indices of input sequence tokens in the vocabulary"
+      },
+      {
+        "dataType" : "Int32",
+        "hasShapeFlexibility" : "1",
+        "isOptional" : "0",
+        "shapeFlexibility" : "1 × 1...128",
+        "shapeRange" : "[[1, 1], [1, 128]]",
+        "formattedType" : "MultiArray (Int32 1 × 1)",
+        "type" : "MultiArray",
+        "shape" : "[1, 1]",
+        "name" : "attention_mask",
+        "shortDescription" : "Mask to avoid performing attention on padding token indices (1 = not masked, 0 = masked)"
+      }
+    ],
+    "generatedClassName" : "minilm",
+    "method" : "predict"
+  }
+]
