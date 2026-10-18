@@ -6108,6 +6108,9 @@ struct NewsTests {
             assertTrue(
                 try await db.fetchArticles(isSaved: true).contains { $0.id == panelOnly.id },
                 "Saved panel reports remain accessible")
+            assertTrue(
+                try await db.searchArticles(query: "regional").contains { $0.id == panelOnly.id },
+                "Saved panel reports remain searchable")
 
             let repairPath = FileManager.default.temporaryDirectory.appendingPathComponent(
                 "news-topic-repair-\(UUID().uuidString).sqlite3"
