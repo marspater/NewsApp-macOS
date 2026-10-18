@@ -127,11 +127,26 @@ public struct ReaderBlock: Codable, Hashable, Sendable {
 }
 
 public struct ReaderDocument: Codable, Hashable, Sendable {
-    public static let currentVersion = 5
+    public static let currentVersion = 6
     public var version = currentVersion
     public let blocks: [ReaderBlock]
     public var images: [ReaderImageCandidate]? = nil
     public var leadImageURL: String? = nil
+    public var isComplete: Bool? = nil
+
+    public init(
+        version: Int = currentVersion,
+        blocks: [ReaderBlock],
+        images: [ReaderImageCandidate]? = nil,
+        leadImageURL: String? = nil,
+        isComplete: Bool? = nil
+    ) {
+        self.version = version
+        self.blocks = blocks
+        self.images = images
+        self.leadImageURL = leadImageURL
+        self.isComplete = isComplete
+    }
 
     func curated(feedImage: String?, title: String, excluding repeated: Set<String> = []) -> Self {
         var result = self
@@ -146,7 +161,7 @@ public struct ReaderDocument: Codable, Hashable, Sendable {
         result.leadImageURL = ReaderImageCandidate.select(from: candidates, title: title)?.url
         result = Self(
             version: result.version, blocks: blocks.filter { $0.imageURL.map { !repeated.contains($0) } ?? true },
-            images: candidates, leadImageURL: result.leadImageURL)
+            images: candidates, leadImageURL: result.leadImageURL, isComplete: result.isComplete)
         return result
     }
 
@@ -159,6 +174,25 @@ public struct ReaderDocument: Codable, Hashable, Sendable {
     /// extraction or survive a refresh that brings none. `DatabaseEngine.upsertArticles` applies the same rule in SQL.
     var hasPublisherText: Bool {
         blocks.contains { $0.kind != .figure }
+    }
+
+    /// True if this document represents a complete standalone article rather than a brief feed teaser/excerpt.
+    public var hasCompleteArticleBody: Bool {
+        guard hasPublisherText else { return false }
+        if isComplete == false { return false }
+        let textBlocks = blocks.filter { $0.kind == .paragraph || $0.kind == .quote || $0.kind == .listItem }
+        let totalCount = textBlocks.map(\.text.count).reduce(0, +)
+        if totalCount < 600 && textBlocks.count <= 2 { return false }
+        if let last = textBlocks.last?.text.lowercased() {
+            if last.contains("continue reading")
+                || last.contains("read full article")
+                || last.contains("appeared first on")
+                || (last.contains("the post") && last.contains("appeared first"))
+            {
+                return false
+            }
+        }
+        return true
     }
 }
 

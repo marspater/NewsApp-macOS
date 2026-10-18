@@ -136,19 +136,25 @@ class FeedManager: NSObject, ObservableObject {
 
     // MARK: - Feed URL Management (delegates to AppSettings)
 
-    func addFeed(url: String) {
+    @discardableResult
+    func addFeed(url: String) -> Bool {
         if let added = appSettings.addFeed(url: url) {
             cancelRefresh()
             feedStatuses[added] = .idle
             fetchFeeds()
+            return true
         }
+        return false
     }
 
     /// Subscribes to catalog feeds the user chose; one refresh covers the whole batch.
-    func addCatalogFeeds(_ feeds: [CatalogFeed]) {
-        guard appSettings.addCatalogFeeds(feeds) > 0 else { return }
+    @discardableResult
+    func addCatalogFeeds(_ feeds: [CatalogFeed]) -> Int {
+        let added = appSettings.addCatalogFeeds(feeds)
+        guard added > 0 else { return 0 }
         cancelRefresh()
         fetchFeeds()
+        return added
     }
 
     func removeFeed(url: String) {
@@ -235,7 +241,15 @@ class FeedManager: NSObject, ObservableObject {
     // MARK: - Feed Health
 
     func reloadFeedHealth() async {
-        guard let states = try? await articleStore.database.feedFetchStates() else { return }
+        let states: [String: FeedFetchState]
+        do {
+            states = try await articleStore.database.feedFetchStates()
+        } catch {
+            if !(error is CancellationError) {
+                logger.error("Failed to load feed fetch states: \(error.localizedDescription)")
+            }
+            return
+        }
         let now = Date()
         feedHealth = Dictionary(
             appSettings.feedURLs.map { ($0, FeedHealth(states[$0], now: now)) }, uniquingKeysWith: { first, _ in first }
@@ -409,7 +423,13 @@ class FeedManager: NSObject, ObservableObject {
         // Rate before triage. Collection and its spinner have ended; another refresh can proceed.
         await waitForEventClustering()
         guard !Task.isCancelled, !isStopped else { return }
-        guard let eligible = try? await articleStore.database.notificationStoryIDs(newArticles.map(\.id)) else {
+        let eligible: Set<String>
+        do {
+            eligible = try await articleStore.database.notificationStoryIDs(newArticles.map(\.id))
+        } catch {
+            if !(error is CancellationError) {
+                logger.error("Failed to load notification-eligible story IDs: \(error.localizedDescription)")
+            }
             return
         }
         // Muting applies in every notification privacy mode; stored importance does not hide stories.

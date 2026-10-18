@@ -80,11 +80,35 @@ class JSONFeedParser {
             $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0
         }
 
+        let cleanTitle = ContentExtractionPipeline.shared.decodeHTMLEntities(title)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
         let extracted = item.contentHtml.map {
             ContentExtractionPipeline.shared.extractFromHTML($0, baseUrl: link)
         }
+        let isTeaser =
+            extracted?.document?.hasCompleteArticleBody == false
+            || (readableContent?.count ?? 0) < 600
+        var doc = extracted?.document
+        if doc == nil, item.contentHtml != nil, let readableContent, !readableContent.isEmpty {
+            let paras = readableContent.components(separatedBy: "\n\n")
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+                .map { ReaderBlock(kind: .paragraph, text: $0) }
+            if !paras.isEmpty {
+                doc = ReaderDocument(
+                    version: ReaderDocument.currentVersion,
+                    blocks: paras,
+                    images: nil,
+                    leadImageURL: nil,
+                    isComplete: !isTeaser
+                )
+            }
+        }
+        if isTeaser { doc?.isComplete = false }
+        let curatedDoc = doc?.curated(feedImage: imageUrl, title: cleanTitle)
+
         return FeedArticle(
-            title: title.trimmingCharacters(in: .whitespacesAndNewlines),
+            title: cleanTitle,
             link: link,
             guid: item.id,
             description: cleanDesc,
@@ -95,12 +119,7 @@ class JSONFeedParser {
             fullContent: extracted?.content ?? readableContent,
             category: category,
             contentFetched: readableContent != nil,
-            readerDocument: {
-                if case .success(_, _, let document) = extracted {
-                    return document?.curated(feedImage: imageUrl, title: title)
-                }
-                return nil
-            }()
+            readerDocument: curatedDoc
         )
     }
 

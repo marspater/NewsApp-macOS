@@ -855,6 +855,25 @@ actor DatabaseEngine {
                 throw error
             }
         }
+        if version < 23 {
+            try beginTransaction()
+            do {
+                try Task.checkCancellation()
+                try executeSimple(
+                    """
+                    UPDATE articles
+                    SET source = trim(substr(source, 1, instr(source, char(10)) - 1))
+                    WHERE instr(source, char(10)) > 0;
+                    """
+                )
+                try Task.checkCancellation()
+                try setUserVersion(23)
+                try commitTransaction()
+            } catch {
+                try? rollbackTransaction()
+                throw error
+            }
+        }
     }
 
     /// Muting predicates for list queries (`MuteRules`); both are pure functions of their arguments.
@@ -1267,9 +1286,11 @@ actor DatabaseEngine {
             source = excluded.source,
             description = excluded.description,
             content = CASE WHEN articles.reader_document IS NOT NULL AND (excluded.reader_document IS NULL
-                    OR (?17 = 0 AND \(storedHasPublisherText)))
+                    OR (?17 = 0 AND \(storedHasPublisherText))
+                    OR (json_extract(articles.reader_document, '$.isComplete') IS NOT 0 AND json_extract(excluded.reader_document, '$.isComplete') = 0))
                 THEN articles.content ELSE coalesce(excluded.content, articles.content) END,
-            reader_document = CASE WHEN ?17 = 0 AND \(storedHasPublisherText)
+            reader_document = CASE WHEN articles.reader_document IS NOT NULL AND (?17 = 0 AND \(storedHasPublisherText)
+                    OR (json_extract(articles.reader_document, '$.isComplete') IS NOT 0 AND json_extract(excluded.reader_document, '$.isComplete') = 0))
                 THEN articles.reader_document ELSE coalesce(excluded.reader_document, articles.reader_document) END,
             image_url = coalesce(excluded.image_url, articles.image_url),
             category = coalesce(excluded.category, articles.category),
@@ -2419,17 +2440,14 @@ actor DatabaseEngine {
                 if let readerDocument {
                     updates.append("reader_document = ?")
                     params.append(("text", String(decoding: try JSONEncoder().encode(readerDocument), as: UTF8.self)))
-                } else {
-                    updates.append("reader_document = NULL")
                 }
+            } else if let readerDocument {
+                updates.append("reader_document = ?")
+                params.append(("text", String(decoding: try JSONEncoder().encode(readerDocument), as: UTF8.self)))
             }
-            if let document = readerDocument, document.version >= 4 {
-                if let selected = document.leadImageURL {
-                    updates.append("image_url = ?")
-                    params.append(("text", selected))
-                } else {
-                    updates.append("image_url = NULL")
-                }
+            if let document = readerDocument, document.version >= 4, let selected = document.leadImageURL {
+                updates.append("image_url = ?")
+                params.append(("text", selected))
             } else if let img = image {
                 updates.append("image_url = coalesce(image_url, ?)")
                 params.append(("text", img))

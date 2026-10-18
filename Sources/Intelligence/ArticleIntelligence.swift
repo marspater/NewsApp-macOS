@@ -1151,6 +1151,34 @@ public enum ArticleContentRedactor {
         {
             return true
         }
+        // Video errors and playback placeholders (BBC News, Al Jazeera, France 24)
+        if rawLower.contains("to play this video you need to enable javascript")
+            || rawLower.contains("to view this video please enable javascript")
+            || rawLower.contains("this video can not be played")
+            || rawLower.contains("this video cannot be played")
+            || (rawLower.hasPrefix("video duration") && rawLower.count < 80)
+            || (rawLower.hasPrefix("watch:") && rawLower.count < 60)
+        {
+            return true
+        }
+        // Google Preferred Source prompts (CNA, DW, Google News CTAs)
+        if rawLower.contains("preferred source on google")
+            || rawLower.contains("trusted source to help google")
+            || rawLower.contains("follow us on google news")
+        {
+            return true
+        }
+        // Editorial standards, corrections, credits footers (CBC, DW, The Hindu)
+        if rawLower.hasPrefix("cbc's journalistic standards")
+            || rawLower.hasPrefix("corrections and clarifications")
+            || (rawLower.hasPrefix("edited by:") && rawLower.count < 100)
+            || (rawLower.hasPrefix("published - ") && rawLower.count < 100)
+            || (rawLower.hasPrefix("by ") && rawLower.count < 100
+                && (rawLower.contains("correspondent") || rawLower.contains("reporter")
+                    || rawLower.contains("editor")))
+        {
+            return true
+        }
         // Consent and player notices that stand in for embedded video (France 24).
         if rawLower.hasPrefix("to display this content from") && rawLower.contains("you must enable")
             || rawLower.hasPrefix("one of your browser extensions seems to be blocking")

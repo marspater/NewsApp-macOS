@@ -643,6 +643,7 @@ struct NewsTests {
         try await testGranularCacheClearingAndRetention()
         await testNotificationServiceErrorLogging()
         await testArticleStoreErrorResilience()
+        await testSystemErrorHardeningAndResilience()
         await testFeedArticleWrapContextNavigation()
         await testArticleContentRedactionAndTypography()
         await testArticleDetailReadingExperienceOverhaul()
@@ -859,7 +860,7 @@ struct NewsTests {
         execute(copy, "DROP VIEW article_fts_rows;")
         try await db.open()
         assertEqual(
-            value(copy, "PRAGMA user_version;"), "22", "Copied v14 library upgrades through v15 to the current schema")
+            value(copy, "PRAGMA user_version;"), "23", "Copied v14 library upgrades through v15 to the current schema")
         assertEqual(value(path, "PRAGMA user_version;"), "14", "Original library stays untouched")
         assertEqual(
             try await db.searchArticles(query: "Research").map(\.id), originalOrder,
@@ -4725,7 +4726,7 @@ struct NewsTests {
         await cancelledDB.close()
         let db = DatabaseEngine(path: copyPath)
         try await db.open()
-        assertEqual(value(copyPath, "PRAGMA user_version;"), "22", "Copied v4 library upgrades to the current schema")
+        assertEqual(value(copyPath, "PRAGMA user_version;"), "23", "Copied v4 library upgrades to the current schema")
         assertEqual(value(originalPath, "PRAGMA user_version;"), "4", "Original fixture stays untouched")
         assertEqual(try await db.fetchArticles(limit: nil).count, 3, "Migration keeps historical rows")
         assertEqual(
@@ -4978,7 +4979,7 @@ struct NewsTests {
             value(failure, "SELECT article_id FROM article_aliases WHERE value='observed-variant-b';"), "historical-b",
             "Injected failure preserves old aliases")
         try await migrated.open()
-        assertEqual(value(copy, "PRAGMA user_version;"), "22", "Copied library upgrades to the current schema")
+        assertEqual(value(copy, "PRAGMA user_version;"), "23", "Copied library upgrades to the current schema")
         assertEqual(value(path, "PRAGMA user_version;"), "8", "Original fixture remains untouched")
         assertEqual(
             try await migrated.fetchArticles(limit: nil).count, 6, "Only confident same-URL text copies are hidden")
@@ -6297,7 +6298,7 @@ struct NewsTests {
 
         let db = DatabaseEngine(path: copy)
         try await db.open()
-        assertEqual(value(copy, "PRAGMA user_version;"), "22", "Copied v11 library upgrades to the current schema")
+        assertEqual(value(copy, "PRAGMA user_version;"), "23", "Copied v11 library upgrades to the current schema")
         assertEqual(value(path, "PRAGMA user_version;"), "11", "Original v11 fixture stays untouched")
         assertEqual(try await db.fetchArticles(limit: nil).count, 5, "Event migration keeps every article")
         assertTrue(try await db.isRead(articleId: "event-a"), "Event migration keeps read state")
@@ -8425,7 +8426,7 @@ struct NewsTests {
             value("SELECT count(*) FROM sqlite_master WHERE name='idx_story_images_url';"), "0",
             "Cancellation leaves no partial index")
         try await db.open()
-        assertEqual(value("PRAGMA user_version;"), "22", "Existing v18 libraries receive the image index migration")
+        assertEqual(value("PRAGMA user_version;"), "23", "Existing v18 libraries receive the image index migration")
         assertEqual(
             sqlite3_exec(handle, "ANALYZE story_images;", nil, nil, nil), SQLITE_OK,
             "Use current fixture cardinality for the query planner")
@@ -9158,7 +9159,7 @@ struct NewsTests {
             ), "0", "Cancelled v14 migration rolls back its tables")
         let migrated = DatabaseEngine(path: copy)
         try await migrated.open()
-        assertEqual(value(copy, "PRAGMA user_version;"), "22", "Copied v13 library upgrades to the current schema")
+        assertEqual(value(copy, "PRAGMA user_version;"), "23", "Copied v13 library upgrades to the current schema")
         assertEqual(value(path, "PRAGMA user_version;"), "13", "Original v13 fixture stays untouched")
         assertEqual(
             try await migrated.fetchEvent(id: event.id)?.memberArticleIDs.count, 5, "Migration keeps events and members"
@@ -9770,7 +9771,7 @@ struct NewsTests {
             guard sqlite3_step(statement) == SQLITE_ROW else { return nil }
             return sqlite3_column_text(statement, 0).map { String(cString: $0) }
         }
-        assertEqual(value(copy, "PRAGMA user_version;"), "22", "Provenance schema upgrades to the current schema")
+        assertEqual(value(copy, "PRAGMA user_version;"), "23", "Provenance schema upgrades to the current schema")
         assertEqual(value(original, "PRAGMA user_version;"), "15", "Original v15 fixture remains untouched")
         assertEqual(value(copy, "PRAGMA quick_check;"), "ok", "Upgraded provenance library passes quick_check")
         assertEqual(value(copy, "PRAGMA foreign_key_check;"), nil, "Provenance has no dangling article references")
@@ -12856,6 +12857,75 @@ struct NewsTests {
 
         // 3. markAllAsRead catches error gracefully without crashing (PR #20)
         await store.markAllAsRead()
+    }
+
+    @MainActor
+    static func testSystemErrorHardeningAndResilience() async {
+        print("  - Testing System Error Hardening & Resilience across Coordinators and Views...")
+
+        // 1. FeedManager.addFeed Boolean feedback
+        let suite = testDefaultsSuite("test.error.feedmanager")
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { removeTestDefaults(suite) }
+        let settings = AppSettings(defaults: defaults)
+        let db = DatabaseEngine(path: ":memory:")
+        let store = ArticleStore(database: db)
+        await store.initialize()
+        let manager = FeedManager(
+            settings: settings, store: store, schedulesRefresh: false,
+            fetchBatch: { urls, _ in urls.map { ($0, [], nil, nil) } },
+            notifyBatch: { _, _ in })
+
+        let validURL = "https://example.com/feed.xml"
+        let addedFirst = manager.addFeed(url: validURL)
+        assertTrue(addedFirst, "Adding a new valid feed returns true")
+        let addedDuplicate = manager.addFeed(url: validURL)
+        assertFalse(addedDuplicate, "Adding a duplicate feed returns false")
+        let addedInvalid = manager.addFeed(url: "https://")
+        assertFalse(addedInvalid, "Adding an invalid scheme-only URL returns false")
+        let addedEmpty = manager.addFeed(url: "   ")
+        assertFalse(addedEmpty, "Adding an empty/whitespace URL returns false")
+        manager.stopBackgroundWork()
+
+        // 2. MigrationCoordinator corrupt legacy data handling
+        let migrationSuite = testDefaultsSuite("test.error.migration")
+        let migrationDefaults = UserDefaults(suiteName: migrationSuite)!
+        defer { removeTestDefaults(migrationSuite) }
+        migrationDefaults.set(Data("corrupted JSON content".utf8), forKey: "saved_articles")
+        let migrationCoordinator = MigrationCoordinator(database: db, userDefaults: migrationDefaults)
+        do {
+            let stats = try await migrationCoordinator.migrateIfNeeded()
+            assertEqual(stats.savedStories, 0, "Corrupted legacy saved stories are gracefully skipped")
+        } catch {
+            assertTrue(false, "migrateIfNeeded should not rethrow legacy JSON parsing failure: \(error)")
+        }
+
+        // 3. SentenceEmbedder corrupt file handling
+        let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try? FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+        let corruptVocab = tempDir.appendingPathComponent("vocab.txt")
+        try? "invalid vocab file".write(to: corruptVocab, atomically: true, encoding: .utf8)
+        let corruptModel = tempDir.appendingPathComponent("minilm.mlmodelc")
+        try? "invalid coreml model".write(to: corruptModel, atomically: true, encoding: .utf8)
+        let embedder = SentenceEmbedder(modelURL: corruptModel, vocabURL: corruptVocab)
+        let available = await embedder.isAvailable
+        assertFalse(available, "SentenceEmbedder with corrupted files gracefully sets isAvailable to false")
+
+        // 4. OverviewGenerationCoordinator graceful error handling when database closed
+        let failingDb = DatabaseEngine(path: ":memory:")
+        let failingStore = ArticleStore(database: failingDb)
+        let coordinator = OverviewGenerationCoordinator(
+            store: failingStore, queue: EnrichmentQueue(store: failingStore), textModel: .unavailable)
+        await failingDb.close()
+        let result = await coordinator.requestOverview(
+            eventID: "err-event", eventTitle: "Error Event", membershipVersion: 1,
+            articles: [
+                FeedArticle(
+                    title: "Test", link: "https://example.com/item", guid: "g1",
+                    description: "Desc", pubDate: Date(), source: "Src")
+            ])
+        assertTrue(result == nil, "requestOverview with failing database returns nil without crashing")
     }
 
     static func testFeedArticleWrapContextNavigation() async {

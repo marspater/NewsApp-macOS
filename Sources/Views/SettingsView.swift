@@ -986,8 +986,11 @@ struct SettingsView: View {
     private func subscribeFromField() {
         let trimmed = newFeedURL.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
-        feedManager.addFeed(url: trimmed)
-        newFeedURL = ""
+        if feedManager.addFeed(url: trimmed) {
+            newFeedURL = ""
+        } else {
+            showActionMessage("Feed not added. Check the URL or whether you already subscribe.", failed: true)
+        }
     }
 
     private func showActionMessage(_ msg: String, failed: Bool = false) {
