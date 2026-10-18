@@ -418,7 +418,9 @@ struct ReadingColumn: ViewModifier {
         content
             .padding(.horizontal, AppLayout.pageInset)
             .padding(.vertical, AppSpacing.xl)
-            .frame(maxWidth: AppLayout.readingColumnMaxWidth(for: textScale), alignment: .leading)
+            .containerRelativeFrame(.horizontal) { available, _ in
+                min(available, AppLayout.readingColumnMaxWidth(for: textScale))
+            }
             .frame(maxWidth: .infinity, alignment: .center)
     }
 }

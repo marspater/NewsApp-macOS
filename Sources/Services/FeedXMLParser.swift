@@ -310,6 +310,9 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
         let elementName = normalizedElement(elementName, namespaceURI: namespaceURI)
         if insideItem {
             appendItemXML("</\(elementName)>")
+            if ["category", "dc:subject"].contains(elementName), !isCollectingContentEncoded {
+                itemCategory += "\n"
+            }
             if elementName == "link", !isCollectingContentEncoded { itemLink = resolvedURL(itemLink) }
         }
         if contentDepth == currentNestingDepth {

@@ -241,7 +241,7 @@ final class DOMElementNode: Sendable {
     private static let auxiliaryPattern =
         (try? NSRegularExpression(
             pattern:
-                #"(?i)(?:^|[^a-z0-9])(?:comments?|comment-thread|disqus|related(?:-content|-stories|-articles)?|links-block|newsletter|byline|timestamp-block|recommendations?|social-share|share-tools|promo|advertisement|outbrain|taboola|eventpromo|promolist|topiclist|uploaderembed)(?:$|[^a-z0-9])"#
+                #"(?i)(?:^|[^a-z0-9])(?:comments?|comment-thread|disqus|also-read|read-more|most-?viewed|most-?popular|onward|onwards|submeta|subscription|paywall|related(?:-content|-stories|-articles)?|links-block|newsletter|byline|timestamp-block|recommendations?|social-share|share-tools|promo|advertisement|outbrain|taboola|eventpromo|promolist|topiclist|uploaderembed)(?:$|[^a-z0-9])"#
         )) ?? NSRegularExpression()
 
     func readingBlocks(allowDivFallback: Bool = true) -> [DOMElementNode] {
@@ -868,6 +868,19 @@ final class ContentExtractionPipeline: Sendable {
             }
         }
 
+        // Explicit publisher bodies beat page-wide scoring: recommendation furniture must not enlarge the story.
+        if let soup,
+            let explicit = try? soup.select(
+                "[itemprop~=articleBody], .article__body, .article-body, .article-body-commercial-selector, .wysiwyg"
+            ).array()
+        {
+            for element in explicit.prefix(8) {
+                if let blocks = repairedReadingBlocks(in: soup, containers: [element]) {
+                    candidateParagraphs = blocks
+                    break
+                }
+            }
+        }
         let prose = candidateParagraphs.filter { [.paragraph, .quote, .listItem].contains($0.kind) }.map(\.text)
         if prose.count < 2 || ContentQualityValidator.validate(paragraphs: prose) != .valid,
             let soup, let fallback = repairedReadingBlocks(in: soup), !Task.isCancelled
@@ -878,6 +891,13 @@ final class ContentExtractionPipeline: Sendable {
             {
                 candidateParagraphs = fallback
             }
+        }
+
+        if candidateParagraphs.contains(where: {
+            $0.text.localizedCaseInsensitiveContains("Subscribe to unlock this article")
+        }) {
+            return .qualityValidationFailed(
+                reason: "The publisher requires a subscription. Open the original story to read with your access.")
         }
 
         // Keep media in publisher order, without allowing images to qualify an empty article.
@@ -993,7 +1013,9 @@ final class ContentExtractionPipeline: Sendable {
 
     // MARK: - Container Scoring Engine
 
-    private func repairedReadingBlocks(in document: SwiftSoup.Document) -> [ReaderBlock]? {
+    private func repairedReadingBlocks(in document: SwiftSoup.Document, containers explicit: [SwiftSoup.Element]? = nil)
+        -> [ReaderBlock]?
+    {
         var count = 0
         func attributes(_ element: SwiftSoup.Element) -> [String: String] {
             Dictionary(
@@ -1016,7 +1038,7 @@ final class ContentExtractionPipeline: Sendable {
                 children: element.getChildNodes().compactMap { convert($0, depth: depth + 1) })
         }
         // ponytail: bounded repair of explicit article containers; no second readability scoring engine.
-        let containers = (try? document.select("[itemprop~=articleBody], article, main").array()) ?? []
+        let containers = explicit ?? ((try? document.select("[itemprop~=articleBody], article, main").array()) ?? [])
         for element in containers.prefix(32) {
             guard !element.parents().array().contains(where: excluded) else { continue }
             guard let node = convert(element, depth: 0), !node.isReaderExcluded else { continue }

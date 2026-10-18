@@ -40,6 +40,7 @@ class FeedManager: NSObject, ObservableObject {
     private let imageFinder: StoryImageFinder
     private var isStopped = false
     private var storeUpdates: AnyCancellable?
+    private var subscriptionUpdates: AnyCancellable?
     private var terminationObserver: AnyCancellable?
     /// Collection only: fetch, ingest and publish. Resolves to the newly stored articles.
     private var refreshTask: Task<[FeedArticle], Never>?
@@ -105,6 +106,15 @@ class FeedManager: NSObject, ObservableObject {
         storeUpdates = articleStore.$articles.sink { [weak self] articles in
             self?.articles = articles
         }
+        subscriptionUpdates = appSettings.$feedURLs
+            .sink { [weak self] subscriptions in
+                guard let self else { return }
+                let hidden = Set(TensionMethodology.v1.panel.map(\.url)).subtracting(subscriptions)
+                Task { [articleStore] in
+                    await articleStore.database.setCollectionOnlyFeedURLs(Array(hidden))
+                    await articleStore.refreshState()
+                }
+            }
         terminationObserver = NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)
             .sink { [weak self] _ in
                 MainActor.assumeIsolated { self?.stopBackgroundWork() }
@@ -216,16 +226,9 @@ class FeedManager: NSObject, ObservableObject {
     func articles(for section: String) -> [FeedArticle] {
         if section == "Today" || section == "Saved Stories" || section == "History" { return articles }
 
-        guard let keywords = ArticleSection.keywords[section] else {
-            return articles.filter { article in
-                let text = "\(article.title) \(article.description) \(article.category ?? "")".lowercased()
-                return text.contains(section.lowercased())
-            }
-        }
-
         return articles.filter { article in
-            let text = "\(article.title) \(article.description) \(article.category ?? "")".lowercased()
-            return keywords.contains { text.contains($0) }
+            ArticleSection.matches(
+                section, title: article.title, description: article.description, category: article.category)
         }
     }
 
@@ -438,7 +441,7 @@ class FeedManager: NSObject, ObservableObject {
         var insertedIDs = Set<String>()
         var allParsed = [FeedArticle]()
         for res in results {
-            guard !Task.isCancelled else { return [] }
+            guard !Task.isCancelled else { break }
             guard targetURLs.contains(res.urlString) else { continue }
             if let err = res.error {
                 feedStatuses[res.urlString] = .failed(err)
@@ -453,11 +456,13 @@ class FeedManager: NSObject, ObservableObject {
                     allParsed.append(contentsOf: arts)
                     insertedIDs.formUnion(
                         await articleStore.batchUpsert(
-                            articles: arts, feedUrl: res.urlString, validators: res.validators))
+                            articles: arts, feedUrl: res.urlString, validators: res.validators, publish: false))
                 }
             }
         }
 
+        // Publish one coherent snapshot per collection, including any committed prefix if it was cancelled.
+        await articleStore.refreshState()
         guard !Task.isCancelled else { return [] }
         allParsed.sort { $0.pubDate > $1.pubDate }
 

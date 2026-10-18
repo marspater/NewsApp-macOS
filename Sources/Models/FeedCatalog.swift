@@ -104,6 +104,8 @@ enum FeedCatalog {
         guard let host = URL(string: link)?.host else { return nil }
         var candidate = siteHost(host)
         while candidate.contains(".") {
+            // Custom FT section feeds call themselves “World”; that is a section, not the publisher.
+            if candidate == "ft.com" { return "Financial Times" }
             if let name = publishersByHost[candidate] { return name }
             candidate = String(candidate.drop { $0 != "." }.dropFirst())
         }

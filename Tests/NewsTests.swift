@@ -859,7 +859,7 @@ struct NewsTests {
         execute(copy, "DROP VIEW article_fts_rows;")
         try await db.open()
         assertEqual(
-            value(copy, "PRAGMA user_version;"), "21", "Copied v14 library upgrades through v15 to the current schema")
+            value(copy, "PRAGMA user_version;"), "22", "Copied v14 library upgrades through v15 to the current schema")
         assertEqual(value(path, "PRAGMA user_version;"), "14", "Original library stays untouched")
         assertEqual(
             try await db.searchArticles(query: "Research").map(\.id), originalOrder,
@@ -3557,6 +3557,23 @@ struct NewsTests {
             _ = try await service.assess(database: database, now: now, aiEnabled: true, collectionEnabled: false)
             assertTrue(false, "Collection-off must reject even a warmed cache")
         } catch WorldTensionError.disabled {}
+        actor RetryDraft {
+            var attempts = 0
+            func draft(_ valid: String) -> String {
+                attempts += 1
+                return attempts == 1 ? "Malformed draft" : valid
+            }
+        }
+        let retryDraft = RetryDraft()
+        let retrying = WorldTensionService(
+            model: NewsTextModel { prompt, _ in
+                if prompt.contains("Reply YES only") { return "YES" }
+                return await retryDraft.draft(encoded)
+            })
+        let retried = try await retrying.assess(
+            database: database, now: now, aiEnabled: true, collectionEnabled: true, force: true)
+        assertEqual(retried.last?.assessment, answer, "One conservative retry can recover a malformed model draft")
+        assertEqual(await retryDraft.attempts, 2, "Assessment retries are bounded to one additional draft")
         let rejecting = WorldTensionService(
             model: NewsTextModel { prompt, _ in prompt.contains("Reply YES only") ? "NO" : encoded })
         do {
@@ -4708,7 +4725,7 @@ struct NewsTests {
         await cancelledDB.close()
         let db = DatabaseEngine(path: copyPath)
         try await db.open()
-        assertEqual(value(copyPath, "PRAGMA user_version;"), "21", "Copied v4 library upgrades to the current schema")
+        assertEqual(value(copyPath, "PRAGMA user_version;"), "22", "Copied v4 library upgrades to the current schema")
         assertEqual(value(originalPath, "PRAGMA user_version;"), "4", "Original fixture stays untouched")
         assertEqual(try await db.fetchArticles(limit: nil).count, 3, "Migration keeps historical rows")
         assertEqual(
@@ -4961,7 +4978,7 @@ struct NewsTests {
             value(failure, "SELECT article_id FROM article_aliases WHERE value='observed-variant-b';"), "historical-b",
             "Injected failure preserves old aliases")
         try await migrated.open()
-        assertEqual(value(copy, "PRAGMA user_version;"), "21", "Copied library upgrades to the current schema")
+        assertEqual(value(copy, "PRAGMA user_version;"), "22", "Copied library upgrades to the current schema")
         assertEqual(value(path, "PRAGMA user_version;"), "8", "Original fixture remains untouched")
         assertEqual(
             try await migrated.fetchArticles(limit: nil).count, 6, "Only confident same-URL text copies are hidden")
@@ -5978,6 +5995,13 @@ struct NewsTests {
 
             try await db.upsertArticles([artA, artB])
 
+            assertEqual(
+                try await db.searchArticles(query: "Bloomberg").map(\.id), [artB.id],
+                "Plain search indexes publisher names as well as story text")
+            assertEqual(
+                try await db.searchArticles(query: "source:Bloomberg").map(\.id), [artB.id],
+                "Publisher operator searches the source field")
+
             // Plain FTS match
             let search1 = try await db.searchArticles(query: "qubit")
             assertEqual(search1.count, 1, "Should find quantum article matching 'qubit'")
@@ -6011,6 +6035,116 @@ struct NewsTests {
             let searchAfterRead = try await db.searchArticles(query: "is:read")
             assertEqual(searchAfterRead.count, 1, "Should find 1 read article")
             assertEqual(searchAfterRead[0].id, artA.id, "Read article ID should match")
+            let guardian = FeedArticle(
+                title: "Publisher search fixture", link: "https://www.theguardian.com/world/2026/oct/18/search-fixture",
+                guid: "publisher-search", description: "Independent publisher report. Get our free app.",
+                pubDate: Date(),
+                source: "World news", category: "Health")
+            _ = try await db.upsertArticles([guardian])
+            assertEqual(
+                try await db.searchArticles(query: "Guardian").map(\.id), [guardian.id],
+                "Plain search finds the publisher name displayed on cards")
+            assertEqual(
+                try await db.searchArticles(query: "source:Guardian").map(\.id), [guardian.id],
+                "Publisher filters use the canonical publisher name")
+
+            assertFalse(
+                try await db.fetchArticles(section: "Tech").contains { $0.id == guardian.id },
+                "A free-app promotion cannot override a Health category")
+            _ = try await db.updateEnrichment(articleId: guardian.id, update: .init(category: "Health"))
+            var publisherRefresh = guardian
+            publisherRefresh.category = "World"
+            _ = try await db.upsertArticles([publisherRefresh])
+            assertTrue(
+                try await db.fetchArticles(section: "Health & Wellness").contains { $0.id == guardian.id },
+                "Feed metadata cannot override the displayed classified category")
+            assertEqual(
+                try await db.searchArticles(query: "category:Health").map(\.id), [guardian.id],
+                "Category search and section membership use the same stored classification")
+            assertEqual(
+                try await db.mutedArticleCount(section: "Health & Wellness", muting: MuteRules(topics: ["publisher"])),
+                1, "Muted counts use the classified category without multiplying joined rows")
+            let financialTimes = FeedArticle(
+                storedID: "ft-publisher", title: "A section feed report",
+                link: "https://www.ft.com/content/publisher-search-fixture", guid: "ft-publisher",
+                description: "Publisher name is absent from the story text", pubDate: Date(), source: "World")
+            _ = try await db.upsertArticles([financialTimes])
+            for query in ["ft", "source:ft", "Financial Times"] {
+                assertEqual(
+                    try await db.searchArticles(query: query).map(\.id), [financialTimes.id],
+                    "FT section feeds remain searchable by publisher: \(query)")
+            }
+            assertTrue(
+                ArticleFilterQuery.parse("ft").matches(article: financialTimes, isRead: false, isSaved: false),
+                "In-memory filters include displayed publisher names")
+            assertTrue(
+                ArticleFilterQuery.parse("source:ft").matches(article: financialTimes, isRead: false, isSaved: false),
+                "In-memory publisher operators use the displayed name")
+            let panelURL = TensionMethodology.v1.panel[8].url
+            let panelOnly = FeedArticle(
+                storedID: "panel-only", title: "Panel-only regional report", link: "https://example.com/panel-only",
+                guid: "panel-only", description: "Stored for analysis", pubDate: Date(), source: "Panel")
+            let shared = FeedArticle(
+                storedID: "shared-subscription", title: "Report on two feeds",
+                link: "https://example.com/shared-subscription", guid: "shared-subscription",
+                description: "A subscribed report", pubDate: Date(), source: "Panel")
+            _ = try await db.upsertArticles([panelOnly, shared], feedUrl: panelURL)
+            _ = try await db.upsertArticles([shared], feedUrl: "https://example.com/subscribed.xml")
+            await db.setCollectionOnlyFeedURLs([panelURL])
+            let scoped = try await db.fetchArticles(limit: nil)
+            assertFalse(
+                scoped.contains { $0.id == panelOnly.id }, "Analysis-only feeds do not enter Today or section pages")
+            assertTrue(scoped.contains { $0.id == shared.id }, "A report on a subscribed feed remains visible")
+            assertTrue(
+                try await db.searchArticles(query: "regional").isEmpty,
+                "Analysis-only feeds stay out of ordinary search")
+            assertEqual(try await db.counts().unread, 4, "Unread counts exclude the panel-only report")
+            assertEqual(
+                try await db.tensionCorpus(
+                    day: DateInterval(start: Date().addingTimeInterval(-3600), duration: 7200), feedURLs: [panelURL]
+                ).count, 2, "Tension retains analysis-only source evidence")
+            try await db.setSaved(articleId: panelOnly.id, isSaved: true)
+            assertTrue(
+                try await db.fetchArticles(isSaved: true).contains { $0.id == panelOnly.id },
+                "Saved panel reports remain accessible")
+
+            let repairPath = FileManager.default.temporaryDirectory.appendingPathComponent(
+                "news-topic-repair-\(UUID().uuidString).sqlite3"
+            ).path
+            defer {
+                for suffix in ["", "-wal", "-shm"] { try? FileManager.default.removeItem(atPath: repairPath + suffix) }
+            }
+            let legacyTopics = DatabaseEngine(path: repairPath)
+            try await legacyTopics.open()
+            let mislabeled = FeedArticle(
+                storedID: "old-topic", title: "Dubai GDP rises as trade expands",
+                link: "https://www.theguardian.com/business/2026/oct/18/topic-fixture", guid: "old-topic",
+                description: "Officials said the economy grew.", pubDate: Date(), source: "World news",
+                fullContent: "Preserved publisher text", category: "Technology")
+            _ = try await legacyTopics.upsertArticles([mislabeled])
+            try await legacyTopics.markRead(articleId: mislabeled.id, isRead: true)
+            try await legacyTopics.setSaved(articleId: mislabeled.id, isSaved: true)
+            await legacyTopics.close()
+            var handle: OpaquePointer?
+            assertEqual(sqlite3_open(repairPath, &handle), SQLITE_OK, "Open copied legacy topic fixture")
+            assertEqual(
+                sqlite3_exec(
+                    handle,
+                    "UPDATE articles SET source='World news'; UPDATE article_enrichment SET category='Technology'; PRAGMA user_version=21;",
+                    nil, nil, nil), SQLITE_OK, "Seed the old generated category and publisher label")
+            sqlite3_close(handle)
+            let repaired = DatabaseEngine(path: repairPath)
+            try await repaired.open()
+            let fixed = try await repaired.fetchArticles(limit: 1, id: mislabeled.id).first
+            assertEqual(fixed?.category, "Business", "The migration repairs stored substring misclassifications")
+            assertEqual(fixed?.fullContent, mislabeled.fullContent, "Topic repair preserves publisher text")
+            assertTrue(try await repaired.isRead(articleId: mislabeled.id), "Topic repair preserves read history")
+            assertTrue(try await repaired.isSaved(articleId: mislabeled.id), "Topic repair preserves saved stories")
+            assertEqual(
+                try await repaired.searchArticles(query: "Guardian").count, 1,
+                "Migration repairs the publisher search index")
+            await repaired.close()
+
         } catch {
             print("❌ FTS5 test failed: \(error.localizedDescription)")
             exit(1)
@@ -6163,7 +6297,7 @@ struct NewsTests {
 
         let db = DatabaseEngine(path: copy)
         try await db.open()
-        assertEqual(value(copy, "PRAGMA user_version;"), "21", "Copied v11 library upgrades to the current schema")
+        assertEqual(value(copy, "PRAGMA user_version;"), "22", "Copied v11 library upgrades to the current schema")
         assertEqual(value(path, "PRAGMA user_version;"), "11", "Original v11 fixture stays untouched")
         assertEqual(try await db.fetchArticles(limit: nil).count, 5, "Event migration keeps every article")
         assertTrue(try await db.isRead(articleId: "event-a"), "Event migration keeps read state")
@@ -8291,7 +8425,7 @@ struct NewsTests {
             value("SELECT count(*) FROM sqlite_master WHERE name='idx_story_images_url';"), "0",
             "Cancellation leaves no partial index")
         try await db.open()
-        assertEqual(value("PRAGMA user_version;"), "21", "Existing v18 libraries receive the image index migration")
+        assertEqual(value("PRAGMA user_version;"), "22", "Existing v18 libraries receive the image index migration")
         assertEqual(
             sqlite3_exec(handle, "ANALYZE story_images;", nil, nil, nil), SQLITE_OK,
             "Use current fixture cardinality for the query planner")
@@ -9024,7 +9158,7 @@ struct NewsTests {
             ), "0", "Cancelled v14 migration rolls back its tables")
         let migrated = DatabaseEngine(path: copy)
         try await migrated.open()
-        assertEqual(value(copy, "PRAGMA user_version;"), "21", "Copied v13 library upgrades to the current schema")
+        assertEqual(value(copy, "PRAGMA user_version;"), "22", "Copied v13 library upgrades to the current schema")
         assertEqual(value(path, "PRAGMA user_version;"), "13", "Original v13 fixture stays untouched")
         assertEqual(
             try await migrated.fetchEvent(id: event.id)?.memberArticleIDs.count, 5, "Migration keeps events and members"
@@ -9369,8 +9503,8 @@ struct NewsTests {
             source: undated.source)
         candidates.append(undated)
         let session = FiniteBriefing(candidates: candidates + [candidates[0]], readIDs: ["read"], now: now)
-        assertEqual(session.articles.count, 10, "The briefing is bounded")
-        assertEqual(Set(session.articles.map(\.id)).count, 10, "Duplicate candidates cannot consume slots")
+        assertEqual(session.articles.count, 4, "The briefing caps a dominant publisher at two stories")
+        assertEqual(Set(session.articles.map(\.id)).count, 4, "Duplicate candidates cannot consume slots")
         assertEqual(
             Array(session.articles.prefix(3).map(\.id)), ["dominant-0", "world", "science"],
             "Recency ties break a source/category mix deterministically")
@@ -9401,8 +9535,22 @@ struct NewsTests {
         ]
         assertEqual(
             FiniteBriefing(candidates: ranked, readIDs: [], now: now, priorities: priority).articles.map(\.id),
-            ["covered", "stored", "neutral", "minor", "major"],
-            "Coverage wins ties before stored importance, and unrated importance is neutral")
+            ["stored", "major"],
+            "Major stored importance precedes coverage; one publisher cannot occupy the briefing")
+
+        let personalized = [
+            article("general", age: 0, source: "General", category: "World"),
+            article("interest", age: 20, source: "Science Desk", category: "Science"),
+            article("duplicate-event", age: 10, source: "Other", category: "Science"),
+        ]
+        let personalizedBriefing = FiniteBriefing(
+            candidates: personalized, readIDs: [], now: now,
+            priorities: ["interest": .init(eventID: "one-event"), "duplicate-event": .init(eventID: "one-event")],
+            interests: ["science": 3])
+        assertEqual(
+            personalizedBriefing.articles.first?.id, "duplicate-event",
+            "Interest breaks neutral-importance and coverage ties before recency")
+        assertEqual(personalizedBriefing.articles.count, 2, "One event cannot consume two briefing slots")
 
         let db = DatabaseEngine(path: ":memory:")
         try await db.open()
@@ -9622,7 +9770,7 @@ struct NewsTests {
             guard sqlite3_step(statement) == SQLITE_ROW else { return nil }
             return sqlite3_column_text(statement, 0).map { String(cString: $0) }
         }
-        assertEqual(value(copy, "PRAGMA user_version;"), "21", "Provenance schema upgrades to the current schema")
+        assertEqual(value(copy, "PRAGMA user_version;"), "22", "Provenance schema upgrades to the current schema")
         assertEqual(value(original, "PRAGMA user_version;"), "15", "Original v15 fixture remains untouched")
         assertEqual(value(copy, "PRAGMA quick_check;"), "ok", "Upgraded provenance library passes quick_check")
         assertEqual(value(copy, "PRAGMA foreign_key_check;"), nil, "Provenance has no dangling article references")
@@ -12899,7 +13047,9 @@ struct NewsTests {
             }
             assertTrue(content.contains(first) && content.contains(second), "Shape \(index) retains publisher text")
             assertFalse(content.contains("HIDDEN PROSE"), "Hidden text never reaches analysis")
-            assertEqual(document.version, 4, "Structured publisher data uses v4")
+            assertEqual(
+                document.version, ReaderDocument.currentVersion,
+                "Structured publisher data uses the current extraction version")
             assertEqual(
                 try JSONDecoder().decode(ReaderDocument.self, from: JSONEncoder().encode(document)), document,
                 "Shape \(index) round trips without loss")
@@ -13367,6 +13517,25 @@ struct NewsTests {
 
     static func testCanonicalClassificationDisambiguation() async {
         print("  - Testing Canonical Classification Disambiguation for Overlapping Topics...")
+        for headline in [
+            "Dubai’s GDP reaches $129bn in H1", "Man who died in aircraft crash named",
+            "India trade deal talks continue",
+        ] {
+            assertFalse(
+                ArticleSection.matches(
+                    "Tech", title: headline, description: "Officials said the discussions continue.", category: nil),
+                "AI must not match inside Dubai, said or aircraft")
+            let result = await NaturalLanguageTopicClassifier().classifyTopic(
+                title: headline, description: "Officials said the discussions continue.", text: nil, rssCategory: nil)
+            assertTrue(result?.category != "Technology", "Whole-word classification rejects incidental AI substrings")
+        }
+        assertFalse(
+            ArticleSection.matches(
+                "Tech", title: "Hospital care report", description: "Get our free app", category: "Health"),
+            "A recognized category overrides incidental promotional words")
+        assertTrue(
+            ArticleSection.matches("Tech", title: "AI hardware launches", description: "", category: nil),
+            "Standalone AI remains a technology cue")
 
         // Overlap 1: Health + Technology (AI scanner for hospital patients)
         assertEqual(

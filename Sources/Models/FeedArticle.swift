@@ -127,7 +127,7 @@ public struct ReaderBlock: Codable, Hashable, Sendable {
 }
 
 public struct ReaderDocument: Codable, Hashable, Sendable {
-    public static let currentVersion = 4
+    public static let currentVersion = 5
     public var version = currentVersion
     public let blocks: [ReaderBlock]
     public var images: [ReaderImageCandidate]? = nil
@@ -196,8 +196,8 @@ struct ArticleFilterQuery: Equatable, Sendable {
         for token in trimmed.components(separatedBy: .whitespacesAndNewlines) {
             let lowerToken = token.lowercased()
             if lowerToken.hasPrefix("source:") {
-                query.sourceFilter = String(token.dropFirst(7)).trimmingCharacters(in: .whitespacesAndNewlines)
-                    .lowercased()
+                let publisher = String(token.dropFirst(7)).trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                query.sourceFilter = publisher == "ft" ? "financial times" : publisher
             } else if lowerToken.hasPrefix("category:") {
                 query.categoryFilter = String(token.dropFirst(9)).trimmingCharacters(in: .whitespacesAndNewlines)
                     .lowercased()
@@ -207,6 +207,8 @@ struct ArticleFilterQuery: Equatable, Sendable {
                 query.isReadFilter = false
             } else if lowerToken == "is:saved" {
                 query.isSavedFilter = true
+            } else if lowerToken == "ft" {
+                query.terms += ["financial", "times"]
             } else if !token.isEmpty {
                 query.terms.append(lowerToken)
             }
@@ -218,7 +220,11 @@ struct ArticleFilterQuery: Equatable, Sendable {
     func matches(article: FeedArticle, isRead: Bool, isSaved: Bool) -> Bool {
         if isEmpty { return true }
 
-        if let s = sourceFilter, !s.isEmpty, !article.source.lowercased().contains(s) { return false }
+        if let s = sourceFilter, !s.isEmpty,
+            !article.source.lowercased().contains(s) && !article.publisherName.lowercased().contains(s)
+        {
+            return false
+        }
 
         if let c = categoryFilter, !c.isEmpty {
             guard let cat = article.category?.lowercased(), cat.contains(c) else { return false }
@@ -229,7 +235,9 @@ struct ArticleFilterQuery: Equatable, Sendable {
         if let sv = isSavedFilter, isSaved != sv { return false }
 
         if !terms.isEmpty {
-            let combined = "\(article.title) \(article.description) \(article.category ?? "")".lowercased()
+            let combined =
+                "\(article.title) \(article.description) \(article.category ?? "") \(article.source) \(article.publisherName)"
+                .lowercased()
             for term in terms where !combined.contains(term) {
                 return false
             }
@@ -250,6 +258,19 @@ struct ArticleQueryCursor: Equatable, Sendable {
 }
 
 enum ArticleSection {
+    static func matches(_ section: String, title: String, description: String, category: String?) -> Bool {
+        if keywords[section] != nil, section != "U.S. Politics",
+            let target = NewsCategory.match(from: section), let classified = category.flatMap(NewsCategory.match(from:))
+        {
+            if section == "Lifestyle" { return [.lifestyle, .fashion, .travel].contains(classified) }
+            return classified == target
+        }
+        let terms = ((keywords[section] ?? [section]) + [NewsCategory.match(from: section)?.rawValue ?? section]).map(
+            MuteRules.phrase
+        ).joined(separator: "\n")
+        return MuteRules.topicList(terms, mutes: title + "\n" + description + "\n" + (category ?? ""))
+    }
+
     static let keywords: [String: [String]] = [
         "Entertainment": [
             "entertainment", "movie", "film", "celebrity", "music", "tv show", "television", "hollywood", "streaming",

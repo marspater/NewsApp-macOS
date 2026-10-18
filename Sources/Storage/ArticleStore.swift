@@ -82,13 +82,16 @@ final class ArticleStore: ObservableObject {
     // MARK: - Article Ingestion & Upsert
 
     @discardableResult
-    func batchUpsert(articles newArticles: [FeedArticle], feedUrl: String? = nil, validators: FeedValidators? = nil)
+    func batchUpsert(
+        articles newArticles: [FeedArticle], feedUrl: String? = nil, validators: FeedValidators? = nil,
+        publish: Bool = true
+    )
         async -> Set<String>
     {
         guard !newArticles.isEmpty else { return [] }
         do {
             let insertedIDs = try await database.upsertArticles(newArticles, feedUrl: feedUrl, validators: validators)
-            await refreshState()
+            if publish { await refreshState() }
             return insertedIDs
         } catch is CancellationError {
             // Superseded refreshes must not publish stale snapshots.

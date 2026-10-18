@@ -158,12 +158,12 @@ actor WorldTensionService {
             Choose an integer 0-100 after reasoning: 0-19 Zen (limited global strain), 20-39 Mild (manageable strain),
             40-59 Warm (regional escalation/broader strain), 60-79 Hot (acute interstate crisis with global spillover),
             80-100 Boiling (acute global systemic danger). Many violent headlines alone do not justify 80+.
-            Return exactly six labelled plain-text lines, no Markdown, IDs or JSON. Each reason under 240 characters:
+            Return exactly six labelled plain-text lines, no Markdown, IDs or JSON. Each reason under 240 characters. Do not merge separate reports into a single event. Read every supplied headline before making any absence-of-evidence claim:
             Scope of impact: one sentence
             Proximity to worst case: one sentence
             Novelty: one sentence
             Reversibility: one sentence
-            Summary: two sentences explaining the main drivers and limits, under 400 characters
+            Summary: two sentences about significance and uncertainty only, under 400 characters. Do not restate events, people, locations or figures; the publisher headlines are shown separately.
             Score: integer
             Summary must match the reasoning. Do not state bands, scores, averages, daily changes or forecasts in prose.
             \(GenerationPromptDefense.sourceDataStartTag)
@@ -252,20 +252,30 @@ actor WorldTensionService {
     private nonisolated static func generate(prompt: String, headlines: [WorldTensionHeadline], model: NewsTextModel)
         async throws -> WorldTensionAssessment
     {
-        let draft: String
-        do { draft = try await model.respond(prompt, 650) } catch is CancellationError {
-            throw CancellationError()
-        } catch is NewsTextModel.TemporarilyUnavailable { throw WorldTensionError.unavailable } catch let error
-            as URLError where error.code == .resourceUnavailable
-        { throw WorldTensionError.unavailable } catch { throw WorldTensionError.generationFailed }
-        guard let result = WorldTensionAssessment.parse(draft, headlines: headlines) else {
-            throw WorldTensionError.unsupported
+        for attempt in 0..<2 {
+            try Task.checkCancellation()
+            let instruction =
+                attempt == 0
+                ? prompt
+                : prompt + """
+
+                    The previous attempt did not pass format or factual-support validation. Write shorter reasons.
+                    Mention only actions explicitly present in the supplied headlines. For missing evidence, say it cannot
+                    be established. Do not invent escalation, sanctions, casualties, dates or comparisons.
+                    Keep the required six-line format.
+                    """
+            let draft: String
+            do { draft = try await model.respond(instruction, 650) } catch is CancellationError {
+                throw CancellationError()
+            } catch is NewsTextModel.TemporarilyUnavailable { throw WorldTensionError.unavailable } catch let error
+                as URLError where error.code == .resourceUnavailable
+            { throw WorldTensionError.unavailable } catch { throw WorldTensionError.generationFailed }
+            guard let result = WorldTensionAssessment.parse(draft, headlines: headlines) else { continue }
+            let check = try Self.supportPrompt(draft, headlines: headlines)
+            let support = try await model.respond(check, 4).trimmingCharacters(in: .whitespacesAndNewlines)
+            if support.uppercased() == "YES" { return result }
         }
-        // A fresh support judgment checks meanings and attribution, not merely number membership.
-        let check = try Self.supportPrompt(draft, headlines: headlines)
-        let support = try await model.respond(check, 4).trimmingCharacters(in: .whitespacesAndNewlines)
-        guard support.uppercased() == "YES" else { throw WorldTensionError.unsupported }
-        return result
+        throw WorldTensionError.unsupported
     }
 
 }

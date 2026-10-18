@@ -551,7 +551,7 @@ struct SettingsView: View {
                         set: { feedManager.setTensionCollectionOptIn($0) }
                     ))
                 Text(
-                    "Fetches stories from the 12 international panel feeds to calculate the AI World Tension assessment. These stories are stored locally for tension analysis and will not generate unread notifications unless you subscribe to the feeds directly."
+                    "Fetches stories from the 12 international panel feeds to calculate the AI World Tension assessment. Analysis-only stories stay out of your feed, Briefing and unread counts unless you subscribe. Stories you read or save remain accessible."
                 )
                 .font(AppTypography.caption)
                 .foregroundColor(AppColor.secondaryText)
@@ -854,66 +854,44 @@ struct SettingsView: View {
     // MARK: - 8. Updates Tab
 
     private var updatesTab: some View {
-        VStack(spacing: AppSpacing.md) {
-            Image(systemName: "arrow.triangle.2.circlepath.circle.fill")
-                .font(AppTypography.masthead)
-                .imageScale(.large)
-                .foregroundColor(AppColor.accent)
-                .padding(.top, AppSpacing.lg)
-
-            VStack(spacing: AppSpacing.xxs) {
-                Text("News for macOS")
-                    .font(AppTypography.sectionTitle.bold())
-                    .foregroundColor(AppColor.primaryText)
-                Text("Version \(updateChecker.currentAppVersion)")
-                    .font(AppTypography.callout)
-                    .foregroundColor(AppColor.secondaryText)
-            }
-
-            if let status = updateChecker.statusMessage {
-                Text(status)
-                    .font(AppTypography.callout)
-                    .foregroundColor(updateChecker.updateAvailable ? AppColor.accent : AppColor.secondaryText)
-                    .padding(.horizontal, AppSpacing.md)
-                    .padding(.vertical, AppSpacing.eyebrowGap)
-                    .background(RoundedRectangle(cornerRadius: AppRadius.control).fill(AppColor.surface))
-            }
-
-            HStack(spacing: AppSpacing.sm) {
-                if updateChecker.isChecking {
-                    ProgressView()
-                        .controlSize(.small)
-                    Text("Checking for updates…")
-                        .font(AppTypography.caption)
-                        .foregroundColor(AppColor.secondaryText)
-                } else if updateChecker.updateAvailable {
-                    Button("View Release on GitHub") {
-                        updateChecker.openReleasePage()
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .tint(AppColor.accent)
-                } else {
-                    Button("Check for Updates") {
-                        Task {
-                            await updateChecker.checkForUpdates(userInitiated: true)
-                        }
-                    }
-                    .buttonStyle(.bordered)
+        Form {
+            Section("News for macOS") {
+                LabeledContent("Installed Version", value: updateChecker.currentAppVersion)
+                LabeledContent("Release Channel", value: "GitHub Releases")
+                if let checked = updateChecker.lastCheckDate {
+                    LabeledContent("Last Checked", value: checked.formatted(date: .abbreviated, time: .shortened))
                 }
             }
-            .padding(.top, AppSpacing.xs)
-            .padding(.bottom, AppSpacing.md)
-
-            VStack(spacing: AppSpacing.xxs) {
-                Text("Direct release channel via GitHub Releases.")
-                    .font(AppTypography.caption)
-                    .foregroundColor(AppColor.secondaryText)
-                Text("Native, privacy-first RSS reader with zero telemetry.")
-                    .font(AppTypography.caption)
-                    .foregroundColor(AppColor.tertiaryText)
+            Section {
+                if let status = updateChecker.statusMessage {
+                    Text(status)
+                        .font(AppTypography.callout)
+                        .foregroundStyle(AppColor.secondaryText)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityAddTraits(.updatesFrequently)
+                }
+                HStack {
+                    if updateChecker.isChecking {
+                        ProgressView().controlSize(.small)
+                        Text("Checking for updates…")
+                    } else {
+                        Button("Check for Updates") {
+                            Task { await updateChecker.checkForUpdates(userInitiated: true) }
+                        }
+                        if updateChecker.updateAvailable {
+                            Button("View Release on GitHub") { updateChecker.openReleasePage() }
+                        }
+                    }
+                }
+            } header: {
+                Text("Software Updates")
+            } footer: {
+                Text(
+                    "Checks published releases. Opening a release shows its download page; News never replaces itself automatically."
+                )
             }
-            .padding(.bottom, AppSpacing.md)
         }
+        .formStyle(.grouped)
         .frame(width: Self.paneWidth)
     }
 

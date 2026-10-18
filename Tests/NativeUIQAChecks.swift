@@ -69,6 +69,16 @@ struct NativeUIQAChecks {
         testCitationRoutingAndBanner()
         testSettingsPanePersistenceAndSizing()
         testSecondaryWindowAndSheetChrome()
+        await testReadingColumnBounds()
+        let forwardStart = ArticleListView.prefetchStart(visibleIndex: 100, currentStart: 0)
+        assertTrue(
+            forwardStart > 0 && forwardStart <= 100 && forwardStart + 30 > 100,
+            "Prefetch drops distant earlier cards and covers the visible card")
+        let backwardStart = ArticleListView.prefetchStart(visibleIndex: 10, currentStart: forwardStart)
+        assertTrue(backwardStart <= 10 && backwardStart + 30 > 10, "Scrolling backward warms nearby images again")
+        assertEqual(
+            ArticleListView.prefetchStart(visibleIndex: 12, currentStart: backwardStart), backwardStart,
+            "Cards already inside the window do not restart prefetch")
         await testRemoteImageReuse()
         await testOverviewLeadImageUsesProtectedLoader()
 
@@ -120,6 +130,39 @@ struct NativeUIQAChecks {
             "A newer chip replaces the one the parser would ignore")
     }
 
+    static func testReadingColumnBounds() async {
+        print("  - Testing rendered reading measure at narrow and wide window sizes...")
+        var measured = CGSize.zero
+        let text = String(repeating: "Publisher prose must wrap inside the reading column. ", count: 80)
+        let root = ScrollView {
+            Text(text).fixedSize(horizontal: false, vertical: true)
+                .onGeometryChange(for: CGSize.self) {
+                    $0.size
+                } action: {
+                    measured = $0
+                }
+                .modifier(ReadingColumn(textScale: 1))
+        }
+        let view = NSHostingView(rootView: root)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 900, height: 600),
+            styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = view
+        window.orderFront(nil)
+        defer { window.close() }
+        for width in [900.0, 1600.0] {
+            window.setContentSize(NSSize(width: width, height: 600))
+            view.layoutSubtreeIfNeeded()
+            let deadline = Date().addingTimeInterval(2)
+            while measured.width == 0, Date() < deadline { await Task.yield() }
+            assertTrue(
+                measured.width > 0 && measured.width <= AppLayout.readingMeasure,
+                "Rendered prose stays within the reading measure at \(width) pt")
+            assertTrue(measured.height > 100, "Publisher prose wraps instead of overflowing horizontally")
+        }
+    }
+
     static func testRemoteImageReuse() async {
         print("  - Testing image cache hits and URL changes in a reused SwiftUI view...")
         let first = URL(string: "https://images.example/\(UUID().uuidString)/first.jpg")!
@@ -152,6 +195,10 @@ struct NativeUIQAChecks {
             await waitUntil { rendered.filter { $0.url == first && $0.success }.count >= 2 },
             "A newly mounted card renders its cached image")
         assertEqual(probe.requests.filter { $0 == first }.count, 1, "A cached mount performs no second load or decode")
+        let warmup = Task {
+            await DecodedImageCache.prefetch([first, second], using: { url in await probe.load(url) })
+        }
+        assertTrue(await waitUntil { probe.pending != nil }, "The next image starts loading before its card mounts")
         rendered.removeAll()
         window.contentView = host
         host.rootView = AnyView(fixture(second))
@@ -165,7 +212,8 @@ struct NativeUIQAChecks {
         assertTrue(
             await waitUntil { rendered.contains { $0.url == second && $0.success } },
             "New image appears after its own load completes")
-        assertEqual(probe.requests.count, 2, "Each distinct source loads once")
+        await warmup.value
+        assertEqual(probe.requests.count, 2, "Prefetch and a mounted card share one load and decode")
     }
 
     static func testOverviewLeadImageUsesProtectedLoader() async {

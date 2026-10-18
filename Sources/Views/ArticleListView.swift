@@ -60,6 +60,24 @@ struct ArticleListView: View {
     @State private var focusedArticleID: String? = nil
 
     @State private var briefing: FiniteBriefing?
+    @State private var imagePrefetchStart = 0
+    @Environment(\.readerImageLoader) private var imageLoader
+
+    private var imagePrefetchURLs: [URL] {
+        buffer.displayed.articles.dropFirst(imagePrefetchStart).prefix(30).compactMap {
+            $0.imageUrl.flatMap(URL.init(string:))
+        }
+    }
+
+    static func prefetchStart(visibleIndex: Int, currentStart: Int) -> Int {
+        if visibleIndex < currentStart || visibleIndex >= currentStart + 18 { return max(0, visibleIndex - 6) }
+        return currentStart
+    }
+
+    private func prefetchAhead(of id: String) {
+        guard let index = buffer.displayed.articles.firstIndex(where: { $0.id == id }) else { return }
+        imagePrefetchStart = Self.prefetchStart(visibleIndex: index, currentStart: imagePrefetchStart)
+    }
     @State private var buffer = FeedUpdateBuffer()
     @State private var pageRequest = 0
     @State private var loadedPageRequest = 0
@@ -208,6 +226,7 @@ struct ArticleListView: View {
         VStack(alignment: .leading, spacing: 0) {
             ScrollViewReader { proxy in
                 scrollView(proxy: proxy)
+                    .toolbar { listToolbar(proxy: proxy) }
             }
         }
         .focusedSceneValue(\.selectedStory, selectedStory)
@@ -215,7 +234,10 @@ struct ArticleListView: View {
         .navigationTitle(locationTitle)
         // The masthead shows the location, so the toolbar does not repeat it (DESIGN.md 5).
         .toolbar(removing: .title)
-        .toolbar { listToolbar }
+        .task(id: imagePrefetchURLs) {
+            guard !ProcessInfo.processInfo.isLowPowerModeEnabled else { return }
+            await DecodedImageCache.prefetch(imagePrefetchURLs, using: imageLoader)
+        }
         .task(id: taskQueryReloadKey) {
             await performQueryReload()
         }
@@ -230,8 +252,6 @@ struct ArticleListView: View {
             }
             // An empty list keeps its masthead at the top and centers its state in the visible area.
             .overlay { emptyListOverlay }
-            // Queued updates float over the list (DESIGN.md 8.4); the list keeps its place underneath.
-            .overlay(alignment: .top) { updatesOverlay(proxy: proxy) }
             .onScrollGeometryChange(for: Bool.self) { geometry in
                 geometry.contentOffset.y + geometry.contentInsets.top > 24
             } action: { _, scrolled in
@@ -286,13 +306,6 @@ struct ArticleListView: View {
         }
     }
 
-    @ViewBuilder
-    private func updatesOverlay(proxy: ScrollViewProxy) -> some View {
-        if buffer.pending != nil {
-            updatesButton(proxy: proxy)
-        }
-    }
-
     private func handleToggleRead() {
         if articlePath.isEmpty, let id = focusedArticleID {
             readManager.toggleRead(id)
@@ -341,8 +354,11 @@ struct ArticleListView: View {
                     let priorities = try await articleStore.database.briefingPriorities(
                         articleIDs: candidates.map(\.id))
                     try Task.checkCancellation()
+                    let interests = try await articleStore.database.briefingInterests(now: now)
+                    try Task.checkCancellation()
                     briefing = FiniteBriefing(
-                        candidates: candidates, readIDs: readManager.readArticles, now: now, priorities: priorities)
+                        candidates: candidates, readIDs: readManager.readArticles, now: now, priorities: priorities,
+                        interests: interests)
                 }
                 buffer.replace(with: FeedSnapshot(articles: briefing?.articles ?? []))
                 hasMoreResults = false
@@ -360,6 +376,7 @@ struct ArticleListView: View {
         loadedPageRequest = pageRequest
         if isNewQuery {
             buffer = FeedUpdateBuffer()
+            imagePrefetchStart = 0
             cursor = nil
             hasMoreResults = false
             expandedEvents = []
@@ -397,9 +414,7 @@ struct ArticleListView: View {
                 let snapshot = FeedSnapshot(articles: page, events: events)
                 let holding = isHoldingList
                 appliesNextUpdate = false
-                let result = withAnimation(reduceMotion ? nil : AppMotion.state) {
-                    buffer.receive(snapshot, holding: holding, mode: groupingMode, hasMore: morePages)
-                }
+                let result = buffer.receive(snapshot, holding: holding, mode: groupingMode, hasMore: morePages)
                 switch result {
                 case .replaced:
                     cursor = page.last.map(ArticleQueryCursor.init)
@@ -486,11 +501,8 @@ struct ArticleListView: View {
                 count > 0 ? "\(count) new \(count == 1 ? "story" : "stories")" : "Show Updates", systemImage: "arrow.up"
             )
             .font(AppTypography.label)
+            .labelStyle(.titleAndIcon)
         }
-        .nativeGlassButtonStyle()
-        .buttonBorderShape(.capsule)
-        .opacity(appearsActive ? 1 : 0.5)
-        .padding(.top, AppSpacing.xs)
         .help("Show the latest stories (U). The list keeps its place until you do.")
         .accessibilityHint("Moves to the top of the updated list")
     }
@@ -586,7 +598,10 @@ struct ArticleListView: View {
     // MARK: - Toolbar
 
     @ToolbarContentBuilder
-    private var listToolbar: some ToolbarContent {
+    private func listToolbar(proxy: ScrollViewProxy) -> some ToolbarContent {
+        if articlePath.isEmpty, buffer.pending != nil {
+            ToolbarItem(placement: .navigation) { updatesButton(proxy: proxy) }
+        }
         // With the duplicate title removed nothing fills the toolbar, so macOS 26 and later would lay the list
         // controls out from the leading edge. A flexible spacer keeps them, and search, at the trailing edge.
         if #available(macOS 26.0, *) {
@@ -660,7 +675,7 @@ struct ArticleListView: View {
 
     /// Story count, how many cards group an event's coverage, and when feeds last refreshed.
     private var listSubtitle: String {
-        if isBriefing { return "Up to 10 unread stories · Last 24 hours" }
+        if isBriefing { return "Main stories · Your interests and importance · Last 24 hours" }
         var parts = ["\(entries.count) \(entries.count == 1 ? "story" : "stories")"]
         if !isSearching && (selectedTopic ?? "Today") == "Today" {
             parts.insert(Date().formatted(.dateTime.weekday(.wide).month(.wide).day()), at: 0)
@@ -769,7 +784,10 @@ struct ArticleListView: View {
                 openArticle(article)
             }
             .id(entry.id)
-            .onAppear(perform: NewsSignposts.firstCardAppeared)
+            .onAppear {
+                NewsSignposts.firstCardAppeared()
+                prefetchAhead(of: article.id)
+            }
         case .event(let summary, let representative, let visibleMembers):
             EventCardView(
                 representative: representative,
@@ -786,7 +804,10 @@ struct ArticleListView: View {
                 separate: { member in separate(member, from: summary.eventID) }
             )
             .id(entry.id)
-            .onAppear(perform: NewsSignposts.firstCardAppeared)
+            .onAppear {
+                NewsSignposts.firstCardAppeared()
+                prefetchAhead(of: representative.id)
+            }
         }
     }
 

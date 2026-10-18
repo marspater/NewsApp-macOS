@@ -378,7 +378,7 @@ struct ArticleDetailView: View {
                     heroImageHeader
 
                     if appSettings.aiEnabled || currentArticle.aiSummary != nil {
-                        DisclosureGroup("On-device summary", isExpanded: summaryExpandedBinding) {
+                        DisclosureGroup("Summary & Key Points", isExpanded: summaryExpandedBinding) {
                             aiAnalysisSection.padding(.top, AppSpacing.sm)
                         }
                         .font(AppTypography.body)
@@ -1053,7 +1053,7 @@ struct ArticleDetailView: View {
             }
             .accessibilityElement(children: .combine)
             .accessibilityLabel("Analyzing story with on-device AI")
-            .padding(AppSpacing.sm)
+            .padding(AppSpacing.md)
             .background(AppColor.surface, in: RoundedRectangle(cornerRadius: AppRadius.card))
         } else if let analysis = analysis {
             VStack(alignment: .leading, spacing: AppSpacing.sm) {
@@ -1064,28 +1064,27 @@ struct ArticleDetailView: View {
                 )
 
                 Text(analysis.summary)
-                    .font(AppTypography.body)
+                    .font(AppTypography.overviewFont(.body, scale: readerTextScale))
                     .foregroundColor(readableText(0.92))
-                    .lineSpacing(AppTypography.bodyLineSpacing(for: themeManager.articleTheme))
+                    .lineSpacing(AppTypography.bodyLineSpacing(for: themeManager.articleTheme) * readerTextScale)
                     .textSelection(.enabled)
 
                 // Key Takeaways
                 if !analysis.keyPoints.isEmpty {
-                    VStack(alignment: .leading, spacing: AppSpacing.xs) {
+                    Divider().padding(.vertical, AppSpacing.xs)
+                    VStack(alignment: .leading, spacing: AppSpacing.sm) {
                         Text("Key Takeaways")
                             .font(AppTypography.label)
                             .foregroundColor(AppColor.secondaryText)
                             .padding(.top, AppSpacing.textStack)
 
                         ForEach(analysis.keyPoints, id: \.self) { point in
-                            HStack(alignment: .top, spacing: AppSpacing.xs) {
-                                Circle()
-                                    .fill(AppColor.intelligence.opacity(0.8))
-                                    .frame(width: 5, height: 5)
-                                    .padding(.top, AppSpacing.eyebrowGap)
+                            HStack(alignment: .firstTextBaseline, spacing: AppSpacing.sm) {
+                                Text("•")
+                                    .foregroundStyle(AppColor.secondaryText)
                                     .accessibilityHidden(true)
                                 Text(point)
-                                    .font(AppTypography.body)
+                                    .font(AppTypography.overviewFont(.body, scale: readerTextScale))
                                     .foregroundColor(readableText(0.88))
                                     .textSelection(.enabled)
                             }
@@ -1107,7 +1106,7 @@ struct ArticleDetailView: View {
                         .foregroundStyle(AppColor.secondaryText)
                 }
             }
-            .padding(AppSpacing.sm)
+            .padding(AppSpacing.md)
             .background(AppColor.surface, in: RoundedRectangle(cornerRadius: AppRadius.card))
         } else if let error = analysisError {
             NoticeView(tint: AppColor.warning) {
@@ -1136,12 +1135,12 @@ struct ArticleDetailView: View {
                 IntelligenceLabel("AI-generated summary")
 
                 Text(ai)
-                    .font(AppTypography.body)
+                    .font(AppTypography.overviewFont(.body, scale: readerTextScale))
                     .foregroundColor(readableText(0.92))
-                    .lineSpacing(AppTypography.bodyLineSpacing(for: themeManager.articleTheme))
+                    .lineSpacing(AppTypography.bodyLineSpacing(for: themeManager.articleTheme) * readerTextScale)
                     .textSelection(.enabled)
             }
-            .padding(AppSpacing.sm)
+            .padding(AppSpacing.md)
             .background(AppColor.surface, in: RoundedRectangle(cornerRadius: AppRadius.card))
         }
     }
@@ -1163,7 +1162,7 @@ struct ArticleDetailView: View {
         // A stored document stands in for extraction only with publisher text; feed media alone does not.
         if !forceRefresh,
             currentArticle.readerDocument.map({
-                (1...ReaderDocument.currentVersion).contains($0.version) && $0.hasPublisherText
+                $0.version == ReaderDocument.currentVersion && $0.hasPublisherText
             }) == true,
             let existing = currentArticle.fullContent, !ArticleContentRedactor.redactAndSplit(existing).isEmpty
         {
@@ -1467,7 +1466,10 @@ struct ReaderFigureView: View {
                     }
                 }
                 .aspectRatio(aspectRatio, contentMode: .fit)
-                .frame(maxWidth: .infinity)
+                .frame(
+                    maxWidth: DecodedImageCache.images.object(forKey: url as NSURL).map { CGFloat($0.width) }
+                        ?? .infinity
+                )
                 .clipShape(RoundedRectangle(cornerRadius: AppRadius.card))
             }
             if !block.text.isEmpty {

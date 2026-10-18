@@ -13,6 +13,48 @@ enum FeedKitSwiftSoupTests {
             guard condition() else { fatalError("Parsing regression: \(message)") }
         }
 
+        let categorized = """
+            <rss><channel><title>Publisher</title><item><title>Category boundaries</title><link>https://example.com/categories</link>
+            <category>World</category><category>Artificial intelligence</category><category>Business</category>
+            </item></channel></rss>
+            """
+        check(
+            FeedXMLParser(data: Data(categorized.utf8), feedURL: base).parse().first?.category == "World",
+            "Successive RSS categories must not concatenate into a fabricated label")
+        let titledTags = EntityResult.readerTags(from: [
+            .init(name: "Donald Trump", type: .person), .init(name: "Mr. Trump", type: .person),
+            .init(name: "Trump", type: .person), .init(name: "Russia", type: .place),
+        ])
+        check(
+            titledTags.map(\.name) == ["Donald Trump", "Russia"],
+            "Honorific surname aliases collapse without deleting places")
+        let articleAndFurniture = """
+            <main><article class="article-body-commercial-selector"><p>\(first)</p><p>\(second)</p>
+            <div class="also-read"><p>Unrelated recommendation with enough prose to look like a paragraph.</p>
+            <img src="https://example.com/thumbnail.jpg" width="90" height="90"></div>
+            <h2>Most viewed</h2><span>Explore more on these topics</span></article>
+            <section><p>Other news furniture outside the publisher body should never enter the story.</p></section></main>
+            """
+        let clean = pipeline.extractFromHTML(articleAndFurniture, baseUrl: base)
+        check(
+            clean.content == first + "\n\n" + second,
+            "Explicit publisher bodies exclude Guardian furniture and Hindu related cards")
+        let alJazeera = """
+            <main><div class="wysiwyg wysiwyg--all-content"><p>\(first)</p><div><p>\(second)</p></div>
+            <p>Final section: \(first)</p></div><aside><p>Other coverage from the site.</p></aside></main>
+            """
+        check(
+            pipeline.extractFromHTML(alJazeera, baseUrl: base).content?.contains("Final section:") == true,
+            "Al Jazeera's explicit body retains later nested paragraphs")
+        let paywall = """
+            <article><p>Subscribe to unlock this article</p><h2>Save 50% on Standard Digital</h2>
+            <p>Save now on essential digital access to trusted journalism on any device for your first year.</p>
+            <p>Savings based on monthly annualised price and the subscription offer ends later this month.</p></article>
+            """
+        check(
+            !pipeline.extractFromHTML(paywall, baseUrl: base).isSuccess,
+            "A subscription offer is not accepted as article prose")
+
         let metadata = """
             <html><head><script>let fake = '<meta property="og:image" content="https://example.com/fake.jpg">';</script>
             <meta property=og:image content="https://example.com/photo.jpg?a=1&amp;b=2">
