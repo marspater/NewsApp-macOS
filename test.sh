@@ -29,7 +29,11 @@ cat > "$TEST_STAGE/Runner.swift" <<'SWIFT'
 struct NewsRegressionRunner {
     static func main() async {
         FeedKitSwiftSoupTests.run()
-        if !CommandLine.arguments.contains("--parsing-regressions") { await NewsTests.main() }
+        if !CommandLine.arguments.contains("--parsing-regressions") {
+            do { try await FeedKitSwiftSoupTests.runEmbeddingIntegration() }
+            catch { fatalError("Parser/embedding integration failed: \(error)") }
+            await NewsTests.main()
+        }
     }
 }
 SWIFT
