@@ -150,15 +150,24 @@
     "initialSandboxCompile": "failed before scoring; Swift macro plugin denied; completed outside sandbox",
     "arm64Build": "passed; arm64 only, ad-hoc signature verified, App Sandbox retained; no launch or install",
     "strengthenedUpgradeRegression": "passed with full suite via normal pre-commit hook",
-    "hostedCI": "pending for follow-up PR; earlier #441 checks passed on 2c5414b only"
+    "hostedCI": "PR #442 arm64 tests/build and other completed checks passed; Swift CodeQL pending at release disposition; final evidence in #439"
   },
   "limitations": [
     "97% point-precision target unmet",
     "Original #409 private export unavailable; full diagnostic replay incomplete",
     "Copied database has zero event exclusion rows; exclusion and rollback coverage comes from deterministic suite",
-    "Native appearance and keyboard checks paused; no app launch, installation or notifications tested",
-    "PR #441 merged before v6 follow-up; follow-up needs its own PR and hosted CI"
+    "Native appearance and keyboard checks paused; no app launch, installation or notifications tested"
   ],
   "privateEvidenceDirectory": "/private/tmp/news-441-verification-09ctk4qt",
-  "integrationRevision": "8ed48b7b0775faaeb7b12aba1d7e4dc06b7aacd8"
+  "integrationRevision": "8ed48b7b0775faaeb7b12aba1d7e4dc06b7aacd8",
+  "releaseDisposition": {
+    "date": "2026-10-18",
+    "acceptedWithLimitations": true,
+    "authorization": "Mars delegated completion judgment after receiving the measured result and remaining PLAN.md items",
+    "precisionTargetMet": false,
+    "original409ReplayCompleted": false,
+    "foregroundAppearanceAndKeyboard": "deferred at Mars request; not a passing check",
+    "tracking": "https://github.com/marspater/NewsApp-macOS/issues/439"
+  },
+  "integrationMerge": "624ea0848db179063e17b30c2332337831a5af06"
 }
