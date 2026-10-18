@@ -1,7 +1,8 @@
 # ADR: Release simplification with two parallel agents
 
-Status: Accepted for implementation by Mars on 17 October 2026.
+Status: Completed and Merged on 18 October 2026 (tracked in #439).
 Base: origin/main 807e34e800fc48afd670fbcda8d320f6fb06d8e6.
+Shipped: origin/main at 7143901 (Wave 1 and Wave 2 merged).
 
 ## Decisions
 - Ship publisher-excerpt overviews; retain deterministic timelines, perspectives and thematic sections with their validators.

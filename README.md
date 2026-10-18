@@ -5,16 +5,17 @@
 
 A native, local-first RSS, Atom and JSON Feed reader built with SwiftUI, WebKit, SQLite and Apple's on-device intelligence frameworks. No cloud AI services or telemetry.
 
-## Story experience — 9 October 2026
+## Story experience — 18 October 2026
 
-- Group reports of one event into a card with its coverage and an overview; read and saved state stay with each publication.
+- Group reports of one event into a card with its coverage and an overview using hybrid EventMatcher v7 (deterministic entity/lexical features and on-device CoreML `all-MiniLM-L6-v2` embeddings with zero false merges on the holdout suite). Read and saved state stay with each publication.
+- Parsing powered by SwiftSoup (CSS metadata selection and bounded DOM repair) and FeedKit (typed RSS/Atom/JSON feed parsing with streaming XML security boundaries).
 - Keep stories visible regardless of importance. Today and archive stay chronological; Briefing balances publishers/categories, then prefers broader coverage and existing importance ratings. Refresh never runs importance scoring or deletes stories for being minor.
-- Fill missing card images from declared publisher images through bounded, protected page requests. Grouped cards choose a usable image across their members; pages without one retain the placeholder.
+- Reliable user notifications with normalized native PNG hero image attachments and background delivery triage.
 - Read multi-source overviews as publisher excerpts with source badges and passage citations, plus validated deterministic timelines and attributed perspectives. No model-written introduction or factual prose is generated for event overviews.
-- Regenerate older generated overviews as publisher excerpts when next requested. Excerpts work with AI disabled; publisher extraction and background warmups honor energy policy. Model-based article summaries retain their own availability and cache rules.
+- World Tension v2: on-device reasoned international headline assessment with four-factor cited explanations (`Novelty`, `Proximity to worst case`, `Reversibility`, `Scope of impact`), backed by a balanced 12-feed global panel.
 - Keep protected networking, local SQLite state and arm64 ad-hoc verification builds. English is the current release scope; non-English matching and spoken VoiceOver verification remain parked.
 
-See the [9 October curation/image audit](docs/audits/2026-10-09-story-curation-images.md), [overview audit](docs/audits/2026-10-09-plain-text-overviews.md), [current plan status](docs/plans/2026-09-30-story-experience.md), [changelog](CHANGELOG.md) and [privacy policy](PRIVACY.md). The audits describe their measured samples; they do not establish current clustering quality or independent overview acceptance.
+See the [acceptance audit](docs/audits/2026-10-18-post-wave2-release-acceptance.md), [notification attachments audit](docs/audits/2026-10-18-notification-attachments-and-overlap.md), [current plan status](docs/plans/2026-09-30-story-experience.md), [changelog](CHANGELOG.md) and [privacy policy](PRIVACY.md).
 
 ## Reading
 
