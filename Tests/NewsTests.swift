@@ -8860,6 +8860,8 @@ struct NewsTests {
             provenance: OverviewProvenance(
                 memberArticleIDs: strikeArticles.map(\.id), kind: .fallbackExcerpts))
         assertTrue(try await db.recordEventOverview(v5Overview), "Store an overview for the v5 event")
+        try await db.setSaved(articleId: "v5-strike-2", isSaved: true)
+        try await db.markRead(articleId: "v5-strike-1", isRead: true)
 
         let v5Run = try await EventClusterer.run(in: db, now: now)
         assertEqual(v5Run.processed, 2, "Active v5 event members are processed under v6")
@@ -8867,6 +8869,18 @@ struct NewsTests {
         assertEqual(
             try await db.fetchEvent(id: v5Event.id)?.memberArticleIDs, ["v5-strike-1"],
             "Primary strike story retains the original event ID")
+        let movedEventID = try await db.eventID(forArticle: "v5-strike-2")
+        assertTrue(movedEventID != nil && movedEventID != v5Event.id, "Moved member has a separate event")
+        if let movedEventID {
+            assertEqual(
+                try await db.fetchEvent(id: movedEventID)?.memberArticleIDs, ["v5-strike-2"],
+                "New event contains exactly the moved member")
+        }
+        assertEqual(
+            try await db.fetchEvent(id: v5Event.id)?.membershipVersion, v5Event.membershipVersion + 1,
+            "The original event version advances after moving a member")
+        assertTrue(try await db.isSaved(articleId: "v5-strike-2"), "v6 preserves saving on the moved member")
+        assertTrue(try await db.isRead(articleId: "v5-strike-1"), "v6 preserves read state on the kept member")
         assertEqual(
             try await db.fetchEventOverview(eventID: v5Event.id), nil,
             "Re-partitioning active event invalidates the obsolete overview")
