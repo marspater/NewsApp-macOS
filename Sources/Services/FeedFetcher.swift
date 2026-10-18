@@ -136,7 +136,8 @@ actor FeedFetcher {
                 if case .serverBusy(_, let retryAfter)? = result.error {
                     let until = now().addingTimeInterval(
                         FeedRetryPolicy.delay(afterFailures: 1, retryAfter: retryAfter))
-                    hostCooldowns[host] = max(until, hostCooldowns[host] ?? .distantPast)  // a later, shorter ask never shortens the wait
+                    // A later, shorter ask never shortens the wait.
+                    hostCooldowns[host] = max(until, hostCooldowns[host] ?? .distantPast)
                 }
                 results.append(result)
                 launchEligible(&group)

@@ -1,5 +1,5 @@
-import Foundation
 import CryptoKit
+import Foundation
 
 /// Encapsulates deterministic article identity computation, URL canonicalization,
 /// and legacy ID reconciliation across syndication formats.
@@ -13,19 +13,20 @@ struct ArticleIdentity: Sendable {
     /// - Strips trailing slash on path.
     static func canonicalizeURL(_ urlString: String) -> String {
         let trimmed = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let url = URL(string: trimmed), var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
+        guard let url = URL(string: trimmed), var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+        else {
             return trimmed
         }
-        
+
         components.host = components.host?.lowercased()
         if components.scheme?.lowercased() == "http" {
             components.scheme = "https"
         }
-        
+
         if let queryItems = components.queryItems {
             let trackingNames: Set<String> = [
                 "ref", "rss_source", "feedburner", "fbclid",
-                "gclid", "mc_cid", "mc_eid", "yclid", "igshid"
+                "gclid", "mc_cid", "mc_eid", "yclid", "igshid",
             ]
             let filtered = queryItems.filter { item in
                 let lowerName = item.name.lowercased()
@@ -33,13 +34,13 @@ struct ArticleIdentity: Sendable {
             }
             components.queryItems = filtered.isEmpty ? nil : filtered
         }
-        
+
         var path = components.path
         if path.hasSuffix("/") && path.count > 1 {
             path.removeLast()
             components.path = path
         }
-        
+
         return components.url?.absoluteString ?? trimmed
     }
 
@@ -62,13 +63,14 @@ struct ArticleIdentity: Sendable {
     /// Exact publisher text is supporting evidence, never a global document key.
     static func publisherTextFingerprints(_ article: FeedArticle) -> [String] {
         guard article.pubDate != DateParser.unknownDate,
-              article.pubDate.timeIntervalSince1970.isFinite,
-              let url = URLComponents(string: article.normalizedLink),
-              let host = url.host?.lowercased(), !host.isEmpty,
-              url.user == nil, url.password == nil,
-              ["http", "https"].contains(url.scheme ?? ""),
-              !url.path.trimmingCharacters(in: CharacterSet(charactersIn: "/")).isEmpty
-                || !(url.query ?? "").isEmpty else { return [] }
+            article.pubDate.timeIntervalSince1970.isFinite,
+            let url = URLComponents(string: article.normalizedLink),
+            let host = url.host?.lowercased(), !host.isEmpty,
+            url.user == nil, url.password == nil,
+            ["http", "https"].contains(url.scheme ?? ""),
+            !url.path.trimmingCharacters(in: CharacterSet(charactersIn: "/")).isEmpty
+                || !(url.query ?? "").isEmpty
+        else { return [] }
         func normalized(_ text: String) -> String {
             text.precomposedStringWithCanonicalMapping
                 .split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
@@ -82,8 +84,10 @@ struct ArticleIdentity: Sendable {
             guard text.utf8.count <= 262_144 else { return nil }
             let content = normalized(text)
             guard content.count >= 400, content.split(separator: " ").count >= 40 else { return nil }
-            let fields = ["publisher-text-v1", publisher, normalized(article.source), kind, title,
-                          String(article.pubDate.timeIntervalSince1970), content]
+            let fields = [
+                "publisher-text-v1", publisher, normalized(article.source), kind, title,
+                String(article.pubDate.timeIntervalSince1970), content,
+            ]
             let framed = fields.map { "\($0.utf8.count):\($0)" }.joined()
             return SHA256.hash(data: Data(framed.utf8)).map { String(format: "%02x", $0) }.joined()
         }
@@ -92,7 +96,8 @@ struct ArticleIdentity: Sendable {
     /// GUIDs identify documents only within the configured subscription URL.
     static func scopedGUID(_ guid: String?, feedURL: String?) -> String? {
         guard let guid = guid?.trimmingCharacters(in: .whitespacesAndNewlines), !guid.isEmpty,
-              let feedURL, !feedURL.isEmpty else { return nil }
+            let feedURL, !feedURL.isEmpty
+        else { return nil }
         // AppSettings normalizes subscriptions. Keep their scheme and every query
         // parameter: document URL tracking rules must not collapse distinct feeds.
         let feed = feedURL.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -121,12 +126,12 @@ struct ArticleIdentity: Sendable {
             }
             return g
         }
-        
+
         let canonical = canonicalizeURL(link)
         if !canonical.isEmpty && canonical != "https://" && canonical != "http://" {
             return canonical
         }
-        
+
         return computeContentFingerprint(title: title, source: source, pubDate: pubDate)
     }
 

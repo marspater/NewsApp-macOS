@@ -423,24 +423,6 @@ struct TensionWeights: Equatable, Codable, Sendable {
     let scaleFactor: Double
     let smoothingAlpha: Double
 
-    init(
-        typeWeights: [TensionEventType: Double],
-        deathMultipliers: [TensionMagnitude: Double],
-        affectedMultipliers: [TensionMagnitude: Double],
-        escalationMultipliers: [TensionEscalation: Double],
-        breadthMultipliers: [Int: Double],
-        scaleFactor: Double,
-        smoothingAlpha: Double
-    ) {
-        self.typeWeights = typeWeights
-        self.deathMultipliers = deathMultipliers
-        self.affectedMultipliers = affectedMultipliers
-        self.escalationMultipliers = escalationMultipliers
-        self.breadthMultipliers = breadthMultipliers
-        self.scaleFactor = scaleFactor
-        self.smoothingAlpha = smoothingAlpha
-    }
-
     static let calibratedV1 = TensionWeights(
         typeWeights: [
             .armedConflict: 10.0,
@@ -511,21 +493,6 @@ struct TensionEventScore: Equatable, Sendable {
     let escalationMultiplier: Double
     let breadthMultiplier: Double
 
-    init(
-        key: String,
-        rawScore: Double,
-        typeWeight: Double,
-        magnitudeMultiplier: Double,
-        escalationMultiplier: Double,
-        breadthMultiplier: Double
-    ) {
-        self.key = key
-        self.rawScore = rawScore
-        self.typeWeight = typeWeight
-        self.magnitudeMultiplier = magnitudeMultiplier
-        self.escalationMultiplier = escalationMultiplier
-        self.breadthMultiplier = breadthMultiplier
-    }
 }
 
 /// Scored evaluation of an observation day with raw, calibrated, and smoothed indices.
@@ -541,23 +508,6 @@ struct TensionDayScore: Equatable, Sendable {
     let eventScores: [TensionEventScore]
     let isProvisional: Bool
 
-    init(
-        day: DateInterval,
-        coverageStatus: TensionCoverage.Status,
-        rawDailyScore: Double?,
-        calibratedIndex: Double?,
-        smoothedIndex: Double?,
-        eventScores: [TensionEventScore],
-        isProvisional: Bool
-    ) {
-        self.day = day
-        self.coverageStatus = coverageStatus
-        self.rawDailyScore = rawDailyScore
-        self.calibratedIndex = calibratedIndex
-        self.smoothedIndex = smoothedIndex
-        self.eventScores = eventScores
-        self.isProvisional = isProvisional
-    }
 }
 
 enum TensionCalibrator {

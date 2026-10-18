@@ -15,16 +15,18 @@ struct FeedValidators: Equatable, Sendable {
     }
 
     init(response: HTTPURLResponse) {
-        self.init(etag: response.value(forHTTPHeaderField: "ETag"),
-                  lastModified: response.value(forHTTPHeaderField: "Last-Modified"))
+        self.init(
+            etag: response.value(forHTTPHeaderField: "ETag"),
+            lastModified: response.value(forHTTPHeaderField: "Last-Modified"))
     }
 
     var isEmpty: Bool { etag == nil && lastModified == nil }
 
     private static func sanitized(_ value: String?) -> String? {
         guard let value = value?.trimmingCharacters(in: .whitespaces), !value.isEmpty,
-              value.utf8.count <= maximumLength,
-              value.utf8.allSatisfy({ (0x20...0x7E).contains($0) }) else { return nil }
+            value.utf8.count <= maximumLength,
+            value.utf8.allSatisfy({ (0x20...0x7E).contains($0) })
+        else { return nil }
         return value
     }
 }
@@ -71,7 +73,8 @@ struct FeedHealth: Equatable, Sendable {
     static let quietWindow: TimeInterval = 30 * 24 * 60 * 60
     /// Characters of feed-provided text from which an item counts as full text.
     static let fullTextCharacters = 1200
-    static let disclaimer = "Feed health shows whether a feed responds, how recent its items are and how much text it carries. It is not a rating of accuracy or trustworthiness."
+    static let disclaimer =
+        "Feed health shows whether a feed responds, how recent its items are and how much text it carries. It is not a rating of accuracy or trustworthiness."
 
     let availability: Availability
     let freshness: Freshness
@@ -120,11 +123,16 @@ struct FeedHealth: Equatable, Sendable {
         case .responding:
             parts.append("Responding")
         case .failing(let failures, let retryAt):
-            var text = failures == 1 ? "Not responding (1 failed attempt)" : "Not responding (\(failures) failed attempts)"
-            if let retryAt, retryAt > now { text += ", retrying \(relative.localizedString(for: retryAt, relativeTo: now))" }
+            var text =
+                failures == 1 ? "Not responding (1 failed attempt)" : "Not responding (\(failures) failed attempts)"
+            if let retryAt, retryAt > now {
+                text += ", retrying \(relative.localizedString(for: retryAt, relativeTo: now))"
+            }
             parts.append(text)
         }
-        if let latestItem { parts.append("Newest item \(relative.localizedString(for: min(latestItem, now), relativeTo: now))") }
+        if let latestItem {
+            parts.append("Newest item \(relative.localizedString(for: min(latestItem, now), relativeTo: now))")
+        }
         switch textQuality {
         case .full: parts.append("Full text")
         case .partial: parts.append("Partial text")

@@ -35,7 +35,7 @@ enum OverviewTimelineBuilder {
     private static let englishMonths: [String: Int] = [
         "January": 1, "Jan": 1, "February": 2, "Feb": 2, "March": 3, "Mar": 3, "April": 4, "Apr": 4, "May": 5,
         "June": 6, "Jun": 6, "July": 7, "Jul": 7, "August": 8, "Aug": 8, "September": 9, "Sept": 9, "Sep": 9,
-        "October": 10, "Oct": 10, "November": 11, "Nov": 11, "December": 12, "Dec": 12
+        "October": 10, "Oct": 10, "November": 11, "Nov": 11, "December": 12, "Dec": 12,
     ]
     /// Day-first month names of the other catalog languages, in the form and case that follow a day
     /// number: German (capitalized), Dutch, French, Italian, Polish and Ukrainian (genitive in the last
@@ -52,7 +52,7 @@ enum OverviewTimelineBuilder {
         "stycznia": 1, "lutego": 2, "marca": 3, "kwietnia": 4, "maja": 5, "czerwca": 6,
         "lipca": 7, "sierpnia": 8, "września": 9, "października": 10, "listopada": 11, "grudnia": 12,
         "січня": 1, "лютого": 2, "березня": 3, "квітня": 4, "травня": 5, "червня": 6,
-        "липня": 7, "серпня": 8, "вересня": 9, "жовтня": 10, "листопада": 11, "грудня": 12
+        "липня": 7, "серпня": 8, "вересня": 9, "жовтня": 10, "листопада": 11, "грудня": 12,
     ]
 
     /// In order of precedence; a later match that overlaps an earlier one is ignored.
@@ -62,10 +62,16 @@ enum OverviewTimelineBuilder {
         let year = #"(?<year>(?:19|20)\d{2})(?!\d)"#
         let sources: [(String, NSRegularExpression.Options)] = [
             (#"(?<![\d.])(?<year>(?:19|20)\d{2})-(?<month>\d{2})-(?<day>\d{2})(?!\d)"#, []),
-            (#"(?<![\d.,])(?<day>\d{1,2})(?:st|nd|rd|th)?\s+(?:of\s+)?(?<month>\#(english))(?!\p{L})\.?(?:,?\s+\#(year))?"#, []),
-            (#"(?<!\p{L})(?<month>\#(english))(?!\p{L})\.?\s+(?<day>\d{1,2})(?:st|nd|rd|th)?(?!\d)(?:,?\s+\#(year))?"#, []),
+            (
+                #"(?<![\d.,])(?<day>\d{1,2})(?:st|nd|rd|th)?\s+(?:of\s+)?(?<month>\#(english))(?!\p{L})\.?(?:,?\s+\#(year))?"#,
+                []
+            ),
+            (
+                #"(?<!\p{L})(?<month>\#(english))(?!\p{L})\.?\s+(?<day>\d{1,2})(?:st|nd|rd|th)?(?!\d)(?:,?\s+\#(year))?"#,
+                []
+            ),
             (#"(?<![\d.,])(?<day>\d{1,2})(?:\.|er)?\s+(?<month>\#(dayFirst))(?!\p{L})(?:\s+\#(year))?"#, []),
-            (#"(?<!\p{L})(?<month>\#(english))(?!\p{L})\.?\s+\#(year)"#, [])
+            (#"(?<!\p{L})(?<month>\#(english))(?!\p{L})\.?\s+\#(year)"#, []),
         ]
         return sources.compactMap { try? NSRegularExpression(pattern: $0.0, options: $0.1) }
     }()
@@ -98,8 +104,9 @@ enum OverviewTimelineBuilder {
         for (order, fact) in facts.enumerated() {
             // The date and the text shown both come from the verbatim quote, never from a restatement.
             guard let article = articlesByID[fact.articleID], article.pubDate != DateParser.unknownDate,
-                  let stated = singleStatedDate(in: fact.quote),
-                  let resolved = resolve(stated, publishedAt: article.pubDate) else { continue }
+                let stated = singleStatedDate(in: fact.quote),
+                let resolved = resolve(stated, publishedAt: article.pubDate)
+            else { continue }
             // Reprints of one sentence become one item with several sources.
             let key = "\(resolved.timeIntervalSince1970)|\(stated.day == nil)|\(normalized(fact.quote))"
             if let index = entryByKey[key] {
@@ -107,16 +114,20 @@ enum OverviewTimelineBuilder {
                 continue
             }
             entryByKey[key] = entries.count
-            entries.append(Entry(date: stated, resolved: resolved,
-                                 isPlan: isPlan(stated, resolved: resolved, publishedAt: article.pubDate),
-                                 quote: fact.quote, order: order, facts: [fact]))
+            entries.append(
+                Entry(
+                    date: stated, resolved: resolved,
+                    isPlan: isPlan(stated, resolved: resolved, publishedAt: article.pubDate),
+                    quote: fact.quote, order: order, facts: [fact]))
         }
-        guard Set(entries.map { "\($0.resolved.timeIntervalSince1970)|\($0.precision)" }).count >= minimumDistinctDates else {
+        guard Set(entries.map { "\($0.resolved.timeIntervalSince1970)|\($0.precision)" }).count >= minimumDistinctDates
+        else {
             return Timeline()
         }
 
         // Prefer corroborated items, then the order the facts arrived in; show them in time order.
-        let kept = entries
+        let kept =
+            entries
             .sorted { ($0.facts.count, -$0.order) > ($1.facts.count, -$1.order) }
             .prefix(maximumItems)
             .sorted { ($0.resolved, $0.precision, $0.order) < ($1.resolved, $1.precision, $1.order) }
@@ -131,23 +142,26 @@ enum OverviewTimelineBuilder {
                 let source = articlesByID[fact.articleID].map {
                     OverviewSourceMetadata(title: $0.title, name: $0.source, url: $0.link, publishedAt: $0.pubDate)
                 }
-                timeline.citations.append(OverviewCitation(
-                    id: citationID,
-                    articleID: fact.articleID,
-                    passageID: fact.passageID,
-                    passageFingerprint: passagesByID[fact.passageID]?.fingerprint ?? ArticleIdentity.sha256Hex(fact.quote),
-                    quote: fact.quote,
-                    source: source
-                ))
+                timeline.citations.append(
+                    OverviewCitation(
+                        id: citationID,
+                        articleID: fact.articleID,
+                        passageID: fact.passageID,
+                        passageFingerprint: passagesByID[fact.passageID]?.fingerprint
+                            ?? ArticleIdentity.sha256Hex(fact.quote),
+                        quote: fact.quote,
+                        source: source
+                    ))
                 citationIDs.append(citationID)
             }
-            timeline.items.append(OverviewTimelineItem(
-                id: "timeline_\(index + 1)",
-                dateText: dateText(entry.date, locale: locale),
-                summary: entry.quote,
-                citationIDs: citationIDs,
-                isFuturePlan: entry.isPlan
-            ))
+            timeline.items.append(
+                OverviewTimelineItem(
+                    id: "timeline_\(index + 1)",
+                    dateText: dateText(entry.date, locale: locale),
+                    summary: entry.quote,
+                    citationIDs: citationIDs,
+                    isFuturePlan: entry.isPlan
+                ))
         }
         return timeline
     }
@@ -173,14 +187,17 @@ enum OverviewTimelineBuilder {
             Range(match.range(withName: name), in: sentence).map { String(sentence[$0]) }
         }
         guard let monthText = group("month"),
-              let month = englishMonths[monthText] ?? dayFirstMonths[monthText] ?? Int(monthText),
-              (1...12).contains(month) else { return nil }
+            let month = englishMonths[monthText] ?? dayFirstMonths[monthText] ?? Int(monthText),
+            (1...12).contains(month)
+        else { return nil }
         let year = group("year").flatMap { Int($0) }
         let day = group("day").flatMap { Int($0) }
         if let day {
             // A leap year stands in for a missing year, so 29 February is possible until it is placed.
             let components = DateComponents(year: year ?? 2000, month: month, day: day)
-            guard let date = calendar.date(from: components), calendar.component(.day, from: date) == day else { return nil }
+            guard let date = calendar.date(from: components), calendar.component(.day, from: date) == day else {
+                return nil
+            }
         }
         return StatedDate(year: year, month: month, day: day)
     }
@@ -191,7 +208,8 @@ enum OverviewTimelineBuilder {
         func place(_ year: Int) -> Date? {
             let components = DateComponents(year: year, month: date.month, day: date.day ?? 1)
             guard let placed = calendar.date(from: components),
-                  calendar.component(.day, from: placed) == (date.day ?? 1) else { return nil }
+                calendar.component(.day, from: placed) == (date.day ?? 1)
+            else { return nil }
             return placed
         }
         if let year = date.year { return place(year) }

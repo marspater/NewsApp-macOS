@@ -1,7 +1,8 @@
 import Foundation
 import NaturalLanguage
+
 #if canImport(FoundationModels)
-import FoundationModels
+    import FoundationModels
 #endif
 
 /// Runtime availability status of on-device Apple Intelligence Foundation Models.
@@ -23,9 +24,9 @@ public enum ModelAvailabilityStatus: Sendable, Equatable {
         case .available:
             return nil
         case .osUnsupported(let msg),
-             .deviceNotEligible(let msg),
-             .modelNotReady(let msg),
-             .languageUnsupported(let msg):
+            .deviceNotEligible(let msg),
+            .modelNotReady(let msg),
+            .languageUnsupported(let msg):
             return msg
         case .disabledByPolicy:
             return "On-device AI is disabled by policy."
@@ -92,21 +93,22 @@ public struct ModelRuntimeProbe: Sendable {
         }
 
         #if canImport(FoundationModels)
-        if #available(macOS 26.0, *) {
-            let availability = SystemLanguageModel.default.availability
-            if case .available = availability {
-                if let lang = language, !supportedLanguages.contains(lang) {
-                    return .languageUnsupported("Language \(lang.rawValue) is not supported for on-device generation.")
+            if #available(macOS 26.0, *) {
+                let availability = SystemLanguageModel.default.availability
+                if case .available = availability {
+                    if let lang = language, !supportedLanguages.contains(lang) {
+                        return .languageUnsupported(
+                            "Language \(lang.rawValue) is not supported for on-device generation.")
+                    }
+                    return .available
+                } else {
+                    return .modelNotReady("SystemLanguageModel is not ready: \(availability).")
                 }
-                return .available
             } else {
-                return .modelNotReady("SystemLanguageModel is not ready: \(availability).")
+                return .osUnsupported("Requires macOS 26 or later.")
             }
-        } else {
-            return .osUnsupported("Requires macOS 26 or later.")
-        }
         #else
-        return .osUnsupported("FoundationModels framework is not available.")
+            return .osUnsupported("FoundationModels framework is not available.")
         #endif
     }
 
@@ -123,9 +125,9 @@ public struct ModelRuntimeProbe: Sendable {
                 maxResponseTokens: budget.reservedResponseTokens
             )
         case .osUnsupported(let msg),
-             .deviceNotEligible(let msg),
-             .modelNotReady(let msg),
-             .languageUnsupported(let msg):
+            .deviceNotEligible(let msg),
+            .modelNotReady(let msg),
+            .languageUnsupported(let msg):
             return .deterministicFallback(reason: msg)
         case .disabledByPolicy:
             return .deterministicFallback(reason: "On-device AI is disabled by policy.")

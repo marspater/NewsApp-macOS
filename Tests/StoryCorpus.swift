@@ -166,6 +166,12 @@ enum StoryCorpus {
     }
 
     static func checkReplay() async throws {
+        let cacheJSON =
+            #"{"id":"cached","canonical_url":"https://corpus.example/cached","title":"Cached report","published_at":1700000000,"source":"Corpus"}"#
+        let cached = try JSONDecoder().decode(CacheRecord.self, from: Data(cacheJSON.utf8))
+        guard cached.article.link == "https://corpus.example/cached",
+            cached.article.pubDate == Date(timeIntervalSince1970: 1_700_000_000)
+        else { throw Failure.invalid("Cache record JSON keys must preserve URLs and publication dates") }
         let date = Date(timeIntervalSince1970: 1_700_000_000)
         let first = FeedArticle(
             title: "Local council approves library", link: "https://corpus.example/library", guid: "original",
@@ -184,17 +190,23 @@ enum StoryCorpus {
 
     struct CacheRecord: Decodable {
         let id: String
-        let canonical_url: String
+        let canonicalURL: String
         let title: String
         let description: String?
         let content: String?
-        let published_at: Double
+        let publishedAt: Double
         let source: String
+
+        enum CodingKeys: String, CodingKey {
+            case id, title, description, content, source
+            case canonicalURL = "canonical_url"
+            case publishedAt = "published_at"
+        }
 
         var article: FeedArticle {
             FeedArticle(
-                title: title, link: canonical_url, guid: id, description: description ?? "",
-                pubDate: Date(timeIntervalSince1970: published_at), source: source, fullContent: content)
+                title: title, link: canonicalURL, guid: id, description: description ?? "",
+                pubDate: Date(timeIntervalSince1970: publishedAt), source: source, fullContent: content)
         }
     }
 
@@ -204,12 +216,12 @@ enum StoryCorpus {
         let data = try Data(contentsOf: URL(fileURLWithPath: path))
         let records = try JSONDecoder().decode([CacheRecord].self, from: data)
         guard Set(records.map(\.id)).count == records.count,
-            records.allSatisfy({ $0.published_at.isFinite })
+            records.allSatisfy({ $0.publishedAt.isFinite })
         else { throw Failure.invalid("Invalid cache records") }
         let holdout = CommandLine.arguments.contains("--corpus-holdout")
         let split = holdout ? "holdout" : "tuning"
         let selected = records.filter {
-            let key = ArticleIdentity.canonicalizeURL($0.canonical_url)
+            let key = ArticleIdentity.canonicalizeURL($0.canonicalURL)
             let value = Int(ArticleIdentity.sha256Hex("news-cache-v1:" + key).prefix(8), radix: 16)!
             return (value % 10 >= 7) == holdout
         }
@@ -225,8 +237,8 @@ enum StoryCorpus {
             byLanguage[languages[i], default: 0] += 1
             bySource[selected[i].source, default: 0] += 1
             for j in selected.indices where j > i && !fingerprints[i].isDisjoint(with: fingerprints[j]) {
-                if ArticleIdentity.canonicalizeURL(selected[i].canonical_url)
-                    == ArticleIdentity.canonicalizeURL(selected[j].canonical_url)
+                if ArticleIdentity.canonicalizeURL(selected[i].canonicalURL)
+                    == ArticleIdentity.canonicalizeURL(selected[j].canonicalURL)
                 {
                     confirmed += 1
                 } else {
@@ -570,7 +582,8 @@ enum StoryCorpus {
                                 record.sha256 = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
                             } catch {
                                 if error is CancellationError || Task.isCancelled { throw CancellationError() }
-                                if error is CocoaError { throw error }  // Never overwrite or silently lose local evidence.
+                                // Never overwrite or silently lose local evidence.
+                                if error is CocoaError { throw error }
                                 record.error = String(describing: error)
                             }
                             records.append(record)

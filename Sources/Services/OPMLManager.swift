@@ -1,12 +1,12 @@
-import Foundation
 import AppKit
+import Foundation
 import UniformTypeIdentifiers
 
 public struct OPMLItem: Equatable, Sendable {
     public let title: String
     public let url: String
     public let folder: String?
-    
+
     public init(title: String, url: String, folder: String?) {
         self.title = title
         self.url = url
@@ -25,19 +25,27 @@ public final class OPMLParser: NSObject, XMLParserDelegate, @unchecked Sendable 
 
     public static func parseValidated(data: Data) throws -> [OPMLItem] {
         guard data.count <= OPMLFileReader.maximumBytes else {
-            throw NSError(domain: "OPML", code: 2, userInfo: [NSLocalizedDescriptionKey: "OPML files must be no larger than 5 MB."])
+            throw NSError(
+                domain: "OPML", code: 2,
+                userInfo: [NSLocalizedDescriptionKey: "OPML files must be no larger than 5 MB."])
         }
         let parser = OPMLParser()
         let xmlParser = XMLParser(data: data)
         xmlParser.shouldResolveExternalEntities = false
         xmlParser.delegate = parser
         guard xmlParser.parse() else {
-            throw xmlParser.parserError ?? NSError(domain: "OPML", code: 1, userInfo: [NSLocalizedDescriptionKey: "The OPML file is incomplete or malformed."])
+            throw xmlParser.parserError
+                ?? NSError(
+                    domain: "OPML", code: 1,
+                    userInfo: [NSLocalizedDescriptionKey: "The OPML file is incomplete or malformed."])
         }
         return parser.items
     }
 
-    public func parser(_ _: XMLParser, didStartElement elementName: String, namespaceURI _: String?, qualifiedName _: String?, attributes attributeDict: [String : String] = [:]) {
+    public func parser(
+        _ _: XMLParser, didStartElement elementName: String, namespaceURI _: String?, qualifiedName _: String?,
+        attributes attributeDict: [String: String] = [:]
+    ) {
         guard elementName.lowercased() == "outline" else { return }
 
         var xmlUrl: String?
@@ -62,7 +70,9 @@ public final class OPMLParser: NSObject, XMLParserDelegate, @unchecked Sendable 
         }
     }
 
-    public func parser(_ _: XMLParser, didEndElement elementName: String, namespaceURI _: String?, qualifiedName _: String?) {
+    public func parser(
+        _ _: XMLParser, didEndElement elementName: String, namespaceURI _: String?, qualifiedName _: String?
+    ) {
         guard elementName.lowercased() == "outline" else { return }
         if let isFolder = outlineStack.popLast(), isFolder {
             _ = folderStack.popLast()
@@ -74,15 +84,15 @@ public enum OPMLExporter: Sendable {
     public static func generateOPML(feedURLs: [String], title: String = "News Subscriptions") -> String {
         let dateStr = ISO8601DateFormatter().string(from: Date())
         var xml = """
-        <?xml version="1.0" encoding="UTF-8"?>
-        <opml version="2.0">
-            <head>
-                <title>\(escapeXML(title))</title>
-                <dateCreated>\(dateStr)</dateCreated>
-            </head>
-            <body>
+            <?xml version="1.0" encoding="UTF-8"?>
+            <opml version="2.0">
+                <head>
+                    <title>\(escapeXML(title))</title>
+                    <dateCreated>\(dateStr)</dateCreated>
+                </head>
+                <body>
 
-        """
+            """
         for url in feedURLs {
             let escapedURL = escapeXML(url)
             let displayTitle: String
@@ -93,18 +103,20 @@ public enum OPMLExporter: Sendable {
             } else {
                 displayTitle = url
             }
-            xml += "        <outline text=\"\(escapeXML(displayTitle))\" title=\"\(escapeXML(displayTitle))\" type=\"rss\" xmlUrl=\"\(escapedURL)\"/>\n"
+            xml +=
+                "        <outline text=\"\(escapeXML(displayTitle))\" title=\"\(escapeXML(displayTitle))\" type=\"rss\" xmlUrl=\"\(escapedURL)\"/>\n"
         }
 
         xml += """
-            </body>
-        </opml>
-        """
+                </body>
+            </opml>
+            """
         return xml
     }
 
     internal static func escapeXML(_ string: String) -> String {
-        return string
+        return
+            string
             .replacingOccurrences(of: "&", with: "&amp;")
             .replacingOccurrences(of: "<", with: "&lt;")
             .replacingOccurrences(of: ">", with: "&gt;")
@@ -125,7 +137,9 @@ enum OPMLFileReader {
             defer { try? handle.close() }
             let data = try handle.read(upToCount: maximumBytes + 1) ?? Data()
             guard data.count <= maximumBytes else {
-                throw NSError(domain: "OPML", code: 2, userInfo: [NSLocalizedDescriptionKey: "OPML files must be no larger than 5 MB."])
+                throw NSError(
+                    domain: "OPML", code: 2,
+                    userInfo: [NSLocalizedDescriptionKey: "OPML files must be no larger than 5 MB."])
             }
             return data
         }.value
@@ -148,8 +162,7 @@ public enum OPMLDialogs {
         }
         if panel.runModal() == .OK, let url = panel.url {
             Task {
-                do { onImport(try await OPMLFileReader.read(url)) }
-                catch { NSAlert(error: error).runModal() }
+                do { onImport(try await OPMLFileReader.read(url)) } catch { NSAlert(error: error).runModal() }
             }
         }
     }
@@ -165,8 +178,9 @@ public enum OPMLDialogs {
             panel.allowedContentTypes = [.xml]
         }
         if panel.runModal() == .OK, let url = panel.url {
-            do { try xmlString.write(to: url, atomically: true, encoding: .utf8) }
-            catch { NSAlert(error: error).runModal() }
+            do { try xmlString.write(to: url, atomically: true, encoding: .utf8) } catch {
+                NSAlert(error: error).runModal()
+            }
         }
     }
 }

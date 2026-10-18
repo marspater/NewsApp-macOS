@@ -35,7 +35,8 @@ enum FeedError: LocalizedError, Equatable, Sendable {
         case .tooManyRedirects(let count):
             return "Exceeded maximum redirect limit (\(count) redirects)."
         case .dnsRebindingDetected(let host, let ip):
-            return "Security Block: Connection destination '\(ip)' for '\(host)' is forbidden (DNS rebinding prevention)."
+            return
+                "Security Block: Connection destination '\(ip)' for '\(host)' is forbidden (DNS rebinding prevention)."
         case .responseTooLarge(let bytes, let maxAllowed):
             let mb = Double(bytes) / (1024 * 1024)
             let limitMb = Double(maxAllowed) / (1024 * 1024)
@@ -45,7 +46,8 @@ enum FeedError: LocalizedError, Equatable, Sendable {
         case .serverBusy(let status, _):
             return "The server asked News to slow down (HTTP \(status))."
         case .retryScheduled(let until):
-            return "Paused until \(until.formatted(date: .abbreviated, time: .shortened)) after the server asked News to wait or the feed kept failing."
+            return
+                "Paused until \(until.formatted(date: .abbreviated, time: .shortened)) after the server asked News to wait or the feed kept failing."
         case .unsupportedFormat(let format):
             return "Unsupported feed format: \(format)."
         case .parseFailed(let reason):

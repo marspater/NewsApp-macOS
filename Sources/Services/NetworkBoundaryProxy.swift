@@ -126,7 +126,7 @@ private final class SOCKSListener: @unchecked Sendable {
         listener.cancel()
         queue.async { [self] in
             let active = Array(tunnels.values)
-            active.forEach { $0.finish() }
+            for tunnel in active { tunnel.finish() }
         }
     }
 }

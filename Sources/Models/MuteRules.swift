@@ -40,7 +40,8 @@ struct MuteRules: Equatable, Hashable, Sendable {
         let topic = raw.split(whereSeparator: \.isWhitespace).joined(separator: " ")
         let phrase = Self.phrase(topic)
         guard topics.count < Self.limit, !phrase.isEmpty, topic.count <= Self.topicLength,
-              !topics.contains(where: { Self.phrase($0) == phrase }) else { return nil }
+            !topics.contains(where: { Self.phrase($0) == phrase })
+        else { return nil }
         topics.append(topic)
         return topic
     }
@@ -126,8 +127,9 @@ struct MuteRules: Equatable, Hashable, Sendable {
         guard !trimmed.isEmpty, !trimmed.contains(where: \.isWhitespace) else { return nil }
         let candidate = trimmed.contains("://") ? trimmed : "https://" + trimmed
         guard let host = linkHost(candidate), host.contains("."), !host.hasPrefix("."), !host.hasPrefix("-"),
-              host.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "." || $0 == "-" }),
-              !host.split(separator: ".", omittingEmptySubsequences: false).contains(where: \.isEmpty) else { return nil }
+            host.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "." || $0 == "-" }),
+            !host.split(separator: ".", omittingEmptySubsequences: false).contains(where: \.isEmpty)
+        else { return nil }
         return host
     }
 
