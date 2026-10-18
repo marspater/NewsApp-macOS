@@ -13,6 +13,48 @@ enum FeedKitSwiftSoupTests {
             guard condition() else { fatalError("Parsing regression: \(message)") }
         }
 
+        let categorized = """
+            <rss><channel><title>Publisher</title><item><title>Category boundaries</title><link>https://example.com/categories</link>
+            <category>World</category><category>Artificial intelligence</category><category>Business</category>
+            </item></channel></rss>
+            """
+        check(
+            FeedXMLParser(data: Data(categorized.utf8), feedURL: base).parse().first?.category == "World",
+            "Successive RSS categories must not concatenate into a fabricated label")
+        let titledTags = EntityResult.readerTags(from: [
+            .init(name: "Donald Trump", type: .person), .init(name: "Mr. Trump", type: .person),
+            .init(name: "Trump", type: .person), .init(name: "Russia", type: .place),
+        ])
+        check(
+            titledTags.map(\.name) == ["Donald Trump", "Russia"],
+            "Honorific surname aliases collapse without deleting places")
+        let articleAndFurniture = """
+            <main><article class="article-body-commercial-selector"><p>\(first)</p><p>\(second)</p>
+            <div class="also-read"><p>Unrelated recommendation with enough prose to look like a paragraph.</p>
+            <img src="https://example.com/thumbnail.jpg" width="90" height="90"></div>
+            <h2>Most viewed</h2><span>Explore more on these topics</span></article>
+            <section><p>Other news furniture outside the publisher body should never enter the story.</p></section></main>
+            """
+        let clean = pipeline.extractFromHTML(articleAndFurniture, baseUrl: base)
+        check(
+            clean.content == first + "\n\n" + second,
+            "Explicit publisher bodies exclude Guardian furniture and Hindu related cards")
+        let alJazeera = """
+            <main><div class="wysiwyg wysiwyg--all-content"><p>\(first)</p><div><p>\(second)</p></div>
+            <p>Final section: \(first)</p></div><aside><p>Other coverage from the site.</p></aside></main>
+            """
+        check(
+            pipeline.extractFromHTML(alJazeera, baseUrl: base).content?.contains("Final section:") == true,
+            "Al Jazeera's explicit body retains later nested paragraphs")
+        let paywall = """
+            <article><p>Subscribe to unlock this article</p><h2>Save 50% on Standard Digital</h2>
+            <p>Save now on essential digital access to trusted journalism on any device for your first year.</p>
+            <p>Savings based on monthly annualised price and the subscription offer ends later this month.</p></article>
+            """
+        check(
+            !pipeline.extractFromHTML(paywall, baseUrl: base).isSuccess,
+            "A subscription offer is not accepted as article prose")
+
         let metadata = """
             <html><head><script>let fake = '<meta property="og:image" content="https://example.com/fake.jpg">';</script>
             <meta property=og:image content="https://example.com/photo.jpg?a=1&amp;b=2">
@@ -175,6 +217,67 @@ enum FeedKitSwiftSoupTests {
 
         check(DateParser.parse("Tues, 6 November 2007 12:00:00 GMT") != nil, "Permissive weekday spellings work")
         check(DateParser.parse("impossible") == nil, "Invalid dates do not become current time")
+
+        // HTML entity decoding in title & category and source name newline cleaning
+        let xmlWithEntities = """
+            <rss><channel><title>BBC News\n        BBC News</title>
+            <item><title>SpaceX&#8217;s gamble with AT&amp;#038;T</title>
+            <link>https://example.com/spacex</link>
+            <description>Summary</description>
+            <category>Sci&amp;Tech</category>
+            </item></channel></rss>
+            """
+        let parsedEntities = FeedXMLParser(data: Data(xmlWithEntities.utf8), feedURL: base).parse()
+        check(parsedEntities.first?.title == "SpaceX’s gamble with AT&T", "HTML entities in RSS titles are decoded")
+        check(parsedEntities.first?.source == "BBC News", "Channel titles with newlines are cleaned of duplicate lines")
+        check(parsedEntities.first?.category == "Sci&Tech", "HTML entities in categories are decoded")
+
+        // Teaser detection in FeedXMLParser
+        let teaserFeed = """
+            <rss xmlns:content="http://purl.org/rss/1.0/modules/content/"><channel><title>The Verge</title>
+            <item><title>Teaser story</title><link>https://example.com/teaser</link>
+            <description>Short teaser summary</description>
+            <content:encoded><![CDATA[<p>First teaser paragraph.</p><p>Second teaser paragraph. <a href="https://example.com/full">Continue reading...</a></p>]]></content:encoded>
+            </item></channel></rss>
+            """
+        let parsedTeaser = FeedXMLParser(data: Data(teaserFeed.utf8), feedURL: base).parse().first
+        check(parsedTeaser?.contentFetched == true, "Items with explicit content:encoded have contentFetched == true")
+        check(
+            parsedTeaser?.readerDocument?.hasCompleteArticleBody == false,
+            "Teaser items must report hasCompleteArticleBody == false")
+
+        // Boilerplate filtering for video errors, Google Preferred Source, and publisher footers
+        check(
+            ArticleContentRedactor.isBoilerplateLine(
+                "To play this video you need to enable JavaScript in your browser."),
+            "Video error heading is boilerplate")
+        check(
+            ArticleContentRedactor.isBoilerplateLine("This video can not be played"),
+            "Video error paragraph is boilerplate")
+        check(
+            ArticleContentRedactor.isBoilerplateLine("Video Duration 28 minutes 30 seconds"),
+            "Video duration is boilerplate")
+        check(
+            ArticleContentRedactor.isBoilerplateLine(
+                "Add CNA as a trusted source to help Google better understand and surface our content in search results."
+            ), "Google trusted source CTA is boilerplate")
+        check(
+            ArticleContentRedactor.isBoilerplateLine(
+                "If you rely on our team for trusted reporting, please take a moment to select us as your Preferred Source on Google"
+            ), "Google preferred source CTA is boilerplate")
+        check(
+            ArticleContentRedactor.isBoilerplateLine("CBC's Journalistic Standards and Practices"),
+            "CBC standards is boilerplate")
+        check(
+            ArticleContentRedactor.isBoilerplateLine("Corrections and clarifications"),
+            "Corrections footer is boilerplate")
+        check(
+            ArticleContentRedactor.isBoilerplateLine("Edited by: Jenipher Camino Gonzalez"),
+            "Editor footer is boilerplate")
+        check(
+            ArticleContentRedactor.isBoilerplateLine("Published - October 18, 2026 09:36 am IST"),
+            "Standalone dateline is boilerplate")
+
         print("✅ SwiftSoup / FeedKit parsing regressions passed")
     }
 
@@ -223,6 +326,77 @@ enum FeedKitSwiftSoupTests {
                     && abs(vector.reduce(Float(0)) { $0 + $1 * $1 } - 1) < 0.001
             }, "Parsed article embeddings must have the expected dimension and unit norm")
         precondition(report.created == 1, "Equivalent parsed reports must form one event through the hybrid matcher")
+        try await testReaderDocumentStoragePreservation()
         print("✅ Feed parsing → reader extraction → embeddings → event clustering integration passed")
+    }
+
+    static func testReaderDocumentStoragePreservation() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let database = DatabaseEngine(path: root.appendingPathComponent("preservation.sqlite3").path)
+        try await database.open()
+
+        let initialDoc = ReaderDocument(
+            version: 5,
+            blocks: [
+                ReaderBlock(kind: .paragraph, text: "Initial rich paragraph 1"),
+                ReaderBlock(kind: .paragraph, text: "Initial rich paragraph 2"),
+            ],
+            images: [ReaderImageCandidate(url: "https://example.com/lead.jpg", origin: .body)],
+            leadImageURL: "https://example.com/lead.jpg"
+        )
+        let article = FeedArticle(
+            title: "Test Article",
+            link: "https://example.com/story",
+            guid: "test-guid-1",
+            description: "Test description",
+            pubDate: Date(),
+            source: "Test Source",
+            fullContent: "Initial rich paragraph 1\n\nInitial rich paragraph 2",
+            readerDocument: initialDoc
+        )
+        try await database.upsertArticles([article])
+
+        var stored = try await database.fetchArticles(limit: 1, id: article.id).first
+        precondition(stored?.readerDocument != nil, "Article must have readerDocument after initial upsert")
+
+        // 1. Updating enrichment with content ONLY (no readerDocument) MUST NOT erase reader_document
+        _ = try await database.updateEnrichment(
+            articleId: article.id,
+            update: .init(
+                content: "Initial rich paragraph 1\n\nInitial rich paragraph 2 (enriched)", readerDocument: nil)
+        )
+        stored = try await database.fetchArticles(limit: 1, id: article.id).first
+        precondition(
+            stored?.readerDocument != nil,
+            "updateEnrichment without readerDocument must NOT wipe stored readerDocument to NULL!")
+        precondition(stored?.readerDocument?.blocks.count == 2, "Stored readerDocument blocks must be preserved")
+
+        // 2. Incoming teaser snippet must NOT overwrite stored rich readerDocument or content
+        let teaser = FeedArticle(
+            title: "Test Article",
+            link: "https://example.com/story",
+            guid: "test-guid-1",
+            description: "Test description",
+            pubDate: Date(),
+            source: "Test Source",
+            fullContent: "Short teaser snippet",
+            contentFetched: false,
+            readerDocument: ReaderDocument(
+                version: 6,
+                blocks: [ReaderBlock(kind: .paragraph, text: "Short teaser snippet")],
+                isComplete: false
+            )
+        )
+        try await database.upsertArticles([teaser])
+        stored = try await database.fetchArticles(limit: 1, id: article.id).first
+        precondition(
+            stored?.readerDocument?.blocks.count == 2, "Incoming teaser must NOT overwrite stored rich readerDocument!")
+        precondition(
+            stored?.fullContent?.contains("Initial rich paragraph 1") == true, "Stored full content must be preserved!")
+        precondition(
+            stored?.fullContent?.contains("Short teaser snippet") == false,
+            "Incoming teaser content must NOT overwrite stored content!")
     }
 }

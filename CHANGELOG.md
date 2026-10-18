@@ -2,6 +2,16 @@
 
 ## Unreleased — 18 October 2026
 
+- Failed World Tension reassessments keep current unscored panel headlines visible alongside accepted history. Feed subscription observers and pending scope updates stop at termination.
+
+- Use recognized categories for section membership and whole-word fallback, fixing substring topic matches (such as AI inside Dubai) and promotional “free app” text, repair stored classifications and publisher search labels in SQLite v22 (including custom Financial Times section feeds and `ft` search), and preserve separate RSS category boundaries.
+- Keep unsubscribed World Tension panel stories outside the reading feed, search, unread counts and Briefing; preserve the panel corpus and any read or saved stories.
+- Move queued stories into the leading toolbar. Updates uses native grouped settings; reader summaries scale with reading size and collapse unambiguous honorific aliases.
+- Reader v6 overhaul: excludes publisher furniture (video player error notices, Google Preferred Source CTAs, CBC standards footers, editor credits, standalone datelines), decodes HTML entities in titles and categories, cleans newline-corrupted sources in SQLite v23, prevents `reader_document` from being wiped to `NULL` during enrichment, prevents incoming RSS teasers from overwriting stored full web articles, and automatically triggers on-demand article extraction when teasers are opened. Polished reader presentation: eliminated duplicate hero images, removed gray letterbox bars behind images, stripped raw CDN host labels, and added context-aware editorial block spacing.
+- Reader v5 prefers complete publisher bodies, excludes Guardian footer furniture and related-story images, rejects subscription offers as prose, and constrains the reading column and image upscaling.
+- Prefetch upcoming card images through the protected shared cache, coalesce duplicate image loads, and publish one library snapshot per feed refresh. Background refresh arrivals no longer animate the list.
+- World Tension retries one rejected assessment with a more conservative prompt, retaining factual validation. Rejected results show unscored panel headlines and never save a score.
+
 - Full notifications convert supported reader images such as WebP to bounded PNG attachments and reuse the selected reader lead image. Attachment failures now produce privacy-safe diagnostics; notification triage still does not wait for publisher-page image lookup.
 
 - On-device CoreML sentence embeddings (`all-MiniLM-L6-v2`) and SQLite v21 vector storage for articles, enabling sub-millisecond local inference and Accelerate `vDSP` cosine similarity calculations (#127, #307).
@@ -10,7 +20,7 @@
 
 - Event overviews show publisher headlines and cited excerpts without generated introduction or factual prose. AI-disabled requests are final; older generated overviews regenerate. Energy policy still bounds publisher extraction and warmups; model updates preserve current excerpts.
 - Minor-rated stories remain visible, eligible for image lookup and notifications, and subject only to ordinary retention. Old importance-expiry tombstones no longer suppress returning feed items. Refresh no longer schedules importance scoring.
-- Briefing keeps source/category diversity first, then ranks by publisher coverage, existing stored importance and recency. Today/archive remain chronological; an existing Briefing stays frozen.
+- Briefing selects one publication per event and at most two per publisher, ranked by existing stored importance, publisher coverage, recent read/save category interests, diversity and recency. Today/archive remain chronological; an existing Briefing stays frozen.
 - Event matching requires shared specific evidence and no conflict on every compared pair, retaining two-thirds compatibility and removing model promotions. Active legacy groups are revalidated transactionally on matcher upgrade; article IDs and read/save state remain intact, and inactive archived groups are preserved.
 - Matcher v6 revalidates active v5 memberships using the primary-headline-clause guard and cross-tagged entity corrections. This narrows background-clause merges; the existing English holdout still falls below the 97% precision target.
 - The developing-story relation backend is parked outside release. The isolated collector was snapshotted and disabled; its files and prior evidence were preserved.

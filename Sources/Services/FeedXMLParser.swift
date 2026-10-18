@@ -104,7 +104,8 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
         if channelTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             channelTitle = extractSourceFromURL(feedURL)
         }
-        let name = channelTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        let name = (channelTitle.components(separatedBy: .newlines).first ?? channelTitle)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty else { return }
         for i in articles.indices {
             let src = articles[i].source
@@ -310,6 +311,9 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
         let elementName = normalizedElement(elementName, namespaceURI: namespaceURI)
         if insideItem {
             appendItemXML("</\(elementName)>")
+            if ["category", "dc:subject"].contains(elementName), !isCollectingContentEncoded {
+                itemCategory += "\n"
+            }
             if elementName == "link", !isCollectingContentEncoded { itemLink = resolvedURL(itemLink) }
         }
         if contentDepth == currentNestingDepth {
@@ -322,6 +326,10 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
         _ = elementStack.popLast()
         _ = baseURLs.popLast()
         currentElement = elementStack.last ?? ""
+
+        if elementName == "title" && !insideItem {
+            parsingChannelTitle = false
+        }
 
         if elementName == "item" || elementName == "entry" {
             insideItem = false
@@ -336,19 +344,27 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
         let rawDate = itemPubDate.isEmpty ? (itemUpdated.isEmpty ? itemDublinDate : itemUpdated) : itemPubDate
         let guid = itemGuid.trimmingCharacters(in: .whitespacesAndNewlines)
         let link = itemDocumentLink(guid: guid)
-        let (fullContent, extracted) = itemContent(articleLink: link)
+        let content = itemContent(articleLink: link)
         if itemImageUrl.isEmpty { itemImageUrl = extractImageFromHTML(itemDescription) ?? "" }
-        if itemImageUrl.isEmpty, fullContent != nil { itemImageUrl = extractImageFromHTML(itemContentEncoded) ?? "" }
+        if itemImageUrl.isEmpty, content.text != nil { itemImageUrl = extractImageFromHTML(itemContentEncoded) ?? "" }
         let category = itemCategory.components(separatedBy: .newlines)
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.first { !$0.isEmpty }
+            .map {
+                ContentExtractionPipeline.shared.decodeHTMLEntities($0).trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+            .first { !$0.isEmpty }
+        let decodedTitle = ContentExtractionPipeline.shared.decodeHTMLEntities(itemTitle)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let doc = itemReaderDocument(
+            from: content.extracted, cleaned: content.text, isTeaser: content.isTeaser, isPlainText: content.isPlainText
+        )
         let article = FeedArticle(
-            title: itemTitle.trimmingCharacters(in: .whitespacesAndNewlines),
+            title: decodedTitle,
             link: resolvedURL(link, baseURL: itemBaseURL), guid: guid.isEmpty ? nil : guid,
             description: stripHTMLSimple(itemDescription).trimmingCharacters(in: .whitespacesAndNewlines),
             pubDate: DateParser.parse(rawDate) ?? DateParser.unknownDate, source: itemSourceName(),
             imageUrl: itemImageUrl.isEmpty ? nil : resolvedURL(itemImageUrl), aiSummary: nil,
-            fullContent: extracted?.content ?? fullContent, category: category,
-            contentFetched: fullContent != nil, readerDocument: itemReaderDocument(from: extracted))
+            fullContent: content.extracted?.content ?? content.text, category: category,
+            contentFetched: content.text != nil, readerDocument: doc)
         articles.append(article)
         parsedItems.append((itemXML, itemBaseURL))
     }
@@ -362,7 +378,8 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
     }
 
     private func itemSourceName() -> String {
-        var source = channelTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        var source = (channelTitle.components(separatedBy: .newlines).first ?? channelTitle)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
         if source.isEmpty || source == "Unknown" {
             source = extractSourceFromURL(itemLink.trimmingCharacters(in: .whitespacesAndNewlines))
         }
@@ -372,7 +389,14 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
         return source.isEmpty ? "Feed" : source
     }
 
-    private func itemContent(articleLink: String) -> (String?, ExtractionOutcome?) {
+    private struct ItemContent {
+        let text: String?
+        let extracted: ExtractionOutcome?
+        let isTeaser: Bool
+        let isPlainText: Bool
+    }
+
+    private func itemContent(articleLink: String) -> ItemContent {
         let trimmed = itemContentEncoded.trimmingCharacters(in: .whitespacesAndNewlines)
         let plainText =
             itemContentIsPlainText || (!itemContentIsXHTML && !trimmed.contains("<") && trimmed.contains("\n"))
@@ -381,13 +405,41 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
         let extracted =
             plainText
             ? nil : ContentExtractionPipeline.shared.extractFromHTML(trimmed, baseUrl: resolvedURL(articleLink))
-        return (cleaned, extracted)
+        let isTeaser = extracted?.document?.hasCompleteArticleBody == false || (cleaned?.count ?? 0) < 600
+        return ItemContent(text: cleaned, extracted: extracted, isTeaser: isTeaser, isPlainText: plainText)
     }
 
-    private func itemReaderDocument(from extracted: ExtractionOutcome?) -> ReaderDocument? {
+    private func itemReaderDocument(
+        from extracted: ExtractionOutcome?, cleaned: String?, isTeaser: Bool, isPlainText: Bool
+    ) -> ReaderDocument? {
+        guard !isPlainText else { return nil }
         var doc: ReaderDocument? = if case .success(_, _, let d) = extracted { d } else { nil }
+        if doc == nil, let cleaned, !cleaned.isEmpty {
+            let paras = cleaned.components(separatedBy: "\n\n")
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+                .map { ReaderBlock(kind: .paragraph, text: $0) }
+            if !paras.isEmpty {
+                doc = ReaderDocument(
+                    version: ReaderDocument.currentVersion,
+                    blocks: paras,
+                    images: itemImageCandidates.isEmpty ? nil : itemImageCandidates,
+                    leadImageURL: nil,
+                    isComplete: !isTeaser
+                )
+            }
+        }
+        if isTeaser {
+            doc?.isComplete = false
+        }
         if !itemImageCandidates.isEmpty {
-            doc = ReaderDocument(blocks: doc?.blocks ?? [], images: (doc?.images ?? []) + itemImageCandidates)
+            doc = ReaderDocument(
+                version: doc?.version ?? ReaderDocument.currentVersion,
+                blocks: doc?.blocks ?? [],
+                images: (doc?.images ?? []) + itemImageCandidates,
+                leadImageURL: doc?.leadImageURL,
+                isComplete: doc?.isComplete
+            )
         }
         return doc?.curated(feedImage: itemImageUrl.isEmpty ? nil : resolvedURL(itemImageUrl), title: itemTitle)
     }
@@ -439,7 +491,8 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
 
     private func rssArticle(_ item: FeedKit.RSSFeedItem, keeping article: FeedArticle) -> FeedArticle {
         let dc = item.dublinCore
-        let title = article.title.isEmpty ? item.title ?? dc?.dcTitle ?? "" : article.title
+        let rawTitle = article.title.isEmpty ? item.title ?? dc?.dcTitle ?? "" : article.title
+        let title = ContentExtractionPipeline.shared.decodeHTMLEntities(rawTitle)
         let desc =
             article.description.isEmpty
             ? stripHTMLSimple(item.description ?? dc?.dcDescription ?? "") : article.description
@@ -454,7 +507,8 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
     }
 
     private func atomArticle(_ item: FeedKit.AtomFeedEntry, keeping article: FeedArticle) -> FeedArticle {
-        let title = article.title.isEmpty ? item.title ?? "" : article.title
+        let rawTitle = article.title.isEmpty ? item.title ?? "" : article.title
+        let title = ContentExtractionPipeline.shared.decodeHTMLEntities(rawTitle)
         let desc = article.description.isEmpty ? stripHTMLSimple(item.summary?.value ?? "") : article.description
         let date =
             article.pubDate == DateParser.unknownDate
@@ -494,8 +548,13 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
         var result = article
         result.imageUrl = imageURL
         if article.readerDocument != nil || !images.isEmpty {
-            result.readerDocument = ReaderDocument(blocks: article.readerDocument?.blocks ?? [], images: images)
-                .curated(feedImage: imageURL, title: article.title)
+            result.readerDocument = ReaderDocument(
+                version: article.readerDocument?.version ?? ReaderDocument.currentVersion,
+                blocks: article.readerDocument?.blocks ?? [],
+                images: images,
+                leadImageURL: article.readerDocument?.leadImageURL,
+                isComplete: article.readerDocument?.isComplete
+            ).curated(feedImage: imageURL, title: article.title)
         }
         return result
     }

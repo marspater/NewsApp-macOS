@@ -25,12 +25,44 @@ extension EnvironmentValues {
 
 /// Decoded images by source URL, so a card scrolled back into view shows its image at once instead of fetching and
 /// decoding it again. NSCache evicts under memory pressure.
-@MainActor private enum DecodedImageCache {
+@MainActor enum DecodedImageCache {
     static let images: NSCache<NSURL, CGImage> = {
         let cache = NSCache<NSURL, CGImage>()
         cache.totalCostLimit = 192 * 1024 * 1024
         return cache
     }()
+    private static var pending: [URL: Task<CGImage, Error>] = [:]
+
+    static func load(_ url: URL, using loader: @escaping @Sendable (URL) async throws -> CGImage) async throws
+        -> CGImage
+    {
+        if let image = images.object(forKey: url as NSURL) { return image }
+        if let task = pending[url] { return try await task.value }
+        // Shared loads survive one card disappearing; NSCache bounds retained decoded images.
+        let task = Task { try await loader(ReaderImageCandidate.preferredRendition(of: url)) }
+        pending[url] = task
+        defer { pending[url] = nil }
+        let image = try await task.value
+        images.setObject(image, forKey: url as NSURL, cost: image.bytesPerRow * image.height)
+        return image
+    }
+
+    static func prefetch(_ urls: [URL], using loader: @escaping @Sendable (URL) async throws -> CGImage) async {
+        var seen = Set<URL>()
+        var iterator = urls.filter { seen.insert($0).inserted }.makeIterator()
+        await withTaskGroup(of: Void.self) { group in
+            for _ in 0..<3 {
+                if let url = iterator.next() { group.addTask { _ = try? await load(url, using: loader) } }
+            }
+            while await group.next() != nil {
+                guard !Task.isCancelled else {
+                    group.cancelAll()
+                    return
+                }
+                if let url = iterator.next() { group.addTask { _ = try? await load(url, using: loader) } }
+            }
+        }
+    }
 }
 
 // Feed image URLs use the same bounded, validated network path as article content.
@@ -71,10 +103,8 @@ struct ArticleRemoteImage<Content: View>: View {
                 }
                 phase = .empty
                 do {
-                    let image = try await loadImage(ReaderImageCandidate.preferredRendition(of: url))
+                    let image = try await DecodedImageCache.load(url, using: loadImage)
                     try Task.checkCancellation()
-                    DecodedImageCache.images.setObject(
-                        image, forKey: url as NSURL, cost: image.bytesPerRow * image.height)
                     phase = .success(Self.image(image))
                     NotificationCenter.default.post(
                         name: .readerImageFinished, object: url, userInfo: ["success": true])

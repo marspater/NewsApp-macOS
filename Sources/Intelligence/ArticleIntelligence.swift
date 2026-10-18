@@ -242,11 +242,16 @@ extension EntityResult {
             else { return nil }
             return EntityResult(name: name, type: entity.type, confidence: entity.confidence)
         }
+        func personWords(_ name: String) -> [Substring] {
+            let titles: Set<Substring> = ["mr", "mrs", "ms", "dr", "sir", "president", "senator"]
+            return Array(MuteRules.words(name).drop(while: { titles.contains($0) }))
+        }
         return normalized.filter { entity in
-            guard entity.type == .person, !entity.name.contains(" ") else { return true }
+            let words = personWords(entity.name)
+            guard entity.type == .person, words.count == 1 else { return true }
             let matches = normalized.filter {
-                $0.type == .person && $0.name.contains(" ")
-                    && $0.name.split(separator: " ").last?.localizedCaseInsensitiveCompare(entity.name) == .orderedSame
+                let full = personWords($0.name)
+                return $0.type == .person && full.count > 1 && full.last == words.last
             }
             return matches.count != 1
         }
@@ -528,10 +533,14 @@ public final class NaturalLanguageTopicClassifier: TopicClassifying {
             return TopicResult(category: matched.rawValue, confidence: 0.95, evidence: [rssCat])
         }
 
-        // 2. Score title, description, and body against taxonomy
-        let titleLower = title.lowercased()
-        let descLower = description.lowercased()
-        let bodyLower = (text ?? "").prefix(2000).lowercased()
+        return Self.classifyContent(title: title, description: description, text: text)
+    }
+
+    static func classifyContent(title: String, description: String, text: String?) -> TopicResult? {
+        // Score whole words; short cues such as AI must not match Dubai, said or aircraft.
+        let titleLower = MuteRules.paddedPhrase(title)
+        let descLower = MuteRules.paddedPhrase(description)
+        let bodyLower = MuteRules.paddedPhrase(String((text ?? "").prefix(2000)))
         let hasTitle = !titleLower.isEmpty
         let hasDesc = !descLower.isEmpty
         let hasBody = !bodyLower.isEmpty
@@ -545,15 +554,16 @@ public final class NaturalLanguageTopicClassifier: TopicClassifying {
             var matched: [String] = []
 
             for kw in item.keywords {
-                if hasTitle && titleLower.contains(kw) {
+                let phrase = MuteRules.paddedPhrase(kw)
+                if hasTitle && titleLower.contains(phrase) {
                     score += 3.0
                     matched.append(kw)
                 }
-                if hasDesc && descLower.contains(kw) {
+                if hasDesc && descLower.contains(phrase) {
                     score += 1.5
                     matched.append(kw)
                 }
-                if hasBody && bodyLower.contains(kw) {
+                if hasBody && bodyLower.contains(phrase) {
                     score += 0.5
                 }
             }
@@ -1046,6 +1056,7 @@ public enum ArticleContentRedactor {
     ]
 
     private static let boilerplateLineExact: Set<String> = [
+        "most viewed", "explore more on these topics",
         "comments", "comment", "read full article", "read more", "continue reading",
         "view comments", "leave a comment", "share this article", "share this post",
         "related articles", "related topics", "more on this story", "source", "read original", "full article",
@@ -1137,6 +1148,34 @@ public enum ArticleContentRedactor {
             return true
         }
         if rawLower.hasPrefix("photo by ") || rawLower.hasPrefix("image credit:") || rawLower.hasPrefix("photo credit:")
+        {
+            return true
+        }
+        // Video errors and playback placeholders (BBC News, Al Jazeera, France 24)
+        if rawLower.contains("to play this video you need to enable javascript")
+            || rawLower.contains("to view this video please enable javascript")
+            || rawLower.contains("this video can not be played")
+            || rawLower.contains("this video cannot be played")
+            || (rawLower.hasPrefix("video duration") && rawLower.count < 80)
+            || (rawLower.hasPrefix("watch:") && rawLower.count < 60)
+        {
+            return true
+        }
+        // Google Preferred Source prompts (CNA, DW, Google News CTAs)
+        if rawLower.contains("preferred source on google")
+            || rawLower.contains("trusted source to help google")
+            || rawLower.contains("follow us on google news")
+        {
+            return true
+        }
+        // Editorial standards, corrections, credits footers (CBC, DW, The Hindu)
+        if rawLower.hasPrefix("cbc's journalistic standards")
+            || rawLower.hasPrefix("corrections and clarifications")
+            || (rawLower.hasPrefix("edited by:") && rawLower.count < 100)
+            || (rawLower.hasPrefix("published - ") && rawLower.count < 100)
+            || (rawLower.hasPrefix("by ") && rawLower.count < 100
+                && (rawLower.contains("correspondent") || rawLower.contains("reporter")
+                    || rawLower.contains("editor")))
         {
             return true
         }

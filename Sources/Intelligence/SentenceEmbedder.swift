@@ -156,7 +156,14 @@ actor SentenceEmbedder {
         let effectiveVocabURL = vocabURL ?? defaultVocabURL
 
         if FileManager.default.fileExists(atPath: effectiveVocabURL.path) {
-            self.tokenizer = try? BertWordPieceTokenizer(vocabURL: effectiveVocabURL)
+            do {
+                self.tokenizer = try BertWordPieceTokenizer(vocabURL: effectiveVocabURL)
+            } catch {
+                logger.error(
+                    "Failed to initialize BertWordPieceTokenizer from \(effectiveVocabURL.path): \(error.localizedDescription)"
+                )
+                self.tokenizer = nil
+            }
         } else {
             self.tokenizer = nil
         }
@@ -164,7 +171,12 @@ actor SentenceEmbedder {
         if FileManager.default.fileExists(atPath: effectiveModelURL.path) {
             let config = MLModelConfiguration()
             config.computeUnits = .all
-            self.model = try? MLModel(contentsOf: effectiveModelURL, configuration: config)
+            do {
+                self.model = try MLModel(contentsOf: effectiveModelURL, configuration: config)
+            } catch {
+                logger.error("Failed to load MLModel from \(effectiveModelURL.path): \(error.localizedDescription)")
+                self.model = nil
+            }
         } else {
             self.model = nil
         }

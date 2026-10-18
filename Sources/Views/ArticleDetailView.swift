@@ -378,7 +378,7 @@ struct ArticleDetailView: View {
                     heroImageHeader
 
                     if appSettings.aiEnabled || currentArticle.aiSummary != nil {
-                        DisclosureGroup("On-device summary", isExpanded: summaryExpandedBinding) {
+                        DisclosureGroup("Summary & Key Points", isExpanded: summaryExpandedBinding) {
                             aiAnalysisSection.padding(.top, AppSpacing.sm)
                         }
                         .font(AppTypography.body)
@@ -435,10 +435,22 @@ struct ArticleDetailView: View {
 
     @ViewBuilder
     private var heroImageHeader: some View {
-        if let imageUrl = currentArticle.readerDocument?.selectedImage(fallback: currentArticle.imageUrl)
-            ?? (currentArticle.readerDocument == nil ? currentArticle.imageUrl : nil), let url = URL(string: imageUrl),
-            currentArticle.readerDocument?.blocks.contains(where: { $0.kind == .figure && $0.imageURL == imageUrl })
-                != true
+        let hasEarlyFigure =
+            currentArticle.readerDocument?.blocks.prefix(2).contains(where: { $0.kind == .figure }) == true
+        if !hasEarlyFigure,
+            let imageUrl = currentArticle.readerDocument?.selectedImage(fallback: currentArticle.imageUrl)
+                ?? (currentArticle.readerDocument == nil ? currentArticle.imageUrl : nil),
+            let url = URL(string: imageUrl),
+            currentArticle.readerDocument?.blocks.contains(where: {
+                guard $0.kind == .figure, let figUrl = $0.imageURL else { return false }
+                if figUrl == imageUrl { return true }
+                if let u1 = URL(string: figUrl), let u2 = URL(string: imageUrl),
+                    u1.lastPathComponent == u2.lastPathComponent && !u1.lastPathComponent.isEmpty
+                {
+                    return true
+                }
+                return false
+            }) != true
         {
             let candidate = currentArticle.readerDocument?.images?.first { $0.url == imageUrl }
             ReaderFigureView(
@@ -560,16 +572,40 @@ struct ArticleDetailView: View {
                     : !ArticleContentRedactor.isBoilerplateLine(block.text)
             }
         // The page's own headline repeats the title above it.
-        if let first = blocks.firstIndex(where: { $0.kind != .figure }),
-            EventFeedSummary.titleKey(blocks[first].text) == EventFeedSummary.titleKey(currentArticle.title)
-        {
-            blocks.remove(at: first)
+        func normalizedHeadline(_ text: String) -> String {
+            var s = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            for sep in [" - ", " | ", " – ", " — "] {
+                if let r = s.range(of: sep, options: .backwards) {
+                    s = String(s[..<r.lowerBound])
+                }
+            }
+            return EventFeedSummary.titleKey(s)
+        }
+        let articleKey = normalizedHeadline(currentArticle.title)
+        if let first = blocks.firstIndex(where: { $0.kind != .figure }) {
+            let blockKey = normalizedHeadline(blocks[first].text)
+            if blockKey == articleKey || (!articleKey.isEmpty && blockKey.hasPrefix(articleKey))
+                || (!blockKey.isEmpty && articleKey.hasPrefix(blockKey))
+            {
+                blocks.remove(at: first)
+            }
         }
         let leadIndex = blocks.firstIndex { $0.kind == .paragraph }
-        return VStack(alignment: .leading, spacing: AppSpacing.lg * readerTextScale) {
+        return VStack(alignment: .leading, spacing: 0) {
             // Positions are stable within the immutable, article-keyed reader document.
             ForEach(Array(blocks.enumerated()), id: \.offset) { index, block in
+                let nextBlock = index + 1 < blocks.count ? blocks[index + 1] : nil
+                let bottomSpacing: CGFloat = {
+                    if block.kind == .listItem && nextBlock?.kind == .listItem {
+                        return AppSpacing.xs * readerTextScale
+                    }
+                    if block.kind == .heading || block.kind == .subheading {
+                        return AppSpacing.sm * readerTextScale
+                    }
+                    return AppSpacing.lg * readerTextScale
+                }()
                 readerBlock(block, isLead: index == leadIndex)
+                    .padding(.bottom, bottomSpacing)
                     .accessibilityLinkedGroup(id: currentArticle.id, in: storyParagraphs)
             }
         }
@@ -1053,7 +1089,7 @@ struct ArticleDetailView: View {
             }
             .accessibilityElement(children: .combine)
             .accessibilityLabel("Analyzing story with on-device AI")
-            .padding(AppSpacing.sm)
+            .padding(AppSpacing.md)
             .background(AppColor.surface, in: RoundedRectangle(cornerRadius: AppRadius.card))
         } else if let analysis = analysis {
             VStack(alignment: .leading, spacing: AppSpacing.sm) {
@@ -1064,28 +1100,27 @@ struct ArticleDetailView: View {
                 )
 
                 Text(analysis.summary)
-                    .font(AppTypography.body)
+                    .font(AppTypography.overviewFont(.body, scale: readerTextScale))
                     .foregroundColor(readableText(0.92))
-                    .lineSpacing(AppTypography.bodyLineSpacing(for: themeManager.articleTheme))
+                    .lineSpacing(AppTypography.bodyLineSpacing(for: themeManager.articleTheme) * readerTextScale)
                     .textSelection(.enabled)
 
                 // Key Takeaways
                 if !analysis.keyPoints.isEmpty {
-                    VStack(alignment: .leading, spacing: AppSpacing.xs) {
+                    Divider().padding(.vertical, AppSpacing.xs)
+                    VStack(alignment: .leading, spacing: AppSpacing.sm) {
                         Text("Key Takeaways")
                             .font(AppTypography.label)
                             .foregroundColor(AppColor.secondaryText)
                             .padding(.top, AppSpacing.textStack)
 
                         ForEach(analysis.keyPoints, id: \.self) { point in
-                            HStack(alignment: .top, spacing: AppSpacing.xs) {
-                                Circle()
-                                    .fill(AppColor.intelligence.opacity(0.8))
-                                    .frame(width: 5, height: 5)
-                                    .padding(.top, AppSpacing.eyebrowGap)
+                            HStack(alignment: .firstTextBaseline, spacing: AppSpacing.sm) {
+                                Text("•")
+                                    .foregroundStyle(AppColor.secondaryText)
                                     .accessibilityHidden(true)
                                 Text(point)
-                                    .font(AppTypography.body)
+                                    .font(AppTypography.overviewFont(.body, scale: readerTextScale))
                                     .foregroundColor(readableText(0.88))
                                     .textSelection(.enabled)
                             }
@@ -1107,7 +1142,7 @@ struct ArticleDetailView: View {
                         .foregroundStyle(AppColor.secondaryText)
                 }
             }
-            .padding(AppSpacing.sm)
+            .padding(AppSpacing.md)
             .background(AppColor.surface, in: RoundedRectangle(cornerRadius: AppRadius.card))
         } else if let error = analysisError {
             NoticeView(tint: AppColor.warning) {
@@ -1136,12 +1171,12 @@ struct ArticleDetailView: View {
                 IntelligenceLabel("AI-generated summary")
 
                 Text(ai)
-                    .font(AppTypography.body)
+                    .font(AppTypography.overviewFont(.body, scale: readerTextScale))
                     .foregroundColor(readableText(0.92))
-                    .lineSpacing(AppTypography.bodyLineSpacing(for: themeManager.articleTheme))
+                    .lineSpacing(AppTypography.bodyLineSpacing(for: themeManager.articleTheme) * readerTextScale)
                     .textSelection(.enabled)
             }
-            .padding(AppSpacing.sm)
+            .padding(AppSpacing.md)
             .background(AppColor.surface, in: RoundedRectangle(cornerRadius: AppRadius.card))
         }
     }
@@ -1163,7 +1198,7 @@ struct ArticleDetailView: View {
         // A stored document stands in for extraction only with publisher text; feed media alone does not.
         if !forceRefresh,
             currentArticle.readerDocument.map({
-                (1...ReaderDocument.currentVersion).contains($0.version) && $0.hasPublisherText
+                $0.version == ReaderDocument.currentVersion && $0.hasPublisherText && $0.hasCompleteArticleBody
             }) == true,
             let existing = currentArticle.fullContent, !ArticleContentRedactor.redactAndSplit(existing).isEmpty
         {
@@ -1453,24 +1488,32 @@ struct ReaderFigureView: View {
         VStack(alignment: .leading, spacing: AppSpacing.sm) {
             ArticleRemoteImage(url: url) { phase in
                 ZStack {
-                    AppColor.surface
-                        .accessibilityHidden(true)
                     switch phase {
                     case .success(let image):
                         image.resizable().aspectRatio(contentMode: .fit)
                             .accessibilityLabel(Self.effectiveImageAlt(for: block))
                     case .failure:
-                        Label("Image unavailable", systemImage: "photo").foregroundStyle(AppColor.secondaryText)
+                        AppColor.surface
+                            .aspectRatio(aspectRatio, contentMode: .fit)
+                            .overlay {
+                                Label("Image unavailable", systemImage: "photo").foregroundStyle(AppColor.secondaryText)
+                            }
                     case .empty:
-                        ProgressView().accessibilityLabel("Loading story image")
+                        AppColor.surface
+                            .aspectRatio(aspectRatio, contentMode: .fit)
+                            .overlay {
+                                ProgressView().accessibilityLabel("Loading story image")
+                            }
                     @unknown default: EmptyView()
                     }
                 }
-                .aspectRatio(aspectRatio, contentMode: .fit)
-                .frame(maxWidth: .infinity)
+                .frame(
+                    maxWidth: DecodedImageCache.images.object(forKey: url as NSURL).map { CGFloat($0.width) }
+                        ?? .infinity
+                )
                 .clipShape(RoundedRectangle(cornerRadius: AppRadius.card))
             }
-            if !block.text.isEmpty {
+            if !block.text.isEmpty && block.text.lowercased() != "article image" {
                 Text(block.text).font(AppTypography.readerCaptionFont(scale: textScale)).foregroundStyle(
                     AppColor.secondaryText
                 )
@@ -1484,9 +1527,6 @@ struct ReaderFigureView: View {
                 )
                 .accessibilityLabel("Image credit: " + credit)
             }
-            Text("Image source: " + (url.host ?? "Publisher"))
-                .font(AppTypography.readerCaptionFont(scale: textScale)).foregroundStyle(AppColor.secondaryText)
-                .textSelection(.enabled)
         }
     }
 

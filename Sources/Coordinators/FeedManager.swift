@@ -40,6 +40,8 @@ class FeedManager: NSObject, ObservableObject {
     private let imageFinder: StoryImageFinder
     private var isStopped = false
     private var storeUpdates: AnyCancellable?
+    private var subscriptionUpdates: AnyCancellable?
+    private var subscriptionTask: Task<Void, Never>?
     private var terminationObserver: AnyCancellable?
     /// Collection only: fetch, ingest and publish. Resolves to the newly stored articles.
     private var refreshTask: Task<[FeedArticle], Never>?
@@ -102,9 +104,35 @@ class FeedManager: NSObject, ObservableObject {
         self.wakeRefreshDelay = wakeRefreshDelay
         self.now = now
         super.init()
+        observeArticles()
+        observeSubscriptions()
+        observeLifecycle(powerEvents: powerEvents, schedulesRefresh: schedulesRefresh)
+        loadCachedArticles()
+        if schedulesRefresh { startBackgroundFetch() }
+    }
+
+    private func observeArticles() {
         storeUpdates = articleStore.$articles.sink { [weak self] articles in
             self?.articles = articles
         }
+    }
+
+    private func observeSubscriptions() {
+        subscriptionUpdates = appSettings.$feedURLs
+            .sink { [weak self] subscriptions in
+                guard let self, !isStopped else { return }
+                let hidden = Set(TensionMethodology.v1.panel.map(\.url)).subtracting(subscriptions)
+                subscriptionTask?.cancel()
+                subscriptionTask = Task { [articleStore] in
+                    guard !Task.isCancelled else { return }
+                    await articleStore.database.setCollectionOnlyFeedURLs(Array(hidden))
+                    guard !Task.isCancelled else { return }
+                    await articleStore.refreshState()
+                }
+            }
+    }
+
+    private func observeLifecycle(powerEvents: NotificationCenter?, schedulesRefresh: Bool) {
         terminationObserver = NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)
             .sink { [weak self] _ in
                 MainActor.assumeIsolated { self?.stopBackgroundWork() }
@@ -120,25 +148,29 @@ class FeedManager: NSObject, ObservableObject {
                 },
             ]
         }
-        loadCachedArticles()
-        if schedulesRefresh { startBackgroundFetch() }
     }
 
     // MARK: - Feed URL Management (delegates to AppSettings)
 
-    func addFeed(url: String) {
+    @discardableResult
+    func addFeed(url: String) -> Bool {
         if let added = appSettings.addFeed(url: url) {
             cancelRefresh()
             feedStatuses[added] = .idle
             fetchFeeds()
+            return true
         }
+        return false
     }
 
     /// Subscribes to catalog feeds the user chose; one refresh covers the whole batch.
-    func addCatalogFeeds(_ feeds: [CatalogFeed]) {
-        guard appSettings.addCatalogFeeds(feeds) > 0 else { return }
+    @discardableResult
+    func addCatalogFeeds(_ feeds: [CatalogFeed]) -> Int {
+        let added = appSettings.addCatalogFeeds(feeds)
+        guard added > 0 else { return 0 }
         cancelRefresh()
         fetchFeeds()
+        return added
     }
 
     func removeFeed(url: String) {
@@ -216,23 +248,24 @@ class FeedManager: NSObject, ObservableObject {
     func articles(for section: String) -> [FeedArticle] {
         if section == "Today" || section == "Saved Stories" || section == "History" { return articles }
 
-        guard let keywords = ArticleSection.keywords[section] else {
-            return articles.filter { article in
-                let text = "\(article.title) \(article.description) \(article.category ?? "")".lowercased()
-                return text.contains(section.lowercased())
-            }
-        }
-
         return articles.filter { article in
-            let text = "\(article.title) \(article.description) \(article.category ?? "")".lowercased()
-            return keywords.contains { text.contains($0) }
+            ArticleSection.matches(
+                section, title: article.title, description: article.description, category: article.category)
         }
     }
 
     // MARK: - Feed Health
 
     func reloadFeedHealth() async {
-        guard let states = try? await articleStore.database.feedFetchStates() else { return }
+        let states: [String: FeedFetchState]
+        do {
+            states = try await articleStore.database.feedFetchStates()
+        } catch {
+            if !(error is CancellationError) {
+                logger.error("Failed to load feed fetch states: \(error.localizedDescription)")
+            }
+            return
+        }
         let now = Date()
         feedHealth = Dictionary(
             appSettings.feedURLs.map { ($0, FeedHealth(states[$0], now: now)) }, uniquingKeysWith: { first, _ in first }
@@ -357,6 +390,18 @@ class FeedManager: NSObject, ObservableObject {
 
     func stopBackgroundWork() {
         isStopped = true
+        subscriptionTask?.cancel()
+        subscriptionTask = nil
+        subscriptionUpdates?.cancel()
+        subscriptionUpdates = nil
+        storeUpdates?.cancel()
+        storeUpdates = nil
+        terminationObserver?.cancel()
+        terminationObserver = nil
+        for observer in powerObservers {
+            observer.cancel()
+        }
+        powerObservers.removeAll()
         backgroundTimer?.invalidate()
         backgroundTimer = nil
         backgroundActivity?.invalidate()
@@ -406,7 +451,13 @@ class FeedManager: NSObject, ObservableObject {
         // Rate before triage. Collection and its spinner have ended; another refresh can proceed.
         await waitForEventClustering()
         guard !Task.isCancelled, !isStopped else { return }
-        guard let eligible = try? await articleStore.database.notificationStoryIDs(newArticles.map(\.id)) else {
+        let eligible: Set<String>
+        do {
+            eligible = try await articleStore.database.notificationStoryIDs(newArticles.map(\.id))
+        } catch {
+            if !(error is CancellationError) {
+                logger.error("Failed to load notification-eligible story IDs: \(error.localizedDescription)")
+            }
             return
         }
         // Muting applies in every notification privacy mode; stored importance does not hide stories.
@@ -438,7 +489,7 @@ class FeedManager: NSObject, ObservableObject {
         var insertedIDs = Set<String>()
         var allParsed = [FeedArticle]()
         for res in results {
-            guard !Task.isCancelled else { return [] }
+            guard !Task.isCancelled else { break }
             guard targetURLs.contains(res.urlString) else { continue }
             if let err = res.error {
                 feedStatuses[res.urlString] = .failed(err)
@@ -453,11 +504,13 @@ class FeedManager: NSObject, ObservableObject {
                     allParsed.append(contentsOf: arts)
                     insertedIDs.formUnion(
                         await articleStore.batchUpsert(
-                            articles: arts, feedUrl: res.urlString, validators: res.validators))
+                            articles: arts, feedUrl: res.urlString, validators: res.validators, publish: false))
                 }
             }
         }
 
+        // Publish one coherent snapshot per collection, including any committed prefix if it was cancelled.
+        await articleStore.refreshState()
         guard !Task.isCancelled else { return [] }
         allParsed.sort { $0.pubDate > $1.pubDate }
 

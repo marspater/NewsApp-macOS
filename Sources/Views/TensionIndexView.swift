@@ -34,12 +34,18 @@ struct TensionIndexView: View {
     @State private var history: [WorldTensionReading]
     @State private var loading = false
     @State private var errorMessage: String?
+    @State private var unscoredHeadlines: [WorldTensionHeadline] = []
     @State private var selectedDay: Date?
     @State private var reassessment = 0
+    private let service: WorldTensionService
     private let onUpdate: ([WorldTensionReading]) -> Void
 
-    init(history: [WorldTensionReading] = [], onUpdate: @escaping ([WorldTensionReading]) -> Void = { _ in }) {
+    init(
+        history: [WorldTensionReading] = [], service: WorldTensionService = .shared,
+        onUpdate: @escaping ([WorldTensionReading]) -> Void = { _ in }
+    ) {
         _history = State(initialValue: history)
+        self.service = service
         self.onUpdate = onUpdate
     }
 
@@ -75,9 +81,23 @@ struct TensionIndexView: View {
                         ProgressView("Assessing international headlines…").frame(maxWidth: .infinity)
                     } else {
                         ContentUnavailableView(
-                            "No Assessment Yet", systemImage: "globe",
+                            errorMessage == nil ? "No Assessment Yet" : "Assessment Unavailable", systemImage: "globe",
                             description: Text(
                                 errorMessage ?? "Enable on-device AI and international panel collection in Settings."))
+                    }
+                    if appSettings.aiEnabled, appSettings.tensionCollectionOptIn,
+                        !unscoredHeadlines.isEmpty
+                    {
+                        VStack(alignment: .leading, spacing: AppSpacing.sm) {
+                            Text("Current Panel Headlines").font(AppTypography.headline)
+                            Text("No score was saved. These publisher headlines remain available to inspect.")
+                                .font(AppTypography.caption).foregroundStyle(AppColor.secondaryText)
+                            ForEach(unscoredHeadlines, id: \.id) { headline in
+                                Text(headline.title).font(AppTypography.body).textSelection(.enabled)
+                                Text(headline.publisher).font(AppTypography.caption).foregroundStyle(
+                                    AppColor.secondaryText)
+                            }
+                        }
                     }
                     if selected != nil, let errorMessage {
                         Text(errorMessage).font(AppTypography.caption).foregroundStyle(AppColor.caution)
@@ -219,16 +239,18 @@ struct TensionIndexView: View {
     private func load(force: Bool = false) async {
         if !appSettings.aiEnabled || !appSettings.tensionCollectionOptIn {
             history = []
+            unscoredHeadlines = []
             onUpdate([])
         }
         loading = true
         defer { loading = false }
         do {
-            let loaded = try await WorldTensionService.shared.assess(
+            let loaded = try await service.assess(
                 database: articleStore.database, now: Date(),
                 aiEnabled: appSettings.aiEnabled, collectionEnabled: appSettings.tensionCollectionOptIn, force: force)
             try Task.checkCancellation()
             history = loaded
+            unscoredHeadlines = []
             errorMessage = nil
             onUpdate(loaded)
         } catch is CancellationError { return } catch {
@@ -237,6 +259,14 @@ struct TensionIndexView: View {
                 let accepted = try? await articleStore.database.worldTensionHistory()
                 guard !Task.isCancelled, appSettings.aiEnabled, appSettings.tensionCollectionOptIn else { return }
                 if let accepted { history = accepted }
+                let now = Date()
+                if let rows = try? await articleStore.database.tensionCorpus(
+                    day: DateInterval(start: now.addingTimeInterval(-86400), end: now),
+                    feedURLs: TensionMethodology.v1.panel.map(\.url))
+                {
+                    guard !Task.isCancelled else { return }
+                    unscoredHeadlines = WorldTensionService.headlines(rows, prefix: "C", limit: 12)
+                }
             }
             errorMessage = error.localizedDescription
         }

@@ -35,7 +35,7 @@ The single design language for News on macOS. It applies to every change that ad
 ### 3.2 Where glass is allowed
 
 1. **System glass (preferred).** Toolbar items, the sidebar, the search field, segmented controls and buttons in the toolbar, menus, popovers, sheets and alerts adopt glass by themselves. Never restyle, re-tint or put a background behind them.
-2. **Custom glass, macOS 26 and later only.** A control that floats over scrolling content and is not in the toolbar: the queued-updates pill, floating Web-view or media controls, a future floating "back to overview" control. At most one tinted (prominent) glass control per view, and only for the primary action.
+2. **Custom glass, macOS 26 and later only.** A control that floats over scrolling content and is not in the toolbar: floating Web-view or media controls, a future floating "back to overview" control. At most one tinted (prominent) glass control per view, and only for the primary action.
 3. **Never glass.** Cards, list and sidebar rows, event coverage, tags and badges in content, the reader column, AI summary and overview panels, section headers, banners inside content, settings content, scroll backgrounds, anything nested in another glass surface.
 
 ### 3.3 Implementation rules
@@ -75,7 +75,7 @@ The single design language for News on macOS. It applies to every change that ad
 
 | Area | List | Reader |
 | --- | --- | --- |
-| Leading (`.navigation`) | System sidebar toggle | Back, Previous Story, Next Story |
+| Leading (`.navigation`) | System sidebar toggle, queued-stories button | Back, Previous Story, Next Story |
 | Center (`.principal`) | Nothing | Mode picker (Overview, Story, Web) |
 | Trailing (`.primaryAction`) | View options group (group by event, list or grid), Refresh, New Briefing when in Briefing | Save and Share group, Reading options, Web back and forward while in Web mode |
 
@@ -138,7 +138,7 @@ An event card is a story card followed by a coverage disclosure row (`AppTypogra
 
 - Empty, error and no-results states use `ContentUnavailableView` with a symbol, title, description and at most two actions. Diagnostic detail goes in a `DisclosureGroup` under it.
 - Loading a list or a story body shows `ProgressView` with a visible label; small inline indicators (event sources, a sidebar row) carry an accessibility label instead.
-- Queued updates appear as the floating glass updates pill (custom glass, section 3.2) at the top of the list, announced to VoiceOver; the list never moves under the reader.
+- Queued updates appear in the leading toolbar as a system-styled button, announced to VoiceOver; the list never moves under the reader.
 - Inline notices (citation highlight, extraction fallback) are content callouts: `AppColor.surface` or a 10–12 % semantic tint, the card radius, symbol plus text. Not glass.
 
 ## 9. Reader
@@ -245,7 +245,7 @@ Each pattern has one implementation; new code reuses it and extends it rather th
 | Eyebrow | Planned in `DesignSystem.swift` | Publisher and kicker lines in cards, reader and overview |
 | Intelligence label | Planned in `DesignSystem.swift` | Every generated-content heading and badge |
 | Masthead | `ArticleListView.swift` | List title and status line |
-| Updates pill | `ArticleListView.swift` | Queued-update control (custom glass) |
+| Updates button | `ArticleListView.swift` | Leading toolbar queued-update control |
 | Notice | Planned in `DesignSystem.swift` | Inline callouts in content |
 | Reading column | Planned in `DesignSystem.swift` | Measure and insets for reader and overview |
 | Empty states | `ContentUnavailableView` | All empty, error and no-result states |

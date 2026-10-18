@@ -39,6 +39,11 @@ public enum ExtractionOutcome: Equatable, Sendable {
         return nil
     }
 
+    public var document: ReaderDocument? {
+        if case .success(_, _, let doc) = self { return doc }
+        return nil
+    }
+
     public var failureReason: String? {
         switch self {
         case .success:
@@ -179,7 +184,16 @@ final class DOMElementNode: Sendable {
         for child in children {
             let childText = child.combinedText()
             if !childText.isEmpty {
-                if ["p", "div", "li"].contains(child.tag), !result.isEmpty { result += "\n" }
+                if ["p", "div", "li"].contains(child.tag), !result.isEmpty {
+                    result += "\n"
+                } else if !result.isEmpty,
+                    let lastChar = result.last, !lastChar.isWhitespace && !lastChar.isPunctuation,
+                    let firstChar = childText.first, !firstChar.isWhitespace && !firstChar.isPunctuation,
+                    ["span", "a", "b", "strong", "em", "i"].contains(child.tag)
+                        && !["span", "a", "b", "strong", "em", "i"].contains(tag)
+                {
+                    result += " "
+                }
                 result += childText
             }
         }
@@ -200,6 +214,11 @@ final class DOMElementNode: Sendable {
 
     var isReaderExcluded: Bool {
         if isHidden || isNavigationCard { return true }
+        if ["p", "h1", "h2", "h3", "h4", "h5", "h6", "li"].contains(tag),
+            ArticleContentRedactor.isBoilerplateLine(text.isEmpty ? children.map { $0.combinedText() }.joined() : text)
+        {
+            return true
+        }
         // BBC renders this listening CTA as ordinary prose; require its exact media links.
         if tag == "p" {
             let links = findNodes(tag: "a").compactMap { $0.attributes["href"] }
@@ -241,7 +260,7 @@ final class DOMElementNode: Sendable {
     private static let auxiliaryPattern =
         (try? NSRegularExpression(
             pattern:
-                #"(?i)(?:^|[^a-z0-9])(?:comments?|comment-thread|disqus|related(?:-content|-stories|-articles)?|links-block|newsletter|byline|timestamp-block|recommendations?|social-share|share-tools|promo|advertisement|outbrain|taboola|eventpromo|promolist|topiclist|uploaderembed)(?:$|[^a-z0-9])"#
+                #"(?i)(?:^|[^a-z0-9])(?:comments?|comment-thread|disqus|also-read|read-more|most-?viewed|most-?popular|onward|onwards|submeta|subscription|paywall|related(?:-content|-stories|-articles)?|links-block|newsletter|byline|timestamp-block|recommendations?|social-share|share-tools|promo|advertisement|outbrain|taboola|eventpromo|promolist|topiclist|uploaderembed)(?:$|[^a-z0-9])"#
         )) ?? NSRegularExpression()
 
     func readingBlocks(allowDivFallback: Bool = true) -> [DOMElementNode] {
@@ -316,7 +335,17 @@ final class DOMElementNode: Sendable {
             ? [] : [ReaderInlineRun(text: text, strong: strong, emphasis: emphasis, code: code, link: link)]
         for child in children {
             if ["p", "div", "li"].contains(child.tag), !runs.isEmpty { runs.append(ReaderInlineRun(text: " ")) }
-            runs += child.inlineContent(strong: strong, emphasis: emphasis, code: code, link: link)
+            let childRuns = child.inlineContent(strong: strong, emphasis: emphasis, code: code, link: link)
+            if let lastRun = runs.last, let lastChar = lastRun.text.last,
+                !lastChar.isWhitespace && !lastChar.isPunctuation,
+                let firstRun = childRuns.first, let firstChar = firstRun.text.first,
+                !firstChar.isWhitespace && !firstChar.isPunctuation,
+                ["span", "a", "b", "strong", "em", "i"].contains(child.tag)
+                    && !["span", "a", "b", "strong", "em", "i"].contains(tag)
+            {
+                runs.append(ReaderInlineRun(text: " "))
+            }
+            runs += childRuns
         }
         return runs
     }
@@ -485,7 +514,7 @@ enum HTMLDOMBuilder {
 
     fileprivate static let ignoredTags: Set<String> = [
         "script", "style", "iframe", "svg", "nav", "footer",
-        "header", "form", "aside", "dialog", "time", "button",
+        "header", "form", "aside", "dialog", "button",
     ]
 
     private static let commentRegex = try? NSRegularExpression(
@@ -556,12 +585,32 @@ enum HTMLDOMBuilder {
         let tagName = parsed.tag.lowercased()
 
         if ignoredTags.contains(tagName) {
-            // Skip content until closing tag
-            if let closing = html.range(
-                of: "</\(tagName)\\s*>", options: [.regularExpression, .caseInsensitive],
-                range: scanner.currentIndex..<html.endIndex
-            ) {
-                scanner.currentIndex = closing.upperBound
+            if parsed.isSelfClosing { return }
+            var depth = 1
+            while !scanner.isAtEnd && depth > 0 {
+                _ = scanner.scanUpToString("<")
+                if scanner.scanString("</") != nil {
+                    if let closeName = scanner.scanUpToString(">"),
+                        closeName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == tagName
+                    {
+                        depth -= 1
+                        _ = scanner.scanString(">")
+                    }
+                } else if scanner.scanString("<") != nil {
+                    if let openName = scanner.scanUpToString(">") {
+                        let openTag =
+                            openName.split(whereSeparator: { $0.isWhitespace }).first.map(String.init)?.lowercased()
+                            ?? ""
+                        if openTag == tagName
+                            && !openName.trimmingCharacters(in: .whitespacesAndNewlines).hasSuffix("/")
+                        {
+                            depth += 1
+                        }
+                        _ = scanner.scanString(">")
+                    }
+                } else {
+                    _ = scanner.scanCharacter()
+                }
             }
             return
         }
@@ -849,6 +898,15 @@ final class ContentExtractionPipeline: Sendable {
             return .contentParsingFailed(reason: "Article exceeds extraction limit")
         }
         let soup = try? SwiftSoup.parse(html)
+        if let soup {
+            _ = try? soup.select(
+                "script, style, noscript, iframe, svg, canvas, form, button, input, select, textarea, dialog, template, "
+                    + "[role=navigation], [role=complementary], [role=banner], [role=search], [aria-hidden=true], "
+                    + ".visually-hidden, .sr-only, "
+                    + "[data-component=byline-block], [data-component=tag-list], [data-component=links-block], [data-component=topic-list], "
+                    + ".video-player-error, .media-player__error, .share-tools, .social-share, .newsletter-signup, .advertisement, .ad-slot"
+            ).remove()
+        }
         let effectiveImage = Self.readerImageURL(
             leadImage ?? soup.flatMap { leadImages(in: $0).first }, baseURL: baseUrl)
 
@@ -868,6 +926,19 @@ final class ContentExtractionPipeline: Sendable {
             }
         }
 
+        // Explicit publisher bodies beat page-wide scoring: recommendation furniture must not enlarge the story.
+        if let soup,
+            let explicit = try? soup.select(
+                "[itemprop~=articleBody], [data-component=text-block], .article__body, .article-body, .article-body-commercial-selector, .wysiwyg, .story-body, .rich-text, .caas-body, .articlebodycontent, .entry-content"
+            ).array()
+        {
+            for element in explicit.prefix(8) {
+                if let blocks = repairedReadingBlocks(in: soup, containers: [element]) {
+                    candidateParagraphs = blocks
+                    break
+                }
+            }
+        }
         let prose = candidateParagraphs.filter { [.paragraph, .quote, .listItem].contains($0.kind) }.map(\.text)
         if prose.count < 2 || ContentQualityValidator.validate(paragraphs: prose) != .valid,
             let soup, let fallback = repairedReadingBlocks(in: soup), !Task.isCancelled
@@ -878,6 +949,13 @@ final class ContentExtractionPipeline: Sendable {
             {
                 candidateParagraphs = fallback
             }
+        }
+
+        if candidateParagraphs.contains(where: {
+            $0.text.localizedCaseInsensitiveContains("Subscribe to unlock this article")
+        }) {
+            return .qualityValidationFailed(
+                reason: "The publisher requires a subscription. Open the original story to read with your access.")
         }
 
         // Keep media in publisher order, without allowing images to qualify an empty article.
@@ -971,9 +1049,15 @@ final class ContentExtractionPipeline: Sendable {
             }
             let title = dom.findNodes(tag: "title").map { $0.combinedText() }.joined()
             let lead = ReaderImageCandidate.select(from: images, title: title)?.url
+            let isComplete = candidateParagraphs.filter { $0.kind == .paragraph }.count >= 3 && joined.count >= 600
             return .success(
                 content: joined, imageUrl: lead,
-                document: ReaderDocument(blocks: candidateParagraphs, images: images, leadImageURL: lead))
+                document: ReaderDocument(
+                    version: ReaderDocument.currentVersion,
+                    blocks: candidateParagraphs,
+                    images: images,
+                    leadImageURL: lead,
+                    isComplete: isComplete))
         case .rejected(let reason):
             return .qualityValidationFailed(reason: reason)
         }
@@ -993,7 +1077,9 @@ final class ContentExtractionPipeline: Sendable {
 
     // MARK: - Container Scoring Engine
 
-    private func repairedReadingBlocks(in document: SwiftSoup.Document) -> [ReaderBlock]? {
+    private func repairedReadingBlocks(in document: SwiftSoup.Document, containers explicit: [SwiftSoup.Element]? = nil)
+        -> [ReaderBlock]?
+    {
         var count = 0
         func attributes(_ element: SwiftSoup.Element) -> [String: String] {
             Dictionary(
@@ -1016,7 +1102,7 @@ final class ContentExtractionPipeline: Sendable {
                 children: element.getChildNodes().compactMap { convert($0, depth: depth + 1) })
         }
         // ponytail: bounded repair of explicit article containers; no second readability scoring engine.
-        let containers = (try? document.select("[itemprop~=articleBody], article, main").array()) ?? []
+        let containers = explicit ?? ((try? document.select("[itemprop~=articleBody], article, main").array()) ?? [])
         for element in containers.prefix(32) {
             guard !element.parents().array().contains(where: excluded) else { continue }
             guard let node = convert(element, depth: 0), !node.isReaderExcluded else { continue }

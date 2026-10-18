@@ -256,9 +256,7 @@ struct SidebarView: View {
     }
 
     private func subscribe(to urlString: String) {
-        let previousCount = feedManager.feedURLs.count
-        feedManager.addFeed(url: urlString)
-        if feedManager.feedURLs.count > previousCount {
+        if feedManager.addFeed(url: urlString) {
             showConfirmation("Subscribed to \(URL(string: urlString)?.host ?? "feed")")
         } else {
             feedManager.articleStore.operationError = "Feed not added. Check the URL or whether you already subscribe."

@@ -58,21 +58,29 @@ actor MigrationCoordinator {
         let cacheDir = fileManager.urls(for: .cachesDirectory, in: .userDomainMask).first?
             .appendingPathComponent("com.marspater.news.cache")
         if let cacheFile = cacheDir?.appendingPathComponent(legacyCacheKey),
-            fileManager.fileExists(atPath: cacheFile.path),
-            let data = try? Data(contentsOf: cacheFile),
-            let decoded = try? JSONDecoder().decode([FeedArticle].self, from: data)
+            fileManager.fileExists(atPath: cacheFile.path)
         {
-            legacyArticles = decoded
-            stats.articlesFound = decoded.count
+            do {
+                let data = try Data(contentsOf: cacheFile)
+                let decoded = try JSONDecoder().decode([FeedArticle].self, from: data)
+                legacyArticles = decoded
+                stats.articlesFound = decoded.count
+            } catch {
+                logger.error(
+                    "Failed to decode legacy article cache at \(cacheFile.path): \(error.localizedDescription)")
+            }
         }
 
         // 2. Load legacy saved stories
         var legacySaved: [FeedArticle] = []
-        if let data = userDefaults.data(forKey: legacySavedStoriesKey),
-            let decoded = try? JSONDecoder().decode([FeedArticle].self, from: data)
-        {
-            legacySaved = decoded
-            stats.savedStories = decoded.count
+        if let data = userDefaults.data(forKey: legacySavedStoriesKey) {
+            do {
+                let decoded = try JSONDecoder().decode([FeedArticle].self, from: data)
+                legacySaved = decoded
+                stats.savedStories = decoded.count
+            } catch {
+                logger.error("Failed to decode legacy saved stories from UserDefaults: \(error.localizedDescription)")
+            }
         }
 
         // 3. Load legacy read articles

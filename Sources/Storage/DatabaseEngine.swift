@@ -11,6 +11,24 @@ actor DatabaseEngine {
     private var db: OpaquePointer?
     private let dbPath: String
     private var inMemoryWorldTension: [WorldTensionReading] = []
+    private var collectionOnlyFeedURLs: [String] = []
+
+    func setCollectionOnlyFeedURLs(_ urls: [String]) {
+        collectionOnlyFeedURLs = Array(Set(urls)).sorted()
+    }
+
+    /// Analysis-only panel reports stay outside the reading feed; read/saved reports remain accessible.
+    private func collectionScope() -> (sql: String, params: [QueryParameter]) {
+        guard !collectionOnlyFeedURLs.isEmpty else { return ("", []) }
+        let placeholders = Array(repeating: "?", count: collectionOnlyFeedURLs.count).joined(separator: ",")
+        return (
+            """
+             AND (EXISTS (SELECT 1 FROM article_state kept WHERE kept.article_id = a.id AND (kept.is_saved = 1 OR kept.is_read = 1))
+                 OR NOT EXISTS (SELECT 1 FROM article_feeds af WHERE af.article_id = a.id)
+                 OR EXISTS (SELECT 1 FROM article_feeds af WHERE af.article_id = a.id AND af.feed_url NOT IN (\(placeholders))))
+            """, collectionOnlyFeedURLs.map { ("text", $0) }
+        )
+    }
 
     // sqliteTransient destructor constant (-1 converted to unsafe pointer)
     private static let sqliteTransient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
@@ -62,6 +80,14 @@ actor DatabaseEngine {
             try registerFunctions()
 
             try migrateSchemaIfNeeded()
+            // Publisher-name corrections also apply to libraries already migrated with an earlier catalog.
+            try executeSimple(
+                "UPDATE articles SET source = news_publisher_name(canonical_url, source) WHERE source != news_publisher_name(canonical_url, source);"
+            )
+            // Fill old classification cache misses before publisher metadata can replace the repaired labels.
+            try executeSimple(
+                "UPDATE article_enrichment SET category = (SELECT news_topic(a.title, coalesce(a.description, ''), a.content) FROM articles a WHERE a.id = article_enrichment.article_id) WHERE category IS NULL;"
+            )
 
             // Ensure article_embeddings table exists on all databases (including pre-existing v21 databases) (#127, #307)
             try executeSimple(
@@ -812,12 +838,52 @@ actor DatabaseEngine {
                 throw error
             }
         }
+        if version < 22 {
+            try beginTransaction()
+            do {
+                try Task.checkCancellation()
+                // Repair generated topic labels from the substring classifier; publisher bodies and user state stay.
+                try executeSimple(
+                    "UPDATE articles SET category = news_topic(title, coalesce(description, ''), content), source = news_publisher_name(canonical_url, source);"
+                )
+                try executeSimple("UPDATE article_enrichment SET category = NULL, confidence = NULL;")
+                try Task.checkCancellation()
+                try setUserVersion(22)
+                try commitTransaction()
+            } catch {
+                try? rollbackTransaction()
+                throw error
+            }
+        }
+        if version < 23 {
+            try beginTransaction()
+            do {
+                try Task.checkCancellation()
+                try executeSimple(
+                    """
+                    UPDATE articles
+                    SET source = trim(substr(source, 1, instr(source, char(10)) - 1))
+                    WHERE instr(source, char(10)) > 0;
+                    """
+                )
+                try Task.checkCancellation()
+                try setUserVersion(23)
+                try commitTransaction()
+            } catch {
+                try? rollbackTransaction()
+                throw error
+            }
+        }
     }
 
     /// Muting predicates for list queries (`MuteRules`); both are pure functions of their arguments.
     private func registerFunctions() throws {
         let flags = SQLITE_UTF8 | SQLITE_DETERMINISTIC
         guard
+            sqlite3_create_function_v2(db, "news_topic", 3, flags, nil, topicFunction, nil, nil, nil) == SQLITE_OK,
+            sqlite3_create_function_v2(db, "news_section", 4, flags, nil, sectionFunction, nil, nil, nil) == SQLITE_OK,
+            sqlite3_create_function_v2(db, "news_publisher_name", 2, flags, nil, publisherNameFunction, nil, nil, nil)
+                == SQLITE_OK,
             sqlite3_create_function_v2(db, "news_publisher_input", 3, flags, nil, publisherInputFunction, nil, nil, nil)
                 == SQLITE_OK,
             sqlite3_create_function_v2(db, "news_muted_source", 2, flags, nil, mutedSourceFunction, nil, nil, nil)
@@ -1220,9 +1286,11 @@ actor DatabaseEngine {
             source = excluded.source,
             description = excluded.description,
             content = CASE WHEN articles.reader_document IS NOT NULL AND (excluded.reader_document IS NULL
-                    OR (?17 = 0 AND \(storedHasPublisherText)))
+                    OR (?17 = 0 AND \(storedHasPublisherText))
+                    OR (json_extract(articles.reader_document, '$.isComplete') IS NOT 0 AND json_extract(excluded.reader_document, '$.isComplete') = 0))
                 THEN articles.content ELSE coalesce(excluded.content, articles.content) END,
-            reader_document = CASE WHEN ?17 = 0 AND \(storedHasPublisherText)
+            reader_document = CASE WHEN articles.reader_document IS NOT NULL AND (?17 = 0 AND \(storedHasPublisherText)
+                    OR (json_extract(articles.reader_document, '$.isComplete') IS NOT 0 AND json_extract(excluded.reader_document, '$.isComplete') = 0))
                 THEN articles.reader_document ELSE coalesce(excluded.reader_document, articles.reader_document) END,
             image_url = coalesce(excluded.image_url, articles.image_url),
             category = coalesce(excluded.category, articles.category),
@@ -1260,7 +1328,7 @@ actor DatabaseEngine {
             sqlite3_bind_null(artStmt, 6)
         }
         sqlite3_bind_double(artStmt, 7, values.pubDate)
-        sqlite3_bind_text(artStmt, 8, article.source, -1, Self.sqliteTransient)
+        sqlite3_bind_text(artStmt, 8, article.publisherName, -1, Self.sqliteTransient)
         if let img = article.imageUrl {
             sqlite3_bind_text(artStmt, 9, img, -1, Self.sqliteTransient)
         } else {
@@ -1644,11 +1712,16 @@ actor DatabaseEngine {
     }
 
     /// Read, saved and section conditions shared by list pages and their muted counts.
-    private func listConditions(section: String?, isRead: Bool?, isSaved: Bool?) -> (
+    private func listConditions(section: String?, isRead: Bool?, isSaved: Bool?, includeCollection: Bool = false) -> (
         sql: String, params: [QueryParameter]
     ) {
         var sql = ""
         var params: [QueryParameter] = []
+        if !includeCollection, isRead != true, isSaved != true, !["Saved Stories", "History"].contains(section ?? "") {
+            let scope = collectionScope()
+            sql += scope.sql
+            params += scope.params
+        }
         if let read = isRead {
             sql += " AND s.is_read = ?"
             params.append(("int", read ? 1 : 0))
@@ -1658,13 +1731,8 @@ actor DatabaseEngine {
             params.append(("int", saved ? 1 : 0))
         }
         if let sec = section, !["Today", "Unread", "Saved Stories", "History"].contains(sec) {
-            let terms = ArticleSection.keywords[sec] ?? [sec.lowercased()]
-            sql +=
-                " AND ("
-                + terms.map { _ in
-                    "instr(lower(a.title || ' ' || coalesce(a.description, '') || ' ' || coalesce(a.category, '')), ?) > 0"
-                }.joined(separator: " OR ") + ")"
-            params += terms.map { ("text", $0) }
+            sql += " AND news_section(a.title, coalesce(a.description, ''), coalesce(ae.category, a.category), ?) = 1"
+            params.append(("text", sec))
         }
         return (sql, params)
     }
@@ -1685,12 +1753,15 @@ actor DatabaseEngine {
             }.joined(separator: " ")
             params.append(("text", sanitizedFtsTerm))
         }
+        let scope = collectionScope()
+        sql += scope.sql
+        params += scope.params
         if let sf = parsed.sourceFilter {
             sql += " AND a.source LIKE ?"
             params.append(("text", "%\(sf)%"))
         }
         if let cf = parsed.categoryFilter {
-            sql += " AND a.category LIKE ?"
+            sql += " AND coalesce(ae.category, a.category) LIKE ?"
             params.append(("text", "%\(cf)%"))
         }
         if let rf = parsed.isReadFilter {
@@ -1802,7 +1873,9 @@ actor DatabaseEngine {
             query += filter.sql
             params += filter.params
         }
-        let list = listConditions(section: criteria.section, isRead: criteria.isRead, isSaved: criteria.isSaved)
+        let list = listConditions(
+            section: criteria.section, isRead: criteria.isRead, isSaved: criteria.isSaved,
+            includeCollection: criteria.id != nil || criteria.canonicalURL != nil || criteria.eventID != nil)
         query += list.sql
         params += list.params
         // Muting and waiting stories are predicates before LIMIT, so every page is full and cursors stay exact.
@@ -2367,17 +2440,14 @@ actor DatabaseEngine {
                 if let readerDocument {
                     updates.append("reader_document = ?")
                     params.append(("text", String(decoding: try JSONEncoder().encode(readerDocument), as: UTF8.self)))
-                } else {
-                    updates.append("reader_document = NULL")
                 }
+            } else if let readerDocument {
+                updates.append("reader_document = ?")
+                params.append(("text", String(decoding: try JSONEncoder().encode(readerDocument), as: UTF8.self)))
             }
-            if let document = readerDocument, document.version >= 4 {
-                if let selected = document.leadImageURL {
-                    updates.append("image_url = ?")
-                    params.append(("text", selected))
-                } else {
-                    updates.append("image_url = NULL")
-                }
+            if let document = readerDocument, document.version >= 4, let selected = document.leadImageURL {
+                updates.append("image_url = ?")
+                params.append(("text", selected))
             } else if let img = image {
                 updates.append("image_url = coalesce(image_url, ?)")
                 params.append(("text", img))
@@ -2413,9 +2483,10 @@ actor DatabaseEngine {
         // 2. Update enrichment table
         let enrichSql = """
             INSERT INTO article_enrichment (
-                article_id, summary, sentiment, entities, topics, content_fetched, enriched_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                article_id, summary, sentiment, entities, topics, content_fetched, enriched_at, category
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(article_id) DO UPDATE SET
+                category = coalesce(excluded.category, article_enrichment.category),
                 summary = coalesce(excluded.summary, article_enrichment.summary),
                 sentiment = coalesce(excluded.sentiment, article_enrichment.sentiment),
                 entities = coalesce(excluded.entities, article_enrichment.entities),
@@ -2452,6 +2523,11 @@ actor DatabaseEngine {
         }
         sqlite3_bind_int(stmt, 6, content != nil ? 1 : 0)
         sqlite3_bind_double(stmt, 7, now)
+        if let category {
+            sqlite3_bind_text(stmt, 8, category, -1, Self.sqliteTransient)
+        } else {
+            sqlite3_bind_null(stmt, 8)
+        }
 
         guard sqlite3_step(stmt) == SQLITE_DONE else {
             throw NSError(
@@ -2720,6 +2796,7 @@ actor DatabaseEngine {
         var saved = 0
 
         var stmt: OpaquePointer?
+        let scope = collectionScope()
         let sql = """
             SELECT
                 count(a.id) as total_count,
@@ -2727,10 +2804,11 @@ actor DatabaseEngine {
                 coalesce(sum(case when s.is_saved = 1 then 1 else 0 end), 0) as saved_count
             FROM articles a
             JOIN article_state s ON s.article_id = a.id
-            WHERE \(Self.visibleArticle);
+            WHERE \(Self.visibleArticle) \(scope.sql);
             """
         if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
             defer { sqlite3_finalize(stmt) }
+            bind(scope.params, to: stmt)
             if sqlite3_step(stmt) == SQLITE_ROW {
                 total = Int(sqlite3_column_int(stmt, 0))
                 unread = Int(sqlite3_column_int(stmt, 1))
@@ -2753,7 +2831,8 @@ actor DatabaseEngine {
                 domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Database not open"])
         }
         guard !muting.isEmpty else { return 0 }
-        var sql = "SELECT count(*) FROM articles a JOIN article_state s ON s.article_id = a.id"
+        var sql =
+            "SELECT count(*) FROM articles a JOIN article_state s ON s.article_id = a.id LEFT JOIN article_enrichment ae ON ae.article_id = a.id"
         var params: [QueryParameter]
         let searchText = search?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         if searchText.isEmpty {
@@ -2860,6 +2939,24 @@ actor DatabaseEngine {
         0
     }
 
+    /// Interest signals stay on device and use a bounded recent reading/saving history, never publisher volume.
+    func briefingInterests(now: Date = Date()) throws -> [String: Int] {
+        let rows = try eventRows(
+            """
+            SELECT coalesce(ae.category, a.category), s.is_saved FROM article_state s JOIN articles a ON a.id = s.article_id
+            LEFT JOIN article_enrichment ae ON ae.article_id = a.id
+            WHERE (s.is_saved = 1 OR s.is_read = 1) AND max(coalesce(s.saved_at, 0), coalesce(s.read_at, 0)) >= ?
+            ORDER BY max(coalesce(s.saved_at, 0), coalesce(s.read_at, 0)) DESC LIMIT 200;
+            """, [.real(now.addingTimeInterval(-30 * 86400).timeIntervalSince1970)])
+        var interests: [String: Int] = [:]
+        for row in rows {
+            if let category = row[0].flatMap(NewsCategory.match(from:)) {
+                interests[category.rawValue.lowercased(), default: 0] += row[1] == "1" ? 3 : 1
+            }
+        }
+        return interests
+    }
+
     /// Stored signals only: one bounded read for the Briefing's at most 500 candidates and their event members.
     func briefingPriorities(articleIDs: [String]) throws -> [String: BriefingPriority] {
         let ids = Array(Set(articleIDs)).sorted()
@@ -2870,7 +2967,7 @@ actor DatabaseEngine {
         let placeholders = Array(repeating: "?", count: ids.count).joined(separator: ",")
         let rows = try eventRows(
             """
-            SELECT candidate.id, a.source, a.canonical_url, i.level
+            SELECT candidate.id, a.source, a.canonical_url, i.level, mine.event_id
             FROM articles candidate
             LEFT JOIN event_members mine ON mine.article_id = candidate.id
             LEFT JOIN event_members peer ON peer.event_id = mine.event_id
@@ -2881,9 +2978,11 @@ actor DatabaseEngine {
             """, ids.map { .text($0) })
         var publishers: [String: Set<String>] = [:]
         var levels: [String: StoryImportance] = [:]
+        var events: [String: String] = [:]
         for row in rows {
             try Task.checkCancellation()
             guard let id = row[0] else { continue }
+            events[id] = row[4]
             let publisher = FeedCatalog.publisher(forLink: row[2] ?? "") ?? row[1] ?? ""
             publishers[id, default: []].insert(EventFeedSummary.displaySource(publisher).lowercased())
             if let raw = row[3].flatMap(Int.init), let level = StoryImportance(rawValue: raw) {
@@ -2892,7 +2991,11 @@ actor DatabaseEngine {
         }
         return Dictionary(
             uniqueKeysWithValues: publishers.map {
-                ($0.key, BriefingPriority(sourceCount: max(1, $0.value.count), importance: levels[$0.key]))
+                (
+                    $0.key,
+                    BriefingPriority(
+                        sourceCount: max(1, $0.value.count), importance: levels[$0.key], eventID: events[$0.key])
+                )
             })
     }
 
@@ -2904,17 +3007,19 @@ actor DatabaseEngine {
         id: String, link: String, eventID: String?
     )] {
         // ponytail: at most 2,000 recent candidates per pass, matching the clustering bound.
+        let scope = collectionScope()
         let rows = try eventRows(
             """
             SELECT a.id, a.canonical_url, m.event_id FROM articles a
             LEFT JOIN event_members m ON m.article_id = a.id
-            WHERE \(Self.articleDateOrder) >= ? AND \(Self.visibleArticle)
+            WHERE \(Self.articleDateOrder) >= ? AND \(Self.visibleArticle) \(scope.sql)
                 AND NOT \(Self.mutedArticle)
                 AND NOT EXISTS (SELECT 1 FROM story_images si WHERE si.article_id = a.id)
             ORDER BY (SELECT count(*) FROM event_members peer WHERE peer.event_id = m.event_id) DESC, \(Self.articleDateOrder) DESC, a.id
             LIMIT 2000;
             """,
-            [.real(activeSince.timeIntervalSince1970), .text(muting.sourceParameter), .text(muting.topicParameter)])
+            [.real(activeSince.timeIntervalSince1970)] + scope.params.map { .text($0.val as? String ?? "") }
+                + [.text(muting.sourceParameter), .text(muting.topicParameter)])
         var results: [(id: String, link: String, eventID: String?)] = []
         var picturedEvents: [String: Bool] = [:]
         for row in rows {
@@ -4444,4 +4549,35 @@ func publisherInputFunction(
     func text(_ index: Int) -> String { sqlite3_value_text(arguments[index]).map { String(cString: $0) } ?? "" }
     let hash = PublisherContentRevision.inputHash(title: text(0), description: text(1), content: text(2))
     sqlite3_result_text(context, hash, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+}
+
+/// Pure content classification for the one-time topic repair; never trusts an earlier generated label.
+private func topicFunction(
+    _ context: OpaquePointer?, _ count: Int32, _ values: UnsafeMutablePointer<OpaquePointer?>?
+) {
+    guard count == 3, let values else { return sqlite3_result_null(context) }
+    func text(_ index: Int) -> String { sqlite3_value_text(values[index]).map { String(cString: $0) } ?? "" }
+    let category =
+        NaturalLanguageTopicClassifier.classifyContent(
+            title: text(0), description: text(1), text: text(2))?.category ?? NewsCategory.world.rawValue
+    sqlite3_result_text(context, category, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+}
+
+private func publisherNameFunction(
+    _ context: OpaquePointer?, _ count: Int32, _ values: UnsafeMutablePointer<OpaquePointer?>?
+) {
+    guard count == 2, let values else { return sqlite3_result_null(context) }
+    func text(_ index: Int) -> String { sqlite3_value_text(values[index]).map { String(cString: $0) } ?? "" }
+    let name = FeedCatalog.publisher(forLink: text(0)) ?? text(1)
+    sqlite3_result_text(context, name, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+}
+
+/// Lists and in-memory callers share category precedence and whole-word fallback.
+private func sectionFunction(
+    _ context: OpaquePointer?, _ count: Int32, _ values: UnsafeMutablePointer<OpaquePointer?>?
+) {
+    guard count == 4, let values else { return sqlite3_result_int(context, 0) }
+    func text(_ index: Int) -> String { sqlite3_value_text(values[index]).map { String(cString: $0) } ?? "" }
+    sqlite3_result_int(
+        context, ArticleSection.matches(text(3), title: text(0), description: text(1), category: text(2)) ? 1 : 0)
 }

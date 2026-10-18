@@ -130,18 +130,24 @@ actor OverviewGenerationCoordinator {
         latestRequestedInputs[eventID] = (membershipVersion, inputTextHash)
 
         // Persistent storage is authoritative: publisher-input changes atomically remove old overviews.
-        if let stored = try? await targetStore.fetchEventOverview(eventID: eventID),
-            !stored.isStale(currentMembershipVersion: membershipVersion, currentInputTextHash: inputTextHash)
-        {
-            guard !Task.isCancelled else { return nil }
-            logger.debug("Store cache hit for event \(eventID) v\(membershipVersion)")
-            if let cached = memoryCache[eventID], cached.id == stored.id,
-                !cached.isStale(currentMembershipVersion: membershipVersion, currentInputTextHash: inputTextHash)
+        do {
+            if let stored = try await targetStore.fetchEventOverview(eventID: eventID),
+                !stored.isStale(currentMembershipVersion: membershipVersion, currentInputTextHash: inputTextHash)
             {
-                return cached
+                guard !Task.isCancelled else { return nil }
+                logger.debug("Store cache hit for event \(eventID) v\(membershipVersion)")
+                if let cached = memoryCache[eventID], cached.id == stored.id,
+                    !cached.isStale(currentMembershipVersion: membershipVersion, currentInputTextHash: inputTextHash)
+                {
+                    return cached
+                }
+                memoryCache[eventID] = stored
+                return stored
             }
-            memoryCache[eventID] = stored
-            return stored
+        } catch {
+            if !(error is CancellationError) {
+                logger.error("Failed to fetch event overview for \(eventID): \(error.localizedDescription)")
+            }
         }
 
         guard !Task.isCancelled else { return nil }
@@ -299,11 +305,12 @@ actor OverviewGenerationCoordinator {
         guard let extractText, await acquireExtractionSlot() else { return false }
         let outcome = await extractText(article.link)
         await releaseExtractionSlot()
-        guard !Task.isCancelled, case .success(let content, _, _) = outcome,
+        guard !Task.isCancelled, case .success(let content, let imageUrl, let document) = outcome,
             content.count > article.description.count, !ArticleContentRedactor.redactAndSplit(content).isEmpty
         else { return false }
         return await store.updateEnrichment(
-            id: article.id, content: content, expectedInputHash: article.publisherInputHash)
+            id: article.id, content: content, image: imageUrl, readerDocument: document,
+            expectedInputHash: article.publisherInputHash)
     }
 
     /// Waits for one of the shared extraction slots; false if cancelled while waiting.
@@ -351,9 +358,15 @@ actor OverviewGenerationCoordinator {
         }
 
         // DatabaseEngine also atomically prevents an older result from overwriting newer
-        let saved =
-            (try? await targetStore.recordEventOverview(document, expectedArticleInputs: expectedArticleInputs))
-            ?? false
+        let saved: Bool
+        do {
+            saved = try await targetStore.recordEventOverview(document, expectedArticleInputs: expectedArticleInputs)
+        } catch {
+            if !(error is CancellationError) {
+                logger.error("Failed to commit overview for event \(eventID): \(error.localizedDescription)")
+            }
+            saved = false
+        }
         if saved {
             memoryCache[eventID] = document
             logger.debug("Committed overview for event \(eventID) v\(membershipVersion)")
@@ -366,22 +379,38 @@ actor OverviewGenerationCoordinator {
     /// Warm only three covered events from the current visible feed, under the same energy policy.
     func warmVisibleOverviews(store: ArticleStore, muting: MuteRules) async {
         guard await allowsEnergy(), !Task.isCancelled else { return }
-        guard
-            let articles = try? await store.database.fetchArticles(
+        let articles: [FeedArticle]
+        let events: [EventFeedSummary]
+        do {
+            articles = try await store.database.fetchArticles(
                 limit: 100,
-                publicationWindow: Date().addingTimeInterval(-72 * 3600)...Date(), muting: muting),
-            let events = try? await store.eventFeedSummaries(for: articles.map(\.id))
-        else { return }
+                publicationWindow: Date().addingTimeInterval(-72 * 3600)...Date(), muting: muting)
+            events = try await store.eventFeedSummaries(for: articles.map(\.id))
+        } catch {
+            if !(error is CancellationError) {
+                logger.error(
+                    "Failed to fetch articles or summaries for visible overviews warming: \(error.localizedDescription)"
+                )
+            }
+            return
+        }
         let top = events.filter { $0.sources.count > 1 }.sorted {
             if $0.sources.count != $1.sources.count { return $0.sources.count > $1.sources.count }
             return ($0.latestDate ?? .distantPast) > ($1.latestDate ?? .distantPast)
         }.prefix(3)
         for event in top {
-            guard !Task.isCancelled, await allowsEnergy(),
-                let members = try? await store.database.fetchArticles(
-                    limit: nil, eventID: event.eventID, muting: muting),
-                let first = members.first
-            else { return }
+            guard !Task.isCancelled, await allowsEnergy() else { return }
+            let members: [FeedArticle]
+            do {
+                members = try await store.database.fetchArticles(
+                    limit: nil, eventID: event.eventID, muting: muting)
+            } catch {
+                if !(error is CancellationError) {
+                    logger.error("Failed to fetch event members for \(event.eventID): \(error.localizedDescription)")
+                }
+                continue
+            }
+            guard let first = members.first else { continue }
             _ = await requestOverview(
                 eventID: event.eventID, eventTitle: first.title,
                 membershipVersion: event.membershipVersion, articles: members, priority: .background, store: store)
@@ -493,12 +522,18 @@ actor OverviewGenerationCoordinator {
         } else {
             targetStore = await ArticleStore.shared
         }
-        if let stored = try? await targetStore.fetchEventOverview(eventID: eventID),
-            !stored.isStale(
-                currentMembershipVersion: currentMembershipVersion, currentInputTextHash: currentInputTextHash)
-        {
-            memoryCache[eventID] = stored
-            return stored
+        do {
+            if let stored = try await targetStore.fetchEventOverview(eventID: eventID),
+                !stored.isStale(
+                    currentMembershipVersion: currentMembershipVersion, currentInputTextHash: currentInputTextHash)
+            {
+                memoryCache[eventID] = stored
+                return stored
+            }
+        } catch {
+            if !(error is CancellationError) {
+                logger.error("Failed to fetch event overview for \(eventID): \(error.localizedDescription)")
+            }
         }
         return nil
     }

@@ -127,11 +127,26 @@ public struct ReaderBlock: Codable, Hashable, Sendable {
 }
 
 public struct ReaderDocument: Codable, Hashable, Sendable {
-    public static let currentVersion = 4
+    public static let currentVersion = 6
     public var version = currentVersion
     public let blocks: [ReaderBlock]
     public var images: [ReaderImageCandidate]? = nil
     public var leadImageURL: String? = nil
+    public var isComplete: Bool? = nil
+
+    public init(
+        version: Int = currentVersion,
+        blocks: [ReaderBlock],
+        images: [ReaderImageCandidate]? = nil,
+        leadImageURL: String? = nil,
+        isComplete: Bool? = nil
+    ) {
+        self.version = version
+        self.blocks = blocks
+        self.images = images
+        self.leadImageURL = leadImageURL
+        self.isComplete = isComplete
+    }
 
     func curated(feedImage: String?, title: String, excluding repeated: Set<String> = []) -> Self {
         var result = self
@@ -146,7 +161,7 @@ public struct ReaderDocument: Codable, Hashable, Sendable {
         result.leadImageURL = ReaderImageCandidate.select(from: candidates, title: title)?.url
         result = Self(
             version: result.version, blocks: blocks.filter { $0.imageURL.map { !repeated.contains($0) } ?? true },
-            images: candidates, leadImageURL: result.leadImageURL)
+            images: candidates, leadImageURL: result.leadImageURL, isComplete: result.isComplete)
         return result
     }
 
@@ -159,6 +174,25 @@ public struct ReaderDocument: Codable, Hashable, Sendable {
     /// extraction or survive a refresh that brings none. `DatabaseEngine.upsertArticles` applies the same rule in SQL.
     var hasPublisherText: Bool {
         blocks.contains { $0.kind != .figure }
+    }
+
+    /// True if this document represents a complete standalone article rather than a brief feed teaser/excerpt.
+    public var hasCompleteArticleBody: Bool {
+        guard hasPublisherText else { return false }
+        if isComplete == false { return false }
+        let textBlocks = blocks.filter { $0.kind == .paragraph || $0.kind == .quote || $0.kind == .listItem }
+        let totalCount = textBlocks.map(\.text.count).reduce(0, +)
+        if totalCount < 600 && textBlocks.count <= 2 { return false }
+        if let last = textBlocks.last?.text.lowercased() {
+            if last.contains("continue reading")
+                || last.contains("read full article")
+                || last.contains("appeared first on")
+                || (last.contains("the post") && last.contains("appeared first"))
+            {
+                return false
+            }
+        }
+        return true
     }
 }
 
@@ -196,8 +230,8 @@ struct ArticleFilterQuery: Equatable, Sendable {
         for token in trimmed.components(separatedBy: .whitespacesAndNewlines) {
             let lowerToken = token.lowercased()
             if lowerToken.hasPrefix("source:") {
-                query.sourceFilter = String(token.dropFirst(7)).trimmingCharacters(in: .whitespacesAndNewlines)
-                    .lowercased()
+                let publisher = String(token.dropFirst(7)).trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                query.sourceFilter = publisher == "ft" ? "financial times" : publisher
             } else if lowerToken.hasPrefix("category:") {
                 query.categoryFilter = String(token.dropFirst(9)).trimmingCharacters(in: .whitespacesAndNewlines)
                     .lowercased()
@@ -207,6 +241,8 @@ struct ArticleFilterQuery: Equatable, Sendable {
                 query.isReadFilter = false
             } else if lowerToken == "is:saved" {
                 query.isSavedFilter = true
+            } else if lowerToken == "ft" {
+                query.terms += ["financial", "times"]
             } else if !token.isEmpty {
                 query.terms.append(lowerToken)
             }
@@ -218,7 +254,11 @@ struct ArticleFilterQuery: Equatable, Sendable {
     func matches(article: FeedArticle, isRead: Bool, isSaved: Bool) -> Bool {
         if isEmpty { return true }
 
-        if let s = sourceFilter, !s.isEmpty, !article.source.lowercased().contains(s) { return false }
+        if let s = sourceFilter, !s.isEmpty,
+            !article.source.lowercased().contains(s) && !article.publisherName.lowercased().contains(s)
+        {
+            return false
+        }
 
         if let c = categoryFilter, !c.isEmpty {
             guard let cat = article.category?.lowercased(), cat.contains(c) else { return false }
@@ -229,7 +269,9 @@ struct ArticleFilterQuery: Equatable, Sendable {
         if let sv = isSavedFilter, isSaved != sv { return false }
 
         if !terms.isEmpty {
-            let combined = "\(article.title) \(article.description) \(article.category ?? "")".lowercased()
+            let combined =
+                "\(article.title) \(article.description) \(article.category ?? "") \(article.source) \(article.publisherName)"
+                .lowercased()
             for term in terms where !combined.contains(term) {
                 return false
             }
@@ -250,6 +292,19 @@ struct ArticleQueryCursor: Equatable, Sendable {
 }
 
 enum ArticleSection {
+    static func matches(_ section: String, title: String, description: String, category: String?) -> Bool {
+        if keywords[section] != nil, section != "U.S. Politics",
+            let target = NewsCategory.match(from: section), let classified = category.flatMap(NewsCategory.match(from:))
+        {
+            if section == "Lifestyle" { return [.lifestyle, .fashion, .travel].contains(classified) }
+            return classified == target
+        }
+        let terms = ((keywords[section] ?? [section]) + [NewsCategory.match(from: section)?.rawValue ?? section]).map(
+            MuteRules.phrase
+        ).joined(separator: "\n")
+        return MuteRules.topicList(terms, mutes: title + "\n" + description + "\n" + (category ?? ""))
+    }
+
     static let keywords: [String: [String]] = [
         "Entertainment": [
             "entertainment", "movie", "film", "celebrity", "music", "tv show", "television", "hollywood", "streaming",

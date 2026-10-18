@@ -308,7 +308,8 @@ actor EnrichmentQueue {
             title: article.title,
             description: article.description,
             text: article.fullContent,
-            rssCategory: article.category,
+            // Stored categories may be earlier classifier output; never feed that output back as a publisher hint.
+            rssCategory: nil,
             allowFoundationModels: false
         )
 
