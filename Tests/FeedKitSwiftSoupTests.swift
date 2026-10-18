@@ -177,4 +177,52 @@ enum FeedKitSwiftSoupTests {
         check(DateParser.parse("impossible") == nil, "Invalid dates do not become current time")
         print("✅ SwiftSoup / FeedKit parsing regressions passed")
     }
+
+    static func runEmbeddingIntegration() async throws {
+        let title = "Anthropic releases Claude coding model with improved reasoning"
+        let summary =
+            "Anthropic released its Claude coding model with improved reasoning and software development tools."
+        let html =
+            "<div itemprop=articleBody><p>\(summary) Developers can use the release to review code and diagnose problems in existing software.<p>The company said the updated model supports longer coding tasks and detailed technical explanations. The release includes tools for developers to evaluate the changes in their own projects.</div>"
+        let date = "2026-10-18T04:00:00Z"
+        let xml = """
+            <rss xmlns:content="http://purl.org/rss/1.0/modules/content/"><channel><title>First Wire</title>
+            <item><title>\(title)</title><link>https://first.example.com/claude</link>
+            <description>\(summary)</description><pubDate>\(date)</pubDate>
+            <content:encoded><![CDATA[\(html)]]></content:encoded></item></channel></rss>
+            """
+        let json: [String: Any] = [
+            "version": "https://jsonfeed.org/version/1.1", "title": "Second Wire",
+            "items": [
+                [
+                    "id": "claude", "url": "https://second.example.com/claude", "title": title,
+                    "summary": summary, "date_published": date, "content_html": html,
+                ]
+            ],
+        ]
+        let articles =
+            FeedXMLParser(data: Data(xml.utf8)).parse()
+            + (JSONFeedParser.parse(data: try JSONSerialization.data(withJSONObject: json), feedURL: "") ?? [])
+        precondition(articles.count == 2, "Both feed formats must produce an article")
+        precondition(
+            articles.allSatisfy { $0.readerDocument?.hasPublisherText == true },
+            "Both feed formats must retain repaired publisher text")
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let database = DatabaseEngine(path: root.appendingPathComponent("integration.sqlite3").path)
+        try await database.open()
+        _ = try await database.upsertArticles(articles)
+        let report = try await EventClusterer.run(in: database, now: articles[0].pubDate)
+        let vectors = try await database.fetchArticleEmbeddings(
+            articleIDs: articles.map(\.id), modelVersion: SentenceEmbedder.modelVersion)
+        precondition(vectors.count == 2, "Production clustering must compute and persist both feed embeddings")
+        precondition(
+            vectors.values.allSatisfy { vector in
+                vector.count == SentenceEmbedder.vectorDimension
+                    && abs(vector.reduce(Float(0)) { $0 + $1 * $1 } - 1) < 0.001
+            }, "Parsed article embeddings must have the expected dimension and unit norm")
+        precondition(report.created == 1, "Equivalent parsed reports must form one event through the hybrid matcher")
+        print("✅ Feed parsing → reader extraction → embeddings → event clustering integration passed")
+    }
 }
