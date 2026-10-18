@@ -472,6 +472,13 @@ enum EventMatcher {
         return nil
     }
 
+    private static func isPrimaryDisjoint(_ a: EventFeatures, _ b: EventFeatures) -> Bool {
+        let nonPlaceB = b.keywords.union(b.titleNumbers).union(b.tollNumbers)
+        let nonPlaceA = a.keywords.union(a.titleNumbers).union(a.tollNumbers)
+        return (!a.primaryTitleTerms.isEmpty && a.primaryTitleTerms.isDisjoint(with: nonPlaceB))
+            || (!b.primaryTitleTerms.isEmpty && b.primaryTitleTerms.isDisjoint(with: nonPlaceA))
+    }
+
     /// Who, what, where and when for one pair. Headline similarity alone never passes: a match needs
     /// a shared name or place, shared action terms, closeness in time and no contradicting facts.
     /// When available, neural sentence embeddings (#127, #307) veto semantic divergence and rescue paraphrased matches.
@@ -484,12 +491,9 @@ enum EventMatcher {
         let sharedAnchors = a.anchors.intersection(b.anchors).union(crossSpecific).count
         let sharedKeywords = a.keywords.intersection(b.keywords).count
         let what = cosine(sharedKeywords, a.keywords.count, b.keywords.count)
-        let entity = overlap(
-            sharedAnchors, max(a.anchors.count, sharedAnchors), max(b.anchors.count, sharedAnchors))
-        let time =
-            gap <= policy.fullTimeCredit
-            ? 1
-            : max(0, 1 - (gap - policy.fullTimeCredit) / max(1, policy.maximumTimeGap - policy.fullTimeCredit))
+        let entity = overlap(sharedAnchors, max(a.anchors.count, sharedAnchors), max(b.anchors.count, sharedAnchors))
+        let timeSpan = max(1, policy.maximumTimeGap - policy.fullTimeCredit)
+        let time = gap <= policy.fullTimeCredit ? 1.0 : max(0.0, 1.0 - (gap - policy.fullTimeCredit) / timeSpan)
         let score = 0.4 * what + 0.4 * entity + 0.2 * time
 
         var conflict = pairConflict(a, b, gap: gap, maximumTimeGap: policy.maximumTimeGap)
@@ -498,15 +502,8 @@ enum EventMatcher {
             sharedKeywords
             + (a.tollNumbers.isDisjoint(with: b.tollNumbers) ? 0 : 1)
             + (a.titleNumbers.isDisjoint(with: b.titleNumbers) ? 0 : 1)
-        func nonPlaceTerms(_ features: EventFeatures) -> Set<String> {
-            features.keywords.union(features.titleNumbers).union(features.tollNumbers)
-        }
-        let primaryDisjoint =
-            (!a.primaryTitleTerms.isEmpty && a.primaryTitleTerms.isDisjoint(with: nonPlaceTerms(b)))
-            || (!b.primaryTitleTerms.isEmpty && b.primaryTitleTerms.isDisjoint(with: nonPlaceTerms(a)))
+        let primaryDisjoint = isPrimaryDisjoint(a, b)
 
-        // Semantic embedding veto (#307): if both articles are embedded and cosine similarity is below veto threshold,
-        // veto borderline rule matches from conflating different stories with shared generic entities.
         if conflict == nil, let sim = embeddingSimilarity, sim < policy.semanticVetoThreshold {
             conflict = .semanticDivergence
         }
@@ -517,15 +514,11 @@ enum EventMatcher {
             && what >= policy.minimumWhat && score >= policy.matchScore
             && (gap <= policy.strictTimeGap || (what >= policy.strictWhat && sharedEvidence >= 3))
 
-        // Semantic embedding rescue (#127, #307): high neural cosine similarity + shared specific anchor
-        // links genuine paraphrases that have different surface action vocabulary.
         let semanticRescue =
             conflict == nil && !primaryDisjoint && sharedSpecific >= 1
-            && (embeddingSimilarity ?? 0) >= policy.semanticMatchThreshold
-            && gap <= policy.maximumTimeGap
+            && (embeddingSimilarity ?? 0) >= policy.semanticMatchThreshold && gap <= policy.maximumTimeGap
 
         let isMatch = ruleMatch || semanticRescue
-
         let isCompatible =
             conflict == nil && !primaryDisjoint && sharedSpecific >= 1
             && (score >= policy.compatibilityScore || (embeddingSimilarity ?? 0) >= policy.semanticFragmentThreshold)
