@@ -63,4 +63,3 @@ actor RefreshCoordinator {
         activeTask != nil
     }
 }
-
