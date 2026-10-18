@@ -1,5 +1,23 @@
 # Matcher #307 independent verification — 18 October 2026
 
+## Release disposition — 18 October 2026
+
+After receiving the measured result and the remaining PLAN.md items, Mars directed:
+"start working. i accept your and antigravity judgment". The delegated release
+decision is to accept this implementation with its documented limitations:
+93.33% precision and 36.84% recall on the reused English holdout, one false pair,
+and no replay of the unavailable original #409 export. The 97% target remains
+unmet; acceptance does not change the target, labels, measurements or evidence
+independence. No new annotation or holdout-driven correction cycle is required
+for this release-plan closeout.
+
+PR #442 merged as `624ea0848db179063e17b30c2332337831a5af06`. Its hosted arm64
+tests and build passed; Swift CodeQL was still running when this addendum was
+written. Final hosted-check evidence and issue/board closeout are recorded in
+[#439](https://github.com/marspater/NewsApp-macOS/issues/439).
+Foreground appearance/keyboard work remains deferred at Mars's request, with no
+visual pass claimed. #264/#268/#314 stay parked and #334 stays deferred.
+
 ## Result
 
 **The existing English holdout does not meet the 97% point-precision target.**
@@ -13,7 +31,8 @@ The false pair is `doc-1081` / `doc-1376`: a housing protest and the parliamenta
 vote reported as its background. These are related acts under the existing labels.
 No labels, thresholds or matcher code were changed after inspecting this result.
 This holdout was already reused for #440; it is regression evidence, not a fresh
-independent acceptance sample. Keep #307 and #439 open.
+independent acceptance sample. The initial recommendation was to keep #307 and
+#439 open pending the release disposition recorded above.
 
 ## Revision and integration
 
@@ -85,12 +104,13 @@ SQLite integrity was `ok`, with zero foreign-key violations. The snapshot contai
 zero exclusion rows, so exclusion preservation is additionally covered by the
 deterministic suite rather than inferred from this empty denominator.
 
-## Remaining acceptance
+## Evidence limitations
 
 The precision target is unmet. The original #409 private export remains unavailable;
-recovering some headlines from a session log does not complete that replay. A reduced
-evidence scope requires Mars's explicit acceptance. Do not tune against this holdout
-or close #307/#439 from the green unit tests or tune-only precision.
+recovering some headlines from a session log does not complete that replay. The
+release disposition above accepts the reduced scope without claiming this replay
+was completed. Unit tests and tune-only precision do not establish the 97% target.
+Do not tune against this holdout.
 
 All checks stayed headless. No installed library was changed, no app was installed
 or launched, and no window or system setting was touched. Native appearance and
