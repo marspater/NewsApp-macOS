@@ -26,7 +26,7 @@ trap cleanup EXIT
 # Feeds point at a reserved .invalid host, so a refresh fails locally; notifications and AI stay off.
 LAUNCH_ARGS=(-saved_feed_urls '("https://launch.invalid/feed.xml")' -notifications_enabled NO -ai_enabled NO)
 
-rsync -a --exclude .git --exclude .antigravity --exclude .claude --exclude '*.app' "$ROOT/" "$STAGE/src/"
+rsync -a --exclude .git --exclude .antigravity --exclude .claude --exclude .build --exclude '*.app' "$ROOT/" "$STAGE/src/"
 sed -i '' "s|<string>com.marspater.news</string>|<string>$BUNDLE_ID</string>|" "$STAGE/src/build.sh"
 (cd "$STAGE/src" && ./build.sh >/dev/null)
 APP="$STAGE/src/News.app"

@@ -73,7 +73,7 @@ case "$MODE" in
         done
         echo "✅ Finished formatting all Swift files."
         ;;
-    --lint-all)
+    --check|--lint-all)
         echo "🔍 Linting all Swift files in Sources and Tests..."
         find Sources Tests -name "*.swift" | sort | while IFS= read -r file; do
             run_lint_file "$file"
@@ -86,7 +86,7 @@ case "$MODE" in
         if [[ -n "$STAGED_FILES" ]]; then
             "$0" --staged
         else
-            echo "Usage: $0 [--staged | --lint-staged | --all | --lint-all | <file.swift> ...]"
+            echo "Usage: $0 [--staged | --lint-staged | --all | --check | --lint-all | <file.swift> ...]"
         fi
         ;;
     *)

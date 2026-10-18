@@ -23,7 +23,7 @@ mkdir -p "${MACOS_DIR}"
 mkdir -p "${RESOURCES_DIR}"
 mkdir -p Assets
 
-cp container-migration.plist PrivacyInfo.xcprivacy "${RESOURCES_DIR}/"
+cp container-migration.plist PrivacyInfo.xcprivacy Sources/ThirdPartyNotices.txt "${RESOURCES_DIR}/"
 
 # Compile the editable Icon Composer source, including legacy macOS fallback.
 xcrun actool "$(pwd)/Assets/AppIcon.icon" --compile "$(pwd)/${RESOURCES_DIR}" \
@@ -31,7 +31,9 @@ xcrun actool "$(pwd)/Assets/AppIcon.icon" --compile "$(pwd)/${RESOURCES_DIR}" \
     --app-icon AppIcon --output-partial-info-plist "$(pwd)/${CONTENTS_DIR}/IconInfo.plist"
 
 # Compile Swift files (exclude any standalone scripts)
-swiftc -swift-version 6 -O -parse-as-library -target "arm64-apple-macos${TARGET_MACOS}" \
+NEWS_DEPENDENCY_ARCH=arm64
+source script/swiftpm_dependencies.sh
+swiftc "${NEWS_DEPENDENCY_FLAGS[@]}" -swift-version 6 -O -parse-as-library -target "arm64-apple-macos${TARGET_MACOS}" \
     Sources/Services/DateParser.swift \
     Sources/Models/FeedError.swift \
     Sources/Models/FeedFetchState.swift \

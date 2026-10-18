@@ -19,7 +19,9 @@ done < <(find Sources -name '*.swift' -print | sort)
 export CLANG_MODULE_CACHE_PATH="${CLANG_MODULE_CACHE_PATH:-${TMPDIR:-/tmp}/news-module-cache}"
 export SWIFT_MODULECACHE_PATH="$CLANG_MODULE_CACHE_PATH"
 echo "Compiling appearance matrix (arm64, macOS 15 deployment target)..."
-swiftc -swift-version 6 -Onone -parse-as-library -target arm64-apple-macos15.0 \
+NEWS_DEPENDENCY_ARCH=arm64
+source script/swiftpm_dependencies.sh
+swiftc "${NEWS_DEPENDENCY_FLAGS[@]}" -swift-version 6 -Onone -parse-as-library -target arm64-apple-macos15.0 \
     "${SOURCES[@]}" "$STAGE/NewsApp.swift" "$STAGE/LiveVoiceOverQAFixtures.swift" Tests/NativeAppearanceMatrix.swift \
     -o "$STAGE/news_appearance_matrix"
 "$STAGE/news_appearance_matrix" "$OUTPUT"

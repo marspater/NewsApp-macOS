@@ -13,8 +13,10 @@ Build on Apple silicon with Xcode 27 selected. The deployment target remains mac
 The current release simplification uses existing #102 labeled tune/English holdout regression inputs; the #409 comparison requires its original private replay export. Importance and overview review commands below remain opt-in historical audit tools, not new release requirements. Developing-story evaluation and its collector are parked with #314. See [the accepted plan](docs/plans/2026-10-17-release-simplification.md).
 
 ```sh
-./test.sh                         # Full regressions; also run by the commit hook
+./test.sh                         # Full regressions, including SwiftSoup/FeedKit parser checks; also run by the commit hook
+./test.sh --parsing-regressions   # Focused offline HTML/feed compatibility and safety checks
 script/format.sh                  # swift-format; automatically formats staged Swift files in pre-commit hook
+script/format.sh --check          # Strict repository-wide Swift formatting lint
 script/design_lint.sh              # DESIGN.md ratchet (first step of ./test.sh); --update only after lowering counts
 ./test.sh --story-regressions     # Focused offline identity, reader and persistence checks
 ./test.sh --curation-live /private/tmp/library-backup.sqlite3 /private/tmp/curation-report # Opt-in on-device rating audit of a SQLite backup; private titles stay local
@@ -57,6 +59,8 @@ NEWS_LIVE_CATALOG_CHECK=1 ./test.sh # Optional: fetch every catalog feed through
 ./test.sh --catalog-reader-access # Opt-in, live: open each catalog feed's newest stories in the app's reader extraction (NEWS_CATALOG_FEEDS=id,… NEWS_CATALOG_SAMPLE=N)
 ./build_release.sh                # Optimized arm64 verification bundle
 ```
+
+SwiftSoup and FeedKit are resolved by `Package.swift` and the committed `Package.resolved`. Native app and QA scripts source `script/swiftpm_dependencies.sh`, which builds one static dependency archive with SwiftPM and supplies its module and link paths to the existing compiler commands. No separate dependency installation or system library search path is needed. Bundles include `Sources/ThirdPartyNotices.txt`.
 
 `make build` and `make release` compile SwiftPM executables; `make app` and `make run` use the app-bundle workflow. Packaging helpers live under `script/distribution/` and are inactive in development CI. Do not run notarization or build Intel slices in the current scope.
 

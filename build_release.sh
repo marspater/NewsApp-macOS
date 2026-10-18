@@ -20,7 +20,7 @@ echo "=================================================="
 rm -rf "${APP_DIR}" "${BUILD_TMP}"
 mkdir -p "${MACOS_DIR}" "${RESOURCES_DIR}" "${BUILD_TMP}" Assets
 
-cp container-migration.plist PrivacyInfo.xcprivacy "${RESOURCES_DIR}/"
+cp container-migration.plist PrivacyInfo.xcprivacy Sources/ThirdPartyNotices.txt "${RESOURCES_DIR}/"
 
 # Compile the editable Icon Composer source, including legacy macOS fallback.
 xcrun actool "$(pwd)/Assets/AppIcon.icon" --compile "$(pwd)/${RESOURCES_DIR}" \
@@ -103,7 +103,9 @@ SWIFT_SOURCES=(
 )
 
 echo "⚙️ Compiling arm64 slice..."
-swiftc -swift-version 6 -O -whole-module-optimization -parse-as-library \
+NEWS_DEPENDENCY_ARCH=arm64
+source script/swiftpm_dependencies.sh
+swiftc "${NEWS_DEPENDENCY_FLAGS[@]}" -swift-version 6 -O -whole-module-optimization -parse-as-library \
     -target "arm64-apple-macos${TARGET_MACOS}" \
     "${SWIFT_SOURCES[@]}" \
     -o "${BUILD_TMP}/News_arm64"
