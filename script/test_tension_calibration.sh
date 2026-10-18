@@ -42,6 +42,7 @@ swiftc "${NEWS_DEPENDENCY_FLAGS[@]}" -target "$(uname -m)-apple-macos${TARGET_MA
     Sources/Intelligence/EventCandidates.swift \
     Sources/Intelligence/EventMatcher.swift \
     Sources/Intelligence/EventClustering.swift \
+    Sources/Intelligence/SentenceEmbedder.swift \
     Sources/Intelligence/EventJudge.swift \
     Sources/Intelligence/StoryImportance.swift \
     Sources/Intelligence/ContentExtractionPipeline.swift \

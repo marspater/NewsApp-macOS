@@ -31,6 +31,7 @@ enum EventClusterer {
     ) async throws -> EventClusteringReport {
         var report = EventClusteringReport()
         var cache: [String: EventFeatures] = [:]
+        var embeddingCache: [String: [Float]] = [:]
         var attempts: [String: Int] = [:]
         /// Partners placed earlier in this pass; their rows in the current batch are stale.
         var handled = Set<String>()
@@ -40,8 +41,32 @@ enum EventClusterer {
             cache[row.id] = value
             return value
         }
-        func assessed(_ a: EventMatchRow, _ b: EventMatchRow) -> EventPairAssessment {
-            EventMatcher.assess(features(a), features(b), policy: matchPolicy)
+        func embedding(_ row: EventMatchRow) async -> [Float]? {
+            if let cached = embeddingCache[row.id] { return cached }
+            if let stored = try? await database.fetchArticleEmbeddings(
+                articleIDs: [row.id], modelVersion: SentenceEmbedder.modelVersion)[row.id]
+            {
+                embeddingCache[row.id] = stored
+                return stored
+            }
+            guard await SentenceEmbedder.shared.isAvailable else { return nil }
+            let text = "\(row.title)\n\(String(row.description.prefix(EventFeatures.descriptionPrefix)))"
+            if let computed = await SentenceEmbedder.shared.embed(text) {
+                embeddingCache[row.id] = computed
+                try? await database.upsertArticleEmbeddings(
+                    [row.id: computed], modelVersion: SentenceEmbedder.modelVersion)
+                return computed
+            }
+            return nil
+        }
+        func assessed(_ a: EventMatchRow, _ b: EventMatchRow) async -> EventPairAssessment {
+            let sim: Double?
+            if let vA = await embedding(a), let vB = await embedding(b) {
+                sim = SentenceEmbedder.cosineSimilarity(vA, vB)
+            } else {
+                sim = nil
+            }
+            return EventMatcher.assess(features(a), features(b), policy: matchPolicy, embeddingSimilarity: sim)
         }
         var remaining = limit
         matching: while remaining > 0 {
@@ -64,12 +89,21 @@ enum EventClusterer {
                     var groups: [[EventMatchRow]] = []
                     for member in members {
                         try Task.checkCancellation()
-                        let index = groups.firstIndex { group in
-                            !group.contains { exclusions[member.id, default: []].contains($0.id) }
-                                && EventMatcher.eventScore(
-                                    pairs: group.map { assessed(member, $0) }, policy: matchPolicy) != nil
+                        var partnerIndex: Int? = nil
+                        for (idx, group) in groups.enumerated() {
+                            guard !group.contains(where: { exclusions[member.id, default: []].contains($0.id) }) else {
+                                continue
+                            }
+                            var pairs: [EventPairAssessment] = []
+                            for other in group {
+                                pairs.append(await assessed(member, other))
+                            }
+                            if EventMatcher.eventScore(pairs: pairs, policy: matchPolicy) != nil {
+                                partnerIndex = idx
+                                break
+                            }
                         }
-                        if let index { groups[index].append(member) } else { groups.append([member]) }
+                        if let partnerIndex { groups[partnerIndex].append(member) } else { groups.append([member]) }
                     }
                     remaining -= members.count
                     report.processed += members.count
@@ -88,7 +122,6 @@ enum EventClusterer {
                 }
                 remaining -= 1
                 report.processed += 1
-                let article = features(row)
                 let excluded = try await database.eventExclusions(of: row.id)
 
                 // Active version upgrades were partitioned above. Archived unchanged groups stay intact;
@@ -96,11 +129,14 @@ enum EventClusterer {
                 if let current = row.eventID, let event = try await database.eventMatchMembers(eventID: current) {
                     let others = event.members.filter { $0.id != row.id }
                     if !others.isEmpty {
+                        var pairs: [EventPairAssessment] = []
+                        for other in others {
+                            pairs.append(await assessed(row, other))
+                        }
+                        let isExcluded = others.contains { excluded.contains($0.id) }
                         let fits =
                             row.previouslyMatched
-                            || EventMatcher.eventScore(
-                                for: article, members: others.map(features),
-                                excluded: others.contains { excluded.contains($0.id) }, policy: matchPolicy) != nil
+                            || (!isExcluded && EventMatcher.eventScore(pairs: pairs, policy: matchPolicy) != nil)
                         if fits {
                             try await database.markEventMatchProcessed(
                                 [row.id], matcherVersion: EventMatcher.version, at: now)
@@ -130,7 +166,10 @@ enum EventClusterer {
                     guard !members.isEmpty, members.count < matchPolicy.maximumEventSize,
                         !members.contains(where: { excluded.contains($0.id) })
                     else { continue }
-                    let pairs = members.map { assessed(row, $0) }
+                    var pairs: [EventPairAssessment] = []
+                    for member in members {
+                        pairs.append(await assessed(row, member))
+                    }
                     guard let score = EventMatcher.eventScore(pairs: pairs, policy: matchPolicy) else { continue }
                     if score > (best?.score ?? 0) { best = (event.id, event.version, score) }
                 }
@@ -145,16 +184,19 @@ enum EventClusterer {
                     for candidate in candidates
                     where candidate.eventID == nil && !excluded.contains(candidate.articleID) {
                         guard let candidateRow = rows[candidate.articleID] else { continue }
-                        let pair = assessed(row, candidateRow)
+                        let pair = await assessed(row, candidateRow)
                         if pair.isMatch { scored.append((candidateRow, pair.score)) }
                     }
                     scored.sort { $0.score != $1.score ? $0.score > $1.score : $0.row.id < $1.row.id }
                     var group: [EventMatchRow] = []
                     for candidate in scored where group.count < min(remaining, matchPolicy.maximumEventSize - 1) {
-                        guard
-                            EventMatcher.eventScore(
-                                pairs: ([row] + group).map { assessed(candidate.row, $0) }, policy: matchPolicy) != nil
-                        else { continue }
+                        var candidatePairs: [EventPairAssessment] = []
+                        for partner in ([row] + group) {
+                            candidatePairs.append(await assessed(candidate.row, partner))
+                        }
+                        guard EventMatcher.eventScore(pairs: candidatePairs, policy: matchPolicy) != nil else {
+                            continue
+                        }
                         let partnerExclusions = try await database.eventExclusions(of: candidate.row.id)
                         guard !group.contains(where: { partnerExclusions.contains($0.id) }) else { continue }
                         group.append(candidate.row)
@@ -199,7 +241,11 @@ enum EventClusterer {
                 if first.contains(where: { exclusions.contains($0.id) }) { return false }
             }
             var pairs: [EventPairAssessment] = []
-            for a in first { for b in second { pairs.append(assessed(a, b)) } }
+            for a in first {
+                for b in second {
+                    pairs.append(await assessed(a, b))
+                }
+            }
             guard pairs.allSatisfy({ $0.conflict == nil && $0.sharedSpecificAnchors >= 1 }) else { return false }
             let required = Int((Double(pairs.count) * matchPolicy.compatibleShare).rounded(.up))
             let mean = pairs.isEmpty ? 0 : pairs.map(\.score).reduce(0, +) / Double(pairs.count)

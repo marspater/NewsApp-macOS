@@ -28,7 +28,7 @@ let package = Package(
                 .product(name: "SwiftSoup", package: "SwiftSoup"), .product(name: "FeedKit", package: "FeedKit"),
             ],
             path: "Sources",
-            resources: [.copy("ThirdPartyNotices.txt")]
+            resources: [.copy("ThirdPartyNotices.txt"), .copy("Resources")]
         ),
     ]
 )

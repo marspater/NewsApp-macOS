@@ -21,6 +21,10 @@ rm -rf "${APP_DIR}" "${BUILD_TMP}"
 mkdir -p "${MACOS_DIR}" "${RESOURCES_DIR}" "${BUILD_TMP}" Assets
 
 cp container-migration.plist PrivacyInfo.xcprivacy Sources/ThirdPartyNotices.txt "${RESOURCES_DIR}/"
+if [ -d "Sources/Resources/Models" ]; then
+    mkdir -p "${RESOURCES_DIR}/Models"
+    cp -r Sources/Resources/Models/* "${RESOURCES_DIR}/Models/"
+fi
 
 # Compile the editable Icon Composer source, including legacy macOS fallback.
 xcrun actool "$(pwd)/Assets/AppIcon.icon" --compile "$(pwd)/${RESOURCES_DIR}" \
@@ -59,6 +63,7 @@ SWIFT_SOURCES=(
     Sources/Intelligence/EventCandidates.swift
     Sources/Intelligence/EventMatcher.swift
     Sources/Intelligence/EventClustering.swift
+    Sources/Intelligence/SentenceEmbedder.swift
     Sources/Intelligence/EventJudge.swift
     Sources/Intelligence/StoryImportance.swift
     Sources/Intelligence/ContentExtractionPipeline.swift

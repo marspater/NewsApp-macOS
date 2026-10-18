@@ -68,6 +68,7 @@ swiftc "${NEWS_DEPENDENCY_FLAGS[@]}" "${TEST_OPT_FLAGS[@]}" -target "$(uname -m)
     Sources/Intelligence/EventCandidates.swift \
     Sources/Intelligence/EventMatcher.swift \
     Sources/Intelligence/EventClustering.swift \
+    Sources/Intelligence/SentenceEmbedder.swift \
     Sources/Intelligence/EventJudge.swift \
     Sources/Intelligence/StoryImportance.swift \
     Sources/Intelligence/ContentExtractionPipeline.swift \
@@ -97,6 +98,7 @@ swiftc "${NEWS_DEPENDENCY_FLAGS[@]}" "${TEST_OPT_FLAGS[@]}" -target "$(uname -m)
     Sources/App/NewsSignposts.swift \
     Sources/App/UpdateChecker.swift \
     Tests/StoryCorpus.swift \
+    Tests/EventEmbeddingTests.swift \
     "$TEST_STAGE/NewsTests.swift" Tests/FeedKitSwiftSoupTests.swift "$TEST_STAGE/Runner.swift" \
     Tests/TestDefaults.swift \
     -o test_runner
