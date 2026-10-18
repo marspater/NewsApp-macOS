@@ -154,13 +154,16 @@ extension EventFeatures {
     }
 
     private static func primaryClauseRange(in text: String, titleEnd: String.Index) -> Range<String.Index>? {
+        guard text.startIndex <= titleEnd, titleEnd <= text.endIndex else { return nil }
         let nsRange = NSRange(text.startIndex..<titleEnd, in: text)
         if let leading = leadingBackgroundPattern.firstMatch(in: text, range: nsRange),
+            leading.range(at: 1).location != NSNotFound,
             let clause = Range(leading.range(at: 1), in: text)
         {
             return clause
         }
         guard let trailing = trailingBackgroundPattern.firstMatch(in: text, range: nsRange),
+            trailing.range.location != NSNotFound,
             let connector = Range(trailing.range, in: text)
         else { return nil }
         let prefix = text[text.startIndex..<connector.lowerBound]
@@ -331,7 +334,7 @@ extension EventFeatures {
         let text = title + "\n" + description
         let language = EventMatchKey.language(of: text)
         let whole = text.startIndex..<text.endIndex
-        let titleEnd = text.index(text.startIndex, offsetBy: title.count)
+        let titleEnd = text.index(text.startIndex, offsetBy: title.count, limitedBy: text.endIndex) ?? text.endIndex
         let titleWords = title.split(whereSeparator: { !$0.isLetter }).filter { $0.count >= 3 }
         let titleCase =
             !titleWords.isEmpty
@@ -435,7 +438,9 @@ struct EventPairAssessment: Sendable, Equatable {
 }
 
 enum EventMatcher {
-    static let version = 5
+    /// Bump when matching changes; recent articles and active memberships are revalidated.
+    /// Unchanged archived memberships remain intact.
+    static let version = 6
 
     private static func pairConflict(
         _ a: EventFeatures, _ b: EventFeatures, gap: TimeInterval, maximumTimeGap: TimeInterval
