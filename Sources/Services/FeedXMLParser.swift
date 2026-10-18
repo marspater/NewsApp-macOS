@@ -101,28 +101,20 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
     }
 
     private func normalizeArticleSources() {
-        // Post-parse: if channelTitle is still empty, extract from feedURL
         if channelTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             channelTitle = extractSourceFromURL(feedURL)
         }
-
-        // Apply channelTitle to any article that has "Feed" or empty source
-        for i in 0..<articles.count {
+        let name = channelTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { return }
+        for i in articles.indices {
             let src = articles[i].source
-            if src.isEmpty || src == "Feed" || src == "Unknown" {
-                let name = channelTitle.trimmingCharacters(in: .whitespacesAndNewlines)
-                if !name.isEmpty {
-                    articles[i] = FeedArticle(
-                        title: articles[i].title, link: articles[i].link,
-                        guid: articles[i].guid,
-                        description: articles[i].description, pubDate: articles[i].pubDate,
-                        source: name, imageUrl: articles[i].imageUrl,
-                        aiSummary: articles[i].aiSummary, fullContent: articles[i].fullContent,
-                        category: articles[i].category, contentFetched: articles[i].contentFetched,
-                        readerDocument: articles[i].readerDocument
-                    )
-                }
-            }
+            guard src.isEmpty || src == "Feed" || src == "Unknown" else { continue }
+            articles[i] = FeedArticle(
+                title: articles[i].title, link: articles[i].link, guid: articles[i].guid,
+                description: articles[i].description, pubDate: articles[i].pubDate, source: name,
+                imageUrl: articles[i].imageUrl, aiSummary: articles[i].aiSummary,
+                fullContent: articles[i].fullContent, category: articles[i].category,
+                contentFetched: articles[i].contentFetched, readerDocument: articles[i].readerDocument)
         }
     }
 
@@ -455,30 +447,32 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
     }
 
     private func rssArticle(_ item: FeedKit.RSSFeedItem, keeping article: FeedArticle) -> FeedArticle {
-        FeedArticle(
-            title: (article.title.isEmpty ? item.title ?? item.dublinCore?.dcTitle ?? "" : article.title)
-                .trimmingCharacters(in: .whitespacesAndNewlines),
-            link: article.link, guid: article.guid,
-            description: article.description.isEmpty
-                ? stripHTMLSimple(item.description ?? item.dublinCore?.dcDescription ?? "") : article.description,
-            pubDate: article.pubDate == DateParser.unknownDate
-                ? item.pubDate ?? item.dublinCore?.dcDate ?? article.pubDate : article.pubDate,
-            source: article.source, imageUrl: article.imageUrl, fullContent: article.fullContent,
-            category: article.category ?? item.categories?.first?.value ?? item.dublinCore?.dcSubject,
-            contentFetched: article.contentFetched, readerDocument: article.readerDocument)
+        let dc = item.dublinCore
+        let title = article.title.isEmpty ? item.title ?? dc?.dcTitle ?? "" : article.title
+        let desc =
+            article.description.isEmpty
+            ? stripHTMLSimple(item.description ?? dc?.dcDescription ?? "") : article.description
+        let date =
+            article.pubDate == DateParser.unknownDate ? item.pubDate ?? dc?.dcDate ?? article.pubDate : article.pubDate
+        let cat = article.category ?? item.categories?.first?.value ?? dc?.dcSubject
+        return FeedArticle(
+            title: title.trimmingCharacters(in: .whitespacesAndNewlines), link: article.link, guid: article.guid,
+            description: desc, pubDate: date, source: article.source, imageUrl: article.imageUrl,
+            fullContent: article.fullContent, category: cat, contentFetched: article.contentFetched,
+            readerDocument: article.readerDocument)
     }
 
     private func atomArticle(_ item: FeedKit.AtomFeedEntry, keeping article: FeedArticle) -> FeedArticle {
-        FeedArticle(
-            title: (article.title.isEmpty ? item.title ?? "" : article.title).trimmingCharacters(
-                in: .whitespacesAndNewlines),
-            link: article.link, guid: article.guid,
-            description: article.description.isEmpty ? stripHTMLSimple(item.summary?.value ?? "") : article.description,
-            pubDate: article.pubDate == DateParser.unknownDate
-                ? item.published ?? item.updated ?? article.pubDate : article.pubDate,
-            source: article.source, imageUrl: article.imageUrl, fullContent: article.fullContent,
-            category: article.category,
-            contentFetched: article.contentFetched, readerDocument: article.readerDocument)
+        let title = article.title.isEmpty ? item.title ?? "" : article.title
+        let desc = article.description.isEmpty ? stripHTMLSimple(item.summary?.value ?? "") : article.description
+        let date =
+            article.pubDate == DateParser.unknownDate
+            ? item.published ?? item.updated ?? article.pubDate : article.pubDate
+        return FeedArticle(
+            title: title.trimmingCharacters(in: .whitespacesAndNewlines), link: article.link, guid: article.guid,
+            description: desc, pubDate: date, source: article.source, imageUrl: article.imageUrl,
+            fullContent: article.fullContent, category: article.category, contentFetched: article.contentFetched,
+            readerDocument: article.readerDocument)
     }
 
     private func applyFeedKitMedia(_ media: FeedKit.MediaNamespace?, baseURL: URL?, to article: FeedArticle)
@@ -538,27 +532,14 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
 
     private func stripHTMLSimple(_ html: String) -> String {
         var text = html.replacingOccurrences(
-            of: "(?i)</(p|div|blockquote|h[1-6]|li|tr)>",
-            with: "\n\n",
-            options: .regularExpression
+            of: "(?i)</(p|div|blockquote|h[1-6]|li|tr)>", with: "\n\n", options: .regularExpression
         )
-        text = text.replacingOccurrences(
-            of: "(?i)<(br|hr)\\s*/?>",
-            with: "\n",
-            options: .regularExpression
-        )
-        text = text.replacingOccurrences(
-            of: "<[^>]+>",
-            with: " ",
-            options: .regularExpression
-        )
-        // Every named and numeric form, including zero-padded ones such as `&#039;`.
+        .replacingOccurrences(of: "(?i)<(br|hr)\\s*/?>", with: "\n", options: .regularExpression)
+        .replacingOccurrences(of: "<[^>]+>", with: " ", options: .regularExpression)
         text = ContentExtractionPipeline.shared.decodeHTMLEntities(text)
-
-        text = text.replacingOccurrences(of: "[ \\t]+", with: " ", options: .regularExpression)
-        text = text.replacingOccurrences(of: "[ \\t]*\\n[ \\t]*", with: "\n", options: .regularExpression)
-        text = text.replacingOccurrences(of: "\\n{3,}", with: "\n\n", options: .regularExpression)
-
+            .replacingOccurrences(of: "[ \\t]+", with: " ", options: .regularExpression)
+            .replacingOccurrences(of: "[ \\t]*\\n[ \\t]*", with: "\n", options: .regularExpression)
+            .replacingOccurrences(of: "\\n{3,}", with: "\n\n", options: .regularExpression)
         return ArticleContentRedactor.cleanText(text.trimmingCharacters(in: .whitespacesAndNewlines))
     }
 
