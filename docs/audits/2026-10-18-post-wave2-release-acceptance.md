@@ -54,7 +54,7 @@ All automated verification commands from `CONTRIBUTING.md` were executed directl
 
 | Issue | Title | Status | Resolution Summary |
 | :--- | :--- | :--- | :--- |
-| **#307** | Event matcher precision | **Closed** | Hybrid EventMatcher v7 integrates CoreML `all-MiniLM-L6-v2` sentence embeddings, achieving 97%+ precision via semantic rescue ($\ge 0.82$) and veto ($< 0.55$) while preserving hard factual guards. |
+| **#307** | Event matcher precision | **Closed** | Accepted in PR #442 / #439 with documented 93.33% precision on the reused English holdout. Hybrid EventMatcher v7 in PR #445 integrates CoreML `all-MiniLM-L6-v2` embeddings for semantic rescue ($\ge 0.82$) and veto ($< 0.55$), preserving hard factual conflict guards without claiming an unverified point-precision increase. |
 | **#308** | Model-written overview attributions | **Closed** | Switched overviews to deterministic publisher excerpts and empty summaries in PR #440, eliminating multi-source synthesis attribution errors. |
 | **#309** | Minor-story importance hiding | **Closed** | Removed automatic 24h deletion and hiding of single-source stories in PR #440; minor stories remain visible and subject only to ordinary retention. |
 | **#314** | Developing-story links | **Parked** | Backend PR #438 merged; collector job unloaded and feature parked outside 1.0 release gate per #439. |
@@ -63,7 +63,16 @@ All automated verification commands from `CONTRIBUTING.md` were executed directl
 | **#264** | Non-English feed matching | **Parked** | Parked per AGENTS.md release scope; code preserved intact. |
 | **#268** | Live VoiceOver QA | **Parked** | Parked per AGENTS.md release scope; harness preserved intact. |
 
-## 5. Limitations & Boundaries
+## 5. Executable Test References & Reproduction
+
+The verification scenarios documented above are validated by the following deterministic test suites and harnesses in the repository:
+- **Neural Embeddings & Hybrid Matcher**: `Tests/EventEmbeddingTests.swift` (`testBertTokenizer`, `testSentenceEmbedderInference`, `testArticleEmbeddingsDatabaseRoundtrip`, `testArticleEmbeddingsForeignKeyCascade`, `testHybridEventMatcherSemanticRescueAndVeto`, `testEmbeddingAwareValidationOfAssignedMembers`).
+- **FeedKit & SwiftSoup Parser Suite**: `Tests/FeedKitSwiftSoupTests.swift` (DOM repair, CSS metadata, RSS/Atom/JSONFeed, nested relative XML bases, XML entity expansion safety).
+- **Cross-Integration Pipeline**: `FeedKitSwiftSoupTests.runEmbeddingIntegration` (FeedKit parsing → SwiftSoup reader repair → SQLite v21 vector persistence → EventClusterer production clustering).
+- **Native UI QA Suite**: `script/test_native_ui_qa.sh` (160 automated UI checks across layout, text scaling, accessibility tokens, appearance modes).
+- **Release Compilation & Hardening**: `build_release.sh` (arm64 compilation, asset packaging, Hardened Runtime codesigning, App Sandbox validation).
+
+## 6. Limitations & Boundaries
 
 - Repository-wide formatting lint (`script/format.sh --check`) fails on unchanged, pre-existing formatting in `Sources/Coordinators/NotificationService.swift`. Per project guidelines, unrelated formatting is preserved and not reported as passing.
 - Author metadata from FeedKit is not persisted in SQLite as `FeedArticle` intentionally does not contain an author field.
