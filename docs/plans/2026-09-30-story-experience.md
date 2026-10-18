@@ -1,8 +1,8 @@
 # News: структуроване читання та огляди подій
 
-> **17 October 2026:** The accepted [release simplification plan](2026-10-17-release-simplification.md), tracked in #439, supersedes earlier matcher/importance acceptance scope. Codex implements deterministic matching and visible stories with coverage-first Briefing ties; Gemini owns publisher-excerpt overviews. Existing #102/#409 data is reused without new annotation or multi-day collection. #314 is parked and #334 remains deferred. Implementation and validation are in progress; historical measurements below are not current-policy acceptance.
+> **18 October 2026:** Story experience epic and follow-ups are **Completed and Verified**. The release simplification plan (tracked in #439) closed all release blockers on `main` at `7143901`: hybrid EventMatcher v7 (#307) passed holdout verification with zero false merges; deterministic publisher-excerpt overviews (#308) and story visibility without importance hiding (#309) merged in PR #440; notification delivery and PNG attachments (#334) verified in PR #449; SwiftSoup and FeedKit parsing cutover verified in PR #446/#449. All core milestones A–H are closed. Parked issues (#264, #268, #314) remain parked. See [post-wave2 release acceptance audit](../audits/2026-10-18-post-wave2-release-acceptance.md).
 
-План від 30 вересня 2026. Статус: виконується; поточний стан наведено нижче та в [#90](https://github.com/marspater/NewsApp-macOS/issues/90). Основа: поточний код News на `codex/kite-practices`, дослідження Kite на коміті `08d15108f82fb8728832f55fc8c3799a2836bfd6` та чотири надані скриншоти. Незакомічені попередні зміни збережено.
+План від 30 вересня 2026. Статус: завершено (18 жовтня 2026). Поточний стан наведено нижче та в [#90](https://github.com/marspater/NewsApp-macOS/issues/90). Основа: поточний код News на `codex/kite-practices`, дослідження Kite на коміті `08d15108f82fb8728832f55fc8c3799a2836bfd6` та чотири надані скриншоти. Незакомічені попередні зміни збережено.
 
 ## Current release status — 10 October 2026
 
