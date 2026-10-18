@@ -62,7 +62,6 @@ public struct OverviewTokenBudget: Sendable, Equatable {
 /// Selects 2 to 5 substantively different representative articles from an event candidate cluster,
 /// filtering out wire reprints and exact duplicates.
 struct OverviewRepresentativeSelector: Sendable {
-    init() {}
 
     /// Selects substantively different representatives from candidate articles.
     func selectRepresentatives(
@@ -190,19 +189,6 @@ struct OverviewPassageSelection: Sendable, Equatable {
     let overflowHandled: Bool
     let isFallbackRecommended: Bool
 
-    init(
-        representatives: [FeedArticle],
-        passages: [EvidencePassage],
-        totalEstimatedTokens: Int,
-        overflowHandled: Bool,
-        isFallbackRecommended: Bool
-    ) {
-        self.representatives = representatives
-        self.passages = passages
-        self.totalEstimatedTokens = totalEstimatedTokens
-        self.overflowHandled = overflowHandled
-        self.isFallbackRecommended = isFallbackRecommended
-    }
 }
 
 /// Selects relevant evidence passages per representative article within a token budget.

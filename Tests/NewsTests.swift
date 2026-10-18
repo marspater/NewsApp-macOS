@@ -2286,11 +2286,15 @@ struct NewsTests {
         do {
             _ = try await OPMLFileReader.read(url)
             assertTrue(false, "Oversized OPML files must be rejected")
-        } catch { /* Expected bounded read failure. */  }
+        } catch {
+            // Expected bounded read failure.
+        }
         do {
             _ = try OPMLParser.parseValidated(data: Data(repeating: 32, count: OPMLFileReader.maximumBytes + 1))
             assertTrue(false, "In-memory OPML imports must enforce the same size bound")
-        } catch { /* Expected validation failure. */  }
+        } catch {
+            // Expected validation failure.
+        }
 
         // OPML Import Deduplication, Invalid URLs & Performance
         let opmlTestSettings = AppSettings(defaults: defaults)
@@ -2448,7 +2452,9 @@ struct NewsTests {
         do {
             _ = try await store.fetchArticles()
             assertTrue(false, "Storage read failure must propagate rather than return an empty library")
-        } catch { /* Expected closed-database error. */  }
+        } catch {
+            // Expected closed-database error.
+        }
     }
 
     @MainActor
@@ -3268,7 +3274,7 @@ struct NewsTests {
                 failures.append("\(feed.id): no articles")
             }
         }
-        failures.forEach { print("    ✗ \($0)") }
+        for failure in failures { print("    ✗ \(failure)") }
         assertTrue(
             failures.isEmpty,
             "Every catalog feed fetches and parses (\(failures.count) of \(FeedCatalog.feeds.count) failed)")
@@ -3309,7 +3315,7 @@ struct NewsTests {
             }
             var lines: [String] = []
             for await line in group { lines.append(line) }
-            lines.sorted().forEach { print("    \($0)") }
+            for line in lines.sorted() { print("    \(line)") }
         }
     }
 
@@ -4459,7 +4465,9 @@ struct NewsTests {
         do {
             _ = try SecureHTTPClient.decodeReaderImage(Data("invalid image".utf8))
             assertTrue(false, "Invalid image input must fail decoding")
-        } catch { /* Expected invalid-image failure. */  }
+        } catch {
+            // Expected invalid-image failure.
+        }
     }
 
     @MainActor
@@ -9712,7 +9720,9 @@ struct NewsTests {
         do {
             _ = try await evaluateEventCorpus(path: identityFile.path, language: "en", outputDirectory: directory.path)
             assertTrue(false, "A replay must not overwrite its previous evidence")
-        } catch { /* Existing evidence is rejected before scoring. */  }
+        } catch {
+            // Existing evidence is rejected before scoring.
+        }
 
         print("  - Testing the native embedding comparison (#127)...")
         let now = Date()

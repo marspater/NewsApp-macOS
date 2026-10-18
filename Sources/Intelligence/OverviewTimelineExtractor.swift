@@ -24,7 +24,7 @@ struct OverviewTimelineValidator: Sendable {
         "plans to", "planned to", "planning to", "scheduled to", "scheduled for",
         "will launch", "will begin", "will open", "aims to", "aiming to",
         "expected in", "expected to", "proposed", "target date", "slated to",
-        "set to begin", "projected to"
+        "set to begin", "projected to",
     ]
 
     /// Validates a single timeline item against available overview citations and source articles.
@@ -34,7 +34,8 @@ struct OverviewTimelineValidator: Sendable {
     ) -> OverviewTimelineValidationResult {
         // Rule 4: Every item must have a source citation
         guard !item.citationIDs.isEmpty else {
-            return OverviewTimelineValidationResult(isValid: false, rejectionReason: "Timeline item has no source citation")
+            return OverviewTimelineValidationResult(
+                isValid: false, rejectionReason: "Timeline item has no source citation")
         }
 
         for citID in item.citationIDs {
@@ -226,22 +227,35 @@ struct OverviewTimelineExtractor: Sendable {
     /// Extracts an explicit temporal expression from text (e.g. "15 October 2026", "06:14 UTC", "October 2026").
     private static func extractTemporalAnchor(from text: String) -> String? {
         // Pattern 1: Day Month Year (e.g., "15 October 2026" or "15 Oct 2026")
-        if let match = text.range(of: #"\b\d{1,2}\s+(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{4}\b"#, options: [.regularExpression, .caseInsensitive]) {
+        if let match = text.range(
+            of:
+                #"\b\d{1,2}\s+(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{4}\b"#,
+            options: [.regularExpression, .caseInsensitive])
+        {
             return String(text[match])
         }
 
         // Pattern 2: Month Day, Year (e.g., "October 15, 2026")
-        if let match = text.range(of: #"\b(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2}(?:,\s*\d{4})?\b"#, options: [.regularExpression, .caseInsensitive]) {
+        if let match = text.range(
+            of:
+                #"\b(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2}(?:,\s*\d{4})?\b"#,
+            options: [.regularExpression, .caseInsensitive])
+        {
             return String(text[match])
         }
 
         // Pattern 3: Explicit time of day with timezone (e.g., "06:14 UTC", "14:30 GMT")
-        if let match = text.range(of: #"\b\d{1,2}:\d{2}\s*(?:UTC|GMT|EST|PST|EDT|PDT)\b"#, options: [.regularExpression, .caseInsensitive]) {
+        if let match = text.range(
+            of: #"\b\d{1,2}:\d{2}\s*(?:UTC|GMT|EST|PST|EDT|PDT)\b"#, options: [.regularExpression, .caseInsensitive])
+        {
             return String(text[match])
         }
 
         // Pattern 4: Relative time anchor (e.g. "Yesterday morning", "Earlier today")
-        if let match = text.range(of: #"\b(?:earlier today|yesterday morning|yesterday evening|last night|earlier this week)\b"#, options: [.regularExpression, .caseInsensitive]) {
+        if let match = text.range(
+            of: #"\b(?:earlier today|yesterday morning|yesterday evening|last night|earlier this week)\b"#,
+            options: [.regularExpression, .caseInsensitive])
+        {
             return String(text[match]).capitalized
         }
 
@@ -253,7 +267,10 @@ struct OverviewTimelineExtractor: Sendable {
         if let match = text.range(of: #"\bQ[1-4]\s+\d{4}\b"#, options: [.regularExpression, .caseInsensitive]) {
             return String(text[match])
         }
-        if let match = text.range(of: #"\b(?:first|second|third|fourth)\s+quarter(?:\s+of\s+\d{4})?\b"#, options: [.regularExpression, .caseInsensitive]) {
+        if let match = text.range(
+            of: #"\b(?:first|second|third|fourth)\s+quarter(?:\s+of\s+\d{4})?\b"#,
+            options: [.regularExpression, .caseInsensitive])
+        {
             return String(text[match]).capitalized
         }
         if let match = text.range(of: #"\b(?:in\s+)?202[7-9]\b"#, options: [.regularExpression, .caseInsensitive]) {
@@ -273,7 +290,7 @@ struct OverviewTimelineExtractor: Sendable {
             "MMMM d, yyyy",
             "yyyy-MM-dd",
             "d MMM yyyy",
-            "MMMM yyyy"
+            "MMMM yyyy",
         ]
 
         for fmt in formats {
