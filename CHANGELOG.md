@@ -6,6 +6,7 @@
 - Minor-rated stories remain visible, eligible for image lookup and notifications, and subject only to ordinary retention. Old importance-expiry tombstones no longer suppress returning feed items. Refresh no longer schedules importance scoring.
 - Briefing keeps source/category diversity first, then ranks by publisher coverage, existing stored importance and recency. Today/archive remain chronological; an existing Briefing stays frozen.
 - Event matching requires shared specific evidence and no conflict on every compared pair, retaining two-thirds compatibility and removing model promotions. Active legacy groups are revalidated transactionally on matcher upgrade; article IDs and read/save state remain intact, and inactive archived groups are preserved.
+- Matcher v6 revalidates active v5 memberships using the primary-headline-clause guard and cross-tagged entity corrections. This narrows background-clause merges; the existing English holdout still falls below the 97% precision target.
 - The developing-story relation backend is parked outside release. The isolated collector was snapshotted and disabled; its files and prior evidence were preserved.
 
 ### Earlier implementation notes — 10 October 2026
