@@ -11,7 +11,7 @@ let package = Package(
         .library(name: "NewsParsingDependencies", type: .static, targets: ["NewsParsingDependencies"]),
     ],
     dependencies: [
-        .package(url: "https://github.com/scinfu/SwiftSoup.git", from: "2.7.5"),
+        .package(url: "https://github.com/scinfu/SwiftSoup.git", from: "2.14.3"),
         .package(url: "https://github.com/nmdias/FeedKit.git", from: "10.9.4"),
     ],
     targets: [
