@@ -227,6 +227,18 @@ struct EventOverviewAccessibilityTests {
             id: "a3", title: "Economic Impact", summary: "Renewable investment expected to double.", citationIDs: [],
             facts: [])
         assertTrue(EventOverviewReaderView.hasThematicAngleContent(validAngle), "Valid thematic angle is present")
+        assertTrue(
+            EventOverviewReaderView.showsThematicAngleSummary(validAngle),
+            "An angle without fact bullets shows its summary")
+        let bulletedAngle = OverviewThematicAngle(
+            id: "a4", title: "By the Numbers", summary: "Ten ships sailed. Two returned.", citationIDs: [],
+            facts: [
+                OverviewFact(id: "n1", text: "Ten ships sailed.", citationIDs: []),
+                OverviewFact(id: "n2", text: "Two returned.", citationIDs: []),
+            ])
+        assertFalse(
+            EventOverviewReaderView.showsThematicAngleSummary(bulletedAngle),
+            "The summary repeats the bullets, so an angle with facts shows only the cited bullets")
 
         // Coverage Sentiment
         assertFalse(EventOverviewReaderView.hasCoverageSentimentContent(nil), "Nil coverage sentiment is absent")

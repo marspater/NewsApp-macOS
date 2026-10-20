@@ -69,12 +69,24 @@ struct FeedArticle: Identifiable, Codable, Hashable, Sendable {
 
     /// Picks among curated member leads. Known area wins; tied or unknown sizes prefer publisher-hosted media.
     static func bestCardImage(in articles: [FeedArticle]) -> URL? {
+        rankedCardImages(in: articles).first?.url
+    }
+
+    /// Every distinct usable member lead, best first, for event cards that show more than one.
+    static func cardImages(in articles: [FeedArticle]) -> [URL] {
+        rankedCardImages(in: articles).map(\.url)
+    }
+
+    /// Distinct usable member leads ranked as `bestCardImage` chooses, each with the article it came from.
+    static func rankedCardImages(in articles: [FeedArticle]) -> [(url: URL, article: FeedArticle)] {
         struct Candidate {
             let url: URL
+            let article: FeedArticle
             let area: Int
             let own: Bool
+            let offset: Int
         }
-        let candidates = articles.compactMap { article -> Candidate? in
+        let candidates = articles.enumerated().compactMap { offset, article -> Candidate? in
             guard let image = article.readerDocument?.selectedImage(fallback: article.imageUrl) ?? article.imageUrl,
                 let url = URL(string: image)
             else { return nil }
@@ -85,14 +97,17 @@ struct FeedArticle: Identifiable, Codable, Hashable, Sendable {
             let host = URL(string: article.link)?.host?.lowercased().replacingOccurrences(of: "www.", with: "") ?? ""
             let imageHost = url.host?.lowercased() ?? ""
             return Candidate(
-                url: url, area: (metadata?.width ?? 0) * (metadata?.height ?? 0),
-                own: !host.isEmpty && (imageHost == host || imageHost.hasSuffix("." + host)))
+                url: url, article: article, area: (metadata?.width ?? 0) * (metadata?.height ?? 0),
+                own: !host.isEmpty && (imageHost == host || imageHost.hasSuffix("." + host)), offset: offset)
         }
-        return candidates.enumerated().max { lhs, rhs in
-            if lhs.element.area != rhs.element.area { return lhs.element.area < rhs.element.area }
-            if lhs.element.own != rhs.element.own { return !lhs.element.own }
-            return lhs.offset > rhs.offset
-        }?.element.url
+        var seen = Set<URL>()
+        return candidates.sorted { lhs, rhs in
+            if lhs.area != rhs.area { return lhs.area > rhs.area }
+            if lhs.own != rhs.own { return lhs.own }
+            return lhs.offset < rhs.offset
+        }
+        .filter { seen.insert($0.url).inserted }
+        .map { ($0.url, $0.article) }
     }
 }
 
@@ -102,11 +117,17 @@ struct FeedArticleWrap: Identifiable, Hashable, Sendable {
     let id: UUID
     let article: FeedArticle
     let contextArticles: [FeedArticle]
+    let initialExperienceMode: ReaderExperienceMode?
 
-    init(article: FeedArticle, contextArticles: [FeedArticle] = []) {
+    init(
+        article: FeedArticle,
+        contextArticles: [FeedArticle] = [],
+        initialExperienceMode: ReaderExperienceMode? = nil
+    ) {
         self.id = UUID()
         self.article = article
         self.contextArticles = contextArticles
+        self.initialExperienceMode = initialExperienceMode
     }
 }
 

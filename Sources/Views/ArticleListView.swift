@@ -127,7 +127,7 @@ struct ArticleListView: View {
 
     /// Saved Stories and History list exactly what the reader kept or opened.
     private var groupingMode: FeedGroupingMode {
-        groupsEvents && !isBriefing && selectedTopic != "Saved Stories" && selectedTopic != "History"
+        groupsEvents && selectedTopic != "Saved Stories" && selectedTopic != "History"
             ? .events : .publications
     }
 
@@ -222,7 +222,7 @@ struct ArticleListView: View {
 
     private var listCommandActions: ListCommandActions? {
         guard articlePath.isEmpty else { return nil }
-        return ListCommandActions(canGroupStories: !isBriefing, newBriefing: isBriefing ? { startNewBriefing() } : nil)
+        return ListCommandActions(canGroupStories: true, newBriefing: isBriefing ? { startNewBriefing() } : nil)
     }
 
     var body: some View {
@@ -385,7 +385,10 @@ struct ArticleListView: View {
                         briefingEditionArticleIDs = edition.articles.map(\.id).joined(separator: "\n")
                     }
                 }
-                buffer.replace(with: FeedSnapshot(articles: briefing?.articles ?? []))
+                let briefingArticles = briefing?.articles ?? []
+                let events = (try? await articleStore.eventFeedSummaries(for: briefingArticles.map(\.id))) ?? []
+                try Task.checkCancellation()
+                buffer.replace(with: FeedSnapshot(articles: briefingArticles, events: events))
                 hasMoreResults = false
                 mutedCount = 0
                 loadedQuery = identity
@@ -648,7 +651,6 @@ struct ArticleListView: View {
                     ? "Showing one card per event. Show individual publications (G)"
                     : "Showing individual publications. Group coverage of the same event (G)"
             )
-            .disabled(isBriefing)
             .accessibilityLabel("Group Coverage by Event")
 
             Picker("Story Layout", selection: $gridLayout) {
@@ -851,9 +853,13 @@ struct ArticleListView: View {
                 compact: !gridLayout,
                 isLead: isLead,
                 isExpanded: expansionBinding(summary.eventID),
-                openRepresentative: { openEvent(summary.eventID, article: representative) },
+                openRepresentative: {
+                    openEvent(summary.eventID, article: representative, initialExperienceMode: .eventOverview)
+                },
                 openMember: { member, members in
-                    openEvent(summary.eventID, article: member, context: members)
+                    openEvent(
+                        summary.eventID, article: member, context: members,
+                        initialExperienceMode: .sourcePublication)
                 },
                 separate: { member in separate(member, from: summary.eventID) }
             )
@@ -1013,7 +1019,6 @@ struct ArticleListView: View {
                 toggleFocusedEventSources()
                 return .handled
             } else if press.characters == "g" {
-                guard !isBriefing else { return .ignored }
                 groupsEvents.toggle()
                 return .handled
             } else if press.characters == "u" {
@@ -1053,7 +1058,8 @@ struct ArticleListView: View {
         guard let entry = listed.first(where: { $0.id == focusedArticleID }) ?? listed.first else { return }
         switch entry {
         case .article(let article): openArticle(article)
-        case .event(let summary, let representative, _): openEvent(summary.eventID, article: representative)
+        case .event(let summary, let representative, _):
+            openEvent(summary.eventID, article: representative, initialExperienceMode: .eventOverview)
         }
     }
 
@@ -1069,18 +1075,33 @@ struct ArticleListView: View {
         }
     }
 
-    private func openArticle(_ article: FeedArticle, context: [FeedArticle]? = nil) {
+    private func openArticle(
+        _ article: FeedArticle,
+        context: [FeedArticle]? = nil,
+        initialExperienceMode: ReaderExperienceMode? = nil
+    ) {
         let context = context ?? filteredArticles
         focusedArticleID = article.id
         readManager.markAsRead(article.id)
-        articlePath.append(FeedArticleWrap(article: article, contextArticles: context))
+        articlePath.append(
+            FeedArticleWrap(
+                article: article,
+                contextArticles: context,
+                initialExperienceMode: initialExperienceMode
+            )
+        )
     }
 
     /// Opening a publication from an event records the event version as seen; it marks only the
     /// opened article read.
-    private func openEvent(_ eventID: String, article: FeedArticle, context: [FeedArticle]? = nil) {
+    private func openEvent(
+        _ eventID: String,
+        article: FeedArticle,
+        context: [FeedArticle]? = nil,
+        initialExperienceMode: ReaderExperienceMode? = nil
+    ) {
         Task { await articleStore.markEventSeen(eventID) }
-        openArticle(article, context: context)
+        openArticle(article, context: context, initialExperienceMode: initialExperienceMode)
     }
 
     private func separate(_ article: FeedArticle, from eventID: String) {

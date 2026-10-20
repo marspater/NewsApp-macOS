@@ -162,7 +162,8 @@ struct MainView: View {
         ArticleDetailView(
             article: wrap.article,
             allArticles: wrap.contextArticles.isEmpty ? feedManager.articles : wrap.contextArticles,
-            path: $articlePath
+            path: $articlePath,
+            initialExperienceMode: wrap.initialExperienceMode
         )
         .navigationBarBackButtonHidden(true)
         // In full screen the toolbar steps aside for the story and returns on hover.

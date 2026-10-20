@@ -20,6 +20,18 @@ struct ArticleCardView: View {
     @Environment(\.effectiveReduceMotion) private var reduceMotion
     @Environment(\.effectiveContrast) private var contrast
     @State private var isHovered = false
+    @State private var hoverImageIndex = 0
+
+    private var candidateImages: [URL] {
+        FeedArticle.cardImages(in: [article] + imageFallbacks)
+    }
+
+    private var activeCardImageURL: URL? {
+        let images = candidateImages
+        guard !images.isEmpty else { return nil }
+        let index = min(hoverImageIndex, images.count - 1)
+        return images[index]
+    }
 
     private var isRead: Bool {
         readManager.isRead(article.id)
@@ -89,14 +101,36 @@ struct ArticleCardView: View {
 
     @ViewBuilder
     private var cardFace: some View {
-        if #available(macOS 26.0, *), isLead,
-            let url = FeedArticle.bestCardImage(in: [article] + imageFallbacks)
-        {
-            ArticleRemoteImage(url: url) { phase in
-                leadImage(for: phase, aspectRatio: DecodedImageCache.aspectRatio(for: url))
+        Group {
+            if #available(macOS 26.0, *), isLead,
+                let url = activeCardImageURL
+            {
+                ZStack {
+                    ArticleRemoteImage(url: url) { phase in
+                        leadImage(for: phase, aspectRatio: DecodedImageCache.aspectRatio(for: url))
+                    }
+                    .id(url)
+                    .transition(reduceMotion ? .identity : .opacity)
+                }
+            } else {
+                regularSurface()
             }
-        } else {
-            regularSurface()
+        }
+        .task(id: isHovered) {
+            let images = candidateImages
+            guard isHovered, !reduceMotion, images.count > 1 else {
+                if hoverImageIndex != 0 {
+                    hoverImageIndex = 0
+                }
+                return
+            }
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(2.5))
+                guard !Task.isCancelled else { break }
+                withAnimation(reduceMotion ? nil : AppMotion.state) {
+                    hoverImageIndex = (hoverImageIndex + 1) % images.count
+                }
+            }
         }
     }
 
@@ -141,6 +175,9 @@ struct ArticleCardView: View {
         .opacity(isRead ? 0.90 : 1.0)
         .onHover { hovering in
             isHovered = hovering
+            if !hovering {
+                hoverImageIndex = 0
+            }
         }
     }
 
@@ -298,7 +335,12 @@ struct ArticleCardView: View {
         .shadow(color: appearance.shadow, radius: appearance.radius, x: 0, y: appearance.y)
         .animation(reduceMotion ? nil : AppMotion.hover, value: isHovered)
         .animation(reduceMotion ? nil : AppMotion.state, value: isSelected)
-        .onHover { isHovered = $0 }
+        .onHover { hovering in
+            isHovered = hovering
+            if !hovering {
+                hoverImageIndex = 0
+            }
+        }
     }
 
     /// Dark image-caption backing remains legible at every glass transparency
@@ -363,21 +405,25 @@ struct ArticleCardView: View {
 
     @ViewBuilder
     private var cardImageHeader: some View {
-        if let url = FeedArticle.bestCardImage(in: [article] + imageFallbacks) {
-            ArticleRemoteImage(url: url) { phase in
-                switch phase {
-                case .success(let image):
-                    // The clear frame takes the column's size; a filled image wider than it must not push past it.
-                    Color.clear
-                        .frame(maxWidth: .infinity)
-                        .frame(height: compact ? 170 : 140)
-                        .overlay { image.resizable().aspectRatio(contentMode: .fill) }
-                        .clipped()
-                        .saturation(isRead ? 0.92 : 1.0)
-                        .accessibilityHidden(true)
-                default:
-                    editorialFallbackHeader.frame(height: compact ? 170 : 140)
+        if let url = activeCardImageURL {
+            ZStack {
+                ArticleRemoteImage(url: url) { phase in
+                    switch phase {
+                    case .success(let image):
+                        // The clear frame takes the column's size; a filled image wider than it must not push past it.
+                        Color.clear
+                            .frame(maxWidth: .infinity)
+                            .frame(height: compact ? 170 : 140)
+                            .overlay { image.resizable().aspectRatio(contentMode: .fill) }
+                            .clipped()
+                            .saturation(isRead ? 0.92 : 1.0)
+                            .accessibilityHidden(true)
+                    default:
+                        editorialFallbackHeader.frame(height: compact ? 170 : 140)
+                    }
                 }
+                .id(url)
+                .transition(reduceMotion ? .identity : .opacity)
             }
             .frame(height: compact ? 170 : 140)
         } else {

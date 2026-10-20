@@ -143,8 +143,12 @@ struct ArticleDetailView: View {
             initialValue: SystemSettingsOverrides.from().textScale.map(ReaderTextSize.normalized))
         if let mode = initialExperienceMode {
             self._experienceMode = State(initialValue: mode)
+            if mode == .eventOverview {
+                self._overviewRequestedArticleID = State(initialValue: article.id)
+            }
         } else if overview != nil {
             self._experienceMode = State(initialValue: .eventOverview)
+            self._overviewRequestedArticleID = State(initialValue: article.id)
         } else {
             self._experienceMode = State(initialValue: .sourcePublication)
         }
@@ -292,6 +296,16 @@ struct ArticleDetailView: View {
                     }
                 )
                 .id(overview.id)
+                .focusEffectDisabled(false)
+            } else if overviewRequestedArticleID == activeArticle.id && isOverviewLoading {
+                VStack(spacing: AppSpacing.md) {
+                    ProgressView()
+                        .controlSize(.regular)
+                    Text("Loading event overview…")
+                        .font(AppTypography.body)
+                        .foregroundColor(AppColor.secondaryText)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .focusEffectDisabled(false)
             } else if viewMode == .reader {
                 readerView
@@ -1485,6 +1499,7 @@ struct ArticleDetailView: View {
             eventMemberArticles = []
             relatedStories = nil
             experienceMode = .sourcePublication
+            overviewRequestedArticleID = nil
             await OverviewGenerationCoordinator.shared.clearVisibleEvent(owner: overviewOwner)
             return
         }
@@ -1547,6 +1562,8 @@ struct ArticleDetailView: View {
                 overviewRequestedArticleID = nil
             }
             await loadRelatedStories(eventID: eventID, articleID: articleID)
+        } else {
+            overviewRequestedArticleID = nil
         }
     }
 

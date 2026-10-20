@@ -8459,6 +8459,35 @@ struct NewsTests {
             FeedArticle.bestCardImage(in: [small, large])?.absoluteString, "https://news.example/large.jpg",
             "Cards select the largest usable member lead")
 
+        var captioned = FeedArticle(
+            title: "Report", link: page, guid: "captioned", description: "", pubDate: Date(), source: "Two")
+        captioned.readerDocument = ReaderDocument(
+            blocks: [],
+            images: [
+                ReaderImageCandidate(
+                    url: "https://news.example/wide.jpg", origin: .body, width: 1600, height: 900,
+                    caption: "  Crews clear the flooded road.  ", credit: "Photo: A. Reporter")
+            ], leadImageURL: "https://news.example/wide.jpg")
+        assertEqual(
+            FeedArticle.cardImages(in: [small, large, captioned, large]).map(\.absoluteString),
+            ["https://news.example/wide.jpg", "https://news.example/large.jpg", "https://news.example/small.jpg"],
+            "Event cards rank every distinct usable member lead, best first")
+        assertEqual(
+            OverviewComposer.leadImage(from: [small, captioned]),
+            OverviewLeadImage(
+                url: "https://news.example/wide.jpg", caption: "Crews clear the flooded road.",
+                credit: "Photo: A. Reporter", sourceArticleID: captioned.id),
+            "The overview lead is the best member image, with its publisher caption, credit and source")
+        assertEqual(
+            OverviewComposer.leadImage(from: [small])?.caption, nil,
+            "A lead without publisher metadata carries no invented caption")
+        assertEqual(
+            OverviewComposer.leadImage(from: [
+                FeedArticle(
+                    title: "Bare", link: page, guid: "bare", description: "", pubDate: Date(), source: "Three")
+            ]),
+            nil, "An event without a usable image has no overview lead")
+
         let db = DatabaseEngine(path: ":memory:")
         try await db.open()
         let now = Date()
@@ -14813,6 +14842,37 @@ struct NewsTests {
             [highlightInput[2].statement, highlightInput[1].statement],
             "Highlights drop fragments and lead with the statement closest to the headlines")
 
+        func fact(_ statement: String, _ articleID: String) -> PassageAnchoredFact {
+            PassageAnchoredFact(statement: statement, passageID: "p-\(articleID)", quote: "q", articleID: articleID)
+        }
+        let wireCopies = [
+            fact("The Venus survey begins after a long orbital approach, officials said.", "wire-1"),
+            fact("The Venus survey begins after a long orbital approach, officials reported.", "wire-2"),
+            fact("Engineers expect the first atmospheric readings within a week.", "wire-3"),
+        ]
+        assertEqual(
+            OverviewComposer.highlights(from: wireCopies, articles: articles).map(\.articleID),
+            ["wire-1", "wire-3"],
+            "Near-identical wire copies yield one Highlight, not the same claim twice")
+
+        let oneSource = [
+            "The Venus survey launched from Kourou aboard a heavy rocket.",
+            "The Venus survey carries a radar mapper built in Toulouse.",
+            "The Venus survey budget reached nearly two billion euros.",
+            "The Venus survey team includes scientists from twelve nations.",
+            "The Venus survey orbit will dip below cloud tops twice daily.",
+            "The Venus survey mission should continue until the next decade.",
+        ].map { fact($0, "lead") }
+        let diverse = OverviewComposer.highlights(
+            from: oneSource + [fact("Another agency will review the Venus data independently next year.", "other")],
+            articles: articles)
+        assertEqual(diverse.count, 5, "Highlights stay capped at five")
+        assertTrue(
+            diverse.contains { $0.articleID == "other" },
+            "A second publisher's statement is not crowded out by one prolific source")
+        assertEqual(
+            diverse.first?.articleID, "lead", "Diversity keeps the headline-closest statement first")
+
         // Verified facts extracted from passages
         let fact1 = PassageAnchoredFact(
             id: "f1",
@@ -16982,6 +17042,27 @@ struct NewsTests {
                 OverviewPerspectivesExtractor.extractPerspectives(
                     passages: [passage], articles: [article1], existingCitations: ["c_typo": typographicCitation]
                 ).isEmpty, "Mismatched delimiters, unattributed quotes and vague speakers stay excluded")
+        }
+        for (text, expectedStatement) in [
+            ("Mayor Elena Rostova said: “The evacuation routes are open.”", "The evacuation routes are open."),
+            ("Mayor Elena Rostova said, \"The evacuation routes are open.\"", "The evacuation routes are open."),
+            ("Mayor Elena Rostova announced: \"The evacuation routes are open.\"", "The evacuation routes are open."),
+            (
+                "Mayor Elena Rostova told reporters: “The evacuation routes are open.”",
+                "The evacuation routes are open."
+            ),
+            ("According to Mayor Elena Rostova, “The evacuation routes are open.”", "The evacuation routes are open."),
+            (
+                "Mayor Elena Rostova said: “The evacuation routes are open. Emergency personnel are ready.”",
+                "The evacuation routes are open. Emergency personnel are ready."
+            ),
+        ] {
+            let passage = EvidencePassage(id: typographic.id, articleID: typographic.articleID, text: text)
+            let extracted = OverviewPerspectivesExtractor.extractPerspectives(
+                passages: [passage], articles: [article1], existingCitations: ["c_typo": typographicCitation])
+            assertEqual(extracted.count, 1, "Speaker-first quote '\(text)' produces one verified voice")
+            assertEqual(extracted.first?.participant, "Mayor Elena Rostova", "Speaker '\(text)' is preserved")
+            assertEqual(extracted.first?.position, expectedStatement, "Statement '\(text)' is verbatim")
         }
         // Reported speech without an adjacent "that" (#313).
         func reported(_ text: String) -> [OverviewPerspective] {

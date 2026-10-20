@@ -5,15 +5,14 @@ import AppKit
 import SwiftUI
 
 /// Native SwiftUI reader view for multi-source event overviews.
-/// Implements the 7 editorial sections in order:
+/// Implements the 6 editorial sections in order:
 /// 1. Title, update time, article count and publisher count
 /// 2. Short introduction (1–2 paragraphs)
 /// 3. Fitting main image with caption and attribution
 /// 4. Highlights: key verified facts with passage-anchored citation links
 /// 5. Evidence sections: participant perspectives, timeline, thematic angle (Kagi News story order), then
 ///    "Earlier in This Story": related earlier events, each opening its own overview (#314)
-/// 6. Compact expandable source list
-/// 7. Links to original publications
+/// 6. Sources: every member publication, read here or opened on the publisher's site
 /// Sections without enough data are absent.
 struct EventOverviewReaderView: View {
     let overview: EventOverviewDocument
@@ -49,7 +48,8 @@ struct EventOverviewReaderView: View {
     @Environment(\.effectiveContrast) private var contrast
     @Environment(\.effectiveReduceMotion) private var reduceMotion
 
-    @State private var isSourcesExpanded: Bool = false
+    /// Open by default: the list is the overview's only route to the original publications.
+    @State private var isSourcesExpanded: Bool = true
     /// The lead image could not load, so its caption and credit are hidden with it.
     @State private var leadImageFailed = false
     @State private var activeCitationPreview: OverviewCitation? = nil
@@ -164,6 +164,11 @@ struct EventOverviewReaderView: View {
         let summary = angle.summary.trimmingCharacters(in: .whitespacesAndNewlines)
         let validFacts = angle.facts.filter { !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
         return !title.isEmpty || !summary.isEmpty || !validFacts.isEmpty
+    }
+
+    /// The extractor builds the summary from the first facts, so it shows only when there are no bullets to repeat.
+    static func showsThematicAngleSummary(_ angle: OverviewThematicAngle) -> Bool {
+        !angle.summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && filterValidFacts(angle.facts).isEmpty
     }
 
     static func hasCoverageSentimentContent(_ sentiment: OverviewCoverageSentiment?) -> Bool {
@@ -304,14 +309,9 @@ struct EventOverviewReaderView: View {
                         earlierInStorySection
                     }
 
-                    // 6. Compact expandable source list
+                    // 6. Sources: one list that reads each publication here or opens it on the publisher's site
                     if !memberArticles.isEmpty {
                         compactSourcesSection
-                    }
-
-                    // 7. Links to original publications
-                    if !memberArticles.isEmpty {
-                        originalPublicationsSection
                     }
                 }
                 .modifier(ReadingColumn(textScale: textScale))
@@ -543,7 +543,7 @@ struct EventOverviewReaderView: View {
         .accessibilityHint("Opens source publication at cited passage")
     }
 
-    // MARK: - Section 5: Compact Expandable Source List
+    // MARK: - Section 6: Sources
 
     private var compactSourcesSection: some View {
         DisclosureGroup(
@@ -688,7 +688,7 @@ struct EventOverviewReaderView: View {
         }
     }
 
-    // MARK: - Section 6: Evidence Sections (Timeline, Perspectives, Angle)
+    // MARK: - Section 5: Evidence Sections (Timeline, Perspectives, Angle)
 
     @ViewBuilder
     private var evidenceSections: some View {
@@ -867,7 +867,7 @@ struct EventOverviewReaderView: View {
                 .accessibilityHeading(.h2)
 
             VStack(alignment: .leading, spacing: AppSpacing.xs) {
-                if !angle.summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                if Self.showsThematicAngleSummary(angle) {
                     Text(angle.summary)
                         .font(AppTypography.overviewFont(.body, scale: textScale))
                         .lineSpacing(AppSpacing.xxs * textScale)
@@ -967,56 +967,5 @@ struct EventOverviewReaderView: View {
                     .stroke(currentBorderStrokeColor, lineWidth: 1)
             )
         }
-    }
-
-    // MARK: - Section 7: Original Publications
-
-    private var originalPublicationsSection: some View {
-        VStack(alignment: .leading, spacing: AppSpacing.sm) {
-            Text("Original publications")
-                .font(AppTypography.overviewFont(.subheading, scale: textScale))
-                .foregroundColor(AppColor.primaryText)
-                .accessibilityAddTraits(.isHeader)
-                .accessibilityHeading(.h2)
-
-            VStack(alignment: .leading, spacing: AppSpacing.xs) {
-                ForEach(memberArticles) { article in
-                    if let url = URL(string: article.link) {
-                        Button {
-                            NSWorkspace.shared.open(url)
-                        } label: {
-                            HStack(spacing: AppSpacing.xs) {
-                                Image(systemName: "safari")
-                                    .imageScale(.small)
-                                    .foregroundColor(AppColor.accent)
-                                    .accessibilityHidden(true)
-
-                                Text(article.publisherName)
-                                    .font(AppTypography.overviewFont(.emphasis, scale: textScale))
-                                    .foregroundColor(AppColor.primaryText)
-
-                                Text("—")
-                                    .foregroundColor(currentTertiaryTextColor)
-                                    .accessibilityHidden(true)
-
-                                Text(article.title)
-                                    .font(AppTypography.overviewFont(.detail, scale: textScale))
-                                    .foregroundColor(currentSecondaryTextColor)
-                                    .lineLimit(2)
-                                    .fixedSize(horizontal: false, vertical: true)
-                            }
-                            .padding(.vertical, AppSpacing.xxs)
-                            .padding(.horizontal, AppSpacing.eyebrowGap)
-                            .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .help("Open original story on \(article.publisherName)")
-                        .accessibilityLabel(
-                            Self.openWebArticleAccessibilityLabel(title: article.title, source: article.publisherName))
-                    }
-                }
-            }
-        }
-        .padding(.top, AppSpacing.xs)
     }
 }
