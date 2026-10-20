@@ -4101,12 +4101,9 @@ actor DatabaseEngine {
         return (target, candidates)
     }
 
-    /// Names that appear in more than `share` of the events published in the window before `end`, and in at least
-    /// `minimumEvents` of them: too common to tie two events to one developing story (a head of state appears across
-    /// unrelated stories). The minimum keeps a small or new library from treating every name as common.
-    func commonStoryTerms(_ terms: Set<String>, before end: Date, share: Double, minimumEvents: Int = 10) throws
-        -> Set<String>
-    {
+    /// Names that appear in more than `share` of the events published in the window before `end`: too common to
+    /// tie two events to one developing story (a head of state appears across unrelated stories).
+    func commonStoryTerms(_ terms: Set<String>, before end: Date, share: Double) throws -> Set<String> {
         try Task.checkCancellation()
         let start = end.addingTimeInterval(-EventStoryRelation.window).timeIntervalSince1970
         let total =
@@ -4116,7 +4113,10 @@ actor DatabaseEngine {
                 WHERE a.published_at >= ? AND a.published_at < ? AND \(Self.visibleArticle);
                 """, [.real(start), .real(end.timeIntervalSince1970)]
             ).first?.first.flatMap { $0.flatMap(Int.init) } ?? 0
-        guard total > 0 else { return [] }
+        // Require the window to hold enough events for the ratio to be meaningful: with fewer than
+        // 1/share events the threshold is below 1 and any single mention would qualify, which
+        // misidentifies actors in sparse windows (unit tests, fresh libraries, quiet periods).
+        guard Double(total) * share >= 1.0 else { return [] }
         var common = Set<String>()
         for term in terms.sorted().prefix(64) {
             try Task.checkCancellation()
@@ -4134,7 +4134,7 @@ actor DatabaseEngine {
                         AND \(Self.visibleArticle);
                     """, [.text(phrase), .real(start), .real(end.timeIntervalSince1970)]
                 ).first?.first.flatMap { $0.flatMap(Int.init) } ?? 0
-            if count >= minimumEvents && Double(count) > Double(total) * share { common.insert(term) }
+            if Double(count) > Double(total) * share { common.insert(term) }
         }
         return common
     }
