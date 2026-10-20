@@ -37,6 +37,7 @@ actor OverviewGenerationCoordinator {
     }
 
     private var memoryCache: [String: EventOverviewDocument] = [:]
+    private var memoryCacheOrder: [String] = []
     private var inFlightTasks: [String: InFlightGeneration] = [:]
     /// The inputs of the most recent request per event. Only a result built from them may be committed:
     /// an article edit changes the input hash without bumping the membership version.
@@ -218,6 +219,7 @@ actor OverviewGenerationCoordinator {
         // A newer request may have replaced this entry while it ran.
         if inFlightTasks[eventID]?.task == task {
             inFlightTasks.removeValue(forKey: eventID)
+            latestRequestedInputs.removeValue(forKey: eventID)
         }
         return Task.isCancelled ? nil : result
     }
@@ -482,6 +484,7 @@ actor OverviewGenerationCoordinator {
     func cancel(eventID: String, reason: EnrichmentCancellationReason = .user) async {
         if let running = inFlightTasks.removeValue(forKey: eventID) {
             running.task.cancel()
+            latestRequestedInputs.removeValue(forKey: eventID)
         }
         await queue.cancelOverview(eventID: eventID, reason: reason)
         logger.debug("Cancelled overview generation for \(eventID): \(reason.rawValue)")
@@ -493,6 +496,7 @@ actor OverviewGenerationCoordinator {
             running.task.cancel()
         }
         inFlightTasks.removeAll()
+        latestRequestedInputs.removeAll()
         logger.info("Cancelled all in-flight overview generation tasks")
     }
 
@@ -545,21 +549,28 @@ actor OverviewGenerationCoordinator {
     }
 
     private func storeInMemoryCache(_ document: EventOverviewDocument, for eventID: String) {
-        if memoryCache.count >= 100 {
-            memoryCache.remove(at: memoryCache.startIndex)
+        if memoryCache[eventID] == nil {
+            if memoryCacheOrder.count >= 100 {
+                let oldest = memoryCacheOrder.removeFirst()
+                memoryCache.removeValue(forKey: oldest)
+            }
+            memoryCacheOrder.append(eventID)
         }
         memoryCache[eventID] = document
     }
 
     private func recordRequestedInputs(eventID: String, membershipVersion: Int, inputTextHash: String) {
         if latestRequestedInputs.count >= 500 {
-            latestRequestedInputs.remove(at: latestRequestedInputs.startIndex)
+            if let evictKey = latestRequestedInputs.keys.first(where: { inFlightTasks[$0] == nil && $0 != eventID }) {
+                latestRequestedInputs.removeValue(forKey: evictKey)
+            }
         }
         latestRequestedInputs[eventID] = (membershipVersion, inputTextHash)
     }
 
     func clearCache() {
         memoryCache.removeAll()
+        memoryCacheOrder.removeAll()
         latestRequestedInputs.removeAll()
         failedExtractions.removeAll()
     }

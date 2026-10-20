@@ -35,6 +35,10 @@ extension EnvironmentValues {
     private static var pending: [URL: Task<CGImage, Error>] = [:]
 
     static func clear() {
+        for (_, task) in pending {
+            task.cancel()
+        }
+        pending.removeAll()
         images.removeAllObjects()
     }
 
@@ -54,7 +58,9 @@ extension EnvironmentValues {
         pending[url] = task
         defer { pending[url] = nil }
         let image = try await task.value
-        images.setObject(image, forKey: url as NSURL, cost: image.bytesPerRow * image.height)
+        if !task.isCancelled && !Task.isCancelled {
+            images.setObject(image, forKey: url as NSURL, cost: image.bytesPerRow * image.height)
+        }
         return image
     }
 

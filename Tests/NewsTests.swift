@@ -17401,6 +17401,30 @@ struct NewsTests {
             assertEqual(DecodedImageCache.images.countLimit, 500, "DecodedImageCache must bound max image count")
         }
 
+        // Test that clear() cancels pending tasks and prevents insertion
+        let slowLoader: @Sendable (URL) async throws -> CGImage = { _ in
+            try await Task.sleep(for: .milliseconds(500))
+            let colorSpace = CGColorSpaceCreateDeviceRGB()
+            let ctx = CGContext(
+                data: nil, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4, space: colorSpace,
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+            return ctx.makeImage()!
+        }
+        let testURL = URL(string: "https://example.com/slow_image_\(UUID().uuidString).jpg")!
+        let loadTask = Task { @MainActor in
+            _ = try? await DecodedImageCache.load(testURL, using: slowLoader)
+        }
+        try await Task.sleep(for: .milliseconds(30))
+        await MainActor.run {
+            DecodedImageCache.clear()
+        }
+        _ = await loadTask.value
+        await MainActor.run {
+            assertTrue(
+                DecodedImageCache.images.object(forKey: testURL as NSURL) == nil,
+                "DecodedImageCache must not contain image from cancelled load")
+        }
+
         // 2. DatabaseEngine directory creation on custom path & deinit safety
         let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(
             "news_test_dir_\(UUID().uuidString)")
