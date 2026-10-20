@@ -170,6 +170,17 @@ struct ReaderAccessibilityTests {
         assertTrue(ArticleCardView.framesLeadImageWhole(aspectRatio: 0.8), "Portrait photos are framed whole")
         assertFalse(ArticleCardView.framesLeadImageWhole(aspectRatio: 16.0 / 9.0), "Wide photos fill the card")
         assertFalse(ArticleCardView.framesLeadImageWhole(aspectRatio: nil), "Unknown sizes fill the card")
+        assertTrue(StoryLayout(compact: false, grid: false) == .list, "Earlier list preferences stay list")
+        assertTrue(StoryLayout(compact: false, grid: true) == .grid, "Earlier grid preferences stay grid")
+        assertTrue(StoryLayout(compact: true, grid: true) == .compact, "Headlines wins over a stored grid choice")
+        var compact = false
+        var grid = true
+        let layout = StoryLayout.binding(
+            compact: Binding(get: { compact }, set: { compact = $0 }), grid: Binding(get: { grid }, set: { grid = $0 }))
+        layout.wrappedValue = .compact
+        assertTrue(compact && !grid, "Choosing Headlines stores only the compact preference")
+        layout.wrappedValue = .list
+        assertTrue(!compact && !grid, "Choosing List clears both preferences")
     }
 
     // MARK: - 3. VoiceOver Source Line Formatter Tests

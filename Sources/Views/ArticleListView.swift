@@ -53,6 +53,7 @@ struct ArticleListView: View {
     @EnvironmentObject private var savedStories: SavedStoriesManager
 
     @AppStorage("articleGridLayout") private var gridLayout = false
+    @AppStorage("articleCompactLayout") private var compactLayout = false
     @AppStorage("groupsEventCoverage") private var groupsEvents = true
     @Environment(\.appearsActive) private var appearsActive
     @Environment(\.effectiveReduceMotion) private var reduceMotion
@@ -619,16 +620,18 @@ struct ArticleListView: View {
             .disabled(isBriefing)
             .accessibilityLabel("Group Coverage by Event")
 
-            Picker("Story Layout", selection: $gridLayout) {
-                Image(systemName: "list.bullet").tag(false)
+            Picker("Story Layout", selection: StoryLayout.binding(compact: $compactLayout, grid: $gridLayout)) {
+                Image(systemName: "text.justify.leading").tag(StoryLayout.compact)
+                    .accessibilityLabel("Headlines")
+                Image(systemName: "list.bullet").tag(StoryLayout.list)
                     .accessibilityLabel("List")
-                Image(systemName: "square.grid.2x2").tag(true)
+                Image(systemName: "square.grid.2x2").tag(StoryLayout.grid)
                     .accessibilityLabel("Grid")
             }
             .pickerStyle(.segmented)
             .labelsHidden()
             .fixedSize()
-            .help("Choose list or grid layout")
+            .help("Choose headlines, list or grid layout")
         }
 
         if #available(macOS 26.0, *) {
@@ -719,6 +722,7 @@ struct ArticleListView: View {
     private func articleGrid(proxy _: ScrollViewProxy) -> some View {
         let listed = entries
         let leadID: String? = {
+            if compactLayout { return nil }
             if #available(macOS 26, *) {
                 return LeadStoryPresentation.firstEligibleID(
                     in: listed, selectedTopic: selectedTopic, isSearching: isSearching
@@ -749,7 +753,13 @@ struct ArticleListView: View {
 
     @ViewBuilder
     private func cardCollection(_ listed: [FeedEntry]) -> some View {
-        if gridLayout {
+        if compactLayout {
+            LazyVStack(spacing: 0) {
+                ForEach(listed) { entry in compactRow(entry) }
+            }
+            .frame(maxWidth: AppLayout.readingMeasure)
+            .frame(maxWidth: .infinity)
+        } else if gridLayout {
             LazyVGrid(
                 columns: [
                     GridItem(
@@ -805,6 +815,30 @@ struct ArticleListView: View {
                 NewsSignposts.firstCardAppeared()
                 prefetchAhead(of: representative.id)
             }
+        }
+    }
+
+    @ViewBuilder
+    private func compactRow(_ entry: FeedEntry) -> some View {
+        let article = entry.representative
+        let publishers: [String] = {
+            if case .event(let summary, _, _) = entry { return summary.sources }
+            return []
+        }()
+        CompactStoryRow(
+            article: article, publishers: publishers, isSelected: article.id == focusedArticleID,
+            isExpanded: expansionBinding(entry.id)
+        ) {
+            if case .event(let summary, let representative, _) = entry {
+                openEvent(summary.eventID, article: representative)
+            } else {
+                openArticle(article)
+            }
+        }
+        .id(entry.id)
+        .onAppear {
+            NewsSignposts.firstCardAppeared()
+            prefetchAhead(of: article.id)
         }
     }
 

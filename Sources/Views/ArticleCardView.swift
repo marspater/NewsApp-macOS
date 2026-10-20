@@ -489,3 +489,124 @@ extension StoryContextMenuItems where TrailingContent == EmptyView {
         self.init(article: article, trailingContent: { EmptyView() })
     }
 }
+
+/// The feed layouts. Stored as the two existing preference keys so earlier List and Grid choices carry over.
+enum StoryLayout: Int, CaseIterable {
+    case compact, list, grid
+
+    init(compact: Bool, grid: Bool) { self = compact ? .compact : grid ? .grid : .list }
+
+    var title: String {
+        switch self {
+        case .compact: return "As Headlines"
+        case .list: return "As List"
+        case .grid: return "As Grid"
+        }
+    }
+
+    /// A binding over the stored preferences, shared by the toolbar picker and the View menu.
+    static func binding(compact: Binding<Bool>, grid: Binding<Bool>) -> Binding<StoryLayout> {
+        Binding(
+            get: { StoryLayout(compact: compact.wrappedValue, grid: grid.wrappedValue) },
+            set: { layout in
+                compact.wrappedValue = layout == .compact
+                grid.wrappedValue = layout == .grid
+            })
+    }
+}
+
+/// A dense headline row (the Headlines layout): topic, headline and publisher on one line each. Clicking expands
+/// the row in place to the summary, the publishers covering it and its actions, so a day's news can be read down
+/// the page and checked off without opening every story.
+struct CompactStoryRow: View {
+    let article: FeedArticle
+    /// Publishers covering the event, when this row stands for one.
+    var publishers: [String] = []
+    var isSelected = false
+    @Binding var isExpanded: Bool
+    let open: () -> Void
+
+    @EnvironmentObject private var readManager: ReadManager
+    @Environment(\.effectiveReduceMotion) private var reduceMotion
+    @Environment(\.effectiveContrast) private var contrast
+
+    private var isRead: Bool { readManager.isRead(article.id) }
+
+    private var kicker: String {
+        let topic = article.category?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let coverage = publishers.count > 1 ? "\(publishers.count) publishers" : ""
+        return [topic, coverage].filter { !$0.isEmpty }.joined(separator: " · ")
+    }
+
+    private var summary: String {
+        ArticleContentRedactor.cleanText(article.aiSummary ?? article.description)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: AppSpacing.xs) {
+            HStack(alignment: .firstTextBaseline, spacing: AppSpacing.sm) {
+                Button {
+                    withAnimation(reduceMotion ? nil : AppMotion.state) { isExpanded.toggle() }
+                } label: {
+                    VStack(alignment: .leading, spacing: AppSpacing.xxs) {
+                        if !kicker.isEmpty { EyebrowText(kicker, color: AppColor.accent) }
+                        Text(article.title)
+                            .font(AppTypography.headline)
+                            .foregroundStyle(isRead ? AppColor.secondaryText : AppColor.primaryText)
+                            .multilineTextAlignment(.leading)
+                            .lineLimit(isExpanded ? nil : 2)
+                        Text("\(article.publisherName) · \(article.cardDateText())")
+                            .font(AppTypography.caption)
+                            .foregroundStyle(AppColor.tertiaryText(for: contrast))
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityHint(isExpanded ? "Collapses the summary" : "Shows the summary and publishers")
+
+                Button {
+                    readManager.toggleRead(article.id)
+                } label: {
+                    Image(systemName: isRead ? "checkmark.circle.fill" : "circle")
+                        .font(AppTypography.sectionTitle)
+                        .foregroundStyle(isRead ? AppColor.success : AppColor.tertiaryText(for: contrast))
+                }
+                .buttonStyle(.plain)
+                .help(isRead ? "Mark as unread" : "Mark as read")
+                .accessibilityLabel(isRead ? "Mark as Unread" : "Mark as Read")
+            }
+
+            if isExpanded {
+                if !summary.isEmpty {
+                    Text(summary)
+                        .font(AppTypography.body)
+                        .foregroundStyle(AppColor.primaryText)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                }
+                if publishers.count > 1 {
+                    Text(publishers.joined(separator: " · "))
+                        .font(AppTypography.caption)
+                        .foregroundStyle(AppColor.secondaryText)
+                }
+                Button("Read Story", action: open)
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .help("Open the story in the reader")
+            }
+        }
+        .padding(.vertical, AppSpacing.sm)
+        .padding(.horizontal, AppSpacing.md)
+        .background(
+            isSelected || isExpanded ? AppColor.surface : Color.clear,
+            in: RoundedRectangle(cornerRadius: AppRadius.control)
+        )
+        .overlay(alignment: .bottom) {
+            Divider().opacity(isExpanded ? 0 : 1)
+        }
+        .contextMenu {
+            StoryContextMenuItems(article: article)
+        }
+    }
+}

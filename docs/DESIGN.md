@@ -128,6 +128,18 @@ One card component for list, grid, Briefing, search, Saved Stories and History.
 | Hover | Accent border at 40 % and the hover shadow token |
 | Keyboard focus | Accent ring (1.5 pt) and focus shadow token |
 
+### 8.3a Headlines layout
+
+The third feed layout (View → As Headlines) is a dense list for reading a day's news down the page, after Kagi News. It has no lead image and no card chrome: rows within the reading measure, separated by hairline dividers.
+
+| Part | Rule |
+| --- | --- |
+| Kicker | Topic and, for an event, the publisher count, as an accent `EyebrowText` |
+| Headline | `AppTypography.headline`, two lines collapsed; read stories use the secondary color |
+| Meta | Publisher and relative date in `caption`, tertiary color |
+| Read toggle | Trailing circle that becomes a green check; a button with a "Mark as Read" label |
+| Expansion | Clicking the row expands it in place to the summary, the publishers covering it and Read Story; the surface fill marks the open row |
+
 Cards use `AppColor.surface`, the card radius, a separator-color hairline and the resting shadow token. No gradients, glass or extra tinting. Every action on a card is also in its context menu and in its accessibility actions.
 
 ### 8.3 Event coverage
@@ -209,7 +221,7 @@ macOS has no Dynamic Type. Chrome uses system text styles so it matches system c
 ## 15. Commands, keyboard and pointer
 
 - Every toolbar action has a menu bar command; every frequent command has a keyboard shortcut shown in its menu item. Never reuse a standard window or app shortcut (close, minimize, hide, quit, settings, full screen) for anything else; a standard document shortcut whose action does not exist here (⌘O, ⌘J) may carry a close meaning, such as Open in Browser or the next story (HIG keyboards).
-- Menus: View holds layout (as List, as Grid), Group Stories by Event, text size and the sidebar; Navigate holds sections, story movement and queued updates; a Story menu holds actions on the focused or open story (read state, save, open in browser, share, Reader or Web), as Mail's Message menu does; Help lists keyboard shortcuts.
+- Menus: View holds layout (as Headlines, as List, as Grid), Group Stories by Event, text size and the sidebar; Navigate holds sections, story movement and queued updates; a Story menu holds actions on the focused or open story (read state, save, open in browser, share, Reader or Web), as Mail's Message menu does; Help lists keyboard shortcuts.
 - Single-key shortcuts (J, K, M, S, O and the others in the shortcuts list) work only while the list or reader has focus and never with ⌘, ⌃ or ⌥ held.
 - Every icon-only control has `.help`. Hover and focus states come from the system or the card tokens; never remove the focus ring without providing the card focus state.
 - Drag and drop: OPML files and feed URLs onto the window or sidebar; feedback through the drop-target highlight and the result notice rules in section 6.
@@ -239,7 +251,7 @@ Each pattern has one implementation; new code reuses it and extends it rather th
 | --- | --- | --- |
 | Tokens | `DesignSystem.swift` | Color, typography, spacing, radius, layout, shadow, motion |
 | Glass helpers | `GlassSystem.swift` | Custom glass, glass containers, glass button style, macOS 15 fallback |
-| Story card | `ArticleCardView.swift` | All story cards and their context menus |
+| Story card | `ArticleCardView.swift` | All story cards, the Headlines row and their context menus |
 | Event coverage | `EventCardView.swift` | Coverage disclosure and member rows |
 | Tag | Planned in `DesignSystem.swift` | Category, entity, Updated, Plan, AI, Verified Excerpts and citation pills |
 | Eyebrow | Planned in `DesignSystem.swift` | Publisher and kicker lines in cards, reader and overview |

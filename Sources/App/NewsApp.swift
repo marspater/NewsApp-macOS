@@ -205,13 +205,13 @@ struct ListViewCommands: Commands {
     @FocusedValue(\.readerActions) private var readerActions
     @ObservedObject var themeManager: ThemeManager
     @AppStorage("articleGridLayout") private var gridLayout = false
+    @AppStorage("articleCompactLayout") private var compactLayout = false
     @AppStorage("groupsEventCoverage") private var groupsEvents = true
 
     var body: some Commands {
         CommandGroup(before: .sidebar) {
-            Picker("Story Layout", selection: $gridLayout) {
-                Text("As List").tag(false)
-                Text("As Grid").tag(true)
+            Picker("Story Layout", selection: StoryLayout.binding(compact: $compactLayout, grid: $gridLayout)) {
+                ForEach(StoryLayout.allCases, id: \.self) { Text($0.title).tag($0) }
             }
             .pickerStyle(.inline)
             .labelsHidden()
