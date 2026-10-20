@@ -17043,6 +17043,27 @@ struct NewsTests {
                     passages: [passage], articles: [article1], existingCitations: ["c_typo": typographicCitation]
                 ).isEmpty, "Mismatched delimiters, unattributed quotes and vague speakers stay excluded")
         }
+        for (text, expectedStatement) in [
+            ("Mayor Elena Rostova said: “The evacuation routes are open.”", "The evacuation routes are open."),
+            ("Mayor Elena Rostova said, \"The evacuation routes are open.\"", "The evacuation routes are open."),
+            ("Mayor Elena Rostova announced: \"The evacuation routes are open.\"", "The evacuation routes are open."),
+            (
+                "Mayor Elena Rostova told reporters: “The evacuation routes are open.”",
+                "The evacuation routes are open."
+            ),
+            ("According to Mayor Elena Rostova, “The evacuation routes are open.”", "The evacuation routes are open."),
+            (
+                "Mayor Elena Rostova said: “The evacuation routes are open. Emergency personnel are ready.”",
+                "The evacuation routes are open. Emergency personnel are ready."
+            ),
+        ] {
+            let passage = EvidencePassage(id: typographic.id, articleID: typographic.articleID, text: text)
+            let extracted = OverviewPerspectivesExtractor.extractPerspectives(
+                passages: [passage], articles: [article1], existingCitations: ["c_typo": typographicCitation])
+            assertEqual(extracted.count, 1, "Speaker-first quote '\(text)' produces one verified voice")
+            assertEqual(extracted.first?.participant, "Mayor Elena Rostova", "Speaker '\(text)' is preserved")
+            assertEqual(extracted.first?.position, expectedStatement, "Statement '\(text)' is verbatim")
+        }
         // Reported speech without an adjacent "that" (#313).
         func reported(_ text: String) -> [OverviewPerspective] {
             let passage = EvidencePassage(id: "pass_reported", articleID: "art_persp_1", text: text)

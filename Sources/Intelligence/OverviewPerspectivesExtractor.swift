@@ -470,12 +470,24 @@ struct OverviewPerspectivesExtractor: Sendable {
         let verbs =
             #"(?:said|stated|announced|noted|argued|warned|confirmed|declared|emphasized|urged|reiterated|cautioned|explained)"#
         let participant = #"([A-Z][A-Za-z0-9\s,\.\-]{2,60})"#
+        // When and where the remark was made: "on Thursday night", "Tuesday", "in a statement", "at a news conference".
+        let time =
+            #"(?:\s+(?:(?:on|late on|earlier on|late|early)\s+)?(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday|this week|last week|this month|last month|this year|last year|earlier this year|earlier this month|earlier today|earlier|later)(?:\s+(?:night|morning|evening|afternoon))?(?:\s+\([^)]{1,30}\))?)?(?:\s+(?:in a statement|in an interview|in a report|in a post|at a news conference|during a news conference)[^:,]{0,30})?[:,]?"#
         var quoted: [Attribution?] = []
         for quote in [#"\"([^\"“”]{10,250})\""#, #"“([^\"“”]{10,250})”"#] {
             let verbFirst = quote + #",?\s*"# + verbs + #"\s+"# + participant
             let speakerFirst = quote + #",?\s*"# + participant + #"\s+"# + verbs + #"\b"#
+            let speakerBeforeQuote = participant + #"\s+"# + verbs + time + #"\s*"# + quote
+            let speakerToldBeforeQuote =
+                participant
+                + #"\s+told\s+(?:(?:[Tt]he|[Aa]n?)\s+[\p{L}0-9\s]{1,30}?|\p{Lu}[\p{L}0-9\s]{1,30}?|reporters|journalists|broadcasters)\#(time)\s*"#
+                + quote
+            let accordingToQuoted = #"According to\s+"# + participant + #",\s*"# + quote
             quoted.append(Attribution(verbFirst, participantGroup: 2, statementGroup: 1, minimumLength: 0))
             quoted.append(Attribution(speakerFirst, participantGroup: 2, statementGroup: 1, minimumLength: 0))
+            quoted.append(Attribution(speakerBeforeQuote, participantGroup: 1, statementGroup: 2, minimumLength: 0))
+            quoted.append(Attribution(speakerToldBeforeQuote, participantGroup: 1, statementGroup: 2, minimumLength: 0))
+            quoted.append(Attribution(accordingToQuoted, participantGroup: 1, statementGroup: 2, minimumLength: 0))
         }
         // Pattern 2: [Participant] (said that|stated that|announced that|argued that|warned that|noted that|confirmed that) [Statement].
         let patternSpeakerFirst =
@@ -483,9 +495,6 @@ struct OverviewPerspectivesExtractor: Sendable {
         // Pattern 2b: reported speech without an adjacent "that" (#313): "Foreign Secretary Ed Miliband said his
         // country does not accept…", "Édouard Geffray told TF1 television on Thursday night that…". The speaker
         // excludes full stops, so it cannot reach back into the previous sentence.
-        // When and where the remark was made: "on Thursday night", "Tuesday", "in a statement", "at a news conference".
-        let time =
-            #"(?:\s+(?:(?:on|late on|earlier on|late|early)\s+)?(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday|this week|last week|this month|last month|this year|last year|earlier this year|earlier this month|earlier today|earlier|later)(?:\s+(?:night|morning|evening|afternoon))?(?:\s+\([^)]{1,30}\))?)?(?:\s+(?:in a statement|in an interview|in a report|in a post|at a news conference|during a news conference)[^:,]{0,30})?[:,]?"#
         let patternReported =
             #"(\p{Lu}[\p{L}0-9\s,'’\-]{1,60}?)\s+(?:(?:said|says)\#(time)\s+(?:that\s+)?|told\s+(?:(?:[Tt]he|[Aa]n?)\s+[\p{L}0-9\s]{1,40}?|\p{Lu}[\p{L}0-9\s]{1,40}?)\#(time)\s+that\s+)(?!(?:in|on|at|of|for|during|after|before|while|with|is|are|was|were|has|have|had|would|will|could|should|can)\b|\p{Ll}+ing\b)([\p{L}0-9“\"][^\.\n]{15,200})"#
         // Pattern 3: According to [Participant], [Statement].
@@ -558,10 +567,12 @@ struct OverviewPerspectivesExtractor: Sendable {
                 let checkLength = min(40, participantRange.location)
                 let checkRange = NSRange(location: participantRange.location - checkLength, length: checkLength)
                 let precedingText = nsString.substring(with: checkRange)
-                if precedingPrepositionRegex?.firstMatch(
-                    in: precedingText, range: NSRange(location: 0, length: precedingText.utf16.count)) != nil
-                {
-                    return nil
+                if !precedingText.lowercased().hasSuffix("according to ") {
+                    if precedingPrepositionRegex?.firstMatch(
+                        in: precedingText, range: NSRange(location: 0, length: precedingText.utf16.count)) != nil
+                    {
+                        return nil
+                    }
                 }
             }
             let participant = cleanParticipant(nsString.substring(with: participantRange))
