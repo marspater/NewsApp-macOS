@@ -189,7 +189,7 @@ actor OverviewGenerationCoordinator {
                     verifiedFacts: verifiedFacts,
                     passages: passages,
                     articles: articles,
-                    leadImage: nil,
+                    leadImage: OverviewComposer.leadImage(from: articles),
                     membershipVersion: membershipVersion
                 )
 

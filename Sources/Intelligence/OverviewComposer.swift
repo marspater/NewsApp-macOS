@@ -27,7 +27,8 @@ public struct OverviewComposer: Sendable {
     /// Validates whether a fact candidate satisfies the quote grounding and passage invariants.
     /// Up to five Highlights, after a Kagi News story card: whole statements of five or more words, those sharing the
     /// most words with the coverage's headlines first, publisher order otherwise. Fragments such as "Earlier this
-    /// month." stay out; the timeline still sees every valid fact.
+    /// month." stay out; the timeline still sees every valid fact. A statement sharing most of its words with one
+    /// already chosen (wire copies) is skipped, and each publisher's best statement is chosen before any second one.
     static func highlights(from facts: [PassageAnchoredFact], articles: [FeedArticle]) -> [PassageAnchoredFact] {
         func words(_ text: String) -> Set<String> {
             Set(TensionEventClassifier.words(text).filter { $0.count >= 4 })
@@ -36,12 +37,31 @@ public struct OverviewComposer: Sendable {
         let substantive = facts.enumerated().filter {
             $0.element.statement.split(whereSeparator: \.isWhitespace).count >= 5
         }
-        let ranked = substantive.sorted { left, right in
-            let a = words(left.element.statement).intersection(headline).count
-            let b = words(right.element.statement).intersection(headline).count
-            return a == b ? left.offset < right.offset : a > b
+        let ranked = substantive.map { (offset: $0.offset, fact: $0.element, words: words($0.element.statement)) }
+            .sorted { left, right in
+                let a = left.words.intersection(headline).count
+                let b = right.words.intersection(headline).count
+                return a == b ? left.offset < right.offset : a > b
+            }
+
+        var chosen: [Int] = []
+        func isRepeat(_ candidate: Set<String>) -> Bool {
+            chosen.contains { index in
+                let other = ranked[index].words
+                let union = candidate.union(other).count
+                return union > 0 && Double(candidate.intersection(other).count) / Double(union) >= 0.6
+            }
         }
-        return ranked.prefix(5).map(\.element)
+        var sources = Set<String>()
+        for firstPerSource in [true, false] {
+            for (index, entry) in ranked.enumerated() where chosen.count < 5 && !chosen.contains(index) {
+                if firstPerSource && sources.contains(entry.fact.articleID) { continue }
+                guard !isRepeat(entry.words) else { continue }
+                chosen.append(index)
+                sources.insert(entry.fact.articleID)
+            }
+        }
+        return chosen.sorted().map { ranked[$0].fact }
     }
 
     public static func validateFactForOverview(
@@ -69,6 +89,23 @@ public struct OverviewComposer: Sendable {
         }
 
         return FactOverviewValidationResult(isValid: true)
+    }
+
+    /// The overview's lead: the member image cards would show, with that publisher's own caption and credit.
+    /// Nothing is generated; missing metadata stays missing.
+    static func leadImage(from articles: [FeedArticle]) -> OverviewLeadImage? {
+        guard let best = FeedArticle.rankedCardImages(in: articles).first else { return nil }
+        let url = best.url.absoluteString
+        let metadata = best.article.readerDocument?.images?.first { $0.url == url }
+        func clean(_ text: String?) -> String? {
+            guard let trimmed = text?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty else {
+                return nil
+            }
+            return trimmed
+        }
+        return OverviewLeadImage(
+            url: url, caption: clean(metadata?.caption), credit: clean(metadata?.credit),
+            sourceArticleID: best.article.id)
     }
 
     /// Composes an event overview from verified facts and source evidence passages.
