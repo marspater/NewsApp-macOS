@@ -4101,6 +4101,41 @@ actor DatabaseEngine {
         return (target, candidates)
     }
 
+    /// Names that appear in more than `share` of the events published in the window before `end`: too common to
+    /// tie two events to one developing story (a head of state appears across unrelated stories).
+    func commonStoryTerms(_ terms: Set<String>, before end: Date, share: Double) throws -> Set<String> {
+        try Task.checkCancellation()
+        let start = end.addingTimeInterval(-EventStoryRelation.window).timeIntervalSince1970
+        let total =
+            try eventRows(
+                """
+                SELECT count(DISTINCT m.event_id) FROM articles a JOIN event_members m ON m.article_id = a.id
+                WHERE a.published_at >= ? AND a.published_at < ? AND \(Self.visibleArticle);
+                """, [.real(start), .real(end.timeIntervalSince1970)]
+            ).first?.first.flatMap { $0.flatMap(Int.init) } ?? 0
+        guard total > 0 else { return [] }
+        var common = Set<String>()
+        for term in terms.sorted().prefix(64) {
+            try Task.checkCancellation()
+            let words = term.split { !$0.isLetter && !$0.isNumber }
+            guard !words.isEmpty else { continue }
+            let phrase = "\"" + words.joined(separator: " ") + "\""
+            let count =
+                try eventRows(
+                    """
+                    SELECT count(DISTINCT m.event_id) FROM articles_fts fts
+                    JOIN article_fts_rows f ON f.fts_rowid = fts.rowid
+                    JOIN articles a ON a.id = f.article_id
+                    JOIN event_members m ON m.article_id = a.id
+                    WHERE articles_fts MATCH ? AND a.published_at >= ? AND a.published_at < ?
+                        AND \(Self.visibleArticle);
+                    """, [.text(phrase), .real(start), .real(end.timeIntervalSince1970)]
+                ).first?.first.flatMap { $0.flatMap(Int.init) } ?? 0
+            if Double(count) > Double(total) * share { common.insert(term) }
+        }
+        return common
+    }
+
     // MARK: - Event Matching
 
     private static let eventMatchColumns = """

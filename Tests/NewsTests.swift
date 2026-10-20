@@ -6619,6 +6619,9 @@ struct NewsTests {
         var country = later
         country.places = ["@US"]
         assertTrue(EventStoryRelation.supports(earlier, country), "A shared country counts as a shared place")
+        assertFalse(
+            EventStoryRelation.supports(earlier, later, commonActors: earlier.people.union(earlier.organizations)),
+            "An actor common across the week's events does not tie two events together")
         var boundary = earlier
         boundary.date = now.addingTimeInterval(-EventStoryRelation.window)
         assertTrue(EventStoryRelation.supports(boundary, later), "The seven-day boundary is inclusive")
@@ -7541,7 +7544,9 @@ struct NewsTests {
         var nearMisses: [Pair] = []
         for event in events {
             let snapshot = try await db.relatedStoryEventRows(eventID: event.eventID)
-            let links = try EventStoryRelation.links(target: snapshot.target, candidates: snapshot.candidates)
+            let common = try await EventStoryRelation.commonActors(of: snapshot.target, in: db)
+            let links = try EventStoryRelation.links(
+                target: snapshot.target, candidates: snapshot.candidates, commonActors: common)
             guard let start = snapshot.target.map(\.date).min() else { continue }
             report["linksPerEvent_\(links.count)", default: 0] += 1
             let linked = Set(links.map(\.eventID))
@@ -7570,8 +7575,9 @@ struct NewsTests {
                         kind: stage, earlierID: candidate.id, laterID: event.eventID, earlier: candidate.members,
                         later: snapshot.target))
                 if !inWindow.isEmpty,
-                    try !EventStoryRelation.links(target: snapshot.target, candidates: [(candidate.id, inWindow)])
-                        .isEmpty
+                    try !EventStoryRelation.links(
+                        target: snapshot.target, candidates: [(candidate.id, inWindow)], commonActors: common
+                    ).isEmpty
                 {
                     report["windowBlocked_\(stage)_wouldLink", default: 0] += 1
                 }
@@ -7597,7 +7603,7 @@ struct NewsTests {
                             ? "noActorOnOneSide" : "differentActors"
                     } else if !pairs.contains(where: { !$0.places.isDisjoint(with: $1.places) }) {
                         "noSharedPlace"
-                    } else if !pairs.contains(where: { EventStoryRelation.supports($0, $1) }) {
+                    } else if !pairs.contains(where: { EventStoryRelation.supports($0, $1, commonActors: common) }) {
                         "noPairMeetsAll"
                     } else if linked.contains(candidate.id) { "linked" } else { "belowTwoThirdsSupport" }
                 report["candidateStage_\(stage)", default: 0] += 1
