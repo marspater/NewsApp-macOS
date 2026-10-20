@@ -8,10 +8,13 @@ jobs:
       - checkout
       - run:
           name: "Ensure permissions"
-          command: chmod +x test.sh build.sh build_release.sh
+          command: chmod +x test.sh build.sh build_release.sh script/ci_testsuite.sh
       - run:
-          name: "Run unit tests and regressions"
-          command: ./test.sh
+          name: "Install Testsuite Extension"
+          command: circleci extension install testsuite || true
+      - run:
+          name: "Run unit tests and regressions via Smarter Testing"
+          command: circleci testsuite run "unit tests"
       - run:
           name: "Verify publisher excerpts"
           command: NEWS_NATIVE_HARNESS=Tests/PublisherExcerptTests.swift ./script/native_performance_baseline.sh

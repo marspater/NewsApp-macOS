@@ -1,0 +1,6 @@
+---
+name: unit tests
+discover: echo "NewsTests"
+run: ./script/ci_testsuite.sh "<< outputs.junit >>" << test.atoms >>
+options:
+  store-test-results: true
