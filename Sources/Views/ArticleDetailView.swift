@@ -280,9 +280,13 @@ struct ArticleDetailView: View {
                                     limit: 1, id: related.articleID
                                 ).first
                             else { return }
-                            highlightedPassage = nil
+                            // The same sequence as moving to the next story: the old overview and reader state go
+                            // before the article changes, so no view shows one event's overview for another article.
+                            resetReaderState()
+                            currentOverview = nil
                             overviewRequestedArticleID = article.id
                             activeArticle = article
+                            readManager.markAsRead(article.id)
                         }
                     }
                 )
