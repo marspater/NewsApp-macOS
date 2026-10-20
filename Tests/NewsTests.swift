@@ -3527,6 +3527,20 @@ struct NewsTests {
         assertTrue(
             demonym.isGrounded(in: [WorldTensionHeadline(id: "C1", title: "Iran resumes talks", publisher: "Panel")]),
             "Demonyms of headline places are grounded")
+        let panel = [
+            "More than 250,000 displaced in Yemen since fighting escalated", "Russian drone strikes hit Kharkiv grid",
+            "Israel launches airstrikes on southern Lebanon", "Floods kill 40 in Nigeria's Borno state",
+        ].enumerated().map { WorldTensionHeadline(id: "C\($0.offset + 1)", title: $0.element, publisher: "Panel") }
+        let liveDraft = WorldTensionAssessment(
+            score: 20,
+            summary:
+                "Displacement in Borno, strikes in Kharkiv and airstrikes in Lebanon reflect fragmented crises across South Asia and Europe.",
+            reasons: answer.reasons,
+            lead: "Fighting in Yemen displaces over 250,000 as Ukraine and Lebanon see strikes.")
+        assertTrue(liveDraft.isGrounded(in: panel), "A country inferred from its city's headline is tolerated")
+        var inventedFigure = liveDraft
+        inventedFigure.lead = "Fighting in Yemen displaces 300,000."
+        assertFalse(inventedFigure.isGrounded(in: panel), "Any figure missing from the headlines is rejected")
         assertTrue(WorldTensionService.isSoftNews("Royals ride the subway and do the dishes"), "Royal gossip is soft")
         assertTrue(WorldTensionService.isSoftNews("Premier League title race tightens"), "Sport is soft")
         assertFalse(WorldTensionService.isSoftNews("Missile strikes hit port as talks stall"), "Conflict is hard news")

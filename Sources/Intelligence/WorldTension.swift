@@ -77,8 +77,8 @@ struct WorldTensionAssessment: Codable, Equatable, Sendable {
     func isValid(headlines: [WorldTensionHeadline]) -> Bool {
         (0...100).contains(score) && (20...400).contains(summary.count) && !summary.contains("\n")
             && reasons.count == 4 && Set(reasons.map(\.factor)) == Set(WorldTensionFactor.allCases)
-            && reasons.allSatisfy { (15...240).contains($0.explanation.count) && !$0.explanation.contains("\n") }
-            && lead.map { (10...240).contains($0.count) && !$0.contains("\n") } ?? true
+            && reasons.allSatisfy { (15...400).contains($0.explanation.count) && !$0.explanation.contains("\n") }
+            && lead.map { (10...300).contains($0.count) && !$0.contains("\n") } ?? true
             && (drivers ?? []).allSatisfy { id in headlines.contains { $0.id == id } }
             && headlines.contains { $0.id.hasPrefix("C") }
             && headlines.count <= 40 && Set(headlines.map(\.id)).count == headlines.count
@@ -87,11 +87,14 @@ struct WorldTensionAssessment: Codable, Equatable, Sendable {
     /// Generic capitalised words that are not claims about the headlines.
     private static let groundingStopwords: Set<String> = [
         "i", "ai", "wmd", "c", "p", "novelty", "scope", "proximity", "reversibility", "summary", "lead",
+        "north", "south", "east", "west", "eastern", "western", "northern", "southern", "central", "middle",
+        "asia", "europe", "africa", "america", "americas", "pacific", "atlantic", "global",
     ]
 
-    /// Deterministic factual grounding: every figure, and all but one proper name, in the prose must occur in the
-    /// supplied headlines. Abstract reasoning ("risk remains contained") is not checked; invented places, actors and
-    /// numbers are. Sentence-initial words are skipped because capitalisation there carries no meaning.
+    /// Deterministic factual grounding: every figure, and at least three in four proper names (all but one when there
+    /// are few), in the prose must occur in the supplied headlines. A country named for its city's headline
+    /// ("Ukraine" for Kharkiv) is tolerated; a cast of invented places is not. Abstract reasoning is not checked.
+    /// Sentence-initial words are skipped because capitalisation there carries no meaning.
     func isGrounded(in headlines: [WorldTensionHeadline]) -> Bool {
         let source = headlines.map(\.title).joined(separator: " ").lowercased()
         let sourceWords = Set(TensionEventClassifier.words(source))
@@ -102,6 +105,7 @@ struct WorldTensionAssessment: Codable, Equatable, Sendable {
             return sourceWords.contains { $0.count >= 4 && (lower.hasPrefix($0) || $0.hasPrefix(lower)) }
         }
         var unsupportedNames = 0
+        var names = 0
         let prose = [lead ?? "", summary] + reasons.map(\.explanation)
         for text in prose {
             for sentence in text.split(whereSeparator: { ".!?;:".contains($0) }) {
@@ -109,13 +113,14 @@ struct WorldTensionAssessment: Codable, Equatable, Sendable {
                 for (index, word) in words.enumerated() {
                     if word.contains(where: \.isNumber) {
                         if !sourceWords.contains(word.lowercased()) { return false }
-                    } else if index > 0, word.first?.isUppercase == true, !supported(word) {
-                        unsupportedNames += 1
+                    } else if index > 0, word.first?.isUppercase == true {
+                        names += 1
+                        if !supported(word) { unsupportedNames += 1 }
                     }
                 }
             }
         }
-        return unsupportedNames <= 1
+        return unsupportedNames <= max(1, names / 4)
     }
 
     // MARK: Keyword estimate
@@ -160,7 +165,8 @@ struct WorldTensionAssessment: Codable, Equatable, Sendable {
         let worstCase = current.contains {
             TensionEventClassifier.containsCue(TensionEventClassifier.words($0.title), worstCaseCues)
         }
-        var score = min(75, 8 + hits.map(\.1).reduce(0, +))
+        // Panels carry several conflict reports every day, so the sum is halved: a busy day reads Warm, not Hot.
+        var score = min(70, 15 + hits.map(\.1).reduce(0, +) / 2)
         if worstCase && !conflict.isEmpty { score = min(85, score + 10) }
         let types = TensionEventType.allCases.filter { type in
             current.contains {
@@ -336,7 +342,7 @@ actor WorldTensionService {
             Choose an integer 0-100 after reasoning: 0-19 Zen (limited global strain), 20-39 Mild (manageable strain),
             40-59 Warm (regional escalation/broader strain), 60-79 Hot (acute interstate crisis with global spillover),
             80-100 Boiling (acute global systemic danger). Many violent headlines alone do not justify 80+.
-            Return exactly eight labelled plain-text lines, no Markdown or JSON. Each reason under 240 characters. Do not merge separate reports into a single event. Read every supplied headline before making any absence-of-evidence claim:
+            Return exactly eight labelled plain-text lines, no Markdown or JSON. Each reason is one sentence under 240 characters; do not list every headline. Do not merge separate reports into a single event. Read every supplied headline before making any absence-of-evidence claim:
             Scope of impact: one sentence
             Proximity to worst case: one sentence
             Novelty: one sentence
