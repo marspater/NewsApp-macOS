@@ -117,11 +117,17 @@ struct FeedArticleWrap: Identifiable, Hashable, Sendable {
     let id: UUID
     let article: FeedArticle
     let contextArticles: [FeedArticle]
+    let initialExperienceMode: ReaderExperienceMode?
 
-    init(article: FeedArticle, contextArticles: [FeedArticle] = []) {
+    init(
+        article: FeedArticle,
+        contextArticles: [FeedArticle] = [],
+        initialExperienceMode: ReaderExperienceMode? = nil
+    ) {
         self.id = UUID()
         self.article = article
         self.contextArticles = contextArticles
+        self.initialExperienceMode = initialExperienceMode
     }
 }
 
