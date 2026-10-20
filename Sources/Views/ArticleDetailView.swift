@@ -259,7 +259,7 @@ struct ArticleDetailView: View {
                     overview: overview,
                     memberArticles: eventMemberArticles.isEmpty ? [currentArticle] : eventMemberArticles,
                     textScale: readerTextScale,
-                    relatedEvents: relatedStories?.eventID == overview.eventID ? relatedStories?.events ?? [] : [],
+                    relatedEvents: Self.relatedEventsToShow(relatedStories, overviewEventID: overview.eventID),
                     onSelectArticle: { article in
                         activeArticle = article
                         highlightedPassage = nil
@@ -1122,6 +1122,20 @@ struct ArticleDetailView: View {
         )
     }
 
+    /// Earlier events only for the overview they were found for; none while a lookup is pending or after it failed.
+    static func relatedEventsToShow(
+        _ stored: (eventID: String, events: [RelatedStoryEvent])?, overviewEventID: String
+    ) -> [RelatedStoryEvent] {
+        guard let stored, stored.eventID == overviewEventID else { return [] }
+        return stored.events.filter { $0.eventID != overviewEventID }
+    }
+
+    /// The reader lands on the overview when it was already showing one, or when the article was opened from
+    /// "Earlier in This Story", even if an interrupted load reset the mode meanwhile.
+    static func opensOnOverview(showingOverview: Bool, requestedArticleID: String?, articleID: String) -> Bool {
+        showingOverview || requestedArticleID == articleID
+    }
+
     static func readerAnimation(reduceMotion: Bool) -> Animation? {
         reduceMotion ? nil : AppMotion.navigation
     }
@@ -1492,7 +1506,9 @@ struct ArticleDetailView: View {
 
         // Never show another event's overview while this one loads. The reader returns to the overview by
         // itself only if it was already showing one (J/K across events); otherwise it stays on the article.
-        let returnToOverview = experienceMode == .eventOverview || overviewRequestedArticleID == articleID
+        let returnToOverview = Self.opensOnOverview(
+            showingOverview: experienceMode == .eventOverview, requestedArticleID: overviewRequestedArticleID,
+            articleID: articleID)
         if currentOverview?.eventID != eventID {
             currentOverview = nil
             experienceMode = .sourcePublication

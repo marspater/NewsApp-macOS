@@ -6600,6 +6600,10 @@ struct NewsTests {
         )
         assertTrue(
             EventStoryRelation.supports(earlierOrganization, organization), "Shared typed organizations can link")
+        let unrelatedCommon: Set<String> = ["someone else", "another agency"]
+        assertTrue(
+            EventStoryRelation.supports(earlier, later, commonActors: unrelatedCommon),
+            "A common-actor set without the shared actor keeps a valid link")
         for field in ["actor", "place", "country", "language", "topic", "date", "period"] {
             var other = later
             switch field {
@@ -6615,6 +6619,9 @@ struct NewsTests {
             if field == "period" { first.periods = ["q1"] }
             assertFalse(
                 EventStoryRelation.supports(first, other), "Weak or conflicting \(field) evidence rejects a link")
+            assertFalse(
+                EventStoryRelation.supports(first, other, commonActors: unrelatedCommon),
+                "The common-actor set never relaxes the \(field) rule")
         }
         var country = later
         country.places = ["@US"]
@@ -6627,6 +6634,9 @@ struct NewsTests {
         assertTrue(EventStoryRelation.supports(boundary, later), "The seven-day boundary is inclusive")
         boundary.date = boundary.date.addingTimeInterval(-1)
         assertFalse(EventStoryRelation.supports(boundary, later), "Older pairs are excluded")
+        assertFalse(
+            EventStoryRelation.supports(boundary, later, commonActors: unrelatedCommon),
+            "The common-actor set never widens the window")
 
         let db = DatabaseEngine(path: ":memory:")
         try await db.open()
@@ -6674,6 +6684,29 @@ struct NewsTests {
         assertEqual(
             ranked.map(\.eventID), ["event-1", "event-2", "event-3"],
             "At most three earlier events link, newest first")
+        let halfSupported = try EventStoryRelation.links(
+            target: [row("t", hours: 0, event: "target")],
+            candidates: [
+                (
+                    "half",
+                    [
+                        row("h1", hours: -3, event: "half"),
+                        EventMatchRow(
+                            id: "h2", title: "Football fans celebrate a match",
+                            description: "Football fans watched the team win a league match.", source: "Publisher",
+                            date: now.addingTimeInterval(-3 * 3600), eventID: "half"),
+                    ]
+                )
+            ], commonActors: unrelatedCommon)
+        assertTrue(halfSupported.isEmpty, "Two-thirds member support still applies with a common-actor set")
+        let cancelledLookup = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            return try await EventStoryRelation.find(eventID: current.id, in: db)
+        }
+        do {
+            _ = try await cancelledLookup.value
+            assertTrue(false, "A cancelled lookup must not return links")
+        } catch is CancellationError {}
         assertEqual(
             try await db.commonStoryTerms(["volodymyr zelenskyy"], before: now.addingTimeInterval(3600), share: 0.05),
             [], "A name in only a few events is never common, however small the library")

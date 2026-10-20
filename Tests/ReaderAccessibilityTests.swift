@@ -55,6 +55,7 @@ struct ReaderAccessibilityTests {
         testReduceMotionReaderPolicy()
         testKeyboardShortcutsAndModifiers()
         testLeadImageFraming()
+        testEarlierInStoryState()
 
         print("Finished \(testsRun) reader accessibility checks with \(failures) failures.")
         if failures > 0 {
@@ -170,6 +171,30 @@ struct ReaderAccessibilityTests {
         assertTrue(ArticleCardView.framesLeadImageWhole(aspectRatio: 0.8), "Portrait photos are framed whole")
         assertFalse(ArticleCardView.framesLeadImageWhole(aspectRatio: 16.0 / 9.0), "Wide photos fill the card")
         assertFalse(ArticleCardView.framesLeadImageWhole(aspectRatio: nil), "Unknown sizes fill the card")
+    }
+
+    static func testEarlierInStoryState() {
+        print("  - Testing Earlier in This Story state: lookup results, failures and overview navigation...")
+        let earlier = RelatedStoryEvent(eventID: "e1", articleID: "a1", title: "Earlier", firstPublishedAt: Date())
+        let current = RelatedStoryEvent(eventID: "e0", articleID: "a0", title: "Current", firstPublishedAt: Date())
+        assertTrue(
+            ArticleDetailView.relatedEventsToShow(nil, overviewEventID: "e0").isEmpty,
+            "A pending or failed lookup leaves the section out")
+        assertTrue(
+            ArticleDetailView.relatedEventsToShow(("other", [earlier]), overviewEventID: "e0").isEmpty,
+            "Links found for another event never show on this overview")
+        assertTrue(
+            ArticleDetailView.relatedEventsToShow(("e0", [earlier, current]), overviewEventID: "e0").map(\.eventID)
+                == ["e1"], "The section lists earlier events and never the overview's own event")
+        assertTrue(
+            ArticleDetailView.opensOnOverview(showingOverview: false, requestedArticleID: "a1", articleID: "a1"),
+            "An earlier event opens on its overview even after an interrupted load reset the mode")
+        assertFalse(
+            ArticleDetailView.opensOnOverview(showingOverview: false, requestedArticleID: "a1", articleID: "a2"),
+            "Other articles keep the story view")
+        assertTrue(
+            ArticleDetailView.opensOnOverview(showingOverview: true, requestedArticleID: nil, articleID: "a2"),
+            "Moving between events while on the overview stays on overviews")
     }
 
     // MARK: - 3. VoiceOver Source Line Formatter Tests
