@@ -4103,6 +4103,8 @@ actor DatabaseEngine {
 
     /// Names that appear in more than `share` of the events published in the window before `end`: too common to
     /// tie two events to one developing story (a head of state appears across unrelated stories).
+    /// Requires at least 20 events in the window: below that, count > total × share collapses to count ≥ 1,
+    /// flagging any single-appearance actor as common and silencing all valid links.
     func commonStoryTerms(_ terms: Set<String>, before end: Date, share: Double) throws -> Set<String> {
         try Task.checkCancellation()
         let start = end.addingTimeInterval(-EventStoryRelation.window).timeIntervalSince1970
@@ -4113,7 +4115,7 @@ actor DatabaseEngine {
                 WHERE a.published_at >= ? AND a.published_at < ? AND \(Self.visibleArticle);
                 """, [.real(start), .real(end.timeIntervalSince1970)]
             ).first?.first.flatMap { $0.flatMap(Int.init) } ?? 0
-        guard total > 0 else { return [] }
+        guard total >= 20 else { return [] }
         var common = Set<String>()
         for term in terms.sorted().prefix(64) {
             try Task.checkCancellation()
