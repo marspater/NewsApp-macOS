@@ -69,6 +69,7 @@ actor FeedFetcher {
     {
         let stored = (try? await state?.feedFetchStates()) ?? [:]
         let started = now()
+        hostCooldowns = hostCooldowns.filter { $0.value > started }
         var results = [FeedFetchResult]()
         var due = [String]()
         for url in urls {

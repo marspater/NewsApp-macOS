@@ -29,9 +29,18 @@ extension EnvironmentValues {
     static let images: NSCache<NSURL, CGImage> = {
         let cache = NSCache<NSURL, CGImage>()
         cache.totalCostLimit = 192 * 1024 * 1024
+        cache.countLimit = 500
         return cache
     }()
     private static var pending: [URL: Task<CGImage, Error>] = [:]
+
+    static func clear() {
+        for (_, task) in pending {
+            task.cancel()
+        }
+        pending.removeAll()
+        images.removeAllObjects()
+    }
 
     /// Width over height of a decoded image, so layouts can frame square and portrait photos differently.
     static func aspectRatio(for url: URL) -> CGFloat? {
@@ -49,7 +58,9 @@ extension EnvironmentValues {
         pending[url] = task
         defer { pending[url] = nil }
         let image = try await task.value
-        images.setObject(image, forKey: url as NSURL, cost: image.bytesPerRow * image.height)
+        if !task.isCancelled && !Task.isCancelled {
+            images.setObject(image, forKey: url as NSURL, cost: image.bytesPerRow * image.height)
+        }
         return image
     }
 

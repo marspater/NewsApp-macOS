@@ -954,6 +954,7 @@ struct SettingsView: View {
 
     private func clearWebCache() {
         CacheManager.shared.clearWebCache()
+        DecodedImageCache.clear()
         calculateStorageSizes()
         showActionMessage("Web and media cache cleared.")
     }

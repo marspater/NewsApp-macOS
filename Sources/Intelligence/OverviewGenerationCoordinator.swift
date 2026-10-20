@@ -37,6 +37,7 @@ actor OverviewGenerationCoordinator {
     }
 
     private var memoryCache: [String: EventOverviewDocument] = [:]
+    private var memoryCacheOrder: [String] = []
     private var inFlightTasks: [String: InFlightGeneration] = [:]
     /// The inputs of the most recent request per event. Only a result built from them may be committed:
     /// an article edit changes the input hash without bumping the membership version.
@@ -127,7 +128,7 @@ actor OverviewGenerationCoordinator {
         )
         let sortedFingerprints = selection.passages.map { $0.fingerprint }.sorted().joined(separator: ":")
         let inputTextHash = ArticleIdentity.sha256Hex(sortedFingerprints.isEmpty ? eventTitle : sortedFingerprints)
-        latestRequestedInputs[eventID] = (membershipVersion, inputTextHash)
+        recordRequestedInputs(eventID: eventID, membershipVersion: membershipVersion, inputTextHash: inputTextHash)
 
         // Persistent storage is authoritative: publisher-input changes atomically remove old overviews.
         do {
@@ -141,7 +142,7 @@ actor OverviewGenerationCoordinator {
                 {
                     return cached
                 }
-                memoryCache[eventID] = stored
+                storeInMemoryCache(stored, for: eventID)
                 return stored
             }
         } catch {
@@ -218,6 +219,7 @@ actor OverviewGenerationCoordinator {
         // A newer request may have replaced this entry while it ran.
         if inFlightTasks[eventID]?.task == task {
             inFlightTasks.removeValue(forKey: eventID)
+            latestRequestedInputs.removeValue(forKey: eventID)
         }
         return Task.isCancelled ? nil : result
     }
@@ -285,16 +287,19 @@ actor OverviewGenerationCoordinator {
     /// releases its slot only when it actually ends.
     private static func result(of work: Task<Bool, Never>, cancellingAt deadline: Duration) async -> Bool {
         let pending = OSAllocatedUnfairLock<CheckedContinuation<Bool, Never>?>(initialState: nil)
+        let timerTask = OSAllocatedUnfairLock<Task<Void, Never>?>(initialState: nil)
         return await withCheckedContinuation { continuation in
             pending.withLock { $0 = continuation }
-            Task {
-                let value = await work.value
-                pending.withLock { $0.take() }?.resume(returning: value)
-            }
-            Task {
+            let timer = Task {
                 try? await Task.sleep(for: deadline)
                 work.cancel()
                 pending.withLock { $0.take() }?.resume(returning: false)
+            }
+            timerTask.withLock { $0 = timer }
+            Task {
+                let value = await work.value
+                timerTask.withLock { $0?.cancel() }
+                pending.withLock { $0.take() }?.resume(returning: value)
             }
         }
     }
@@ -324,12 +329,15 @@ actor OverviewGenerationCoordinator {
     }
 
     private func releaseExtractionSlot() {
-        activeExtractions -= 1
+        activeExtractions = max(0, activeExtractions - 1)
     }
 
     private func finishExtraction(_ article: FeedArticle, stored: Bool) {
         extractionTasks[article.id] = nil
-        if !stored { failedExtractions.insert(article.id + article.publisherInputHash) }
+        if !stored {
+            if failedExtractions.count >= 1000 { failedExtractions.removeAll() }
+            failedExtractions.insert(article.id + article.publisherInputHash)
+        }
     }
 
     /// Returns false when the result was built from superseded inputs, or storage rejected it, and must not reach the caller.
@@ -368,7 +376,7 @@ actor OverviewGenerationCoordinator {
             saved = false
         }
         if saved {
-            memoryCache[eventID] = document
+            storeInMemoryCache(document, for: eventID)
             logger.debug("Committed overview for event \(eventID) v\(membershipVersion)")
         }
         return saved
@@ -476,6 +484,7 @@ actor OverviewGenerationCoordinator {
     func cancel(eventID: String, reason: EnrichmentCancellationReason = .user) async {
         if let running = inFlightTasks.removeValue(forKey: eventID) {
             running.task.cancel()
+            latestRequestedInputs.removeValue(forKey: eventID)
         }
         await queue.cancelOverview(eventID: eventID, reason: reason)
         logger.debug("Cancelled overview generation for \(eventID): \(reason.rawValue)")
@@ -487,6 +496,7 @@ actor OverviewGenerationCoordinator {
             running.task.cancel()
         }
         inFlightTasks.removeAll()
+        latestRequestedInputs.removeAll()
         logger.info("Cancelled all in-flight overview generation tasks")
     }
 
@@ -527,7 +537,7 @@ actor OverviewGenerationCoordinator {
                 !stored.isStale(
                     currentMembershipVersion: currentMembershipVersion, currentInputTextHash: currentInputTextHash)
             {
-                memoryCache[eventID] = stored
+                storeInMemoryCache(stored, for: eventID)
                 return stored
             }
         } catch {
@@ -538,7 +548,30 @@ actor OverviewGenerationCoordinator {
         return nil
     }
 
+    private func storeInMemoryCache(_ document: EventOverviewDocument, for eventID: String) {
+        if memoryCache[eventID] == nil {
+            if memoryCacheOrder.count >= 100 {
+                let oldest = memoryCacheOrder.removeFirst()
+                memoryCache.removeValue(forKey: oldest)
+            }
+            memoryCacheOrder.append(eventID)
+        }
+        memoryCache[eventID] = document
+    }
+
+    private func recordRequestedInputs(eventID: String, membershipVersion: Int, inputTextHash: String) {
+        if latestRequestedInputs.count >= 500 {
+            if let evictKey = latestRequestedInputs.keys.first(where: { inFlightTasks[$0] == nil && $0 != eventID }) {
+                latestRequestedInputs.removeValue(forKey: evictKey)
+            }
+        }
+        latestRequestedInputs[eventID] = (membershipVersion, inputTextHash)
+    }
+
     func clearCache() {
         memoryCache.removeAll()
+        memoryCacheOrder.removeAll()
+        latestRequestedInputs.removeAll()
+        failedExtractions.removeAll()
     }
 }

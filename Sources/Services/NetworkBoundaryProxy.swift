@@ -124,10 +124,16 @@ private final class SOCKSListener: @unchecked Sendable {
 
     func stop() {
         listener.cancel()
-        queue.async { [self] in
-            let active = Array(tunnels.values)
+        queue.async { [weak self] in
+            guard let self else { return }
+            let active = Array(self.tunnels.values)
+            self.tunnels.removeAll()
             for tunnel in active { tunnel.finish() }
         }
+    }
+
+    deinit {
+        listener.cancel()
     }
 }
 
