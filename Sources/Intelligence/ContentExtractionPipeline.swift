@@ -404,6 +404,17 @@ final class DOMElementNode: Sendable {
         let plain = combinedText().replacingOccurrences(of: "[ \t\r\n]+", with: " ", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)
         guard !plain.isEmpty, !ArticleContentRedactor.isBoilerplateLine(plain) else { return nil }
+        // A metadata strip item holding only a <time> (BBC's "· 20 October 2026, 14:13 BST") is not story text.
+        let timestamps = findNodes(tag: "time").map { $0.combinedText() }
+        if !timestamps.isEmpty {
+            var residue = plain
+            for stamp in timestamps {
+                residue = residue.replacingOccurrences(
+                    of: stamp.trimmingCharacters(in: .whitespacesAndNewlines), with: "")
+            }
+            let words = residue.lowercased().split { !$0.isLetter && !$0.isNumber }
+            if words.allSatisfy({ ["published", "updated", "last", "on", "at"].contains($0) }) { return nil }
+        }
         let kind: ReaderBlock.Kind
         switch tag {
         case "h2": kind = .heading

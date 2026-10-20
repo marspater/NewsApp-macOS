@@ -100,6 +100,13 @@ enum FeedKitSwiftSoupTests {
         check(
             pipeline.extractFromHTML(hydrated, baseUrl: base).content?.contains("Hydrated final paragraph") == true,
             "A thin page falls back to its Next.js hydration body")
+        let stamped = pipeline.extractFromHTML(
+            """
+            <article><ul><li>· <time datetime="2026-10-20T13:13:26Z">20 October 2026, 14:13 BST</time></li></ul>
+            <p>\(first)</p><p>\(second) It was confirmed at <time>14:13</time> by officials on site.</p></article>
+            """, baseUrl: base)
+        check(stamped.content?.contains("14:13 BST") == false, "A metadata strip timestamp is not story text")
+        check(stamped.content?.contains("confirmed at 14:13") == true, "Prose that mentions a time is kept")
         let sections = """
             <article><hr><p>\(first)</p><hr><hr><p>\(second)</p><hr></article>
             """
