@@ -1,0 +1,25 @@
+version: 2.1
+
+jobs:
+  test-macos:
+    macos:
+      xcode: "27.0"
+    steps:
+      - checkout
+      - run:
+          name: "Ensure permissions"
+          command: chmod +x test.sh build.sh build_release.sh
+      - run:
+          name: "Run unit tests and regressions"
+          command: ./test.sh
+      - run:
+          name: "Verify publisher excerpts"
+          command: NEWS_NATIVE_HARNESS=Tests/PublisherExcerptTests.swift ./script/native_performance_baseline.sh
+      - run:
+          name: "Verify Swift Package Manager build"
+          command: swift build --force-resolved-versions --target News
+
+workflows:
+  build-and-test:
+    jobs:
+      - test-macos
