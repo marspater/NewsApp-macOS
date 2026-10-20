@@ -605,6 +605,8 @@ struct CompactStoryRow: View {
         .overlay(alignment: .bottom) {
             Divider().opacity(isExpanded ? 0 : 1)
         }
+        // Expanding and collapsing content never draws over the neighbouring rows while they move.
+        .clipped()
         .contextMenu {
             StoryContextMenuItems(article: article)
         }
