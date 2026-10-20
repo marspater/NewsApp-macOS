@@ -83,50 +83,29 @@ public enum NewsCategory: String, CaseIterable, Sendable, Codable {
         return nil
     }
 
+    private static let synonymKeywordGroups: [(category: NewsCategory, keywords: [String], token: String?)] = [
+        (.technology, ["tech", "software", "hardware", "artificial intelligence", "cyber", "chip"], "ai"),
+        (.business, ["econ", "biz", "market"], nil),
+        (.sports, ["sport", "football", "basketball", "soccer", "league"], nil),
+        (.entertainment, ["entertain", "movie", "film", "music", "celebrity", "cinema"], nil),
+        (.health, ["wellness", "fitness", "nutrition"], nil),
+        (.travel, ["travel", "tourism", "vacation", "flight"], nil),
+        (.food, ["food", "cook", "dining", "culinary", "recipe", "restaurant"], nil),
+        (.fashion, ["style", "fashion", "runway", "apparel"], nil),
+        (.world, ["global", "world", "international", "foreign", "geopolitic", "united nations", "diplomat"], "un"),
+        (.lifestyle, ["life", "living", "lifestyle", "home", "parenting"], nil),
+        (.science, ["sci", "research"], nil),
+    ]
+
     private static func matchSynonyms(_ lower: String, tokens: Set<String>) -> NewsCategory? {
-        if lower.contains("tech") || lower.contains("software") || lower.contains("hardware") || tokens.contains("ai")
-            || lower.contains("artificial intelligence") || lower.contains("cyber") || lower.contains("chip")
-        {
-            return .technology
+        for group in synonymKeywordGroups {
+            if let token = group.token, tokens.contains(token) {
+                return group.category
+            }
+            if group.keywords.contains(where: { lower.contains($0) }) {
+                return group.category
+            }
         }
-        if lower.contains("econ") || lower.contains("biz") || lower.contains("market") { return .business }
-        if lower.contains("sport") || lower.contains("football") || lower.contains("basketball")
-            || lower.contains("soccer") || lower.contains("league")
-        {
-            return .sports
-        }
-        if lower.contains("entertain") || lower.contains("movie") || lower.contains("film") || lower.contains("music")
-            || lower.contains("celebrity") || lower.contains("cinema")
-        {
-            return .entertainment
-        }
-        if lower.contains("wellness") || lower.contains("fitness") || lower.contains("nutrition") { return .health }
-        if lower.contains("travel") || lower.contains("tourism") || lower.contains("vacation")
-            || lower.contains("flight")
-        {
-            return .travel
-        }
-        if lower.contains("food") || lower.contains("cook") || lower.contains("dining") || lower.contains("culinary")
-            || lower.contains("recipe") || lower.contains("restaurant")
-        {
-            return .food
-        }
-        if lower.contains("style") || lower.contains("fashion") || lower.contains("runway") || lower.contains("apparel")
-        {
-            return .fashion
-        }
-        if lower.contains("global") || lower.contains("world") || lower.contains("international")
-            || lower.contains("foreign") || lower.contains("geopolitic") || tokens.contains("un")
-            || lower.contains("united nations") || lower.contains("diplomat")
-        {
-            return .world
-        }
-        if lower.contains("life") || lower.contains("living") || lower.contains("lifestyle") || lower.contains("home")
-            || lower.contains("parenting")
-        {
-            return .lifestyle
-        }
-        if lower.contains("sci") || lower.contains("research") { return .science }
         return nil
     }
 }

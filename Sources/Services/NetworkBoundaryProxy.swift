@@ -69,6 +69,7 @@ private final class SOCKSListener: @unchecked Sendable {
     private let resolver: ProxyResolver
     private let connector: NetworkBoundaryProxy.Connector
     private var tunnels: [UUID: SOCKSTunnel] = [:]  // Accessed only on queue.
+    private var isStopped = false  // Accessed only on queue.
     var port: UInt16 { listener.port!.rawValue }
 
     init(resolver: ProxyResolver, connector: @escaping NetworkBoundaryProxy.Connector) throws {
@@ -96,7 +97,7 @@ private final class SOCKSListener: @unchecked Sendable {
                 }
             }
             listener.newConnectionHandler = { [weak self] connection in
-                guard let self, self.tunnels.count < 64 else {
+                guard let self, !self.isStopped, self.tunnels.count < 64 else {
                     connection.cancel()
                     return
                 }
@@ -125,6 +126,8 @@ private final class SOCKSListener: @unchecked Sendable {
     func stop() {
         listener.cancel()
         queue.async { [self] in
+            guard !isStopped else { return }
+            isStopped = true
             let active = Array(tunnels.values)
             tunnels.removeAll()
             for tunnel in active { tunnel.finish() }

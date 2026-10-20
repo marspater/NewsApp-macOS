@@ -485,6 +485,14 @@ struct TensionGlyph: View {
                 Gradient(colors: [AppColor.warning, AppColor.flameCore]), startPoint: .zero,
                 endPoint: CGPoint(x: 0, y: height)))
         guard level != .warm else { return }
+        renderSparks(level, in: &context, size: size, time: time)
+    }
+
+    private static func renderSparks(
+        _ level: TensionLevel, in context: inout GraphicsContext, size: CGSize, time: Double
+    ) {
+        let width = size.width
+        let height = size.height
         // Sparks rise and fade; each one fades in from nothing and starts its next flight elsewhere.
         let count = level == .hot ? 4 : 18
         let rate = level == .hot ? 0.4 : 1.2

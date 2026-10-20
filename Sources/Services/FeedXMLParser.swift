@@ -168,40 +168,44 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
         }
 
         if insideItem {
-            let attributes = attributeDict.filter { !$0.key.hasPrefix("xmlns") }.sorted { $0.key < $1.key }.map {
-                key, value in
-                let value = ["url", "href"].contains(key) ? resolvedURL(value) : value
-                return " \(key)=\"\(escapeHTML(value))\""
-            }.joined()
-            appendItemXML("<\(elementName)\(attributes)>")
+            handleItemElement(elementName: elementName, attributeDict: attributeDict)
         }
+    }
 
-        if insideItem && (elementName == "content:encoded" || elementName == "content") && contentDepth == nil {
+    private func handleItemElement(elementName: String, attributeDict: [String: String]) {
+        let attributes = attributeDict.filter { !$0.key.hasPrefix("xmlns") }.sorted { $0.key < $1.key }.map {
+            key, value in
+            let value = ["url", "href"].contains(key) ? resolvedURL(value) : value
+            return " \(key)=\"\(escapeHTML(value))\""
+        }.joined()
+        appendItemXML("<\(elementName)\(attributes)>")
+
+        if (elementName == "content:encoded" || elementName == "content") && contentDepth == nil {
             isCollectingContentEncoded = true
             itemContentEncoded = ""
             contentDepth = currentNestingDepth
             itemContentIsPlainText = elementName == "content" && (attributeDict["type"] ?? "text") == "text"
             itemContentIsXHTML = elementName == "content" && attributeDict["type"] == "xhtml"
         } else if isCollectingContentEncoded && !itemContentIsPlainText {
-            let attributes = attributeDict.sorted { $0.key < $1.key }.map { key, value in
+            let encodedAttrs = attributeDict.sorted { $0.key < $1.key }.map { key, value in
                 " \(key)=\"\(escapeHTML(value))\""
             }.joined()
-            itemContentEncoded += "<\(elementName)\(attributes)>"
+            itemContentEncoded += "<\(elementName)\(encodedAttrs)>"
         }
 
-        if insideItem && elementName == "guid" {
+        if elementName == "guid" {
             itemGuidIsPermalink = attributeDict["isPermaLink"]?.lowercased() != "false"
         }
 
-        if insideItem && elementName == "category", let term = attributeDict["term"], itemCategory.isEmpty {
+        if elementName == "category", let term = attributeDict["term"], itemCategory.isEmpty {
             itemCategory = term
         }
 
-        if insideItem && ["enclosure", "media:content", "media:thumbnail"].contains(elementName) {
+        if ["enclosure", "media:content", "media:thumbnail"].contains(elementName) {
             handleMediaElement(elementName: elementName, attributeDict: attributeDict)
         }
 
-        if insideItem && elementName == "link" {
+        if elementName == "link" {
             let relation = attributeDict["rel"] ?? "alternate"
             if let href = attributeDict["href"], relation == "alternate", itemLink.isEmpty {
                 itemLink =
