@@ -61,8 +61,9 @@ enum ArticleContentState: Equatable {
     case loading
     case ready
     case fallback(reason: String)
-    /// The publisher shows the story to subscribers only; the feed teaser is shown as a preview.
-    case subscriberOnly
+    /// The publisher shows the story only to subscribers (or refuses the reader outright); the feed teaser is shown
+    /// as a preview with ways to read it on the publisher's site.
+    case publisherOnly(subscriber: Bool)
 }
 
 struct ArticleDetailView: View {
@@ -401,8 +402,8 @@ struct ArticleDetailView: View {
                         articleContentParagraphs
                     case .fallback(let reason):
                         fallbackStateView(reason: reason)
-                    case .subscriberOnly:
-                        subscriberOnlyView
+                    case .publisherOnly(let subscriber):
+                        publisherOnlyView(subscriber: subscriber)
                     }
 
                     // Terminal Affordance: "Read original article on <source>"
@@ -549,16 +550,21 @@ struct ArticleDetailView: View {
     }
 
     /// The teaser reads as the story's lead, followed by a quiet note and the ways to read it with the reader's access.
-    private var subscriberOnlyView: some View {
+    private func publisherOnlyView(subscriber: Bool) -> some View {
         VStack(alignment: .leading, spacing: AppSpacing.lg) {
             articleDescriptionParagraphs
             NoticeView {
                 VStack(alignment: .leading, spacing: AppSpacing.sm) {
-                    Label("Subscriber-only story", systemImage: "lock")
-                        .font(AppTypography.headline)
-                        .foregroundStyle(AppColor.primaryText)
+                    Label(
+                        subscriber ? "Subscriber-only story" : "Read on the publisher's site",
+                        systemImage: subscriber ? "lock" : "globe"
+                    )
+                    .font(AppTypography.headline)
+                    .foregroundStyle(AppColor.primaryText)
                     Text(
-                        "\(displaySource) shows the full story to subscribers. Sign in through the web view to read it."
+                        subscriber
+                            ? "\(displaySource) shows the full story to subscribers. Sign in through the web view to read it."
+                            : "\(displaySource) does not let the reader fetch this story. Open it in the web view to read it."
                     )
                     .font(AppTypography.callout)
                     .foregroundStyle(AppColor.secondaryText)
@@ -1334,7 +1340,10 @@ struct ArticleDetailView: View {
                 self.activeArticle = updated
                 self.contentState = .ready
             case .subscriberOnly:
-                self.contentState = .subscriberOnly
+                self.contentState = .publisherOnly(subscriber: true)
+            case .httpError(403):
+                // Bot checks and regional blocks: the publisher's own page still opens in the web view.
+                self.contentState = .publisherOnly(subscriber: false)
             case .qualityValidationFailed(let reason):
                 self.contentState = .fallback(reason: "Story quality check not met: \(reason)")
             case .httpError(let status):
