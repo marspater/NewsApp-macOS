@@ -4101,9 +4101,12 @@ actor DatabaseEngine {
         return (target, candidates)
     }
 
-    /// Names that appear in more than `share` of the events published in the window before `end`: too common to
-    /// tie two events to one developing story (a head of state appears across unrelated stories).
-    func commonStoryTerms(_ terms: Set<String>, before end: Date, share: Double) throws -> Set<String> {
+    /// Names that appear in more than `share` of the events published in the window before `end`, and in at least
+    /// `minimumEvents` of them: too common to tie two events to one developing story (a head of state appears across
+    /// unrelated stories). The minimum keeps a small or new library from treating every name as common.
+    func commonStoryTerms(_ terms: Set<String>, before end: Date, share: Double, minimumEvents: Int = 10) throws
+        -> Set<String>
+    {
         try Task.checkCancellation()
         let start = end.addingTimeInterval(-EventStoryRelation.window).timeIntervalSince1970
         let total =
@@ -4131,7 +4134,7 @@ actor DatabaseEngine {
                         AND \(Self.visibleArticle);
                     """, [.text(phrase), .real(start), .real(end.timeIntervalSince1970)]
                 ).first?.first.flatMap { $0.flatMap(Int.init) } ?? 0
-            if Double(count) > Double(total) * share { common.insert(term) }
+            if count >= minimumEvents && Double(count) > Double(total) * share { common.insert(term) }
         }
         return common
     }
