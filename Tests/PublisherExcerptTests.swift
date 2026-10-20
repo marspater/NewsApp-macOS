@@ -60,10 +60,10 @@ struct PublisherExcerptTests {
 
     // MARK: - 1. Version Bump
     static func testCurrentAnalysisVersionBumped() {
-        print("  - Testing current analysis version bumped to 8...")
+        print("  - Testing current analysis version bumped to 9...")
         assertEqual(
-            EventOverviewDocument.currentAnalysisVersion, 8,
-            "EventOverviewDocument.currentAnalysisVersion must be bumped to 8 to invalidate cached generated prose"
+            EventOverviewDocument.currentAnalysisVersion, 9,
+            "EventOverviewDocument.currentAnalysisVersion must be bumped to 9 to invalidate cached generated prose"
         )
     }
 
@@ -265,7 +265,7 @@ struct PublisherExcerptTests {
 
         assertTrue(
             oldDoc.isStale(currentMembershipVersion: 1, currentInputTextHash: "hash_1"),
-            "Document with analysisVersion 7 must be stale when currentAnalysisVersion is 8"
+            "Document with analysisVersion 7 must be stale when currentAnalysisVersion is 9"
         )
 
         let currentDoc = EventOverviewDocument(
@@ -275,7 +275,7 @@ struct PublisherExcerptTests {
                 membershipVersion: 1,
                 inputTextHash: "hash_1",
                 schemaVersion: EventOverviewDocument.currentSchemaVersion,
-                analysisVersion: 8
+                analysisVersion: 9
             ),
             content: OverviewContent(title: "Publisher Title", summary: "", facts: [], citations: []),
             provenance: OverviewProvenance(memberArticleIDs: ["art_1"], kind: .fallbackExcerpts)
@@ -283,7 +283,7 @@ struct PublisherExcerptTests {
 
         assertFalse(
             currentDoc.isStale(currentMembershipVersion: 1, currentInputTextHash: "hash_1"),
-            "Document with analysisVersion 8 must not be stale"
+            "Document with analysisVersion 9 must not be stale"
         )
     }
 
