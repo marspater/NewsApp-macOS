@@ -46,16 +46,17 @@ private final class MatrixDelegate: NSObject, NSApplicationDelegate {
             ("dark-increased-contrast", .accessibilityHighContrastDarkAqua, .increased),
         ]
         let views = [
-            ("list", "LIST", false), ("grid", "LIST", true), ("reader", "READER", false),
-            ("overview", "OVERVIEW", false),
+            ("list", "LIST", StoryLayout.list), ("grid", "LIST", .grid), ("headlines", "LIST", .compact),
+            ("reader", "READER", .list), ("overview", "OVERVIEW", .list),
         ]
         for (suffix, name, contrast) in appearances {
             host.window?.appearance = NSAppearance(named: name)
-            for (file, mode, grid) in views {
+            for (file, mode, layout) in views {
                 guard let window = host.window, let defaults = host.defaults else {
                     throw QAFailure("Fixture host is not initialized")
                 }
-                defaults.set(grid, forKey: "articleGridLayout")
+                defaults.set(layout == .grid, forKey: "articleGridLayout")
+                defaults.set(layout == .compact, forKey: "articleCompactLayout")
                 // Same root as LiveVoiceOverHost.displayMode. A window's high-contrast appearance
                 // does not reach SwiftUI, and split-view columns re-derive the system value, so the
                 // app's own QA override (what `effectiveContrast` reads) carries the contrast too.
@@ -91,7 +92,16 @@ private final class MatrixDelegate: NSObject, NSApplicationDelegate {
                 }
             }
         }
-        print("APPEARANCE_MATRIX_PASS: \(appearances.count * views.count) renders in \(output.path)")
+        // The narrowest supported window (900 pt) with the densest layout.
+        if let window = host.window {
+            host.window?.appearance = NSAppearance(named: .aqua)
+            host.defaults?.set(true, forKey: "articleCompactLayout")
+            window.setContentSize(NSSize(width: 900, height: window.frame.height))
+            host.state.activeMode = "LIST"
+            try await Task.sleep(for: .milliseconds(600))
+            try await captureWindow(window, to: output.appendingPathComponent("headlines-light-900.png"))
+        }
+        print("APPEARANCE_MATRIX_PASS: \(appearances.count * views.count + 1) renders in \(output.path)")
     }
 
     /// A strengthened divider alone changes a few thousand pixels at 2x; unchanged captures differ by none.
