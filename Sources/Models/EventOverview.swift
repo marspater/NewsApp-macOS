@@ -343,7 +343,8 @@ public struct EventOverviewDocument: Codable, Hashable, Sendable, Identifiable {
     public static let currentSchemaVersion = 1
     /// 5: attributed straight/typographic quotations with both post-quote speaker orders. 7: reported speech
     /// attribution guards (preposition context, verb/relative exclusions, time phrases). 8: publisher-excerpt overviews
-    /// with stored publisher headlines, complete publisher sentences, and empty summaries.
+    /// with stored publisher headlines, complete publisher sentences, and empty summaries. 9: Highlights ranked by
+    /// word overlap with coverage headlines; fragments under five words excluded.
     public static let currentAnalysisVersion = 9
 
     public let id: String
