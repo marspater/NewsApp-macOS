@@ -204,14 +204,13 @@ public struct ReaderDocument: Codable, Hashable, Sendable {
         let textBlocks = blocks.filter { $0.kind == .paragraph || $0.kind == .quote || $0.kind == .listItem }
         let totalCount = textBlocks.map(\.text.count).reduce(0, +)
         if totalCount < 600 && textBlocks.count <= 2 { return false }
-        if let last = textBlocks.last?.text.lowercased() {
-            if last.contains("continue reading")
+        if let last = textBlocks.last?.text.lowercased(),
+            last.contains("continue reading")
                 || last.contains("read full article")
                 || last.contains("appeared first on")
                 || (last.contains("the post") && last.contains("appeared first"))
-            {
-                return false
-            }
+        {
+            return false
         }
         return true
     }

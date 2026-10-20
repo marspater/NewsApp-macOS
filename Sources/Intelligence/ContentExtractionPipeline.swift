@@ -623,7 +623,7 @@ enum HTMLDOMBuilder {
         }
     }
 
-    private static func handleOpeningTag(scanner: Scanner, html: String, stack: inout [DOMElementBuilder]) {
+    private static func handleOpeningTag(scanner: Scanner, html _: String, stack: inout [DOMElementBuilder]) {
         // Opening or self-closing tag
         guard let tagContent = scanner.scanUpToString(">") else { return }
         _ = scanner.scanString(">")

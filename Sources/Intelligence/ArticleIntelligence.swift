@@ -45,48 +45,45 @@ public enum NewsCategory: String, CaseIterable, Sendable, Codable {
         let trimmed = firstLine.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
 
-        // 1. Exact case-insensitive match against canonical enum values
-        for cat in allCases where cat.rawValue.localizedCaseInsensitiveCompare(trimmed) == .orderedSame {
-            return cat
-        }
-
+        if let exact = matchExact(trimmed) { return exact }
         let lower = trimmed.lowercased()
+        if let highPriority = matchHighPriorityOverlap(lower) { return highPriority }
+        let tokens = Set(lower.components(separatedBy: CharacterSet.alphanumerics.inverted).filter { !$0.isEmpty })
+        return matchSynonyms(lower, tokens: tokens)
+    }
 
-        // 2. High-priority semantic disambiguation for multi-topic overlaps
-        // Health over Technology (e.g., medical AI, clinical devices, vaccines, disease)
+    private static func matchExact(_ trimmed: String) -> NewsCategory? {
+        allCases.first { $0.rawValue.localizedCaseInsensitiveCompare(trimmed) == .orderedSame }
+    }
+
+    private static func matchHighPriorityOverlap(_ lower: String) -> NewsCategory? {
         if lower.contains("health") || lower.contains("medical") || lower.contains("clinical")
             || lower.contains("hospital") || lower.contains("vaccine") || lower.contains("disease")
             || lower.contains("pharma")
         {
             return .health
         }
-
-        // Science over Technology (e.g., space mission, telescope, NASA, quantum research, astronomy)
         if lower.contains("space") || lower.contains("nasa") || lower.contains("astronomy") || lower.contains("quantum")
             || lower.contains("biology") || lower.contains("physics") || lower.contains("telescope")
         {
             return .science
         }
-
-        // Business over Politics or Tech (e.g., stock market, earnings, inflation, IPO, central bank, revenue)
         if lower.contains("stock") || lower.contains("wall street") || lower.contains("earnings")
             || lower.contains("inflation") || lower.contains("investor") || lower.contains("revenue")
             || lower.contains("recession") || lower.contains("finance") || lower.contains("dividend")
         {
             return .business
         }
-
-        // Politics over World or Business (e.g., congress, senate, election, voter, parliament, campaign)
         if lower.contains("congress") || lower.contains("senate") || lower.contains("election")
             || lower.contains("politic") || lower.contains("lawmaker") || lower.contains("parliament")
             || lower.contains("white house") || lower.contains("governor") || lower.contains("campaign")
         {
             return .politics
         }
+        return nil
+    }
 
-        let tokens = Set(lower.components(separatedBy: CharacterSet.alphanumerics.inverted).filter { !$0.isEmpty })
-
-        // 3. Normalized synonym mappings
+    private static func matchSynonyms(_ lower: String, tokens: Set<String>) -> NewsCategory? {
         if lower.contains("tech") || lower.contains("software") || lower.contains("hardware") || tokens.contains("ai")
             || lower.contains("artificial intelligence") || lower.contains("cyber") || lower.contains("chip")
         {
@@ -130,7 +127,6 @@ public enum NewsCategory: String, CaseIterable, Sendable, Codable {
             return .lifestyle
         }
         if lower.contains("sci") || lower.contains("research") { return .science }
-
         return nil
     }
 }

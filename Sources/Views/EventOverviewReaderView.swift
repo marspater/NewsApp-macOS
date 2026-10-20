@@ -877,47 +877,9 @@ struct EventOverviewReaderView: View {
 
                 let validAngleFacts = Self.filterValidFacts(angle.facts)
                 if !validAngleFacts.isEmpty {
-                    VStack(alignment: .leading, spacing: AppSpacing.xs) {
-                        ForEach(validAngleFacts) { fact in
-                            HStack(alignment: .top, spacing: AppSpacing.xs) {
-                                Circle()
-                                    .frame(width: AppSpacing.xxs, height: AppSpacing.xxs)
-                                    .foregroundColor(AppColor.accent)
-                                    .padding(.top, AppSpacing.eyebrowGap)
-                                    .accessibilityHidden(true)
-
-                                VStack(alignment: .leading, spacing: AppSpacing.xxs) {
-                                    Text(fact.text)
-                                        .font(AppTypography.overviewFont(.detail, scale: textScale))
-                                        .foregroundColor(AppColor.primaryText)
-                                        .textSelection(.enabled)
-
-                                    let validCitationIDs = fact.citationIDs.filter { overview.citations[$0] != nil }
-                                    if !validCitationIDs.isEmpty {
-                                        HStack(spacing: AppSpacing.xxs) {
-                                            ForEach(validCitationIDs, id: \.self) { citID in
-                                                if let citation = overview.citations[citID] {
-                                                    citationPill(citation)
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    .padding(.top, AppSpacing.xxs)
+                    thematicAngleFactsView(validAngleFacts)
                 } else if !angle.citationIDs.isEmpty {
-                    let validCitationIDs = angle.citationIDs.filter { overview.citations[$0] != nil }
-                    if !validCitationIDs.isEmpty {
-                        HStack(spacing: AppSpacing.xxs) {
-                            ForEach(validCitationIDs, id: \.self) { citID in
-                                if let citation = overview.citations[citID] {
-                                    citationPill(citation)
-                                }
-                            }
-                        }
-                    }
+                    thematicAngleCitationsView(angle.citationIDs)
                 }
             }
             .padding(AppSpacing.md)
@@ -927,6 +889,53 @@ struct EventOverviewReaderView: View {
                 RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous)
                     .stroke(currentBorderStrokeColor, lineWidth: 1)
             )
+        }
+    }
+
+    private func thematicAngleFactsView(_ facts: [OverviewFact]) -> some View {
+        VStack(alignment: .leading, spacing: AppSpacing.xs) {
+            ForEach(facts) { fact in
+                HStack(alignment: .top, spacing: AppSpacing.xs) {
+                    Circle()
+                        .frame(width: AppSpacing.xxs, height: AppSpacing.xxs)
+                        .foregroundColor(AppColor.accent)
+                        .padding(.top, AppSpacing.eyebrowGap)
+                        .accessibilityHidden(true)
+
+                    VStack(alignment: .leading, spacing: AppSpacing.xxs) {
+                        Text(fact.text)
+                            .font(AppTypography.overviewFont(.detail, scale: textScale))
+                            .foregroundColor(AppColor.primaryText)
+                            .textSelection(.enabled)
+
+                        let validCitationIDs = fact.citationIDs.filter { overview.citations[$0] != nil }
+                        if !validCitationIDs.isEmpty {
+                            HStack(spacing: AppSpacing.xxs) {
+                                ForEach(validCitationIDs, id: \.self) { citID in
+                                    if let citation = overview.citations[citID] {
+                                        citationPill(citation)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        .padding(.top, AppSpacing.xxs)
+    }
+
+    @ViewBuilder
+    private func thematicAngleCitationsView(_ citationIDs: [String]) -> some View {
+        let validCitationIDs = citationIDs.filter { overview.citations[$0] != nil }
+        if !validCitationIDs.isEmpty {
+            HStack(spacing: AppSpacing.xxs) {
+                ForEach(validCitationIDs, id: \.self) { citID in
+                    if let citation = overview.citations[citID] {
+                        citationPill(citation)
+                    }
+                }
+            }
         }
     }
 

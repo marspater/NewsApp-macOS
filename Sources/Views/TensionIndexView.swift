@@ -42,7 +42,9 @@ struct TensionIndexView: View {
 
     init(
         history: [WorldTensionReading] = [], service: WorldTensionService = .shared,
-        onUpdate: @escaping ([WorldTensionReading]) -> Void = { _ in }
+        onUpdate: @escaping ([WorldTensionReading]) -> Void = { _ in
+            // Default no-op handler
+        }
     ) {
         _history = State(initialValue: history)
         self.service = service
@@ -156,7 +158,8 @@ struct TensionIndexView: View {
         }
         guard let previous = others.last else { return nil }
         let change = reading.assessment.score - previous.assessment.score
-        let movement = change == 0 ? "Unchanged" : "\(change > 0 ? "Up" : "Down") \(abs(change))"
+        let direction = change > 0 ? "Up" : "Down"
+        let movement = change == 0 ? "Unchanged" : "\(direction) \(abs(change))"
         return
             "\(movement) since the assessment on \(previous.evaluatedAt.formatted(date: .abbreviated, time: .omitted))"
     }
@@ -375,10 +378,21 @@ struct TensionGlyph: View {
 
     private var paused: Bool { reduceMotion || scenePhase != .active }
 
+    private func animationTime(for date: Date) -> TimeInterval {
+        if reduceMotion {
+            return 0
+        } else if paused {
+            return frozen
+        } else {
+            return date.timeIntervalSince(origin)
+        }
+    }
+
     var body: some View {
         TimelineView(.animation(paused: paused)) { timeline in
-            let time = reduceMotion ? 0 : paused ? frozen : timeline.date.timeIntervalSince(origin)
-            Canvas { context, size in Self.draw(level, in: &context, size: size, time: time) }
+            Canvas { context, size in
+                Self.draw(level, in: &context, size: size, time: animationTime(for: timeline.date))
+            }
         }
         .onChange(of: paused) { _, isPaused in
             if isPaused {
@@ -439,7 +453,14 @@ struct TensionGlyph: View {
     ) {
         let width = size.width
         let height = size.height
-        let heat = level == .warm ? 0.0 : level == .hot ? 0.5 : 1.0
+        let heat: Double
+        if level == .warm {
+            heat = 0.0
+        } else if level == .hot {
+            heat = 0.5
+        } else {
+            heat = 1.0
+        }
         if level == .warm {
             context.translateBy(x: width * 0.08, y: height * 0.2)
             context.scaleBy(x: 0.84, y: 0.8)

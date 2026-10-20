@@ -164,27 +164,7 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
         }
 
         if elementName == "item" || elementName == "entry" {
-            insideItem = true
-            parsingChannelTitle = false
-            itemTitle = ""
-            itemDescription = ""
-            itemLink = ""
-            itemGuid = ""
-            itemGuidIsPermalink = true
-            itemPubDate = ""
-            itemUpdated = ""
-            itemDublinDate = ""
-            itemBaseURL = baseURLs.last.flatMap { $0 }
-            itemXML = articles.count < maxArticlesPerFeed ? "" : nil
-            itemXMLBytes = 0
-            contentDepth = nil
-            itemContentIsPlainText = false
-            isCollectingContentEncoded = false
-            itemImageUrl = ""
-            itemImageCandidates = []
-            itemContentIsXHTML = false
-            itemCategory = ""
-            itemContentEncoded = ""
+            resetItemState()
         }
 
         if insideItem {
@@ -217,27 +197,8 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
             itemCategory = term
         }
 
-        if insideItem && ["enclosure", "media:content", "media:thumbnail"].contains(elementName),
-            let raw = attributeDict["url"], !raw.isEmpty
-        {
-            let type = attributeDict["type"]?.lowercased()
-            let medium = attributeDict["medium"]?.lowercased()
-            let url = resolvedURL(raw)
-            let width = attributeDict["width"].flatMap(Int.init)
-            let height = attributeDict["height"].flatMap(Int.init)
-            // The Guardian lists sized media:content renditions with neither type nor medium.
-            let isImage =
-                type?.hasPrefix("image/") == true
-                || (type == nil
-                    && (elementName == "media:thumbnail" || medium == "image"
-                        || (elementName == "media:content" && medium == nil && width != nil)))
-            if isImage, ReaderImageCandidate.usable(url: url, width: width, height: height),
-                itemImageCandidates.count < 8
-            {
-                itemImageCandidates.append(ReaderImageCandidate(url: url, origin: .feed, width: width, height: height))
-                // The widest rendition; the first listed when sizes are unknown or equal.
-                itemImageUrl = itemImageCandidates.max { ($0.width ?? 0) < ($1.width ?? 0) }?.url ?? url
-            }
+        if insideItem && ["enclosure", "media:content", "media:thumbnail"].contains(elementName) {
+            handleMediaElement(elementName: elementName, attributeDict: attributeDict)
         }
 
         if insideItem && elementName == "link" {
@@ -246,6 +207,52 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
                 itemLink =
                     URL(string: href, relativeTo: baseURLs.last.flatMap { $0 })?.absoluteURL.absoluteString ?? href
             }
+        }
+    }
+
+    private func resetItemState() {
+        insideItem = true
+        parsingChannelTitle = false
+        itemTitle = ""
+        itemDescription = ""
+        itemLink = ""
+        itemGuid = ""
+        itemGuidIsPermalink = true
+        itemPubDate = ""
+        itemUpdated = ""
+        itemDublinDate = ""
+        itemBaseURL = baseURLs.last.flatMap { $0 }
+        itemXML = articles.count < maxArticlesPerFeed ? "" : nil
+        itemXMLBytes = 0
+        contentDepth = nil
+        itemContentIsPlainText = false
+        isCollectingContentEncoded = false
+        itemImageUrl = ""
+        itemImageCandidates = []
+        itemContentIsXHTML = false
+        itemCategory = ""
+        itemContentEncoded = ""
+    }
+
+    private func handleMediaElement(elementName: String, attributeDict: [String: String]) {
+        guard let raw = attributeDict["url"], !raw.isEmpty else { return }
+        let type = attributeDict["type"]?.lowercased()
+        let medium = attributeDict["medium"]?.lowercased()
+        let url = resolvedURL(raw)
+        let width = attributeDict["width"].flatMap(Int.init)
+        let height = attributeDict["height"].flatMap(Int.init)
+        // The Guardian lists sized media:content renditions with neither type nor medium.
+        let isImage =
+            type?.hasPrefix("image/") == true
+            || (type == nil
+                && (elementName == "media:thumbnail" || medium == "image"
+                    || (elementName == "media:content" && medium == nil && width != nil)))
+        if isImage, ReaderImageCandidate.usable(url: url, width: width, height: height),
+            itemImageCandidates.count < 8
+        {
+            itemImageCandidates.append(ReaderImageCandidate(url: url, origin: .feed, width: width, height: height))
+            // The widest rendition; the first listed when sizes are unknown or equal.
+            itemImageUrl = itemImageCandidates.max { ($0.width ?? 0) < ($1.width ?? 0) }?.url ?? url
         }
     }
 
@@ -341,7 +348,8 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
     }
 
     private func finishArticle() {
-        let rawDate = itemPubDate.isEmpty ? (itemUpdated.isEmpty ? itemDublinDate : itemUpdated) : itemPubDate
+        let fallbackDate = itemUpdated.isEmpty ? itemDublinDate : itemUpdated
+        let rawDate = itemPubDate.isEmpty ? fallbackDate : itemPubDate
         let guid = itemGuid.trimmingCharacters(in: .whitespacesAndNewlines)
         let link = itemDocumentLink(guid: guid)
         let content = itemContent(articleLink: link)
@@ -400,7 +408,14 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
         let trimmed = itemContentEncoded.trimmingCharacters(in: .whitespacesAndNewlines)
         let plainText =
             itemContentIsPlainText || (!itemContentIsXHTML && !trimmed.contains("<") && trimmed.contains("\n"))
-        let content = trimmed.isEmpty ? nil : (itemContentIsPlainText ? trimmed : stripHTMLSimple(trimmed))
+        let content: String?
+        if trimmed.isEmpty {
+            content = nil
+        } else if itemContentIsPlainText {
+            content = trimmed
+        } else {
+            content = stripHTMLSimple(trimmed)
+        }
         let cleaned = content?.isEmpty == true ? nil : content
         let extracted =
             plainText

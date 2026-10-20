@@ -560,10 +560,10 @@ actor OverviewGenerationCoordinator {
     }
 
     private func recordRequestedInputs(eventID: String, membershipVersion: Int, inputTextHash: String) {
-        if latestRequestedInputs.count >= 500 {
-            if let evictKey = latestRequestedInputs.keys.first(where: { inFlightTasks[$0] == nil && $0 != eventID }) {
-                latestRequestedInputs.removeValue(forKey: evictKey)
-            }
+        if latestRequestedInputs.count >= 500,
+            let evictKey = latestRequestedInputs.keys.first(where: { inFlightTasks[$0] == nil && $0 != eventID })
+        {
+            latestRequestedInputs.removeValue(forKey: evictKey)
         }
         latestRequestedInputs[eventID] = (membershipVersion, inputTextHash)
     }

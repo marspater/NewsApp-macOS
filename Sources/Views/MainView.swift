@@ -261,9 +261,13 @@ struct MainView: View {
     private func reloadTension() async {
         guard appSettings.tensionCollectionOptIn, appSettings.aiEnabled, articleStore.isReady else {
             tensionHistory = []
-            tensionStatus =
-                !appSettings.aiEnabled
-                ? "AI is off" : !appSettings.tensionCollectionOptIn ? "Collection is off" : "Collecting headlines"
+            if !appSettings.aiEnabled {
+                tensionStatus = "AI is off"
+            } else if !appSettings.tensionCollectionOptIn {
+                tensionStatus = "Collection is off"
+            } else {
+                tensionStatus = "Collecting headlines"
+            }
             return
         }
         tensionStatus = "Assessing headlines"
