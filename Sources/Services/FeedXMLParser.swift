@@ -475,30 +475,33 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
             isAtom
             ? "<feed xmlns=\"http://www.w3.org/2005/Atom\" \(namespaces)>\(itemXML)</feed>"
             : "<rss version=\"2.0\" \(namespaces)><channel>\(itemXML)</channel></rss>"
-        guard case .success(let feed) = FeedKit.FeedParser(data: Data(xml.utf8)).parse(), !Task.isCancelled else {
-            return article
-        }
-        switch feed {
-        case .rss(let rss):
-            guard let item = rss.items?.first else { return article }
-            return applyFeedKitMedia(item.media, baseURL: baseURL, to: rssArticle(item, keeping: article))
-        case .atom(let atom):
-            guard let item = atom.entries?.first else { return article }
+        if isAtom {
+            guard let atom = try? FeedKit.AtomFeed(data: Data(xml.utf8)), !Task.isCancelled,
+                let item = atom.entries?.first
+            else {
+                return article
+            }
             return applyFeedKitMedia(item.media, baseURL: baseURL, to: atomArticle(item, keeping: article))
-        case .json: return article
+        } else {
+            guard let rss = try? FeedKit.RSSFeed(data: Data(xml.utf8)), !Task.isCancelled,
+                let item = rss.channel?.items?.first
+            else {
+                return article
+            }
+            return applyFeedKitMedia(item.media, baseURL: baseURL, to: rssArticle(item, keeping: article))
         }
     }
 
     private func rssArticle(_ item: FeedKit.RSSFeedItem, keeping article: FeedArticle) -> FeedArticle {
         let dc = item.dublinCore
-        let rawTitle = article.title.isEmpty ? item.title ?? dc?.dcTitle ?? "" : article.title
+        let rawTitle = article.title.isEmpty ? item.title ?? dc?.title ?? "" : article.title
         let title = ContentExtractionPipeline.shared.decodeHTMLEntities(rawTitle)
         let desc =
             article.description.isEmpty
-            ? stripHTMLSimple(item.description ?? dc?.dcDescription ?? "") : article.description
+            ? stripHTMLSimple(item.description ?? dc?.description ?? "") : article.description
         let date =
-            article.pubDate == DateParser.unknownDate ? item.pubDate ?? dc?.dcDate ?? article.pubDate : article.pubDate
-        let cat = article.category ?? item.categories?.first?.value ?? dc?.dcSubject
+            article.pubDate == DateParser.unknownDate ? item.pubDate ?? dc?.date ?? article.pubDate : article.pubDate
+        let cat = article.category ?? item.categories?.first?.text ?? dc?.subject
         return FeedArticle(
             title: title.trimmingCharacters(in: .whitespacesAndNewlines), link: article.link, guid: article.guid,
             description: desc, pubDate: date, source: article.source, imageUrl: article.imageUrl,
@@ -509,7 +512,7 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
     private func atomArticle(_ item: FeedKit.AtomFeedEntry, keeping article: FeedArticle) -> FeedArticle {
         let rawTitle = article.title.isEmpty ? item.title ?? "" : article.title
         let title = ContentExtractionPipeline.shared.decodeHTMLEntities(rawTitle)
-        let desc = article.description.isEmpty ? stripHTMLSimple(item.summary?.value ?? "") : article.description
+        let desc = article.description.isEmpty ? stripHTMLSimple(item.summary?.text ?? "") : article.description
         let date =
             article.pubDate == DateParser.unknownDate
             ? item.published ?? item.updated ?? article.pubDate : article.pubDate
@@ -520,13 +523,13 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
             readerDocument: article.readerDocument)
     }
 
-    private func applyFeedKitMedia(_ media: FeedKit.MediaNamespace?, baseURL: URL?, to article: FeedArticle)
+    private func applyFeedKitMedia(_ media: FeedKit.Media?, baseURL: URL?, to article: FeedArticle)
         -> FeedArticle
     {
         var images = article.readerDocument?.images ?? []
-        let credit = (media?.mediaCredits ?? media?.mediaGroup?.mediaCredits ?? []).compactMap(\.value).joined(
+        let credit = (media?.credits ?? media?.group?.credits ?? []).compactMap(\.text).joined(
             separator: ", ")
-        let contents = (media?.mediaContents ?? []) + (media?.mediaGroup?.mediaContents ?? [])
+        let contents = (media?.contents ?? []) + (media?.group?.contents ?? [])
         for content in contents {
             guard let attributes = content.attributes, let raw = attributes.url,
                 attributes.type?.hasPrefix("image/") == true || attributes.medium == "image"
