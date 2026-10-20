@@ -260,10 +260,15 @@ struct SettingsView: View {
                                 .help("Feed is active and up to date")
                                 .accessibilityLabel("Feed is active and up to date")
                         case .loading?:
-                            ProgressView()
-                                .controlSize(.mini)
-                                .help("Fetching updates…")
-                                .accessibilityLabel("Fetching updates…")
+                            // The AppKit-backed spinner is hidden; a plain container carries the label (DESIGN.md 16).
+                            HStack {
+                                ProgressView()
+                                    .controlSize(.mini)
+                                    .accessibilityHidden(true)
+                            }
+                            .help("Fetching updates…")
+                            .accessibilityElement(children: .ignore)
+                            .accessibilityLabel("Fetching updates…")
                         case .failed(let err)?:
                             Image(systemName: "exclamationmark.triangle.fill")
                                 .foregroundColor(AppColor.warning)

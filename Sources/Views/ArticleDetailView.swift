@@ -274,15 +274,20 @@ struct ArticleDetailView: View {
                     },
                     onSelectRelatedEvent: { related in
                         Task {
-                            // Opening the earlier event's first report keeps the reader on overviews.
                             guard
                                 let article = try? await articleStore.database.fetchArticles(
                                     limit: 1, id: related.articleID
                                 ).first
                             else { return }
-                            highlightedPassage = nil
+                            // The same sequence as moving to the next story; the earlier event opens on its overview.
+                            resetReaderState()
+                            currentOverview = nil
+                            eventMemberArticles = []
                             overviewRequestedArticleID = article.id
                             activeArticle = article
+                            readManager.markAsRead(article.id)
+                            // Opening an event from here counts as seeing it, as it does from the feed.
+                            await articleStore.markEventSeen(related.eventID)
                         }
                     }
                 )
@@ -333,7 +338,8 @@ struct ArticleDetailView: View {
                                             .textSelection(.enabled)
                                     }
                                 }
-                                .accessibilityElement(children: .combine)
+                                // Ignore, not combine: the passage is selectable text (DESIGN.md 16).
+                                .accessibilityElement(children: .ignore)
                                 .accessibilityLabel("Cited passage in event overview: \(passage)")
 
                                 Spacer()
@@ -503,14 +509,15 @@ struct ArticleDetailView: View {
 
     private var loadingStateView: some View {
         HStack(spacing: AppSpacing.sm) {
+            // AppKit-backed views stay out of combined or relabelled accessibility elements (see ReaderFigureView).
             ProgressView()
                 .controlSize(.small)
+                .accessibilityHidden(true)
             Text("Loading full story…")
                 .font(AppTypography.label)
                 .foregroundColor(AppColor.secondaryText)
+                .accessibilityLabel("Loading full story")
         }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("Loading full story")
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.vertical, AppSpacing.lg)
     }
@@ -746,11 +753,13 @@ struct ArticleDetailView: View {
             HStack(alignment: .firstTextBaseline, spacing: AppSpacing.sm) {
                 Text(block.ordinal.map { "\($0)." } ?? "•")
                     .foregroundStyle(AppColor.secondaryText)
+                    // A bullet is decoration; an ordinal is read before the item.
+                    .accessibilityHidden(block.ordinal == nil)
+                // Not combined: the item is selectable text and may carry links (DESIGN.md 16).
                 Text(readerText(block)).textSelection(.enabled)
             }
             .font(AppTypography.bodyFont(for: themeManager.articleTheme, scale: readerTextScale))
             .lineSpacing(AppTypography.bodyLineSpacing(for: themeManager.articleTheme) * readerTextScale)
-            .accessibilityElement(children: .combine)
         case .code:
             Text(readerText(block))
                 .font(.system(.body, design: .monospaced))
@@ -1195,12 +1204,12 @@ struct ArticleDetailView: View {
             HStack(spacing: AppSpacing.xs) {
                 ProgressView()
                     .controlSize(.small)
+                    .accessibilityHidden(true)
                 Text("Analyzing the story on device…")
                     .font(AppTypography.label)
                     .foregroundColor(AppColor.secondaryText)
+                    .accessibilityLabel("Analyzing story with on-device AI")
             }
-            .accessibilityElement(children: .combine)
-            .accessibilityLabel("Analyzing story with on-device AI")
             .padding(AppSpacing.md)
             .background(AppColor.surface, in: RoundedRectangle(cornerRadius: AppRadius.card))
         } else if let analysis = analysis {
@@ -1630,11 +1639,16 @@ struct ReaderFigureView: View {
                                 Label("Image unavailable", systemImage: "photo").foregroundStyle(AppColor.secondaryText)
                             }
                     case .empty:
+                        // A label set on the AppKit-backed spinner itself made accessibility label resolution loop
+                        // between SwiftUI and AppKit until the stack overflowed (VoiceOver or automation reading a
+                        // story whose image was still loading). The plain placeholder carries the label instead.
                         AppColor.surface
                             .aspectRatio(aspectRatio, contentMode: .fit)
                             .overlay {
-                                ProgressView().accessibilityLabel("Loading story image")
+                                ProgressView().accessibilityHidden(true)
                             }
+                            .accessibilityElement()
+                            .accessibilityLabel("Loading story image")
                     @unknown default: EmptyView()
                     }
                 }
@@ -1651,11 +1665,14 @@ struct ReaderFigureView: View {
                 .textSelection(.enabled)
             }
             if let credit = block.imageCredit, !credit.isEmpty {
-                Text(credit).font(AppTypography.readerCaptionFont(scale: textScale)).foregroundStyle(
-                    AppColor.secondaryText
-                ).textSelection(
-                    .enabled
-                )
+                // Selectable text is backed by an AppKit view; a label set directly on it made accessibility label
+                // resolution loop until the stack overflowed. A plain container carries the spoken label instead.
+                HStack(spacing: 0) {
+                    Text(credit).font(AppTypography.readerCaptionFont(scale: textScale)).foregroundStyle(
+                        AppColor.secondaryText
+                    ).textSelection(.enabled)
+                }
+                .accessibilityElement(children: .ignore)
                 .accessibilityLabel("Image credit: " + credit)
             }
         }
@@ -1705,18 +1722,19 @@ private struct ToolbarLoadingBubble: View {
     @Environment(\.effectiveReduceMotion) private var reduceMotion
     var body: some View {
         HStack(alignment: .center, spacing: AppSpacing.xs) {
+            // AppKit-backed views stay out of combined or relabelled accessibility elements (see ReaderFigureView).
             ProgressView()
                 .controlSize(.small)
+                .accessibilityHidden(true)
             Text("Loading event overview…")
                 .font(AppTypography.caption)
                 .foregroundColor(AppColor.secondaryText)
+                .accessibilityLabel("Loading event overview")
         }
         .frame(height: 24)
         .padding(.horizontal, AppSpacing.sm)
         .padding(.vertical, AppSpacing.xxs)
         .transition(.opacity.animation(reduceMotion ? nil : AppMotion.state))
         .help("Generating evidence-backed event overview…")
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("Loading event overview")
     }
 }

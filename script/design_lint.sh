@@ -21,13 +21,95 @@ RULES=(
     "direct-glass|glassEffect|GlassEffectContainer"
     "scroll-edge-style|scrollEdgeEffectStyle"
     "uppercased|\.uppercased\(\)"
+    "platform-label|(see platform_labels)"
     "material|\.(ultraThin|thin|regular|thick|ultraThick)Material"
 )
 ALLOWED_COLORS='Color\.(clear|primary|secondary|accentColor)$'
 
+# Labels set on AppKit-backed views (a ProgressView, or text with .textSelection(.enabled)) anywhere in the same
+# modifier chain, which may span lines: the chain continues while lines start with "." or ")". Also counts a
+# container that combines such a view into one element: a { } block holding one, whose closing chain applies
+# .accessibilityElement(children: .combine). DESIGN.md section 16.
+platform_labels() {
+    local file="$1"
+    awk '
+        { line = $0; sub(/^[ \t]+/, "", line) }
+        chained && line !~ /^[.)]/ { chained = 0 }
+        closed && line !~ /^[.)}]/ { closed = 0 }
+        {
+            start = 0
+            if (match(line, /ProgressView\(/)) start = RSTART
+            else if (match(line, /\.textSelection\(\.enabled\)/)) start = RSTART
+            if (start) { chained = 1; rest = substr(line, start) } else { rest = line }
+            if (chained && index(rest, ".accessibilityLabel(")) count++
+
+            # Track { } blocks; mark every open block that holds an AppKit-backed view.
+            backed = start
+            tail = line
+            for (c = 1; c <= length(line); c++) {
+                ch = substr(line, c, 1)
+                if (backed && c == backed) for (d = 1; d <= depth; d++) holds[d] = 1
+                if (ch == "{") { depth++; holds[depth] = 0 }
+                else if (ch == "}" && depth > 0) {
+                    closed = holds[depth]; depth--
+                    tail = substr(line, c + 1)
+                }
+            }
+            if (closed && index(tail, ".accessibilityElement(children: .combine)")) { count++; closed = 0 }
+        }
+        END { print count + 0 }
+    ' "$file"
+}
+
+# Self-check on every run: three labelled AppKit-backed views (one split across lines), two containers combining
+# one (one nested, one with a modifier between), and three safe containers that must not count.
+platform_probe="$(mktemp)"
+cat > "$platform_probe" <<'SWIFT'
+ProgressView()
+    .controlSize(.small)
+    .accessibilityLabel("Loading")
+Text(credit).font(.body)
+    .textSelection(.enabled)
+    .accessibilityLabel("Credit")
+ProgressView().accessibilityLabel("One line")
+HStack {
+    ProgressView().accessibilityHidden(true)
+}
+.accessibilityLabel("Container")
+VStack {
+    if let caption {
+        Text(caption).textSelection(.enabled)
+    }
+}
+.accessibilityElement(children: .combine)
+.accessibilityLabel("Combined")
+HStack {
+    Text(item).textSelection(.enabled)
+}
+.font(.body)
+.accessibilityElement(children: .combine)
+HStack {
+    Text(item).textSelection(.enabled)
+}
+.accessibilityElement(children: .ignore)
+.accessibilityLabel("Ignored")
+HStack {
+    Text("Plain")
+}
+.accessibilityElement(children: .combine)
+SWIFT
+if [[ "$(platform_labels "$platform_probe")" != "5" ]]; then
+    rm -f "$platform_probe"
+    echo "Design lint: the AppKit-backed label check failed its self-test." >&2
+    exit 1
+fi
+rm -f "$platform_probe"
+
 count() {
     local rule="$1" pattern="$2" file="$3"
-    if [[ "$rule" == "literal-color" ]]; then
+    if [[ "$rule" == "platform-label" ]]; then
+        platform_labels "$file"
+    elif [[ "$rule" == "literal-color" ]]; then
         { grep -o -E "$pattern" "$file" || true; } | { grep -v -E "$ALLOWED_COLORS" || true; } | wc -l | tr -d ' '
     else
         { grep -o -E "$pattern" "$file" || true; } | wc -l | tr -d ' '
@@ -49,8 +131,8 @@ find Sources/Views -name '*.swift' ! -name DesignSystem.swift ! -name GlassSyste
 done | sort > "$current"
 
 # Phase 4 (#354): a permanent zero-deviation gate for content styles.
-if grep -E '^(literal-font-size|literal-color|uppercased) ' "$current"; then
-    echo "Design lint: literal fonts, colors and uppercasing must be zero (#354)." >&2
+if grep -E '^(literal-font-size|literal-color|uppercased|platform-label) ' "$current"; then
+    echo "Design lint: literal fonts, colors, uppercasing and labels on AppKit-backed views must be zero (#354)." >&2
     exit 1
 fi
 

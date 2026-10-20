@@ -463,7 +463,9 @@ struct EventOverviewReaderView: View {
                     .textSelection(.enabled)
             }
         }
-        .accessibilityElement(children: .combine)
+        // Ignore, not combine: the caption and credit are selectable (AppKit-backed) text, and the label already
+        // carries both (DESIGN.md 16).
+        .accessibilityElement(children: .ignore)
         .accessibilityLabel(Self.leadImageAccessibilityLabel(leadImage))
     }
 
