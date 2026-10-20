@@ -271,6 +271,14 @@ final class DOMElementNode: Sendable {
         guard !isReaderExcluded else { return [] }
         if tag == "noscript" { return children.flatMap { $0.readingBlocks(allowDivFallback: false) } }
         if tag == "figure" || tag == "img" || tag == "picture" || tag == "hr" { return [self] }
+        // An article header holds the title and byline; only its standfirst is story text.
+        if tag == "header" && !HTMLDOMBuilder.isEditorial(attributes) {
+            func editorial(_ node: DOMElementNode) -> [DOMElementNode] {
+                HTMLDOMBuilder.isEditorial(node.attributes)
+                    ? node.readingBlocks(allowDivFallback: false) : node.children.flatMap(editorial)
+            }
+            return children.flatMap(editorial)
+        }
         if ["div", "p"].contains(tag), children.contains(where: { $0.tag == "br" }) {
             var groups = [[DOMElementNode]]([[]])
             for child in children {
@@ -293,7 +301,7 @@ final class DOMElementNode: Sendable {
                 ]
             }
         }
-        if ["p", "h2", "h3", "h4", "h5", "h6", "li", "blockquote", "pre"].contains(tag) { return [self] }
+        if ["p", "h2", "h3", "h4", "h5", "h6", "li", "blockquote", "pre", "aside"].contains(tag) { return [self] }
         var blocks = [DOMElementNode]()
         var inline = [DOMElementNode]()
         func flushInline() {
@@ -310,7 +318,7 @@ final class DOMElementNode: Sendable {
                 blocks += nested
             } else if child.tag == "br" {
                 flushInline()
-            } else if !child.isReaderExcluded {
+            } else if !child.isReaderExcluded && child.tag != "header" {
                 inline.append(child)
             }
         }
@@ -401,7 +409,7 @@ final class DOMElementNode: Sendable {
         case "h2": kind = .heading
         case "h3", "h4", "h5", "h6": kind = .subheading
         case "li": kind = .listItem
-        case "blockquote": kind = .quote
+        case "blockquote", "aside": kind = .quote
         case "pre": kind = .code
         default: kind = .paragraph
         }
@@ -522,6 +530,28 @@ enum HTMLDOMBuilder {
         "header", "form", "aside", "dialog", "button",
     ]
 
+    /// Pull quotes and standfirsts that publishers wrap in otherwise ignored `<aside>` and `<header>` elements.
+    static let editorialPattern =
+        (try? NSRegularExpression(
+            pattern:
+                #"(?i)pull-?quote|standfirst|(?:^|[-_ ])dek(?:$|[-_ ])|subtitle|sub-?headline|article-summary|intro-text"#
+        )) ?? NSRegularExpression()
+
+    static func isEditorial(_ attributes: [String: String]) -> Bool {
+        let identifier = "\(attributes["class"] ?? "") \(attributes["id"] ?? "")"
+        return editorialPattern.firstMatch(in: identifier, range: NSRange(identifier.startIndex..., in: identifier))
+            != nil
+    }
+
+    /// Whether a tag and everything inside it is skipped. Editorial asides and headers are kept, as is an article's
+    /// own header, from which only standfirst-like children are read.
+    static func isIgnored(tag: String, attributes: [String: String], insideArticle: Bool = false) -> Bool {
+        guard ignoredTags.contains(tag) else { return false }
+        if tag == "header" && insideArticle { return false }
+        guard tag == "aside" || tag == "header" else { return true }
+        return !isEditorial(attributes)
+    }
+
     private static let commentRegex = try? NSRegularExpression(
         pattern: "<!--.*?-->", options: .dotMatchesLineSeparators)
 
@@ -589,7 +619,9 @@ enum HTMLDOMBuilder {
         let parsed = parseTagContent(tagContent)
         let tagName = parsed.tag.lowercased()
 
-        if ignoredTags.contains(tagName) {
+        if isIgnored(
+            tag: tagName, attributes: parsed.attributes, insideArticle: stack.contains { $0.tag == "article" })
+        {
             if parsed.isSelfClosing { return }
             var depth = 1
             while !scanner.isAtEnd && depth > 0 {
@@ -1104,20 +1136,31 @@ final class ContentExtractionPipeline: Sendable {
         "[class*=paywall], [id*=paywall], [class*=barrier], [id*=barrier], [data-component*=barrier], "
         + "[class*=subscribe-wall], [class*=subscription-wall], [class*=regwall], [id*=regwall], .tp-modal"
 
-    /// The longest schema.org articleBody and any isAccessibleForFree=false flag in the page's JSON-LD.
+    /// The longest schema.org articleBody and any isAccessibleForFree=false flag in the page's JSON-LD, then in
+    /// Next.js hydration state (`__NEXT_DATA__`), where the body may be HTML.
     static func structuredArticle(in document: SwiftSoup.Document) -> StructuredArticle {
         var result = StructuredArticle()
-        func visit(_ value: Any, depth: Int) {
-            guard depth < 8 else { return }
+        var budget = 20_000
+        func consider(_ body: String) {
+            guard body.count > (result.articleBody?.count ?? 0), body.utf8.count <= 512 * 1024 else { return }
+            result.articleBody = body
+        }
+        func visit(_ value: Any, depth: Int, everyKey: Bool = false) {
+            budget -= 1
+            guard depth < (everyKey ? 14 : 8), budget > 0 else { return }
             if let array = value as? [Any] {
-                for item in array.prefix(64) { visit(item, depth: depth + 1) }
+                for item in array.prefix(64) { visit(item, depth: depth + 1, everyKey: everyKey) }
                 return
             }
             guard let object = value as? [String: Any] else { return }
-            if let body = object["articleBody"] as? String,
-                body.count > (result.articleBody?.count ?? 0), body.utf8.count <= 512 * 1024
-            {
-                result.articleBody = body
+            if let body = object["articleBody"] as? String { consider(body) }
+            if everyKey {
+                // ponytail: key-name heuristic for hydration state; add per-publisher paths if this misses.
+                for key in ["body", "bodyHtml", "content", "contentHtml"] {
+                    if let body = object[key] as? String, body.count >= 600, body.contains(". ") { consider(body) }
+                }
+                for nested in object.values.prefix(256) { visit(nested, depth: depth + 1, everyKey: true) }
+                return
             }
             let free = object["isAccessibleForFree"]
             if (free as? Bool) == false || (free as? String)?.lowercased() == "false" {
@@ -1132,11 +1175,20 @@ final class ContentExtractionPipeline: Sendable {
             guard data.count <= 1024 * 1024, let json = try? JSONSerialization.jsonObject(with: data) else { continue }
             visit(json, depth: 0)
         }
+        if result.articleBody == nil, let next = try? document.select("script#__NEXT_DATA__").first() {
+            let data = Data(next.data().utf8)
+            if data.count <= 4 * 1024 * 1024, let json = try? JSONSerialization.jsonObject(with: data) {
+                visit(json, depth: 0, everyKey: true)
+            }
+        }
         return result
     }
 
     /// Paragraphs from plain text: publisher line breaks when present, otherwise groups of sentences.
     static func paragraphs(fromPlainText text: String) -> [String] {
+        if text.range(of: "<p[ >]", options: [.regularExpression, .caseInsensitive]) != nil {
+            return ContentExtractionPipeline.shared.extractParagraphs(from: text)
+        }
         let decoded = ContentExtractionPipeline.shared.decodeHTMLEntities(text)
         let lines = decoded.components(separatedBy: .newlines)
             .map { $0.trimmingCharacters(in: .whitespaces) }.filter { $0.count >= 25 }
@@ -1241,7 +1293,8 @@ final class ContentExtractionPipeline: Sendable {
                 uniquingKeysWith: { first, _ in first })
         }
         func excluded(_ element: SwiftSoup.Element) -> Bool {
-            HTMLDOMBuilder.ignoredTags.contains(element.tagName()) || element.tagName() == "template"
+            HTMLDOMBuilder.isIgnored(tag: element.tagName(), attributes: attributes(element))
+                || element.tagName() == "template"
                 || DOMElementNode(tag: element.tagName(), attributes: attributes(element)).isReaderExcluded
         }
         func convert(_ node: SwiftSoup.Node, depth: Int) -> DOMElementNode? {

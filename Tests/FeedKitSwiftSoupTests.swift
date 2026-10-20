@@ -79,6 +79,27 @@ enum FeedKitSwiftSoupTests {
             pipeline.extractFromHTML(structuredBody, baseUrl: base).content?.contains("Final structured paragraph")
                 == true,
             "A thin DOM body falls back to the publisher's JSON-LD articleBody")
+        let editorial = pipeline.extractFromHTML(
+            """
+            <article><header class="article-header"><h1>Bridge</h1><p class="standfirst">The council says repairs will finish before winter, ending weeks of detours.</p></header>
+            <p>\(first)</p><aside class="pull-quote">The structure remained intact after the storm passed.</aside>
+            <aside class="related"><p>Other coverage from the site that should never appear.</p></aside><p>\(second)</p></article>
+            """, baseUrl: base)
+        check(
+            editorial.content?.contains("repairs will finish before winter") == true,
+            "A header standfirst is kept inside the article")
+        check(
+            editorial.document?.blocks.contains { $0.kind == .quote && $0.text.hasPrefix("The structure") } == true,
+            "An aside pull quote becomes a quote block")
+        check(editorial.content?.contains("Other coverage") == false, "Related-story asides stay excluded")
+        let hydrated = """
+            <html><head><script id="__NEXT_DATA__" type="application/json">{"props":{"pageProps":{"story":
+            {"bodyHtml":"<p>\(first)</p><p>\(second)</p><p>\(second)</p><p>Hydrated final paragraph: \(first)</p>"}}}}</script></head>
+            <body><div id="__next"><p>\(first)</p></div></body></html>
+            """
+        check(
+            pipeline.extractFromHTML(hydrated, baseUrl: base).content?.contains("Hydrated final paragraph") == true,
+            "A thin page falls back to its Next.js hydration body")
         let sections = """
             <article><hr><p>\(first)</p><hr><hr><p>\(second)</p><hr></article>
             """

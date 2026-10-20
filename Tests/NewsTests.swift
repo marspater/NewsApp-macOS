@@ -9375,6 +9375,15 @@ struct NewsTests {
 
         var buffer = FeedUpdateBuffer()
         assertEqual(
+            FeedUpdateBuffer.debouncesReload(isPaging: false, isNewQuery: true, hasStories: false), false,
+            "A section's first page is shown without the reload debounce")
+        assertEqual(
+            FeedUpdateBuffer.debouncesReload(isPaging: false, isNewQuery: false, hasStories: false), false,
+            "An empty list fills at once at startup")
+        assertEqual(
+            FeedUpdateBuffer.debouncesReload(isPaging: false, isNewQuery: false, hasStories: true), true,
+            "Revision bursts over a shown list are debounced")
+        assertEqual(
             buffer.receive(FeedSnapshot(articles: [a, b]), holding: true, mode: .events), .replaced,
             "The first page always shows")
         let fresh = article("n", source: "Wire One", minutesAgo: 0)

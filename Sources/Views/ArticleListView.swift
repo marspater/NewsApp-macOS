@@ -379,8 +379,9 @@ struct ArticleListView: View {
         isLoadingPage = true
         defer { if queryRunID == runID { isLoadingPage = false } }
         do {
-            // Debounce bursts of store revisions, but show the first page of a section at once.
-            if !isPaging && !isNewQuery && !buffer.displayed.articles.isEmpty {
+            if FeedUpdateBuffer.debouncesReload(
+                isPaging: isPaging, isNewQuery: isNewQuery, hasStories: !buffer.displayed.articles.isEmpty)
+            {
                 try await Task.sleep(for: .milliseconds(180))
             }
             let muting = listMuting

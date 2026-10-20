@@ -240,6 +240,11 @@ struct ArticleCardView: View {
     /// Below this width-to-height ratio a lead image is framed whole rather than cropped to fill.
     static let wideLeadImageRatio: CGFloat = 1.25
 
+    /// Square and portrait lead images (and wide ones only once their size is known) are framed whole.
+    static func framesLeadImageWhole(aspectRatio: CGFloat?) -> Bool {
+        aspectRatio.map { $0 < wideLeadImageRatio } ?? false
+    }
+
     /// Match the normal list or grid card geometry when an image cannot decode.
     private var failedLeadSurface: some View {
         regularSurface(editorialFallbackOnly: true)
@@ -258,7 +263,7 @@ struct ArticleCardView: View {
                     .frame(maxWidth: .infinity)
                     .frame(height: AppLayout.leadStoryHeight)
                     .overlay(alignment: .top) {
-                        if let aspectRatio, aspectRatio < Self.wideLeadImageRatio {
+                        if Self.framesLeadImageWhole(aspectRatio: aspectRatio) {
                             ZStack(alignment: .top) {
                                 image.resizable().aspectRatio(contentMode: .fill)
                                     .blur(radius: 40)
