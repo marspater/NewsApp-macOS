@@ -6662,6 +6662,13 @@ struct NewsTests {
         assertEqual(links.map(\.eventID), [previous.id], "Only directly supported, wholly earlier events link")
         assertFalse(links.map(\.eventID).contains(half.id), "Support from half the members is not enough")
         assertEqual(links.first?.articleID, "earlier", "Navigation carries a stored member ID")
+        assertEqual(
+            try await db.commonStoryTerms(["volodymyr zelenskyy"], before: now.addingTimeInterval(3600), share: 0.05),
+            [], "A name in only a few events is never common, however small the library")
+        assertEqual(
+            try await db.commonStoryTerms(
+                ["volodymyr zelenskyy", "absent name"], before: now.addingTimeInterval(3600), share: 0.05,
+                minimumEvents: 1), ["volodymyr zelenskyy"], "A name across most of the week's events is common")
         assertEqual(try await db.fetchEvent(id: current.id), current, "Lookup does not change the target event")
         assertEqual(try await db.fetchEvent(id: previous.id), previous, "Lookup does not change earlier membership")
         assertTrue(try await db.isRead(articleId: "earlier"), "Lookup preserves read state")
