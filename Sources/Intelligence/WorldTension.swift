@@ -179,11 +179,22 @@ struct WorldTensionAssessment: Codable, Equatable, Sendable {
             phrases.isEmpty
             ? "Today's international panel headlines describe no armed conflict, attacks or disasters."
             : "Reports of \(phrases.joined(separator: " and ")) lead today's international panel headlines."
-        let reasons: [Reason] = [
+        return Self(
+            score: max(5, score),
+            summary:
+                "This estimate counts conflict, attack, unrest and disaster cues in the panel headlines. It is shown because the on-device assessment is unavailable and does not weigh context or credibility.",
+            reasons: estimateReasons(
+                hits: hits.count, of: current.count, worstCase: worstCase, conflict: !conflict.isEmpty),
+            lead: lead, drivers: hits.sorted { $0.1 > $1.1 }.prefix(5).map(\.0.id), isEstimate: true)
+    }
+
+    /// The four factor sentences of a keyword estimate, stating only what the cues show.
+    private static func estimateReasons(hits: Int, of total: Int, worstCase: Bool, conflict: Bool) -> [Reason] {
+        [
             Reason(
                 factor: .scope,
                 explanation:
-                    "\(hits.count) of \(current.count) current panel headlines describe conflict, attacks, unrest, pressure or disasters."
+                    "\(hits) of \(total) current panel headlines describe conflict, attacks, unrest, pressure or disasters."
             ),
             Reason(
                 factor: .worstCase,
@@ -195,16 +206,10 @@ struct WorldTensionAssessment: Codable, Equatable, Sendable {
                 explanation: "Novelty cannot be established without the on-device model comparing earlier coverage."),
             Reason(
                 factor: .reversibility,
-                explanation: conflict.isEmpty
-                    ? "No supplied headline describes fighting or attacks, so most reported harm appears reversible."
-                    : "Reports of fighting or attacks imply loss of life that cannot be reversed."),
+                explanation: conflict
+                    ? "Reports of fighting or attacks imply loss of life that cannot be reversed."
+                    : "No supplied headline describes fighting or attacks, so most reported harm appears reversible."),
         ]
-        return Self(
-            score: max(5, score),
-            summary:
-                "This estimate counts conflict, attack, unrest and disaster cues in the panel headlines. It is shown because the on-device assessment is unavailable and does not weigh context or credibility.",
-            reasons: reasons, lead: lead,
-            drivers: hits.sorted { $0.1 > $1.1 }.prefix(5).map(\.0.id), isEstimate: true)
     }
 }
 

@@ -1150,49 +1150,65 @@ final class ContentExtractionPipeline: Sendable {
     /// The longest schema.org articleBody and any isAccessibleForFree=false flag in the page's JSON-LD, then in
     /// Next.js hydration state (`__NEXT_DATA__`), where the body may be HTML.
     static func structuredArticle(in document: SwiftSoup.Document) -> StructuredArticle {
+        var scan = StructuredScan()
+        for script in ((try? document.select("script[type=application/ld+json]").array()) ?? []).prefix(16) {
+            let data = Data(script.data().utf8)
+            guard data.count <= 1024 * 1024, let json = try? JSONSerialization.jsonObject(with: data) else { continue }
+            scan.visitLinkedData(json, depth: 0)
+        }
+        if scan.result.articleBody == nil, let next = try? document.select("script#__NEXT_DATA__").first() {
+            let data = Data(next.data().utf8)
+            if data.count <= 4 * 1024 * 1024, let json = try? JSONSerialization.jsonObject(with: data) {
+                scan.visitHydration(json, depth: 0)
+            }
+        }
+        return scan.result
+    }
+
+    /// A bounded walk over decoded JSON that keeps the longest article body it meets.
+    private struct StructuredScan {
         var result = StructuredArticle()
         var budget = 20_000
-        func consider(_ body: String) {
+
+        mutating func consider(_ body: String) {
             guard body.count > (result.articleBody?.count ?? 0), body.utf8.count <= 512 * 1024 else { return }
             result.articleBody = body
         }
-        func visit(_ value: Any, depth: Int, everyKey: Bool = false) {
+
+        /// schema.org JSON-LD: articleBody, the isAccessibleForFree flag and the containers that nest articles.
+        mutating func visitLinkedData(_ value: Any, depth: Int) {
             budget -= 1
-            guard depth < (everyKey ? 14 : 8), budget > 0 else { return }
+            guard depth < 8, budget > 0 else { return }
             if let array = value as? [Any] {
-                for item in array.prefix(64) { visit(item, depth: depth + 1, everyKey: everyKey) }
+                for item in array.prefix(64) { visitLinkedData(item, depth: depth + 1) }
                 return
             }
             guard let object = value as? [String: Any] else { return }
             if let body = object["articleBody"] as? String { consider(body) }
-            if everyKey {
-                // ponytail: key-name heuristic for hydration state; add per-publisher paths if this misses.
-                for key in ["body", "bodyHtml", "content", "contentHtml"] {
-                    if let body = object[key] as? String, body.count >= 600, body.contains(". ") { consider(body) }
-                }
-                for nested in object.values.prefix(256) { visit(nested, depth: depth + 1, everyKey: true) }
-                return
-            }
             let free = object["isAccessibleForFree"]
             if (free as? Bool) == false || (free as? String)?.lowercased() == "false" {
                 result.isAccessibleForFree = false
             }
             for key in ["@graph", "hasPart", "mainEntity", "mainEntityOfPage"] {
-                if let nested = object[key] { visit(nested, depth: depth + 1) }
+                if let nested = object[key] { visitLinkedData(nested, depth: depth + 1) }
             }
         }
-        for script in ((try? document.select("script[type=application/ld+json]").array()) ?? []).prefix(16) {
-            let data = Data(script.data().utf8)
-            guard data.count <= 1024 * 1024, let json = try? JSONSerialization.jsonObject(with: data) else { continue }
-            visit(json, depth: 0)
-        }
-        if result.articleBody == nil, let next = try? document.select("script#__NEXT_DATA__").first() {
-            let data = Data(next.data().utf8)
-            if data.count <= 4 * 1024 * 1024, let json = try? JSONSerialization.jsonObject(with: data) {
-                visit(json, depth: 0, everyKey: true)
+
+        /// Hydration state has no schema: every key is searched for a prose-length body.
+        /// ponytail: key-name heuristic for hydration state; add per-publisher paths if this misses.
+        mutating func visitHydration(_ value: Any, depth: Int) {
+            budget -= 1
+            guard depth < 14, budget > 0 else { return }
+            if let array = value as? [Any] {
+                for item in array.prefix(64) { visitHydration(item, depth: depth + 1) }
+                return
             }
+            guard let object = value as? [String: Any] else { return }
+            for key in ["articleBody", "body", "bodyHtml", "content", "contentHtml"] {
+                if let body = object[key] as? String, body.count >= 600, body.contains(". ") { consider(body) }
+            }
+            for nested in object.values.prefix(256) { visitHydration(nested, depth: depth + 1) }
         }
-        return result
     }
 
     /// Paragraphs from plain text: publisher line breaks when present, otherwise groups of sentences.
@@ -1226,12 +1242,28 @@ final class ContentExtractionPipeline: Sendable {
     static func splitLongParagraph(_ block: ReaderBlock) -> [ReaderBlock] {
         let text = block.text
         guard block.kind == .paragraph, text.count > 650 else { return [block] }
+        let cuts = sentenceCuts(in: text)
+        guard !cuts.isEmpty else { return [block] }
+        let bounds = [0] + cuts + [text.count]
+        return zip(bounds, bounds.dropFirst()).map { lower, upper in
+            let range = text.index(text.startIndex, offsetBy: lower)..<text.index(text.startIndex, offsetBy: upper)
+            let piece = String(text[range]).trimmingCharacters(in: .whitespaces)
+            let runs = block.inlineRuns.map { slice($0, from: lower, to: upper) }
+            return ReaderBlock(
+                kind: .paragraph, text: piece, ordinal: block.ordinal,
+                inlineRuns: runs?.map(\.text).joined() == piece ? runs : nil)
+        }
+    }
+
+    /// Character offsets where a wall of text splits: after sentences, once a piece holds 300 characters and two
+    /// sentences, never leaving a tail under 120 characters. Empty with fewer than four sentences.
+    private static func sentenceCuts(in text: String) -> [Int] {
         var ends = [Int]()
         text.enumerateSubstrings(in: text.startIndex..., options: [.bySentences, .substringNotRequired]) {
             _, _, enclosing, _ in
             ends.append(text.distance(from: text.startIndex, to: enclosing.upperBound))
         }
-        guard ends.count >= 4 else { return [block] }
+        guard ends.count >= 4 else { return [] }
         var cuts = [Int]()
         var start = 0
         var sentences = 0
@@ -1243,41 +1275,33 @@ final class ContentExtractionPipeline: Sendable {
                 sentences = 0
             }
         }
-        guard !cuts.isEmpty else { return [block] }
-        let bounds = [0] + cuts + [text.count]
-        return zip(bounds, bounds.dropFirst()).map { lower, upper in
-            let range = text.index(text.startIndex, offsetBy: lower)..<text.index(text.startIndex, offsetBy: upper)
-            let piece = String(text[range]).trimmingCharacters(in: .whitespaces)
-            var runs: [ReaderInlineRun]?
-            if let inline = block.inlineRuns {
-                var offset = 0
-                var sliced = [ReaderInlineRun]()
-                for run in inline {
-                    let runEnd = offset + run.text.count
-                    let from = max(lower, offset)
-                    let to = min(upper, runEnd)
-                    if from < to {
-                        var part = run
-                        let runText = run.text
-                        part.text = String(
-                            runText[
-                                runText.index(
-                                    runText.startIndex, offsetBy: from - offset)..<runText.index(
-                                        runText.startIndex, offsetBy: to - offset)])
-                        sliced.append(part)
-                    }
-                    offset = runEnd
-                }
-                if !sliced.isEmpty { sliced[0].text = String(sliced[0].text.drop(while: \.isWhitespace)) }
-                sliced.removeAll { $0.text.isEmpty }
-                while let last = sliced.last, last.text.last?.isWhitespace == true {
-                    sliced[sliced.count - 1].text.removeLast()
-                    if sliced[sliced.count - 1].text.isEmpty { sliced.removeLast() }
-                }
-                runs = sliced.map(\.text).joined() == piece ? sliced : nil
+        return cuts
+    }
+
+    /// The inline runs covering characters `lower..<upper`, with the piece's outer whitespace removed.
+    private static func slice(_ runs: [ReaderInlineRun], from lower: Int, to upper: Int) -> [ReaderInlineRun] {
+        var offset = 0
+        var sliced = [ReaderInlineRun]()
+        for run in runs {
+            let runEnd = offset + run.text.count
+            let from = max(lower, offset)
+            let to = min(upper, runEnd)
+            if from < to {
+                var part = run
+                let start = run.text.index(run.text.startIndex, offsetBy: from - offset)
+                let end = run.text.index(run.text.startIndex, offsetBy: to - offset)
+                part.text = String(run.text[start..<end])
+                sliced.append(part)
             }
-            return ReaderBlock(kind: .paragraph, text: piece, ordinal: block.ordinal, inlineRuns: runs)
+            offset = runEnd
         }
+        if !sliced.isEmpty { sliced[0].text = String(sliced[0].text.drop(while: \.isWhitespace)) }
+        sliced.removeAll { $0.text.isEmpty }
+        while let last = sliced.last, last.text.last?.isWhitespace == true {
+            sliced[sliced.count - 1].text.removeLast()
+            if sliced[sliced.count - 1].text.isEmpty { sliced.removeLast() }
+        }
+        return sliced
     }
 
     /// Structural URL validation only; actual loads still pass through SecureHTTPClient.
