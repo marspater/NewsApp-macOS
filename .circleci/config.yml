@@ -30,7 +30,10 @@ jobs:
       - run:
           name: "Record deployment start"
           command: |
-            circleci run release plan news-app --target-version="$CIRCLE_SHA1"
+            circleci run release plan news-app \
+              --environment-name="default" \
+              --component-name="NewsApp-macOS" \
+              --target-version="$CIRCLE_SHA1"
             circleci run release update news-app --status=running
       - run:
           name: "Build release artifact"
