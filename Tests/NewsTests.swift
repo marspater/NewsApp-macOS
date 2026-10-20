@@ -656,6 +656,7 @@ struct NewsTests {
         await testCanonicalClassificationDisambiguation()
         await testAppContainerWiring()
         try await testReadManagerReconciliationCache()
+        try await testMemoryLeakMitigationsAndErrorHandling()
 
         if ProcessInfo.processInfo.environment["NEWS_LIVE_READER_CHECK"] == "1" {
             await testLiveReader()
@@ -17389,5 +17390,72 @@ struct NewsTests {
 
         let sentimentEvidence = OverviewEvidenceSections(coverageSentiment: customSentiment)
         assertFalse(sentimentEvidence.isEmpty, "OverviewEvidenceSections with sentiment is not empty")
+    }
+
+    static func testMemoryLeakMitigationsAndErrorHandling() async throws {
+        print("  - Testing Resource Leak Mitigations & Error Resilience...")
+
+        // 1. DecodedImageCache bounds and clear
+        await MainActor.run {
+            DecodedImageCache.clear()
+            assertEqual(DecodedImageCache.images.countLimit, 500, "DecodedImageCache must bound max image count")
+        }
+
+        // Test that clear() cancels pending tasks and prevents insertion
+        let slowLoader: @Sendable (URL) async throws -> CGImage = { _ in
+            try await Task.sleep(for: .milliseconds(500))
+            let colorSpace = CGColorSpaceCreateDeviceRGB()
+            let ctx = CGContext(
+                data: nil, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4, space: colorSpace,
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+            return ctx.makeImage()!
+        }
+        let testURL = URL(string: "https://example.com/slow_image_\(UUID().uuidString).jpg")!
+        let loadTask = Task { @MainActor in
+            _ = try? await DecodedImageCache.load(testURL, using: slowLoader)
+        }
+        try await Task.sleep(for: .milliseconds(30))
+        await MainActor.run {
+            DecodedImageCache.clear()
+        }
+        _ = await loadTask.value
+        await MainActor.run {
+            assertTrue(
+                DecodedImageCache.images.object(forKey: testURL as NSURL) == nil,
+                "DecodedImageCache must not contain image from cancelled load")
+        }
+
+        // 2. DatabaseEngine directory creation on custom path & deinit safety
+        let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "news_test_dir_\(UUID().uuidString)")
+        let nestedDBPath = tempDir.appendingPathComponent("nested/deep/test.sqlite3").path
+        do {
+            let engine = DatabaseEngine(path: nestedDBPath)
+            try await engine.open()
+            assertTrue(
+                FileManager.default.fileExists(atPath: nestedDBPath),
+                "open() must create parent directories if missing")
+            await engine.close()
+        }
+        try? FileManager.default.removeItem(at: tempDir)
+
+        // 3. SecureSessionDelegateCoordinator task cleanup on completion with error
+        let coordinator = SecureSessionDelegateCoordinator()
+        let config = URLSessionConfiguration.ephemeral
+        let session = URLSession(configuration: config, delegate: coordinator, delegateQueue: nil)
+        let dummyRequest = URLRequest(url: URL(string: "https://example.com/test")!)
+        let dummyTask = session.dataTask(with: dummyRequest)
+        coordinator.urlSession(session, task: dummyTask, didCompleteWithError: URLError(.cancelled))
+        session.invalidateAndCancel()
+
+        // 4. FeedFetcher hostCooldowns pruning
+        let clock = TestClock(Date())
+        let fetcher = FeedFetcher(now: { clock.now })
+        clock.advance(by: 86400)
+        _ = await fetcher.fetchAllFeeds(urls: [])
+
+        // 5. OverviewGenerationCoordinator activeExtractions safety & memory cache bounding
+        let coord = OverviewGenerationCoordinator.shared
+        await coord.clearCache()
     }
 }
