@@ -16,7 +16,11 @@ public final class CacheManager: @unchecked Sendable {
         let appCacheDir = paths[0].appendingPathComponent(dirName)
 
         if !fileManager.fileExists(atPath: appCacheDir.path) {
-            try? fileManager.createDirectory(at: appCacheDir, withIntermediateDirectories: true)
+            do {
+                try fileManager.createDirectory(at: appCacheDir, withIntermediateDirectories: true)
+            } catch {
+                logger.error("Failed to create cache directory at \(appCacheDir.path): \(error.localizedDescription)")
+            }
         }
         return appCacheDir
     }

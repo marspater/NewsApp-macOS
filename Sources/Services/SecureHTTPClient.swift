@@ -183,7 +183,7 @@ actor SecureHTTPClient {
         // 4. Progressive Byte Streaming Download with Size Enforcement
         let session = try await protectedSession()
         let (asyncBytes, rawResponse) = try await session.bytes(for: request)
-        defer { if prefixOnly { asyncBytes.task.cancel() } }
+        defer { asyncBytes.task.cancel() }
 
         guard let httpResponse = rawResponse as? HTTPURLResponse else {
             throw FeedError.network("Invalid non-HTTP response received")
@@ -289,6 +289,12 @@ final class SecureSessionDelegateCoordinator: NSObject, URLSessionTaskDelegate, 
         case .blocked, .unresolvable:
             completionHandler(nil)
         }
+    }
+
+    func urlSession(_: URLSession, task: URLSessionTask, didCompleteWithError _: Error?) {
+        lock.lock()
+        states.removeValue(forKey: task.taskIdentifier)
+        lock.unlock()
     }
 
     func urlSession(_ _: URLSession, task: URLSessionTask, didFinishCollecting metrics: URLSessionTaskMetrics) {

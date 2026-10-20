@@ -8,7 +8,14 @@ import os
 actor DatabaseEngine {
     static let shared = DatabaseEngine()
     private let logger = Logger(subsystem: "com.marspater.news", category: "DatabaseEngine")
-    private var db: OpaquePointer?
+    private struct DBConnection: @unchecked Sendable {
+        var handle: OpaquePointer?
+    }
+    private var connection = DBConnection()
+    private var db: OpaquePointer? {
+        get { connection.handle }
+        set { connection.handle = newValue }
+    }
     private let dbPath: String
     private var inMemoryWorldTension: [WorldTensionReading] = []
     private var collectionOnlyFeedURLs: [String] = []
@@ -48,9 +55,15 @@ actor DatabaseEngine {
     }
 
     func close() {
-        if let db = db {
-            sqlite3_close(db)
-            self.db = nil
+        if let handle = connection.handle {
+            sqlite3_close_v2(handle)
+            connection.handle = nil
+        }
+    }
+
+    deinit {
+        if let handle = connection.handle {
+            sqlite3_close_v2(handle)
         }
     }
 
@@ -58,6 +71,11 @@ actor DatabaseEngine {
 
     func open() throws {
         guard db == nil else { return }
+
+        let parentDir = URL(fileURLWithPath: dbPath).deletingLastPathComponent()
+        if !FileManager.default.fileExists(atPath: parentDir.path) {
+            try FileManager.default.createDirectory(at: parentDir, withIntermediateDirectories: true)
+        }
 
         var handle: OpaquePointer?
         let flags = SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX
@@ -241,13 +259,13 @@ actor DatabaseEngine {
                         domain: "DatabaseEngine", code: -1,
                         userInfo: [NSLocalizedDescriptionKey: "Cannot inspect enrichment schema"])
                 }
+                defer { sqlite3_finalize(statement) }
                 var columns = Set<String>()
                 var status = sqlite3_step(statement)
                 while status == SQLITE_ROW {
                     if let name = sqlite3_column_text(statement, 1) { columns.insert(String(cString: name)) }
                     status = sqlite3_step(statement)
                 }
-                sqlite3_finalize(statement)
                 guard status == SQLITE_DONE else {
                     throw NSError(
                         domain: "DatabaseEngine", code: Int(status),
@@ -3383,10 +3401,25 @@ actor DatabaseEngine {
         // If an existing overview exists with older/same version, remove it first
         if let oldID = existingOverviewID {
             var delStmt: OpaquePointer?
-            if sqlite3_prepare_v2(db, "DELETE FROM event_overviews WHERE id = ?;", -1, &delStmt, nil) == SQLITE_OK {
-                sqlite3_bind_text(delStmt, 1, oldID, -1, Self.sqliteTransient)
-                _ = sqlite3_step(delStmt)
-                sqlite3_finalize(delStmt)
+            guard sqlite3_prepare_v2(db, "DELETE FROM event_overviews WHERE id = ?;", -1, &delStmt, nil) == SQLITE_OK
+            else {
+                throw NSError(
+                    domain: "DatabaseEngine", code: -1,
+                    userInfo: [
+                        NSLocalizedDescriptionKey:
+                            "Failed to prepare overview deletion: \(String(cString: sqlite3_errmsg(db)))"
+                    ])
+            }
+            defer { sqlite3_finalize(delStmt) }
+            sqlite3_bind_text(delStmt, 1, oldID, -1, Self.sqliteTransient)
+            let stepStatus = sqlite3_step(delStmt)
+            guard stepStatus == SQLITE_DONE else {
+                throw NSError(
+                    domain: "DatabaseEngine", code: Int(stepStatus),
+                    userInfo: [
+                        NSLocalizedDescriptionKey:
+                            "Failed to delete existing event overview: \(String(cString: sqlite3_errmsg(db)))"
+                    ])
             }
         }
 
