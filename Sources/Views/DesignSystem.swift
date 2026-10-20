@@ -85,6 +85,10 @@ enum AppLayout {
     static let tensionSheetWidth: CGFloat = 580
     static let tensionSheetHeight: CGFloat = 660
     static let tensionChartHeight: CGFloat = 160
+    static let tensionScaleHeight: CGFloat = 8
+    /// The centered rule between sections of a story in the reader.
+    static let readerSectionRuleWidth: CGFloat = 120
+    static let tensionScaleMarkerHeight: CGFloat = 16
     static let pageInset: CGFloat = 24.0
     static let sidebarInset: CGFloat = 12.0
     static let sectionGap: CGFloat = 24.0

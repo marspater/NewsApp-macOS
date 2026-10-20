@@ -48,6 +48,12 @@ final class ArticleStore: ObservableObject {
                     logger.error("Model generation check failed: \(error.localizedDescription)")
                 }
             }
+            // The first snapshot already leaves out World Tension panel feeds the reader has not subscribed to;
+            // FeedManager keeps this current afterwards.
+            if database === DatabaseEngine.shared {
+                let hidden = Set(TensionMethodology.v1.panel.map(\.url)).subtracting(AppSettings.shared.feedURLs)
+                await database.setCollectionOnlyFeedURLs(Array(hidden))
+            }
             self.isReady = await refreshState()
             if !isReady { operationError = "Stored articles could not be loaded. Please try again." }
         } catch {

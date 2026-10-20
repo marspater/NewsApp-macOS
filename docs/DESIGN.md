@@ -55,7 +55,7 @@ The single design language for News on macOS. It applies to every change that ad
 - Leave the scroll edge effect on `automatic`. Do not force `.soft` or `.hard` globally; macOS chooses hard where title text or controls without backgrounds sit over content.
 - Content that must stay pinned above a scroll view uses `safeAreaBar(edge:)` on macOS 26 and later (`safeAreaInset` on macOS 15), so the edge effect extends beneath it. One edge effect style per scroll view; never stack soft and hard.
 - Editorial content (the masthead) scrolls with the content; it is not pinned.
-- Hero imagery that sits next to the sidebar may extend beneath it with `backgroundExtensionEffect()` (macOS 26+), applied to the image only, with text and controls layered above it. The image must touch the leading and trailing edges of the column.
+- Hero imagery that sits next to the sidebar may extend beneath it with `backgroundExtensionEffect()` (macOS 26+), applied to the image only, with text and controls layered above it. The image must touch the leading and trailing edges of the column. Inset cards inside a scroll view (the lead story card) never use it: the effect bleeds the image into the toolbar while the inset leaves the toolbar edges uncovered.
 
 ## 4. Window structure and navigation
 

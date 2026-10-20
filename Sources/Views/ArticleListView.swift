@@ -89,8 +89,6 @@ struct ArticleListView: View {
     @State private var pendingHasMore = false
     @State private var queryError: String?
     @State private var expandedEvents: Set<String> = []
-    @State private var isScrolledAway = false
-    @State private var isPointerInList = false
     /// Set by the reader's own regrouping actions, which apply at once.
     @State private var appliesNextUpdate = false
     /// Reloads the list once a refresh the reader asked for has finished.
@@ -131,12 +129,13 @@ struct ArticleListView: View {
 
     private var entries: [FeedEntry] { buffer.displayed.entries(groupingMode) }
 
-    /// The reader is looking at the list or an article from it, so cards must not move underneath. A refresh the
-    /// reader started is the exception while the list is showing: they asked for the new stories.
+    /// Once stories are on screen they stay put: background collection, grouping and rating queue behind the
+    /// updates button instead of reshuffling the list. A refresh the reader started is the exception while the list
+    /// is showing: they asked for the new stories.
     private var isHoldingList: Bool {
         guard !appliesNextUpdate else { return false }
         if !articlePath.isEmpty { return true }
-        return !isReaderRefreshing && (isScrolledAway || isPointerInList || focusedArticleID != nil)
+        return !isReaderRefreshing
     }
 
     private var queuedUpdateCount: Int {
@@ -252,12 +251,6 @@ struct ArticleListView: View {
             }
             // An empty list keeps its masthead at the top and centers its state in the visible area.
             .overlay { emptyListOverlay }
-            .onScrollGeometryChange(for: Bool.self) { geometry in
-                geometry.contentOffset.y + geometry.contentInsets.top > 24
-            } action: { _, scrolled in
-                isScrolledAway = scrolled
-            }
-            .onHover { isPointerInList = $0 }
             .onChange(of: queuedUpdateCount, handleQueuedUpdatesChange)
             .focusable()
             .focused($listHasFocus)
@@ -386,7 +379,10 @@ struct ArticleListView: View {
         isLoadingPage = true
         defer { if queryRunID == runID { isLoadingPage = false } }
         do {
-            if !isPaging { try await Task.sleep(for: .milliseconds(180)) }
+            // Debounce bursts of store revisions, but show the first page of a section at once.
+            if !isPaging && !isNewQuery && !buffer.displayed.articles.isEmpty {
+                try await Task.sleep(for: .milliseconds(180))
+            }
             let muting = listMuting
             let fetched = try await fetchPage(
                 after: isPaging ? cursor : nil, muting: showsMuted ? MuteRules() : muting)

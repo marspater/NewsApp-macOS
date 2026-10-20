@@ -61,6 +61,8 @@ enum ArticleContentState: Equatable {
     case loading
     case ready
     case fallback(reason: String)
+    /// The publisher shows the story to subscribers only; the feed teaser is shown as a preview.
+    case subscriberOnly
 }
 
 struct ArticleDetailView: View {
@@ -372,6 +374,8 @@ struct ArticleDetailView: View {
                         .accessibilityHeading(.h1)
                         .textSelection(.enabled)
 
+                    standfirst
+
                     publisherUpdates
 
                     // On-device AI Analysis Section
@@ -397,6 +401,8 @@ struct ArticleDetailView: View {
                         articleContentParagraphs
                     case .fallback(let reason):
                         fallbackStateView(reason: reason)
+                    case .subscriberOnly:
+                        subscriberOnlyView
                     }
 
                     // Terminal Affordance: "Read original article on <source>"
@@ -542,6 +548,64 @@ struct ArticleDetailView: View {
         }
     }
 
+    /// The teaser reads as the story's lead, followed by a quiet note and the ways to read it with the reader's access.
+    private var subscriberOnlyView: some View {
+        VStack(alignment: .leading, spacing: AppSpacing.lg) {
+            articleDescriptionParagraphs
+            NoticeView {
+                VStack(alignment: .leading, spacing: AppSpacing.sm) {
+                    Label("Subscriber-only story", systemImage: "lock")
+                        .font(AppTypography.headline)
+                        .foregroundStyle(AppColor.primaryText)
+                    Text(
+                        "\(displaySource) shows the full story to subscribers. Sign in through the web view to read it."
+                    )
+                    .font(AppTypography.callout)
+                    .foregroundStyle(AppColor.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+                    HStack(spacing: AppSpacing.sm) {
+                        Button {
+                            viewMode = .web
+                        } label: {
+                            Label("Open Web View", systemImage: "globe")
+                        }
+                        .help("Open web view (W)")
+                        Button {
+                            openInBrowser()
+                        } label: {
+                            Label("Open in Browser", systemImage: "safari")
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .font(AppTypography.caption)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+    }
+
+    /// The feed's standfirst under the headline, unless the story's opening paragraph already says it.
+    @ViewBuilder
+    private var standfirst: some View {
+        let dek = ArticleContentRedactor.cleanText(currentArticle.description)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let opening =
+            currentArticle.readerDocument?.blocks.first { $0.kind == .paragraph }?.text
+            ?? displayParagraphs.first ?? ""
+        let key = { (text: String) in String(EventFeedSummary.titleKey(text).prefix(60)) }
+        if contentState == .ready, (20...400).contains(dek.count), !key(opening).hasPrefix(key(dek)),
+            !key(dek).hasPrefix(key(opening))
+        {
+            Text(dek)
+                .font(AppTypography.leadFont(for: themeManager.articleTheme, scale: readerTextScale))
+                .foregroundStyle(AppColor.secondaryText)
+                .lineSpacing(AppTypography.bodyLineSpacing(for: themeManager.articleTheme) * readerTextScale)
+                .fixedSize(horizontal: false, vertical: true)
+                .textSelection(.enabled)
+        }
+    }
+
     @ViewBuilder
     private var articleDescriptionParagraphs: some View {
         let paragraphs = displayParagraphs
@@ -569,7 +633,7 @@ struct ArticleDetailView: View {
                 block.kind == .figure
                     ? ReaderImageCandidate.usable(
                         url: block.imageURL ?? "", width: block.imageWidth, height: block.imageHeight)
-                    : !ArticleContentRedactor.isBoilerplateLine(block.text)
+                    : block.kind == .divider || !ArticleContentRedactor.isBoilerplateLine(block.text)
             }
         // The page's own headline repeats the title above it.
         func normalizedHeadline(_ text: String) -> String {
@@ -582,7 +646,7 @@ struct ArticleDetailView: View {
             return EventFeedSummary.titleKey(s)
         }
         let articleKey = normalizedHeadline(currentArticle.title)
-        if let first = blocks.firstIndex(where: { $0.kind != .figure }) {
+        if let first = blocks.firstIndex(where: { $0.kind != .figure && $0.kind != .divider }) {
             let blockKey = normalizedHeadline(blocks[first].text)
             if blockKey == articleKey || (!articleKey.isEmpty && blockKey.hasPrefix(articleKey))
                 || (!blockKey.isEmpty && articleKey.hasPrefix(blockKey))
@@ -627,7 +691,7 @@ struct ArticleDetailView: View {
                         weight: block.kind == .heading ? .bold : .semibold)
                 )
                 .foregroundStyle(AppColor.primaryText)
-                .padding(.top, AppSpacing.md)
+                .padding(.top, AppSpacing.lg)
                 .accessibilityAddTraits(.isHeader)
                 .accessibilityHeading(block.kind == .heading ? .h2 : .h3)
                 .textSelection(.enabled)
@@ -643,7 +707,16 @@ struct ArticleDetailView: View {
                     .textSelection(.enabled)
             }
             .fixedSize(horizontal: false, vertical: true)
-            .padding(.leading, AppSpacing.xs)
+            .padding(AppSpacing.md)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(AppColor.surface, in: RoundedRectangle(cornerRadius: AppRadius.control))
+        case .divider:
+            Divider()
+                .opacity(Self.dividerOpacity(for: contrast))
+                .frame(maxWidth: AppLayout.readerSectionRuleWidth)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, AppSpacing.sm)
+                .accessibilityHidden(true)
         case .listItem:
             HStack(alignment: .firstTextBaseline, spacing: AppSpacing.sm) {
                 Text(block.ordinal.map { "\($0)." } ?? "•")
@@ -1260,6 +1333,8 @@ struct ArticleDetailView: View {
                 updated.imageUrl = document?.selectedImage(fallback: imageUrl) ?? (document == nil ? imageUrl : nil)
                 self.activeArticle = updated
                 self.contentState = .ready
+            case .subscriberOnly:
+                self.contentState = .subscriberOnly
             case .qualityValidationFailed(let reason):
                 self.contentState = .fallback(reason: "Story quality check not met: \(reason)")
             case .httpError(let status):

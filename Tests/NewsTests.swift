@@ -201,6 +201,7 @@ extension ExtractionOutcome {
         case .emptyContent: "emptyContent"
         case .contentParsingFailed: "contentParsingFailed"
         case .qualityValidationFailed: "qualityRejected"
+        case .subscriberOnly: "subscriberOnly"
         }
     }
 }
@@ -3456,7 +3457,7 @@ struct NewsTests {
     }
 
     static func testWorldTension() async throws {
-        print("  - Testing World Tension v2: reasoning, citations, policy, support rejection and separate history...")
+        print("  - Testing World Tension v2: reasoning, grounding, soft-news filter, estimate and separate history...")
         let answer = WorldTensionAssessment(
             score: 28,
             summary:
@@ -3491,6 +3492,74 @@ struct NewsTests {
             WorldTensionAssessment.parse(
                 encoded, headlines: [WorldTensionHeadline(id: "P1", title: "Old talks", publisher: "Panel")]), nil,
             "Past headlines alone cannot create a current assessment")
+        let structured = """
+            Here is my assessment.
+            - Novelty: \(answer.reasons[0].explanation)
+            Scope of Impact: \(answer.reasons[0].explanation)
+            Proximity to worst case: \(answer.reasons[0].explanation)
+            Reversibility: \(answer.reasons[0].explanation)
+            Lead: Peace talks resume between the parties.
+            Summary: \(answer.summary)
+            Drivers: C1, C1, C9
+            Score: 28/100
+            """
+        let parsed = WorldTensionAssessment.parse(structured, headlines: headlines)
+        assertEqual(parsed?.lead, "Peace talks resume between the parties.", "Lead sentences parse in any line order")
+        assertEqual(parsed?.drivers, ["C1"], "Drivers keep known current IDs once")
+        assertEqual(parsed?.score, 28, "Score lines tolerate a scale suffix")
+        assertEqual(
+            WorldTensionAssessment.parse(
+                structured.replacingOccurrences(of: "Score: 28/100", with: ""), headlines: headlines),
+            nil, "A report without a score is rejected")
+        assertTrue(answer.isGrounded(in: headlines), "Abstract reasoning over the headlines is grounded")
+        let invented = WorldTensionAssessment(
+            score: 90,
+            summary: "A strike on Paris killed 5000 people. These headlines describe a new global crisis.",
+            reasons: answer.reasons)
+        assertFalse(invented.isGrounded(in: headlines), "Invented figures are not grounded")
+        let named = WorldTensionAssessment(
+            score: 40, summary: "Talks between Kyiv and Moscow resume. Paris and Berlin back them.",
+            reasons: answer.reasons)
+        assertFalse(named.isGrounded(in: headlines), "Several invented places are not grounded")
+        let demonym = WorldTensionAssessment(
+            score: 40, summary: "Iranian officials resume talks. The outcome remains uncertain for now.",
+            reasons: answer.reasons)
+        assertTrue(
+            demonym.isGrounded(in: [WorldTensionHeadline(id: "C1", title: "Iran resumes talks", publisher: "Panel")]),
+            "Demonyms of headline places are grounded")
+        assertTrue(WorldTensionService.isSoftNews("Royals ride the subway and do the dishes"), "Royal gossip is soft")
+        assertTrue(WorldTensionService.isSoftNews("Premier League title race tightens"), "Sport is soft")
+        assertFalse(WorldTensionService.isSoftNews("Missile strikes hit port as talks stall"), "Conflict is hard news")
+        let estimateInput = [
+            WorldTensionHeadline(id: "C1", title: "Airstrikes intensify along the front line", publisher: "Panel"),
+            WorldTensionHeadline(id: "C2", title: "Central bank holds rates", publisher: "Panel"),
+            WorldTensionHeadline(id: "C3", title: "Floods displace villagers", publisher: "Panel"),
+        ]
+        let estimate = WorldTensionAssessment.estimate(current: estimateInput)
+        assertEqual(estimate?.isEstimate, true, "Keyword estimates are labelled")
+        assertEqual(estimate?.drivers, ["C1", "C3"], "Estimate drivers rank conflict above disaster")
+        assertTrue(
+            estimate?.isValid(headlines: estimateInput) == true, "Keyword estimates satisfy the reading contract")
+        assertTrue((estimate?.score ?? 0) > 20, "Conflict cues raise the estimate above the floor")
+        let driverHeadlines = [
+            WorldTensionHeadline(id: "C1", title: "Peace talks resume", publisher: "Panel"),
+            WorldTensionHeadline(id: "C2", title: "Airstrikes hit the port", publisher: "Panel"),
+        ]
+        var mislabelled = answer
+        mislabelled.drivers = ["C2"]
+        assertEqual(
+            WorldTensionReading(
+                evaluatedAt: Date(timeIntervalSince1970: 0), inputHash: "", modelGeneration: "",
+                headlines: driverHeadlines, assessment: mislabelled
+            ).drivingHeadlines.map(\.id), ["C2"],
+            "A driver the prose never mentions falls back to cue ranking")
+        var labelled = answer
+        labelled.drivers = ["C1"]
+        assertEqual(
+            WorldTensionReading(
+                evaluatedAt: Date(timeIntervalSince1970: 0), inputHash: "", modelGeneration: "",
+                headlines: driverHeadlines, assessment: labelled
+            ).drivingHeadlines.map(\.id), ["C1"], "A driver the explanation discusses is shown")
         let missing = WorldTensionAssessment(
             score: 28, summary: answer.summary, reasons: Array(answer.reasons.dropLast()))
         assertFalse(missing.isValid(headlines: headlines), "Every assessment must reason about all four factors")
@@ -3537,10 +3606,21 @@ struct NewsTests {
             title: "Unrelated previous incident must not establish novelty", link: "https://example.com/world/old",
             guid: "world-old", description: "", pubDate: now.addingTimeInterval(-2 * 86400), source: "Panel")
         try await database.upsertArticles([unrelated], feedUrl: TensionMethodology.v1.panel[0].url)
+        let soft = FeedArticle(
+            title: "Royals ride the subway and do the dishes", link: "https://example.com/world/royals",
+            guid: "world-royals", description: "", pubDate: now.addingTimeInterval(-60), source: "Panel")
+        try await database.upsertArticles([soft], feedUrl: TensionMethodology.v1.panel[1].url)
+        let unavailableDay = try await WorldTensionService(model: .unavailable).assess(
+            database: database, now: now, aiEnabled: true, collectionEnabled: true)
+        assertEqual(unavailableDay.last?.assessment.isEstimate, true, "An unavailable model shows a keyword estimate")
+        assertEqual(try await database.worldTensionHistory(), [], "Keyword estimates are never saved")
+        assertFalse(
+            unavailableDay.last?.headlines.contains { $0.title == soft.title } ?? true,
+            "Soft news is left out of the panel headlines")
         let model = NewsTextModel { prompt, _ in
             assertFalse(
                 prompt.contains(unrelated.title), "Unrelated prior events are excluded from the novelty baseline")
-            return prompt.contains("Reply YES only") ? "YES" : encoded
+            return encoded
         }
         let service = WorldTensionService(model: model)
         let history = try await service.assess(database: database, now: now, aiEnabled: true, collectionEnabled: true)
@@ -3567,16 +3647,13 @@ struct NewsTests {
         }
         let retryDraft = RetryDraft()
         let retrying = WorldTensionService(
-            model: NewsTextModel { prompt, _ in
-                if prompt.contains("Reply YES only") { return "YES" }
-                return await retryDraft.draft(encoded)
-            })
+            model: NewsTextModel { _, _ in await retryDraft.draft(encoded) })
         let retried = try await retrying.assess(
             database: database, now: now, aiEnabled: true, collectionEnabled: true, force: true)
         assertEqual(retried.last?.assessment, answer, "One conservative retry can recover a malformed model draft")
         assertEqual(await retryDraft.attempts, 2, "Assessment retries are bounded to one additional draft")
-        let rejecting = WorldTensionService(
-            model: NewsTextModel { prompt, _ in prompt.contains("Reply YES only") ? "NO" : encoded })
+        let ungrounded = String(decoding: try JSONEncoder().encode(invented), as: UTF8.self)
+        let rejecting = WorldTensionService(model: NewsTextModel { _, _ in ungrounded })
         do {
             _ = try await rejecting.assess(
                 database: database, now: now, aiEnabled: true, collectionEnabled: true, force: true)
@@ -3587,8 +3664,7 @@ struct NewsTests {
             "A rejected reassessment preserves the previous supported reading")
         let gate = OpenGate()
         let cancellable = WorldTensionService(
-            model: NewsTextModel { prompt, _ in
-                if prompt.contains("Reply YES only") { return "YES" }
+            model: NewsTextModel { _, _ in
                 await gate.wait()
                 return encoded
             })
@@ -3625,7 +3701,7 @@ struct NewsTests {
             try await reopened.tensionCorpus(
                 day: DateInterval(start: now.addingTimeInterval(-86400), end: now),
                 feedURLs: TensionMethodology.v1.panel.map(\.url)
-            ).count, 12, "Clearing AI data preserves source articles")
+            ).count, 13, "Clearing AI data preserves source articles, including the filtered soft story")
         await reopened.close()
     }
 

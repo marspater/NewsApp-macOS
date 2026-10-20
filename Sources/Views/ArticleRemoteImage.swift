@@ -33,6 +33,12 @@ extension EnvironmentValues {
     }()
     private static var pending: [URL: Task<CGImage, Error>] = [:]
 
+    /// Width over height of a decoded image, so layouts can frame square and portrait photos differently.
+    static func aspectRatio(for url: URL) -> CGFloat? {
+        guard let image = images.object(forKey: url as NSURL), image.height > 0 else { return nil }
+        return CGFloat(image.width) / CGFloat(image.height)
+    }
+
     static func load(_ url: URL, using loader: @escaping @Sendable (URL) async throws -> CGImage) async throws
         -> CGImage
     {

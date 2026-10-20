@@ -23,6 +23,8 @@ public enum ExtractionOutcome: Equatable, Sendable {
     case emptyContent
     case contentParsingFailed(reason: String)
     case qualityValidationFailed(reason: String)
+    /// The publisher shows subscribers only a barrier; the feed teaser is all the reader can show.
+    case subscriberOnly
 
     public var isSuccess: Bool {
         if case .success = self { return true }
@@ -60,6 +62,8 @@ public enum ExtractionOutcome: Equatable, Sendable {
             return reason
         case .qualityValidationFailed(let reason):
             return reason
+        case .subscriberOnly:
+            return "The publisher requires a subscription"
         }
     }
 }
@@ -266,7 +270,7 @@ final class DOMElementNode: Sendable {
     func readingBlocks(allowDivFallback: Bool = true) -> [DOMElementNode] {
         guard !isReaderExcluded else { return [] }
         if tag == "noscript" { return children.flatMap { $0.readingBlocks(allowDivFallback: false) } }
-        if tag == "figure" || tag == "img" || tag == "picture" { return [self] }
+        if tag == "figure" || tag == "img" || tag == "picture" || tag == "hr" { return [self] }
         if ["div", "p"].contains(tag), children.contains(where: { $0.tag == "br" }) {
             var groups = [[DOMElementNode]]([[]])
             for child in children {
@@ -352,6 +356,7 @@ final class DOMElementNode: Sendable {
 
     var readerBlock: ReaderBlock? {
         guard !isReaderExcluded else { return nil }
+        if tag == "hr" { return ReaderBlock(kind: .divider, text: "") }
         if ["figure", "img", "picture"].contains(tag) {
             guard let image = visibleReaderImage(),
                 let source = image.readerImageSource,
@@ -747,6 +752,7 @@ final class ContentExtractionPipeline: Sendable {
         do {
             let (data, response) = try await client.fetchArticleHTML(from: url, allowHTTP: allowHTTP)
 
+            if response.statusCode == 401 || response.statusCode == 402 { return (.subscriberOnly, nil) }
             if response.statusCode >= 400 {
                 logger.warning("[Extraction] Host: \(host, privacy: .public) | HTTP Error: \(response.statusCode)")
                 return (.httpError(status: response.statusCode), nil)
@@ -898,6 +904,11 @@ final class ContentExtractionPipeline: Sendable {
             return .contentParsingFailed(reason: "Article exceeds extraction limit")
         }
         let soup = try? SwiftSoup.parse(html)
+        // Structured data and barrier markers are read before scripts and furniture are removed.
+        let structured = soup.map { Self.structuredArticle(in: $0) } ?? StructuredArticle()
+        let hasBarrier =
+            structured.isAccessibleForFree == false
+            || ((try? soup?.select(Self.barrierSelector).isEmpty()) == false)
         if let soup {
             _ = try? soup.select(
                 "script, style, noscript, iframe, svg, canvas, form, button, input, select, textarea, dialog, template, "
@@ -951,11 +962,23 @@ final class ContentExtractionPipeline: Sendable {
             }
         }
 
+        // A thin or failed DOM body falls back to the publisher's own schema.org articleBody.
+        let domProse = candidateParagraphs.filter { [.paragraph, .quote, .listItem].contains($0.kind) }.map(\.text)
+        if ContentQualityValidator.validate(paragraphs: domProse) != .valid || domProse.joined().count < 600,
+            let body = structured.articleBody
+        {
+            let blocks = Self.paragraphs(fromPlainText: body).map { ReaderBlock(kind: .paragraph, text: $0) }
+            if ContentQualityValidator.validate(paragraphs: blocks.map(\.text)) == .valid,
+                blocks.map(\.text).joined().count > domProse.joined().count
+            {
+                candidateParagraphs = blocks
+            }
+        }
+
         if candidateParagraphs.contains(where: {
             $0.text.localizedCaseInsensitiveContains("Subscribe to unlock this article")
         }) {
-            return .qualityValidationFailed(
-                reason: "The publisher requires a subscription. Open the original story to read with your access.")
+            return .subscriberOnly
         }
 
         // Keep media in publisher order, without allowing images to qualify an empty article.
@@ -981,8 +1004,10 @@ final class ContentExtractionPipeline: Sendable {
                     run.link = Self.readerImageURL(run.link, baseURL: baseUrl)
                     if !text.isEmpty { normalized.append(run) }
                 }
-                if !normalized.isEmpty {
-                    normalized[normalized.count - 1].text = normalized.last!.text.trimmingCharacters(in: .whitespaces)
+                // Only trailing space: the last run's leading space separates it from the run before.
+                while let last = normalized.last, last.text.last?.isWhitespace == true {
+                    normalized[normalized.count - 1].text.removeLast()
+                    if normalized[normalized.count - 1].text.isEmpty { normalized.removeLast() }
                 }
                 // Invalid/legacy structure falls back to plain text, never changes its words.
                 block.inlineRuns = normalized.map(\.text).joined() == block.text ? normalized : nil
@@ -1023,9 +1048,15 @@ final class ContentExtractionPipeline: Sendable {
             }
             validation = ContentQualityValidator.validate(paragraphs: candidateParagraphs.filter(isText).map(\.text))
         }
+        let bodyLength = candidateParagraphs.filter(isText).map(\.text.count).reduce(0, +)
+        if hasBarrier && (validation != .valid || (structured.isAccessibleForFree == false && bodyLength < 600)) {
+            return .subscriberOnly
+        }
+        candidateParagraphs = Self.tidiedDividers(candidateParagraphs).flatMap(Self.splitLongParagraph)
         switch validation {
         case .valid:
-            let joined = candidateParagraphs.filter { $0.kind != .figure }.map(\.text).joined(separator: "\n\n")
+            let joined = candidateParagraphs.filter { ![.figure, .divider].contains($0.kind) }.map(\.text)
+                .joined(separator: "\n\n")
             var images = candidateParagraphs.filter { $0.kind == .figure }.compactMap {
                 block -> ReaderImageCandidate? in
                 guard let url = block.imageURL else { return nil }
@@ -1060,6 +1091,129 @@ final class ContentExtractionPipeline: Sendable {
                     isComplete: isComplete))
         case .rejected(let reason):
             return .qualityValidationFailed(reason: reason)
+        }
+    }
+
+    struct StructuredArticle {
+        var articleBody: String?
+        var isAccessibleForFree: Bool?
+    }
+
+    /// Elements publishers use for subscription barriers (FT's barrier grid, Piano, generic paywall wrappers).
+    private static let barrierSelector =
+        "[class*=paywall], [id*=paywall], [class*=barrier], [id*=barrier], [data-component*=barrier], "
+        + "[class*=subscribe-wall], [class*=subscription-wall], [class*=regwall], [id*=regwall], .tp-modal"
+
+    /// The longest schema.org articleBody and any isAccessibleForFree=false flag in the page's JSON-LD.
+    static func structuredArticle(in document: SwiftSoup.Document) -> StructuredArticle {
+        var result = StructuredArticle()
+        func visit(_ value: Any, depth: Int) {
+            guard depth < 8 else { return }
+            if let array = value as? [Any] {
+                for item in array.prefix(64) { visit(item, depth: depth + 1) }
+                return
+            }
+            guard let object = value as? [String: Any] else { return }
+            if let body = object["articleBody"] as? String,
+                body.count > (result.articleBody?.count ?? 0), body.utf8.count <= 512 * 1024
+            {
+                result.articleBody = body
+            }
+            let free = object["isAccessibleForFree"]
+            if (free as? Bool) == false || (free as? String)?.lowercased() == "false" {
+                result.isAccessibleForFree = false
+            }
+            for key in ["@graph", "hasPart", "mainEntity", "mainEntityOfPage"] {
+                if let nested = object[key] { visit(nested, depth: depth + 1) }
+            }
+        }
+        for script in ((try? document.select("script[type=application/ld+json]").array()) ?? []).prefix(16) {
+            let data = Data(script.data().utf8)
+            guard data.count <= 1024 * 1024, let json = try? JSONSerialization.jsonObject(with: data) else { continue }
+            visit(json, depth: 0)
+        }
+        return result
+    }
+
+    /// Paragraphs from plain text: publisher line breaks when present, otherwise groups of sentences.
+    static func paragraphs(fromPlainText text: String) -> [String] {
+        let decoded = ContentExtractionPipeline.shared.decodeHTMLEntities(text)
+        let lines = decoded.components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespaces) }.filter { $0.count >= 25 }
+        if lines.count >= 2 { return lines }
+        let single = decoded.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespaces)
+        return splitLongParagraph(ReaderBlock(kind: .paragraph, text: single)).map(\.text)
+    }
+
+    /// Section dividers only between content: never first, last or repeated.
+    static func tidiedDividers(_ blocks: [ReaderBlock]) -> [ReaderBlock] {
+        var result = [ReaderBlock]()
+        for block in blocks {
+            if block.kind == .divider && (result.isEmpty || result.last?.kind == .divider) { continue }
+            result.append(block)
+        }
+        if result.last?.kind == .divider { result.removeLast() }
+        return result
+    }
+
+    /// Splits a wall-of-text paragraph (over 650 characters, four or more sentences) at sentence boundaries into
+    /// paragraphs of roughly 300 or more characters. Inline formatting is split with the text; if the runs no longer
+    /// match the words they are dropped and the plain text is kept.
+    static func splitLongParagraph(_ block: ReaderBlock) -> [ReaderBlock] {
+        let text = block.text
+        guard block.kind == .paragraph, text.count > 650 else { return [block] }
+        var ends = [Int]()
+        text.enumerateSubstrings(in: text.startIndex..., options: [.bySentences, .substringNotRequired]) {
+            _, _, enclosing, _ in
+            ends.append(text.distance(from: text.startIndex, to: enclosing.upperBound))
+        }
+        guard ends.count >= 4 else { return [block] }
+        var cuts = [Int]()
+        var start = 0
+        var sentences = 0
+        for end in ends.dropLast() {
+            sentences += 1
+            if end - start >= 300 && sentences >= 2 && text.count - end >= 120 {
+                cuts.append(end)
+                start = end
+                sentences = 0
+            }
+        }
+        guard !cuts.isEmpty else { return [block] }
+        let bounds = [0] + cuts + [text.count]
+        return zip(bounds, bounds.dropFirst()).map { lower, upper in
+            let range = text.index(text.startIndex, offsetBy: lower)..<text.index(text.startIndex, offsetBy: upper)
+            let piece = String(text[range]).trimmingCharacters(in: .whitespaces)
+            var runs: [ReaderInlineRun]?
+            if let inline = block.inlineRuns {
+                var offset = 0
+                var sliced = [ReaderInlineRun]()
+                for run in inline {
+                    let runEnd = offset + run.text.count
+                    let from = max(lower, offset)
+                    let to = min(upper, runEnd)
+                    if from < to {
+                        var part = run
+                        let runText = run.text
+                        part.text = String(
+                            runText[
+                                runText.index(
+                                    runText.startIndex, offsetBy: from - offset)..<runText.index(
+                                        runText.startIndex, offsetBy: to - offset)])
+                        sliced.append(part)
+                    }
+                    offset = runEnd
+                }
+                if !sliced.isEmpty { sliced[0].text = String(sliced[0].text.drop(while: \.isWhitespace)) }
+                sliced.removeAll { $0.text.isEmpty }
+                while let last = sliced.last, last.text.last?.isWhitespace == true {
+                    sliced[sliced.count - 1].text.removeLast()
+                    if sliced[sliced.count - 1].text.isEmpty { sliced.removeLast() }
+                }
+                runs = sliced.map(\.text).joined() == piece ? sliced : nil
+            }
+            return ReaderBlock(kind: .paragraph, text: piece, ordinal: block.ordinal, inlineRuns: runs)
         }
     }
 

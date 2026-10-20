@@ -93,7 +93,7 @@ struct ArticleCardView: View {
             let url = FeedArticle.bestCardImage(in: [article] + imageFallbacks)
         {
             ArticleRemoteImage(url: url) { phase in
-                leadImage(for: phase)
+                leadImage(for: phase, aspectRatio: DecodedImageCache.aspectRatio(for: url))
             }
         } else {
             regularSurface()
@@ -102,10 +102,10 @@ struct ArticleCardView: View {
 
     @available(macOS 26.0, *)
     @ViewBuilder
-    private func leadImage(for phase: AsyncImagePhase) -> some View {
+    private func leadImage(for phase: AsyncImagePhase, aspectRatio: CGFloat?) -> some View {
         switch phase {
         case .success(let image):
-            leadSurface(image: image)
+            leadSurface(image: image, aspectRatio: aspectRatio)
         case .empty:
             leadSurface(image: nil)
         case .failure:
@@ -237,6 +237,9 @@ struct ArticleCardView: View {
         }
     }
 
+    /// Below this width-to-height ratio a lead image is framed whole rather than cropped to fill.
+    static let wideLeadImageRatio: CGFloat = 1.25
+
     /// Match the normal list or grid card geometry when an image cannot decode.
     private var failedLeadSurface: some View {
         regularSurface(editorialFallbackOnly: true)
@@ -244,22 +247,31 @@ struct ArticleCardView: View {
             .frame(height: AppLayout.leadStoryHeight, alignment: .top)
     }
 
-    /// Only the publisher image extends into adjacent safe areas. The image is
-    /// clipped to the detail-column frame before the macOS 26 background effect;
-    /// content, caption, and controls are separate foreground layers.
+    /// Wide images fill the frame anchored to the top, where subjects usually sit above the caption scrim.
+    /// Square and portrait images are shown whole over a blurred copy of themselves, so faces are never cropped.
+    /// The image stays clipped to the card; the caption and controls are separate foreground layers.
     @available(macOS 26.0, *)
-    private func leadSurface(image: Image?) -> some View {
+    private func leadSurface(image: Image?, aspectRatio: CGFloat? = nil) -> some View {
         ZStack(alignment: .bottomLeading) {
             if let image {
                 Color.clear
                     .frame(maxWidth: .infinity)
                     .frame(height: AppLayout.leadStoryHeight)
-                    .overlay {
-                        image.resizable().aspectRatio(contentMode: .fill)
+                    .overlay(alignment: .top) {
+                        if let aspectRatio, aspectRatio < Self.wideLeadImageRatio {
+                            ZStack(alignment: .top) {
+                                image.resizable().aspectRatio(contentMode: .fill)
+                                    .blur(radius: 40)
+                                    .overlay(AppColor.leadPlaceholder.opacity(0.45))
+                                image.resizable().aspectRatio(contentMode: .fit)
+                            }
+                        } else {
+                            image.resizable().aspectRatio(contentMode: .fill)
+                                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                        }
                     }
                     .clipped()
                     .clipShape(RoundedRectangle(cornerRadius: AppRadius.container))
-                    .backgroundExtensionEffect()
                     .accessibilityHidden(true)
             } else {
                 // Keep the loading surface dark so the image caption stays readable.
