@@ -222,6 +222,7 @@ macOS has no Dynamic Type. Chrome uses system text styles so it matches system c
 - Reader paragraphs of one story may be linked with `accessibilityLinkedGroup(id:in:)` for continuous reading.
 - State never relies on color alone: unread has a dot and a label, saved has a glyph, modes have text.
 - Increase Contrast uses the contrast tokens (stronger dividers, borders, fills); Reduce Transparency applies only to the macOS 15 material fallback.
+- Never set `accessibilityLabel` directly on an AppKit-backed view (`ProgressView`, `.textSelection(.enabled)` text) or combine one into a labelled element: label resolution loops between SwiftUI and AppKit until the app crashes under VoiceOver or automation. Hide the view (`.accessibilityHidden(true)`) and label a plain container (`.accessibilityElement(children: .ignore)`); `script/design_lint.sh` rejects labelled `ProgressView`s.
 - Live spoken VoiceOver verification is parked (#268); code-level accessibility above is not.
 
 ## 17. Copy

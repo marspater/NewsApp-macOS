@@ -21,6 +21,7 @@ RULES=(
     "direct-glass|glassEffect|GlassEffectContainer"
     "scroll-edge-style|scrollEdgeEffectStyle"
     "uppercased|\.uppercased\(\)"
+    "platform-label|ProgressView\([^)]*\)\.accessibilityLabel"
     "material|\.(ultraThin|thin|regular|thick|ultraThick)Material"
 )
 ALLOWED_COLORS='Color\.(clear|primary|secondary|accentColor)$'
@@ -49,8 +50,8 @@ find Sources/Views -name '*.swift' ! -name DesignSystem.swift ! -name GlassSyste
 done | sort > "$current"
 
 # Phase 4 (#354): a permanent zero-deviation gate for content styles.
-if grep -E '^(literal-font-size|literal-color|uppercased) ' "$current"; then
-    echo "Design lint: literal fonts, colors and uppercasing must be zero (#354)." >&2
+if grep -E '^(literal-font-size|literal-color|uppercased|platform-label) ' "$current"; then
+    echo "Design lint: literal fonts, colors, uppercasing and labels on AppKit-backed views must be zero (#354)." >&2
     exit 1
 fi
 

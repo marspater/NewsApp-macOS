@@ -2,6 +2,8 @@
 
 ## Unreleased — 20 October 2026
 
+- Fix a crash when VoiceOver or another accessibility client read a story whose lead image had a credit or was still loading (for example while opening an "Earlier in This Story" link): labels set directly on selectable text and spinners made label resolution loop until the stack overflowed. The design lint now rejects labelled spinners.
+
 - Event overviews show "Earlier in This Story": up to three earlier events of the same developing story, each opening its own overview (#314). People and organizations named across more than 5% (and at least ten) of the week's events no longer tie events together; reviewed wrong links fell from 7 of 36 to 1 of 45.
 
 - Briefing is a daily edition, after Kagi News: selected once a day at a chosen hour (Settings → Reading, default 7:00), shared by every window and kept across relaunch until the next edition; New Edition selects one early.
