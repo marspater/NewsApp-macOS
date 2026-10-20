@@ -282,9 +282,12 @@ struct ArticleDetailView: View {
                             // The same sequence as moving to the next story; the earlier event opens on its overview.
                             resetReaderState()
                             currentOverview = nil
+                            eventMemberArticles = []
                             overviewRequestedArticleID = article.id
                             activeArticle = article
                             readManager.markAsRead(article.id)
+                            // Opening an event from here counts as seeing it, as it does from the feed.
+                            await articleStore.markEventSeen(related.eventID)
                         }
                     }
                 )
