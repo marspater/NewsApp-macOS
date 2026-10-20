@@ -266,8 +266,8 @@ struct ArticleCardView: View {
                         if Self.framesLeadImageWhole(aspectRatio: aspectRatio) {
                             ZStack(alignment: .top) {
                                 image.resizable().aspectRatio(contentMode: .fill)
-                                    .blur(radius: 40)
-                                    .overlay(AppColor.leadPlaceholder.opacity(0.45))
+                                    .blur(radius: AppLayout.leadBackdropBlur)
+                                    .overlay(AppColor.leadBackdropDim)
                                 image.resizable().aspectRatio(contentMode: .fit)
                             }
                         } else {

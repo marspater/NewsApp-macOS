@@ -68,6 +68,8 @@ enum AppColor {
     // Image-caption contrast remains independent of Liquid Glass transparency.
     static let leadPlaceholder = Color(NSColor.darkGray)
     static let leadScrim = Color.black.opacity(0.84)
+    /// Dims the blurred copy behind a square or portrait lead image so the photo itself stands out.
+    static let leadBackdropDim = leadPlaceholder.opacity(0.45)
     static let leadText = Color.white
     static let leadSecondaryText = Color.white.opacity(0.85)
 }
@@ -100,6 +102,8 @@ enum AppLayout {
     }
     static let listMaxWidth: CGFloat = 1000.0
     static let leadStoryHeight: CGFloat = 360.0
+    /// Blur of the backdrop behind a square or portrait lead image.
+    static let leadBackdropBlur: CGFloat = 40
     static let gridColumnMinimum: CGFloat = 300.0
     static let gridColumnMaximum: CGFloat = 420.0
     // Control and toolbar heights belong to the system (DESIGN.md 12).
