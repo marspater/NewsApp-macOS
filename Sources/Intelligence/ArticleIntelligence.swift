@@ -83,18 +83,33 @@ public enum NewsCategory: String, CaseIterable, Sendable, Codable {
         return nil
     }
 
-    private static let synonymKeywordGroups: [(category: NewsCategory, keywords: [String], token: String?)] = [
-        (.technology, ["tech", "software", "hardware", "artificial intelligence", "cyber", "chip"], "ai"),
-        (.business, ["econ", "biz", "market"], nil),
-        (.sports, ["sport", "football", "basketball", "soccer", "league"], nil),
-        (.entertainment, ["entertain", "movie", "film", "music", "celebrity", "cinema"], nil),
-        (.health, ["wellness", "fitness", "nutrition"], nil),
-        (.travel, ["travel", "tourism", "vacation", "flight"], nil),
-        (.food, ["food", "cook", "dining", "culinary", "recipe", "restaurant"], nil),
-        (.fashion, ["style", "fashion", "runway", "apparel"], nil),
-        (.world, ["global", "world", "international", "foreign", "geopolitic", "united nations", "diplomat"], "un"),
-        (.lifestyle, ["life", "living", "lifestyle", "home", "parenting"], nil),
-        (.science, ["sci", "research"], nil),
+    private struct SynonymGroup {
+        let category: NewsCategory
+        let keywords: [String]
+        let token: String?
+
+        init(_ category: NewsCategory, _ keywords: [String], token: String? = nil) {
+            self.category = category
+            self.keywords = keywords
+            self.token = token
+        }
+    }
+
+    private static let synonymKeywordGroups: [SynonymGroup] = [
+        SynonymGroup(
+            .technology, ["tech", "software", "hardware", "artificial intelligence", "cyber", "chip"], token: "ai"),
+        SynonymGroup(.business, ["econ", "biz", "market"]),
+        SynonymGroup(.sports, ["sport", "football", "basketball", "soccer", "league"]),
+        SynonymGroup(.entertainment, ["entertain", "movie", "film", "music", "celebrity", "cinema"]),
+        SynonymGroup(.health, ["wellness", "fitness", "nutrition"]),
+        SynonymGroup(.travel, ["travel", "tourism", "vacation", "flight"]),
+        SynonymGroup(.food, ["food", "cook", "dining", "culinary", "recipe", "restaurant"]),
+        SynonymGroup(.fashion, ["style", "fashion", "runway", "apparel"]),
+        SynonymGroup(
+            .world, ["global", "world", "international", "foreign", "geopolitic", "united nations", "diplomat"],
+            token: "un"),
+        SynonymGroup(.lifestyle, ["life", "living", "lifestyle", "home", "parenting"]),
+        SynonymGroup(.science, ["sci", "research"]),
     ]
 
     private static func matchSynonyms(_ lower: String, tokens: Set<String>) -> NewsCategory? {
