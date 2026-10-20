@@ -100,6 +100,15 @@ enum FeedKitSwiftSoupTests {
         check(
             pipeline.extractFromHTML(hydrated, baseUrl: base).content?.contains("Hydrated final paragraph") == true,
             "A thin page falls back to its Next.js hydration body")
+        check(
+            pipeline.extractFromHTML(
+                hydrated.replacingOccurrences(
+                    of: "<script id=",
+                    with: "<script type=\"application/ld+json\">{\"articleBody\":\"Short teaser.\"}</script><script id="
+                ),
+                baseUrl: base
+            ).content?.contains("Hydrated final paragraph") == true,
+            "A teaser-length JSON-LD body does not hide the hydration body")
         let stamped = pipeline.extractFromHTML(
             """
             <article><ul><li>· <time datetime="2026-10-20T13:13:26Z">20 October 2026, 14:13 BST</time></li></ul>

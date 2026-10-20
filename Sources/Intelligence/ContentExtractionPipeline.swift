@@ -1156,7 +1156,9 @@ final class ContentExtractionPipeline: Sendable {
             guard data.count <= 1024 * 1024, let json = try? JSONSerialization.jsonObject(with: data) else { continue }
             scan.visitLinkedData(json, depth: 0)
         }
-        if scan.result.articleBody == nil, let next = try? document.select("script#__NEXT_DATA__").first() {
+        // A missing or teaser-length JSON-LD body still looks in hydration state; the longer body wins.
+        if (scan.result.articleBody?.count ?? 0) < 600, let next = try? document.select("script#__NEXT_DATA__").first()
+        {
             let data = Data(next.data().utf8)
             if data.count <= 4 * 1024 * 1024, let json = try? JSONSerialization.jsonObject(with: data) {
                 scan.visitHydration(json, depth: 0)

@@ -420,7 +420,9 @@ actor WorldTensionService {
         let assessment: WorldTensionAssessment
         do {
             assessment = try await task.value
-        } catch let error as WorldTensionError {
+        } catch let error as WorldTensionError
+            where [.unavailable, .generationFailed, .unsupported].contains(error)
+        {
             // Without a reading for today, show a labelled keyword estimate rather than an empty sheet. It is never
             // saved, so the model is asked again next time and an accepted reading is never replaced by it.
             try Task.checkCancellation()
