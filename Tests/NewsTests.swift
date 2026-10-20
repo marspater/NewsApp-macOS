@@ -9605,6 +9605,14 @@ struct NewsTests {
         assertFalse(
             FiniteBriefing.isCurrent(selectedAt: morning.addingTimeInterval(60), now: morning, hour: 7, calendar: utc),
             "An edition stamped in the future is not trusted")
+        var london = Calendar(identifier: .gregorian)
+        london.timeZone = TimeZone(identifier: "Europe/London")!
+        // 24 October 2026 08:00 BST; clocks go back on the 25th, so the next 07:00 is 25 hours later.
+        let beforeChange = london.date(from: DateComponents(year: 2026, month: 10, day: 24, hour: 8))!
+        let next = FiniteBriefing.nextEditionStart(now: beforeChange, hour: 7, calendar: london)
+        assertEqual(
+            london.dateComponents([.day, .hour], from: next), DateComponents(day: 25, hour: 7),
+            "The next edition keeps its local hour across a daylight-saving change")
 
         let now = Date(timeIntervalSince1970: 1_790_928_000)
         func article(_ id: String, age: TimeInterval, source: String = "Dominant", category: String = "Tech")

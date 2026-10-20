@@ -300,6 +300,14 @@ struct FiniteBriefing: Equatable, Sendable {
         return today <= now ? today : calendar.date(byAdding: .day, value: -1, to: today) ?? today
     }
 
+    /// When the following edition is due: the next day at the edition hour, in calendar days so daylight-saving
+    /// changes keep the configured local time.
+    static func nextEditionStart(now: Date, hour: Int, calendar: Calendar = .current) -> Date {
+        let current = editionStart(now: now, hour: hour, calendar: calendar)
+        let nextDay = calendar.date(byAdding: .day, value: 1, to: current) ?? current.addingTimeInterval(duration)
+        return calendar.date(bySettingHour: min(23, max(0, hour)), minute: 0, second: 0, of: nextDay) ?? nextDay
+    }
+
     /// A stored edition is reused while it was selected at or after the edition currently due.
     static func isCurrent(selectedAt: Date, now: Date, hour: Int, calendar: Calendar = .current) -> Bool {
         selectedAt >= editionStart(now: now, hour: hour, calendar: calendar) && selectedAt <= now

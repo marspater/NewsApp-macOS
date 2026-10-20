@@ -256,6 +256,12 @@ struct ArticleListView: View {
             // An empty list keeps its masthead at the top and centers its state in the visible area.
             .overlay { emptyListOverlay }
             .onChange(of: queuedUpdateCount, handleQueuedUpdatesChange)
+            // Another window stored a new edition (New Edition, or the next day's): show the same one here.
+            .onChange(of: briefingEditionSelectedAt) { _, stored in
+                guard let shown = briefing, shown.startedAt.timeIntervalSince1970 != stored else { return }
+                briefing = nil
+                if isBriefing { pageRequest += 1 }
+            }
             .focusable()
             .focused($listHasFocus)
             .defaultFocus($listHasFocus, true)
@@ -364,9 +370,20 @@ struct ArticleListView: View {
                     let edition = FiniteBriefing(
                         candidates: candidates, readIDs: readManager.readArticles, now: now, priorities: priorities,
                         interests: interests)
-                    briefing = edition
-                    briefingEditionSelectedAt = edition.startedAt.timeIntervalSince1970
-                    briefingEditionArticleIDs = edition.articles.map(\.id).joined(separator: "\n")
+                    // Selection awaited the database, so another window may have stored an edition meanwhile. This
+                    // check and the write run on the main actor without a suspension, so the first stored edition
+                    // wins and later windows adopt it.
+                    if !briefingEditionArticleIDs.isEmpty,
+                        FiniteBriefing.isCurrent(
+                            selectedAt: Date(timeIntervalSince1970: briefingEditionSelectedAt), now: now,
+                            hour: briefingEditionHour)
+                    {
+                        briefing = try await storedBriefingEdition(now: now) ?? edition
+                    } else {
+                        briefing = edition
+                        briefingEditionSelectedAt = edition.startedAt.timeIntervalSince1970
+                        briefingEditionArticleIDs = edition.articles.map(\.id).joined(separator: "\n")
+                    }
                 }
                 buffer.replace(with: FeedSnapshot(articles: briefing?.articles ?? []))
                 hasMoreResults = false
@@ -726,9 +743,8 @@ struct ArticleListView: View {
     }
 
     private var nextEditionText: String {
-        let next = FiniteBriefing.editionStart(now: Date(), hour: briefingEditionHour)
-            .addingTimeInterval(FiniteBriefing.duration)
-        return next.formatted(date: .omitted, time: .shortened)
+        FiniteBriefing.nextEditionStart(now: Date(), hour: briefingEditionHour)
+            .formatted(date: .omitted, time: .shortened)
     }
 
     private var briefingCompletion: some View {
