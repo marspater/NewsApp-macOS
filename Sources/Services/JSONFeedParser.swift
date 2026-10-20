@@ -34,9 +34,23 @@ class JSONFeedParser {
             ] {
                 if item[key] == nil || item[key] is NSNull { item[key] = item[alias] }
             }
+            if item["id"] == nil || item["id"] is NSNull {
+                item["id"] = item["url"] ?? UUID().uuidString
+            }
             if (item["tags"] as? [String])?.isEmpty == true { item["tags"] = item["categories"] }
             if item["summary"] == nil || item["summary"] is NSNull {
                 item["summary"] = stripSimpleHTML(item["description"] as? String ?? "")
+            }
+            if let rawDate = item["date_published"] as? String {
+                if let parsed = DateParser.parse(rawDate) {
+                    let formatter = ISO8601DateFormatter()
+                    formatter.formatOptions = [.withInternetDateTime]
+                    item["date_published"] = formatter.string(from: parsed)
+                } else {
+                    item.removeValue(forKey: "date_published")
+                }
+            } else {
+                item.removeValue(forKey: "date_published")
             }
             // Unused optional FeedKit fields must not make an otherwise compatible feed fail decoding.
             let fields: Set<String> = [
@@ -45,18 +59,16 @@ class JSONFeedParser {
             normalized.append(item.filter { fields.contains($0.key) })
         }
         object = object.filter { ["version", "title"].contains($0.key) }
+        if object["version"] == nil {
+            object["version"] = "https://jsonfeed.org/version/1.1"
+        }
         object["items"] = normalized
         guard let bounded = try? JSONSerialization.data(withJSONObject: object), !Task.isCancelled else { return nil }
         return bounded
     }
 
     private static func decodeFeed(_ data: Data) -> FeedKit.JSONFeed? {
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .custom { decoder in
-            let raw = try decoder.singleValueContainer().decode(String.self)
-            return DateParser.parse(raw) ?? DateParser.unknownDate
-        }
-        return try? decoder.decode(FeedKit.JSONFeed.self, from: data)
+        try? FeedKit.JSONFeed(data: data)
     }
 
     private static func article(from item: FeedKit.JSONFeedItem, sourceName: String) -> FeedArticle? {
