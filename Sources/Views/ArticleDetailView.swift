@@ -335,7 +335,8 @@ struct ArticleDetailView: View {
                                             .textSelection(.enabled)
                                     }
                                 }
-                                .accessibilityElement(children: .combine)
+                                // Ignore, not combine: the passage is selectable text (DESIGN.md 16).
+                                .accessibilityElement(children: .ignore)
                                 .accessibilityLabel("Cited passage in event overview: \(passage)")
 
                                 Spacer()
@@ -749,11 +750,13 @@ struct ArticleDetailView: View {
             HStack(alignment: .firstTextBaseline, spacing: AppSpacing.sm) {
                 Text(block.ordinal.map { "\($0)." } ?? "•")
                     .foregroundStyle(AppColor.secondaryText)
+                    // A bullet is decoration; an ordinal is read before the item.
+                    .accessibilityHidden(block.ordinal == nil)
+                // Not combined: the item is selectable text and may carry links (DESIGN.md 16).
                 Text(readerText(block)).textSelection(.enabled)
             }
             .font(AppTypography.bodyFont(for: themeManager.articleTheme, scale: readerTextScale))
             .lineSpacing(AppTypography.bodyLineSpacing(for: themeManager.articleTheme) * readerTextScale)
-            .accessibilityElement(children: .combine)
         case .code:
             Text(readerText(block))
                 .font(.system(.body, design: .monospaced))
