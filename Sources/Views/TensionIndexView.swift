@@ -67,14 +67,9 @@ struct TensionIndexView: View {
                 VStack(alignment: .leading, spacing: AppSpacing.lg) {
                     if let reading = selected {
                         readingHeader(reading)
-                        Text(reading.assessment.summary)
-                            .font(AppTypography.lede).fixedSize(horizontal: false, vertical: true).textSelection(
-                                .enabled)
-                        IntelligenceLabel("Assessed on device")
-                        if let comparison = comparison(reading) {
-                            Text(comparison).font(AppTypography.callout).foregroundStyle(AppColor.secondaryText)
-                        }
-                        reasons(reading)
+                        summaryCard(reading)
+                        drivers(reading)
+                        DisclosureGroup("Factor Breakdown") { reasons(reading).padding(.top, AppSpacing.sm) }
                         evidence(reading)
                         if history.count > 1 { trend }
                     } else if loading {
@@ -121,35 +116,96 @@ struct TensionIndexView: View {
 
     private func readingHeader(_ reading: WorldTensionReading) -> some View {
         VStack(alignment: .leading, spacing: AppSpacing.md) {
-            HStack {
+            HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: AppSpacing.xs) {
                     HStack(alignment: .firstTextBaseline, spacing: AppSpacing.sm) {
-                        Text("\(reading.assessment.score)°").font(AppTypography.tensionReading).monospacedDigit()
+                        Text("\(reading.assessment.score)").font(AppTypography.tensionReading).monospacedDigit()
                             .contentTransition(.numericText())
-                        Text(reading.level.rawValue).font(AppTypography.sectionTitle).foregroundStyle(
-                            AppColor.secondaryText)
+                        Text("/ 100").font(AppTypography.headline).foregroundStyle(AppColor.secondaryText)
+                        Text(reading.level.rawValue).font(AppTypography.sectionTitle)
+                            .foregroundStyle(AppColor.tension(reading.level))
                     }
-                    Text("Assessed \(reading.evaluatedAt.formatted(date: .abbreviated, time: .shortened))")
+                    if let comparison = comparison(reading) {
+                        Text(comparison).font(AppTypography.callout).foregroundStyle(AppColor.secondaryText)
+                    }
+                    Text("Updated \(reading.evaluatedAt.formatted(date: .abbreviated, time: .shortened))")
                         .font(AppTypography.caption).foregroundStyle(AppColor.secondaryText)
                 }
                 Spacer()
                 TensionGlyph(level: reading.level)
             }
             .accessibilityElement(children: .combine)
-            .accessibilityLabel("World tension \(reading.assessment.score) degrees, \(reading.level.rawValue)")
-            Gauge(value: Double(reading.assessment.score), in: 0...100) { Text("World Tension") }
-                .gaugeStyle(.accessoryLinear).tint(AppColor.tensionScale)
-                .accessibilityValue("\(reading.assessment.score) of 100")
+            .accessibilityLabel("World tension \(reading.assessment.score) of 100, \(reading.level.rawValue)")
+            TensionScaleBar(score: reading.assessment.score)
         }
     }
 
+    /// Where the reading sits among the past month's assessments, or its change since the previous one.
     private func comparison(_ reading: WorldTensionReading) -> String? {
-        let earlier = history.filter { $0.id < reading.id && $0.modelGeneration == reading.modelGeneration }
-        guard let previous = earlier.last else { return nil }
+        let others = history.filter {
+            $0.id < reading.id && $0.id > reading.id.addingTimeInterval(-30 * 86400)
+                && $0.modelGeneration == reading.modelGeneration
+        }
+        if others.count >= 3 {
+            let below = others.filter { $0.assessment.score < reading.assessment.score }.count
+            let above = others.filter { $0.assessment.score > reading.assessment.score }.count
+            let share = { (n: Int) in Int((Double(n) / Double(others.count) * 100).rounded()) }
+            return above >= below
+                ? "Lower than \(share(above))% of assessed days in the past month"
+                : "Higher than \(share(below))% of assessed days in the past month"
+        }
+        guard let previous = others.last else { return nil }
         let change = reading.assessment.score - previous.assessment.score
-        let movement = change == 0 ? "Unchanged" : "\(change > 0 ? "Up" : "Down") \(abs(change))°"
+        let movement = change == 0 ? "Unchanged" : "\(change > 0 ? "Up" : "Down") \(abs(change))"
         return
-            "\(movement) since the assessment on \(previous.evaluatedAt.formatted(date: .abbreviated, time: .omitted))."
+            "\(movement) since the assessment on \(previous.evaluatedAt.formatted(date: .abbreviated, time: .omitted))"
+    }
+
+    /// The lead sentence in bold, then the synthesis; readings saved before leads existed show the synthesis alone.
+    private func summaryCard(_ reading: WorldTensionReading) -> some View {
+        VStack(alignment: .leading, spacing: AppSpacing.sm) {
+            Group {
+                if let lead = reading.assessment.lead {
+                    Text(lead).bold() + Text(" ") + Text(reading.assessment.summary)
+                } else {
+                    Text(reading.assessment.summary)
+                }
+            }
+            .font(AppTypography.lede).fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
+            if reading.assessment.isEstimate == true {
+                Label("Keyword estimate · on-device assessment unavailable", systemImage: "exclamationmark.circle")
+                    .font(AppTypography.caption).foregroundStyle(AppColor.secondaryText)
+            } else {
+                IntelligenceLabel("Assessed on device")
+            }
+        }
+        .padding(AppSpacing.md)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(AppColor.surface, in: RoundedRectangle(cornerRadius: AppRadius.card))
+    }
+
+    @ViewBuilder
+    private func drivers(_ reading: WorldTensionReading) -> some View {
+        let headlines = reading.drivingHeadlines
+        if !headlines.isEmpty {
+            VStack(alignment: .leading, spacing: AppSpacing.sm) {
+                Text("What's Driving It").font(AppTypography.headline).accessibilityAddTraits(.isHeader)
+                ForEach(headlines, id: \.id) { headline in
+                    VStack(alignment: .leading, spacing: AppSpacing.textStack) {
+                        EyebrowText(headline.publisher)
+                        if let link = headline.link.flatMap(URL.init(string:)),
+                            ["http", "https"].contains(link.scheme?.lowercased())
+                        {
+                            Link(headline.title, destination: link).font(AppTypography.body)
+                                .multilineTextAlignment(.leading).help("Open the story in your browser")
+                        } else {
+                            Text(headline.title).font(AppTypography.body).textSelection(.enabled)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+        }
     }
 
     private func reasons(_ reading: WorldTensionReading) -> some View {
@@ -171,7 +227,7 @@ struct TensionIndexView: View {
     }
 
     private func evidence(_ reading: WorldTensionReading) -> some View {
-        DisclosureGroup("Headlines Behind the Assessment") {
+        DisclosureGroup("All Panel Headlines") {
             VStack(alignment: .leading, spacing: AppSpacing.sm) {
                 Text("C: last 24 hours · P: preceding six days").font(AppTypography.caption).foregroundStyle(
                     AppColor.secondaryText)
@@ -185,7 +241,7 @@ struct TensionIndexView: View {
 
     private var trend: some View {
         VStack(alignment: .leading, spacing: AppSpacing.sm) {
-            Text("Assessment History").font(AppTypography.headline)
+            Text("Past 30 Days").font(AppTypography.headline)
             Chart {
                 ForEach(Array(history.enumerated()), id: \.element.id) { index, reading in
                     LineMark(
@@ -196,7 +252,7 @@ struct TensionIndexView: View {
                     PointMark(x: .value("Day", reading.id), y: .value("Assessment", reading.assessment.score))
                         .foregroundStyle(AppColor.tension(reading.level))
                         .accessibilityLabel(reading.evaluatedAt.formatted(date: .abbreviated, time: .omitted))
-                        .accessibilityValue("\(reading.assessment.score) degrees")
+                        .accessibilityValue("\(reading.assessment.score) of 100")
                 }
             }
             .chartYScale(domain: 0...100).chartXSelection(value: $selectedDay)
@@ -222,7 +278,7 @@ struct TensionIndexView: View {
             .font(AppTypography.caption).foregroundStyle(AppColor.secondaryText)
             DisclosureGroup("How World Tension Is Assessed") {
                 Text(
-                    "The on-device model reasons about novelty, proximity to worst case, reversibility and scope of impact. Nuclear and WMD situations carry outsized weight when supported by headlines. Current international headlines are compared with earlier coverage; no fixed formula sets the score. Explanations are checked against the supplied headlines before saving an assessment."
+                    "The on-device model reasons about novelty, proximity to worst case, reversibility and scope of impact. Nuclear and WMD situations carry outsized weight when supported by headlines. Current international headlines are compared with earlier coverage; no fixed formula sets the score. Before an assessment is saved, every place, person and figure it names is checked against the supplied headlines. Royal, celebrity, sport and lifestyle stories are left out. When the model is unavailable and no assessment exists for the day, a labelled keyword estimate is shown instead and not saved."
                 )
                 .font(AppTypography.caption).foregroundStyle(AppColor.secondaryText)
             }
@@ -270,6 +326,41 @@ struct TensionIndexView: View {
             }
             errorMessage = error.localizedDescription
         }
+    }
+}
+
+/// The full 0–100 scale with the band colours and a marker at the current score.
+struct TensionScaleBar: View {
+    let score: Int
+
+    var body: some View {
+        VStack(spacing: AppSpacing.xs) {
+            GeometryReader { geometry in
+                Capsule().fill(
+                    LinearGradient(gradient: AppColor.tensionScale, startPoint: .leading, endPoint: .trailing)
+                )
+                .overlay(alignment: .leading) {
+                    Capsule().fill(AppColor.primaryText)
+                        .frame(width: AppLayout.tensionStrokeWidth, height: AppLayout.tensionScaleMarkerHeight)
+                        .offset(
+                            x: geometry.size.width * CGFloat(min(100, max(0, score))) / 100
+                                - AppLayout.tensionStrokeWidth / 2)
+                }
+            }
+            .frame(height: AppLayout.tensionScaleHeight)
+            .padding(.vertical, (AppLayout.tensionScaleMarkerHeight - AppLayout.tensionScaleHeight) / 2)
+            HStack {
+                Text("0")
+                Spacer()
+                Text("50")
+                Spacer()
+                Text("100")
+            }
+            .font(AppTypography.caption).foregroundStyle(AppColor.tertiaryText).monospacedDigit()
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("World Tension scale")
+        .accessibilityValue("\(score) of 100")
     }
 }
 

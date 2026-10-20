@@ -54,6 +54,91 @@ enum FeedKitSwiftSoupTests {
         check(
             !pipeline.extractFromHTML(paywall, baseUrl: base).isSuccess,
             "A subscription offer is not accepted as article prose")
+        check(
+            pipeline.extractFromHTML(paywall, baseUrl: base) == .subscriberOnly,
+            "A subscription offer is reported as a subscriber-only story")
+        let barrier = """
+            <html><head><script type="application/ld+json">{"@type":"NewsArticle","headline":"Markets",
+            "isAccessibleForFree":"False"}</script></head><body><div class="barrier-grid"><div class="paywall">
+            <p>Try unlimited access. Then pay monthly.</p></div></div></body></html>
+            """
+        check(
+            pipeline.extractFromHTML(barrier, baseUrl: base) == .subscriberOnly,
+            "An FT-style barrier with isAccessibleForFree=false is subscriber-only, not a parser failure")
+        check(
+            pipeline.extractFromHTML(
+                "<html><body><div class=\"barrier\"><p>Short text.</p></div><article><p>\(first)</p><p>\(second)</p></article></body></html>",
+                baseUrl: base
+            ).isSuccess, "Readable prose next to an unrelated barrier class still succeeds")
+        let structuredBody = """
+            <html><head><script type="application/ld+json">{"@graph":[{"@type":"NewsArticle",
+            "articleBody":"\(first)\\n\(second)\\nFinal structured paragraph: \(first)"}]}</script></head>
+            <body><main><p>\(first)</p></main></body></html>
+            """
+        check(
+            pipeline.extractFromHTML(structuredBody, baseUrl: base).content?.contains("Final structured paragraph")
+                == true,
+            "A thin DOM body falls back to the publisher's JSON-LD articleBody")
+        let editorial = pipeline.extractFromHTML(
+            """
+            <article><header class="article-header"><h1>Bridge</h1><p class="standfirst">The council says repairs will finish before winter, ending weeks of detours.</p></header>
+            <p>\(first)</p><aside class="pull-quote">The structure remained intact after the storm passed.</aside>
+            <aside class="related"><p>Other coverage from the site that should never appear.</p></aside><p>\(second)</p></article>
+            """, baseUrl: base)
+        check(
+            editorial.content?.contains("repairs will finish before winter") == true,
+            "A header standfirst is kept inside the article")
+        check(
+            editorial.document?.blocks.contains { $0.kind == .quote && $0.text.hasPrefix("The structure") } == true,
+            "An aside pull quote becomes a quote block")
+        check(editorial.content?.contains("Other coverage") == false, "Related-story asides stay excluded")
+        let hydrated = """
+            <html><head><script id="__NEXT_DATA__" type="application/json">{"props":{"pageProps":{"story":
+            {"bodyHtml":"<p>\(first)</p><p>\(second)</p><p>\(second)</p><p>Hydrated final paragraph: \(first)</p>"}}}}</script></head>
+            <body><div id="__next"><p>\(first)</p></div></body></html>
+            """
+        check(
+            pipeline.extractFromHTML(hydrated, baseUrl: base).content?.contains("Hydrated final paragraph") == true,
+            "A thin page falls back to its Next.js hydration body")
+        check(
+            pipeline.extractFromHTML(
+                hydrated.replacingOccurrences(
+                    of: "<script id=",
+                    with: "<script type=\"application/ld+json\">{\"articleBody\":\"Short teaser.\"}</script><script id="
+                ),
+                baseUrl: base
+            ).content?.contains("Hydrated final paragraph") == true,
+            "A teaser-length JSON-LD body does not hide the hydration body")
+        let stamped = pipeline.extractFromHTML(
+            """
+            <article><ul><li>· <time datetime="2026-10-20T13:13:26Z">20 October 2026, 14:13 BST</time></li></ul>
+            <p>\(first)</p><p>\(second) It was confirmed at <time>14:13</time> by officials on site.</p></article>
+            """, baseUrl: base)
+        check(stamped.content?.contains("14:13 BST") == false, "A metadata strip timestamp is not story text")
+        check(stamped.content?.contains("confirmed at 14:13") == true, "Prose that mentions a time is kept")
+        let sections = """
+            <article><hr><p>\(first)</p><hr><hr><p>\(second)</p><hr></article>
+            """
+        check(
+            pipeline.extractFromHTML(sections, baseUrl: base).document?.blocks.map(\.kind)
+                == [.paragraph, .divider, .paragraph],
+            "Section rules survive only between content, once")
+        let wall = (1...8).map {
+            "Sentence \($0) describes the bridge inspection and the repairs in some detail today."
+        }
+        .joined(separator: " ")
+        let walled = pipeline.extractFromHTML(
+            "<article><p>\(wall)<strong> Strong finding</strong> closes it.</p><p>\(second)</p></article>",
+            baseUrl: base)
+        let wallBlocks = walled.document?.blocks.filter { $0.kind == .paragraph } ?? []
+        check(wallBlocks.count >= 3, "A wall-of-text paragraph splits at sentence boundaries")
+        check(
+            wallBlocks.dropLast().map(\.text).joined(separator: " ") == "\(wall) Strong finding closes it.",
+            "Splitting a paragraph keeps every word in order")
+        check(
+            wallBlocks.dropLast().last?.inlineRuns?.contains { $0.strong } == true
+                && wallBlocks.allSatisfy { $0.inlineRuns != nil },
+            "Inline formatting is split with the paragraph")
 
         let metadata = """
             <html><head><script>let fake = '<meta property="og:image" content="https://example.com/fake.jpg">';</script>

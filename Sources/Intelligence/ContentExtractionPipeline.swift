@@ -23,6 +23,8 @@ public enum ExtractionOutcome: Equatable, Sendable {
     case emptyContent
     case contentParsingFailed(reason: String)
     case qualityValidationFailed(reason: String)
+    /// The publisher shows subscribers only a barrier; the feed teaser is all the reader can show.
+    case subscriberOnly
 
     public var isSuccess: Bool {
         if case .success = self { return true }
@@ -60,6 +62,8 @@ public enum ExtractionOutcome: Equatable, Sendable {
             return reason
         case .qualityValidationFailed(let reason):
             return reason
+        case .subscriberOnly:
+            return "The publisher requires a subscription"
         }
     }
 }
@@ -266,7 +270,15 @@ final class DOMElementNode: Sendable {
     func readingBlocks(allowDivFallback: Bool = true) -> [DOMElementNode] {
         guard !isReaderExcluded else { return [] }
         if tag == "noscript" { return children.flatMap { $0.readingBlocks(allowDivFallback: false) } }
-        if tag == "figure" || tag == "img" || tag == "picture" { return [self] }
+        if tag == "figure" || tag == "img" || tag == "picture" || tag == "hr" { return [self] }
+        // An article header holds the title and byline; only its standfirst is story text.
+        if tag == "header" && !HTMLDOMBuilder.isEditorial(attributes) {
+            func editorial(_ node: DOMElementNode) -> [DOMElementNode] {
+                HTMLDOMBuilder.isEditorial(node.attributes)
+                    ? node.readingBlocks(allowDivFallback: false) : node.children.flatMap(editorial)
+            }
+            return children.flatMap(editorial)
+        }
         if ["div", "p"].contains(tag), children.contains(where: { $0.tag == "br" }) {
             var groups = [[DOMElementNode]]([[]])
             for child in children {
@@ -289,7 +301,7 @@ final class DOMElementNode: Sendable {
                 ]
             }
         }
-        if ["p", "h2", "h3", "h4", "h5", "h6", "li", "blockquote", "pre"].contains(tag) { return [self] }
+        if ["p", "h2", "h3", "h4", "h5", "h6", "li", "blockquote", "pre", "aside"].contains(tag) { return [self] }
         var blocks = [DOMElementNode]()
         var inline = [DOMElementNode]()
         func flushInline() {
@@ -306,7 +318,7 @@ final class DOMElementNode: Sendable {
                 blocks += nested
             } else if child.tag == "br" {
                 flushInline()
-            } else if !child.isReaderExcluded {
+            } else if !child.isReaderExcluded && child.tag != "header" {
                 inline.append(child)
             }
         }
@@ -352,6 +364,7 @@ final class DOMElementNode: Sendable {
 
     var readerBlock: ReaderBlock? {
         guard !isReaderExcluded else { return nil }
+        if tag == "hr" { return ReaderBlock(kind: .divider, text: "") }
         if ["figure", "img", "picture"].contains(tag) {
             guard let image = visibleReaderImage(),
                 let source = image.readerImageSource,
@@ -391,12 +404,23 @@ final class DOMElementNode: Sendable {
         let plain = combinedText().replacingOccurrences(of: "[ \t\r\n]+", with: " ", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)
         guard !plain.isEmpty, !ArticleContentRedactor.isBoilerplateLine(plain) else { return nil }
+        // A metadata strip item holding only a <time> (BBC's "· 20 October 2026, 14:13 BST") is not story text.
+        let timestamps = findNodes(tag: "time").map { $0.combinedText() }
+        if !timestamps.isEmpty {
+            var residue = plain
+            for stamp in timestamps {
+                residue = residue.replacingOccurrences(
+                    of: stamp.trimmingCharacters(in: .whitespacesAndNewlines), with: "")
+            }
+            let words = residue.lowercased().split { !$0.isLetter && !$0.isNumber }
+            if words.allSatisfy({ ["published", "updated", "last", "on", "at"].contains($0) }) { return nil }
+        }
         let kind: ReaderBlock.Kind
         switch tag {
         case "h2": kind = .heading
         case "h3", "h4", "h5", "h6": kind = .subheading
         case "li": kind = .listItem
-        case "blockquote": kind = .quote
+        case "blockquote", "aside": kind = .quote
         case "pre": kind = .code
         default: kind = .paragraph
         }
@@ -517,6 +541,28 @@ enum HTMLDOMBuilder {
         "header", "form", "aside", "dialog", "button",
     ]
 
+    /// Pull quotes and standfirsts that publishers wrap in otherwise ignored `<aside>` and `<header>` elements.
+    static let editorialPattern =
+        (try? NSRegularExpression(
+            pattern:
+                #"(?i)pull-?quote|standfirst|(?:^|[-_ ])dek(?:$|[-_ ])|subtitle|sub-?headline|article-summary|intro-text"#
+        )) ?? NSRegularExpression()
+
+    static func isEditorial(_ attributes: [String: String]) -> Bool {
+        let identifier = "\(attributes["class"] ?? "") \(attributes["id"] ?? "")"
+        return editorialPattern.firstMatch(in: identifier, range: NSRange(identifier.startIndex..., in: identifier))
+            != nil
+    }
+
+    /// Whether a tag and everything inside it is skipped. Editorial asides and headers are kept, as is an article's
+    /// own header, from which only standfirst-like children are read.
+    static func isIgnored(tag: String, attributes: [String: String], insideArticle: Bool = false) -> Bool {
+        guard ignoredTags.contains(tag) else { return false }
+        if tag == "header" && insideArticle { return false }
+        guard tag == "aside" || tag == "header" else { return true }
+        return !isEditorial(attributes)
+    }
+
     private static let commentRegex = try? NSRegularExpression(
         pattern: "<!--.*?-->", options: .dotMatchesLineSeparators)
 
@@ -584,7 +630,9 @@ enum HTMLDOMBuilder {
         let parsed = parseTagContent(tagContent)
         let tagName = parsed.tag.lowercased()
 
-        if ignoredTags.contains(tagName) {
+        if isIgnored(
+            tag: tagName, attributes: parsed.attributes, insideArticle: stack.contains { $0.tag == "article" })
+        {
             if parsed.isSelfClosing { return }
             var depth = 1
             while !scanner.isAtEnd && depth > 0 {
@@ -747,6 +795,7 @@ final class ContentExtractionPipeline: Sendable {
         do {
             let (data, response) = try await client.fetchArticleHTML(from: url, allowHTTP: allowHTTP)
 
+            if response.statusCode == 401 || response.statusCode == 402 { return (.subscriberOnly, nil) }
             if response.statusCode >= 400 {
                 logger.warning("[Extraction] Host: \(host, privacy: .public) | HTTP Error: \(response.statusCode)")
                 return (.httpError(status: response.statusCode), nil)
@@ -898,6 +947,11 @@ final class ContentExtractionPipeline: Sendable {
             return .contentParsingFailed(reason: "Article exceeds extraction limit")
         }
         let soup = try? SwiftSoup.parse(html)
+        // Structured data and barrier markers are read before scripts and furniture are removed.
+        let structured = soup.map { Self.structuredArticle(in: $0) } ?? StructuredArticle()
+        let hasBarrier =
+            structured.isAccessibleForFree == false
+            || ((try? soup?.select(Self.barrierSelector).isEmpty()) == false)
         if let soup {
             _ = try? soup.select(
                 "script, style, noscript, iframe, svg, canvas, form, button, input, select, textarea, dialog, template, "
@@ -951,11 +1005,23 @@ final class ContentExtractionPipeline: Sendable {
             }
         }
 
+        // A thin or failed DOM body falls back to the publisher's own schema.org articleBody.
+        let domProse = candidateParagraphs.filter { [.paragraph, .quote, .listItem].contains($0.kind) }.map(\.text)
+        if ContentQualityValidator.validate(paragraphs: domProse) != .valid || domProse.joined().count < 600,
+            let body = structured.articleBody
+        {
+            let blocks = Self.paragraphs(fromPlainText: body).map { ReaderBlock(kind: .paragraph, text: $0) }
+            if ContentQualityValidator.validate(paragraphs: blocks.map(\.text)) == .valid,
+                blocks.map(\.text).joined().count > domProse.joined().count
+            {
+                candidateParagraphs = blocks
+            }
+        }
+
         if candidateParagraphs.contains(where: {
             $0.text.localizedCaseInsensitiveContains("Subscribe to unlock this article")
         }) {
-            return .qualityValidationFailed(
-                reason: "The publisher requires a subscription. Open the original story to read with your access.")
+            return .subscriberOnly
         }
 
         // Keep media in publisher order, without allowing images to qualify an empty article.
@@ -981,8 +1047,10 @@ final class ContentExtractionPipeline: Sendable {
                     run.link = Self.readerImageURL(run.link, baseURL: baseUrl)
                     if !text.isEmpty { normalized.append(run) }
                 }
-                if !normalized.isEmpty {
-                    normalized[normalized.count - 1].text = normalized.last!.text.trimmingCharacters(in: .whitespaces)
+                // Only trailing space: the last run's leading space separates it from the run before.
+                while let last = normalized.last, last.text.last?.isWhitespace == true {
+                    normalized[normalized.count - 1].text.removeLast()
+                    if normalized[normalized.count - 1].text.isEmpty { normalized.removeLast() }
                 }
                 // Invalid/legacy structure falls back to plain text, never changes its words.
                 block.inlineRuns = normalized.map(\.text).joined() == block.text ? normalized : nil
@@ -1023,9 +1091,15 @@ final class ContentExtractionPipeline: Sendable {
             }
             validation = ContentQualityValidator.validate(paragraphs: candidateParagraphs.filter(isText).map(\.text))
         }
+        let bodyLength = candidateParagraphs.filter(isText).map(\.text.count).reduce(0, +)
+        if hasBarrier && (validation != .valid || (structured.isAccessibleForFree == false && bodyLength < 600)) {
+            return .subscriberOnly
+        }
+        candidateParagraphs = Self.tidiedDividers(candidateParagraphs).flatMap(Self.splitLongParagraph)
         switch validation {
         case .valid:
-            let joined = candidateParagraphs.filter { $0.kind != .figure }.map(\.text).joined(separator: "\n\n")
+            let joined = candidateParagraphs.filter { ![.figure, .divider].contains($0.kind) }.map(\.text)
+                .joined(separator: "\n\n")
             var images = candidateParagraphs.filter { $0.kind == .figure }.compactMap {
                 block -> ReaderImageCandidate? in
                 guard let url = block.imageURL else { return nil }
@@ -1063,6 +1137,175 @@ final class ContentExtractionPipeline: Sendable {
         }
     }
 
+    struct StructuredArticle {
+        var articleBody: String?
+        var isAccessibleForFree: Bool?
+    }
+
+    /// Elements publishers use for subscription barriers (FT's barrier grid, Piano, generic paywall wrappers).
+    private static let barrierSelector =
+        "[class*=paywall], [id*=paywall], [class*=barrier], [id*=barrier], [data-component*=barrier], "
+        + "[class*=subscribe-wall], [class*=subscription-wall], [class*=regwall], [id*=regwall], .tp-modal"
+
+    /// The longest schema.org articleBody and any isAccessibleForFree=false flag in the page's JSON-LD, then in
+    /// Next.js hydration state (`__NEXT_DATA__`), where the body may be HTML.
+    static func structuredArticle(in document: SwiftSoup.Document) -> StructuredArticle {
+        var scan = StructuredScan()
+        for script in ((try? document.select("script[type=application/ld+json]").array()) ?? []).prefix(16) {
+            let data = Data(script.data().utf8)
+            guard data.count <= 1024 * 1024, let json = try? JSONSerialization.jsonObject(with: data) else { continue }
+            scan.visitLinkedData(json, depth: 0)
+        }
+        // A missing or teaser-length JSON-LD body still looks in hydration state; the longer body wins.
+        if (scan.result.articleBody?.count ?? 0) < 600, let next = try? document.select("script#__NEXT_DATA__").first()
+        {
+            let data = Data(next.data().utf8)
+            if data.count <= 4 * 1024 * 1024, let json = try? JSONSerialization.jsonObject(with: data) {
+                scan.visitHydration(json, depth: 0)
+            }
+        }
+        return scan.result
+    }
+
+    /// A bounded walk over decoded JSON that keeps the longest article body it meets.
+    private struct StructuredScan {
+        var result = StructuredArticle()
+        var budget = 20_000
+
+        mutating func consider(_ body: String) {
+            guard body.count > (result.articleBody?.count ?? 0), body.utf8.count <= 512 * 1024 else { return }
+            result.articleBody = body
+        }
+
+        /// schema.org JSON-LD: articleBody, the isAccessibleForFree flag and the containers that nest articles.
+        mutating func visitLinkedData(_ value: Any, depth: Int) {
+            budget -= 1
+            guard depth < 8, budget > 0 else { return }
+            if let array = value as? [Any] {
+                for item in array.prefix(64) { visitLinkedData(item, depth: depth + 1) }
+                return
+            }
+            guard let object = value as? [String: Any] else { return }
+            if let body = object["articleBody"] as? String { consider(body) }
+            let free = object["isAccessibleForFree"]
+            if (free as? Bool) == false || (free as? String)?.lowercased() == "false" {
+                result.isAccessibleForFree = false
+            }
+            for key in ["@graph", "hasPart", "mainEntity", "mainEntityOfPage"] {
+                if let nested = object[key] { visitLinkedData(nested, depth: depth + 1) }
+            }
+        }
+
+        /// Hydration state has no schema: every key is searched for a prose-length body.
+        /// ponytail: key-name heuristic for hydration state; add per-publisher paths if this misses.
+        mutating func visitHydration(_ value: Any, depth: Int) {
+            budget -= 1
+            guard depth < 14, budget > 0 else { return }
+            if let array = value as? [Any] {
+                for item in array.prefix(64) { visitHydration(item, depth: depth + 1) }
+                return
+            }
+            guard let object = value as? [String: Any] else { return }
+            for key in ["articleBody", "body", "bodyHtml", "content", "contentHtml"] {
+                if let body = object[key] as? String, body.count >= 600, body.contains(". ") { consider(body) }
+            }
+            for nested in object.values.prefix(256) { visitHydration(nested, depth: depth + 1) }
+        }
+    }
+
+    /// Paragraphs from plain text: publisher line breaks when present, otherwise groups of sentences.
+    static func paragraphs(fromPlainText text: String) -> [String] {
+        if text.range(of: "<p[ >]", options: [.regularExpression, .caseInsensitive]) != nil {
+            return ContentExtractionPipeline.shared.extractParagraphs(from: text)
+        }
+        let decoded = ContentExtractionPipeline.shared.decodeHTMLEntities(text)
+        let lines = decoded.components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespaces) }.filter { $0.count >= 25 }
+        if lines.count >= 2 { return lines }
+        let single = decoded.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespaces)
+        return splitLongParagraph(ReaderBlock(kind: .paragraph, text: single)).map(\.text)
+    }
+
+    /// Section dividers only between content: never first, last or repeated.
+    static func tidiedDividers(_ blocks: [ReaderBlock]) -> [ReaderBlock] {
+        var result = [ReaderBlock]()
+        for block in blocks {
+            if block.kind == .divider && (result.isEmpty || result.last?.kind == .divider) { continue }
+            result.append(block)
+        }
+        if result.last?.kind == .divider { result.removeLast() }
+        return result
+    }
+
+    /// Splits a wall-of-text paragraph (over 650 characters, four or more sentences) at sentence boundaries into
+    /// paragraphs of roughly 300 or more characters. Inline formatting is split with the text; if the runs no longer
+    /// match the words they are dropped and the plain text is kept.
+    static func splitLongParagraph(_ block: ReaderBlock) -> [ReaderBlock] {
+        let text = block.text
+        guard block.kind == .paragraph, text.count > 650 else { return [block] }
+        let cuts = sentenceCuts(in: text)
+        guard !cuts.isEmpty else { return [block] }
+        let bounds = [0] + cuts + [text.count]
+        return zip(bounds, bounds.dropFirst()).map { lower, upper in
+            let range = text.index(text.startIndex, offsetBy: lower)..<text.index(text.startIndex, offsetBy: upper)
+            let piece = String(text[range]).trimmingCharacters(in: .whitespaces)
+            let runs = block.inlineRuns.map { slice($0, from: lower, to: upper) }
+            return ReaderBlock(
+                kind: .paragraph, text: piece, ordinal: block.ordinal,
+                inlineRuns: runs?.map(\.text).joined() == piece ? runs : nil)
+        }
+    }
+
+    /// Character offsets where a wall of text splits: after sentences, once a piece holds 300 characters and two
+    /// sentences, never leaving a tail under 120 characters. Empty with fewer than four sentences.
+    private static func sentenceCuts(in text: String) -> [Int] {
+        var ends = [Int]()
+        text.enumerateSubstrings(in: text.startIndex..., options: [.bySentences, .substringNotRequired]) {
+            _, _, enclosing, _ in
+            ends.append(text.distance(from: text.startIndex, to: enclosing.upperBound))
+        }
+        guard ends.count >= 4 else { return [] }
+        var cuts = [Int]()
+        var start = 0
+        var sentences = 0
+        for end in ends.dropLast() {
+            sentences += 1
+            if end - start >= 300 && sentences >= 2 && text.count - end >= 120 {
+                cuts.append(end)
+                start = end
+                sentences = 0
+            }
+        }
+        return cuts
+    }
+
+    /// The inline runs covering characters `lower..<upper`, with the piece's outer whitespace removed.
+    private static func slice(_ runs: [ReaderInlineRun], from lower: Int, to upper: Int) -> [ReaderInlineRun] {
+        var offset = 0
+        var sliced = [ReaderInlineRun]()
+        for run in runs {
+            let runEnd = offset + run.text.count
+            let from = max(lower, offset)
+            let to = min(upper, runEnd)
+            if from < to {
+                var part = run
+                let start = run.text.index(run.text.startIndex, offsetBy: from - offset)
+                let end = run.text.index(run.text.startIndex, offsetBy: to - offset)
+                part.text = String(run.text[start..<end])
+                sliced.append(part)
+            }
+            offset = runEnd
+        }
+        if !sliced.isEmpty { sliced[0].text = String(sliced[0].text.drop(while: \.isWhitespace)) }
+        sliced.removeAll { $0.text.isEmpty }
+        while let last = sliced.last, last.text.last?.isWhitespace == true {
+            sliced[sliced.count - 1].text.removeLast()
+            if sliced[sliced.count - 1].text.isEmpty { sliced.removeLast() }
+        }
+        return sliced
+    }
+
     /// Structural URL validation only; actual loads still pass through SecureHTTPClient.
     static func readerImageURL(_ raw: String?, baseURL: String?) -> String? {
         guard let raw, raw.utf8.count <= 8192,
@@ -1087,7 +1330,8 @@ final class ContentExtractionPipeline: Sendable {
                 uniquingKeysWith: { first, _ in first })
         }
         func excluded(_ element: SwiftSoup.Element) -> Bool {
-            HTMLDOMBuilder.ignoredTags.contains(element.tagName()) || element.tagName() == "template"
+            HTMLDOMBuilder.isIgnored(tag: element.tagName(), attributes: attributes(element))
+                || element.tagName() == "template"
                 || DOMElementNode(tag: element.tagName(), attributes: attributes(element)).isReaderExcluded
         }
         func convert(_ node: SwiftSoup.Node, depth: Int) -> DOMElementNode? {

@@ -218,6 +218,11 @@ struct FeedUpdateBuffer: Equatable, Sendable {
     /// A refreshed first page. `hasMore` says further pages follow it, so pages already loaded
     /// beyond it are a continuation and stay when the first page is unchanged.
     @discardableResult
+    /// Bursts of store revisions are debounced, but a section's first page is shown at once.
+    static func debouncesReload(isPaging: Bool, isNewQuery: Bool, hasStories: Bool) -> Bool {
+        !isPaging && !isNewQuery && hasStories
+    }
+
     mutating func receive(_ snapshot: FeedSnapshot, holding: Bool, mode: FeedGroupingMode, hasMore: Bool = false)
         -> FeedUpdateResult
     {
@@ -271,15 +276,42 @@ struct BriefingPriority: Equatable, Sendable {
     var eventID: String? = nil
 }
 
-/// A window-local reading session. Membership, order and publisher snapshots stay frozen
-/// until the reader explicitly starts another briefing; ordinary refresh is independent.
+/// A daily edition, after Kagi News: selected once per day at the edition hour and frozen until the next edition
+/// or until the reader asks for a new one; ordinary refresh is independent. Every window shows the same edition.
 struct FiniteBriefing: Equatable, Sendable {
     static let maximumStories = 10
     static let candidateLimit = 500
     static let duration: TimeInterval = 24 * 60 * 60
+    static let defaultEditionHour = 7
 
     let startedAt: Date
     let articles: [FeedArticle]
+
+    /// A stored edition, restored in its saved order.
+    init(startedAt: Date, articles: [FeedArticle]) {
+        self.startedAt = startedAt
+        self.articles = articles
+    }
+
+    /// When the edition current at `now` was due: today's edition hour, or yesterday's before that hour.
+    static func editionStart(now: Date, hour: Int, calendar: Calendar = .current) -> Date {
+        let hour = min(23, max(0, hour))
+        let today = calendar.date(bySettingHour: hour, minute: 0, second: 0, of: now) ?? now
+        return today <= now ? today : calendar.date(byAdding: .day, value: -1, to: today) ?? today
+    }
+
+    /// When the following edition is due: the next day at the edition hour, in calendar days so daylight-saving
+    /// changes keep the configured local time.
+    static func nextEditionStart(now: Date, hour: Int, calendar: Calendar = .current) -> Date {
+        let current = editionStart(now: now, hour: hour, calendar: calendar)
+        let nextDay = calendar.date(byAdding: .day, value: 1, to: current) ?? current.addingTimeInterval(duration)
+        return calendar.date(bySettingHour: min(23, max(0, hour)), minute: 0, second: 0, of: nextDay) ?? nextDay
+    }
+
+    /// A stored edition is reused while it was selected at or after the edition currently due.
+    static func isCurrent(selectedAt: Date, now: Date, hour: Int, calendar: Calendar = .current) -> Bool {
+        selectedAt >= editionStart(now: now, hour: hour, calendar: calendar) && selectedAt <= now
+    }
 
     init(
         candidates: [FeedArticle], readIDs: Set<String>, now: Date = Date(),
