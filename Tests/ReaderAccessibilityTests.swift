@@ -54,6 +54,7 @@ struct ReaderAccessibilityTests {
         testIncreaseContrastValues()
         testReduceMotionReaderPolicy()
         testKeyboardShortcutsAndModifiers()
+        testLeadImageFraming()
 
         print("Finished \(testsRun) reader accessibility checks with \(failures) failures.")
         if failures > 0 {
@@ -161,6 +162,14 @@ struct ReaderAccessibilityTests {
         assertEqual(
             resolvedAlt3, "Article image",
             "Whitespace/empty alt text must fall back to 'Article image' instead of empty label")
+    }
+
+    static func testLeadImageFraming() {
+        print("  - Testing lead image framing for square and portrait photos...")
+        assertTrue(ArticleCardView.framesLeadImageWhole(aspectRatio: 1), "Square photos are framed whole")
+        assertTrue(ArticleCardView.framesLeadImageWhole(aspectRatio: 0.8), "Portrait photos are framed whole")
+        assertFalse(ArticleCardView.framesLeadImageWhole(aspectRatio: 16.0 / 9.0), "Wide photos fill the card")
+        assertFalse(ArticleCardView.framesLeadImageWhole(aspectRatio: nil), "Unknown sizes fill the card")
     }
 
     // MARK: - 3. VoiceOver Source Line Formatter Tests

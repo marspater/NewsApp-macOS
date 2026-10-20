@@ -113,7 +113,7 @@ struct FeedArticleWrap: Identifiable, Hashable, Sendable {
 /// Publisher-authored structure. Plain text remains separate for search and analysis.
 public struct ReaderBlock: Codable, Hashable, Sendable {
     public enum Kind: String, Codable, Sendable {
-        case paragraph, heading, subheading, quote, listItem, code, figure
+        case paragraph, heading, subheading, quote, listItem, code, figure, divider
     }
     public let kind: Kind
     public let text: String
@@ -127,7 +127,7 @@ public struct ReaderBlock: Codable, Hashable, Sendable {
 }
 
 public struct ReaderDocument: Codable, Hashable, Sendable {
-    public static let currentVersion = 6
+    public static let currentVersion = 7
     public var version = currentVersion
     public let blocks: [ReaderBlock]
     public var images: [ReaderImageCandidate]? = nil
@@ -173,7 +173,7 @@ public struct ReaderDocument: Codable, Hashable, Sendable {
     /// Feed media alone is not a reader document: only publisher text lets a stored document stand in for
     /// extraction or survive a refresh that brings none. `DatabaseEngine.upsertArticles` applies the same rule in SQL.
     var hasPublisherText: Bool {
-        blocks.contains { $0.kind != .figure }
+        blocks.contains { $0.kind != .figure && $0.kind != .divider }
     }
 
     /// True if this document represents a complete standalone article rather than a brief feed teaser/excerpt.

@@ -201,12 +201,11 @@ private final class WorldTensionQADelegate: NSObject, NSApplicationDelegate {
             database: database, now: now,
             aiEnabled: true, collectionEnabled: true)
         guard let reading = readings.last else { throw QAError.noAssessment }
-        let invented = try WorldTensionService.supportPrompt(
-            "Summary: A nuclear attack destroyed a capital city yesterday. Score: 95", headlines: reading.headlines)
-        let rejection = try await NewsTextModel.onDevice.respond(invented, 4)
-            .trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-        guard rejection == "NO" else { throw QAError.fabricatedClaimAccepted }
-        print("Fresh factual verifier rejected a fabricated nuclear attack")
+        let invented = WorldTensionAssessment(
+            score: 95, summary: "A nuclear attack destroyed Paris yesterday, killing 40000 people.",
+            reasons: reading.assessment.reasons)
+        guard !invented.isGrounded(in: reading.headlines) else { throw QAError.fabricatedClaimAccepted }
+        print("Lexical grounding rejected a fabricated nuclear attack")
         try JSONEncoder().encode(reading).write(to: output.appendingPathComponent("live-model.json"))
         print(
             "Live on-device assessment: score \(reading.assessment.score), \(reading.assessment.reasons.count) supported factors, \(ProcessInfo.processInfo.systemUptime - modelStart) seconds"

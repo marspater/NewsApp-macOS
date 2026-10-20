@@ -218,6 +218,11 @@ struct FeedUpdateBuffer: Equatable, Sendable {
     /// A refreshed first page. `hasMore` says further pages follow it, so pages already loaded
     /// beyond it are a continuation and stay when the first page is unchanged.
     @discardableResult
+    /// Bursts of store revisions are debounced, but a section's first page is shown at once.
+    static func debouncesReload(isPaging: Bool, isNewQuery: Bool, hasStories: Bool) -> Bool {
+        !isPaging && !isNewQuery && hasStories
+    }
+
     mutating func receive(_ snapshot: FeedSnapshot, holding: Bool, mode: FeedGroupingMode, hasMore: Bool = false)
         -> FeedUpdateResult
     {
