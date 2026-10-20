@@ -2,6 +2,8 @@
 
 ## Unreleased — 20 October 2026
 
+- Event overviews show "Earlier in This Story": up to three earlier events of the same developing story, each opening its own overview (#314). People and organizations named across more than 5% (and at least ten) of the week's events no longer tie events together; reviewed wrong links fell from 7 of 36 to 1 of 45.
+
 - Briefing is a daily edition, after Kagi News: selected once a day at a chosen hour (Settings → Reading, default 7:00), shared by every window and kept across relaunch until the next edition; New Edition selects one early.
 - Event overviews follow a Kagi News story card's order: Highlights (formerly Key facts), then Perspectives and Timeline, then sources. Highlights skip fragments under five words and lead with the statements closest to the coverage's headlines; analysis version 9 regenerates cached overviews.
 - Reader v8 re-extracts stories stored before timestamp-only metadata blocks were dropped.

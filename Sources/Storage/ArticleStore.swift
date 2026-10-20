@@ -377,7 +377,7 @@ final class ArticleStore: ObservableObject {
         try await database.fetchArticles(limit: nil, eventID: eventID)
     }
 
-    /// Experimental backend candidates for #314; intentionally not displayed before label review.
+    /// Earlier events of the same developing story (#314), shown in the event overview.
     func relatedStoryEvents(eventID: String) async throws -> [RelatedStoryEvent] {
         try await EventStoryRelation.find(eventID: eventID, in: database)
     }

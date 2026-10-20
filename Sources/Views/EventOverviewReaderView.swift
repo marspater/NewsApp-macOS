@@ -10,7 +10,8 @@ import SwiftUI
 /// 2. Short introduction (1–2 paragraphs)
 /// 3. Fitting main image with caption and attribution
 /// 4. Highlights: key verified facts with passage-anchored citation links
-/// 5. Evidence sections: participant perspectives, timeline, thematic angle (Kagi News story order)
+/// 5. Evidence sections: participant perspectives, timeline, thematic angle (Kagi News story order), then
+///    "Earlier in This Story": related earlier events, each opening its own overview (#314)
 /// 6. Compact expandable source list
 /// 7. Links to original publications
 /// Sections without enough data are absent.
@@ -20,19 +21,28 @@ struct EventOverviewReaderView: View {
     let textScale: CGFloat
     let onSelectArticle: (FeedArticle) -> Void
     let onSelectCitation: (OverviewCitation, FeedArticle?) -> Void
+    /// Earlier events of the same developing story; never merged into this one.
+    let relatedEvents: [RelatedStoryEvent]
+    let onSelectRelatedEvent: (RelatedStoryEvent) -> Void
 
     init(
         overview: EventOverviewDocument,
         memberArticles: [FeedArticle],
         textScale: CGFloat = 1.0,
+        relatedEvents: [RelatedStoryEvent] = [],
         onSelectArticle: @escaping (FeedArticle) -> Void,
-        onSelectCitation: @escaping (OverviewCitation, FeedArticle?) -> Void
+        onSelectCitation: @escaping (OverviewCitation, FeedArticle?) -> Void,
+        onSelectRelatedEvent: @escaping (RelatedStoryEvent) -> Void = { _ in
+            // Callers without navigation (harnesses, previews) pass no related events, so nothing calls this.
+        }
     ) {
         self.overview = overview
         self.memberArticles = memberArticles
         self.textScale = textScale
+        self.relatedEvents = relatedEvents
         self.onSelectArticle = onSelectArticle
         self.onSelectCitation = onSelectCitation
+        self.onSelectRelatedEvent = onSelectRelatedEvent
     }
 
     @Environment(\.colorScheme) private var colorScheme
@@ -289,6 +299,10 @@ struct EventOverviewReaderView: View {
 
                     // 5. With evidence: participant positions, timeline, thematic angle
                     evidenceSections
+
+                    if !relatedEvents.isEmpty {
+                        earlierInStorySection
+                    }
 
                     // 6. Compact expandable source list
                     if !memberArticles.isEmpty {
@@ -623,6 +637,53 @@ struct EventOverviewReaderView: View {
             RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous)
                 .stroke(currentBorderStrokeColor, lineWidth: 1)
         )
+    }
+
+    // MARK: - Earlier in This Story (#314)
+
+    /// Each row opens its own event; read and saved state stay with that event.
+    private var earlierInStorySection: some View {
+        VStack(alignment: .leading, spacing: AppSpacing.sm) {
+            Text("Earlier in This Story")
+                .font(AppTypography.overviewFont(.section, scale: textScale))
+                .foregroundColor(AppColor.primaryText)
+                .accessibilityAddTraits(.isHeader)
+                .accessibilityHeading(.h2)
+
+            VStack(alignment: .leading, spacing: AppSpacing.sm) {
+                ForEach(relatedEvents, id: \.eventID) { event in
+                    Button {
+                        onSelectRelatedEvent(event)
+                    } label: {
+                        HStack(alignment: .firstTextBaseline, spacing: AppSpacing.sm) {
+                            Text(event.firstPublishedAt.formatted(.dateTime.month(.abbreviated).day()))
+                                .font(AppTypography.overviewFont(.captionMedium, scale: textScale))
+                                .foregroundColor(currentTertiaryTextColor)
+                                .monospacedDigit()
+                            Text(event.title)
+                                .font(AppTypography.overviewFont(.body, scale: textScale))
+                                .foregroundColor(AppColor.primaryText)
+                                .multilineTextAlignment(.leading)
+                            Spacer(minLength: AppSpacing.xs)
+                            Image(systemName: "chevron.right")
+                                .foregroundColor(currentTertiaryTextColor)
+                                .accessibilityHidden(true)
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help("Open the overview of this earlier event")
+                    .accessibilityHint("Opens this earlier event")
+
+                    if event.eventID != relatedEvents.last?.eventID {
+                        Divider().opacity(Self.dividerOpacity(for: contrast))
+                    }
+                }
+            }
+            .padding(AppSpacing.md)
+            .background(AppColor.cardBackground)
+            .clipShape(RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous))
+        }
     }
 
     // MARK: - Section 6: Evidence Sections (Timeline, Perspectives, Angle)

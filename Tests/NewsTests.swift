@@ -6600,6 +6600,10 @@ struct NewsTests {
         )
         assertTrue(
             EventStoryRelation.supports(earlierOrganization, organization), "Shared typed organizations can link")
+        let unrelatedCommon: Set<String> = ["someone else", "another agency"]
+        assertTrue(
+            EventStoryRelation.supports(earlier, later, commonActors: unrelatedCommon),
+            "A common-actor set without the shared actor keeps a valid link")
         for field in ["actor", "place", "country", "language", "topic", "date", "period"] {
             var other = later
             switch field {
@@ -6615,15 +6619,24 @@ struct NewsTests {
             if field == "period" { first.periods = ["q1"] }
             assertFalse(
                 EventStoryRelation.supports(first, other), "Weak or conflicting \(field) evidence rejects a link")
+            assertFalse(
+                EventStoryRelation.supports(first, other, commonActors: unrelatedCommon),
+                "The common-actor set never relaxes the \(field) rule")
         }
         var country = later
         country.places = ["@US"]
         assertTrue(EventStoryRelation.supports(earlier, country), "A shared country counts as a shared place")
+        assertFalse(
+            EventStoryRelation.supports(earlier, later, commonActors: earlier.people.union(earlier.organizations)),
+            "An actor common across the week's events does not tie two events together")
         var boundary = earlier
         boundary.date = now.addingTimeInterval(-EventStoryRelation.window)
         assertTrue(EventStoryRelation.supports(boundary, later), "The seven-day boundary is inclusive")
         boundary.date = boundary.date.addingTimeInterval(-1)
         assertFalse(EventStoryRelation.supports(boundary, later), "Older pairs are excluded")
+        assertFalse(
+            EventStoryRelation.supports(boundary, later, commonActors: unrelatedCommon),
+            "The common-actor set never widens the window")
 
         let db = DatabaseEngine(path: ":memory:")
         try await db.open()
@@ -6659,6 +6672,48 @@ struct NewsTests {
         assertEqual(links.map(\.eventID), [previous.id], "Only directly supported, wholly earlier events link")
         assertFalse(links.map(\.eventID).contains(half.id), "Support from half the members is not enough")
         assertEqual(links.first?.articleID, "earlier", "Navigation carries a stored member ID")
+        func row(_ id: String, hours: Double, event: String) -> EventMatchRow {
+            let story = article(id, hours: hours)
+            return EventMatchRow(
+                id: id, title: story.title, description: story.description, source: "Publisher",
+                date: story.pubDate, eventID: event)
+        }
+        let ranked = try EventStoryRelation.links(
+            target: [row("t", hours: 0, event: "target")],
+            candidates: (1...4).map { ("event-\($0)", [row("c\($0)", hours: -Double($0), event: "event-\($0)")]) })
+        assertEqual(
+            ranked.map(\.eventID), ["event-1", "event-2", "event-3"],
+            "At most three earlier events link, newest first")
+        let halfSupported = try EventStoryRelation.links(
+            target: [row("t", hours: 0, event: "target")],
+            candidates: [
+                (
+                    "half",
+                    [
+                        row("h1", hours: -3, event: "half"),
+                        EventMatchRow(
+                            id: "h2", title: "Football fans celebrate a match",
+                            description: "Football fans watched the team win a league match.", source: "Publisher",
+                            date: now.addingTimeInterval(-3 * 3600), eventID: "half"),
+                    ]
+                )
+            ], commonActors: unrelatedCommon)
+        assertTrue(halfSupported.isEmpty, "Two-thirds member support still applies with a common-actor set")
+        let cancelledLookup = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            return try await EventStoryRelation.find(eventID: current.id, in: db)
+        }
+        do {
+            _ = try await cancelledLookup.value
+            assertTrue(false, "A cancelled lookup must not return links")
+        } catch is CancellationError {}
+        assertEqual(
+            try await db.commonStoryTerms(["volodymyr zelenskyy"], before: now.addingTimeInterval(3600), share: 0.05),
+            [], "A name in only a few events is never common, however small the library")
+        assertEqual(
+            try await db.commonStoryTerms(
+                ["volodymyr zelenskyy", "absent name"], before: now.addingTimeInterval(3600), share: 0.05,
+                minimumEvents: 1), ["volodymyr zelenskyy"], "A name across most of the week's events is common")
         assertEqual(try await db.fetchEvent(id: current.id), current, "Lookup does not change the target event")
         assertEqual(try await db.fetchEvent(id: previous.id), previous, "Lookup does not change earlier membership")
         assertTrue(try await db.isRead(articleId: "earlier"), "Lookup preserves read state")
@@ -7541,7 +7596,9 @@ struct NewsTests {
         var nearMisses: [Pair] = []
         for event in events {
             let snapshot = try await db.relatedStoryEventRows(eventID: event.eventID)
-            let links = try EventStoryRelation.links(target: snapshot.target, candidates: snapshot.candidates)
+            let common = try await EventStoryRelation.commonActors(of: snapshot.target, in: db)
+            let links = try EventStoryRelation.links(
+                target: snapshot.target, candidates: snapshot.candidates, commonActors: common)
             guard let start = snapshot.target.map(\.date).min() else { continue }
             report["linksPerEvent_\(links.count)", default: 0] += 1
             let linked = Set(links.map(\.eventID))
@@ -7570,8 +7627,9 @@ struct NewsTests {
                         kind: stage, earlierID: candidate.id, laterID: event.eventID, earlier: candidate.members,
                         later: snapshot.target))
                 if !inWindow.isEmpty,
-                    try !EventStoryRelation.links(target: snapshot.target, candidates: [(candidate.id, inWindow)])
-                        .isEmpty
+                    try !EventStoryRelation.links(
+                        target: snapshot.target, candidates: [(candidate.id, inWindow)], commonActors: common
+                    ).isEmpty
                 {
                     report["windowBlocked_\(stage)_wouldLink", default: 0] += 1
                 }
@@ -7597,7 +7655,7 @@ struct NewsTests {
                             ? "noActorOnOneSide" : "differentActors"
                     } else if !pairs.contains(where: { !$0.places.isDisjoint(with: $1.places) }) {
                         "noSharedPlace"
-                    } else if !pairs.contains(where: { EventStoryRelation.supports($0, $1) }) {
+                    } else if !pairs.contains(where: { EventStoryRelation.supports($0, $1, commonActors: common) }) {
                         "noPairMeetsAll"
                     } else if linked.contains(candidate.id) { "linked" } else { "belowTwoThirdsSupport" }
                 report["candidateStage_\(stage)", default: 0] += 1

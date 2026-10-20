@@ -10,7 +10,7 @@ Build on Apple silicon with Xcode 27 selected. The deployment target remains mac
 
 ## Validation
 
-The current release simplification uses existing #102 labeled tune/English holdout regression inputs; the #409 comparison requires its original private replay export. Importance and overview review commands below remain opt-in historical audit tools, not new release requirements. Developing-story evaluation and its collector are parked with #314. See [the accepted plan](docs/plans/2026-10-17-release-simplification.md).
+The current release simplification uses existing #102 labeled tune/English holdout regression inputs; the #409 comparison requires its original private replay export. Importance and overview review commands below remain opt-in historical audit tools, not new release requirements. Developing-story links (#314) ship in event overviews; their collector stays disabled, and the review commands below re-measure wrong links on a private library copy. See [the accepted plan](docs/plans/2026-10-17-release-simplification.md).
 
 ```sh
 ./test.sh                         # Full regressions, including parser-to-embedding/clustering integration; also run by the commit hook

@@ -124,19 +124,22 @@ struct RelatedStoryEvent: Hashable, Sendable {
     let firstPublishedAt: Date
 }
 
-/// Experimental, read-only relation. Keep it out of the reader until reviewed wrong-link rates
-/// are acceptable. Missing signals deliberately produce no link.
+/// Read-only relation behind the overview's "Earlier in This Story" links. It never merges events; missing signals
+/// deliberately produce no link.
 enum EventStoryRelation {
     static let window: TimeInterval = 7 * 86400
     static let candidateLimit = 40
     static let linkLimit = 3
     static let memberLimit = 100
+    /// An actor in more of the week's events than this share does not, alone, tie two events together.
+    static let commonActorShare = 0.05
 
     static func find(eventID: String, in database: DatabaseEngine) async throws -> [RelatedStoryEvent] {
         let snapshot = try await database.relatedStoryEventRows(eventID: eventID)
+        let common = try await commonActors(of: snapshot.target, in: database)
         // NaturalLanguage work must not hold either the database actor or the main actor.
         let work = Task.detached(priority: .utility) {
-            try links(target: snapshot.target, candidates: snapshot.candidates)
+            try links(target: snapshot.target, candidates: snapshot.candidates, commonActors: common)
         }
         return try await withTaskCancellationHandler {
             let result = try await work.value
@@ -147,13 +150,30 @@ enum EventStoryRelation {
         }
     }
 
-    static func supports(_ earlier: EventFeatures, _ later: EventFeatures) -> Bool {
+    /// The target's people and organizations that are too common in the preceding week to tie events together.
+    static func commonActors(of target: [EventMatchRow], in database: DatabaseEngine) async throws -> Set<String> {
+        guard let start = target.map(\.date).min() else { return [] }
+        let actors = try await Task.detached(priority: .utility) {
+            var actors = Set<String>()
+            for row in target.prefix(memberLimit) {
+                try Task.checkCancellation()
+                let features = EventFeatures(title: row.title, description: row.description, date: row.date)
+                actors.formUnion(features.people.union(features.organizations))
+            }
+            return actors
+        }.value
+        return try await database.commonStoryTerms(actors, before: start, share: commonActorShare)
+    }
+
+    /// `commonActors` (a head of state, a government) never count as the shared actor: they appear across
+    /// unrelated stories, and were behind every wrong link in the 20 October 2026 review.
+    static func supports(_ earlier: EventFeatures, _ later: EventFeatures, commonActors: Set<String> = []) -> Bool {
         let gap = later.date.timeIntervalSince(earlier.date)
         guard earlier.language == "en", later.language == "en",
             earlier.date != DateParser.unknownDate, later.date != DateParser.unknownDate,
             gap > 0, gap <= window,
-            !earlier.people.isDisjoint(with: later.people)
-                || !earlier.organizations.isDisjoint(with: later.organizations),
+            !earlier.people.subtracting(commonActors).isDisjoint(with: later.people)
+                || !earlier.organizations.subtracting(commonActors).isDisjoint(with: later.organizations),
             !earlier.places.isDisjoint(with: later.places),
             earlier.keywords.intersection(later.keywords)
                 .subtracting(earlier.anchors.union(later.anchors)).count >= 2
@@ -168,7 +188,8 @@ enum EventStoryRelation {
     }
 
     static func links(
-        target: [EventMatchRow], candidates: [(id: String, members: [EventMatchRow])]
+        target: [EventMatchRow], candidates: [(id: String, members: [EventMatchRow])],
+        commonActors: Set<String> = []
     ) throws -> [RelatedStoryEvent] {
         try Task.checkCancellation()
         guard !target.isEmpty, target.count <= memberLimit,
@@ -193,7 +214,8 @@ enum EventStoryRelation {
             // ponytail: at most 40 events × 100 × 100 pairs; use indexed features if those caps grow.
             for (i, earlier) in features.enumerated() {
                 try Task.checkCancellation()
-                for (j, later) in targetFeatures.enumerated() where supports(earlier, later) {
+                for (j, later) in targetFeatures.enumerated()
+                where supports(earlier, later, commonActors: commonActors) {
                     supportedEarlier.insert(i)
                     supportedLater.insert(j)
                 }

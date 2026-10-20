@@ -116,6 +116,11 @@ struct ArticleDetailView: View {
     @State private var currentOverview: EventOverviewDocument? = nil
     @State private var highlightedPassage: String? = nil
     @State private var eventMemberArticles: [FeedArticle] = []
+    /// Earlier events of the overview's developing story, keyed by the event they were found for.
+    @State private var relatedStories: (eventID: String, events: [RelatedStoryEvent])?
+    /// An article opened from "Earlier in This Story": its event opens on the overview, even if an interrupted load
+    /// already reset the mode.
+    @State private var overviewRequestedArticleID: String?
     @State private var isOverviewLoading: Bool = false
     /// Identifies this reader to the overview coordinator, so closing it never clears another reader's event.
     @State private var overviewOwner = UUID()
@@ -254,6 +259,7 @@ struct ArticleDetailView: View {
                     overview: overview,
                     memberArticles: eventMemberArticles.isEmpty ? [currentArticle] : eventMemberArticles,
                     textScale: readerTextScale,
+                    relatedEvents: Self.relatedEventsToShow(relatedStories, overviewEventID: overview.eventID),
                     onSelectArticle: { article in
                         activeArticle = article
                         highlightedPassage = nil
@@ -265,6 +271,19 @@ struct ArticleDetailView: View {
                         }
                         highlightedPassage = citation.quote
                         experienceMode = .sourcePublication
+                    },
+                    onSelectRelatedEvent: { related in
+                        Task {
+                            // Opening the earlier event's first report keeps the reader on overviews.
+                            guard
+                                let article = try? await articleStore.database.fetchArticles(
+                                    limit: 1, id: related.articleID
+                                ).first
+                            else { return }
+                            highlightedPassage = nil
+                            overviewRequestedArticleID = article.id
+                            activeArticle = article
+                        }
                     }
                 )
                 .id(overview.id)
@@ -1103,6 +1122,20 @@ struct ArticleDetailView: View {
         )
     }
 
+    /// Earlier events only for the overview they were found for; none while a lookup is pending or after it failed.
+    static func relatedEventsToShow(
+        _ stored: (eventID: String, events: [RelatedStoryEvent])?, overviewEventID: String
+    ) -> [RelatedStoryEvent] {
+        guard let stored, stored.eventID == overviewEventID else { return [] }
+        return stored.events.filter { $0.eventID != overviewEventID }
+    }
+
+    /// The reader lands on the overview when it was already showing one, or when the article was opened from
+    /// "Earlier in This Story", even if an interrupted load reset the mode meanwhile.
+    static func opensOnOverview(showingOverview: Bool, requestedArticleID: String?, articleID: String) -> Bool {
+        showingOverview || requestedArticleID == articleID
+    }
+
     static func readerAnimation(reduceMotion: Bool) -> Animation? {
         reduceMotion ? nil : AppMotion.navigation
     }
@@ -1441,6 +1474,7 @@ struct ArticleDetailView: View {
             setOverviewLoading(false)
             currentOverview = nil
             eventMemberArticles = []
+            relatedStories = nil
             experienceMode = .sourcePublication
             await OverviewGenerationCoordinator.shared.clearVisibleEvent(owner: overviewOwner)
             return
@@ -1459,6 +1493,7 @@ struct ArticleDetailView: View {
                 currentArticle.publisherInputHash == inputHash
             else { return }
             eventMemberArticles = members.isEmpty ? [activeArticle] : members
+            await loadRelatedStories(eventID: eventID, articleID: articleID)
             return
         }
 
@@ -1471,7 +1506,9 @@ struct ArticleDetailView: View {
 
         // Never show another event's overview while this one loads. The reader returns to the overview by
         // itself only if it was already showing one (J/K across events); otherwise it stays on the article.
-        let returnToOverview = experienceMode == .eventOverview
+        let returnToOverview = Self.opensOnOverview(
+            showingOverview: experienceMode == .eventOverview, requestedArticleID: overviewRequestedArticleID,
+            articleID: articleID)
         if currentOverview?.eventID != eventID {
             currentOverview = nil
             experienceMode = .sourcePublication
@@ -1498,8 +1535,18 @@ struct ArticleDetailView: View {
             eventMemberArticles = resolvedMembers
             if returnToOverview && viewMode == .reader {
                 experienceMode = .eventOverview
+                overviewRequestedArticleID = nil
             }
+            await loadRelatedStories(eventID: eventID, articleID: articleID)
         }
+    }
+
+    /// Optional navigation after the overview shows: a failure or slow lookup only leaves the section out.
+    private func loadRelatedStories(eventID: String, articleID: String) async {
+        guard relatedStories?.eventID != eventID else { return }
+        let related = (try? await articleStore.relatedStoryEvents(eventID: eventID)) ?? []
+        guard !Task.isCancelled, activeArticle.id == articleID else { return }
+        relatedStories = (eventID, related)
     }
 
     private func resetReaderState() {
