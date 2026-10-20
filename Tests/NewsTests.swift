@@ -14732,6 +14732,20 @@ struct NewsTests {
         )
         let articles = [article1, article2, article3]
 
+        let highlightInput = [
+            PassageAnchoredFact(statement: "Earlier this month.", passageID: "p", quote: "q", articleID: "a"),
+            PassageAnchoredFact(
+                statement: "Officials said the weather stayed mild across the region today.", passageID: "p",
+                quote: "q", articleID: "a"),
+            PassageAnchoredFact(
+                statement: "The atmospheric survey of Venus begins after a long orbital approach.", passageID: "p",
+                quote: "q", articleID: "a"),
+        ]
+        assertEqual(
+            OverviewComposer.highlights(from: highlightInput, articles: articles).map(\.statement),
+            [highlightInput[2].statement, highlightInput[1].statement],
+            "Highlights drop fragments and lead with the statement closest to the headlines")
+
         // Verified facts extracted from passages
         let fact1 = PassageAnchoredFact(
             id: "f1",
