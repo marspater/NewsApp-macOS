@@ -19,7 +19,35 @@ jobs:
           name: "Verify Swift Package Manager build"
           command: swift build --force-resolved-versions --target News
 
+  deploy-marker:
+    macos:
+      xcode: "27.0"
+    steps:
+      - checkout
+      - run:
+          name: "Record deployment start"
+          command: |
+            circleci run release plan news-app --target-version="$CIRCLE_SHA1"
+            circleci run release update news-app --status=running
+      - run:
+          name: "Build release artifact"
+          command: ./build_release.sh
+      - run:
+          name: "Mark deployment SUCCESS"
+          command: circleci run release update news-app --status=SUCCESS
+          when: on_success
+      - run:
+          name: "Mark deployment FAILED"
+          command: circleci run release update news-app --status=FAILED
+          when: on_fail
+
 workflows:
   build-and-test:
     jobs:
       - test-macos
+      - deploy-marker:
+          requires:
+            - test-macos
+          filters:
+            branches:
+              only: main
