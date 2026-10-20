@@ -25,6 +25,25 @@ public struct FactOverviewValidationResult: Sendable, Equatable {
 public struct OverviewComposer: Sendable {
 
     /// Validates whether a fact candidate satisfies the quote grounding and passage invariants.
+    /// Up to five Highlights, after a Kagi News story card: whole statements of five or more words, those sharing the
+    /// most words with the coverage's headlines first, publisher order otherwise. Fragments such as "Earlier this
+    /// month." stay out; the timeline still sees every valid fact.
+    static func highlights(from facts: [PassageAnchoredFact], articles: [FeedArticle]) -> [PassageAnchoredFact] {
+        func words(_ text: String) -> Set<String> {
+            Set(TensionEventClassifier.words(text).filter { $0.count >= 4 })
+        }
+        let headline = words(articles.map(\.title).joined(separator: " "))
+        let substantive = facts.enumerated().filter {
+            $0.element.statement.split(whereSeparator: \.isWhitespace).count >= 5
+        }
+        let ranked = substantive.sorted { left, right in
+            let a = words(left.element.statement).intersection(headline).count
+            let b = words(right.element.statement).intersection(headline).count
+            return a == b ? left.offset < right.offset : a > b
+        }
+        return ranked.prefix(5).map(\.element)
+    }
+
     public static func validateFactForOverview(
         _ fact: PassageAnchoredFact,
         against passages: [EvidencePassage]
@@ -96,9 +115,7 @@ public struct OverviewComposer: Sendable {
         // Timeline items come from every valid fact, not only the key facts shown above them.
         let timeline = OverviewTimelineBuilder.build(facts: validFacts, passages: passages, articles: articles)
 
-        // Select up to 5 verified key facts
-        let targetFactCount = min(5, validFacts.count)
-        let selectedFacts = Array(validFacts.prefix(targetFactCount))
+        let selectedFacts = highlights(from: validFacts, articles: articles)
 
         var overviewFacts: [OverviewFact] = []
         var citations: [OverviewCitation] = []

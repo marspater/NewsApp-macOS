@@ -148,7 +148,7 @@ An event card is a story card followed by a coverage disclosure row (`AppTypogra
 - Typography comes from the reading style (Casper serif, Edition sans, Alto mono) through `AppTypography` functions; headings, quotes, lists, captions and code all have reader tokens. Body text is selectable.
 - Text size is one persisted preference applied to every story, adjustable from the View menu (Make Text Bigger ⌘+, Make Text Smaller ⌘−, Actual Size ⌘0) and the Reading options control.
 - Figures fill the measure, never crop, and carry caption and credit in `readerCaption`.
-- Generated content (summary, overview introduction, key facts) is labeled with the intelligence label, collapsible where it precedes publisher text, and never styled as publisher text.
+- Generated content (summary, overview introduction, highlights) is labeled with the intelligence label, collapsible where it precedes publisher text, and never styled as publisher text.
 - The terminal affordance uses standard bordered buttons: Open Web View, and Open in Browser.
 - Web mode keeps the protected-preview status line in content and the navigation controls in the toolbar.
 

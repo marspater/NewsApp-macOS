@@ -9583,6 +9583,37 @@ struct NewsTests {
 
     static func testFiniteBriefing() async throws {
         print("  - Testing bounded, balanced and frozen briefings (#162)...")
+        var utc = Calendar(identifier: .gregorian)
+        utc.timeZone = TimeZone(identifier: "UTC")!
+        let morning = Date(timeIntervalSince1970: 1_780_000_000)  // 2026-05-28 20:26 UTC
+        let dayStart = utc.startOfDay(for: morning)
+        assertEqual(
+            FiniteBriefing.editionStart(now: morning, hour: 7, calendar: utc), dayStart.addingTimeInterval(7 * 3600),
+            "After the edition hour, today's edition is due")
+        let early = dayStart.addingTimeInterval(5 * 3600)
+        assertEqual(
+            FiniteBriefing.editionStart(now: early, hour: 7, calendar: utc),
+            dayStart.addingTimeInterval(-17 * 3600), "Before the edition hour, yesterday's edition is still due")
+        assertTrue(
+            FiniteBriefing.isCurrent(
+                selectedAt: dayStart.addingTimeInterval(8 * 3600), now: morning, hour: 7, calendar: utc),
+            "An edition selected after today's hour stays current")
+        assertFalse(
+            FiniteBriefing.isCurrent(
+                selectedAt: dayStart.addingTimeInterval(6 * 3600), now: morning, hour: 7, calendar: utc),
+            "An edition selected before today's hour is replaced")
+        assertFalse(
+            FiniteBriefing.isCurrent(selectedAt: morning.addingTimeInterval(60), now: morning, hour: 7, calendar: utc),
+            "An edition stamped in the future is not trusted")
+        var london = Calendar(identifier: .gregorian)
+        london.timeZone = TimeZone(identifier: "Europe/London")!
+        // 24 October 2026 08:00 BST; clocks go back on the 25th, so the next 07:00 is 25 hours later.
+        let beforeChange = london.date(from: DateComponents(year: 2026, month: 10, day: 24, hour: 8))!
+        let next = FiniteBriefing.nextEditionStart(now: beforeChange, hour: 7, calendar: london)
+        assertEqual(
+            london.dateComponents([.day, .hour], from: next), DateComponents(day: 25, hour: 7),
+            "The next edition keeps its local hour across a daylight-saving change")
+
         let now = Date(timeIntervalSince1970: 1_790_928_000)
         func article(_ id: String, age: TimeInterval, source: String = "Dominant", category: String = "Tech")
             -> FeedArticle
@@ -14708,6 +14739,20 @@ struct NewsTests {
             fullContent: "Original complete publisher article content 3"
         )
         let articles = [article1, article2, article3]
+
+        let highlightInput = [
+            PassageAnchoredFact(statement: "Earlier this month.", passageID: "p", quote: "q", articleID: "a"),
+            PassageAnchoredFact(
+                statement: "Officials said the weather stayed mild across the region today.", passageID: "p",
+                quote: "q", articleID: "a"),
+            PassageAnchoredFact(
+                statement: "The atmospheric survey of Venus begins after a long orbital approach.", passageID: "p",
+                quote: "q", articleID: "a"),
+        ]
+        assertEqual(
+            OverviewComposer.highlights(from: highlightInput, articles: articles).map(\.statement),
+            [highlightInput[2].statement, highlightInput[1].statement],
+            "Highlights drop fragments and lead with the statement closest to the headlines")
 
         // Verified facts extracted from passages
         let fact1 = PassageAnchoredFact(
