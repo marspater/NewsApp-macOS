@@ -9,9 +9,9 @@ import SwiftUI
 /// 1. Title, update time, article count and publisher count
 /// 2. Short introduction (1–2 paragraphs)
 /// 3. Fitting main image with caption and attribution
-/// 4. Key verified facts with passage-anchored citation links
-/// 5. Compact expandable source list
-/// 6. Evidence sections: timeline, participant perspectives, thematic angle
+/// 4. Highlights: key verified facts with passage-anchored citation links
+/// 5. Evidence sections: participant perspectives, timeline, thematic angle (Kagi News story order)
+/// 6. Compact expandable source list
 /// 7. Links to original publications
 /// Sections without enough data are absent.
 struct EventOverviewReaderView: View {
@@ -287,13 +287,13 @@ struct EventOverviewReaderView: View {
                         keyFactsSection
                     }
 
-                    // 5. Compact expandable source list
+                    // 5. With evidence: participant positions, timeline, thematic angle
+                    evidenceSections
+
+                    // 6. Compact expandable source list
                     if !memberArticles.isEmpty {
                         compactSourcesSection
                     }
-
-                    // 6. With evidence: timeline, participant positions, thematic angle
-                    evidenceSections
 
                     // 7. Links to original publications
                     if !memberArticles.isEmpty {
@@ -457,7 +457,7 @@ struct EventOverviewReaderView: View {
 
     private var keyFactsSection: some View {
         VStack(alignment: .leading, spacing: AppSpacing.sm) {
-            Text("Key facts")
+            Text("Highlights")
                 .font(AppTypography.overviewFont(.section, scale: textScale))
                 .foregroundColor(AppColor.primaryText)
                 .accessibilityAddTraits(.isHeader)
@@ -637,14 +637,13 @@ struct EventOverviewReaderView: View {
             coverageSentiment: overview.coverageSentiment
         ) {
             VStack(alignment: .leading, spacing: AppSpacing.lg) {
-                // Timeline
-                if !validTimeline.isEmpty {
-                    timelineSection
-                }
-
-                // Participant positions / perspectives
+                // Participant positions / perspectives, then how the event unfolded
                 if !validPerspectives.isEmpty {
                     perspectivesSection
+                }
+
+                if !validTimeline.isEmpty {
+                    timelineSection
                 }
 
                 // Thematic angle

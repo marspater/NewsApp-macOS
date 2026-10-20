@@ -9583,6 +9583,29 @@ struct NewsTests {
 
     static func testFiniteBriefing() async throws {
         print("  - Testing bounded, balanced and frozen briefings (#162)...")
+        var utc = Calendar(identifier: .gregorian)
+        utc.timeZone = TimeZone(identifier: "UTC")!
+        let morning = Date(timeIntervalSince1970: 1_780_000_000)  // 2026-05-28 20:26 UTC
+        let dayStart = utc.startOfDay(for: morning)
+        assertEqual(
+            FiniteBriefing.editionStart(now: morning, hour: 7, calendar: utc), dayStart.addingTimeInterval(7 * 3600),
+            "After the edition hour, today's edition is due")
+        let early = dayStart.addingTimeInterval(5 * 3600)
+        assertEqual(
+            FiniteBriefing.editionStart(now: early, hour: 7, calendar: utc),
+            dayStart.addingTimeInterval(-17 * 3600), "Before the edition hour, yesterday's edition is still due")
+        assertTrue(
+            FiniteBriefing.isCurrent(
+                selectedAt: dayStart.addingTimeInterval(8 * 3600), now: morning, hour: 7, calendar: utc),
+            "An edition selected after today's hour stays current")
+        assertFalse(
+            FiniteBriefing.isCurrent(
+                selectedAt: dayStart.addingTimeInterval(6 * 3600), now: morning, hour: 7, calendar: utc),
+            "An edition selected before today's hour is replaced")
+        assertFalse(
+            FiniteBriefing.isCurrent(selectedAt: morning.addingTimeInterval(60), now: morning, hour: 7, calendar: utc),
+            "An edition stamped in the future is not trusted")
+
         let now = Date(timeIntervalSince1970: 1_790_928_000)
         func article(_ id: String, age: TimeInterval, source: String = "Dominant", category: String = "Tech")
             -> FeedArticle

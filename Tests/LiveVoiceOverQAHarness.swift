@@ -1102,8 +1102,9 @@ final class LiveVoiceOverInspector {
         assert(metaLine != nil, "Overview metadata is combined into a single accessibility element")
 
         // 3. Section Headings (H2)
-        for section in ["Key facts", "Timeline", "Perspectives", "Economic Impact", "Sources", "Original publications"]
-        {
+        for section in [
+            "Highlights", "Perspectives", "Timeline", "Economic Impact", "Sources", "Original publications",
+        ] {
             _ = heading(order3, text: section, level: 2)
         }
 

@@ -45,6 +45,7 @@ struct SettingsView: View {
     @Environment(\.openWindow) private var openWindow
 
     @AppStorage(SettingsView.lastPaneStorageKey) private var selectedPane: SettingsPane = .general
+    @AppStorage("briefingEditionHour") private var briefingEditionHour = FiniteBriefing.defaultEditionHour
     @State private var newFeedURL: String = ""
     @State private var webCacheSize: String = "Calculating…"
     @State private var databaseSize: String = "Calculating…"
@@ -149,6 +150,17 @@ struct SettingsView: View {
             Section("Reading Behavior") {
                 Toggle("Auto-Hide Read Stories", isOn: $themeManager.autoHideRead)
                 Text("Stories will disappear from filtered views once marked as read.")
+                    .font(AppTypography.caption)
+                    .foregroundColor(AppColor.secondaryText)
+                Picker("Daily Briefing Edition", selection: $briefingEditionHour) {
+                    ForEach(0..<24, id: \.self) { hour in
+                        Text(
+                            Calendar.current.date(bySettingHour: hour, minute: 0, second: 0, of: Date())?
+                                .formatted(date: .omitted, time: .shortened) ?? "\(hour):00"
+                        ).tag(hour)
+                    }
+                }
+                Text("Briefing selects one edition a day at this time and keeps it until the next one.")
                     .font(AppTypography.caption)
                     .foregroundColor(AppColor.secondaryText)
             }

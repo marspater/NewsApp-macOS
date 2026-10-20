@@ -60,6 +60,10 @@ struct ArticleListView: View {
     @State private var focusedArticleID: String? = nil
 
     @State private var briefing: FiniteBriefing?
+    @AppStorage("briefingEditionHour") private var briefingEditionHour = FiniteBriefing.defaultEditionHour
+    /// The stored edition, shared by every window: when it was selected and its story IDs in order.
+    @AppStorage("briefingEditionSelectedAt") private var briefingEditionSelectedAt = 0.0
+    @AppStorage("briefingEditionArticleIDs") private var briefingEditionArticleIDs = ""
     @State private var imagePrefetchStart = 0
     @Environment(\.readerImageLoader) private var imageLoader
 
@@ -337,8 +341,16 @@ struct ArticleListView: View {
             isLoadingPage = true
             defer { if queryRunID == runID { isLoadingPage = false } }
             do {
+                let now = Date()
+                if let current = briefing,
+                    !FiniteBriefing.isCurrent(selectedAt: current.startedAt, now: now, hour: briefingEditionHour)
+                {
+                    briefing = nil
+                }
+                if briefing == nil, let stored = try await storedBriefingEdition(now: now) {
+                    briefing = stored
+                }
                 if briefing == nil {
-                    let now = Date()
                     let candidates = try await articleStore.database.fetchArticles(
                         isRead: false, limit: FiniteBriefing.candidateLimit,
                         publicationWindow: now.addingTimeInterval(-FiniteBriefing.duration)...now,
@@ -349,9 +361,12 @@ struct ArticleListView: View {
                     try Task.checkCancellation()
                     let interests = try await articleStore.database.briefingInterests(now: now)
                     try Task.checkCancellation()
-                    briefing = FiniteBriefing(
+                    let edition = FiniteBriefing(
                         candidates: candidates, readIDs: readManager.readArticles, now: now, priorities: priorities,
                         interests: interests)
+                    briefing = edition
+                    briefingEditionSelectedAt = edition.startedAt.timeIntervalSince1970
+                    briefingEditionArticleIDs = edition.articles.map(\.id).joined(separator: "\n")
                 }
                 buffer.replace(with: FeedSnapshot(articles: briefing?.articles ?? []))
                 hasMoreResults = false
@@ -648,8 +663,8 @@ struct ArticleListView: View {
         if isBriefing {
             if #available(macOS 26, *) { ToolbarSpacer(.fixed, placement: .primaryAction) }
             ToolbarItem(placement: .primaryAction) {
-                Button("New Briefing", action: startNewBriefing)
-                    .help("Select a new briefing from the latest unread stories")
+                Button("New Edition", action: startNewBriefing)
+                    .help("Select a new edition now from the latest unread stories")
             }
         }
     }
@@ -672,7 +687,10 @@ struct ArticleListView: View {
 
     /// Story count, how many cards group an event's coverage, and when feeds last refreshed.
     private var listSubtitle: String {
-        if isBriefing { return "Main stories · Your interests and importance · Last 24 hours" }
+        if isBriefing {
+            let edition = (briefing?.startedAt ?? Date()).formatted(.dateTime.weekday(.wide).month(.wide).day())
+            return "\(edition) edition · Main stories · Your interests and importance"
+        }
         var parts = ["\(entries.count) \(entries.count == 1 ? "story" : "stories")"]
         if !isSearching && (selectedTopic ?? "Today") == "Today" {
             parts.insert(Date().formatted(.dateTime.weekday(.wide).month(.wide).day()), at: 0)
@@ -687,7 +705,30 @@ struct ArticleListView: View {
 
     private func startNewBriefing() {
         briefing = nil
+        briefingEditionArticleIDs = ""
         pageRequest += 1
+    }
+
+    /// Today's stored edition, when one was selected since the edition hour; stories since removed are skipped.
+    private func storedBriefingEdition(now: Date) async throws -> FiniteBriefing? {
+        let selectedAt = Date(timeIntervalSince1970: briefingEditionSelectedAt)
+        let ids = briefingEditionArticleIDs.split(separator: "\n").map(String.init)
+        guard !ids.isEmpty, FiniteBriefing.isCurrent(selectedAt: selectedAt, now: now, hour: briefingEditionHour)
+        else { return nil }
+        var articles: [FeedArticle] = []
+        for id in ids.prefix(FiniteBriefing.maximumStories) {
+            if let article = try await articleStore.database.fetchArticles(limit: 1, id: id).first {
+                articles.append(article)
+            }
+            try Task.checkCancellation()
+        }
+        return articles.isEmpty ? nil : FiniteBriefing(startedAt: selectedAt, articles: articles)
+    }
+
+    private var nextEditionText: String {
+        let next = FiniteBriefing.editionStart(now: Date(), hour: briefingEditionHour)
+            .addingTimeInterval(FiniteBriefing.duration)
+        return next.formatted(date: .omitted, time: .shortened)
     }
 
     private var briefingCompletion: some View {
@@ -700,7 +741,7 @@ struct ArticleListView: View {
                 )
                 .font(AppTypography.sectionTitle)
                 Text(
-                    "Selection frozen at \(briefing.startedAt.formatted(date: .omitted, time: .shortened)). New stories stay in your regular feed."
+                    "Edition selected at \(briefing.startedAt.formatted(date: .omitted, time: .shortened)). The next edition arrives at \(nextEditionText). New stories stay in your regular feed."
                 )
                 .font(AppTypography.caption)
                 .foregroundStyle(AppColor.secondaryText)
