@@ -21,14 +21,55 @@ RULES=(
     "direct-glass|glassEffect|GlassEffectContainer"
     "scroll-edge-style|scrollEdgeEffectStyle"
     "uppercased|\.uppercased\(\)"
-    "platform-label|ProgressView\([^)]*\)\.accessibilityLabel"
+    "platform-label|(see platform_labels)"
     "material|\.(ultraThin|thin|regular|thick|ultraThick)Material"
 )
 ALLOWED_COLORS='Color\.(clear|primary|secondary|accentColor)$'
 
+# Labels set on AppKit-backed views (a ProgressView, or text with .textSelection(.enabled)) anywhere in the same
+# modifier chain, which may span lines: the chain continues while lines start with "." or ")". DESIGN.md section 16.
+platform_labels() {
+    awk '
+        { line = $0; sub(/^[ \t]+/, "", line) }
+        chained && line !~ /^[.)]/ { chained = 0 }
+        {
+            start = 0
+            if (match(line, /ProgressView\(/)) start = RSTART
+            else if (match(line, /\.textSelection\(\.enabled\)/)) start = RSTART
+            if (start) { chained = 1; rest = substr(line, start) } else { rest = line }
+            if (chained && index(rest, ".accessibilityLabel(")) count++
+        }
+        END { print count + 0 }
+    ' "$1"
+}
+
+# Self-check on every run: three labelled AppKit-backed views (one split across lines), one labelled container.
+platform_probe="$(mktemp)"
+cat > "$platform_probe" <<'SWIFT'
+ProgressView()
+    .controlSize(.small)
+    .accessibilityLabel("Loading")
+Text(credit).font(.body)
+    .textSelection(.enabled)
+    .accessibilityLabel("Credit")
+ProgressView().accessibilityLabel("One line")
+HStack {
+    ProgressView().accessibilityHidden(true)
+}
+.accessibilityLabel("Container")
+SWIFT
+if [[ "$(platform_labels "$platform_probe")" != "3" ]]; then
+    rm -f "$platform_probe"
+    echo "Design lint: the AppKit-backed label check failed its self-test." >&2
+    exit 1
+fi
+rm -f "$platform_probe"
+
 count() {
     local rule="$1" pattern="$2" file="$3"
-    if [[ "$rule" == "literal-color" ]]; then
+    if [[ "$rule" == "platform-label" ]]; then
+        platform_labels "$file"
+    elif [[ "$rule" == "literal-color" ]]; then
         { grep -o -E "$pattern" "$file" || true; } | { grep -v -E "$ALLOWED_COLORS" || true; } | wc -l | tr -d ' '
     else
         { grep -o -E "$pattern" "$file" || true; } | wc -l | tr -d ' '

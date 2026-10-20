@@ -112,10 +112,15 @@ struct EventCardView: View {
                     .foregroundStyle(AppColor.secondaryText)
                     .padding(AppSpacing.sm)
             } else if members.isEmpty {
-                ProgressView()
-                    .controlSize(.small)
-                    .padding(AppSpacing.sm)
-                    .accessibilityLabel("Loading sources")
+                // The AppKit-backed spinner is hidden; a plain container carries the label (DESIGN.md 16).
+                HStack {
+                    ProgressView()
+                        .controlSize(.small)
+                        .accessibilityHidden(true)
+                }
+                .padding(AppSpacing.sm)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("Loading sources")
             }
             ForEach(members) { member in
                 EventSourceRow(
