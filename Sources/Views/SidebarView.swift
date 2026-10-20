@@ -21,7 +21,9 @@ struct SidebarView: View {
     var showsTensionReading = false
     var tensionReading: WorldTensionReading?
     var tensionStatus = "Not assessed"
-    var openTension: () -> Void = {}
+    var openTension: () -> Void = {
+        // Default no-op action
+    }
 
     @EnvironmentObject private var appSettings: AppSettings
     @EnvironmentObject private var feedManager: FeedManager

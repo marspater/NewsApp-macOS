@@ -45,92 +45,82 @@ public enum NewsCategory: String, CaseIterable, Sendable, Codable {
         let trimmed = firstLine.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
 
-        // 1. Exact case-insensitive match against canonical enum values
-        for cat in allCases where cat.rawValue.localizedCaseInsensitiveCompare(trimmed) == .orderedSame {
-            return cat
-        }
-
+        if let exact = matchExact(trimmed) { return exact }
         let lower = trimmed.lowercased()
+        if let highPriority = matchHighPriorityOverlap(lower) { return highPriority }
+        let tokens = Set(lower.components(separatedBy: CharacterSet.alphanumerics.inverted).filter { !$0.isEmpty })
+        return matchSynonyms(lower, tokens: tokens)
+    }
 
-        // 2. High-priority semantic disambiguation for multi-topic overlaps
-        // Health over Technology (e.g., medical AI, clinical devices, vaccines, disease)
+    private static func matchExact(_ trimmed: String) -> NewsCategory? {
+        allCases.first { $0.rawValue.localizedCaseInsensitiveCompare(trimmed) == .orderedSame }
+    }
+
+    private static func matchHighPriorityOverlap(_ lower: String) -> NewsCategory? {
         if lower.contains("health") || lower.contains("medical") || lower.contains("clinical")
             || lower.contains("hospital") || lower.contains("vaccine") || lower.contains("disease")
             || lower.contains("pharma")
         {
             return .health
         }
-
-        // Science over Technology (e.g., space mission, telescope, NASA, quantum research, astronomy)
         if lower.contains("space") || lower.contains("nasa") || lower.contains("astronomy") || lower.contains("quantum")
             || lower.contains("biology") || lower.contains("physics") || lower.contains("telescope")
         {
             return .science
         }
-
-        // Business over Politics or Tech (e.g., stock market, earnings, inflation, IPO, central bank, revenue)
         if lower.contains("stock") || lower.contains("wall street") || lower.contains("earnings")
             || lower.contains("inflation") || lower.contains("investor") || lower.contains("revenue")
             || lower.contains("recession") || lower.contains("finance") || lower.contains("dividend")
         {
             return .business
         }
-
-        // Politics over World or Business (e.g., congress, senate, election, voter, parliament, campaign)
         if lower.contains("congress") || lower.contains("senate") || lower.contains("election")
             || lower.contains("politic") || lower.contains("lawmaker") || lower.contains("parliament")
             || lower.contains("white house") || lower.contains("governor") || lower.contains("campaign")
         {
             return .politics
         }
+        return nil
+    }
 
-        let tokens = Set(lower.components(separatedBy: CharacterSet.alphanumerics.inverted).filter { !$0.isEmpty })
+    private struct SynonymGroup {
+        let category: NewsCategory
+        let keywords: [String]
+        let token: String?
 
-        // 3. Normalized synonym mappings
-        if lower.contains("tech") || lower.contains("software") || lower.contains("hardware") || tokens.contains("ai")
-            || lower.contains("artificial intelligence") || lower.contains("cyber") || lower.contains("chip")
-        {
-            return .technology
+        init(_ category: NewsCategory, _ keywords: [String], token: String? = nil) {
+            self.category = category
+            self.keywords = keywords
+            self.token = token
         }
-        if lower.contains("econ") || lower.contains("biz") || lower.contains("market") { return .business }
-        if lower.contains("sport") || lower.contains("football") || lower.contains("basketball")
-            || lower.contains("soccer") || lower.contains("league")
-        {
-            return .sports
-        }
-        if lower.contains("entertain") || lower.contains("movie") || lower.contains("film") || lower.contains("music")
-            || lower.contains("celebrity") || lower.contains("cinema")
-        {
-            return .entertainment
-        }
-        if lower.contains("wellness") || lower.contains("fitness") || lower.contains("nutrition") { return .health }
-        if lower.contains("travel") || lower.contains("tourism") || lower.contains("vacation")
-            || lower.contains("flight")
-        {
-            return .travel
-        }
-        if lower.contains("food") || lower.contains("cook") || lower.contains("dining") || lower.contains("culinary")
-            || lower.contains("recipe") || lower.contains("restaurant")
-        {
-            return .food
-        }
-        if lower.contains("style") || lower.contains("fashion") || lower.contains("runway") || lower.contains("apparel")
-        {
-            return .fashion
-        }
-        if lower.contains("global") || lower.contains("world") || lower.contains("international")
-            || lower.contains("foreign") || lower.contains("geopolitic") || tokens.contains("un")
-            || lower.contains("united nations") || lower.contains("diplomat")
-        {
-            return .world
-        }
-        if lower.contains("life") || lower.contains("living") || lower.contains("lifestyle") || lower.contains("home")
-            || lower.contains("parenting")
-        {
-            return .lifestyle
-        }
-        if lower.contains("sci") || lower.contains("research") { return .science }
+    }
 
+    private static let synonymKeywordGroups: [SynonymGroup] = [
+        SynonymGroup(
+            .technology, ["tech", "software", "hardware", "artificial intelligence", "cyber", "chip"], token: "ai"),
+        SynonymGroup(.business, ["econ", "biz", "market"]),
+        SynonymGroup(.sports, ["sport", "football", "basketball", "soccer", "league"]),
+        SynonymGroup(.entertainment, ["entertain", "movie", "film", "music", "celebrity", "cinema"]),
+        SynonymGroup(.health, ["wellness", "fitness", "nutrition"]),
+        SynonymGroup(.travel, ["travel", "tourism", "vacation", "flight"]),
+        SynonymGroup(.food, ["food", "cook", "dining", "culinary", "recipe", "restaurant"]),
+        SynonymGroup(.fashion, ["style", "fashion", "runway", "apparel"]),
+        SynonymGroup(
+            .world, ["global", "world", "international", "foreign", "geopolitic", "united nations", "diplomat"],
+            token: "un"),
+        SynonymGroup(.lifestyle, ["life", "living", "lifestyle", "home", "parenting"]),
+        SynonymGroup(.science, ["sci", "research"]),
+    ]
+
+    private static func matchSynonyms(_ lower: String, tokens: Set<String>) -> NewsCategory? {
+        for group in synonymKeywordGroups {
+            if let token = group.token, tokens.contains(token) {
+                return group.category
+            }
+            if group.keywords.contains(where: { lower.contains($0) }) {
+                return group.category
+            }
+        }
         return nil
     }
 }

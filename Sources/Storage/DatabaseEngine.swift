@@ -2887,7 +2887,7 @@ actor DatabaseEngine {
 
     /// Compatibility for historical audit callers. Importance no longer hides stories.
     func waitingStoryCount(
-        section: String? = nil, isRead: Bool? = nil, isSaved: Bool? = nil, muting: MuteRules = MuteRules()
+        section _: String? = nil, isRead _: Bool? = nil, isSaved _: Bool? = nil, muting _: MuteRules = MuteRules()
     ) throws -> Int {
         0
     }

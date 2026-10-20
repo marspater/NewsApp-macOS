@@ -590,7 +590,7 @@ enum HTMLDOMBuilder {
                     _ = scanner.scanUpToString(">")
                     _ = scanner.scanString(">")
                 } else {
-                    handleOpeningTag(scanner: scanner, html: cleanHTML, stack: &stack)
+                    handleOpeningTag(scanner: scanner, stack: &stack)
                 }
             } else {
                 handleTextNode(scanner: scanner, stack: &stack)
@@ -623,7 +623,7 @@ enum HTMLDOMBuilder {
         }
     }
 
-    private static func handleOpeningTag(scanner: Scanner, html: String, stack: inout [DOMElementBuilder]) {
+    private static func handleOpeningTag(scanner: Scanner, stack: inout [DOMElementBuilder]) {
         // Opening or self-closing tag
         guard let tagContent = scanner.scanUpToString(">") else { return }
         _ = scanner.scanString(">")
@@ -633,32 +633,8 @@ enum HTMLDOMBuilder {
         if isIgnored(
             tag: tagName, attributes: parsed.attributes, insideArticle: stack.contains { $0.tag == "article" })
         {
-            if parsed.isSelfClosing { return }
-            var depth = 1
-            while !scanner.isAtEnd && depth > 0 {
-                _ = scanner.scanUpToString("<")
-                if scanner.scanString("</") != nil {
-                    if let closeName = scanner.scanUpToString(">"),
-                        closeName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == tagName
-                    {
-                        depth -= 1
-                        _ = scanner.scanString(">")
-                    }
-                } else if scanner.scanString("<") != nil {
-                    if let openName = scanner.scanUpToString(">") {
-                        let openTag =
-                            openName.split(whereSeparator: { $0.isWhitespace }).first.map(String.init)?.lowercased()
-                            ?? ""
-                        if openTag == tagName
-                            && !openName.trimmingCharacters(in: .whitespacesAndNewlines).hasSuffix("/")
-                        {
-                            depth += 1
-                        }
-                        _ = scanner.scanString(">")
-                    }
-                } else {
-                    _ = scanner.scanCharacter()
-                }
+            if !parsed.isSelfClosing {
+                skipIgnoredSubtree(scanner: scanner, tagName: tagName)
             }
             return
         }
@@ -681,6 +657,35 @@ enum HTMLDOMBuilder {
             stack.last?.children.append(node)
         } else {
             stack.append(elementBuilder)
+        }
+    }
+
+    private static func skipIgnoredSubtree(scanner: Scanner, tagName: String) {
+        var depth = 1
+        while !scanner.isAtEnd && depth > 0 {
+            _ = scanner.scanUpToString("<")
+            if scanner.scanString("</") != nil {
+                if let closeName = scanner.scanUpToString(">"),
+                    closeName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == tagName
+                {
+                    depth -= 1
+                    _ = scanner.scanString(">")
+                }
+            } else if scanner.scanString("<") != nil {
+                if let openName = scanner.scanUpToString(">") {
+                    let openTag =
+                        openName.split(whereSeparator: { $0.isWhitespace }).first.map(String.init)?.lowercased()
+                        ?? ""
+                    if openTag == tagName
+                        && !openName.trimmingCharacters(in: .whitespacesAndNewlines).hasSuffix("/")
+                    {
+                        depth += 1
+                    }
+                    _ = scanner.scanString(">")
+                }
+            } else {
+                _ = scanner.scanCharacter()
+            }
         }
     }
 
