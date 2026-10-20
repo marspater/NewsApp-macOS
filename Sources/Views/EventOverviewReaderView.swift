@@ -32,7 +32,9 @@ struct EventOverviewReaderView: View {
         relatedEvents: [RelatedStoryEvent] = [],
         onSelectArticle: @escaping (FeedArticle) -> Void,
         onSelectCitation: @escaping (OverviewCitation, FeedArticle?) -> Void,
-        onSelectRelatedEvent: @escaping (RelatedStoryEvent) -> Void = { _ in }
+        onSelectRelatedEvent: @escaping (RelatedStoryEvent) -> Void = { _ in
+            // Callers without navigation (harnesses, previews) pass no related events, so nothing calls this.
+        }
     ) {
         self.overview = overview
         self.memberArticles = memberArticles

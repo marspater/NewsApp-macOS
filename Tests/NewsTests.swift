@@ -6662,6 +6662,18 @@ struct NewsTests {
         assertEqual(links.map(\.eventID), [previous.id], "Only directly supported, wholly earlier events link")
         assertFalse(links.map(\.eventID).contains(half.id), "Support from half the members is not enough")
         assertEqual(links.first?.articleID, "earlier", "Navigation carries a stored member ID")
+        func row(_ id: String, hours: Double, event: String) -> EventMatchRow {
+            let story = article(id, hours: hours)
+            return EventMatchRow(
+                id: id, title: story.title, description: story.description, source: "Publisher",
+                date: story.pubDate, eventID: event)
+        }
+        let ranked = try EventStoryRelation.links(
+            target: [row("t", hours: 0, event: "target")],
+            candidates: (1...4).map { ("event-\($0)", [row("c\($0)", hours: -Double($0), event: "event-\($0)")]) })
+        assertEqual(
+            ranked.map(\.eventID), ["event-1", "event-2", "event-3"],
+            "At most three earlier events link, newest first")
         assertEqual(
             try await db.commonStoryTerms(["volodymyr zelenskyy"], before: now.addingTimeInterval(3600), share: 0.05),
             [], "A name in only a few events is never common, however small the library")
