@@ -186,9 +186,20 @@ public struct ReaderDocument: Codable, Hashable, Sendable {
         return result
     }
 
-    /// Curation is authoritative in v4, including the deliberate absence of a lead.
+    /// Selects the best image for card and reader representation, falling back to usable extracted images or feed media.
     func selectedImage(fallback: String?) -> String? {
-        version >= 4 ? leadImageURL : fallback
+        if version >= 4 {
+            if let leadImageURL, !leadImageURL.isEmpty {
+                return leadImageURL
+            }
+            if let firstUsable = images?.first(where: {
+                ReaderImageCandidate.usable(url: $0.url, width: $0.width, height: $0.height)
+            })?.url {
+                return firstUsable
+            }
+            return nil
+        }
+        return fallback
     }
 
     /// Feed media alone is not a reader document: only publisher text lets a stored document stand in for

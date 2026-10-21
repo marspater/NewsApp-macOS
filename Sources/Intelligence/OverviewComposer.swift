@@ -374,10 +374,8 @@ public struct OverviewComposer: Sendable {
     static func hasSufficientEvidence(_ passages: [EvidencePassage]) -> Bool {
         var sentences = Set<String>()
         var articles = Set<String>()
-        let tokenizer = NLTokenizer(unit: .sentence)
         for passage in passages {
-            tokenizer.string = passage.text
-            for range in tokenizer.tokens(for: passage.text.startIndex..<passage.text.endIndex) {
+            for range in PassageFactExtractor.segmentedSentences(in: passage.text) {
                 let words = passage.text[range].split { !$0.isLetter && !$0.isNumber }
                 guard words.count >= 6, sentences.insert(words.joined(separator: " ").lowercased()).inserted else {
                     continue

@@ -186,6 +186,26 @@ enum FeedCatalog {
             language: "en", region: "FR", topic: .general, set: .world,
             fullText: .summary, hasImages: false, availability: .available),
         CatalogFeed(
+            id: "npr-news", title: "NPR News · Top Stories", publisher: "NPR",
+            url: "https://feeds.npr.org/1001/rss.xml",
+            language: "en", region: "US", topic: .general, set: .world,
+            fullText: .summary, hasImages: true, availability: .available),
+        CatalogFeed(
+            id: "pbs-newshour", title: "PBS NewsHour · World", publisher: "PBS NewsHour",
+            url: "https://www.pbs.org/newshour/feeds/rss/world",
+            language: "en", region: "US", topic: .general, set: .world,
+            fullText: .summary, hasImages: true, availability: .available),
+        CatalogFeed(
+            id: "sky-news-world", title: "Sky News · World", publisher: "Sky News",
+            url: "https://feeds.skynews.com/feeds/rss/world.xml",
+            language: "en", region: "GB", topic: .general, set: .world,
+            fullText: .summary, hasImages: true, availability: .available),
+        CatalogFeed(
+            id: "semafor-world", title: "Semafor · World", publisher: "Semafor",
+            url: "https://www.semafor.com/feed.xml",
+            language: "en", region: "US", topic: .general, set: .world,
+            fullText: .summary, hasImages: true, availability: .available),
+        CatalogFeed(
             id: "politico", title: "Politico · Politics", publisher: "Politico",
             url: "https://rss.politico.com/politics-news.xml",
             language: "en", region: "US", topic: .politics, set: .politics,
@@ -199,6 +219,21 @@ enum FeedCatalog {
             id: "guardian-politics", title: "The Guardian · Politics", publisher: "The Guardian",
             url: "https://www.theguardian.com/politics/rss",
             language: "en", region: "GB", topic: .politics, set: .politics,
+            fullText: .summary, hasImages: true, availability: .available),
+        CatalogFeed(
+            id: "pbs-politics", title: "PBS NewsHour · Politics", publisher: "PBS NewsHour",
+            url: "https://www.pbs.org/newshour/feeds/rss/politics",
+            language: "en", region: "US", topic: .politics, set: .politics,
+            fullText: .summary, hasImages: true, availability: .available),
+        CatalogFeed(
+            id: "roll-call", title: "Roll Call · News", publisher: "Roll Call",
+            url: "https://rollcall.com/feed",
+            language: "en", region: "US", topic: .politics, set: .politics,
+            fullText: .summary, hasImages: true, availability: .available),
+        CatalogFeed(
+            id: "npr-politics", title: "NPR · Politics", publisher: "NPR",
+            url: "https://feeds.npr.org/1014/rss.xml",
+            language: "en", region: "US", topic: .politics, set: .politics,
             fullText: .summary, hasImages: true, availability: .available),
         CatalogFeed(
             id: "bbc-business", title: "BBC News · Business", publisher: "BBC News",
@@ -220,6 +255,16 @@ enum FeedCatalog {
             url: "https://www.fastcompany.com/latest/rss",
             language: "en", region: "US", topic: .business, set: .business,
             fullText: .full, hasImages: true, availability: .available),
+        CatalogFeed(
+            id: "quartz", title: "Quartz · Latest", publisher: "Quartz",
+            url: "https://qz.com/feed",
+            language: "en", region: "US", topic: .business, set: .business,
+            fullText: .summary, hasImages: true, availability: .available),
+        CatalogFeed(
+            id: "marketwatch", title: "MarketWatch · Top Stories", publisher: "MarketWatch",
+            url: "https://feeds.content.dowjones.io/public/rss/mw_topstories",
+            language: "en", region: "US", topic: .business, set: .business,
+            fullText: .summary, hasImages: false, availability: .available),
         CatalogFeed(
             id: "ars-technica", title: "Ars Technica", publisher: "Ars Technica",
             url: "https://feeds.arstechnica.com/arstechnica/index",
@@ -251,6 +296,26 @@ enum FeedCatalog {
             language: "en", region: "US", topic: .technology, set: .technology,
             fullText: .full, hasImages: true, availability: .available),
         CatalogFeed(
+            id: "the-verge", title: "The Verge", publisher: "The Verge",
+            url: "https://www.theverge.com/rss/index.xml",
+            language: "en", region: "US", topic: .technology, set: .technology,
+            fullText: .full, hasImages: true, availability: .available),
+        CatalogFeed(
+            id: "wired", title: "Wired · Latest", publisher: "Wired",
+            url: "https://www.wired.com/feed/rss",
+            language: "en", region: "US", topic: .technology, set: .technology,
+            fullText: .summary, hasImages: true, availability: .available),
+        CatalogFeed(
+            id: "9to5mac", title: "9to5Mac", publisher: "9to5Mac",
+            url: "https://9to5mac.com/feed",
+            language: "en", region: "US", topic: .technology, set: .technology,
+            fullText: .full, hasImages: true, availability: .available),
+        CatalogFeed(
+            id: "macrumors", title: "MacRumors", publisher: "MacRumors",
+            url: "https://feeds.macrumors.com/MacRumors-All",
+            language: "en", region: "US", topic: .technology, set: .technology,
+            fullText: .summary, hasImages: true, availability: .available),
+        CatalogFeed(
             id: "science-news", title: "Science News", publisher: "Science News",
             url: "https://www.sciencenews.org/feed",
             language: "en", region: "US", topic: .science, set: .scienceHealth,
@@ -276,6 +341,16 @@ enum FeedCatalog {
             language: "en", region: "US", topic: .health, set: .scienceHealth,
             fullText: .full, hasImages: true, availability: .available),
         CatalogFeed(
+            id: "smithsonian", title: "Smithsonian Magazine · Science", publisher: "Smithsonian",
+            url: "https://www.smithsonianmag.com/rss/smart-news",
+            language: "en", region: "US", topic: .science, set: .scienceHealth,
+            fullText: .summary, hasImages: true, availability: .available),
+        CatalogFeed(
+            id: "phys-org", title: "Phys.org · Spotlight", publisher: "Phys.org",
+            url: "https://phys.org/rss-feed",
+            language: "en", region: "GB", topic: .science, set: .scienceHealth,
+            fullText: .summary, hasImages: true, availability: .available),
+        CatalogFeed(
             id: "variety", title: "Variety", publisher: "Variety",
             url: "https://variety.com/feed",
             language: "en", region: "US", topic: .culture, set: .cultureLifestyle,
@@ -299,6 +374,16 @@ enum FeedCatalog {
             id: "lifehacker", title: "Lifehacker", publisher: "Lifehacker",
             url: "https://lifehacker.com/feed/rss",
             language: "en", region: "US", topic: .lifestyle, set: .cultureLifestyle,
+            fullText: .full, hasImages: true, availability: .available),
+        CatalogFeed(
+            id: "pitchfork", title: "Pitchfork · News", publisher: "Pitchfork",
+            url: "https://pitchfork.com/rss/news",
+            language: "en", region: "US", topic: .culture, set: .cultureLifestyle,
+            fullText: .summary, hasImages: true, availability: .available),
+        CatalogFeed(
+            id: "polygon", title: "Polygon", publisher: "Polygon",
+            url: "https://www.polygon.com/rss/index.xml",
+            language: "en", region: "US", topic: .culture, set: .cultureLifestyle,
             fullText: .full, hasImages: true, availability: .available),
         CatalogFeed(
             id: "ukrainska-pravda", title: "Українська правда", publisher: "Українська правда",
@@ -384,6 +469,11 @@ enum FeedCatalog {
             id: "cna", title: "CNA · World and Asia", publisher: "CNA",
             url: "https://www.channelnewsasia.com/rssfeeds/8395884",
             language: "en", region: "SG", topic: .general, set: .regional,
+            fullText: .summary, hasImages: true, availability: .available),
+        CatalogFeed(
+            id: "abc-australia", title: "ABC News · International", publisher: "ABC News Australia",
+            url: "https://www.abc.net.au/news/feed/52278/rss.xml",
+            language: "en", region: "AU", topic: .general, set: .regional,
             fullText: .summary, hasImages: true, availability: .available),
     ]
 }

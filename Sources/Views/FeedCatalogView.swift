@@ -10,51 +10,110 @@ struct FeedCatalogView: View {
     @EnvironmentObject private var appSettings: AppSettings
     @EnvironmentObject private var feedManager: FeedManager
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.colorSchemeContrast) private var contrast
+
+    @State private var searchText = ""
+    @State private var selectedSet: CatalogSet? = nil
+
+    private var displayedSets: [CatalogSet] {
+        if let selectedSet {
+            return [selectedSet]
+        }
+        return CatalogSet.offered
+    }
+
+    private func matchingFeeds(in set: CatalogSet) -> [CatalogFeed] {
+        let feeds = FeedCatalog.feeds(in: set)
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !query.isEmpty else { return feeds }
+        return feeds.filter { feed in
+            feed.title.lowercased().contains(query)
+                || feed.publisher.lowercased().contains(query)
+                || feed.topic.rawValue.lowercased().contains(query)
+                || feed.region.lowercased().contains(query)
+        }
+    }
+
+    private var allMatchingFeedsCount: Int {
+        displayedSets.reduce(0) { $0 + matchingFeeds(in: $1).count }
+    }
 
     var body: some View {
         VStack(spacing: 0) {
-            VStack(alignment: .leading, spacing: AppSpacing.xs) {
+            // Header
+            VStack(alignment: .leading, spacing: AppSpacing.xxs) {
                 Text("Feed Catalog")
                     .font(AppTypography.title)
                     .foregroundStyle(AppColor.primaryText)
                     .accessibilityAddTraits(.isHeader)
+
                 Text(
-                    "Choose a set or single feeds. Nothing is subscribed automatically, and every subscription can be removed in Subscriptions. Details describe how each feed looked when checked on \(FeedCatalog.verifiedOn); they say nothing about the accuracy of a publisher's reporting."
+                    "Explore verified, non-paywalled publications across world news, technology, science, and culture."
                 )
                 .font(AppTypography.callout)
                 .foregroundStyle(AppColor.secondaryText)
                 .fixedSize(horizontal: false, vertical: true)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(AppLayout.pageInset)
+            .padding(.horizontal, AppLayout.pageInset)
+            .padding(.top, AppLayout.pageInset)
+            .padding(.bottom, AppSpacing.xs)
+
+            // Category Filter Pills
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: AppSpacing.xs) {
+                    categoryPill("All Topics", isSelected: selectedSet == nil) {
+                        selectedSet = nil
+                    }
+                    ForEach(CatalogSet.offered) { set in
+                        categoryPill(set.title, isSelected: selectedSet == set) {
+                            selectedSet = set
+                        }
+                    }
+                }
+                .padding(.horizontal, AppLayout.pageInset)
+                .padding(.vertical, AppSpacing.xs)
+            }
 
             Divider()
 
-            List {
-                let gaps = CatalogReviewEngine.detectTopicGaps(subscribedURLs: appSettings.feedURLs)
-                if !gaps.isEmpty {
-                    Section {
-                        ForEach(gaps) { gap in
-                            gapRow(gap)
+            // Feed Content List
+            if allMatchingFeedsCount == 0 && !searchText.isEmpty {
+                ContentUnavailableView.search(text: searchText)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                List {
+                    // Suggested gaps only when browsing all topics with empty search
+                    if selectedSet == nil && searchText.isEmpty {
+                        let gaps = CatalogReviewEngine.detectTopicGaps(subscribedURLs: appSettings.feedURLs)
+                        if !gaps.isEmpty {
+                            Section {
+                                ForEach(gaps) { gap in
+                                    gapRow(gap)
+                                }
+                            } header: {
+                                gapsHeader
+                            }
                         }
-                    } header: {
-                        gapsHeader
                     }
-                }
 
-                ForEach(CatalogSet.offered) { set in
-                    Section {
-                        ForEach(FeedCatalog.feeds(in: set)) { feed in
-                            row(feed)
+                    ForEach(displayedSets) { set in
+                        let feeds = matchingFeeds(in: set)
+                        if !feeds.isEmpty {
+                            Section {
+                                ForEach(feeds) { feed in
+                                    row(feed)
+                                }
+                            } header: {
+                                header(for: set, matchingCount: feeds.count)
+                            }
                         }
-                    } header: {
-                        header(for: set)
                     }
                 }
+                .listStyle(.inset)
             }
-            .listStyle(.inset)
         }
-        .frame(minWidth: 620, idealWidth: 680, minHeight: 560)
+        .frame(minWidth: 680, idealWidth: 720, minHeight: 560)
         .navigationTitle(Self.navigationTitleText)
         .toolbar(removing: .title)
         .toolbar {
@@ -63,9 +122,26 @@ struct FeedCatalogView: View {
                     .keyboardShortcut(.defaultAction)
             }
         }
+        .searchable(text: $searchText, prompt: "Search publications, topics, regions…")
         .task { await feedManager.reloadFeedHealth() }
-        // Sheets close with Esc as well as Done (DESIGN.md 4).
         .onExitCommand { dismiss() }
+    }
+
+    private func categoryPill(_ title: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(AppTypography.label)
+                .padding(.horizontal, AppSpacing.sm)
+                .padding(.vertical, AppSpacing.xxs)
+                .background(isSelected ? AppColor.accent : AppColor.surface)
+                .foregroundStyle(isSelected ? AppColor.leadText : AppColor.primaryText)
+                .clipShape(Capsule())
+                .overlay(
+                    Capsule()
+                        .strokeBorder(isSelected ? Color.clear : AppColor.border(for: contrast), lineWidth: 0.5)
+                )
+        }
+        .buttonStyle(.plain)
     }
 
     private var gapsHeader: some View {
@@ -110,7 +186,7 @@ struct FeedCatalogView: View {
         .padding(.vertical, AppSpacing.xxs)
     }
 
-    private func header(for set: CatalogSet) -> some View {
+    private func header(for set: CatalogSet, matchingCount: Int) -> some View {
         let feeds = FeedCatalog.feeds(in: set)
         let remaining = feeds.filter { !appSettings.isSubscribed($0) }
         return HStack(alignment: .firstTextBaseline, spacing: AppSpacing.sm) {
@@ -126,7 +202,6 @@ struct FeedCatalogView: View {
             }
             Spacer()
             if remaining.isEmpty {
-                // Bulk removal stays out of the header: a double-click on the swapped button must not unsubscribe a set.
                 Label("Subscribed to all", systemImage: "checkmark.circle.fill")
                     .font(AppTypography.label)
                     .foregroundStyle(AppColor.success)
@@ -150,13 +225,27 @@ struct FeedCatalogView: View {
     private func row(_ feed: CatalogFeed) -> some View {
         let subscribed = appSettings.isSubscribed(feed)
         return HStack(spacing: AppSpacing.sm) {
+            // Publisher Monogram
+            Circle()
+                .fill(AppColor.accent.opacity(0.12))
+                .frame(width: 32, height: 32)
+                .overlay(
+                    Text(String(feed.publisher.prefix(1)))
+                        .textCase(.uppercase)
+                        .font(AppTypography.headline)
+                        .foregroundStyle(AppColor.accent)
+                )
+                .accessibilityHidden(true)
+
             VStack(alignment: .leading, spacing: AppSpacing.xxs) {
                 Text(feed.title)
                     .font(AppTypography.body)
                     .foregroundStyle(AppColor.primaryText)
+
                 Text(details(feed))
                     .font(AppTypography.caption)
                     .foregroundStyle(AppColor.secondaryText)
+
                 if subscribed {
                     FeedHealthLine(health: feedManager.feedHealth[feed.url])
                 }
@@ -166,23 +255,37 @@ struct FeedCatalogView: View {
                         .foregroundStyle(AppColor.primaryText)
                 }
                 if feed.availability == .previewOnly {
-                    Text("Story pages may refuse the in-app reader; the feed preview still works.")
+                    Text("Story pages may refuse the in-app reader; feed preview still works.")
                         .font(AppTypography.caption)
-                        .foregroundStyle(AppColor.tertiaryText)
+                        .foregroundStyle(AppColor.tertiaryText(for: contrast))
                 }
             }
+
             Spacer()
+
             if subscribed {
-                Label("Subscribed", systemImage: "checkmark.circle.fill")
-                    .font(AppTypography.label)
-                    .foregroundStyle(AppColor.success)
-                Button("Remove") { feedManager.removeFeed(url: feed.url) }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    .accessibilityLabel("Remove \(feed.title)")
+                HStack(spacing: AppSpacing.xs) {
+                    Label("Subscribed", systemImage: "checkmark.circle.fill")
+                        .font(AppTypography.label)
+                        .foregroundStyle(AppColor.success)
+
+                    Button("Remove") { feedManager.removeFeed(url: feed.url) }
+                        .buttonStyle(.plain)
+                        .font(AppTypography.caption)
+                        .foregroundStyle(AppColor.secondaryText)
+                        .padding(.horizontal, AppSpacing.xs)
+                        .padding(.vertical, AppSpacing.xxs)
+                        .background(AppColor.surface)
+                        .clipShape(RoundedRectangle(cornerRadius: AppRadius.control, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: AppRadius.control, style: .continuous)
+                                .strokeBorder(AppColor.border(for: contrast), lineWidth: 0.5)
+                        )
+                        .accessibilityLabel("Remove \(feed.title)")
+                }
             } else {
                 Button("Subscribe") { feedManager.addCatalogFeeds([feed]) }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(.borderedProminent)
                     .controlSize(.small)
                     .accessibilityLabel("Subscribe, \(feed.title)")
             }
@@ -192,17 +295,10 @@ struct FeedCatalogView: View {
 
     private func details(_ feed: CatalogFeed) -> String {
         let locale = Locale.current
-        let language = locale.localizedString(forLanguageCode: feed.language) ?? feed.language
         let region =
             feed.region == "global"
             ? "International" : (locale.localizedString(forRegionCode: feed.region) ?? feed.region)
-        let content: String
-        switch feed.fullText {
-        case .full: content = "Full text in feed"
-        case .partial: content = "Partial text in feed"
-        case .summary: content = "Summaries in feed"
-        }
-        return [feed.publisher, language, region, content, feed.hasImages ? "Images" : nil].compactMap { $0 }.joined(
+        return [feed.publisher, region, feed.hasImages ? "Images" : nil].compactMap { $0 }.joined(
             separator: " · ")
     }
 }

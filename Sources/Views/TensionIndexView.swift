@@ -673,7 +673,7 @@ struct TensionSidebarButton: View {
         Image(systemName: "chevron.right")
             .font(AppTypography.eyebrow)
             .foregroundStyle(AppColor.tertiaryText(for: contrast))
-            .opacity(isHovered ? 0.8 : 0)
+            .opacity(isHovered ? 0.8 : 0.35)
             .accessibilityHidden(true)
     }
 
@@ -688,14 +688,7 @@ struct TensionSidebarButton: View {
         .padding(.vertical, AppSpacing.xs)
         .background(
             RoundedRectangle(cornerRadius: AppRadius.control, style: .continuous)
-                .fill(isHovered ? AppColor.surface : Color.clear)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: AppRadius.control, style: .continuous)
-                .strokeBorder(
-                    isHovered ? AppColor.border(for: contrast) : Color.clear,
-                    lineWidth: 0.5
-                )
+                .fill(isHovered ? Color.primary.opacity(0.06) : Color.clear)
         )
         .contentShape(RoundedRectangle(cornerRadius: AppRadius.control, style: .continuous))
     }
