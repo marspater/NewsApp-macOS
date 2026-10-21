@@ -4,7 +4,7 @@ Status: sections 1–7 record the review and plan as written on 21 October 2026,
 
 ## 1. Where the app stands
 
-**Shipped and green.** CI and Security pass on `main`. Locally on 21 October: `./test.sh` passed, `./build.sh` produced a signed arm64 bundle with no warnings, and `script/format.sh --check` passed (window-opening harnesses not run). No pull requests are open. The only open issues are the two parked ones (#264 non-English matching, #268 live VoiceOver). The 18 October acceptance audit closed every 1.0 blocker (#307, #308, #309, #334, #435). Design-language phases 1–7 were accepted on 10 October.
+**Shipped and green.** CI and Security pass on `main`. Locally on 21 October: `./test.sh` passed, `./build.sh` produced a signed arm64 bundle with no warnings, and `script/format.sh --check` passed (window-opening harnesses not run). No pull requests were open at the baseline. The only open issues are the two parked ones (#264 non-English matching, #268 live VoiceOver). The 18 October acceptance audit closed every 1.0 blocker (#307, #308, #309, #334, #435). Design-language phases 1–7 were accepted on 10 October.
 
 **Product surface today.**
 - Feed ingestion: RSS/Atom/JSON via FeedKit behind the streaming XML safety boundary; conditional requests, per-feed backoff, host limits, sleep/wake handling.
