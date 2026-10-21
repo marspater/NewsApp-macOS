@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased — 20 October 2026
+## Unreleased — 21 October 2026
+
+- Reader v9: stories from Africanews, CNA, Science News and IEEE Spectrum open as text again, Ars Technica shows the story instead of its author bio, and Variety and NASA show the whole article instead of the first paragraphs. Inline scripts that wrote a `<script>` tag hid the rest of the page from the reader, and explicit publisher bodies lost every paragraph during repair. Stories stored by earlier readers are extracted again when opened.
 
 - Fix a crash when VoiceOver or another accessibility client read a story whose lead image had a credit or was still loading (for example while opening an "Earlier in This Story" link): labels set directly on selectable text and spinners made label resolution loop until the stack overflowed. The same pattern is fixed for the Settings feed-refresh and event-source spinners, and the design lint now rejects such labels across multi-line modifier chains.
 

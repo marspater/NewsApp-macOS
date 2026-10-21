@@ -148,7 +148,7 @@ public struct ReaderBlock: Codable, Hashable, Sendable {
 }
 
 public struct ReaderDocument: Codable, Hashable, Sendable {
-    public static let currentVersion = 8
+    public static let currentVersion = 9
     public var version = currentVersion
     public let blocks: [ReaderBlock]
     public var images: [ReaderImageCandidate]? = nil
