@@ -31,6 +31,7 @@ struct TensionIndexView: View {
     @EnvironmentObject var appSettings: AppSettings
     @Environment(\.dismiss) private var dismiss
     @Environment(\.effectiveReduceMotion) private var reduceMotion
+    @Environment(\.colorSchemeContrast) private var contrast
     @State private var history: [WorldTensionReading]
     @State private var loading = false
     @State private var errorMessage: String?
@@ -184,7 +185,11 @@ struct TensionIndexView: View {
         }
         .padding(AppSpacing.md)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(AppColor.surface, in: RoundedRectangle(cornerRadius: AppRadius.card))
+        .background(AppColor.surface, in: RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous)
+                .strokeBorder(AppColor.border(for: contrast), lineWidth: 0.5)
+        )
     }
 
     @ViewBuilder
@@ -226,7 +231,11 @@ struct TensionIndexView: View {
         }
         .padding(AppSpacing.md)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(AppColor.surface, in: RoundedRectangle(cornerRadius: AppRadius.card))
+        .background(AppColor.surface, in: RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous)
+                .strokeBorder(AppColor.border(for: contrast), lineWidth: 0.5)
+        )
     }
 
     private func evidence(_ reading: WorldTensionReading) -> some View {
@@ -251,6 +260,7 @@ struct TensionIndexView: View {
                         x: .value("Day", reading.id), y: .value("Assessment", reading.assessment.score),
                         series: .value("Segment", segment(index))
                     )
+                    .interpolationMethod(.catmullRom)
                     .foregroundStyle(AppColor.secondaryText)
                     PointMark(x: .value("Day", reading.id), y: .value("Assessment", reading.assessment.score))
                         .foregroundStyle(AppColor.tension(reading.level))
@@ -335,20 +345,27 @@ struct TensionIndexView: View {
 /// The full 0–100 scale with the band colours and a marker at the current score.
 struct TensionScaleBar: View {
     let score: Int
+    @Environment(\.colorSchemeContrast) private var contrast
 
     var body: some View {
         VStack(spacing: AppSpacing.xs) {
             GeometryReader { geometry in
-                Capsule().fill(
-                    LinearGradient(gradient: AppColor.tensionScale, startPoint: .leading, endPoint: .trailing)
-                )
-                .overlay(alignment: .leading) {
-                    Capsule().fill(AppColor.primaryText)
-                        .frame(width: AppLayout.tensionStrokeWidth, height: AppLayout.tensionScaleMarkerHeight)
-                        .offset(
-                            x: geometry.size.width * CGFloat(min(100, max(0, score))) / 100
-                                - AppLayout.tensionStrokeWidth / 2)
-                }
+                Capsule()
+                    .fill(
+                        LinearGradient(gradient: AppColor.tensionScale, startPoint: .leading, endPoint: .trailing)
+                    )
+                    .overlay(
+                        Capsule()
+                            .strokeBorder(AppColor.border(for: contrast).opacity(0.35), lineWidth: 0.5)
+                    )
+                    .overlay(alignment: .leading) {
+                        Capsule().fill(AppColor.primaryText)
+                            .frame(width: AppLayout.tensionStrokeWidth, height: AppLayout.tensionScaleMarkerHeight)
+                            .shadow(color: AppShadow.cardRestingColor, radius: 2, x: 0, y: 1)
+                            .offset(
+                                x: geometry.size.width * CGFloat(min(100, max(0, score))) / 100
+                                    - AppLayout.tensionStrokeWidth / 2)
+                    }
             }
             .frame(height: AppLayout.tensionScaleHeight)
             .padding(.vertical, (AppLayout.tensionScaleMarkerHeight - AppLayout.tensionScaleHeight) / 2)
@@ -359,7 +376,7 @@ struct TensionScaleBar: View {
                 Spacer()
                 Text("100")
             }
-            .font(AppTypography.caption).foregroundStyle(AppColor.tertiaryText).monospacedDigit()
+            .font(AppTypography.caption).foregroundStyle(AppColor.tertiaryText(for: contrast)).monospacedDigit()
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("World Tension scale")
