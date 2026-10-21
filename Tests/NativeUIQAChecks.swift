@@ -253,17 +253,19 @@ struct NativeUIQAChecks {
             do { try VNImageRequestHandler(cgImage: image).perform([request]) } catch { return "" }
             return (request.results ?? []).compactMap { $0.topCandidates(1).first?.string }.joined(separator: "\n")
         }
-        let deadline = ContinuousClock.now + .seconds(5)
-        while !renderedText().contains("Current Panel Headlines"), ContinuousClock.now < deadline {
+        // OCR is slow under load: wait until every expected line is recognised in one pass, then assert on that pass.
+        let expected = ["Previously accepted assessment", "Current Panel Headlines", "Current unscored panel evidence"]
+        let deadline = ContinuousClock.now + .seconds(10)
+        var text = renderedText()
+        while !expected.allSatisfy(text.contains), ContinuousClock.now < deadline {
             host.layoutSubtreeIfNeeded()
             try? await Task.sleep(for: .milliseconds(10))
+            text = renderedText()
         }
-        assertTrue(renderedText().contains("Previously accepted assessment"), "Accepted history remains visible")
+        assertTrue(text.contains("Previously accepted assessment"), "Accepted history remains visible")
         assertTrue(
-            renderedText().contains("Current Panel Headlines"),
-            "Failed reassessments expose current evidence alongside history")
-        assertTrue(
-            renderedText().contains("Current unscored panel evidence"), "The current publisher headline is inspectable")
+            text.contains("Current Panel Headlines"), "Failed reassessments expose current evidence alongside history")
+        assertTrue(text.contains("Current unscored panel evidence"), "The current publisher headline is inspectable")
         for disableAI in [true, false] {
             settings.aiEnabled = !disableAI
             settings.tensionCollectionOptIn = disableAI
