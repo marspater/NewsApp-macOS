@@ -16,13 +16,13 @@ struct FeedCatalogView: View {
             VStack(alignment: .leading, spacing: AppSpacing.xs) {
                 Text("Feed Catalog")
                     .font(AppTypography.title)
-                    .foregroundColor(AppColor.primaryText)
+                    .foregroundStyle(AppColor.primaryText)
                     .accessibilityAddTraits(.isHeader)
                 Text(
                     "Choose a set or single feeds. Nothing is subscribed automatically, and every subscription can be removed in Subscriptions. Details describe how each feed looked when checked on \(FeedCatalog.verifiedOn); they say nothing about the accuracy of a publisher's reporting."
                 )
                 .font(AppTypography.callout)
-                .foregroundColor(AppColor.secondaryText)
+                .foregroundStyle(AppColor.secondaryText)
                 .fixedSize(horizontal: false, vertical: true)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -72,11 +72,12 @@ struct FeedCatalogView: View {
         VStack(alignment: .leading, spacing: AppSpacing.xxs) {
             Text("Suggested Topics & Gaps")
                 .font(AppTypography.sectionTitle)
-                .foregroundColor(AppColor.primaryText)
+                .tracking(AppTypography.sectionHeaderTracking)
+                .foregroundStyle(AppColor.primaryText)
                 .accessibilityAddTraits(.isHeader)
             Text("Explore areas not yet covered by your subscriptions.")
                 .font(AppTypography.caption)
-                .foregroundColor(AppColor.secondaryText)
+                .foregroundStyle(AppColor.secondaryText)
         }
         .controlSize(.small)
         .textCase(nil)
@@ -85,18 +86,24 @@ struct FeedCatalogView: View {
 
     private func gapRow(_ gap: TopicGap) -> some View {
         HStack(spacing: AppSpacing.sm) {
+            Image(systemName: "sparkles")
+                .foregroundStyle(AppColor.intelligence)
+                .frame(width: 20)
+                .accessibilityHidden(true)
+
             VStack(alignment: .leading, spacing: AppSpacing.xxs) {
                 Text(gap.title)
                     .font(AppTypography.body)
-                    .foregroundColor(AppColor.primaryText)
+                    .foregroundStyle(AppColor.primaryText)
                 Text(gap.rationale)
                     .font(AppTypography.caption)
-                    .foregroundColor(AppColor.secondaryText)
+                    .foregroundStyle(AppColor.secondaryText)
             }
             Spacer()
             Button("Subscribe to Set (\(gap.candidateFeeds.count))") {
                 feedManager.addCatalogFeeds(gap.candidateFeeds)
             }
+            .buttonStyle(.bordered)
             .controlSize(.small)
             .accessibilityLabel("Subscribe to \(gap.title), \(gap.candidateFeeds.count) feeds")
         }
@@ -110,18 +117,19 @@ struct FeedCatalogView: View {
             VStack(alignment: .leading, spacing: AppSpacing.xxs) {
                 Text(set.title)
                     .font(AppTypography.sectionTitle)
-                    .foregroundColor(AppColor.primaryText)
+                    .tracking(AppTypography.sectionHeaderTracking)
+                    .foregroundStyle(AppColor.primaryText)
                     .accessibilityAddTraits(.isHeader)
                 Text(set.summary)
                     .font(AppTypography.caption)
-                    .foregroundColor(AppColor.secondaryText)
+                    .foregroundStyle(AppColor.secondaryText)
             }
             Spacer()
             if remaining.isEmpty {
                 // Bulk removal stays out of the header: a double-click on the swapped button must not unsubscribe a set.
                 Label("Subscribed to all", systemImage: "checkmark.circle.fill")
                     .font(AppTypography.label)
-                    .foregroundColor(AppColor.success)
+                    .foregroundStyle(AppColor.success)
             } else {
                 Button(
                     remaining.count == feeds.count
@@ -129,6 +137,8 @@ struct FeedCatalogView: View {
                 ) {
                     feedManager.addCatalogFeeds(remaining)
                 }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
                 .accessibilityLabel("Subscribe to Set, \(remaining.count) feeds in \(set.title)")
             }
         }
@@ -143,34 +153,36 @@ struct FeedCatalogView: View {
             VStack(alignment: .leading, spacing: AppSpacing.xxs) {
                 Text(feed.title)
                     .font(AppTypography.body)
-                    .foregroundColor(AppColor.primaryText)
+                    .foregroundStyle(AppColor.primaryText)
                 Text(details(feed))
                     .font(AppTypography.caption)
-                    .foregroundColor(AppColor.secondaryText)
+                    .foregroundStyle(AppColor.secondaryText)
                 if subscribed {
                     FeedHealthLine(health: feedManager.feedHealth[feed.url])
                 }
                 if let advisory = appSettings.visibleAdvisory(for: feed.url) {
                     Text("Review note (\(advisory.date)): \(advisory.summary)")
                         .font(AppTypography.caption)
-                        .foregroundColor(AppColor.primaryText)
+                        .foregroundStyle(AppColor.primaryText)
                 }
                 if feed.availability == .previewOnly {
                     Text("Story pages may refuse the in-app reader; the feed preview still works.")
                         .font(AppTypography.caption)
-                        .foregroundColor(AppColor.tertiaryText)
+                        .foregroundStyle(AppColor.tertiaryText)
                 }
             }
             Spacer()
             if subscribed {
                 Label("Subscribed", systemImage: "checkmark.circle.fill")
                     .font(AppTypography.label)
-                    .foregroundColor(AppColor.success)
+                    .foregroundStyle(AppColor.success)
                 Button("Remove") { feedManager.removeFeed(url: feed.url) }
+                    .buttonStyle(.bordered)
                     .controlSize(.small)
                     .accessibilityLabel("Remove \(feed.title)")
             } else {
                 Button("Subscribe") { feedManager.addCatalogFeeds([feed]) }
+                    .buttonStyle(.bordered)
                     .controlSize(.small)
                     .accessibilityLabel("Subscribe, \(feed.title)")
             }

@@ -3,6 +3,9 @@
 ## Unreleased — 21 October 2026
 
 - Reader v9: stories from Africanews, CNA, Science News and IEEE Spectrum open as text again, Ars Technica shows the story instead of its author bio, and Variety and NASA show the whole article instead of the first paragraphs. Inline scripts that wrote a `<script>` tag hid the rest of the page from the reader, and explicit publisher bodies lost every paragraph during repair. The Guardian keeps its lead photo and standfirst, Dawn drops its sharing prompts, and a sponsor box can no longer replace a story. Stories stored by earlier readers are extracted again when opened ([audit](docs/audits/2026-10-21-catalog-reader-access.md)).
+- Retire the Financial Times world feed, which is subscriber-only, and The Hill, which answers every reader request with HTTP 403; The Hill leaves the starter catalog. Existing subscriptions end once at launch; read and saved FT stories stay, and subscribing again later is kept.
+
+- Keep a meaningful trailing slash on subscription URLs. Feeds such as `japantimes.co.jp/feed/` and `phys.org/rss-feed/` answer the slashless form with 403, 404 or an HTTP-downgrading redirect. Only the bare root slash is removed; `/feed` and `/feed/` are treated as one subscription when adding, importing or subscribing from the catalog, advisories and their dismissals apply to both forms, and stored subscriptions are not rewritten.
 
 - Fix a crash when VoiceOver or another accessibility client read a story whose lead image had a credit or was still loading (for example while opening an "Earlier in This Story" link): labels set directly on selectable text and spinners made label resolution loop until the stack overflowed. The same pattern is fixed for the Settings feed-refresh and event-source spinners, and the design lint now rejects such labels across multi-line modifier chains.
 

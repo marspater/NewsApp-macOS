@@ -50,6 +50,7 @@ swiftc "${NEWS_DEPENDENCY_FLAGS[@]}" "$@" -target "$(uname -m)-apple-macos${TARG
     Sources/Models/ArticleIdentity.swift \
     Sources/Models/EventOverview.swift \
     Sources/Models/EventFeed.swift \
+    Sources/Models/ArchiveSearchToken.swift \
     Sources/Storage/DatabaseEngine.swift \
     Sources/Storage/MigrationCoordinator.swift \
     Sources/Storage/ArticleStore.swift \

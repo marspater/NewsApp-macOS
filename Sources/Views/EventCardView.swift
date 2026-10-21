@@ -70,6 +70,7 @@ struct EventCardView: View {
                     Text("· updated \(latest, format: .relative(presentation: .named))")
                         .font(AppTypography.caption)
                         .foregroundStyle(AppColor.tertiaryText(for: contrast))
+                        .monospacedDigit()
                 }
                 if summary.hasSubstantiveUpdate {
                     TagView(title: "Updated", tint: AppColor.accent)
@@ -82,7 +83,9 @@ struct EventCardView: View {
             .foregroundStyle(AppColor.secondaryText)
             .padding(.horizontal, AppSpacing.sm)
             .padding(.vertical, AppSpacing.xs)
-            .background(RoundedRectangle(cornerRadius: AppRadius.control).fill(AppColor.badgeBackground))
+            .background(
+                RoundedRectangle(cornerRadius: AppRadius.control, style: .continuous).fill(AppColor.badgeBackground)
+            )
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -135,8 +138,11 @@ struct EventCardView: View {
             }
         }
         .padding(.vertical, AppSpacing.xxs)
-        .background(RoundedRectangle(cornerRadius: AppRadius.card).fill(AppColor.surface))
-        .overlay(RoundedRectangle(cornerRadius: AppRadius.card).stroke(AppColor.border(for: contrast), lineWidth: 0.5))
+        .background(RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous).fill(AppColor.surface))
+        .overlay(
+            RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous)
+                .strokeBorder(AppColor.border(for: contrast), lineWidth: 0.5)
+        )
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Sources covering this event")
     }
@@ -182,6 +188,7 @@ private struct EventSourceRow: View {
                 Text(article.cardDateText())
                     .font(AppTypography.caption)
                     .foregroundStyle(AppColor.tertiaryText(for: contrast))
+                    .monospacedDigit()
             }
             .padding(.horizontal, AppSpacing.sm)
             .padding(.vertical, AppSpacing.xs)

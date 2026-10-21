@@ -336,18 +336,18 @@ struct ArticleDetailView: View {
                                 HStack(alignment: .top, spacing: AppSpacing.xs) {
                                     Image(systemName: "quote.bubble.fill")
                                         .font(AppTypography.body)
-                                        .foregroundColor(AppColor.accent)
+                                        .foregroundStyle(AppColor.accent)
                                         .padding(.top, AppSpacing.textStack)
                                         .accessibilityHidden(true)
 
                                     VStack(alignment: .leading, spacing: AppSpacing.xxs) {
                                         Text("Cited in Event Overview")
                                             .font(AppTypography.eyebrow)
-                                            .foregroundColor(AppColor.accent)
+                                            .foregroundStyle(AppColor.accent)
 
                                         Text("“\(passage)”")
                                             .font(AppTypography.readerCitation)
-                                            .foregroundColor(AppColor.primaryText)
+                                            .foregroundStyle(AppColor.primaryText)
                                             .lineSpacing(AppSpacing.textStack)
                                             .textSelection(.enabled)
                                     }
@@ -369,7 +369,7 @@ struct ArticleDetailView: View {
                                 } label: {
                                     Image(systemName: "xmark.circle.fill")
                                         .font(AppTypography.body)
-                                        .foregroundColor(AppColor.secondaryText)
+                                        .foregroundStyle(AppColor.secondaryText)
                                 }
                                 .buttonStyle(.plain)
                                 .buttonBorderShape(.circle)
@@ -384,18 +384,20 @@ struct ArticleDetailView: View {
                         EyebrowText(displaySource, color: AppColor.accent)
 
                         Text("·")
-                            .foregroundColor(tertiaryText)
+                            .foregroundStyle(tertiaryText)
 
                         Text(currentArticle.publicationDateText)
                             .font(AppTypography.label)
-                            .foregroundColor(AppColor.secondaryText)
+                            .foregroundStyle(AppColor.secondaryText)
+                            .monospacedDigit()
 
                         Text("·")
-                            .foregroundColor(tertiaryText)
+                            .foregroundStyle(tertiaryText)
 
                         Text(readingTimeEstimate)
                             .font(AppTypography.label)
-                            .foregroundColor(AppColor.secondaryText)
+                            .foregroundStyle(AppColor.secondaryText)
+                            .monospacedDigit()
                     }
                     .accessibilityElement(children: .ignore)
                     .accessibilityLabel(
@@ -408,8 +410,8 @@ struct ArticleDetailView: View {
                     // Headline
                     Text(currentArticle.title)
                         .font(AppTypography.titleFont(for: themeManager.articleTheme, scale: readerTextScale))
-                        .foregroundColor(AppColor.primaryText)
-                        .lineSpacing(3)
+                        .foregroundStyle(AppColor.primaryText)
+                        .lineSpacing(AppSpacing.xxs * readerTextScale)
                         .accessibilityAddTraits(.isHeader)
                         .accessibilityHeading(.h1)
                         .textSelection(.enabled)
@@ -529,7 +531,7 @@ struct ArticleDetailView: View {
                 .accessibilityHidden(true)
             Text("Loading full story…")
                 .font(AppTypography.label)
-                .foregroundColor(AppColor.secondaryText)
+                .foregroundStyle(AppColor.secondaryText)
                 .accessibilityLabel("Loading full story")
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -542,11 +544,11 @@ struct ArticleDetailView: View {
                 HStack(spacing: AppSpacing.xs) {
                     Image(systemName: "doc.text.magnifyingglass")
                         .font(AppTypography.sectionTitle)
-                        .foregroundColor(AppColor.secondaryText)
+                        .foregroundStyle(AppColor.secondaryText)
                         .accessibilityHidden(true)
                     Text("Full story unavailable in reader")
                         .font(AppTypography.headline)
-                        .foregroundColor(AppColor.primaryText)
+                        .foregroundStyle(AppColor.primaryText)
                     Spacer()
                     Button {
                         reloadGeneration += 1
@@ -574,7 +576,7 @@ struct ArticleDetailView: View {
 
                 Text(reason)
                     .font(AppTypography.callout)
-                    .foregroundColor(AppColor.secondaryText)
+                    .foregroundStyle(AppColor.secondaryText)
 
                 Divider().opacity(Self.dividerOpacity(for: contrast))
 
@@ -582,7 +584,7 @@ struct ArticleDetailView: View {
                     .font(AppTypography.eyebrow)
                     .tracking(AppTypography.eyebrowTracking)
                     .textCase(.uppercase)
-                    .foregroundColor(tertiaryText)
+                    .foregroundStyle(tertiaryText)
 
                 articleDescriptionParagraphs
             }
@@ -655,12 +657,12 @@ struct ArticleDetailView: View {
     @ViewBuilder
     private var articleDescriptionParagraphs: some View {
         let paragraphs = displayParagraphs
-        VStack(alignment: .leading, spacing: AppSpacing.sm) {
+        VStack(alignment: .leading, spacing: AppSpacing.lg * readerTextScale) {
             ForEach(Array(paragraphs.enumerated()), id: \.offset) { _, paragraph in
                 Text(paragraph)
                     .font(AppTypography.bodyFont(for: themeManager.articleTheme, scale: readerTextScale))
-                    .foregroundColor(readableText(0.9))
-                    .lineSpacing(AppTypography.bodyLineSpacing(for: themeManager.articleTheme))
+                    .foregroundStyle(readableText(0.9))
+                    .lineSpacing(AppTypography.bodyLineSpacing(for: themeManager.articleTheme) * readerTextScale)
                     .textSelection(.enabled)
                     .accessibilityLinkedGroup(id: currentArticle.id, in: storyParagraphs)
             }
@@ -732,9 +734,8 @@ struct ArticleDetailView: View {
         case .heading, .subheading:
             Text(readerText(block))
                 .font(
-                    .system(
-                        size: (block.kind == .heading ? 22 : 15) * readerTextScale,
-                        weight: block.kind == .heading ? .bold : .semibold)
+                    AppTypography.readerHeadingFont(
+                        level: block.kind == .heading ? 2 : 3, scale: readerTextScale)
                 )
                 .foregroundStyle(AppColor.primaryText)
                 .padding(.top, AppSpacing.lg)
@@ -1221,11 +1222,15 @@ struct ArticleDetailView: View {
                     .accessibilityHidden(true)
                 Text("Analyzing the story on device…")
                     .font(AppTypography.label)
-                    .foregroundColor(AppColor.secondaryText)
+                    .foregroundStyle(AppColor.secondaryText)
                     .accessibilityLabel("Analyzing story with on-device AI")
             }
             .padding(AppSpacing.md)
-            .background(AppColor.surface, in: RoundedRectangle(cornerRadius: AppRadius.card))
+            .background(AppColor.surface, in: RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous)
+                    .strokeBorder(AppColor.border(for: contrast), lineWidth: 0.5)
+            )
         } else if let analysis = analysis {
             VStack(alignment: .leading, spacing: AppSpacing.sm) {
                 // Section Header: Restrained Summary
@@ -1236,7 +1241,7 @@ struct ArticleDetailView: View {
 
                 Text(analysis.summary)
                     .font(AppTypography.overviewFont(.body, scale: readerTextScale))
-                    .foregroundColor(readableText(0.92))
+                    .foregroundStyle(readableText(0.92))
                     .lineSpacing(AppTypography.bodyLineSpacing(for: themeManager.articleTheme) * readerTextScale)
                     .textSelection(.enabled)
 
@@ -1246,7 +1251,7 @@ struct ArticleDetailView: View {
                     VStack(alignment: .leading, spacing: AppSpacing.sm) {
                         Text("Key Takeaways")
                             .font(AppTypography.label)
-                            .foregroundColor(AppColor.secondaryText)
+                            .foregroundStyle(AppColor.secondaryText)
                             .padding(.top, AppSpacing.textStack)
 
                         ForEach(analysis.keyPoints, id: \.self) { point in
@@ -1256,7 +1261,7 @@ struct ArticleDetailView: View {
                                     .accessibilityHidden(true)
                                 Text(point)
                                     .font(AppTypography.overviewFont(.body, scale: readerTextScale))
-                                    .foregroundColor(readableText(0.88))
+                                    .foregroundStyle(readableText(0.88))
                                     .textSelection(.enabled)
                             }
                         }
@@ -1278,15 +1283,19 @@ struct ArticleDetailView: View {
                 }
             }
             .padding(AppSpacing.md)
-            .background(AppColor.surface, in: RoundedRectangle(cornerRadius: AppRadius.card))
+            .background(AppColor.surface, in: RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous)
+                    .strokeBorder(AppColor.border(for: contrast), lineWidth: 0.5)
+            )
         } else if let error = analysisError {
             NoticeView(tint: AppColor.warning) {
                 HStack(spacing: AppSpacing.xs) {
                     Image(systemName: "exclamationmark.triangle")
-                        .foregroundColor(AppColor.warning)
+                        .foregroundStyle(AppColor.warning)
                     Text("AI analysis unavailable: \(error)")
                         .font(AppTypography.callout)
-                        .foregroundColor(AppColor.secondaryText)
+                        .foregroundStyle(AppColor.secondaryText)
                     Spacer()
                     Button("Close Summary") {
                         if reduceMotion {
@@ -1307,12 +1316,16 @@ struct ArticleDetailView: View {
 
                 Text(ai)
                     .font(AppTypography.overviewFont(.body, scale: readerTextScale))
-                    .foregroundColor(readableText(0.92))
+                    .foregroundStyle(readableText(0.92))
                     .lineSpacing(AppTypography.bodyLineSpacing(for: themeManager.articleTheme) * readerTextScale)
                     .textSelection(.enabled)
             }
             .padding(AppSpacing.md)
-            .background(AppColor.surface, in: RoundedRectangle(cornerRadius: AppRadius.card))
+            .background(AppColor.surface, in: RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous)
+                    .strokeBorder(AppColor.border(for: contrast), lineWidth: 0.5)
+            )
         }
     }
 
@@ -1633,6 +1646,7 @@ struct ReaderFigureView: View {
     let block: ReaderBlock
     let url: URL
     var textScale: CGFloat = 1
+    @Environment(\.effectiveContrast) private var contrast
 
     static func effectiveImageAlt(for block: ReaderBlock) -> String {
         if let alt = block.imageAlt?.trimmingCharacters(in: .whitespacesAndNewlines), !alt.isEmpty {
@@ -1673,7 +1687,11 @@ struct ReaderFigureView: View {
                     maxWidth: DecodedImageCache.images.object(forKey: url as NSURL).map { CGFloat($0.width) }
                         ?? .infinity
                 )
-                .clipShape(RoundedRectangle(cornerRadius: AppRadius.card))
+                .clipShape(RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous)
+                        .strokeBorder(AppColor.borderSubtle, lineWidth: 0.5)
+                )
             }
             if !block.text.isEmpty && block.text.lowercased() != "article image" {
                 Text(block.text).font(AppTypography.readerCaptionFont(scale: textScale)).foregroundStyle(
@@ -1686,7 +1704,7 @@ struct ReaderFigureView: View {
                 // resolution loop until the stack overflowed. A plain container carries the spoken label instead.
                 HStack(spacing: 0) {
                     Text(credit).font(AppTypography.readerCaptionFont(scale: textScale)).foregroundStyle(
-                        AppColor.secondaryText
+                        AppColor.tertiaryText(for: contrast)
                     ).textSelection(.enabled)
                 }
                 .accessibilityElement(children: .ignore)
