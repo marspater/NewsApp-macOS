@@ -58,9 +58,13 @@ struct SidebarView: View {
         .focused($isListFocused)
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if showsTensionReading {
-                TensionSidebarButton(reading: tensionReading, open: openTension, status: tensionStatus)
-                    .padding(.horizontal, AppLayout.sidebarInset)
-                    .padding(.vertical, AppSpacing.sm)
+                VStack(spacing: 0) {
+                    Divider()
+                        .opacity(0.4)
+                    TensionSidebarButton(reading: tensionReading, open: openTension, status: tensionStatus)
+                        .padding(.horizontal, AppLayout.sidebarInset)
+                        .padding(.vertical, AppSpacing.xs)
+                }
             }
         }
         .focusedSceneValue(\.addFeedSubscription, { isSubscribePopoverPresented = true })

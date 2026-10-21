@@ -140,7 +140,8 @@ enum FeedCatalog {
     /// The active maintainer advisory for a feed URL, if one is registered.
     static func advisory(for url: String) -> FeedAdvisory? {
         guard let normalized = AppSettings.normalizeFeedURL(url) else { return nil }
-        return advisoriesByURL[normalized]
+        // Keys carry no trailing slash, so a slash variant of a subscription finds its advisory.
+        return advisoriesByURL[AppSettings.feedKey(normalized)]
     }
 
     /// Alternative catalog feeds for a subscription or catalog source.
@@ -189,11 +190,6 @@ enum FeedCatalog {
             url: "https://rss.politico.com/politics-news.xml",
             language: "en", region: "US", topic: .politics, set: .politics,
             fullText: .full, hasImages: true, availability: .available),
-        CatalogFeed(
-            id: "the-hill", title: "The Hill · News", publisher: "The Hill",
-            url: "https://thehill.com/feed",
-            language: "en", region: "US", topic: .politics, set: .politics,
-            fullText: .summary, hasImages: true, availability: .available),
         CatalogFeed(
             id: "bbc-politics", title: "BBC News · Politics", publisher: "BBC News",
             url: "https://feeds.bbci.co.uk/news/politics/rss.xml",
