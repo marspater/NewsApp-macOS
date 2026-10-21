@@ -610,24 +610,88 @@ struct TensionSidebarButton: View {
     let reading: WorldTensionReading?
     let open: () -> Void
     var status = "Not assessed"
+    @Environment(\.colorSchemeContrast) private var contrast
+    @State private var isHovered = false
+
+    private var readingHeadline: String {
+        if let reading {
+            return "\(reading.assessment.score)° \(reading.level.rawValue)"
+        }
+        return TensionIndexView.navigationTitleText
+    }
+
+    private var readingSubheadline: String {
+        reading == nil ? status : TensionIndexView.navigationTitleText
+    }
+
+    private var statusDot: some View {
+        Circle()
+            .fill(reading.map { AppColor.tension($0.level) } ?? AppColor.secondaryText)
+            .frame(width: AppLayout.tensionDotSize, height: AppLayout.tensionDotSize)
+            .overlay(
+                Circle()
+                    .strokeBorder(
+                        AppColor.border(for: contrast).opacity(0.35),
+                        lineWidth: 0.5
+                    )
+            )
+            .accessibilityHidden(true)
+    }
+
+    private var textStack: some View {
+        VStack(alignment: .leading, spacing: AppSpacing.textStack) {
+            Text(readingHeadline)
+                .font(AppTypography.headline)
+                .monospacedDigit()
+                .foregroundStyle(AppColor.primaryText)
+
+            Text(readingSubheadline)
+                .font(AppTypography.caption)
+                .foregroundStyle(AppColor.secondaryText)
+                .lineLimit(1)
+        }
+    }
+
+    private var chevron: some View {
+        Image(systemName: "chevron.right")
+            .font(AppTypography.eyebrow)
+            .foregroundStyle(AppColor.tertiaryText(for: contrast))
+            .opacity(isHovered ? 0.8 : 0)
+            .accessibilityHidden(true)
+    }
+
+    private var buttonContent: some View {
+        HStack(spacing: AppSpacing.sm) {
+            statusDot
+            textStack
+            Spacer(minLength: 0)
+            chevron
+        }
+        .padding(.horizontal, AppSpacing.sm)
+        .padding(.vertical, AppSpacing.xs)
+        .background(
+            RoundedRectangle(cornerRadius: AppRadius.control, style: .continuous)
+                .fill(isHovered ? AppColor.surface : Color.clear)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: AppRadius.control, style: .continuous)
+                .strokeBorder(
+                    isHovered ? AppColor.border(for: contrast) : Color.clear,
+                    lineWidth: 0.5
+                )
+        )
+        .contentShape(RoundedRectangle(cornerRadius: AppRadius.control, style: .continuous))
+    }
+
     var body: some View {
         Button(action: open) {
-            HStack(spacing: AppSpacing.sm) {
-                Circle().fill(reading.map { AppColor.tension($0.level) } ?? AppColor.secondaryText)
-                    .frame(width: AppLayout.tensionDotSize, height: AppLayout.tensionDotSize).accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: AppSpacing.textStack) {
-                    Text(
-                        reading.map { "\($0.assessment.score)° \($0.level.rawValue)" }
-                            ?? TensionIndexView.navigationTitleText
-                    )
-                    .font(AppTypography.headline).monospacedDigit()
-                    Text(reading == nil ? status : TensionIndexView.navigationTitleText)
-                        .font(AppTypography.caption).foregroundStyle(AppColor.secondaryText).lineLimit(1)
-                }
-                Spacer(minLength: 0)
-            }.contentShape(Rectangle())
+            buttonContent
         }
-        .buttonStyle(.plain).help("Show the World Tension assessment")
+        .buttonStyle(.plain)
+        .onHover { hovering in
+            isHovered = hovering
+        }
+        .help("Show the World Tension assessment")
         .accessibilityLabel(
             reading.map { "World tension, \($0.assessment.score) degrees, \($0.level.rawValue)" }
                 ?? "World tension, \(status)"
