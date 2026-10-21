@@ -66,6 +66,8 @@ final class AppSettings: ObservableObject {
         ("https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml", 1),
         // Removed from the catalog as low-quality news.
         ("https://wiadomosci.onet.pl/.feed", 2),
+        // Subscriber-only: nearly every story opens to a paywall card instead of publisher text.
+        ("https://www.ft.com/world?format=rss", 3),
     ]
     static var retiredFeedsVersion: Int { retiredFeeds.map(\.version).max() ?? 0 }
 

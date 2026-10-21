@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased — 20 October 2026
+## Unreleased — 21 October 2026
+
+- Retire the Financial Times world feed: it is subscriber-only, so nearly every story opened to a paywall card. Existing subscriptions end once at launch; read and saved FT stories stay, and subscribing again later is kept.
 
 - Fix a crash when VoiceOver or another accessibility client read a story whose lead image had a credit or was still loading (for example while opening an "Earlier in This Story" link): labels set directly on selectable text and spinners made label resolution loop until the stack overflowed. The same pattern is fixed for the Settings feed-refresh and event-source spinners, and the design lint now rejects such labels across multi-line modifier chains.
 
