@@ -140,7 +140,8 @@ enum FeedCatalog {
     /// The active maintainer advisory for a feed URL, if one is registered.
     static func advisory(for url: String) -> FeedAdvisory? {
         guard let normalized = AppSettings.normalizeFeedURL(url) else { return nil }
-        return advisoriesByURL[normalized]
+        // Keys carry no trailing slash, so a slash variant of a subscription finds its advisory.
+        return advisoriesByURL[AppSettings.feedKey(normalized)]
     }
 
     /// Alternative catalog feeds for a subscription or catalog source.

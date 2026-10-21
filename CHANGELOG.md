@@ -2,6 +2,8 @@
 
 ## Unreleased — 20 October 2026
 
+- Keep a meaningful trailing slash on subscription URLs. Feeds such as `japantimes.co.jp/feed/` and `phys.org/rss-feed/` answer the slashless form with 403, 404 or an HTTP-downgrading redirect. Only the bare root slash is removed; `/feed` and `/feed/` are treated as one subscription when adding, importing or subscribing from the catalog, advisories and their dismissals apply to both forms, and stored subscriptions are not rewritten.
+
 - Fix a crash when VoiceOver or another accessibility client read a story whose lead image had a credit or was still loading (for example while opening an "Earlier in This Story" link): labels set directly on selectable text and spinners made label resolution loop until the stack overflowed. The same pattern is fixed for the Settings feed-refresh and event-source spinners, and the design lint now rejects such labels across multi-line modifier chains.
 
 - Event overviews show "Earlier in This Story": up to three earlier events of the same developing story, each opening its own overview (#314). People and organizations named across more than 5% (and at least ten) of the week's events no longer tie events together; reviewed wrong links fell from 7 of 36 to 1 of 45.
