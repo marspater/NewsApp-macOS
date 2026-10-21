@@ -4,6 +4,7 @@
 #        script/ci_testsuite.sh --lcov LCOV_PATH ATOM...
 # Compiles the runner once, runs each atom in its own process and writes one JUnit testcase per atom.
 # With --lcov (the analysis command), compiles with coverage instrumentation and writes LCOV instead of JUnit.
+# Set NEWS_TEST_RUNNER to an already built runner to skip compilation.
 set -uo pipefail
 
 cd "$(dirname "$0")/.."
@@ -23,7 +24,14 @@ trap 'rm -rf "$WORK"' EXIT
 
 COVERAGE_FLAGS=()
 if [ -n "$LCOV_PATH" ]; then COVERAGE_FLAGS=(-profile-generate -profile-coverage-mapping); fi
-script/build_test_runner.sh "$WORK/test_runner" ${COVERAGE_FLAGS[@]+"${COVERAGE_FLAGS[@]}"} || exit 1
+RUNNER="${NEWS_TEST_RUNNER:-$WORK/test_runner}"
+if [ -z "${NEWS_TEST_RUNNER:-}" ] && [ -n "$LCOV_PATH" ] && [ -n "${CIRCLE_BUILD_NUM:-}" ]; then
+    # Analysis invokes this script once per atom; build the instrumented runner once per CI job.
+    RUNNER="${TMPDIR:-/tmp}/news-coverage-runner-$CIRCLE_BUILD_NUM"
+fi
+if [ ! -x "$RUNNER" ]; then
+    script/build_test_runner.sh "$RUNNER" ${COVERAGE_FLAGS[@]+"${COVERAGE_FLAGS[@]}"} || exit 1
+fi
 
 STATUS=0
 CASES=""
@@ -31,7 +39,7 @@ FAILURES=0
 for atom in "$@"; do
     echo "Running $atom..."
     START_TIME=$(date +%s)
-    NEWS_TEST_ATOM="$atom" LLVM_PROFILE_FILE="$WORK/%p.profraw" "$WORK/test_runner" 2>&1 | tee "$WORK/output.log"
+    NEWS_TEST_ATOM="$atom" LLVM_PROFILE_FILE="$WORK/%p.profraw" "$RUNNER" 2>&1 | tee "$WORK/output.log"
     ATOM_STATUS=${PIPESTATUS[0]}
     DURATION=$(($(date +%s) - START_TIME))
     CASES+="    <testcase name=\"$atom\" classname=\"NewsTests\" file=\"$atom\" time=\"$DURATION\">"
@@ -57,10 +65,20 @@ EOF
 fi
 
 if [ -n "$LCOV_PATH" ]; then
-    xcrun llvm-profdata merge -sparse "$WORK"/*.profraw -o "$WORK/coverage.profdata" || exit 1
+    # Report the atom failure itself rather than a coverage error caused by it.
+    if [ "$STATUS" -ne 0 ]; then
+        echo "Analysis skipped: $FAILURES test atom(s) failed." >&2
+        exit $STATUS
+    fi
+    PROFILES=("$WORK"/*.profraw)
+    if [ ! -e "${PROFILES[0]}" ]; then
+        echo "Analysis failed: the runner wrote no coverage profile. Was it built with -profile-generate?" >&2
+        exit 1
+    fi
+    xcrun llvm-profdata merge -sparse "${PROFILES[@]}" -o "$WORK/coverage.profdata" || exit 1
     mkdir -p "$(dirname "$LCOV_PATH")"
     # Report repository sources only: drop the staged test copies and the SwiftPM dependency checkouts.
-    xcrun llvm-cov export -format=lcov -instr-profile "$WORK/coverage.profdata" "$WORK/test_runner" \
+    xcrun llvm-cov export -format=lcov -instr-profile "$WORK/coverage.profdata" "$RUNNER" \
         -ignore-filename-regex='news-tests\.|/\.build/' > "$LCOV_PATH" || exit 1
 fi
 
