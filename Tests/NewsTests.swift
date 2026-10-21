@@ -457,6 +457,22 @@ struct NewsTests {
             try await testPublisherCancellation()
             return
         }
+        if let index = CommandLine.arguments.firstIndex(of: "--debug-extract") {
+            for path in CommandLine.arguments[(index + 1)...] {
+                let html = ContentExtractionPipeline.shared.decodeHTML(
+                    data: try Data(contentsOf: URL(fileURLWithPath: path)))
+                let outcome = ContentExtractionPipeline.shared.extractFromHTML(html, baseUrl: "https://example.com/a")
+                if case .success(let content, _, let doc) = outcome {
+                    print(
+                        "DBG", path.split(separator: "/").last!, "OK words",
+                        content.split(whereSeparator: \.isWhitespace).count,
+                        doc?.blocks.prefix(4).map { "\($0.kind):\($0.text.prefix(40))" } ?? [])
+                } else {
+                    print("DBG", path.split(separator: "/").last!, outcome)
+                }
+            }
+            return
+        }
         if CommandLine.arguments.contains("--catalog-reader-access") {
             await testCatalogReaderAccess()
             return
@@ -1496,6 +1512,81 @@ struct NewsTests {
         assertEqual(
             pipeline.extractFromHTML(html).content, "\(prose)\n\n\(second)",
             "Uppercase raw tags and optional paragraph endings preserve the body")
+        let third =
+            "Officials said the review would continue into next year, and a public consultation is planned before any decision."
+        let threeParagraphs = "<p>\(prose)</p><p>\(second)</p><p>\(third)</p>"
+        assertEqual(
+            pipeline.extractFromHTML(
+                "<script>document.write('<script src=\"/jquery.js\">\\x3C/script>')</script><article>\(threeParagraphs)</article>"
+            ).content, "\(prose)\n\n\(second)\n\n\(third)",
+            "Markup written inside a script does not swallow the page (Africanews, CNA, Science News)")
+        assertEqual(
+            pipeline.extractFromHTML(
+                "<style>a::before { content: '<style>'; } /* </b> */</style><script>var s = '</div>';</script><article>\(threeParagraphs)</article>"
+            ).content, "\(prose)\n\n\(second)\n\n\(third)",
+            "Style and script end at their own first closing tag, whatever markup they contain")
+        assertEqual(
+            pipeline.extractFromHTML(
+                "<nav><nav><p>Menu link text that is long enough to read as prose here.</p></nav></nav><article>\(threeParagraphs)</article>"
+            )
+            .content, "\(prose)\n\n\(second)\n\n\(third)",
+            "Nested ignored elements still close by depth")
+        assertEqual(
+            pipeline.extractFromHTML(
+                "<div class='menu'><h3>Topics</h3><h3>Sections</h3></div><div class='entry-content'><figure><img src='https://news.example/a.jpg' width='1200' height='800'></figure>\(threeParagraphs)</div>"
+            ).content, "\(prose)\n\n\(second)\n\n\(third)",
+            "An explicit publisher body keeps every paragraph (NASA)")
+        assertEqual(
+            pipeline.extractFromHTML(
+                "<div class='menu'><h3>Topics</h3><h3>Sections</h3><p>Top Programming Languages</p></div><div class='body-description'>\(threeParagraphs)</div>"
+            ).content, "\(prose)\n\n\(second)\n\n\(third)",
+            "A RebelMouse body beats the site menu (IEEE Spectrum)")
+        assertEqual(
+            pipeline.extractFromHTML(
+                "<article><p>\(prose)</p><div class='pmc-paywall'><p>\(second)</p><p>\(third)</p></div></article>"
+            )
+            .content, "\(prose)\n\n\(second)\n\n\(third)",
+            "A metering wrapper holding the story stays (Variety)")
+        assertEqual(
+            pipeline.extractFromHTML(
+                "<article>\(threeParagraphs)<div class='paywall'><p>Subscribe today for unlimited access to every story we publish.</p></div></article>"
+            ).content, "\(prose)\n\n\(second)\n\n\(third)",
+            "A paywall prompt without the story is still furniture")
+        assertEqual(
+            pipeline.extractFromHTML(
+                "<article><div x-cloak class='panel'><label>Size</label><select><option>Small</option><option>Standard</option><option>Large</option></select> Links Standard Orange</div>\(threeParagraphs)</article>"
+            ).content, "\(prose)\n\n\(second)\n\n\(third)",
+            "Script-only panels and form controls are not story text (Ars Technica)")
+        assertEqual(
+            pipeline.extractFromHTML(
+                "<article><div class='story'>\(threeParagraphs)<p>\(prose)</p><p>\(second)</p></div><div class='article-body'><p>Sponsored: a short report on how security teams measure the defenses they deploy.</p><p>Download the free report today to compare your scores with industry peers.</p></div></article>"
+            ).content?.hasPrefix(prose), true,
+            "A small box with an explicit body class does not replace the story (BleepingComputer)")
+        let standfirst = "Officials expect the review to shape spending plans for the coming decade across the region."
+        let guardianLike = pipeline.extractFromHTML(
+            "<article><div data-gu-name='media'><figure><img src='https://news.example/lead.jpg' width='1200' height='800'><figcaption>Crews at work.</figcaption></figure></div><div class='player-note'><p>This story is voiced by an automated narrator for listeners on the go.</p></div><div data-gu-name='standfirst'><p>\(standfirst)</p></div><div class='article-body-commercial-selector'>\(threeParagraphs)</div></article>"
+        )
+        assertEqual(
+            guardianLike.content, "\(standfirst)\n\n\(prose)\n\n\(second)\n\n\(third)",
+            "An explicit body keeps the article's standfirst but not other lead-in text (the Guardian)")
+        assertEqual(
+            pipeline.extractFromHTML(
+                "<article><header><h1>Review shapes plans</h1><p class='standfirst'>\(standfirst)</p></header><div class='entry-content'>\(threeParagraphs)</div></article>"
+            ).content, "\(standfirst)\n\n\(prose)\n\n\(second)\n\n\(third)",
+            "A standfirst in the article's own header survives the explicit-body repair")
+        assertEqual(
+            pipeline.extractFromHTML(
+                "<article><h3>Email Story</h3><p>Join our Whatsapp Channel</p>\(threeParagraphs)</article>"
+            )
+            .content, "\(prose)\n\n\(second)\n\n\(third)",
+            "Sharing and channel prompts are not story text (Dawn)")
+        if case .success(_, _, let document) = guardianLike {
+            assertEqual(
+                document?.blocks.first?.imageURL, "https://news.example/lead.jpg",
+                "An explicit body keeps the article's lead figure")
+        } else {
+            assertTrue(false, "The Guardian-like page extracts")
+        }
         assertTrue(
             pipeline.extractFromHTML("<article><div>\(prose)</div><div>\(second)</div></article>").isSuccess,
             "Div-only articles remain readable")
