@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased — 20 October 2026
+## Unreleased — 21 October 2026
+
+- Retire the Financial Times world feed, which is subscriber-only, and The Hill, which answers every reader request with HTTP 403; The Hill leaves the starter catalog. Existing subscriptions end once at launch; read and saved FT stories stay, and subscribing again later is kept.
 
 - Keep a meaningful trailing slash on subscription URLs. Feeds such as `japantimes.co.jp/feed/` and `phys.org/rss-feed/` answer the slashless form with 403, 404 or an HTTP-downgrading redirect. Only the bare root slash is removed; `/feed` and `/feed/` are treated as one subscription when adding, importing or subscribing from the catalog, advisories and their dismissals apply to both forms, and stored subscriptions are not rewritten.
 
