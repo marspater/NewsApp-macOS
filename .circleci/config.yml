@@ -8,10 +8,14 @@ jobs:
       - checkout
       - run:
           name: "Ensure permissions"
-          command: chmod +x test.sh build.sh build_release.sh script/ci_testsuite.sh
+          command: chmod +x test.sh build.sh build_release.sh script/build_test_runner.sh script/ci_testsuite.sh
       - run:
-          name: "Install Testsuite Extension"
-          command: circleci extension install testsuite || true
+          name: "Design lint and evaluation self-checks"
+          command: |
+            script/design_lint.sh
+            for check in evaluate publisher_review publisher_dates overview_review importance_review relation_review catalog_review; do
+              python3 "script/evaluation/$check.py"
+            done
       - run:
           name: "Run unit tests and regressions via Smarter Testing"
           command: circleci testsuite run "unit tests"

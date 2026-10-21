@@ -1,6 +1,24 @@
 ---
 name: unit tests
-discover: echo "NewsTests"
-run: ./script/ci_testsuite.sh "<< outputs.junit >>" << test.atoms >>
+discover: printf '%s\n' Tests/FeedKitSwiftSoupTests.swift Tests/NotificationAttachmentTests.swift Tests/NewsTests.swift
+run: script/ci_testsuite.sh "<< outputs.junit >>" << test.atoms >>
+analysis: script/ci_testsuite.sh --lcov "<< outputs.lcov >>" << test.atoms >>
 options:
   store-test-results: true
+  test-impact-analysis: true
+  impact-key: news-unit-tests
+  full-test-run-paths:
+    - .circleci/test-suites.yml
+    - test.sh
+    - script/build_test_runner.sh
+    - script/ci_testsuite.sh
+    - script/swiftpm_dependencies.sh
+    - Package.swift
+    - Package.resolved
+    # Fixtures are read at run time, which coverage cannot attribute to a test atom.
+    - Tests/Fixtures/**
+  # The runner compiles a staged copy of NewsTests.swift, so coverage cannot see the original file.
+  test-selection-rules:
+    - test-atom: Tests/NewsTests.swift
+      include:
+        - Tests/NewsTests.swift
