@@ -135,10 +135,12 @@ struct ArticleListView: View {
 
     /// Once stories are on screen they stay put: background collection, grouping and rating queue behind the
     /// updates button instead of reshuffling the list. A refresh the reader started is the exception while the list
-    /// is showing: they asked for the new stories.
+    /// is showing: they asked for the new stories. So is Today showing only earlier days' stories, such as the cache
+    /// at launch the next morning.
     private var isHoldingList: Bool {
         guard !appliesNextUpdate else { return false }
         if !articlePath.isEmpty { return true }
+        if !isSearching, (selectedTopic ?? "Today") == "Today", buffer.showsOnlyEarlierDays() { return false }
         return !isReaderRefreshing
     }
 

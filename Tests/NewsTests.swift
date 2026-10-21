@@ -9488,6 +9488,24 @@ struct NewsTests {
         assertEqual(
             buffer.receive(FeedSnapshot(articles: [a, b]), holding: true, mode: .events), .replaced,
             "The first page always shows")
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC")!
+        let morning = calendar.date(from: DateComponents(year: 2026, month: 10, day: 21, hour: 7))!
+        func dated(_ id: String, _ date: Date) -> FeedArticle {
+            FeedArticle(
+                storedID: id, title: "Story \(id)", link: "https://news.example/\(id)", guid: id, description: "",
+                pubDate: date, source: "Wire One")
+        }
+        var cached = FeedUpdateBuffer()
+        cached.replace(with: FeedSnapshot(articles: [dated("y", morning.addingTimeInterval(-10 * 3600))]))
+        assertTrue(
+            cached.showsOnlyEarlierDays(now: morning, calendar: calendar),
+            "A list of only yesterday's stories is not today's reading")
+        cached.replace(with: FeedSnapshot(articles: [dated("t", morning.addingTimeInterval(-3600))]))
+        assertFalse(
+            cached.showsOnlyEarlierDays(now: morning, calendar: calendar), "A story from today keeps the list held")
+        assertFalse(
+            FeedUpdateBuffer().showsOnlyEarlierDays(now: morning, calendar: calendar), "An empty list is not stale")
         let fresh = article("n", source: "Wire One", minutesAgo: 0)
         assertEqual(
             buffer.receive(FeedSnapshot(articles: [fresh, a, b]), holding: true, mode: .events), .waiting,

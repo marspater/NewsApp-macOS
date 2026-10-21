@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased — 20 October 2026
+## Unreleased — 21 October 2026
+
+- Today replaces a list that shows only earlier days' stories, such as the cache shown at launch the next morning, when the first refresh arrives, instead of holding it behind the updates button. An open story still keeps the list still.
 
 - Fix a crash when VoiceOver or another accessibility client read a story whose lead image had a credit or was still loading (for example while opening an "Earlier in This Story" link): labels set directly on selectable text and spinners made label resolution loop until the stack overflowed. The same pattern is fixed for the Settings feed-refresh and event-source spinners, and the design lint now rejects such labels across multi-line modifier chains.
 

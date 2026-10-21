@@ -215,14 +215,21 @@ struct FeedUpdateBuffer: Equatable, Sendable {
         displayed.events = events
     }
 
-    /// A refreshed first page. `hasMore` says further pages follow it, so pages already loaded
-    /// beyond it are a continuation and stay when the first page is unchanged.
-    @discardableResult
     /// Bursts of store revisions are debounced, but a section's first page is shown at once.
     static func debouncesReload(isPaging: Bool, isNewQuery: Bool, hasStories: Bool) -> Bool {
         !isPaging && !isNewQuery && hasStories
     }
 
+    /// Every listed story is from an earlier day, such as a cache shown at launch the next morning. Nothing listed is
+    /// today's reading, so a refresh replaces it instead of waiting behind the updates button.
+    func showsOnlyEarlierDays(now: Date = Date(), calendar: Calendar = .current) -> Bool {
+        let today = calendar.startOfDay(for: now)
+        return !displayed.articles.isEmpty && displayed.articles.allSatisfy { $0.pubDate < today }
+    }
+
+    /// A refreshed first page. `hasMore` says further pages follow it, so pages already loaded
+    /// beyond it are a continuation and stay when the first page is unchanged.
+    @discardableResult
     mutating func receive(_ snapshot: FeedSnapshot, holding: Bool, mode: FeedGroupingMode, hasMore: Bool = false)
         -> FeedUpdateResult
     {
