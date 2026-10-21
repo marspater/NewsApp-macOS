@@ -3087,6 +3087,8 @@ struct NewsTests {
         let nyt = "https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml"
         let onet = "https://wiadomosci.onet.pl/.feed"
         let ft = "https://www.ft.com/world?format=rss"
+        let hill = "https://thehill.com/feed"
+        assertFalse(FeedCatalog.allFeeds.contains { $0.url == hill }, "A reader-blocking feed leaves the catalog")
         assertFalse(AppSettings.defaultFeeds.contains(nyt), "Retired feeds are not fresh-install defaults")
         assertFalse(FeedCatalog.allFeeds.contains { $0.url == onet }, "Retired feeds leave the catalog")
         parkedDefaults.set([kept[0], nyt, onet], forKey: AppSettings.feedURLsKey)
@@ -3100,7 +3102,7 @@ struct NewsTests {
             "The first retirement's flag counts as version 1; later ones still apply")
         parkedDefaults.removeObject(forKey: AppSettings.retiredFeedsVersionKey)
         parkedDefaults.removeObject(forKey: "retired_default_feeds_v1")
-        parkedDefaults.set([kept[0], nyt, onet, ft], forKey: AppSettings.feedURLsKey)
+        parkedDefaults.set([kept[0], nyt, onet, ft, hill], forKey: AppSettings.feedURLsKey)
         assertEqual(AppSettings(defaults: parkedDefaults).feedURLs, [kept[0]], "Every retired subscription ends")
         let resubscribed = AppSettings(defaults: parkedDefaults)
         _ = resubscribed.addFeed(url: nyt)

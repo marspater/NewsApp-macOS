@@ -190,11 +190,6 @@ enum FeedCatalog {
             language: "en", region: "US", topic: .politics, set: .politics,
             fullText: .full, hasImages: true, availability: .available),
         CatalogFeed(
-            id: "the-hill", title: "The Hill · News", publisher: "The Hill",
-            url: "https://thehill.com/feed",
-            language: "en", region: "US", topic: .politics, set: .politics,
-            fullText: .summary, hasImages: true, availability: .available),
-        CatalogFeed(
             id: "bbc-politics", title: "BBC News · Politics", publisher: "BBC News",
             url: "https://feeds.bbci.co.uk/news/politics/rss.xml",
             language: "en", region: "GB", topic: .politics, set: .politics,

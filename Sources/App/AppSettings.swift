@@ -68,6 +68,8 @@ final class AppSettings: ObservableObject {
         ("https://wiadomosci.onet.pl/.feed", 2),
         // Subscriber-only: nearly every story opens to a paywall card instead of publisher text.
         ("https://www.ft.com/world?format=rss", 3),
+        // Every story answers HTTP 403 to the reader (21 October 2026 catalog reader-access run).
+        ("https://thehill.com/feed", 3),
     ]
     static var retiredFeedsVersion: Int { retiredFeeds.map(\.version).max() ?? 0 }
 
