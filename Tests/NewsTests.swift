@@ -12183,6 +12183,16 @@ struct NewsTests {
         let storedSections = tempDefaults.stringArray(forKey: AppSettings.userSectionsKey) ?? []
         assertTrue(storedSections.contains("IsolatedSection"), "Injected defaults must receive userSections mutations")
 
+        assertEqual(AppSettings.feedKey("https://example.com"), "https://example.com", "A root URL is its own key")
+        assertEqual(
+            AppSettings.feedKey("https://example.com/feed/"), "https://example.com/feed",
+            "One trailing slash is ignored")
+        assertEqual(
+            AppSettings.feedKey("https://example.com/feed//"), "https://example.com/feed/",
+            "Only one trailing slash is ignored")
+        assertEqual(
+            AppSettings.feedKey("https://example.com/feed/?a=1"), "https://example.com/feed?a=1",
+            "The query stays in the key")
         // 3. Slash variants are one subscription; the URL is stored as given and stored subscriptions are never rewritten
         let slashSuite = testDefaultsSuite("test.settings.slash")
         let slashDefaults = UserDefaults(suiteName: slashSuite)!
