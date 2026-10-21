@@ -5,6 +5,32 @@ struct ArchiveSearchToken: Hashable, Identifiable {
     let expression: String
     var id: String { expression }
 
+    var displayName: String {
+        if expression == "is:unread" { return "Unread" }
+        if expression == "is:read" { return "Read" }
+        if expression == "is:saved" { return "Saved" }
+        if expression.hasPrefix("source:") {
+            return "Source: " + expression.dropFirst("source:".count)
+        }
+        if expression.hasPrefix("category:") {
+            return "Category: " + expression.dropFirst("category:".count)
+        }
+        return expression
+    }
+
+    var systemImage: String {
+        if expression == "is:unread" { return "circle.circle" }
+        if expression == "is:read" { return "checkmark.circle" }
+        if expression == "is:saved" { return "bookmark" }
+        if expression.hasPrefix("source:") { return "newspaper" }
+        if expression.hasPrefix("category:") { return "tag" }
+        return "magnifyingglass"
+    }
+
+    init(expression: String) {
+        self.expression = expression
+    }
+
     /// Prefix-only source/category expressions remain editable until their value is supplied.
     init?(completedExpression: String) {
         let candidate = completedExpression.lowercased()
