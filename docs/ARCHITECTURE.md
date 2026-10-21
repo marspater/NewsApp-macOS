@@ -82,7 +82,7 @@ Native macOS, local-first RSS reader. This document defines the supported techno
 - `Sources/Views/DesignSystem.swift`, `GlassSystem.swift`: semantic design tokens and Liquid Glass integration.
 
 ### Data / persistence (`Sources/Storage/`, `Sources/Models/`)
-- `Sources/Storage/DatabaseEngine.swift`: SQLite engine, schema, WAL/FTS5 responsibilities.
+- `Sources/Storage/DatabaseEngine.swift`: SQLite engine, schema, WAL/FTS5 responsibilities; `DatabaseEngine+Events.swift` holds events, overviews, event matching and reading state, and article embeddings.
 - `Sources/Storage/ArticleStore.swift`: article domain persistence.
 - `Sources/Storage/MigrationCoordinator.swift`: database migrations.
 - `Sources/Storage/ReadManager.swift`, `SavedStoriesManager.swift`: reading and saved-story state.
