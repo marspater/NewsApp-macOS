@@ -834,60 +834,74 @@ struct EventOverviewReaderView: View {
     @ViewBuilder
     private func timelineRow(_ item: OverviewTimelineItem, isLast: Bool) -> some View {
         HStack(alignment: .top, spacing: AppSpacing.sm) {
-            VStack(spacing: 0) {
-                Circle()
-                    .fill(AppColor.accent)
-                    .frame(width: 8, height: 8)
-                    .padding(.top, 5)
+            timelineRailNode(isLast: isLast)
+            timelineRowContent(item, isLast: isLast)
+        }
+    }
 
-                if !isLast {
-                    Rectangle()
-                        .fill(AppColor.accent.opacity(0.3))
-                        .frame(width: 1.5)
-                        .frame(maxHeight: .infinity)
-                }
+    private func timelineRailNode(isLast: Bool) -> some View {
+        VStack(spacing: 0) {
+            Circle()
+                .fill(AppColor.accent)
+                .frame(width: 8, height: 8)
+                .padding(.top, 5)
+
+            if !isLast {
+                Rectangle()
+                    .fill(AppColor.accent.opacity(0.3))
+                    .frame(width: 1.5)
+                    .frame(maxHeight: .infinity)
             }
-            .frame(width: 12)
+        }
+        .frame(width: 12)
+    }
 
-            VStack(alignment: .leading, spacing: AppSpacing.xxs) {
-                HStack(spacing: AppSpacing.xs) {
-                    Text(item.dateText)
-                        .font(AppTypography.overviewFont(.annotation, scale: textScale))
-                        .foregroundStyle(AppColor.accent)
-                        .bold()
+    private func timelineRowContent(_ item: OverviewTimelineItem, isLast: Bool) -> some View {
+        VStack(alignment: .leading, spacing: AppSpacing.xxs) {
+            timelineDateRow(item)
+            timelineSummaryRow(item)
+        }
+        .padding(.bottom, isLast ? 0 : AppSpacing.md)
+    }
 
-                    if item.isFuturePlan {
-                        TagView(
-                            title: "Plan",
-                            tint: AppColor.accent,
-                            font: AppTypography.overviewFont(.micro, scale: textScale)
-                        )
-                        .accessibilityLabel("Planned event")
-                    }
+    private func timelineDateRow(_ item: OverviewTimelineItem) -> some View {
+        HStack(spacing: AppSpacing.xs) {
+            Text(item.dateText)
+                .font(AppTypography.overviewFont(.annotation, scale: textScale))
+                .foregroundStyle(AppColor.accent)
+                .bold()
 
-                    if let pubDate = item.publicationDate, item.eventDate != nil {
-                        Text("Reported \(formatTimelineDate(pubDate))")
-                            .font(AppTypography.overviewFont(.micro, scale: textScale))
-                            .foregroundStyle(currentTertiaryTextColor)
-                    }
-                }
-
-                HStack(alignment: .firstTextBaseline, spacing: AppSpacing.xxs) {
-                    Text(item.summary)
-                        .font(AppTypography.overviewFont(.body, scale: textScale))
-                        .foregroundStyle(AppColor.primaryText)
-                        .lineSpacing(AppSpacing.textStack * textScale)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .textSelection(.enabled)
-
-                    let indices = sourceIndices(for: item.citationIDs)
-                    ForEach(indices, id: \.self) { idx in
-                        superscriptCitationButton(
-                            idx, citation: item.citationIDs.compactMap { overview.citations[$0] }.first)
-                    }
-                }
+            if item.isFuturePlan {
+                TagView(
+                    title: "Plan",
+                    tint: AppColor.accent,
+                    font: AppTypography.overviewFont(.micro, scale: textScale)
+                )
+                .accessibilityLabel("Planned event")
             }
-            .padding(.bottom, isLast ? 0 : AppSpacing.md)
+
+            if let pubDate = item.publicationDate, item.eventDate != nil {
+                Text("Reported \(formatTimelineDate(pubDate))")
+                    .font(AppTypography.overviewFont(.micro, scale: textScale))
+                    .foregroundStyle(currentTertiaryTextColor)
+            }
+        }
+    }
+
+    private func timelineSummaryRow(_ item: OverviewTimelineItem) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: AppSpacing.xxs) {
+            Text(item.summary)
+                .font(AppTypography.overviewFont(.body, scale: textScale))
+                .foregroundStyle(AppColor.primaryText)
+                .lineSpacing(AppSpacing.textStack * textScale)
+                .fixedSize(horizontal: false, vertical: true)
+                .textSelection(.enabled)
+
+            let indices = sourceIndices(for: item.citationIDs)
+            ForEach(indices, id: \.self) { idx in
+                superscriptCitationButton(
+                    idx, citation: item.citationIDs.compactMap { overview.citations[$0] }.first)
+            }
         }
     }
 

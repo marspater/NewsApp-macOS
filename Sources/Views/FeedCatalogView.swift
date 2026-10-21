@@ -105,7 +105,7 @@ struct FeedCatalogView: View {
                                     row(feed)
                                 }
                             } header: {
-                                header(for: set, matchingCount: feeds.count)
+                                header(for: set, matchingFeeds: feeds)
                             }
                         }
                     }
@@ -186,9 +186,8 @@ struct FeedCatalogView: View {
         .padding(.vertical, AppSpacing.xxs)
     }
 
-    private func header(for set: CatalogSet, matchingCount: Int) -> some View {
-        let feeds = FeedCatalog.feeds(in: set)
-        let remaining = feeds.filter { !appSettings.isSubscribed($0) }
+    private func header(for set: CatalogSet, matchingFeeds: [CatalogFeed]) -> some View {
+        let remaining = matchingFeeds.filter { !appSettings.isSubscribed($0) }
         return HStack(alignment: .firstTextBaseline, spacing: AppSpacing.sm) {
             VStack(alignment: .leading, spacing: AppSpacing.xxs) {
                 Text(set.title)
@@ -207,8 +206,8 @@ struct FeedCatalogView: View {
                     .foregroundStyle(AppColor.success)
             } else {
                 Button(
-                    remaining.count == feeds.count
-                        ? "Subscribe to Set (\(feeds.count))" : "Subscribe to Remaining (\(remaining.count))"
+                    remaining.count == matchingFeeds.count
+                        ? "Subscribe to Set (\(matchingFeeds.count))" : "Subscribe to Remaining (\(remaining.count))"
                 ) {
                     feedManager.addCatalogFeeds(remaining)
                 }
@@ -225,72 +224,81 @@ struct FeedCatalogView: View {
     private func row(_ feed: CatalogFeed) -> some View {
         let subscribed = appSettings.isSubscribed(feed)
         return HStack(spacing: AppSpacing.sm) {
-            // Publisher Monogram
-            Circle()
-                .fill(AppColor.accent.opacity(0.12))
-                .frame(width: 32, height: 32)
-                .overlay(
-                    Text(String(feed.publisher.prefix(1)))
-                        .textCase(.uppercase)
-                        .font(AppTypography.headline)
-                        .foregroundStyle(AppColor.accent)
-                )
-                .accessibilityHidden(true)
-
-            VStack(alignment: .leading, spacing: AppSpacing.xxs) {
-                Text(feed.title)
-                    .font(AppTypography.body)
-                    .foregroundStyle(AppColor.primaryText)
-
-                Text(details(feed))
-                    .font(AppTypography.caption)
-                    .foregroundStyle(AppColor.secondaryText)
-
-                if subscribed {
-                    FeedHealthLine(health: feedManager.feedHealth[feed.url])
-                }
-                if let advisory = appSettings.visibleAdvisory(for: feed.url) {
-                    Text("Review note (\(advisory.date)): \(advisory.summary)")
-                        .font(AppTypography.caption)
-                        .foregroundStyle(AppColor.primaryText)
-                }
-                if feed.availability == .previewOnly {
-                    Text("Story pages may refuse the in-app reader; feed preview still works.")
-                        .font(AppTypography.caption)
-                        .foregroundStyle(AppColor.tertiaryText(for: contrast))
-                }
-            }
-
+            publisherMonogram(feed)
+            feedInfoColumn(feed, subscribed: subscribed)
             Spacer()
-
-            if subscribed {
-                HStack(spacing: AppSpacing.xs) {
-                    Label("Subscribed", systemImage: "checkmark.circle.fill")
-                        .font(AppTypography.label)
-                        .foregroundStyle(AppColor.success)
-
-                    Button("Remove") { feedManager.removeFeed(url: feed.url) }
-                        .buttonStyle(.plain)
-                        .font(AppTypography.caption)
-                        .foregroundStyle(AppColor.secondaryText)
-                        .padding(.horizontal, AppSpacing.xs)
-                        .padding(.vertical, AppSpacing.xxs)
-                        .background(AppColor.surface)
-                        .clipShape(RoundedRectangle(cornerRadius: AppRadius.control, style: .continuous))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: AppRadius.control, style: .continuous)
-                                .strokeBorder(AppColor.border(for: contrast), lineWidth: 0.5)
-                        )
-                        .accessibilityLabel("Remove \(feed.title)")
-                }
-            } else {
-                Button("Subscribe") { feedManager.addCatalogFeeds([feed]) }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.small)
-                    .accessibilityLabel("Subscribe, \(feed.title)")
-            }
+            feedActionButtons(feed, subscribed: subscribed)
         }
         .padding(.vertical, AppSpacing.xxs)
+    }
+
+    private func publisherMonogram(_ feed: CatalogFeed) -> some View {
+        Circle()
+            .fill(AppColor.accent.opacity(0.12))
+            .frame(width: 32, height: 32)
+            .overlay(
+                Text(String(feed.publisher.prefix(1)))
+                    .textCase(.uppercase)
+                    .font(AppTypography.headline)
+                    .foregroundStyle(AppColor.accent)
+            )
+            .accessibilityHidden(true)
+    }
+
+    private func feedInfoColumn(_ feed: CatalogFeed, subscribed: Bool) -> some View {
+        VStack(alignment: .leading, spacing: AppSpacing.xxs) {
+            Text(feed.title)
+                .font(AppTypography.body)
+                .foregroundStyle(AppColor.primaryText)
+
+            Text(details(feed))
+                .font(AppTypography.caption)
+                .foregroundStyle(AppColor.secondaryText)
+
+            if subscribed {
+                FeedHealthLine(health: feedManager.feedHealth[feed.url])
+            }
+            if let advisory = appSettings.visibleAdvisory(for: feed.url) {
+                Text("Review note (\(advisory.date)): \(advisory.summary)")
+                    .font(AppTypography.caption)
+                    .foregroundStyle(AppColor.primaryText)
+            }
+            if feed.availability == .previewOnly {
+                Text("Story pages may refuse the in-app reader; feed preview still works.")
+                    .font(AppTypography.caption)
+                    .foregroundStyle(AppColor.tertiaryText(for: contrast))
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func feedActionButtons(_ feed: CatalogFeed, subscribed: Bool) -> some View {
+        if subscribed {
+            HStack(spacing: AppSpacing.xs) {
+                Label("Subscribed", systemImage: "checkmark.circle.fill")
+                    .font(AppTypography.label)
+                    .foregroundStyle(AppColor.success)
+
+                Button("Remove") { feedManager.removeFeed(url: feed.url) }
+                    .buttonStyle(.plain)
+                    .font(AppTypography.caption)
+                    .foregroundStyle(AppColor.secondaryText)
+                    .padding(.horizontal, AppSpacing.xs)
+                    .padding(.vertical, AppSpacing.xxs)
+                    .background(AppColor.surface)
+                    .clipShape(RoundedRectangle(cornerRadius: AppRadius.control, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: AppRadius.control, style: .continuous)
+                            .strokeBorder(AppColor.border(for: contrast), lineWidth: 0.5)
+                    )
+                    .accessibilityLabel("Remove \(feed.title)")
+            }
+        } else {
+            Button("Subscribe") { feedManager.addCatalogFeeds([feed]) }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .accessibilityLabel("Subscribe, \(feed.title)")
+        }
     }
 
     private func details(_ feed: CatalogFeed) -> String {
