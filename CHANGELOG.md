@@ -2,6 +2,7 @@
 
 ## Unreleased — 21 October 2026
 
+- Event overview cards (Highlights, Perspectives, Timeline, Earlier in This Story and their inner cards) fill the reading column instead of shrinking to short content, so every card shares one width.
 - Reader v9: stories from Africanews, CNA, Science News and IEEE Spectrum open as text again, Ars Technica shows the story instead of its author bio, and Variety and NASA show the whole article instead of the first paragraphs. Inline scripts that wrote a `<script>` tag hid the rest of the page from the reader, and explicit publisher bodies lost every paragraph during repair. The Guardian keeps its lead photo and standfirst, Dawn drops its sharing prompts, and a sponsor box can no longer replace a story. Stories stored by earlier readers are extracted again when opened ([audit](docs/audits/2026-10-21-catalog-reader-access.md)).
 - Retire the Financial Times world feed, which is subscriber-only, and The Hill, which answers every reader request with HTTP 403; The Hill leaves the starter catalog. Existing subscriptions end once at launch; read and saved FT stories stay, and subscribing again later is kept.
 

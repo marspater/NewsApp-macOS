@@ -927,7 +927,9 @@ private struct OverviewCardSurfaceModifier: ViewModifier {
     let contrast: ColorSchemeContrast
 
     func body(content: Content) -> some View {
+        // Every card fills the reading column, so short cards line up with the rest.
         content
+            .frame(maxWidth: .infinity, alignment: .leading)
             .background(AppColor.cardBackground)
             .clipShape(RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous))
             .overlay(
