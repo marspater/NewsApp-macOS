@@ -91,6 +91,7 @@ SWIFT_SOURCES=(
     Sources/Views/EventCardView.swift
     Sources/Views/ArticleListView.swift
     Sources/Views/ArticleDetailView.swift
+    Sources/Views/ReaderSupportViews.swift
     Sources/Views/ArticleRemoteImage.swift
     Sources/Views/EventOverviewReaderView.swift
     Sources/Views/TensionIndexView.swift

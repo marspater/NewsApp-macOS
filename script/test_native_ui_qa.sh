@@ -70,6 +70,7 @@ swiftc "${NEWS_DEPENDENCY_FLAGS[@]}" -swift-version 6 -O -parse-as-library -targ
     Sources/Views/ArticleRemoteImage.swift \
     Sources/Views/EventOverviewReaderView.swift \
     Sources/Views/ArticleDetailView.swift \
+    Sources/Views/ReaderSupportViews.swift \
     Sources/Storage/SavedStoriesManager.swift \
     Sources/Services/OPMLManager.swift \
     Sources/Coordinators/RefreshCoordinator.swift \

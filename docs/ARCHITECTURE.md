@@ -74,7 +74,7 @@ Native macOS, local-first RSS reader. This document defines the supported techno
 - `Sources/App/NewsSignposts.swift`: local OSLog performance signposts.
 - `Sources/Views/MainView.swift`: top-level UI coordinator.
 - `Sources/Views/SidebarView.swift`, `ArticleListView.swift`, `ArticleCardView.swift`, `EventCardView.swift`, `FeedHealthLine.swift`: navigation and list presentation.
-- `Sources/Views/ArticleDetailView.swift`, `ArticleWebView.swift`, `WebPreviewPolicy.swift`: article reading and protected WebKit rendering.
+- `Sources/Views/ArticleDetailView.swift`, `ReaderSupportViews.swift` (reader modes, commands, figures and tags), `ArticleWebView.swift`, `WebPreviewPolicy.swift`: article reading and protected WebKit rendering.
 - `Sources/Views/EventOverviewReaderView.swift`: event overview (Highlights, Perspectives, Timeline, Earlier in This Story, sources).
 - `Sources/Views/TensionIndexView.swift`: World Tension sheet and sidebar entry.
 - `Sources/Views/ArticleRemoteImage.swift`: remote card, reader and overview images, loaded through the protected reader image path with a decoded-image cache.
