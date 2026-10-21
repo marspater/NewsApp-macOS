@@ -27,6 +27,10 @@ struct ArchiveSearchToken: Hashable, Identifiable {
         return "magnifyingglass"
     }
 
+    init(expression: String) {
+        self.expression = expression
+    }
+
     /// Prefix-only source/category expressions remain editable until their value is supplied.
     init?(completedExpression: String) {
         let candidate = completedExpression.lowercased()

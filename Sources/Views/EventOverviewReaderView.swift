@@ -510,12 +510,7 @@ struct EventOverviewReaderView: View {
                 }
             }
             .padding(AppSpacing.md)
-            .background(AppColor.cardBackground)
-            .clipShape(RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous)
-                    .strokeBorder(currentBorderStrokeColor, lineWidth: contrast == .increased ? 1.0 : 0.5)
-            )
+            .overviewCardSurface(borderColor: currentBorderStrokeColor, contrast: contrast)
         }
     }
 
@@ -646,12 +641,7 @@ struct EventOverviewReaderView: View {
             }
         }
         .padding(AppSpacing.sm)
-        .background(AppColor.cardBackground)
-        .clipShape(RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous)
-                .strokeBorder(currentBorderStrokeColor, lineWidth: contrast == .increased ? 1.0 : 0.5)
-        )
+        .overviewCardSurface(borderColor: currentBorderStrokeColor, contrast: contrast)
     }
 
     // MARK: - Earlier in This Story (#314)
@@ -696,12 +686,7 @@ struct EventOverviewReaderView: View {
                 }
             }
             .padding(AppSpacing.md)
-            .background(AppColor.cardBackground)
-            .clipShape(RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous)
-                    .strokeBorder(currentBorderStrokeColor, lineWidth: contrast == .increased ? 1.0 : 0.5)
-            )
+            .overviewCardSurface(borderColor: currentBorderStrokeColor, contrast: contrast)
         }
     }
 
@@ -793,12 +778,7 @@ struct EventOverviewReaderView: View {
                 }
             }
             .padding(AppSpacing.md)
-            .background(AppColor.cardBackground)
-            .clipShape(RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous)
-                    .strokeBorder(currentBorderStrokeColor, lineWidth: contrast == .increased ? 1.0 : 0.5)
-            )
+            .overviewCardSurface(borderColor: currentBorderStrokeColor, contrast: contrast)
         }
     }
 
@@ -848,12 +828,7 @@ struct EventOverviewReaderView: View {
                 }
             }
             .padding(AppSpacing.md)
-            .background(AppColor.cardBackground)
-            .clipShape(RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous)
-                    .strokeBorder(currentBorderStrokeColor, lineWidth: contrast == .increased ? 1.0 : 0.5)
-            )
+            .overviewCardSurface(borderColor: currentBorderStrokeColor, contrast: contrast)
         }
     }
 
@@ -882,12 +857,7 @@ struct EventOverviewReaderView: View {
                 }
             }
             .padding(AppSpacing.md)
-            .background(AppColor.cardBackground)
-            .clipShape(RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous)
-                    .strokeBorder(currentBorderStrokeColor, lineWidth: contrast == .increased ? 1.0 : 0.5)
-            )
+            .overviewCardSurface(borderColor: currentBorderStrokeColor, contrast: contrast)
         }
     }
 
@@ -945,12 +915,30 @@ struct EventOverviewReaderView: View {
             }
             .padding(AppSpacing.sm)
             .frame(maxWidth: .infinity, alignment: .leading)
+            .overviewCardSurface(borderColor: currentBorderStrokeColor, contrast: contrast)
+        }
+    }
+}
+
+// MARK: - Overview Card Surface Modifier
+
+private struct OverviewCardSurfaceModifier: ViewModifier {
+    let borderColor: Color
+    let contrast: ColorSchemeContrast
+
+    func body(content: Content) -> some View {
+        content
             .background(AppColor.cardBackground)
             .clipShape(RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous)
-                    .strokeBorder(currentBorderStrokeColor, lineWidth: contrast == .increased ? 1.0 : 0.5)
+                    .strokeBorder(borderColor, lineWidth: contrast == .increased ? 1.0 : 0.5)
             )
-        }
+    }
+}
+
+extension View {
+    fileprivate func overviewCardSurface(borderColor: Color, contrast: ColorSchemeContrast) -> some View {
+        modifier(OverviewCardSurfaceModifier(borderColor: borderColor, contrast: contrast))
     }
 }

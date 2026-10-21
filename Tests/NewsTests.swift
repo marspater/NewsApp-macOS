@@ -10943,6 +10943,36 @@ struct NewsTests {
             parsed.matches(article: art1, isRead: true, isSaved: false), "Article 1 should fail because it is read")
         assertFalse(
             parsed.matches(article: art2, isRead: false, isSaved: false), "Article 2 should fail source/terms match")
+
+        // 6. Settings Pane Bounds and Section Header Tracking (#475)
+        assertEqual(AppLayout.settingsPaneWidth, 720.0, "AppLayout.settingsPaneWidth should be 720.0")
+        assertEqual(AppLayout.settingsPaneHeight, 560.0, "AppLayout.settingsPaneHeight should be 560.0")
+        assertEqual(AppTypography.sectionHeaderTracking, 0.6, "AppTypography.sectionHeaderTracking should be 0.6")
+
+        // 7. ArchiveSearchToken Semantic Display Names and Symbols (#475)
+        let unreadToken = ArchiveSearchToken(completedExpression: "is:unread")!
+        assertEqual(unreadToken.displayName, "Unread", "Unread token has display name Unread")
+        assertEqual(unreadToken.systemImage, "circle.circle", "Unread token uses circle.circle")
+
+        let readToken = ArchiveSearchToken(completedExpression: "is:read")!
+        assertEqual(readToken.displayName, "Read", "Read token has display name Read")
+        assertEqual(readToken.systemImage, "checkmark.circle", "Read token uses checkmark.circle")
+
+        let savedToken = ArchiveSearchToken(completedExpression: "is:saved")!
+        assertEqual(savedToken.displayName, "Saved", "Saved token has display name Saved")
+        assertEqual(savedToken.systemImage, "bookmark", "Saved token uses bookmark")
+
+        let sourceToken = ArchiveSearchToken(completedExpression: "source:reuters")!
+        assertEqual(sourceToken.displayName, "Source: reuters", "Source token has formatted display name")
+        assertEqual(sourceToken.systemImage, "newspaper", "Source token uses newspaper")
+
+        let categoryToken = ArchiveSearchToken(completedExpression: "category:science")!
+        assertEqual(categoryToken.displayName, "Category: science", "Category token has formatted display name")
+        assertEqual(categoryToken.systemImage, "tag", "Category token uses tag")
+
+        let fallbackToken = ArchiveSearchToken(expression: "custom:term")
+        assertEqual(fallbackToken.displayName, "custom:term", "Fallback token keeps raw expression")
+        assertEqual(fallbackToken.systemImage, "magnifyingglass", "Fallback token uses magnifyingglass")
     }
 
     static func testDistributionAndEntitlementsIntegrity() async {
