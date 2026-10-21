@@ -342,7 +342,7 @@ struct EventOverviewReaderView: View {
 
             Text(overview.title)
                 .font(AppTypography.overviewFont(.title, scale: textScale))
-                .foregroundColor(AppColor.primaryText)
+                .foregroundStyle(AppColor.primaryText)
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityAddTraits(.isHeader)
                 .accessibilityHeading(.h1)
@@ -351,23 +351,26 @@ struct EventOverviewReaderView: View {
             HStack(spacing: AppSpacing.eyebrowGap) {
                 Text("Updated \(formattedUpdateTime)")
                     .font(AppTypography.overviewFont(.metadata, scale: textScale))
-                    .foregroundColor(currentSecondaryTextColor)
+                    .foregroundStyle(currentSecondaryTextColor)
+                    .monospacedDigit()
 
                 Text("·")
-                    .foregroundColor(currentTertiaryTextColor)
+                    .foregroundStyle(currentTertiaryTextColor)
                     .accessibilityHidden(true)
 
                 Text(articleCountText)
                     .font(AppTypography.overviewFont(.metadata, scale: textScale))
-                    .foregroundColor(currentSecondaryTextColor)
+                    .foregroundStyle(currentSecondaryTextColor)
+                    .monospacedDigit()
 
                 Text("·")
-                    .foregroundColor(currentTertiaryTextColor)
+                    .foregroundStyle(currentTertiaryTextColor)
                     .accessibilityHidden(true)
 
                 Text(publisherCountText)
                     .font(AppTypography.overviewFont(.metadata, scale: textScale))
-                    .foregroundColor(currentSecondaryTextColor)
+                    .foregroundStyle(currentSecondaryTextColor)
+                    .monospacedDigit()
             }
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(
@@ -393,7 +396,7 @@ struct EventOverviewReaderView: View {
                     Text(fact.text)
                         .font(AppTypography.overviewFont(.introduction, scale: textScale))
                         .lineSpacing(AppSpacing.eyebrowGap * textScale)
-                        .foregroundColor(AppColor.primaryText)
+                        .foregroundStyle(AppColor.primaryText)
                         .fixedSize(horizontal: false, vertical: true)
                         .textSelection(.enabled)
                     HStack(spacing: AppSpacing.eyebrowGap) {
@@ -407,7 +410,7 @@ struct EventOverviewReaderView: View {
                     Text(para)
                         .font(AppTypography.overviewFont(.introduction, scale: textScale))
                         .lineSpacing(AppSpacing.eyebrowGap * textScale)
-                        .foregroundColor(AppColor.primaryText)
+                        .foregroundStyle(AppColor.primaryText)
                         .fixedSize(horizontal: false, vertical: true)
                         .textSelection(.enabled)
                 }
@@ -429,6 +432,10 @@ struct EventOverviewReaderView: View {
                             .aspectRatio(contentMode: .fit)
                             .frame(maxWidth: .infinity, maxHeight: 380)
                             .clipShape(RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous)
+                                    .strokeBorder(AppColor.borderSubtle, lineWidth: 0.5)
+                            )
                     } else if phase.error != nil {
                         Color.clear
                             .frame(height: 0)
@@ -450,7 +457,7 @@ struct EventOverviewReaderView: View {
             {
                 Text(caption)
                     .font(AppTypography.overviewFont(.annotation, scale: textScale))
-                    .foregroundColor(currentSecondaryTextColor)
+                    .foregroundStyle(currentSecondaryTextColor)
                     .textSelection(.enabled)
             }
 
@@ -459,7 +466,7 @@ struct EventOverviewReaderView: View {
             {
                 Text(credit)
                     .font(AppTypography.overviewFont(.caption, scale: textScale))
-                    .foregroundColor(currentTertiaryTextColor)
+                    .foregroundStyle(currentTertiaryTextColor)
                     .textSelection(.enabled)
             }
         }
@@ -492,7 +499,7 @@ struct EventOverviewReaderView: View {
                             Text(fact.text)
                                 .font(AppTypography.overviewFont(.fact, scale: textScale))
                                 .lineSpacing(AppSpacing.xxs * textScale)
-                                .foregroundColor(AppColor.primaryText)
+                                .foregroundStyle(AppColor.primaryText)
                                 .fixedSize(horizontal: false, vertical: true)
                                 .textSelection(.enabled)
 
@@ -507,7 +514,7 @@ struct EventOverviewReaderView: View {
             .clipShape(RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous)
-                    .stroke(currentBorderStrokeColor, lineWidth: 1)
+                    .strokeBorder(currentBorderStrokeColor, lineWidth: contrast == .increased ? 1.0 : 0.5)
             )
         }
     }
@@ -577,14 +584,15 @@ struct EventOverviewReaderView: View {
 
                             Text(article.title)
                                 .font(AppTypography.overviewFont(.metadata, scale: textScale))
-                                .foregroundColor(AppColor.primaryText)
+                                .foregroundStyle(AppColor.primaryText)
                                 .lineLimit(2)
                                 .fixedSize(horizontal: false, vertical: true)
                                 .textSelection(.enabled)
 
                             Text(article.publicationDateText)
                                 .font(AppTypography.overviewFont(.caption, scale: textScale))
-                                .foregroundColor(currentTertiaryTextColor)
+                                .foregroundStyle(currentTertiaryTextColor)
+                                .monospacedDigit()
                         }
 
                         Spacer(minLength: 8)
@@ -607,7 +615,7 @@ struct EventOverviewReaderView: View {
                                     .accessibilityHidden(true)
                             }
                             .buttonStyle(.plain)
-                            .foregroundColor(currentSecondaryTextColor)
+                            .foregroundStyle(currentSecondaryTextColor)
                             .help("Open original web publication")
                             .accessibilityLabel(
                                 Self.openWebArticleAccessibilityLabel(
@@ -627,12 +635,12 @@ struct EventOverviewReaderView: View {
             HStack(spacing: AppSpacing.xs) {
                 Image(systemName: "newspaper")
                     .imageScale(.small)
-                    .foregroundColor(AppColor.accent)
+                    .foregroundStyle(AppColor.accent)
                     .accessibilityHidden(true)
 
                 Text("Sources (\(memberArticles.count))")
                     .font(AppTypography.overviewFont(.subheading, scale: textScale))
-                    .foregroundColor(AppColor.primaryText)
+                    .foregroundStyle(AppColor.primaryText)
                     .accessibilityAddTraits(.isHeader)
                     .accessibilityHeading(.h2)
             }
@@ -642,7 +650,7 @@ struct EventOverviewReaderView: View {
         .clipShape(RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous)
-                .stroke(currentBorderStrokeColor, lineWidth: 1)
+                .strokeBorder(currentBorderStrokeColor, lineWidth: contrast == .increased ? 1.0 : 0.5)
         )
     }
 
@@ -653,7 +661,7 @@ struct EventOverviewReaderView: View {
         VStack(alignment: .leading, spacing: AppSpacing.sm) {
             Text("Earlier in This Story")
                 .font(AppTypography.overviewFont(.section, scale: textScale))
-                .foregroundColor(AppColor.primaryText)
+                .foregroundStyle(AppColor.primaryText)
                 .accessibilityAddTraits(.isHeader)
                 .accessibilityHeading(.h2)
 
@@ -665,15 +673,15 @@ struct EventOverviewReaderView: View {
                         HStack(alignment: .firstTextBaseline, spacing: AppSpacing.sm) {
                             Text(event.firstPublishedAt.formatted(.dateTime.month(.abbreviated).day()))
                                 .font(AppTypography.overviewFont(.captionMedium, scale: textScale))
-                                .foregroundColor(currentTertiaryTextColor)
+                                .foregroundStyle(currentTertiaryTextColor)
                                 .monospacedDigit()
                             Text(event.title)
                                 .font(AppTypography.overviewFont(.body, scale: textScale))
-                                .foregroundColor(AppColor.primaryText)
+                                .foregroundStyle(AppColor.primaryText)
                                 .multilineTextAlignment(.leading)
                             Spacer(minLength: AppSpacing.xs)
                             Image(systemName: "chevron.right")
-                                .foregroundColor(currentTertiaryTextColor)
+                                .foregroundStyle(currentTertiaryTextColor)
                                 .accessibilityHidden(true)
                         }
                         .contentShape(Rectangle())
@@ -690,6 +698,10 @@ struct EventOverviewReaderView: View {
             .padding(AppSpacing.md)
             .background(AppColor.cardBackground)
             .clipShape(RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous)
+                    .strokeBorder(currentBorderStrokeColor, lineWidth: contrast == .increased ? 1.0 : 0.5)
+            )
         }
     }
 
@@ -733,7 +745,7 @@ struct EventOverviewReaderView: View {
         VStack(alignment: .leading, spacing: AppSpacing.sm) {
             Text("Timeline")
                 .font(AppTypography.overviewFont(.section, scale: textScale))
-                .foregroundColor(AppColor.primaryText)
+                .foregroundStyle(AppColor.primaryText)
                 .accessibilityAddTraits(.isHeader)
                 .accessibilityHeading(.h2)
 
@@ -743,7 +755,7 @@ struct EventOverviewReaderView: View {
                         VStack(alignment: .leading, spacing: AppSpacing.textStack) {
                             Text(item.dateText)
                                 .font(AppTypography.overviewFont(.annotation, scale: textScale))
-                                .foregroundColor(AppColor.accent)
+                                .foregroundStyle(AppColor.accent)
 
                             if item.isFuturePlan {
                                 TagView(
@@ -757,7 +769,7 @@ struct EventOverviewReaderView: View {
                             if let pubDate = item.publicationDate, item.eventDate != nil {
                                 Text("Reported \(formatTimelineDate(pubDate))")
                                     .font(AppTypography.overviewFont(.micro, scale: textScale))
-                                    .foregroundColor(currentTertiaryTextColor)
+                                    .foregroundStyle(currentTertiaryTextColor)
                             }
                         }
                         .frame(minWidth: 80, maxWidth: 110, alignment: .leading)
@@ -765,7 +777,7 @@ struct EventOverviewReaderView: View {
                         VStack(alignment: .leading, spacing: AppSpacing.xxs) {
                             Text(item.summary)
                                 .font(AppTypography.overviewFont(.body, scale: textScale))
-                                .foregroundColor(AppColor.primaryText)
+                                .foregroundStyle(AppColor.primaryText)
                                 .lineSpacing(AppSpacing.textStack * textScale)
                                 .textSelection(.enabled)
 
@@ -785,7 +797,7 @@ struct EventOverviewReaderView: View {
             .clipShape(RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous)
-                    .stroke(currentBorderStrokeColor, lineWidth: 1)
+                    .strokeBorder(currentBorderStrokeColor, lineWidth: contrast == .increased ? 1.0 : 0.5)
             )
         }
     }
@@ -794,7 +806,7 @@ struct EventOverviewReaderView: View {
         VStack(alignment: .leading, spacing: AppSpacing.sm) {
             Text("Perspectives")
                 .font(AppTypography.overviewFont(.section, scale: textScale))
-                .foregroundColor(AppColor.primaryText)
+                .foregroundStyle(AppColor.primaryText)
                 .accessibilityAddTraits(.isHeader)
                 .accessibilityHeading(.h2)
 
@@ -804,23 +816,23 @@ struct EventOverviewReaderView: View {
                         HStack(alignment: .firstTextBaseline, spacing: AppSpacing.xs) {
                             Text(perspective.participant)
                                 .font(AppTypography.overviewFont(.emphasis, scale: textScale))
-                                .foregroundColor(AppColor.primaryText)
+                                .foregroundStyle(AppColor.primaryText)
                                 .textSelection(.enabled)
 
                             if let wire = perspective.originalWireSource, !wire.isEmpty {
                                 Text("via \(wire) syndicate")
                                     .font(AppTypography.overviewFont(.captionMedium, scale: textScale))
-                                    .foregroundColor(currentTertiaryTextColor)
+                                    .foregroundStyle(currentTertiaryTextColor)
                             } else if let publisher = perspective.sourcePublisher, !publisher.isEmpty {
                                 Text("via \(publisher)")
                                     .font(AppTypography.overviewFont(.captionMedium, scale: textScale))
-                                    .foregroundColor(currentTertiaryTextColor)
+                                    .foregroundStyle(currentTertiaryTextColor)
                             }
                         }
 
                         Text(perspective.position)
                             .font(AppTypography.overviewFont(.body, scale: textScale))
-                            .foregroundColor(currentSecondaryTextColor)
+                            .foregroundStyle(currentSecondaryTextColor)
                             .lineSpacing(AppSpacing.textStack * textScale)
                             .textSelection(.enabled)
 
@@ -840,7 +852,7 @@ struct EventOverviewReaderView: View {
             .clipShape(RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous)
-                    .stroke(currentBorderStrokeColor, lineWidth: 1)
+                    .strokeBorder(currentBorderStrokeColor, lineWidth: contrast == .increased ? 1.0 : 0.5)
             )
         }
     }
@@ -849,7 +861,7 @@ struct EventOverviewReaderView: View {
         VStack(alignment: .leading, spacing: AppSpacing.sm) {
             Text(angle.title)
                 .font(AppTypography.overviewFont(.section, scale: textScale))
-                .foregroundColor(AppColor.primaryText)
+                .foregroundStyle(AppColor.primaryText)
                 .accessibilityAddTraits(.isHeader)
                 .accessibilityHeading(.h2)
 
@@ -858,7 +870,7 @@ struct EventOverviewReaderView: View {
                     Text(angle.summary)
                         .font(AppTypography.overviewFont(.body, scale: textScale))
                         .lineSpacing(AppSpacing.xxs * textScale)
-                        .foregroundColor(AppColor.primaryText)
+                        .foregroundStyle(AppColor.primaryText)
                         .textSelection(.enabled)
                 }
 
@@ -874,7 +886,7 @@ struct EventOverviewReaderView: View {
             .clipShape(RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous)
-                    .stroke(currentBorderStrokeColor, lineWidth: 1)
+                    .strokeBorder(currentBorderStrokeColor, lineWidth: contrast == .increased ? 1.0 : 0.5)
             )
         }
     }
@@ -885,14 +897,14 @@ struct EventOverviewReaderView: View {
                 HStack(alignment: .top, spacing: AppSpacing.xs) {
                     Circle()
                         .frame(width: AppSpacing.xxs, height: AppSpacing.xxs)
-                        .foregroundColor(AppColor.accent)
+                        .foregroundStyle(AppColor.accent)
                         .padding(.top, AppSpacing.eyebrowGap)
                         .accessibilityHidden(true)
 
                     VStack(alignment: .leading, spacing: AppSpacing.xxs) {
                         Text(fact.text)
                             .font(AppTypography.overviewFont(.detail, scale: textScale))
-                            .foregroundColor(AppColor.primaryText)
+                            .foregroundStyle(AppColor.primaryText)
                             .textSelection(.enabled)
 
                         citationPillsView(fact.citationIDs)
@@ -907,18 +919,18 @@ struct EventOverviewReaderView: View {
         VStack(alignment: .leading, spacing: AppSpacing.xs) {
             Text("Coverage tone")
                 .font(AppTypography.overviewFont(.section, scale: textScale))
-                .foregroundColor(AppColor.primaryText)
+                .foregroundStyle(AppColor.primaryText)
                 .accessibilityAddTraits(.isHeader)
                 .accessibilityHeading(.h2)
 
             VStack(alignment: .leading, spacing: AppSpacing.xs) {
                 HStack(spacing: AppSpacing.xs) {
                     Image(systemName: "text.magnifyingglass")
-                        .foregroundColor(currentSecondaryTextColor)
+                        .foregroundStyle(currentSecondaryTextColor)
                         .accessibilityHidden(true)
                     Text("\(sentiment.label) tone · automated estimate")
                         .font(AppTypography.overviewFont(.bodyMedium, scale: textScale))
-                        .foregroundColor(AppColor.primaryText)
+                        .foregroundStyle(AppColor.primaryText)
                 }
 
                 if let rationale = sentiment.rationale?.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -926,7 +938,7 @@ struct EventOverviewReaderView: View {
                 {
                     Text(rationale)
                         .font(AppTypography.overviewFont(.annotation, scale: textScale))
-                        .foregroundColor(currentSecondaryTextColor)
+                        .foregroundStyle(currentSecondaryTextColor)
                         .lineSpacing(AppSpacing.textStack * textScale)
                         .textSelection(.enabled)
                 }
@@ -937,7 +949,7 @@ struct EventOverviewReaderView: View {
             .clipShape(RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous)
-                    .stroke(currentBorderStrokeColor, lineWidth: 1)
+                    .strokeBorder(currentBorderStrokeColor, lineWidth: contrast == .increased ? 1.0 : 0.5)
             )
         }
     }
