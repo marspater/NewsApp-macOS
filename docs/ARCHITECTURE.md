@@ -1,142 +1,289 @@
 # Architecture
 
-Native macOS, local-first RSS reader. This document defines the supported technology and implementation constraints for all contributors. Validation and contribution workflow live in [CONTRIBUTING.md](../CONTRIBUTING.md); security reporting and boundaries live in [SECURITY.md](../SECURITY.md).
+Native macOS, local-first RSS reader. This page is the contract for technology and implementation invariants. Workflow lives in [CONTRIBUTING.md](../CONTRIBUTING.md), design in [DESIGN.md](DESIGN.md), security in [SECURITY.md](../SECURITY.md), privacy in [PRIVACY.md](../PRIVACY.md).
 
-## Technology and product constraints
+> [!IMPORTANT]
+> Nothing leaves the Mac except feed, article and image requests through the protected gateway. No cloud backend, remote AI, custom AI models, telemetry or analytics SDKs.
 
-- Swift 6, SwiftUI, and narrow AppKit/WebKit integration; minimum deployment target macOS 15. Gate newer APIs without raising the minimum casually.
-- Parsing dependencies: SwiftSoup provides CSS metadata selection and a bounded HTML5 DOM repair fallback; FeedKit provides typed RSS/Atom/JSON models behind the app's feed limits and streaming XML safety boundary. SwiftPM resolves both packages; app and native harness scripts link its static dependency archive.
-- Native Apple frameworks: Foundation, Network, SQLite3, NaturalLanguage, conditional FoundationModels, OSLog/signposts and Swift Concurrency. Prefer existing services and native APIs; third-party dependencies need a concrete requirement without a reasonable native solution.
-- Local-first storage, no cloud backend, remote AI, custom AI models, telemetry or analytics SDKs. OSLog/signposts are local diagnostics. See [PRIVACY.md](../PRIVACY.md).
-- Current development and verification builds are Apple silicon (arm64), ad-hoc signed with App Sandbox and Hardened Runtime. Intel/universal builds and notarization are outside current development scope.
-- Native keyboard and trackpad interaction, accessibility, shared semantic design tokens and restrained Liquid Glass. Avoid fixed-display layout hacks and gratuitous animation. [DESIGN.md](DESIGN.md) defines the design language, its tokens and components, and where Liquid Glass may be used.
+## Stack
 
-## Implementation invariants
+| | |
+|---|---|
+| Language / UI | Swift 6, SwiftUI, narrow AppKit/WebKit. Minimum macOS 15; gate newer APIs, never raise the minimum casually. |
+| Apple frameworks | Foundation, Network, SQLite3 (WAL + FTS5), NaturalLanguage, CoreML, conditional FoundationModels, OSLog/signposts, Swift Concurrency. |
+| Packages (SwiftPM, static archive) | **SwiftSoup**: CSS metadata selection and bounded HTML5 repair. **FeedKit**: typed RSS/Atom/JSON models behind the app's own XML safety boundary. New dependencies need a requirement with no reasonable native answer. |
+| Builds | arm64, ad-hoc signed, App Sandbox + Hardened Runtime. Intel/universal and notarization are out of current scope. |
+| UI rules | Native keyboard/trackpad, accessibility, semantic tokens, restrained Liquid Glass ([DESIGN.md](DESIGN.md)). |
 
-- Briefing is a daily edition (after Kagi News) of at most ten unread, unmuted publications from an explicit 24-hour publication window. Selection uses at most 500 recent candidates and caps each publisher at two reports and each event at one; membership and order are stored in preferences, shared by every window and frozen until the next edition hour (Settings → Reading, default 7:00) or an explicit New Edition; stories removed since are skipped. Read state supplies progress without removing cards. Normal refresh, archive access and scheduling remain independent. Stored importance, publisher coverage and recent read/save category interests precede source/category diversity, publication time and stable ID. Unrated importance is neutral; selection never invokes a model.
+## System map
 
-- Schema v12 guards FTS update triggers with null-safe comparisons of indexed text fields; metadata-only and identical refreshes preserve existing FTS rows. Changed titles/descriptions/content/source/category still reindex atomically.
-- Schema v15 gives each indexed article a durable integer key in `article_fts_rows`, independent of `articles`' hidden rowid. FTS search/candidate joins and update/delete triggers use that key; the migration transactionally rebuilds only the derived index from stored articles. Rank/ID tie order, visibility filters and saved/read/event data are preserved, including across `VACUUM`.
+```mermaid
+flowchart LR
+    subgraph UI["Views · Sources/Views"]
+        Main[MainView] --> List[ArticleListView<br/>EventCardView]
+        Main --> Reader[ArticleDetailView<br/>ReaderSupportViews]
+        Main --> Overview[EventOverviewReaderView]
+        Main --> Tension[TensionIndexView]
+    end
+    subgraph Coord["Coordinators"]
+        FM[FeedManager]
+        RC[RefreshCoordinator]
+        NS[NotificationService]
+    end
+    subgraph Svc["Services · protected network"]
+        FF[FeedFetcher]
+        HTTP[SecureHTTPClient]
+        GW[NetworkBoundaryProxy<br/>IPAddressValidator]
+        Parse[FeedXMLParser · FeedKit<br/>JSONFeedParser]
+    end
+    subgraph Intel["Intelligence · on device"]
+        EQ[EnrichmentQueue]
+        CEP[ContentExtractionPipeline<br/>SwiftSoup]
+        EM[EventMatcher v7<br/>SentenceEmbedder MiniLM]
+        EC[EventClusterer]
+        OV[Overview* builders]
+        WT[WorldTension]
+    end
+    subgraph Store["Storage · SQLite v23"]
+        AS[ArticleStore]
+        DB[(DatabaseEngine<br/>+Events)]
+    end
+    RC --> FM --> FF --> HTTP --> GW --> Net((Publishers))
+    FF --> Parse --> DB
+    FM --> EQ & EC & NS
+    EC --> EM
+    Reader --> CEP --> HTTP
+    Overview --> OV --> AS
+    List & Reader --> AS --> DB
+    Tension --> WT
+```
 
-- Keep UI concerns out of database, networking and domain layers. Preserve actor isolation, avoid main-actor database work, bound batch concurrency/memory, and avoid lifecycle retain cycles.
-- Propagate cancellation through feed, extraction and enrichment work. Shared refresh work survives an individual waiter cancelling; explicit reset cancels that shared work. Unstructured tasks require explicit lifecycle ownership.
-- Undated articles retain the unknown publication-date sentinel for identity/display; archive and filter-only search order and paginate by their original ingestion time. Retention uses the same date fallback.
-- Stored article IDs remain stable when publisher metadata changes. Ingestion resolves incoming GUID variants against indexed canonical document URLs; homepage and missing URLs are not deduplication keys.
-- Schema v9 reconciles historical rows only when an exact document URL and substantial publisher body (or description when no body exists) match. Original rows and pre-reconciliation state timestamps remain stored; normal lists/search/counts hide reconciled copies and old IDs resolve to a survivor with unioned read/save state and feed associations. Existing ambiguity tombstones remain intact. Exact historical evidence maps refreshed variants to the survivor. Saved-family originals survive content cache purges; retention removes an eligible family together. `includingOriginals` explicitly retrieves retained originals.
-- Schema v7 adds indexed content aliases for substantial exact publisher text, scoped by exact publisher host, source label, title and known publication time. Migration indexes existing evidence without merging rows. URL/GUID evidence takes precedence; conflicting content aliases retain ambiguity. Generated summaries and short teasers are excluded; historical row merging remains separate.
-- Subscription URLs are stored as given after `AppSettings.normalizeFeedURL`: scheme and host lowercase, HTTPS upgrade, bare root slash removed. A trailing slash on a non-root path is part of the address, because some publishers serve a feed only with it. Duplicate detection (`addFeed`, OPML import, catalog subscribe), catalog coverage and advisory lookup and dismissal use the slash-insensitive `AppSettings.feedKey`, so `/feed` and `/feed/` are one subscription and the first stored form wins. Stored subscriptions are never rewritten or migrated: scoped GUIDs hash the exact subscription string, so changing it would orphan existing article identity. A user whose stored slashless form fails removes it and adds the slashed one.
-- Schema v6 scopes incoming GUIDs to the configured subscription URL, retaining its scheme and query parameters. Migration seeds scoped aliases only when a single-feed historical row still has its original GUID-derived key; ambiguous ownership and unattributed later variants are not guessed. Feed refresh carries scoped IDs into new-story notification matching, while hydrated articles keep their existing primary keys.
-- Schema v5 keeps observed IDs and document URL aliases mapped to existing primary keys. Alias writes share the ingestion transaction; conflicting URL aliases retain a NULL target and cannot be revived automatically. Resolve state, enrichment and navigation through aliases. Historical row reconciliation remains a separate change.
-- Reader extraction records the protected final document URL and, at most, one same-origin canonical URL after protected fetching confirms matching substantial text and page title. Canonical declarations alone never authorize an identity merge; alias conflicts remain ambiguous and stored rows are not merged. Evidence is bound to the requested article URL and relative media resolve against the final response URL.
-- Reader document v4 retains optional publisher inline runs, image candidates/origin/dimensions, separate credit and an explicit selected lead. RSS/Atom/JSON HTML uses the structured extractor; lists/search suppress recurring media by distinct document URLs within a publisher. Older v2/v3 documents remain readable offline. Only a document with publisher text blocks (`ReaderDocument.hasPublisherText`) stands in for extraction; one holding only feed media never replaces a stored document with text, or its body, on refresh. Candidate ranking and recurrence are conservative heuristics, not semantic or image-rights verification.
-- Reader document v3 preserves publisher figures with captions and alt text separately from analysis prose. Remote image URLs retain the protected networking boundary; ImageIO decoding limits input dimensions and display resolution. Existing v2 text documents remain readable.
-- Schema v16 tracks publisher input (title, feed summary, extracted body) with local SHA-256 hashes and at most 20 revision metadata rows per article (`publisher_content_revisions`; no body copies). Initial snapshots/extractions and cache purges are not publisher-update claims. Changes atomically invalidate generated article analysis and affected event overviews; extraction, classification, analysis and overview writes carry captured input hashes and are rejected if stored input changed. The reader starts from stored input rather than a list or briefing snapshot and requests the overview again when input changes. Unversioned legacy analysis regenerates; bodies and read/save state survive. The reader labels local observations, never verified corrections.
-- SQLite schema changes require migrations. Preserve WAL/FTS5, saved stories, read history and user settings; use transactions where multi-step writes must be atomic.
-- Publication dates that are missing or malformed use a stable `Date.distantPast` sentinel; undated stories order by their original ingestion time. Upserts apply valid URL/date corrections while retaining known values when incoming metadata is invalid. New-story notifications use IDs inserted by a committed SQLite transaction, not the 500-story UI snapshot.
-- Notification navigation requests remain in `ArticleStore` until storage is ready and resolve via SQLite by stable ID, with canonical URL fallback for older notifications.
-- A refresh ends when new articles are collected and published (`FeedManager.fetchFeedsAsync`). Follow-up work, notification triage and bounded classification through `EnrichmentQueue`, runs afterwards for the caller that started the run and never holds the refresh, its loading state or the next manual refresh. Finished queue jobs are not superseded or repeated. Background classification is skipped under Low Power Mode or serious thermal state, scheduled refreshes honor `NSBackgroundActivityScheduler.shouldDefer`, and nothing is promised while the app is closed. Sleep cancels a refresh in flight, so requests cut off by sleep record no feed failures. After wake, and after a short delay for the network, one refresh runs if the interrupted refresh needs repeating or the last completed refresh is older than the interval; the foreground timer then restarts from that refresh. Generated overviews (later phases) belong on this queue, on request or for the visible event, never in the refresh path. `OverviewGenerationCoordinator` shares a running generation only with a request from the same membership version, input hash and article publisher inputs; a request with changed inputs (an article edit keeps the membership version) cancels it, and only a result from the latest requested inputs is committed or returned. Opening an article of an event with two or more sources requests its overview; the reader stays on the publication and offers the overview when it is ready, returning to it by itself only when it was already showing one. A reader clears the visible event only if it set it (`clearVisibleEvent(owner:)`), and cancelling an overview completes before the call returns. Cancelled reader requests never replace the visible-event owner or receive an overview; after each storage suspension, the reader checks its originating article and publisher input before applying results. Stored citation rows are keyed by overview ID and citation ID, because citation IDs are unique only within one overview; rows stored before read back unchanged.
-- Ingestion remains cheap. Expensive extraction and analysis run on demand or under explicit bounded enrichment rules. Prefer extracted publisher content; distinguish it from generated summaries and never invent article facts.
-- FoundationModels classification uses structured outputs and the supported deterministic taxonomy. Preserve model identifiers/analysis versions and deterministic fallbacks when models are unavailable. Persist only intelligence required by product behavior.
-- Image requests honor native HTTP freshness and no-store rules after destination validation; feed, article and update requests retain explicit reload behavior. Decoded card and reader images stay in a bounded in-memory `NSCache` for the session only.
-- Feed requests are conditional. ETag/Last-Modified validators live in the existing `feeds` table, keyed by subscription URL, and are replayed through the shared protected client; a 304 leaves stored articles untouched. Validators are written in the ingestion transaction (never before it), cleared by replaceable-cache purges and replaced or dropped by each 200. They are untrusted headers: only short printable ASCII is stored.
-- Schema v10 adds a per-feed failure count and next-attempt time to `feeds`. `FeedFetcher` is the single refresh path for scheduled and manual refreshes: it skips feeds and hosts whose wait has not ended, runs at most six requests overall and two per host, records success (200/304) and failure, and honors `Retry-After` on 429/503 as a lower bound (capped at 24 hours; backoff is 10 minutes doubling to 6 hours). Local rejections, cancellation and a batch where every request fails to connect (offline) are never counted as feed failures. A host that answered 429/503 is cooled in memory only; after relaunch each of its other feeds probes once.
-- Schema v13 adds `events` and `event_members`. An article belongs to at most one event, referenced by its surviving stored ID (aliases and reconciled copies resolve first); events never copy source text. Each change to an event's member set bumps its membership version once, including an event that loses a member; no-ops do not. Merges keep the absorbed ID as a one-hop forward to the survivor and splits give the moved members a new ID; neither touches article rows or read/save state. Membership follows article deletion, and retention drops events left without members or a stored overview, together with their forwards.
-- Event candidates are bounded: `EventCandidateFinder` builds at most eight terms per article (named participants and places, then title words of four or more characters), quotes each as an FTS5 phrase over title and description, and reads at most twice `EventCandidatePolicy.limit` rows within the time window (48 hours either side by default). Articles in another confidently detected language, hidden reconciled copies and members of events unchanged for longer than the active lifetime (72 hours) are excluded. Candidates are not matches; nothing compares the archive with itself.
-- Schema v21 adds `article_embeddings` storing 384-dimensional CoreML `all-MiniLM-L6-v2` embeddings for fast cosine similarity scoring and grey-zone cluster resolution, with schema migration preserving existing clustering.
-- Event matching uses a hybrid deterministic and on-device embedding architecture (EventMatcher version 7). NaturalLanguage features come from the headline and first 600 description characters. Every admitted cross-pair requires known publication dates within 36 hours, a shared specific anchor (a country alone is insufficient) and no conflicting language, period, year, weekday, distinguishing figure or place. When deterministic confidence lands in the boundary zone, CoreML `all-MiniLM-L6-v2` cosine similarity (`SentenceEmbedder`) provides semantic tie-breaking and promotion while maintaining zero false merges on the holdout suite. Changing casualty tolls remain separate from distinguishing headline figures. Event admission needs one matching pair, two-thirds compatible members rounded upward and the existing mean-score threshold; every pair must still share specific evidence and have no conflict. Events stop growing at 100 members.
-- Production event clustering uses pure on-device evaluation (CoreML MiniLM embeddings and deterministic rules). It never invokes an external LLM or cloud API. Legacy judge types/arguments and their zero-valued report counter remain available to older audit callers, but no promotion, soft-conflict override or whole-coverage model override runs.
-- Earlier matcher measurements describe earlier policies and remain in dated audits. Current-policy regression comparisons reuse the existing #102/#409 inputs under the explicit 17 October decision in [the release simplification plan](plans/2026-10-17-release-simplification.md). The 97% point target is retained; reused data and provisional #409 labels do not establish fresh independent generalization.
-- EventClusterer runs after refresh publication and at launch, off the main actor and cancelled by shutdown. Schema v14 tracks processed input/version; title/description edits leave a report pending. A version upgrade revalidates active events, including active events with older publications: members are partitioned in publication-time/ID order using the same admission rule. The earliest subgroup keeps the original event ID. Membership/text snapshots and versions are checked before a single transaction moves members, invalidates the old overview and marks processing complete; rollback leaves all work pending. Inactive archived groups stay intact. A pass counts at most 2,000 articles, including initial partners and upgrade members. Fragment merging requires specific evidence/no conflict on every cross-pair, one match, two-thirds compatibility, the existing mean score, exclusions and size bounds. The larger event survives with one-hop forwarding.
-- Schema v14 also adds `event_exclusions` ("Not the Same Event": pairwise, ordered, cascading with articles) and `event_state` (the membership version the reader has seen; only grows). Opening an event never marks articles read; an event is updated when an unread member joined after the seen version with a headline the reader did not already have.
-- Importance never hides or expires stories. Schema v17 ratings and historical expiry tombstones remain stored, but ingestion ignores old expiry suppression. Refresh does not rate importance; Briefing uses existing ratings with publisher coverage and local reading interests. User-configured retention, read/save state, muting and notification privacy are unchanged. Explicit importance audits remain opt-in. The legacy waiting-count/expiry methods return zero for older audit callers; the old query flag no longer filters results. StoryCurator is used in production only for bounded publisher-image lookup, not scoring or deletion.
-- Lead images (schema v18, `story_images`; v19 indexes `image_url` for duplicate checks): after a clustering pass ends, in a separate task that notification triage never waits for (`FeedManager.lookUpStoryImages`), `StoryCurator` looks up at most 30 shown, unmuted recent stories whose whole event has no usable curated image (clustered first, one report per event). `SecureHTTPClient.fetchArticleHead` reads at most 256 KiB and cancels the rest; existing charset decoding is reused. Open Graph, Twitter and schema.org article images are resolved and filtered like reader media. Completed lookups, including misses, are stored once; unreachable pages retry. Results from a changed document URL are rejected. Shared storage hydration supplies the found media to lists, Briefing, search and event members. Event cards consider every member lead, prefer larger known dimensions and use publisher-hosted media to break ties; logos and extreme aspect ratios are excluded. An image declared by two stories is conservatively treated as a site default and cleared. Image changes, including removals, publish a feed revision. Lookups wait out Low Power Mode and serious thermal state. Publishers without a usable declaration in the bounded prefix retain the existing card placeholder.
+## One refresh, end to end
 
-- Developing-story relations (#314) back the event overview's "Earlier in This Story" section (`ArticleStore.relatedStoryEvents`, `EventStoryRelation`); each link opens its own event, so read and saved state stay per event, and a failed or slow lookup only leaves the section out. The database returns a bounded FTS/member snapshot; cancellable NaturalLanguage work runs on a detached utility task. A direct link needs English, known publication dates, an earlier event wholly within seven days before the target's first publication, a typed shared actor that is not common (people and organizations named in more than 5%, and at least ten, of the preceding week's events, counted with FTS phrase queries by `DatabaseEngine.commonStoryTerms`, never count: heads of state and governments span unrelated stories), a shared place (a country counts), two shared non-anchor topic terms and support from at least two thirds of each event's members. Explicit conflicting countries, periods or years reject a pair. Lookups inspect at most 80 FTS rows, 40 candidate events and 101 members per event (events above 100 are rejected), and return at most three links, newest first with stable event-ID ties. They resolve merge forwards, never expand neighbours transitively, and write no memberships, overview, read or saved state. First publication is an ordering cue, not an event date. Reprints can crowd out candidates. The 20 October 2026 review ([audit](audits/2026-10-20-developing-story-links.md)) measured 7 wrong of 36 decided links before the common-actor rule and 1 of 45 after it, across two private libraries; recall is deliberately low. Existing `different` clustering labels and the sealed holdout stay unchanged, and the isolated collector stays disabled.
+The refresh ends at publication. Everything after it is follow-up work that never holds the refresh, its loading state or the next manual refresh.
 
-- Overview timelines are deterministic (`OverviewTimelineBuilder`, #143). An item is a verified fact whose verbatim quote states exactly one explicit calendar date: day and month with or without a year, or month and year, in English or day-first in the other catalog languages; relative dates (weekdays, "yesterday") are not resolved. The date is shown at the stated precision, so a missing year stays missing; the citing article's publication date only orders a yearless date (nearest year) and marks a date after publication as a plan, and is never shown as the event date. Articles with an unknown publication date contribute nothing. Reprints of one sentence become one item with several citations; fewer than two distinct dates means no timeline. Timeline citations are stored with the overview; `EventOverviewDocument.currentAnalysisVersion` 2 regenerates older overviews.
-- The feed groups an already filtered page (`EventFeedGrouping`): a confirmed event (two or more members) is one card at its first listed member, so filters never hide a listed publication behind another representative; Saved Stories and History stay ungrouped. `FeedUpdateBuffer` keeps the displayed list once it shows stories (an empty list fills at once, and a section's first page skips the reload debounce): refreshed content updates in place, while additions, removals and regrouping wait behind an explicit update. The reader's own refresh and regrouping actions apply at once.
-- Schema v11 adds the response's newest item date, item count and full-text item count (items with at least 1200 characters of feed text) to `feeds`, written in the ingestion transaction; 304s and failures leave them unchanged. `FeedHealth` derives availability (responding or failing with its next attempt), freshness (recent within 3 days, quiet within 30, otherwise stale) and text quality (full from 80% of items, partial from 30%) from that state. It is operational only: UI copy and wording never present it as a rating of accuracy, reliability or trustworthiness (`FeedHealth.disclaimer`).
-- Muting is the reader's own and deterministic (`MuteRules`, stored in `AppSettings`): publisher hosts (a host covers its subdomains) and topic words are separate lists, nothing is muted by default and no preset lists are imported. Topics match whole words of the headline and feed summary, ignoring case, never generated categories or summaries. Feed lists and search apply the rules in SQLite before LIMIT through the `news_muted_source` and `news_muted_topic` functions registered on every connection, so pages and cursors stay exact, and report how many stories the same filters hid, with "Show Muted Stories" and "Unmute All". Saved Stories and History never apply muting; new-story notifications skip muted stories.
-- News tension is an experiment that nothing else depends on. `TensionMethodology` and [the v1 methodology](methodology/tension-index-v1.md) change together under a version number: a fixed panel of catalog feeds, UTC days, a majority coverage rule where insufficient and missing days are never zero, unique events (one per event cluster or unclustered article) and deterministic classification of type, reported scale and escalation from verbatim anchored quotes. It computes no score until weights are calibrated on a historical sample (#158).
-- The starter catalog is opt-in data, not behavior: nothing is subscribed automatically, entries are stored in `AppSettings.normalizeFeedURL` form so they are fetched exactly as verified, and a catalog subscription is an ordinary subscription (custom RSS, removal, OPML and refresh treat it identically). Entries record how a feed looked on `FeedCatalog.verifiedOn`; they are not a quality or truthfulness rating, and live state comes from the feed's own health. Re-verify with `NEWS_LIVE_CATALOG_CHECK=1 ./test.sh` and `./test.sh --catalog-reader-access` before changing entries. The app carries only free, open sources whose stories open in the reader; a paywalled or reader-blocking feed is retired (`AppSettings.retiredFeeds`), which ends existing subscriptions to it once. Only `FeedCatalog.supportedLanguages` (English) are offered: macOS has no word-class model for the other catalog languages, so their stories could not form events (#264). Those entries stay in `FeedCatalog.allFeeds` as parked data, and `AppSettings` drops earlier subscriptions to them at launch; custom feeds are never touched.
-- Feed XML keeps its streaming depth (64), article-count (500), cancellation and `xml:base` checks before FeedKit sees an item. Entity declarations are rejected in a 64 KiB prolog scan and by declaration callbacks; FeedKit receives only reserialized items without DTDs, capped at 512 KiB each. Larger valid items retain the streaming compatibility path. FeedKit never fetches URLs. JSON feeds are bounded by the protected 10 MiB limit, normalized for existing RSS-in-JSON aliases and trimmed to 500 items before typed decoding.
-- Reader extraction uses `HTMLDOMBuilder` scoring with a quality-validated preference for explicit publisher bodies selected through SwiftSoup. Repaired nodes pass the same exclusion, quality, URL and inline-run rules. Reader v6 excludes related-story modules, video error notices and footer furniture, decodes HTML entities in titles and categories, preserves `reader_document` through feed refreshes and background enrichment, and automatically triggers on-demand article extraction when RSS teasers are opened. Reader v7 adds a `subscriberOnly` outcome (FT-style barriers, `isAccessibleForFree: false`, HTTP 401/402; a 403 shows the same teaser preview), thin-page fallbacks to JSON-LD `articleBody` and Next.js `__NEXT_DATA__`, article-header standfirsts, aside pull quotes, `<hr>` dividers and wall-of-text splitting at sentence boundaries. Reader v8 drops timestamp-only metadata blocks; stored documents of older versions re-extract on open. Reader v9 ends `<script>`/`<style>` at their first closing tag (markup written inside scripts no longer swallows the page), judges explicit-body elements with their children (empty paragraph shells no longer drop every paragraph), keeps metering wrappers that hold at least two paragraphs (Variety's `pmc-paywall`), treats `x-cloak` panels and form controls as hidden, reads RebelMouse `.body-description` bodies, requires an explicit body to hold at least 40% of the scored prose, and keeps the lead figures and standfirst-marked paragraph that sit just before an explicit body in its article. Canonical declarations still require same-origin protected-fetch equivalence.
-- Treat URLs, feed bodies, publisher HTML, redirects and OPML as untrusted. Route remote fetching through the shared protected networking path; preserve destination validation, numeric-IP pinning, response bounds and cancellation.
-- Keep app entitlements intact. Render sanitized reader HTML; protected WebKit previews disable publisher scripts and block local resources. Do not log secrets, article contents, credentials or full sensitive URLs.
+```mermaid
+sequenceDiagram
+    autonumber
+    participant RC as RefreshCoordinator
+    participant FM as FeedManager
+    participant FF as FeedFetcher
+    participant DB as DatabaseEngine
+    participant EQ as EnrichmentQueue
+    participant EC as EventClusterer
+    participant SC as StoryCurator
+    RC->>FM: fetchFeedsAsync
+    FM->>FF: due feeds (≤6 requests, ≤2 per host)
+    FF-->>FM: 200 / 304 / failure + Retry-After
+    FM->>DB: one transaction per feed: articles + validators
+    FM-->>RC: publish one library snapshot — refresh ends
+    par follow-up, caller-owned
+        FM->>EQ: notification triage, bounded classification
+    and
+        FM->>EC: clustering pass (off main actor)
+        EC->>SC: lead-image lookup (≤30 stories)
+    end
+```
 
-## Current architecture map
+## How `main` moves
 
-### App / UI (`Sources/App/`, `Sources/Views/`)
-- `Sources/App/NewsApp.swift`: application lifecycle, scenes, commands, notification routing, window configuration.
-- `Sources/App/AppContainer.swift`: app dependency injection container.
-- `Sources/App/AppSettings.swift`: user settings and defaults persistence.
-- `Sources/App/ThemeManager.swift`: appearance/theme state.
-- `Sources/App/UpdateChecker.swift`: GitHub release version verification.
-- `Sources/App/NewsSignposts.swift`: local OSLog performance signposts.
-- `Sources/Views/MainView.swift`: top-level UI coordinator.
-- `Sources/Views/SidebarView.swift`, `ArticleListView.swift`, `ArticleCardView.swift`, `EventCardView.swift`, `FeedHealthLine.swift`: navigation and list presentation.
-- `Sources/Views/ArticleDetailView.swift`, `ReaderSupportViews.swift` (reader modes, commands, figures and tags), `ArticleWebView.swift`, `WebPreviewPolicy.swift`: article reading and protected WebKit rendering.
-- `Sources/Views/EventOverviewReaderView.swift`: event overview (Highlights, Perspectives, Timeline, Earlier in This Story, sources).
-- `Sources/Views/TensionIndexView.swift`: World Tension sheet and sidebar entry.
-- `Sources/Views/ArticleRemoteImage.swift`: remote card, reader and overview images, loaded through the protected reader image path with a decoded-image cache.
-- `Sources/Views/SettingsView.swift`: user settings.
-- `Sources/Views/DesignSystem.swift`, `GlassSystem.swift`: semantic design tokens and Liquid Glass integration.
+Every change lands as a focused PR, squash-merged. Open and parked branches stay off `main` until reviewed against current code.
 
-### Data / persistence (`Sources/Storage/`, `Sources/Models/`)
-- `Sources/Storage/DatabaseEngine.swift`: SQLite engine, schema, WAL/FTS5 responsibilities; `DatabaseEngine+Events.swift` holds events, overviews, event matching and reading state, and article embeddings.
-- `Sources/Storage/ArticleStore.swift`: article domain persistence.
-- `Sources/Storage/MigrationCoordinator.swift`: database migrations.
-- `Sources/Storage/ReadManager.swift`, `SavedStoriesManager.swift`: reading and saved-story state.
-- `Sources/Storage/CacheManager.swift`: HTTP cache, intentionally separate from durable user state.
-- `Sources/Models/FeedArticle.swift`, `ArticleIdentity.swift`: article/domain identity models.
-- `Sources/Models/FeedError.swift`: feed error types.
-- `Sources/Models/FeedFetchState.swift`: conditional-request validators, per-feed retry schedule and policy.
-- `Sources/Models/FeedCatalog.swift`: the curated starter catalog (data and set definitions); `Sources/Views/FeedCatalogView.swift` is its opt-in browser.
-- `Sources/Models/EventOverview.swift`: overview document, citations, evidence sections and versioning.
-- `Sources/Models/FeedAdvisory.swift`, `ArchiveSearchToken.swift`: catalog advisories and archive search operators.
-- `Sources/Models/MuteRules.swift`: the reader's muted hosts and topics, normalization and whole-word matching shared by SQLite and notifications.
+```mermaid
+gitGraph
+    commit id: "#261 reader structure"
+    branch event-feature-fallback
+    commit id: "non-English matching" tag: "parked #264"
+    checkout main
+    commit id: "#453 feed quality"
+    branch kagi-compact-layout
+    commit id: "Headlines layout" tag: "kept, #456 closed"
+    checkout main
+    commit id: "#455 paywalls, World Tension"
+    commit id: "#457 daily edition"
+    commit id: "#462 Earlier in This Story"
+    commit id: "#467 multi-source overview"
+    commit id: "#473 test atoms"
+    branch macos-hig-design
+    commit id: "style: cards, reader, chrome"
+    commit id: "refactor(overview)"
+    commit id: "Kagi-style journey" type: HIGHLIGHT tag: "PR #481 open"
+    checkout main
+    commit id: "#475 HIG refinement"
+    commit id: "#470 #471 feeds"
+    commit id: "#474 reader v9"
+    commit id: "#478 #479 file splits"
+    commit id: "#480 state review" tag: "HEAD"
+```
 
-### Feed / networking (`Sources/Services/`, `Sources/Coordinators/`)
-- `Sources/Coordinators/FeedManager.swift`: feed orchestration and synchronization.
-- `Sources/Coordinators/RefreshCoordinator.swift`: refresh lifecycle.
-- `Sources/Coordinators/NotificationService.swift`: user notification triage.
-- `Sources/Services/FeedFetcher.swift`, `SecureHTTPClient.swift`: network fetching and security boundaries.
-- `Sources/Services/FeedXMLParser.swift`, `JSONFeedParser.swift`, `DateParser.swift`: feed parsing.
-- `Sources/Services/IPAddressValidator.swift`, `NetworkBoundaryProxy.swift`: SSRF/IP validation and the pinned network gateway.
-- `Sources/Services/OPMLManager.swift`: OPML portability.
+## Where the code is
 
-### Content / intelligence (`Sources/Intelligence/`)
-- `Sources/Intelligence/ContentExtractionPipeline.swift`: article content extraction.
-- `Sources/Intelligence/ArticleIntelligence.swift`: article classification, sentiment, entities, summarization and content-cleaning capabilities.
-- `Sources/Intelligence/EnrichmentQueue.swift`: actor-isolated background enrichment scheduling.
-- `Sources/Intelligence/EventCandidates.swift`: bounded candidate generation for event matching and the developing-story relation (`EventStoryRelation`).
-- `Sources/Intelligence/Overview*.swift`, `PassageFactExtractor.swift`, `CoverageSentimentEvaluator.swift`: event overview passage selection, deterministic facts, Highlights, timeline, perspectives, thematic angle, claim verification and generation coordination.
-- `Sources/Intelligence/StoryImportance.swift`, `EventJudge.swift`, `ModelAvailability.swift`, `PromptDefense.swift`: stored importance, legacy audit judge types, model availability and untrusted-data prompt framing.
-- `Sources/Intelligence/SentenceEmbedder.swift`: WordPiece BERT tokenizer (`vocab.txt`) and CoreML `all-MiniLM-L6-v2` (`minilm.mlmodelc`) 384-dimensional sentence embedding generator with Accelerate cosine similarity scoring.
-- `Sources/Intelligence/EventMatcher.swift`, `EventClustering.swift`: hybrid EventMatcher v7 with entity/lexical gates, CoreML semantic promotion in the grey zone, pairwise and whole-event admission rules, and incremental clustering passes.
-- `Sources/Intelligence/WorldTension.swift`: methodology v2 on-device reasoning over bounded international headlines, four-factor explanations with a lead and driving headlines, deterministic lexical grounding, an unsaved keyword estimate when no reading exists, soft-news filtering and AI-policy-first caching. Accepted daily history is an atomic JSON sidecar managed by `DatabaseEngine`; v1 scores are not relabelled.
-- `Sources/Intelligence/TensionMethodology.swift`: news tension panel, coverage rule, deterministic event classification and daily assessment (experiment, no score).
-- `Sources/Models/EventFeed.swift`: matching records, event feed summaries, grouping and the stable feed buffer; `Sources/Views/EventCardView.swift` renders an event card and its source list.
-- Current intelligence uses `NaturalLanguage` and conditional `FoundationModels` with a fixed 12-category taxonomy. Classification and interactive article analysis retain bounded plain-text model contracts, strict parsing and extractive fallbacks. Production event overviews use deterministic publisher sentences with per-source citations, a stored publisher headline, an empty summary and `fallbackExcerpts` provenance; timelines, attributed perspectives and thematic sections retain their validators. Analysis version 9 regenerates cached overviews (Highlights ranking). Overview requests and at most three visible-event warmups obey Low Power/thermal policy independently of AI availability. Before fixing inputs/cache keys, up to four representatives without publisher text are extracted through the reader pipeline: at most two concurrent shared fetches, four seconds each, failures remembered for that publisher input during the session. Only quality-accepted text longer than the feed summary is stored under publisher-version checks; the reader extracts its own article. Exact sentences and punctuation survive passage-budget trimming. A cancelled caller stops waiting without cancelling a generation another request joined; `cancel(eventID:)` stops it for all. Schema v20 records the macOS build for model-generated article results; model changes invalidate those summaries and legacy synthesized overviews, while publisher excerpts remain final. Importance ratings and event memberships remain applied decisions. Legacy model-composer entry points remain for opt-in audits, outside production requests; they do not establish current release acceptance.
+```mermaid
+pie showData title Swift lines in Sources/ (21 Oct 2026)
+    "Intelligence" : 12058
+    "Views" : 8418
+    "Storage" : 5488
+    "Models" : 2491
+    "Services" : 2196
+    "App" : 1334
+    "Coordinators" : 951
+```
 
-### Tests (`Tests/`)
-- `Tests/NewsTests.swift`: automated test runner and unit test suites.
-- `Tests/FeedKitSwiftSoupTests.swift`, `EventEmbeddingTests.swift`, `NotificationAttachmentTests.swift`, `StoryCorpus.swift`: offline parsing, embedding, attachment and corpus suites run by `test.sh`.
-- `Tests/Native*.swift`, `ReaderAccessibilityTests.swift`, `EventOverviewAccessibilityTests.swift`, `PublisherExcerptTests.swift`, `LiveVoiceOverQAHarness.swift`: native harnesses compiled with the app views (some open windows; opt-in).
-- `Tests/TestDefaults.swift`: temporary defaults suites stored in the temporary directory, shared by the test runners and native harnesses.
+| Area | Owns |
+|---|---|
+| `Sources/App/` | `NewsApp` lifecycle, scenes, commands, notification routing · `AppContainer` DI · `AppSettings` defaults, feed URL normalization, mute rules storage · `ThemeManager` · `UpdateChecker` · `NewsSignposts` |
+| `Sources/Views/` | `MainView` coordinator · `SidebarView`, `ArticleListView`, `ArticleCardView`, `EventCardView`, `FeedHealthLine` · `ArticleDetailView` + `ReaderSupportViews`, `ArticleWebView`, `WebPreviewPolicy` · `EventOverviewReaderView` · `TensionIndexView` · `ArticleRemoteImage` · `FeedCatalogView` · `SettingsView` · `DesignSystem`, `GlassSystem` |
+| `Sources/Storage/` | `DatabaseEngine` schema, WAL/FTS5 · `DatabaseEngine+Events` events, overviews, reading state, embeddings · `ArticleStore` · `MigrationCoordinator` · `ReadManager`, `SavedStoriesManager` · `CacheManager` (HTTP cache, separate from user state) |
+| `Sources/Models/` | `FeedArticle`, `ArticleIdentity` · `FeedFetchState` validators and backoff · `FeedCatalog` · `EventOverview`, `EventFeed` · `FeedAdvisory`, `ArchiveSearchToken` · `MuteRules` · `FeedError` |
+| `Sources/Coordinators/` | `FeedManager` orchestration · `RefreshCoordinator` lifecycle · `NotificationService` triage |
+| `Sources/Services/` | `FeedFetcher`, `SecureHTTPClient` · `FeedXMLParser`, `JSONFeedParser`, `DateParser` · `IPAddressValidator`, `NetworkBoundaryProxy` · `OPMLManager` |
+| `Sources/Intelligence/` | `ContentExtractionPipeline` · `ArticleIntelligence` · `EnrichmentQueue` · `EventCandidates` (+ `EventStoryRelation`) · `EventMatcher`, `EventClustering`, `SentenceEmbedder` · `Overview*`, `PassageFactExtractor`, `CoverageSentimentEvaluator` · `StoryImportance`, `EventJudge`, `ModelAvailability`, `PromptDefense` · `WorldTension`, `TensionMethodology` |
+| `Tests/` | `NewsTests` runner and suites · `FeedKitSwiftSoupTests`, `EventEmbeddingTests`, `NotificationAttachmentTests`, `StoryCorpus` · `Native*` and accessibility harnesses (some open windows, opt-in) · `TestDefaults` |
+| Platform | `News.entitlements` · `build.sh`, `test.sh`, `script/build_test_runner.sh` (runner build, `NEWS_TEST_ATOM`), `script/ci_testsuite.sh` (one JUnit case per `Tests/*.swift` atom, `--lcov` for impact analysis) · dormant `build_release.sh`, `script/distribution/` · CI: `.github/workflows/`, `.circleci/config.yml`, `codemagic.yaml` |
 
-### Platform / distribution
-- `News.entitlements`: sandbox/runtime capabilities.
-- `build.sh`, `build_release.sh`, `script/distribution/package_dmg.sh`, `script/distribution/notarize.sh`, `test.sh`: build, release, packaging and validation pipeline.
-- `.github/workflows/ci.yml`, `security.yml`, `.circleci/config.yml`, `codemagic.yaml`: CI (tests and arm64 build), security scanning and the Codemagic verification build.
-- `PRIVACY.md`, `SECURITY.md`: privacy/security commitments.
+## Schema history
 
-The network gateway validates public DNS answers and pins numeric upstream connections. URLSession and protected WebKit previews share this boundary; WebKit also blocks local resource forms and disables scripts.
+SQLite changes always ship as migrations that preserve WAL/FTS5, saved stories, read history and settings.
 
-### Reading feed and topic repairs
+```mermaid
+timeline
+    title SQLite user_version
+    section Identity
+        v5 : ID and document-URL aliases
+        v6 : GUIDs scoped to subscription URL
+        v7 : Exact-content aliases
+        v9 : Historical row reconciliation
+    section Feeds and search
+        v10 : Per-feed failures and backoff
+        v11 : Feed health counters
+        v12 : Null-safe FTS triggers
+        v15 : Durable FTS keys
+    section Stories
+        v13 : events, event_members
+        v14 : Clustering progress, exclusions, seen state
+        v16 : Publisher content revisions
+        v17 : Importance ratings
+        v18 : story_images
+        v19 : image_url index
+    section Models and repair
+        v20 : Model build stamp
+        v21 : MiniLM article_embeddings
+        v22 : Category and publisher repair
+        v23 : Source newline cleanup
+```
 
-- SQLite v22 repairs stored substring-based categories with the deterministic whole-word classifier and canonicalizes known publisher names, updating the FTS index without changing IDs, publisher text, read/save state or source evidence.
-- SQLite v23 normalizes newline-contaminated publisher sources.
-- `FeedManager` gives each database connection the panel feed URLs absent from user subscriptions. Normal list/search/count queries exclude reports available only through those feeds before paging; read/saved reports and reports also present in subscribed feeds remain accessible. Direct identity lookups and the tension corpus retain all evidence. The scope follows subscription changes even when panel collection is switched off.
-- Refresh persists each feed's articles and validators together, then publishes one library snapshot for the batch. Upcoming card images load through a bounded prefetch window and share protected loads with mounted cards.
-- Briefing is a daily edition, frozen until the next edition hour or an explicit New Edition: at most ten reports, one per event and two per publisher. Stored importance, publisher coverage and category interest from at most 200 recent read/saved stories precede diversity and recency. No refresh-time importance model runs.
+## Invariants
+
+Open a section before changing that area. Each rule is load-bearing; tests cover most of them.
+
+<details>
+<summary><b>Layering, concurrency, lifecycle</b></summary>
+
+- No UI concerns in database, networking or domain layers. No main-actor database work.
+- Preserve actor isolation; bound batch concurrency and memory; avoid retain cycles.
+- Cancellation propagates through feed, extraction and enrichment. Shared refresh work survives one waiter cancelling; explicit reset cancels it.
+- Unstructured tasks need an explicit lifecycle owner.
+- Ingestion stays cheap. Extraction and analysis run on demand or under bounded enrichment rules.
+
+</details>
+
+<details>
+<summary><b>Article identity and storage</b></summary>
+
+- Stored article IDs never change when publisher metadata changes. Homepage and missing URLs are never dedup keys.
+- Resolution order: scoped GUID (v6) → document-URL alias (v5) → exact-content alias (v7). URL/GUID evidence wins; conflicting aliases stay ambiguous (NULL target) and are never revived or guessed.
+- v9 reconciliation needs an exact document URL plus substantial matching publisher body. Originals stay stored; lists/search/counts hide them; old IDs resolve to the survivor with unioned read/save state. `includingOriginals` retrieves them.
+- Undated articles keep the `Date.distantPast` sentinel; ordering, paging and retention fall back to ingestion time. Upserts keep known values when incoming metadata is invalid.
+- v15 FTS joins and triggers use `article_fts_rows` keys, never the hidden rowid (safe across `VACUUM`). v12 triggers skip identical refreshes.
+- v16: publisher input (title, summary, body) is hashed; at most 20 revision rows per article, no body copies. A change invalidates article analysis and affected overviews; every write carries its input hash and is rejected if input moved. The reader labels local observations, never verified corrections.
+- Multi-step writes use transactions.
+
+</details>
+
+<details>
+<summary><b>Subscriptions, refresh, networking</b></summary>
+
+- Subscription URLs are stored after `AppSettings.normalizeFeedURL` (lowercase scheme/host, HTTPS, bare root slash removed). A non-root trailing slash is part of the address. Duplicate checks use slash-insensitive `AppSettings.feedKey`. Stored subscriptions are never rewritten: scoped GUIDs hash the exact string.
+- `FeedFetcher` is the single refresh path: ≤6 requests, ≤2 per host. Backoff 10 min doubling to 6 h; `Retry-After` on 429/503 is a lower bound capped at 24 h. Local rejections, cancellation and fully offline batches are not failures.
+- Requests are conditional. ETag/Last-Modified live in `feeds`, written only inside the ingestion transaction, short printable ASCII only; 304 touches nothing.
+- Sleep cancels a refresh without recording failures. After wake (short network delay) one refresh runs if needed.
+- Background classification skips Low Power Mode and serious thermal state; scheduled refreshes honor `NSBackgroundActivityScheduler.shouldDefer`.
+- New-story notifications use IDs inserted by a committed transaction, skip muted stories, and resolve via SQLite by stable ID once storage is ready.
+- All URLs, feed bodies, HTML, redirects and OPML are untrusted. Remote fetching goes through the protected gateway: public-DNS validation, numeric-IP pinning, response bounds, cancellation. URLSession and WebKit previews share it.
+- Feed XML: depth 64, 500 items, entity declarations rejected (64 KiB prolog scan + callbacks), FeedKit gets reserialized DTD-free items ≤512 KiB and never fetches URLs. JSON feeds ≤10 MiB, trimmed to 500 items.
+- Image requests honor HTTP freshness/no-store after destination validation; decoded images live in a session-only `NSCache`.
+
+</details>
+
+<details>
+<summary><b>Reader extraction</b></summary>
+
+- `HTMLDOMBuilder` scoring with a quality-checked preference for explicit publisher bodies chosen through SwiftSoup. Repaired nodes pass the same rules.
+- Reader v9: scripts/styles end at their first closing tag; explicit bodies are judged with children and must hold ≥40% of scored prose; metering wrappers with ≥2 paragraphs stay; `x-cloak` and form controls are hidden. v8 drops timestamp-only blocks; v7 adds `subscriberOnly` (barriers, `isAccessibleForFree: false`, 401/402; 403 shows the same preview), JSON-LD `articleBody` and `__NEXT_DATA__` fallbacks, standfirsts, pull quotes. Older stored documents re-extract on open.
+- Document v4 keeps inline runs, image candidates, credit and an explicit selected lead. Only a document with publisher text (`ReaderDocument.hasPublisherText`) replaces extraction; feed media never overwrites stored text.
+- Extraction records the protected final URL and at most one same-origin canonical URL, only after matching text and title. Canonical declarations alone never merge identities.
+- Render sanitized HTML. WebKit previews disable publisher scripts and block local resources. Never log secrets, article contents or full sensitive URLs.
+
+</details>
+
+<details>
+<summary><b>Events and clustering</b></summary>
+
+- An article belongs to at most one event (v13), by surviving stored ID. Events never copy source text. Each member-set change bumps the membership version once.
+- Merges forward the absorbed ID one hop; splits give moved members a new ID. Neither touches article rows or read/save state. Events cap at 100 members.
+- Candidates (`EventCandidateFinder`): ≤8 terms per article as FTS5 phrases, ≤2× `EventCandidatePolicy.limit` rows, ±48 h window, 72 h active lifetime. Candidates are not matches.
+- `EventMatcher` v7: headline + first 600 description characters. A pair needs dates within 36 h, a shared specific anchor (a country alone is not enough) and no conflict in language, period, year, weekday, distinguishing figure or place. Grey-zone pairs use MiniLM cosine (`SentenceEmbedder`, v21 embeddings). Admission: one matching pair, ⅔ compatible members (rounded up), the mean-score threshold.
+- Clustering is fully on device; no external LLM. Legacy judge types stay only for audit callers.
+- `EventClusterer` runs after publication and at launch, off the main actor, ≤2,000 articles per pass. Version upgrades revalidate active events; the earliest subgroup keeps the ID. One transaction moves members and invalidates overviews; rollback leaves work pending.
+- v14 `event_exclusions` ("Not the Same Event") and `event_state` (seen version, only grows). Opening an event never marks articles read.
+- Regression comparisons follow the 17 October decision in [the release simplification plan](plans/2026-10-17-release-simplification.md). Earlier measurements stay in dated audits.
+
+</details>
+
+<details>
+<summary><b>Overviews and developing stories</b></summary>
+
+- Overviews are generated on request or for the visible event, on `EnrichmentQueue`, never in the refresh path. Opening an article of an event with ≥2 sources requests one.
+- `OverviewGenerationCoordinator` shares a run only for the same membership version, input hash and publisher inputs; changed inputs cancel it; only the latest inputs commit. `cancel(eventID:)` stops it for all callers.
+- A reader clears the visible event only if it set it (`clearVisibleEvent(owner:)`); after each storage suspension it rechecks its article and input.
+- Production overviews are deterministic publisher sentences with per-source citations (`fallbackExcerpts` provenance). Analysis version 9. Up to four representatives without text are extracted first (≤2 concurrent, 4 s each). Citation rows key on overview ID + citation ID.
+- Timelines (`OverviewTimelineBuilder`): a verified quote with exactly one explicit date, shown at its stated precision; relative dates are not resolved; fewer than two dates means no timeline.
+- "Earlier in This Story" (`EventStoryRelation`): English, earlier event within 7 days, a shared uncommon typed actor (not in >5% and ≥10 of last week's events), a shared place, two shared topic terms, ⅔ member support. ≤80 FTS rows, ≤40 candidates, ≤3 links. Writes nothing. [Audit](audits/2026-10-20-developing-story-links.md): 1 wrong of 45 after the common-actor rule.
+
+</details>
+
+<details>
+<summary><b>Briefing, feed list, muting, images</b></summary>
+
+- Briefing is a daily edition: ≤10 unread, unmuted reports from a 24 h window, ≤500 candidates, ≤2 per publisher, 1 per event. Frozen in preferences across windows until the edition hour (default 7:00) or New Edition. Order: stored importance, publisher coverage, interests from ≤200 recent read/saved stories, then diversity, recency, stable ID. Selection never calls a model.
+- Importance never hides or expires stories; refresh never rates it.
+- The feed groups an already filtered page (`EventFeedGrouping`). `FeedUpdateBuffer` holds a shown list; additions and regrouping wait behind an explicit update. Saved Stories and History stay ungrouped and unmuted.
+- Muting (`MuteRules`) is the reader's own: hosts (cover subdomains) and whole-word topics on headline + feed summary. Applied in SQLite before `LIMIT` via `news_muted_source` / `news_muted_topic`.
+- Lead images (`StoryCurator`, after a clustering pass): ≤30 imageless shown stories, `fetchArticleHead` reads ≤256 KiB. An image declared by two stories is a site default and dropped.
+- Panel-only feeds are excluded from normal lists before paging; the tension corpus keeps them.
+
+</details>
+
+<details>
+<summary><b>Intelligence, catalog, World Tension</b></summary>
+
+- `NaturalLanguage` + conditional `FoundationModels`, fixed 12-category taxonomy, plain-text model contracts with strict parsing and extractive fallbacks. v20 stamps the macOS build; a model change invalidates generated summaries, not publisher excerpts.
+- Persist only intelligence that product behavior needs; keep model identifiers, analysis versions and deterministic fallbacks.
+- `FeedHealth` is operational only (availability, freshness, text quality), never a rating of accuracy or trust (`FeedHealth.disclaimer`).
+- The starter catalog is opt-in data: nothing auto-subscribes; entries record `FeedCatalog.verifiedOn`. Only free, open sources that open in the reader; others go to `AppSettings.retiredFeeds`. English only (`FeedCatalog.supportedLanguages`); other-language entries stay parked (#264). Re-verify with `NEWS_LIVE_CATALOG_CHECK=1 ./test.sh` and `./test.sh --catalog-reader-access`.
+- World Tension (`WorldTension`, methodology v2) reasons over bounded headlines with lexical grounding. `TensionMethodology` and [the v1 methodology](methodology/tension-index-v1.md) change together; it computes no score until weights are calibrated (#158).
+
+</details>
+
+## In review: [#481](https://github.com/marspater/NewsApp-macOS/pull/481)
+
+Not on `main` yet, and currently conflicting with it. Move each row into the invariants above when it merges.
+
+| Area | Change |
+|---|---|
+| Overview UI | Hero → highlights grouped by publisher (`ClusteredHighlightGroup`) → timeline rail → perspective cards → numbered sources. Superscript citations replace source pills; the "Publisher excerpts" tag goes. |
+| Sentences | `PassageFactExtractor.segmentedSentences` rejoins `NLTokenizer` splits at abbreviations (`St.`, `U.S.`, `Dr.`) and inside open quotes; `OverviewComposer` evidence counting uses it. |
+| Images | JSON-LD lead image is read before script stripping. Feed parser accepts image file extensions and `data-src`/`data-original`, and reads `content:encoded` images even without body text. |
+| Invariant change | `ReaderDocument.selectedImage` (v4) falls back to the first usable extracted image when no lead is selected. Today v4 curation is authoritative, including no lead. |
+| Catalog | 18 new English feeds (NPR, PBS, Sky, Semafor, Roll Call, Quartz, MarketWatch, The Verge, Wired, 9to5Mac, MacRumors, Smithsonian, Phys.org, Pitchfork, Polygon, ABC Australia). `FeedCatalogView` gains category pills, search and monograms. |
+| Chrome | Tension footer uses native hover styling. |
