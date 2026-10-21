@@ -1551,6 +1551,26 @@ struct NewsTests {
                 "<article><div class='story'>\(threeParagraphs)<p>\(prose)</p><p>\(second)</p></div><div class='article-body'><p>Sponsored: a short report on how security teams measure the defenses they deploy.</p><p>Download the free report today to compare your scores with industry peers.</p></div></article>"
             ).content?.hasPrefix(prose), true,
             "A small box with an explicit body class does not replace the story (BleepingComputer)")
+        let standfirst = "Officials expect the review to shape spending plans for the coming decade across the region."
+        let guardianLike = pipeline.extractFromHTML(
+            "<article><div data-gu-name='media'><figure><img src='https://news.example/lead.jpg' width='1200' height='800'><figcaption>Crews at work.</figcaption></figure></div><div class='player-note'><p>This story is voiced by an automated narrator for listeners on the go.</p></div><div data-gu-name='standfirst'><p>\(standfirst)</p></div><div class='article-body-commercial-selector'>\(threeParagraphs)</div></article>"
+        )
+        assertEqual(
+            guardianLike.content, "\(standfirst)\n\n\(prose)\n\n\(second)\n\n\(third)",
+            "An explicit body keeps the article's standfirst but not other lead-in text (the Guardian)")
+        assertEqual(
+            pipeline.extractFromHTML(
+                "<article><h3>Email Story</h3><p>Join our Whatsapp Channel</p>\(threeParagraphs)</article>"
+            )
+            .content, "\(prose)\n\n\(second)\n\n\(third)",
+            "Sharing and channel prompts are not story text (Dawn)")
+        if case .success(_, _, let document) = guardianLike {
+            assertEqual(
+                document?.blocks.first?.imageURL, "https://news.example/lead.jpg",
+                "An explicit body keeps the article's lead figure")
+        } else {
+            assertTrue(false, "The Guardian-like page extracts")
+        }
         assertTrue(
             pipeline.extractFromHTML("<article><div>\(prose)</div><div>\(second)</div></article>").isSuccess,
             "Div-only articles remain readable")

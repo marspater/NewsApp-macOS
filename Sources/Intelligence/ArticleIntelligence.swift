@@ -1051,7 +1051,7 @@ public enum ArticleContentRedactor {
         "view comments", "leave a comment", "share this article", "share this post",
         "related articles", "related topics", "more on this story", "source", "read original", "full article",
         "full story", "keywords for this article", "keywords for this story", "keywords",
-        "tags for this article", "tags for this story",
+        "tags for this article", "tags for this story", "email story", "join our whatsapp channel",
     ]
 
     private static let compiledBoilerplateRegexes: [(regex: NSRegularExpression, template: String)] = {

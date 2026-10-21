@@ -1030,7 +1030,7 @@ final class ContentExtractionPipeline: Sendable {
                 if let blocks = repairedReadingBlocks(in: soup, containers: [element]),
                     Self.proseLength(blocks) * 5 >= scoredLength * 2
                 {
-                    candidateParagraphs = blocks
+                    candidateParagraphs = leadIn(before: blocks, of: element, in: soup) + blocks
                     break
                 }
             }
@@ -1176,6 +1176,43 @@ final class ContentExtractionPipeline: Sendable {
                     isComplete: isComplete))
         case .rejected(let reason):
             return .qualityValidationFailed(reason: reason)
+        }
+    }
+
+    /// Lead media and a standfirst the article shows just before its explicit body (the Guardian's media and standfirst
+    /// sit beside the body, not inside it). At most four blocks are considered; only figures and one paragraph from a
+    /// standfirst-marked element are kept, so headlines, bylines and player notes stay out.
+    private func leadIn(before body: [ReaderBlock], of element: SwiftSoup.Element, in document: SwiftSoup.Document)
+        -> [ReaderBlock]
+    {
+        guard let first = body.first(where: { $0.kind != .figure })?.text,
+            let article = element.parents().array().first(where: { $0.tagName() == "article" }),
+            let blocks = repairedReadingBlocks(in: document, containers: [article]),
+            let start = blocks.firstIndex(where: { $0.text == first })
+        else { return [] }
+        func normalized(_ text: String) -> String {
+            text.replacingOccurrences(of: "[ \t\r\n]+", with: " ", options: .regularExpression)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        let standfirsts = Set(
+            ((try? article.getAllElements().array()) ?? []).filter { candidate in
+                (try? candidate.attr("data-gu-name")) == "standfirst"
+                    || HTMLDOMBuilder.isEditorial([
+                        "class": (try? candidate.className()) ?? "", "id": candidate.id(),
+                    ])
+            }.compactMap { try? normalized($0.text()) })
+        let bodyImages = Set(body.compactMap(\.imageURL))
+        let bodyTexts = Set(body.map(\.text))
+        var keptStandfirst = false
+        return blocks[..<start].suffix(4).filter { block in
+            if block.kind == .figure {
+                return block.imageURL.map { !bodyImages.contains($0) } ?? false
+            }
+            guard block.kind == .paragraph, !keptStandfirst, !bodyTexts.contains(block.text),
+                standfirsts.contains(normalized(block.text))
+            else { return false }
+            keptStandfirst = true
+            return true
         }
     }
 
