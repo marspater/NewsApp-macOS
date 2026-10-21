@@ -130,6 +130,31 @@ struct NativeUIQAChecks {
         assertEqual(
             replaced.map(\.expression), ["is:saved", "source:npr", "is:read"],
             "A newer chip replaces the one the parser would ignore")
+
+        // Semantic display names and SF Symbols for archive search tokens (#475)
+        let unread = ArchiveSearchToken(completedExpression: "is:unread")!
+        assertEqual(unread.displayName, "Unread", "Unread token has human-readable display name")
+        assertEqual(unread.systemImage, "circle.circle", "Unread token uses circle.circle symbol")
+
+        let read = ArchiveSearchToken(completedExpression: "is:read")!
+        assertEqual(read.displayName, "Read", "Read token has human-readable display name")
+        assertEqual(read.systemImage, "checkmark.circle", "Read token uses checkmark.circle symbol")
+
+        let saved = ArchiveSearchToken(completedExpression: "is:saved")!
+        assertEqual(saved.displayName, "Saved", "Saved token has human-readable display name")
+        assertEqual(saved.systemImage, "bookmark", "Saved token uses bookmark symbol")
+
+        let source = ArchiveSearchToken(completedExpression: "source:reuters")!
+        assertEqual(source.displayName, "Source: reuters", "Source token formats with prefix")
+        assertEqual(source.systemImage, "newspaper", "Source token uses newspaper symbol")
+
+        let category = ArchiveSearchToken(completedExpression: "category:science")!
+        assertEqual(category.displayName, "Category: science", "Category token formats with prefix")
+        assertEqual(category.systemImage, "tag", "Category token uses tag symbol")
+
+        let fallback = ArchiveSearchToken(expression: "custom:term")
+        assertEqual(fallback.displayName, "custom:term", "Fallback token retains raw expression")
+        assertEqual(fallback.systemImage, "magnifyingglass", "Fallback token uses magnifyingglass symbol")
     }
 
     static func testReadingColumnBounds() async {
@@ -520,6 +545,11 @@ struct NativeUIQAChecks {
 
         let wideColWidth = EventOverviewReaderView.readingColumnMaxWidth(for: 1.0)
         assertTrue(wideColWidth <= 720.0, "Wide windows keep maximum measure bounded to 720px for readability")
+
+        // Settings pane stable dimensions and header tracking (#475)
+        assertEqual(AppLayout.settingsPaneWidth, 720.0, "Settings pane width is 720.0")
+        assertEqual(AppLayout.settingsPaneHeight, 560.0, "Settings pane height is 560.0")
+        assertEqual(AppTypography.sectionHeaderTracking, 0.6, "Section header tracking is 0.6")
     }
 
     // MARK: - Phase 6: lead selection never changes the feed order

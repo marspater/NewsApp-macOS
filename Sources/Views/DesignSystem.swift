@@ -414,7 +414,8 @@ struct NoticeView<Content: View>: View {
             )
             .overlay {
                 RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous)
-                    .stroke(tint.opacity(contrast == .increased ? 1 : 0.30), lineWidth: 1)
+                    .strokeBorder(
+                        tint.opacity(contrast == .increased ? 1 : 0.30), lineWidth: contrast == .increased ? 1.0 : 0.5)
             }
     }
 }
