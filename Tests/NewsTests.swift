@@ -887,7 +887,7 @@ struct NewsTests {
             try await db.searchArticles(query: "Research").map(\.id), originalOrder,
             "Search still joins the correct publications")
         let candidates = try await db.eventCandidateRows(
-            matching: "Research", around: now, window: 48 * 3600,
+            matching: "Research", in: EventTimeSpan(around: now, window: 48 * 3600),
             activeSince: now.addingTimeInterval(-72 * 3600), excluding: "one", limit: 10)
         assertEqual(Set(candidates.map(\.id)), ["two", "three"], "Candidate joins survive VACUUM")
         await db.close()
@@ -1050,8 +1050,8 @@ struct NewsTests {
         func measureMapped() async throws {
             let start = ProcessInfo.processInfo.systemUptime
             let rows = try await db.eventCandidateRows(
-                matching: candidateQuery, around: probe.pubDate,
-                window: 48 * 3600, activeSince: clusterNow.addingTimeInterval(-72 * 3600), excluding: probe.id,
+                matching: candidateQuery, in: EventTimeSpan(around: probe.pubDate, window: 48 * 3600),
+                activeSince: clusterNow.addingTimeInterval(-72 * 3600), excluding: probe.id,
                 limit: 80)
             record("event_candidate_rowid_join_ms", from: start)
             assertEqual(

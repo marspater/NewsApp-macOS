@@ -92,7 +92,7 @@ enum EventCandidateFinder {
         guard let query = key.ftsQuery, policy.limit > 0 else { return [] }
         let date = article.pubDate == DateParser.unknownDate ? now : article.pubDate
         let rows = try await database.eventCandidateRows(
-            matching: query, around: date, window: policy.window,
+            matching: query, in: EventTimeSpan(around: date, window: policy.window),
             activeSince: now.addingTimeInterval(-policy.activeEventLifetime),
             excluding: article.id, limit: policy.limit * 2)
         var candidates: [EventCandidate] = []

@@ -108,7 +108,7 @@ enum EventClusterer {
                     remaining -= members.count
                     report.processed += members.count
                     if let changed = try await database.repartitionEvent(
-                        event.id, expectedVersion: snapshot.version, expectedMembers: snapshot.members,
+                        EventMemberSnapshot(id: event.id, version: snapshot.version, members: snapshot.members),
                         groups: groups.map { $0.map(\.id) }, matcherVersion: EventMatcher.version,
                         activeSince: now.addingTimeInterval(-candidatePolicy.activeEventLifetime), at: now)
                     {
@@ -299,7 +299,9 @@ enum EventClusterer {
                         merges.merged += 1
                         merges.changedEvents.insert(survivor.id)
                         merges.changedEvents.insert(candidate.id)
-                        survivor = (survivor.id, merged.membershipVersion, survivor.members + candidate.members)
+                        survivor = EventMemberSnapshot(
+                            id: survivor.id, version: merged.membershipVersion,
+                            members: survivor.members + candidate.members)
                         survivorTerms.formUnion(candidateTerms)
                         events[index] = survivor
                         events.remove(at: other)

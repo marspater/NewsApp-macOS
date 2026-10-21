@@ -22,7 +22,10 @@ swiftc "${NEWS_DEPENDENCY_FLAGS[@]}" -target "$(uname -m)-apple-macos${TARGET_MA
     Sources/Models/EventOverview.swift \
     Sources/Models/EventFeed.swift \
     Sources/Storage/DatabaseEngine.swift \
+    Sources/Storage/DatabaseEngine+EventOverviews.swift \
     Sources/Storage/DatabaseEngine+Events.swift \
+    Sources/Storage/DatabaseEngine+EventMatching.swift \
+    Sources/Storage/DatabaseEngine+EventState.swift \
     Sources/Storage/MigrationCoordinator.swift \
     Sources/Storage/ArticleStore.swift \
     Sources/Intelligence/ArticleIntelligence.swift \

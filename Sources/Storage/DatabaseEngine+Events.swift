@@ -2,440 +2,8 @@ import Foundation
 import SQLite3
 import os
 
-// Events, event overviews, event matching state, reading state and article embeddings.
+// Event records, membership and developing-story lookups.
 extension DatabaseEngine {
-    // MARK: - Event Overviews
-
-    /// Records an event overview only after deterministic verification of claims.
-    /// If verification fails, converts the overview to a safe fallback excerpts document
-    /// and stores that instead, guaranteeing a failed retelling is never stored as finished synthesized overview.
-    func recordVerifiedOverview(
-        _ overview: EventOverviewDocument,
-        passages: [EvidencePassage],
-        articles: [FeedArticle]
-    ) throws -> (saved: Bool, document: EventOverviewDocument) {
-        let report = OverviewClaimVerifier.verifyOverview(overview, passages: passages, articles: articles)
-        let documentToStore: EventOverviewDocument
-        if report.isFullyVerified {
-            documentToStore = overview
-        } else {
-            documentToStore = OverviewClaimVerifier.createFallbackOverview(
-                from: overview,
-                passages: passages,
-                articles: articles,
-                report: report
-            )
-        }
-        let saved = try recordEventOverview(documentToStore)
-        return (saved: saved, document: documentToStore)
-    }
-
-    @discardableResult
-    func recordEventOverview(_ overview: EventOverviewDocument, expectedArticleInputs: [String: String]? = nil) throws
-        -> Bool
-    {
-        guard let db = db else {
-            throw NSError(
-                domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Database not open"])
-        }
-
-        try beginTransaction()
-        defer {
-            if sqlite3_get_autocommit(db) == 0 { try? rollbackTransaction() }
-        }
-
-        if let expectedArticleInputs {
-            for (id, hash) in expectedArticleInputs {
-                guard try fetchArticles(limit: 1, id: id).first?.publisherInputHash == hash else { return false }
-            }
-        }
-
-        // Check if an existing overview exists for this event
-        var checkStmt: OpaquePointer?
-        let checkSql = "SELECT id, membership_version FROM event_overviews WHERE event_id = ?;"
-        guard sqlite3_prepare_v2(db, checkSql, -1, &checkStmt, nil) == SQLITE_OK else {
-            throw NSError(
-                domain: "DatabaseEngine", code: -1,
-                userInfo: [NSLocalizedDescriptionKey: "Failed to prepare check statement for event overview"])
-        }
-        defer { sqlite3_finalize(checkStmt) }
-
-        sqlite3_bind_text(checkStmt, 1, overview.eventID, -1, Self.sqliteTransient)
-        var existingOverviewID: String?
-        if sqlite3_step(checkStmt) == SQLITE_ROW {
-            let existingVersion = Int(sqlite3_column_int(checkStmt, 1))
-            // An older result never overwrites a newer version
-            if existingVersion > overview.membershipVersion {
-                return false
-            }
-            if let idText = sqlite3_column_text(checkStmt, 0) {
-                existingOverviewID = String(cString: idText)
-            }
-        }
-
-        // If an existing overview exists with older/same version, remove it first
-        if let oldID = existingOverviewID {
-            var delStmt: OpaquePointer?
-            guard sqlite3_prepare_v2(db, "DELETE FROM event_overviews WHERE id = ?;", -1, &delStmt, nil) == SQLITE_OK
-            else {
-                throw NSError(
-                    domain: "DatabaseEngine", code: -1,
-                    userInfo: [
-                        NSLocalizedDescriptionKey:
-                            "Failed to prepare overview deletion: \(String(cString: sqlite3_errmsg(db)))"
-                    ])
-            }
-            defer { sqlite3_finalize(delStmt) }
-            sqlite3_bind_text(delStmt, 1, oldID, -1, Self.sqliteTransient)
-            let stepStatus = sqlite3_step(delStmt)
-            guard stepStatus == SQLITE_DONE else {
-                throw NSError(
-                    domain: "DatabaseEngine", code: Int(stepStatus),
-                    userInfo: [
-                        NSLocalizedDescriptionKey:
-                            "Failed to delete existing event overview: \(String(cString: sqlite3_errmsg(db)))"
-                    ])
-            }
-        }
-
-        let encoder = JSONEncoder()
-        let factsJSON: String
-        if let evidence = overview.content.evidenceSections, !evidence.isEmpty {
-            struct OverviewFactsEnvelope: Codable {
-                let facts: [OverviewFact]
-                let evidenceSections: OverviewEvidenceSections?
-            }
-            let envelope = OverviewFactsEnvelope(facts: overview.facts, evidenceSections: evidence)
-            factsJSON = String(decoding: try encoder.encode(envelope), as: UTF8.self)
-        } else {
-            factsJSON = String(decoding: try encoder.encode(overview.facts), as: UTF8.self)
-        }
-        let memberArticleIDsJSON = String(decoding: try encoder.encode(overview.memberArticleIDs), as: UTF8.self)
-        var leadImageJSON: String?
-        if let leadImage = overview.leadImage {
-            leadImageJSON = String(decoding: try encoder.encode(leadImage), as: UTF8.self)
-        }
-
-        let insertOverviewSql = """
-            INSERT INTO event_overviews (
-                id, event_id, membership_version, input_text_hash,
-                schema_version, analysis_version, title, summary,
-                facts_json, lead_image_json, member_article_ids_json,
-                kind, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
-            """
-
-        var overviewStmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, insertOverviewSql, -1, &overviewStmt, nil) == SQLITE_OK else {
-            throw NSError(
-                domain: "DatabaseEngine", code: -1,
-                userInfo: [NSLocalizedDescriptionKey: "Failed to prepare insert statement for event overview"])
-        }
-        defer { sqlite3_finalize(overviewStmt) }
-
-        sqlite3_bind_text(overviewStmt, 1, overview.id, -1, Self.sqliteTransient)
-        sqlite3_bind_text(overviewStmt, 2, overview.eventID, -1, Self.sqliteTransient)
-        sqlite3_bind_int(overviewStmt, 3, Int32(overview.membershipVersion))
-        sqlite3_bind_text(overviewStmt, 4, overview.inputTextHash, -1, Self.sqliteTransient)
-        sqlite3_bind_int(overviewStmt, 5, Int32(overview.schemaVersion))
-        sqlite3_bind_int(overviewStmt, 6, Int32(overview.analysisVersion))
-        sqlite3_bind_text(overviewStmt, 7, overview.title, -1, Self.sqliteTransient)
-        sqlite3_bind_text(overviewStmt, 8, overview.summary, -1, Self.sqliteTransient)
-        sqlite3_bind_text(overviewStmt, 9, factsJSON, -1, Self.sqliteTransient)
-        if let lij = leadImageJSON {
-            sqlite3_bind_text(overviewStmt, 10, lij, -1, Self.sqliteTransient)
-        } else {
-            sqlite3_bind_null(overviewStmt, 10)
-        }
-        sqlite3_bind_text(overviewStmt, 11, memberArticleIDsJSON, -1, Self.sqliteTransient)
-        sqlite3_bind_text(overviewStmt, 12, overview.kind.rawValue, -1, Self.sqliteTransient)
-        sqlite3_bind_double(overviewStmt, 13, overview.createdAt.timeIntervalSince1970)
-        sqlite3_bind_double(overviewStmt, 14, overview.updatedAt.timeIntervalSince1970)
-
-        guard sqlite3_step(overviewStmt) == SQLITE_DONE else {
-            let errMsg = String(cString: sqlite3_errmsg(db))
-            throw NSError(
-                domain: "DatabaseEngine", code: -1,
-                userInfo: [NSLocalizedDescriptionKey: "Failed to insert event overview: \(errMsg)"])
-        }
-
-        let insertCitationSql = """
-            INSERT INTO event_overview_citations (
-                id, overview_id, article_id, passage_id, passage_fingerprint,
-                quote, source_title, source_name, source_url, published_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
-            """
-        var citationStmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, insertCitationSql, -1, &citationStmt, nil) == SQLITE_OK else {
-            throw NSError(
-                domain: "DatabaseEngine", code: -1,
-                userInfo: [NSLocalizedDescriptionKey: "Failed to prepare citation statement"])
-        }
-        defer { sqlite3_finalize(citationStmt) }
-
-        for citation in overview.citations.values {
-            sqlite3_reset(citationStmt)
-            // Citation IDs are unique within one overview only (`cite_<passage>_<n>`), so the row key carries the
-            // overview ID: another event citing the same passage must not collide with this one.
-            sqlite3_bind_text(
-                citationStmt, 1, Self.citationRowID(overviewID: overview.id, citationID: citation.id), -1,
-                Self.sqliteTransient)
-            sqlite3_bind_text(citationStmt, 2, overview.id, -1, Self.sqliteTransient)
-            sqlite3_bind_text(citationStmt, 3, citation.articleID, -1, Self.sqliteTransient)
-            sqlite3_bind_text(citationStmt, 4, citation.passageID, -1, Self.sqliteTransient)
-            sqlite3_bind_text(citationStmt, 5, citation.passageFingerprint, -1, Self.sqliteTransient)
-            sqlite3_bind_text(citationStmt, 6, citation.quote, -1, Self.sqliteTransient)
-            if let st = citation.sourceTitle {
-                sqlite3_bind_text(citationStmt, 7, st, -1, Self.sqliteTransient)
-            } else {
-                sqlite3_bind_null(citationStmt, 7)
-            }
-            if let sn = citation.sourceName {
-                sqlite3_bind_text(citationStmt, 8, sn, -1, Self.sqliteTransient)
-            } else {
-                sqlite3_bind_null(citationStmt, 8)
-            }
-            if let su = citation.sourceURL {
-                sqlite3_bind_text(citationStmt, 9, su, -1, Self.sqliteTransient)
-            } else {
-                sqlite3_bind_null(citationStmt, 9)
-            }
-            if let pa = citation.publishedAt {
-                sqlite3_bind_double(citationStmt, 10, pa.timeIntervalSince1970)
-            } else {
-                sqlite3_bind_null(citationStmt, 10)
-            }
-
-            guard sqlite3_step(citationStmt) == SQLITE_DONE else {
-                let errMsg = String(cString: sqlite3_errmsg(db))
-                throw NSError(
-                    domain: "DatabaseEngine", code: -1,
-                    userInfo: [NSLocalizedDescriptionKey: "Failed to insert event overview citation: \(errMsg)"])
-            }
-        }
-
-        try commitTransaction()
-        return true
-    }
-
-    func fetchEventOverview(eventID: String) throws -> EventOverviewDocument? {
-        guard let db = db else {
-            throw NSError(
-                domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Database not open"])
-        }
-
-        let overviewSql = """
-            SELECT id, event_id, membership_version, input_text_hash,
-                   schema_version, analysis_version, title, summary,
-                   facts_json, lead_image_json, member_article_ids_json,
-                   kind, created_at, updated_at
-            FROM event_overviews
-            WHERE event_id = ?;
-            """
-        var overviewStmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, overviewSql, -1, &overviewStmt, nil) == SQLITE_OK else {
-            throw NSError(
-                domain: "DatabaseEngine", code: -1,
-                userInfo: [NSLocalizedDescriptionKey: "Failed to prepare fetch overview statement"])
-        }
-        defer { sqlite3_finalize(overviewStmt) }
-
-        sqlite3_bind_text(overviewStmt, 1, eventID, -1, Self.sqliteTransient)
-        guard sqlite3_step(overviewStmt) == SQLITE_ROW else {
-            return nil
-        }
-
-        let id = String(cString: sqlite3_column_text(overviewStmt, 0))
-        let fetchedEventID = String(cString: sqlite3_column_text(overviewStmt, 1))
-        let membershipVersion = Int(sqlite3_column_int(overviewStmt, 2))
-        let inputTextHash = String(cString: sqlite3_column_text(overviewStmt, 3))
-        let schemaVersion = Int(sqlite3_column_int(overviewStmt, 4))
-        let analysisVersion = Int(sqlite3_column_int(overviewStmt, 5))
-        let title = String(cString: sqlite3_column_text(overviewStmt, 6))
-        let summary = String(cString: sqlite3_column_text(overviewStmt, 7))
-        let factsJSON = String(cString: sqlite3_column_text(overviewStmt, 8))
-        let leadImageJSON = sqlite3_column_text(overviewStmt, 9).map { String(cString: $0) }
-        let memberArticleIDsJSON = String(cString: sqlite3_column_text(overviewStmt, 10))
-        let kindString = String(cString: sqlite3_column_text(overviewStmt, 11))
-        let createdAt = Date(timeIntervalSince1970: sqlite3_column_double(overviewStmt, 12))
-        let updatedAt = Date(timeIntervalSince1970: sqlite3_column_double(overviewStmt, 13))
-
-        let decoder = JSONDecoder()
-        var facts: [OverviewFact] = []
-        var evidenceSections: OverviewEvidenceSections?
-        let trimmedFacts = factsJSON.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmedFacts.hasPrefix("{") {
-            struct OverviewFactsEnvelope: Codable {
-                let facts: [OverviewFact]
-                let evidenceSections: OverviewEvidenceSections?
-            }
-            if let envelope = try? decoder.decode(OverviewFactsEnvelope.self, from: Data(factsJSON.utf8)) {
-                facts = envelope.facts
-                evidenceSections = envelope.evidenceSections
-            }
-        } else {
-            facts = (try? decoder.decode([OverviewFact].self, from: Data(factsJSON.utf8))) ?? []
-        }
-        let memberArticleIDs = (try? decoder.decode([String].self, from: Data(memberArticleIDsJSON.utf8))) ?? []
-        var leadImage: OverviewLeadImage?
-        if let lij = leadImageJSON, let data = lij.data(using: .utf8) {
-            leadImage = try? decoder.decode(OverviewLeadImage.self, from: data)
-        }
-        let kind = OverviewKind(rawValue: kindString) ?? .synthesized
-
-        // Fetch citations
-        let citationSql = """
-            SELECT id, article_id, passage_id, passage_fingerprint,
-                   quote, source_title, source_name, source_url, published_at
-            FROM event_overview_citations
-            WHERE overview_id = ?;
-            """
-        var citationStmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, citationSql, -1, &citationStmt, nil) == SQLITE_OK else {
-            throw NSError(
-                domain: "DatabaseEngine", code: -1,
-                userInfo: [NSLocalizedDescriptionKey: "Failed to prepare fetch citations statement"])
-        }
-        defer { sqlite3_finalize(citationStmt) }
-
-        sqlite3_bind_text(citationStmt, 1, id, -1, Self.sqliteTransient)
-        var citations: [OverviewCitation] = []
-        while sqlite3_step(citationStmt) == SQLITE_ROW {
-            let citID = Self.citationID(
-                fromRowID: String(cString: sqlite3_column_text(citationStmt, 0)), overviewID: id)
-            let articleID = String(cString: sqlite3_column_text(citationStmt, 1))
-            let passageID = String(cString: sqlite3_column_text(citationStmt, 2))
-            let passageFingerprint = String(cString: sqlite3_column_text(citationStmt, 3))
-            let quote = String(cString: sqlite3_column_text(citationStmt, 4))
-            let sourceTitle = sqlite3_column_text(citationStmt, 5).map { String(cString: $0) }
-            let sourceName = sqlite3_column_text(citationStmt, 6).map { String(cString: $0) }
-            let sourceURL = sqlite3_column_text(citationStmt, 7).map { String(cString: $0) }
-            var publishedAt: Date?
-            if sqlite3_column_type(citationStmt, 8) != SQLITE_NULL {
-                publishedAt = Date(timeIntervalSince1970: sqlite3_column_double(citationStmt, 8))
-            }
-            citations.append(
-                OverviewCitation(
-                    id: citID,
-                    articleID: articleID,
-                    passageID: passageID,
-                    passageFingerprint: passageFingerprint,
-                    quote: quote,
-                    source: OverviewSourceMetadata(
-                        title: sourceTitle,
-                        name: sourceName,
-                        url: sourceURL,
-                        publishedAt: publishedAt
-                    )
-                ))
-        }
-
-        return EventOverviewDocument(
-            id: id,
-            eventID: fetchedEventID,
-            version: OverviewVersionContext(
-                membershipVersion: membershipVersion,
-                inputTextHash: inputTextHash,
-                schemaVersion: schemaVersion,
-                analysisVersion: analysisVersion
-            ),
-            content: OverviewContent(
-                title: title,
-                summary: summary,
-                facts: facts,
-                citations: citations,
-                leadImage: leadImage,
-                evidenceSections: evidenceSections
-            ),
-            provenance: OverviewProvenance(
-                memberArticleIDs: memberArticleIDs,
-                kind: kind,
-                createdAt: createdAt,
-                updatedAt: updatedAt
-            )
-        )
-    }
-
-    static func citationRowID(overviewID: String, citationID: String) -> String {
-        overviewID + "|" + citationID
-    }
-
-    /// Rows stored before overview-scoped keys carry the bare citation ID and are read unchanged.
-    static func citationID(fromRowID rowID: String, overviewID: String) -> String {
-        let prefix = overviewID + "|"
-        return rowID.hasPrefix(prefix) ? String(rowID.dropFirst(prefix.count)) : rowID
-    }
-
-    /// Resolves the event overview associated with a given article ID (via event membership or citations).
-    func fetchEventOverview(forArticleID articleID: String) throws -> EventOverviewDocument? {
-        if let eventID = try eventID(forArticle: articleID),
-            let overview = try fetchEventOverview(eventID: eventID)
-        {
-            return overview
-        }
-
-        // Fallback: check overview citations for direct article attribution
-        guard let db = db else { return nil }
-        var stmt: OpaquePointer?
-        let sql = """
-            SELECT o.event_id FROM event_overview_citations c
-            JOIN event_overviews o ON o.id = c.overview_id
-            WHERE c.article_id = ? LIMIT 1;
-            """
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
-            return nil
-        }
-        defer { sqlite3_finalize(stmt) }
-
-        sqlite3_bind_text(stmt, 1, articleID, -1, Self.sqliteTransient)
-        if sqlite3_step(stmt) == SQLITE_ROW, let eventIDText = sqlite3_column_text(stmt, 0) {
-            let eventID = String(cString: eventIDText)
-            return try fetchEventOverview(eventID: eventID)
-        }
-        return nil
-    }
-
-    @discardableResult
-    func deleteEventOverview(eventID: String) throws -> Bool {
-        guard let db = db else {
-            throw NSError(
-                domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Database not open"])
-        }
-
-        try beginTransaction()
-        defer {
-            if sqlite3_get_autocommit(db) == 0 { try? rollbackTransaction() }
-        }
-
-        var stmt: OpaquePointer?
-        let sql = "DELETE FROM event_overviews WHERE event_id = ?;"
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
-            throw NSError(
-                domain: "DatabaseEngine", code: -1,
-                userInfo: [NSLocalizedDescriptionKey: "Failed to prepare delete event overview statement"])
-        }
-        defer { sqlite3_finalize(stmt) }
-
-        sqlite3_bind_text(stmt, 1, eventID, -1, Self.sqliteTransient)
-        guard sqlite3_step(stmt) == SQLITE_DONE else {
-            let errMsg = String(cString: sqlite3_errmsg(db))
-            throw NSError(
-                domain: "DatabaseEngine", code: -1,
-                userInfo: [NSLocalizedDescriptionKey: "Failed to delete event overview: \(errMsg)"])
-        }
-        let changes = sqlite3_changes(db)
-        try commitTransaction()
-        return changes > 0
-    }
-
-    func clearEventOverviews() throws {
-        guard db != nil else { return }
-        try executeSimple("DELETE FROM event_overviews;")
-        logger.info("Cleared all event overviews and citations.")
-    }
-
-    // MARK: - Events
-
     enum EventValue {
         case text(String)
         case integer(Int)
@@ -452,6 +20,8 @@ extension DatabaseEngine {
     func eventRows(_ sql: String, _ values: [EventValue] = []) throws -> [[String?]] {
         guard let db = db else { throw Self.eventError("Database not open") }
         var statement: OpaquePointer?
+        // Callers interpolate only static SQL fragments and generated `?` lists; every value is bound below.
+        // nosemgrep: swift.sqllite.sqllite-injection-audit.swift-potential-sqlite-injection
         guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
             throw Self.eventError("Cannot prepare event statement: \(String(cString: sqlite3_errmsg(db)))")
         }
@@ -645,12 +215,12 @@ extension DatabaseEngine {
         return try requireEvent(id)
     }
 
-    private func requireEvent(_ id: String) throws -> StoryEvent {
+    func requireEvent(_ id: String) throws -> StoryEvent {
         guard let event = try fetchEvent(id: id) else { throw Self.eventError("Unknown event") }
         return event
     }
 
-    private func liveEvent(_ id: String) throws -> (id: String, version: Int) {
+    func liveEvent(_ id: String) throws -> (id: String, version: Int) {
         guard let live = try resolvedEventID(id),
             let version = try eventRows("SELECT membership_version FROM events WHERE id = ?;", [.text(live)]).first?[0]
                 .flatMap({ Int($0) })
@@ -660,7 +230,7 @@ extension DatabaseEngine {
         return (live, version)
     }
 
-    private func insertEvent(members: [String], at now: Double) throws -> String {
+    func insertEvent(members: [String], at now: Double) throws -> String {
         guard !members.isEmpty else { throw Self.eventError("An event needs at least one article") }
         let id = UUID().uuidString
         try eventRows(
@@ -671,7 +241,7 @@ extension DatabaseEngine {
     }
 
     /// Membership references the surviving stored document, never an alias or a reconciled copy.
-    private func memberArticleID(_ id: String) throws -> String? {
+    func memberArticleID(_ id: String) throws -> String? {
         var resolved = try resolvedArticleID(id)
         if let survivor = try eventRows(
             "SELECT survivor_id FROM article_reconciliations WHERE duplicate_id = ?;", [.text(resolved)]
@@ -681,7 +251,7 @@ extension DatabaseEngine {
         return try eventRows("SELECT 1 FROM articles WHERE id = ?;", [.text(resolved)]).isEmpty ? nil : resolved
     }
 
-    private func resolvedMembers(_ articleIDs: [String]) throws -> [String] {
+    func resolvedMembers(_ articleIDs: [String]) throws -> [String] {
         var seen = Set<String>()
         var members: [String] = []
         for articleID in articleIDs {
@@ -695,7 +265,7 @@ extension DatabaseEngine {
 
     /// Moves members into `eventID`; every event that loses an article gains one membership version.
     /// Returns whether the target's member set changed.
-    private func assignMembers(_ members: [String], to eventID: String, joinedVersion: Int, at now: Double) throws
+    func assignMembers(_ members: [String], to eventID: String, joinedVersion: Int, at now: Double) throws
         -> Bool
     {
         var losing = Set<String>()
@@ -719,7 +289,7 @@ extension DatabaseEngine {
         return changed
     }
 
-    private func bumpMembershipVersion(_ eventID: String, at now: Double) throws {
+    func bumpMembershipVersion(_ eventID: String, at now: Double) throws {
         try eventRows(
             "UPDATE events SET membership_version = membership_version + 1, updated_at = ? WHERE id = ?;",
             [.real(now), .text(eventID)])
@@ -729,9 +299,8 @@ extension DatabaseEngine {
     /// `limit`. Hidden reconciled copies, `articleID` itself and members of events unchanged since
     /// `activeSince` are excluded, so closed events never grow.
     func eventCandidateRows(
-        matching query: String, around date: Date, window: TimeInterval,
-        activeSince: Date, excluding articleID: String, limit: Int
-    ) throws -> [(id: String, title: String, description: String, eventID: String?)] {
+        matching query: String, in span: EventTimeSpan, activeSince: Date, excluding articleID: String, limit: Int
+    ) throws -> [EventCandidateRow] {
         let sql = """
             SELECT a.id, a.title, coalesce(a.description, ''), m.event_id
             FROM articles_fts fts
@@ -746,7 +315,8 @@ extension DatabaseEngine {
             ORDER BY fts.rank, a.id
             LIMIT ?;
             """
-        let center = date.timeIntervalSince1970
+        let center = span.around.timeIntervalSince1970
+        let window = span.window
         return try eventRows(
             sql,
             [
@@ -755,7 +325,7 @@ extension DatabaseEngine {
             ]
         ).compactMap { row in
             guard let id = row[0], let title = row[1] else { return nil }
-            return (id: id, title: title, description: row[2] ?? "", eventID: row[3])
+            return EventCandidateRow(id: id, title: title, description: row[2] ?? "", eventID: row[3])
         }
     }
 
@@ -846,421 +416,18 @@ extension DatabaseEngine {
         }
         return common
     }
+}
 
-    // MARK: - Event Matching
+/// A publication time and the window either side of it.
+struct EventTimeSpan {
+    let around: Date
+    let window: TimeInterval
+}
 
-    static let eventMatchColumns = """
-        SELECT a.id, a.title, coalesce(a.description, ''), a.source, a.published_at, m.event_id,
-            ms.article_id IS NOT NULL
-        FROM articles a
-        LEFT JOIN event_members m ON m.article_id = a.id
-        LEFT JOIN event_match_state ms ON ms.article_id = a.id
-        """
-
-    func eventMatchRows(_ sql: String, _ values: [EventValue]) throws -> [EventMatchRow] {
-        try eventRows(sql, values).compactMap { row in
-            guard let id = row[0], let title = row[1] else { return nil }
-            return EventMatchRow(
-                id: id, title: title, description: row[2] ?? "", source: row[3] ?? "",
-                date: Date(timeIntervalSince1970: row[4].flatMap { Double($0) } ?? 0), eventID: row[5],
-                previouslyMatched: row[6] == "1")
-        }
-    }
-
-    /// Pending recent articles and members of still-active events, oldest first. This also upgrades
-    /// active events whose last publication is older than the window; inactive archived groups stay untouched.
-    func pendingEventMatchRows(activeSince: Date, matcherVersion: Int, limit: Int) throws -> [EventMatchRow] {
-        try eventMatchRows(
-            """
-            \(Self.eventMatchColumns)
-            WHERE (ms.article_id IS NULL OR ms.matcher_version < ?)
-                AND (\(Self.articleDateOrder) >= ? OR EXISTS (
-                    SELECT 1 FROM events active WHERE active.id = m.event_id AND active.updated_at >= ?))
-                AND \(Self.visibleArticle)
-            ORDER BY \(Self.articleDateOrder), a.id
-            LIMIT ?;
-            """,
-            [
-                .integer(matcherVersion), .real(activeSince.timeIntervalSince1970),
-                .real(activeSince.timeIntervalSince1970), .integer(limit),
-            ])
-    }
-
-    func eventMatchRows(articleIDs: [String]) throws -> [EventMatchRow] {
-        var rows: [EventMatchRow] = []
-        for start in stride(from: 0, to: articleIDs.count, by: 400) {
-            let slice = Array(articleIDs[start..<min(start + 400, articleIDs.count)])
-            let placeholders = Array(repeating: "?", count: slice.count).joined(separator: ", ")
-            rows += try eventMatchRows(
-                "\(Self.eventMatchColumns) WHERE a.id IN (\(placeholders));", slice.map { .text($0) })
-        }
-        return rows
-    }
-
-    /// The live event, its membership version and its members, for a whole-event check.
-    func eventMatchMembers(eventID: String) throws -> (id: String, version: Int, members: [EventMatchRow])? {
-        guard let live = try? liveEvent(eventID) else { return nil }
-        let members = try eventMatchRows("\(Self.eventMatchColumns) WHERE m.event_id = ?;", [.text(live.id)])
-        return (live.id, live.version, members)
-    }
-
-    /// Every live event updated since `activeSince`, with its members, for merging fragments of one story.
-    func activeEventMembers(since activeSince: Date) throws -> [(id: String, version: Int, members: [EventMatchRow])] {
-        let since = activeSince.timeIntervalSince1970
-        let versions = try eventRows(
-            "SELECT id, membership_version FROM events WHERE merged_into IS NULL AND updated_at >= ? ORDER BY id;",
-            [.real(since)])
-        let rows = try eventMatchRows(
-            """
-            \(Self.eventMatchColumns)
-            JOIN events e ON e.id = m.event_id
-            WHERE e.merged_into IS NULL AND e.updated_at >= ?;
-            """, [.real(since)])
-        let byEvent = Dictionary(grouping: rows) { $0.eventID ?? "" }
-        return versions.compactMap { row in
-            guard let id = row[0], let members = byEvent[id], !members.isEmpty else { return nil }
-            return (id, row[1].flatMap { Int($0) } ?? 1, members.sorted { $0.id < $1.id })
-        }
-    }
-
-    /// Apply a matcher upgrade only to the exact active membership/text snapshot that was assessed.
-    /// The first group retains the event ID; all moves, invalidation and processed markers commit together.
-    func repartitionEvent(
-        _ eventID: String, expectedVersion: Int, expectedMembers: [EventMatchRow], groups: [[String]],
-        matcherVersion: Int, activeSince: Date, at now: Date
-    ) throws -> Set<String>? {
-        try inEventTransaction {
-            guard let event = try fetchEvent(id: eventID), event.id == eventID,
-                event.membershipVersion == expectedVersion, event.updatedAt >= activeSince,
-                let current = try eventMatchMembers(eventID: eventID),
-                Set(current.members) == Set(expectedMembers)
-            else { return nil }
-            let ids = groups.flatMap { $0 }
-            guard !groups.isEmpty, groups.allSatisfy({ !$0.isEmpty }),
-                ids.count == expectedMembers.count, Set(ids).count == ids.count,
-                Set(ids) == Set(expectedMembers.map(\.id))
-            else { throw Self.eventError("Invalid matcher partition") }
-            for group in groups {
-                for member in group where try excluded(member, from: group) {
-                    throw Self.eventError("Excluded reports cannot share a matcher partition")
-                }
-            }
-            var changed: Set<String> = []
-            if groups.count > 1 {
-                changed.insert(eventID)
-                for group in groups.dropFirst() {
-                    changed.insert(try insertEvent(members: group, at: now.timeIntervalSince1970))
-                }
-                try eventRows("DELETE FROM event_overviews WHERE event_id = ?;", [.text(eventID)])
-            }
-            for id in ids { try markMatched(id, matcherVersion: matcherVersion, at: now.timeIntervalSince1970) }
-            return changed
-        }
-    }
-
-    /// Articles the user marked as a different event from `articleID`.
-    func eventExclusions(of articleID: String) throws -> Set<String> {
-        guard let member = try memberArticleID(articleID) else { return [] }
-        return try eventExclusions(for: [member])[member] ?? []
-    }
-
-    /// A symmetric exclusion snapshot for stored member IDs, in bounded SQLite batches.
-    func eventExclusions(for articleIDs: [String]) throws -> [String: Set<String>] {
-        let ids = Set(articleIDs).sorted()
-        var exclusions: [String: Set<String>] = [:]
-        for start in stride(from: 0, to: ids.count, by: 400) {
-            try Task.checkCancellation()
-            let slice = Array(ids[start..<min(start + 400, ids.count)])
-            let placeholders = Array(repeating: "?", count: slice.count).joined(separator: ",")
-            let rows = try eventRows(
-                """
-                SELECT article_id, other_article_id FROM event_exclusions
-                WHERE article_id IN (\(placeholders)) OR other_article_id IN (\(placeholders));
-                """, (slice + slice).map { .text($0) })
-            for row in rows {
-                guard let first = row[0], let second = row[1] else { continue }
-                exclusions[first, default: []].insert(second)
-                exclusions[second, default: []].insert(first)
-            }
-        }
-        return exclusions
-    }
-
-    func markEventMatchProcessed(_ articleIDs: [String], matcherVersion: Int, at date: Date = Date()) throws {
-        try inEventTransaction { () throws -> Void in
-            for articleID in articleIDs {
-                try markMatched(articleID, matcherVersion: matcherVersion, at: date.timeIntervalSince1970)
-            }
-        }
-    }
-
-    private func markMatched(_ articleID: String, matcherVersion: Int, at now: Double) throws {
-        // An article deleted in the meantime has nothing left to mark.
-        try eventRows(
-            """
-            INSERT INTO event_match_state(article_id, matcher_version, processed_at)
-            SELECT ?, ?, ? WHERE EXISTS (SELECT 1 FROM articles WHERE id = ?)
-            ON CONFLICT(article_id) DO UPDATE SET matcher_version = excluded.matcher_version, processed_at = excluded.processed_at;
-            """, [.text(articleID), .integer(matcherVersion), .real(now), .text(articleID)])
-    }
-
-    private func excluded(_ articleID: String, from others: [String]) throws -> Bool {
-        for other in others where other != articleID {
-            let (low, high) = articleID < other ? (articleID, other) : (other, articleID)
-            if try !eventRows(
-                "SELECT 1 FROM event_exclusions WHERE article_id = ? AND other_article_id = ?;",
-                [.text(low), .text(high)]
-            ).isEmpty {
-                return true
-            }
-        }
-        return false
-    }
-
-    /// Applies a matcher decision only if the state it was made against still holds: the target event
-    /// keeps the expected version, new-event partners are still unassigned and no pair is excluded.
-    /// Otherwise nothing changes and the article stays pending for the next pass.
-    func applyEventMatch(
-        _ articleID: String, _ decision: EventMatchDecision, matcherVersion: Int, at date: Date = Date()
-    ) throws -> EventMatchOutcome {
-        try inEventTransaction { () throws -> EventMatchOutcome in
-            let now = date.timeIntervalSince1970
-            guard let member = try memberArticleID(articleID) else { return .conflict }
-            switch decision {
-            case .join(let eventID, let expectedVersion):
-                guard try resolvedEventID(eventID) == eventID, let live = try? liveEvent(eventID),
-                    live.version == expectedVersion
-                else { return .conflict }
-                let members = try eventRows(
-                    "SELECT article_id FROM event_members WHERE event_id = ?;", [.text(eventID)]
-                ).compactMap { $0[0] }
-                guard !(try excluded(member, from: members)) else { return .conflict }
-                if try assignMembers([member], to: eventID, joinedVersion: live.version + 1, at: now) {
-                    try bumpMembershipVersion(eventID, at: now)
-                }
-                try markMatched(member, matcherVersion: matcherVersion, at: now)
-                return .joined(eventID)
-            case .create(let partners):
-                var group = [member]
-                for partner in partners {
-                    guard let resolved = try memberArticleID(partner), !group.contains(resolved),
-                        try eventRows("SELECT 1 FROM event_members WHERE article_id = ?;", [.text(resolved)]).isEmpty,
-                        !(try excluded(resolved, from: group))
-                    else { return .conflict }
-                    group.append(resolved)
-                }
-                guard group.count >= 2 else { return .conflict }
-                let id = try insertEvent(members: group, at: now)
-                for article in group { try markMatched(article, matcherVersion: matcherVersion, at: now) }
-                return .created(id)
-            }
-        }
-    }
-
-    /// "These are different events": takes the article out of the event and records an exclusion
-    /// against every remaining member. Later passes may match it elsewhere, never back with them.
-    @discardableResult
-    func separateArticle(_ articleID: String, fromEvent eventID: String, at date: Date = Date()) throws -> StoryEvent {
-        let id = try inEventTransaction { () throws -> String in
-            let target = try liveEvent(eventID)
-            guard let member = try memberArticleID(articleID) else {
-                throw Self.eventError("Unknown event member article")
-            }
-            let members = try eventRows("SELECT article_id FROM event_members WHERE event_id = ?;", [.text(target.id)])
-                .compactMap { $0[0] }
-            guard members.contains(member) else { throw Self.eventError("The article is not part of this event") }
-            let now = date.timeIntervalSince1970
-            try eventRows(
-                "DELETE FROM event_members WHERE article_id = ? AND event_id = ?;", [.text(member), .text(target.id)])
-            try bumpMembershipVersion(target.id, at: now)
-            for other in members where other != member {
-                let (low, high) = member < other ? (member, other) : (other, member)
-                try eventRows(
-                    "INSERT OR IGNORE INTO event_exclusions(article_id, other_article_id, created_at) VALUES (?, ?, ?);",
-                    [.text(low), .text(high), .real(now)])
-            }
-            try eventRows("DELETE FROM event_match_state WHERE article_id = ?;", [.text(member)])
-            return target.id
-        }
-        return try requireEvent(id)
-    }
-
-    // MARK: - Event Reading State
-
-    /// Records that the reader has seen the event up to `version` (the current version by default,
-    /// never beyond it). Seen versions only grow. Article read and saved state is not touched.
-    @discardableResult
-    func markEventSeen(_ eventID: String, version: Int? = nil, at date: Date = Date()) throws -> Int {
-        try inEventTransaction { () throws -> Int in
-            let live = try liveEvent(eventID)
-            let seen = max(1, min(version ?? live.version, live.version))
-            try eventRows(
-                """
-                INSERT INTO event_state(event_id, seen_version, seen_at) VALUES (?, ?, ?)
-                ON CONFLICT(event_id) DO UPDATE SET seen_version = max(seen_version, excluded.seen_version), seen_at = excluded.seen_at;
-                """, [.text(live.id), .integer(seen), .real(date.timeIntervalSince1970)])
-            return try eventRows("SELECT seen_version FROM event_state WHERE event_id = ?;", [.text(live.id)]).first?[0]
-                .flatMap { Int($0) } ?? seen
-        }
-    }
-
-    func eventSeenVersion(_ eventID: String) throws -> Int? {
-        guard let live = try resolvedEventID(eventID) else { return nil }
-        return try eventRows("SELECT seen_version FROM event_state WHERE event_id = ?;", [.text(live)]).first?[0]
-            .flatMap { Int($0) }
-    }
-
-    /// Every visible member of the events that hold any of `articleIDs`, newest first, with the
-    /// state a feed card needs. No article text beyond the title is read.
-    func eventFeedSummaries(forArticles articleIDs: [String]) throws -> [EventFeedSummary] {
-        var eventIDs: [String] = []
-        var seen = Set<String>()
-        for start in stride(from: 0, to: articleIDs.count, by: 400) {
-            let slice = Array(articleIDs[start..<min(start + 400, articleIDs.count)])
-            let placeholders = Array(repeating: "?", count: slice.count).joined(separator: ", ")
-            for row in try eventRows(
-                "SELECT DISTINCT event_id FROM event_members WHERE article_id IN (\(placeholders));",
-                slice.map { .text($0) })
-            {
-                if let id = row[0], seen.insert(id).inserted { eventIDs.append(id) }
-            }
-        }
-        var summaries: [EventFeedSummary] = []
-        for start in stride(from: 0, to: eventIDs.count, by: 400) {
-            let slice = Array(eventIDs[start..<min(start + 400, eventIDs.count)])
-            let placeholders = Array(repeating: "?", count: slice.count).joined(separator: ", ")
-            let rows = try eventRows(
-                """
-                SELECT m.event_id, e.membership_version, st.seen_version, a.id, a.source, a.title,
-                       \(Self.articleDateOrder), m.joined_version, s.is_read, s.is_saved, a.canonical_url
-                FROM event_members m
-                JOIN events e ON e.id = m.event_id
-                JOIN articles a ON a.id = m.article_id
-                JOIN article_state s ON s.article_id = a.id
-                LEFT JOIN event_state st ON st.event_id = m.event_id
-                WHERE m.event_id IN (\(placeholders)) AND \(Self.visibleArticle)
-                ORDER BY m.event_id, \(Self.articleDateOrder) DESC, a.id;
-                """, slice.map { .text($0) })
-            var current: (id: String, version: Int, seen: Int?, members: [EventFeedMember])?
-            for row in rows {
-                guard let eventID = row[0], let articleID = row[3] else { continue }
-                if current?.id != eventID {
-                    if let current {
-                        summaries.append(
-                            EventFeedSummary(
-                                eventID: current.id, membershipVersion: current.version, seenVersion: current.seen,
-                                members: current.members))
-                    }
-                    current = (eventID, row[1].flatMap { Int($0) } ?? 1, row[2].flatMap { Int($0) }, [])
-                }
-                current?.members.append(
-                    EventFeedMember(
-                        articleID: articleID, source: FeedCatalog.publisher(forLink: row[10] ?? "") ?? row[4] ?? "",
-                        title: row[5] ?? "",
-                        date: Date(timeIntervalSince1970: row[6].flatMap { Double($0) } ?? 0),
-                        joinedVersion: row[7].flatMap { Int($0) } ?? 1,
-                        isRead: row[8] == "1", isSaved: row[9] == "1"))
-            }
-            if let current {
-                summaries.append(
-                    EventFeedSummary(
-                        eventID: current.id, membershipVersion: current.version, seenVersion: current.seen,
-                        members: current.members))
-            }
-        }
-        return summaries
-    }
-
-    /// Drops events left without members unless an overview still refers to them. A forward dies with
-    /// its survivor; merges keep forwards one hop deep, so two passes clear them.
-    func pruneEmptyEvents() throws {
-        for _ in 0..<2 {
-            try executeSimple(
-                """
-                DELETE FROM events WHERE merged_into IS NULL
-                    AND NOT EXISTS (SELECT 1 FROM event_members m WHERE m.event_id = events.id)
-                    AND NOT EXISTS (SELECT 1 FROM event_overviews o WHERE o.event_id = events.id);
-                """)
-        }
-    }
-
-    // MARK: - Article Embeddings (#127, #307)
-
-    /// Retrieves stored normalized embedding vectors for the given article IDs matching the model version.
-    func fetchArticleEmbeddings(articleIDs: [String], modelVersion: Int) throws -> [String: [Float]] {
-        guard !articleIDs.isEmpty else { return [:] }
-        var result: [String: [Float]] = [:]
-        for start in stride(from: 0, to: articleIDs.count, by: 400) {
-            let slice = Array(articleIDs[start..<min(start + 400, articleIDs.count)])
-            let placeholders = Array(repeating: "?", count: slice.count).joined(separator: ", ")
-            let sql =
-                "SELECT article_id, vector FROM article_embeddings WHERE model_version = ? AND article_id IN (\(placeholders));"
-            var statement: OpaquePointer?
-            guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
-                throw NSError(
-                    domain: "DatabaseEngine", code: -1,
-                    userInfo: [NSLocalizedDescriptionKey: "Failed to prepare embedding query"])
-            }
-            defer { sqlite3_finalize(statement) }
-            sqlite3_bind_int(statement, 1, Int32(modelVersion))
-            for (idx, id) in slice.enumerated() {
-                sqlite3_bind_text(statement, Int32(idx + 2), id, -1, Self.sqliteTransient)
-            }
-            while sqlite3_step(statement) == SQLITE_ROW {
-                guard let idText = sqlite3_column_text(statement, 0),
-                    let blobBytes = sqlite3_column_blob(statement, 1)
-                else { continue }
-                let id = String(cString: idText)
-                let byteCount = Int(sqlite3_column_bytes(statement, 1))
-                let floatCount = byteCount / MemoryLayout<Float>.stride
-                guard floatCount == 384 else { continue }
-                // SQLite does not promise Float alignment for blob memory, so copy the bytes instead of rebinding them.
-                let floats = [Float](unsafeUninitializedCapacity: floatCount) { buffer, initialized in
-                    memcpy(buffer.baseAddress!, blobBytes, floatCount * MemoryLayout<Float>.stride)
-                    initialized = floatCount
-                }
-                result[id] = floats
-            }
-        }
-        return result
-    }
-
-    /// Stores normalized float vectors for articles inside a single transaction.
-    func upsertArticleEmbeddings(_ embeddings: [String: [Float]], modelVersion: Int) throws {
-        guard !embeddings.isEmpty else { return }
-        try beginTransaction()
-        do {
-            let sql = """
-                INSERT INTO article_embeddings (article_id, model_version, vector) VALUES (?, ?, ?)
-                ON CONFLICT(article_id) DO UPDATE SET model_version = excluded.model_version, vector = excluded.vector;
-                """
-            var statement: OpaquePointer?
-            guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
-                throw NSError(
-                    domain: "DatabaseEngine", code: -1,
-                    userInfo: [NSLocalizedDescriptionKey: "Failed to prepare embedding upsert"])
-            }
-            defer { sqlite3_finalize(statement) }
-
-            for (articleID, vector) in embeddings {
-                guard vector.count == 384 else { continue }
-                sqlite3_reset(statement)
-                sqlite3_bind_text(statement, 1, articleID, -1, Self.sqliteTransient)
-                sqlite3_bind_int(statement, 2, Int32(modelVersion))
-                let byteCount = vector.count * MemoryLayout<Float>.stride
-                _ = vector.withUnsafeBytes { raw in
-                    sqlite3_bind_blob(statement, 3, raw.baseAddress, Int32(byteCount), Self.sqliteTransient)
-                }
-                guard sqlite3_step(statement) == SQLITE_DONE else {
-                    throw NSError(
-                        domain: "DatabaseEngine", code: -1,
-                        userInfo: [NSLocalizedDescriptionKey: "Failed to insert article embedding for \(articleID)"])
-                }
-            }
-            try commitTransaction()
-        } catch {
-            try? rollbackTransaction()
-            throw error
-        }
-    }
+/// An event-matching candidate from full-text search.
+struct EventCandidateRow: Equatable {
+    let id: String
+    let title: String
+    let description: String
+    let eventID: String?
 }
