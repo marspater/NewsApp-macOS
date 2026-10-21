@@ -365,15 +365,28 @@ struct MainView: View {
         }
     }
 
+    private func operatorIcon(for token: String) -> String {
+        if token.hasPrefix("is:unread") { return "circle.circle" }
+        if token.hasPrefix("is:read") { return "checkmark.circle" }
+        if token.hasPrefix("is:saved") { return "bookmark" }
+        if token.hasPrefix("source:") { return "newspaper" }
+        if token.hasPrefix("category:") { return "tag" }
+        return "magnifyingglass"
+    }
+
     /// One suggestion row. The operator column is as wide as the longest operator, so every description starts at
     /// the same position.
     private func operatorSuggestion(_ option: (token: String, summary: String)) -> some View {
         HStack(spacing: AppSpacing.sm) {
+            Image(systemName: operatorIcon(for: option.token))
+                .foregroundStyle(AppColor.accent)
+                .frame(width: 16)
+                .accessibilityHidden(true)
             ZStack(alignment: .leading) {
                 Text(Self.longestSearchOperator).hidden().accessibilityHidden(true)
                 Text(option.token)
             }
-            .font(.system(.body, design: .monospaced))
+            .font(AppTypography.caption.monospaced())
             Text(option.summary).foregroundStyle(AppColor.secondaryText)
         }
     }
@@ -436,7 +449,7 @@ private struct ArchiveSearchToolbar<Suggestions: View>: ViewModifier {
                 text: $searchText, tokens: $searchTokens, isPresented: $searchPresented, placement: .toolbar,
                 prompt: "Search archive"
             ) { token in
-                Text(token.expression)
+                Label(token.displayName, systemImage: token.systemImage)
             }
             .searchSuggestions { suggestions }
             .focusedSceneValue(\.archiveSearch, presentSearch)
@@ -479,7 +492,16 @@ private struct CompactArchiveSearch: NSViewRepresentable {
                     lessThanOrEqualToConstant: AppLayout.archiveSearchCollapsedWidth)
                 width?.priority = .init(999)
             }
-            width?.isActive = !expanded
+            if window != nil {
+                NSAnimationContext.runAnimationGroup { context in
+                    context.duration = 0.22
+                    context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+                    context.allowsImplicitAnimation = true
+                    width?.isActive = !expanded
+                }
+            } else {
+                width?.isActive = !expanded
+            }
         }
     }
 }

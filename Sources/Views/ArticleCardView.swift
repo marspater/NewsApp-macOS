@@ -164,10 +164,10 @@ struct ArticleCardView: View {
         }
         .frame(height: compact ? 170 : nil)
         .background(AppColor.surface)
-        .clipShape(RoundedRectangle(cornerRadius: AppRadius.card))
+        .clipShape(RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: AppRadius.card)
-                .stroke(appearance.border, lineWidth: appearance.width)
+            RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous)
+                .strokeBorder(appearance.border, lineWidth: appearance.width)
         )
         .shadow(color: appearance.shadow, radius: appearance.radius, x: 0, y: appearance.y)
         .animation(reduceMotion ? nil : AppMotion.hover, value: isHovered)
@@ -204,7 +204,7 @@ struct ArticleCardView: View {
             // Headline
             Text(article.title)
                 .font(AppTypography.cardHeadline(compact ? .list : .grid))
-                .foregroundColor(isRead ? AppColor.secondaryText : AppColor.primaryText)
+                .foregroundStyle(isRead ? AppColor.secondaryText : AppColor.primaryText)
                 .lineLimit(2)
                 .multilineTextAlignment(.leading)
                 // In the fixed-height list card the summary gives up lines before the headline does.
@@ -251,7 +251,7 @@ struct ArticleCardView: View {
             if !cleanDesc.isEmpty {
                 Text(cleanDesc)
                     .font(AppTypography.body)
-                    .foregroundColor(AppColor.secondaryText)
+                    .foregroundStyle(AppColor.secondaryText)
                     .lineLimit(2)
                     .multilineTextAlignment(.leading)
             }
@@ -262,7 +262,8 @@ struct ArticleCardView: View {
         HStack(spacing: AppSpacing.xs) {
             Text(article.cardDateText())
                 .font(AppTypography.caption)
-                .foregroundColor(AppColor.tertiaryText(for: contrast))
+                .foregroundStyle(AppColor.tertiaryText(for: contrast))
+                .monospacedDigit()
 
             Spacer()
 
@@ -313,12 +314,12 @@ struct ArticleCardView: View {
                         }
                     }
                     .clipped()
-                    .clipShape(RoundedRectangle(cornerRadius: AppRadius.container))
+                    .clipShape(RoundedRectangle(cornerRadius: AppRadius.container, style: .continuous))
                     .accessibilityHidden(true)
             } else {
                 // Keep the loading surface dark so the image caption stays readable.
                 AppColor.leadPlaceholder
-                    .clipShape(RoundedRectangle(cornerRadius: AppRadius.container))
+                    .clipShape(RoundedRectangle(cornerRadius: AppRadius.container, style: .continuous))
                     .accessibilityHidden(true)
             }
 
@@ -327,10 +328,10 @@ struct ArticleCardView: View {
         }
         .frame(maxWidth: .infinity)
         .frame(height: AppLayout.leadStoryHeight)
-        .containerShape(RoundedRectangle(cornerRadius: AppRadius.container))
+        .containerShape(RoundedRectangle(cornerRadius: AppRadius.container, style: .continuous))
         .overlay {
-            RoundedRectangle(cornerRadius: AppRadius.container)
-                .stroke(appearance.border, lineWidth: appearance.width)
+            RoundedRectangle(cornerRadius: AppRadius.container, style: .continuous)
+                .strokeBorder(appearance.border, lineWidth: appearance.width)
         }
         .shadow(color: appearance.shadow, radius: appearance.radius, x: 0, y: appearance.y)
         .animation(reduceMotion ? nil : AppMotion.hover, value: isHovered)
@@ -380,6 +381,7 @@ struct ArticleCardView: View {
                 Text(article.cardDateText())
                     .font(AppTypography.caption)
                     .foregroundStyle(AppColor.leadSecondaryText)
+                    .monospacedDigit()
                 Spacer(minLength: AppSpacing.xs)
                 if article.aiSummary != nil {
                     TagView.intelligence()

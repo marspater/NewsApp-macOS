@@ -31,6 +31,7 @@ struct TensionIndexView: View {
     @EnvironmentObject var appSettings: AppSettings
     @Environment(\.dismiss) private var dismiss
     @Environment(\.effectiveReduceMotion) private var reduceMotion
+    @Environment(\.colorSchemeContrast) private var contrast
     @State private var history: [WorldTensionReading]
     @State private var loading = false
     @State private var errorMessage: String?
@@ -184,7 +185,11 @@ struct TensionIndexView: View {
         }
         .padding(AppSpacing.md)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(AppColor.surface, in: RoundedRectangle(cornerRadius: AppRadius.card))
+        .background(AppColor.surface, in: RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous)
+                .strokeBorder(AppColor.border(for: contrast), lineWidth: 0.5)
+        )
     }
 
     @ViewBuilder
@@ -226,7 +231,11 @@ struct TensionIndexView: View {
         }
         .padding(AppSpacing.md)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(AppColor.surface, in: RoundedRectangle(cornerRadius: AppRadius.card))
+        .background(AppColor.surface, in: RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous)
+                .strokeBorder(AppColor.border(for: contrast), lineWidth: 0.5)
+        )
     }
 
     private func evidence(_ reading: WorldTensionReading) -> some View {
@@ -251,6 +260,7 @@ struct TensionIndexView: View {
                         x: .value("Day", reading.id), y: .value("Assessment", reading.assessment.score),
                         series: .value("Segment", segment(index))
                     )
+                    .interpolationMethod(.catmullRom)
                     .foregroundStyle(AppColor.secondaryText)
                     PointMark(x: .value("Day", reading.id), y: .value("Assessment", reading.assessment.score))
                         .foregroundStyle(AppColor.tension(reading.level))
@@ -335,20 +345,27 @@ struct TensionIndexView: View {
 /// The full 0–100 scale with the band colours and a marker at the current score.
 struct TensionScaleBar: View {
     let score: Int
+    @Environment(\.colorSchemeContrast) private var contrast
 
     var body: some View {
         VStack(spacing: AppSpacing.xs) {
             GeometryReader { geometry in
-                Capsule().fill(
-                    LinearGradient(gradient: AppColor.tensionScale, startPoint: .leading, endPoint: .trailing)
-                )
-                .overlay(alignment: .leading) {
-                    Capsule().fill(AppColor.primaryText)
-                        .frame(width: AppLayout.tensionStrokeWidth, height: AppLayout.tensionScaleMarkerHeight)
-                        .offset(
-                            x: geometry.size.width * CGFloat(min(100, max(0, score))) / 100
-                                - AppLayout.tensionStrokeWidth / 2)
-                }
+                Capsule()
+                    .fill(
+                        LinearGradient(gradient: AppColor.tensionScale, startPoint: .leading, endPoint: .trailing)
+                    )
+                    .overlay(
+                        Capsule()
+                            .strokeBorder(AppColor.border(for: contrast).opacity(0.35), lineWidth: 0.5)
+                    )
+                    .overlay(alignment: .leading) {
+                        Capsule().fill(AppColor.primaryText)
+                            .frame(width: AppLayout.tensionStrokeWidth, height: AppLayout.tensionScaleMarkerHeight)
+                            .shadow(color: AppShadow.cardRestingColor, radius: 2, x: 0, y: 1)
+                            .offset(
+                                x: geometry.size.width * CGFloat(min(100, max(0, score))) / 100
+                                    - AppLayout.tensionStrokeWidth / 2)
+                    }
             }
             .frame(height: AppLayout.tensionScaleHeight)
             .padding(.vertical, (AppLayout.tensionScaleMarkerHeight - AppLayout.tensionScaleHeight) / 2)
@@ -359,7 +376,7 @@ struct TensionScaleBar: View {
                 Spacer()
                 Text("100")
             }
-            .font(AppTypography.caption).foregroundStyle(AppColor.tertiaryText).monospacedDigit()
+            .font(AppTypography.caption).foregroundStyle(AppColor.tertiaryText(for: contrast)).monospacedDigit()
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("World Tension scale")
@@ -610,24 +627,88 @@ struct TensionSidebarButton: View {
     let reading: WorldTensionReading?
     let open: () -> Void
     var status = "Not assessed"
+    @Environment(\.colorSchemeContrast) private var contrast
+    @State private var isHovered = false
+
+    private var readingHeadline: String {
+        if let reading {
+            return "\(reading.assessment.score)° \(reading.level.rawValue)"
+        }
+        return TensionIndexView.navigationTitleText
+    }
+
+    private var readingSubheadline: String {
+        reading == nil ? status : TensionIndexView.navigationTitleText
+    }
+
+    private var statusDot: some View {
+        Circle()
+            .fill(reading.map { AppColor.tension($0.level) } ?? AppColor.secondaryText)
+            .frame(width: AppLayout.tensionDotSize, height: AppLayout.tensionDotSize)
+            .overlay(
+                Circle()
+                    .strokeBorder(
+                        AppColor.border(for: contrast).opacity(0.35),
+                        lineWidth: 0.5
+                    )
+            )
+            .accessibilityHidden(true)
+    }
+
+    private var textStack: some View {
+        VStack(alignment: .leading, spacing: AppSpacing.textStack) {
+            Text(readingHeadline)
+                .font(AppTypography.headline)
+                .monospacedDigit()
+                .foregroundStyle(AppColor.primaryText)
+
+            Text(readingSubheadline)
+                .font(AppTypography.caption)
+                .foregroundStyle(AppColor.secondaryText)
+                .lineLimit(1)
+        }
+    }
+
+    private var chevron: some View {
+        Image(systemName: "chevron.right")
+            .font(AppTypography.eyebrow)
+            .foregroundStyle(AppColor.tertiaryText(for: contrast))
+            .opacity(isHovered ? 0.8 : 0)
+            .accessibilityHidden(true)
+    }
+
+    private var buttonContent: some View {
+        HStack(spacing: AppSpacing.sm) {
+            statusDot
+            textStack
+            Spacer(minLength: 0)
+            chevron
+        }
+        .padding(.horizontal, AppSpacing.sm)
+        .padding(.vertical, AppSpacing.xs)
+        .background(
+            RoundedRectangle(cornerRadius: AppRadius.control, style: .continuous)
+                .fill(isHovered ? AppColor.surface : Color.clear)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: AppRadius.control, style: .continuous)
+                .strokeBorder(
+                    isHovered ? AppColor.border(for: contrast) : Color.clear,
+                    lineWidth: 0.5
+                )
+        )
+        .contentShape(RoundedRectangle(cornerRadius: AppRadius.control, style: .continuous))
+    }
+
     var body: some View {
         Button(action: open) {
-            HStack(spacing: AppSpacing.sm) {
-                Circle().fill(reading.map { AppColor.tension($0.level) } ?? AppColor.secondaryText)
-                    .frame(width: AppLayout.tensionDotSize, height: AppLayout.tensionDotSize).accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: AppSpacing.textStack) {
-                    Text(
-                        reading.map { "\($0.assessment.score)° \($0.level.rawValue)" }
-                            ?? TensionIndexView.navigationTitleText
-                    )
-                    .font(AppTypography.headline).monospacedDigit()
-                    Text(reading == nil ? status : TensionIndexView.navigationTitleText)
-                        .font(AppTypography.caption).foregroundStyle(AppColor.secondaryText).lineLimit(1)
-                }
-                Spacer(minLength: 0)
-            }.contentShape(Rectangle())
+            buttonContent
         }
-        .buttonStyle(.plain).help("Show the World Tension assessment")
+        .buttonStyle(.plain)
+        .onHover { hovering in
+            isHovered = hovering
+        }
+        .help("Show the World Tension assessment")
         .accessibilityLabel(
             reading.map { "World tension, \($0.assessment.score) degrees, \($0.level.rawValue)" }
                 ?? "World tension, \(status)"
