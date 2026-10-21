@@ -1,6 +1,6 @@
 # State of the app and next development — 21 October 2026
 
-Status: executed on 21 October 2026; every slice is an open PR awaiting review (outcomes in section 8). Base: `origin/main` at `1c1f05e`. Evidence: repository, GitHub, CI, and a read-only copy of the real library (snapshot 20 October 2026 19:21 UTC; private titles not reproduced).
+Status: sections 1–7 record the review and plan as written on 21 October 2026, before execution (baseline `origin/main` `1c1f05e`). Section 8 records the outcome: slice 3 needed no change, and PRs #470–#472, #474 and #476–#479 were open for review when this was written.
 
 ## 1. Where the app stands
 
