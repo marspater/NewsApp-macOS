@@ -993,6 +993,7 @@ final class ContentExtractionPipeline: Sendable {
         let hasBarrier =
             structured.isAccessibleForFree == false
             || ((try? soup?.select(Self.barrierSelector).isEmpty()) == false)
+        let discoveredLeadImage = leadImage ?? soup.flatMap { leadImages(in: $0).first }
         if let soup {
             _ = try? soup.select(
                 "script, style, noscript, iframe, svg, canvas, form, button, input, select, textarea, dialog, template, "
@@ -1002,8 +1003,7 @@ final class ContentExtractionPipeline: Sendable {
                     + ".video-player-error, .media-player__error, .share-tools, .social-share, .newsletter-signup, .advertisement, .ad-slot"
             ).remove()
         }
-        let effectiveImage = Self.readerImageURL(
-            leadImage ?? soup.flatMap { leadImages(in: $0).first }, baseURL: baseUrl)
+        let effectiveImage = Self.readerImageURL(discoveredLeadImage, baseURL: baseUrl)
 
         // 1. Build DOM Tree
         let dom = HTMLDOMBuilder.parse(html: html)

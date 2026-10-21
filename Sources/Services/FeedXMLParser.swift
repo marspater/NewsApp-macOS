@@ -246,11 +246,15 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
         let width = attributeDict["width"].flatMap(Int.init)
         let height = attributeDict["height"].flatMap(Int.init)
         // The Guardian lists sized media:content renditions with neither type nor medium.
+        let isImageExtension = ["jpg", "jpeg", "png", "webp", "avif", "gif"].contains(
+            URL(string: raw)?.pathExtension.lowercased() ?? "")
         let isImage =
             type?.hasPrefix("image/") == true
             || (type == nil
                 && (elementName == "media:thumbnail" || medium == "image"
-                    || (elementName == "media:content" && medium == nil && width != nil)))
+                    || (elementName == "media:content" && (medium == nil || medium == "image")
+                        && (width != nil || isImageExtension))
+                    || isImageExtension))
         if isImage, ReaderImageCandidate.usable(url: url, width: width, height: height),
             itemImageCandidates.count < 8
         {
@@ -358,7 +362,7 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
         let link = itemDocumentLink(guid: guid)
         let content = itemContent(articleLink: link)
         if itemImageUrl.isEmpty { itemImageUrl = extractImageFromHTML(itemDescription) ?? "" }
-        if itemImageUrl.isEmpty, content.text != nil { itemImageUrl = extractImageFromHTML(itemContentEncoded) ?? "" }
+        if itemImageUrl.isEmpty { itemImageUrl = extractImageFromHTML(itemContentEncoded) ?? "" }
         let category = itemCategory.components(separatedBy: .newlines)
             .map {
                 ContentExtractionPipeline.shared.decodeHTMLEntities($0).trimmingCharacters(in: .whitespacesAndNewlines)
@@ -623,7 +627,9 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
     }
 
     private static let imageRegex: NSRegularExpression? = {
-        try? NSRegularExpression(pattern: "<img[^>]+src\\s*=\\s*['\"]([^'\"]+)['\"]", options: .caseInsensitive)
+        try? NSRegularExpression(
+            pattern: "<img[^>]+(?:src|data-src|data-original)\\s*=\\s*['\"]([^'\"]+)['\"]",
+            options: .caseInsensitive)
     }()
 
     private func extractImageFromHTML(_ html: String) -> String? {

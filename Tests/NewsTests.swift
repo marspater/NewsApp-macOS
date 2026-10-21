@@ -13659,6 +13659,38 @@ struct NewsTests {
         assertTrue(
             noImage.selectedImage(fallback: base + "/old.jpg") == nil,
             "A curated text-only document never revives the old feed image")
+        let docWithExtractedImages = ReaderDocument(
+            blocks: [],
+            images: [
+                ReaderImageCandidate(url: base + "/body.jpg", origin: .body, width: 1200, height: 800)
+            ],
+            leadImageURL: nil
+        )
+        assertEqual(
+            docWithExtractedImages.selectedImage(fallback: base + "/old.jpg"),
+            base + "/body.jpg",
+            "A curated document without explicit leadImageURL falls back to usable extracted images")
+
+        let abbrevText =
+            "Envoy visited St. Petersburg for talks with U.S. and U.K. diplomats. Dr. Smith commented on the report."
+        let sentences = PassageFactExtractor.segmentedSentences(in: abbrevText).map {
+            abbrevText[$0].trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        assertEqual(sentences.count, 2, "Sentence segmentation must not split on St. or U.S. or Dr.")
+        assertEqual(
+            sentences.first, "Envoy visited St. Petersburg for talks with U.S. and U.K. diplomats.",
+            "Abbreviation sentence preserved")
+        assertEqual(sentences.last, "Dr. Smith commented on the report.", "Second sentence preserved")
+
+        let quoteText =
+            "He said \"The outcome was positive. We expect further meetings.\" Next sentence starts here."
+        let quoteSentences = PassageFactExtractor.segmentedSentences(in: quoteText).map {
+            quoteText[$0].trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        assertEqual(quoteSentences.count, 2, "Unclosed quotes should not be split across sentence boundaries")
+        assertEqual(
+            quoteSentences.first, "He said \"The outcome was positive. We expect further meetings.\"",
+            "Quote sentence preserved")
 
         let oversizedHTML =
             "<article><p>\(first)</p><figure><img src='/oversized.jpg' width='20000' height='20000'></figure><p>\(second)</p></article>"

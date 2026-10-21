@@ -190,14 +190,69 @@ public struct PassageFactExtractor: Sendable {
             """
     }
 
+    private static let nonTerminalAbbreviations: Set<String> = [
+        "st.", "u.s.", "u.k.", "mr.", "mrs.", "ms.", "dr.", "prof.", "gov.", "sen.", "rep.",
+        "gen.", "col.", "capt.", "lt.", "sgt.", "maj.", "jan.", "feb.", "mar.", "apr.",
+        "jun.", "jul.", "aug.", "sep.", "sept.", "oct.", "nov.", "dec.", "vs.", "i.e.",
+        "e.g.", "etc.", "no.", "vol.", "rev.", "hon.", "dept.",
+    ]
+
+    private static func hasUnclosedQuotes(_ text: Substring) -> Bool {
+        var doubleQuoteOpen = false
+        var curlQuoteOpen = false
+        for char in text {
+            if char == "\"" {
+                doubleQuoteOpen.toggle()
+            } else if char == "“" {
+                curlQuoteOpen = true
+            } else if char == "”" {
+                curlQuoteOpen = false
+            }
+        }
+        return doubleQuoteOpen || curlQuoteOpen
+    }
+
+    /// Segments text into complete sentences, combining fragments split at abbreviations (e.g. "St.") or within unclosed quotes.
+    public static func segmentedSentences(in text: String) -> [Range<String.Index>] {
+        let tokenizer = NLTokenizer(unit: .sentence)
+        tokenizer.string = text
+        var ranges: [Range<String.Index>] = []
+        tokenizer.enumerateTokens(in: text.startIndex..<text.endIndex) { range, _ in
+            ranges.append(range)
+            return true
+        }
+        guard !ranges.isEmpty else { return [] }
+
+        var merged: [Range<String.Index>] = []
+        var currentStart = ranges[0].lowerBound
+        var currentEnd = ranges[0].upperBound
+
+        for i in 0..<ranges.count {
+            let slice = text[currentStart..<ranges[i].upperBound]
+            let trimmedEnd = slice.trimmingCharacters(in: .whitespacesAndNewlines)
+            let lastWord = trimmedEnd.split(whereSeparator: \.isWhitespace).last.map { String($0).lowercased() } ?? ""
+            let isAbbrev = nonTerminalAbbreviations.contains(lastWord)
+            let unclosed = hasUnclosedQuotes(slice)
+
+            if (isAbbrev || unclosed) && i + 1 < ranges.count {
+                currentEnd = ranges[i + 1].upperBound
+            } else {
+                merged.append(currentStart..<currentEnd)
+                if i + 1 < ranges.count {
+                    currentStart = ranges[i + 1].lowerBound
+                    currentEnd = ranges[i + 1].upperBound
+                }
+            }
+        }
+        return merged
+    }
+
     /// Extracts passage-anchored facts using deterministic sentence segmentation for non-AI / macOS 15 execution.
     public static func deterministicExtract(passages: [EvidencePassage]) -> [PassageAnchoredFact] {
         var candidates: [RawFactCandidate] = []
         for passage in passages {
-            let tokenizer = NLTokenizer(unit: .sentence)
-            tokenizer.string = passage.text
-            let range = passage.text.startIndex..<passage.text.endIndex
-            tokenizer.enumerateTokens(in: range) { sentenceRange, _ in
+            let sentenceRanges = segmentedSentences(in: passage.text)
+            for sentenceRange in sentenceRanges {
                 let sentence = String(passage.text[sentenceRange]).trimmingCharacters(in: .whitespacesAndNewlines)
                 if sentence.count >= 15 {
                     candidates.append(
@@ -207,7 +262,6 @@ public struct PassageFactExtractor: Sendable {
                             quote: sentence
                         ))
                 }
-                return true
             }
         }
         let diagnostic = PassageFactValidator.validateCandidates(candidates, against: passages)

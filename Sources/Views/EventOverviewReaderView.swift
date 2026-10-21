@@ -331,12 +331,6 @@ struct EventOverviewReaderView: View {
                 TagView(
                     title: "Event overview", tint: AppColor.accent,
                     font: AppTypography.overviewFont(.eyebrow, scale: textScale))
-
-                if overview.kind == .fallbackExcerpts {
-                    TagView(
-                        title: "Publisher excerpts", tint: currentSecondaryTextColor,
-                        font: AppTypography.overviewFont(.eyebrow, scale: textScale))
-                }
             }
             .accessibilityElement(children: .combine)
 
@@ -476,6 +470,83 @@ struct EventOverviewReaderView: View {
         .accessibilityLabel(Self.leadImageAccessibilityLabel(leadImage))
     }
 
+    private func sourceIndex(for citation: OverviewCitation) -> Int? {
+        if let match = matchingArticle(for: citation),
+            let idx = memberArticles.firstIndex(where: { $0.id == match.id })
+        {
+            return idx + 1
+        }
+        if let pub = citation.sourceName,
+            let idx = memberArticles.firstIndex(where: {
+                $0.publisherName.localizedCaseInsensitiveContains(pub)
+                    || pub.localizedCaseInsensitiveContains($0.publisherName)
+            })
+        {
+            return idx + 1
+        }
+        return nil
+    }
+
+    private func sourceIndices(for citationIDs: [String]) -> [Int] {
+        let indices = citationIDs.compactMap { citID -> Int? in
+            guard let citation = overview.citations[citID] else { return nil }
+            return sourceIndex(for: citation)
+        }
+        return Array(Set(indices)).sorted()
+    }
+
+    @ViewBuilder
+    private func superscriptCitationButton(_ index: Int, citation: OverviewCitation?) -> some View {
+        Button {
+            if let citation {
+                let match = matchingArticle(for: citation)
+                onSelectCitation(citation, match)
+            }
+        } label: {
+            Text("[\(index)]")
+                .font(AppTypography.overviewFont(.micro, scale: textScale))
+                .baselineOffset(4)
+                .foregroundStyle(AppColor.accent)
+                .bold()
+        }
+        .buttonStyle(.plain)
+        .help("Jump to source [\(index)]: \(citation?.sourceName ?? "Source")")
+        .accessibilityLabel("Citation \(index), \(citation?.sourceName ?? "source")")
+    }
+
+    struct ClusteredHighlightGroup: Identifiable {
+        let id: String
+        let publisherName: String?
+        let facts: [OverviewFact]
+    }
+
+    private var clusteredHighlights: [ClusteredHighlightGroup] {
+        var groups: [ClusteredHighlightGroup] = []
+        var publisherToGroupIndex: [String: Int] = [:]
+
+        for fact in validFacts {
+            let pubName: String? = fact.citationIDs.compactMap { citID -> String? in
+                guard let cit = overview.citations[citID] else { return nil }
+                return cit.sourceName ?? matchingArticle(for: cit)?.publisherName
+            }.first
+
+            let key = pubName ?? fact.id
+            if let existingIndex = publisherToGroupIndex[key] {
+                let existing = groups[existingIndex]
+                groups[existingIndex] = ClusteredHighlightGroup(
+                    id: existing.id,
+                    publisherName: existing.publisherName,
+                    facts: existing.facts + [fact]
+                )
+            } else {
+                let newIndex = groups.count
+                publisherToGroupIndex[key] = newIndex
+                groups.append(ClusteredHighlightGroup(id: key, publisherName: pubName, facts: [fact]))
+            }
+        }
+        return groups
+    }
+
     // MARK: - Section 4: Key Facts
 
     private var keyFactsSection: some View {
@@ -486,31 +557,42 @@ struct EventOverviewReaderView: View {
                 .accessibilityAddTraits(.isHeader)
                 .accessibilityHeading(.h2)
 
-            VStack(alignment: .leading, spacing: AppSpacing.sm) {
-                ForEach(validFacts) { fact in
-                    HStack(alignment: .top, spacing: AppSpacing.xs) {
+            VStack(alignment: .leading, spacing: AppSpacing.md) {
+                ForEach(clusteredHighlights) { group in
+                    HStack(alignment: .top, spacing: AppSpacing.sm) {
                         Circle()
                             .frame(width: AppSpacing.xxs, height: AppSpacing.xxs)
                             .foregroundColor(AppColor.accent)
-                            .padding(.top, AppSpacing.eyebrowGap)
+                            .padding(.top, 7 * textScale)
                             .accessibilityHidden(true)
 
-                        VStack(alignment: .leading, spacing: AppSpacing.eyebrowGap) {
-                            Text(fact.text)
-                                .font(AppTypography.overviewFont(.fact, scale: textScale))
-                                .lineSpacing(AppSpacing.xxs * textScale)
-                                .foregroundStyle(AppColor.primaryText)
-                                .fixedSize(horizontal: false, vertical: true)
-                                .textSelection(.enabled)
-
-                            // Citation pills
-                            citationPillsView(fact.citationIDs, spacing: AppSpacing.eyebrowGap)
+                        VStack(alignment: .leading, spacing: AppSpacing.xxs) {
+                            ForEach(group.facts) { fact in
+                                factWithSuperscript(fact)
+                            }
                         }
                     }
                 }
             }
-            .padding(AppSpacing.md)
-            .overviewCardSurface(borderColor: currentBorderStrokeColor, contrast: contrast)
+            .padding(.vertical, AppSpacing.xxs)
+        }
+    }
+
+    @ViewBuilder
+    private func factWithSuperscript(_ fact: OverviewFact) -> some View {
+        let indices = sourceIndices(for: fact.citationIDs)
+        HStack(alignment: .firstTextBaseline, spacing: AppSpacing.xxs) {
+            Text(fact.text)
+                .font(AppTypography.overviewFont(.fact, scale: textScale))
+                .lineSpacing(AppSpacing.xxs * textScale)
+                .foregroundStyle(AppColor.primaryText)
+                .fixedSize(horizontal: false, vertical: true)
+                .textSelection(.enabled)
+
+            ForEach(indices, id: \.self) { idx in
+                superscriptCitationButton(
+                    idx, citation: fact.citationIDs.compactMap { overview.citations[$0] }.first)
+            }
         }
     }
 
@@ -568,8 +650,15 @@ struct EventOverviewReaderView: View {
             )
         ) {
             VStack(alignment: .leading, spacing: AppSpacing.xs) {
-                ForEach(memberArticles) { article in
+                ForEach(Array(memberArticles.enumerated()), id: \.element.id) { index, article in
                     HStack(alignment: .center, spacing: AppSpacing.sm) {
+                        Text("[\(index + 1)]")
+                            .font(AppTypography.overviewFont(.annotation, scale: textScale))
+                            .foregroundStyle(AppColor.accent)
+                            .bold()
+                            .monospacedDigit()
+                            .frame(width: 24, alignment: .leading)
+
                         VStack(alignment: .leading, spacing: AppSpacing.textStack) {
                             EyebrowText(
                                 article.publisherName,
@@ -702,13 +791,12 @@ struct EventOverviewReaderView: View {
             coverageSentiment: overview.coverageSentiment
         ) {
             VStack(alignment: .leading, spacing: AppSpacing.lg) {
-                // Participant positions / perspectives, then how the event unfolded
-                if !validPerspectives.isEmpty {
-                    perspectivesSection
-                }
-
                 if !validTimeline.isEmpty {
                     timelineSection
+                }
+
+                if !validPerspectives.isEmpty {
+                    perspectivesSection
                 }
 
                 // Thematic angle
@@ -734,51 +822,86 @@ struct EventOverviewReaderView: View {
                 .accessibilityAddTraits(.isHeader)
                 .accessibilityHeading(.h2)
 
-            VStack(alignment: .leading, spacing: AppSpacing.xs) {
-                ForEach(validTimeline) { item in
-                    HStack(alignment: .top, spacing: AppSpacing.sm) {
-                        VStack(alignment: .leading, spacing: AppSpacing.textStack) {
-                            Text(item.dateText)
-                                .font(AppTypography.overviewFont(.annotation, scale: textScale))
-                                .foregroundStyle(AppColor.accent)
-
-                            if item.isFuturePlan {
-                                TagView(
-                                    title: "Plan",
-                                    tint: AppColor.accent,
-                                    font: AppTypography.overviewFont(.micro, scale: textScale)
-                                )
-                                .accessibilityLabel("Planned event")
-                            }
-
-                            if let pubDate = item.publicationDate, item.eventDate != nil {
-                                Text("Reported \(formatTimelineDate(pubDate))")
-                                    .font(AppTypography.overviewFont(.micro, scale: textScale))
-                                    .foregroundStyle(currentTertiaryTextColor)
-                            }
-                        }
-                        .frame(minWidth: 80, maxWidth: 110, alignment: .leading)
-
-                        VStack(alignment: .leading, spacing: AppSpacing.xxs) {
-                            Text(item.summary)
-                                .font(AppTypography.overviewFont(.body, scale: textScale))
-                                .foregroundStyle(AppColor.primaryText)
-                                .lineSpacing(AppSpacing.textStack * textScale)
-                                .textSelection(.enabled)
-
-                            citationPillsView(item.citationIDs)
-                        }
-                    }
-                    .padding(.vertical, AppSpacing.xxs)
-
-                    if item.id != validTimeline.last?.id {
-                        Divider()
-                            .opacity(Self.dividerOpacity(for: contrast))
-                    }
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(Array(validTimeline.enumerated()), id: \.element.id) { index, item in
+                    timelineRow(item, isLast: index == validTimeline.count - 1)
                 }
             }
-            .padding(AppSpacing.md)
-            .overviewCardSurface(borderColor: currentBorderStrokeColor, contrast: contrast)
+            .padding(.vertical, AppSpacing.xxs)
+        }
+    }
+
+    @ViewBuilder
+    private func timelineRow(_ item: OverviewTimelineItem, isLast: Bool) -> some View {
+        HStack(alignment: .top, spacing: AppSpacing.sm) {
+            timelineRailNode(isLast: isLast)
+            timelineRowContent(item, isLast: isLast)
+        }
+    }
+
+    private func timelineRailNode(isLast: Bool) -> some View {
+        VStack(spacing: 0) {
+            Circle()
+                .fill(AppColor.accent)
+                .frame(width: 8, height: 8)
+                .padding(.top, 5)
+
+            if !isLast {
+                Rectangle()
+                    .fill(AppColor.accent.opacity(0.3))
+                    .frame(width: 1.5)
+                    .frame(maxHeight: .infinity)
+            }
+        }
+        .frame(width: 12)
+    }
+
+    private func timelineRowContent(_ item: OverviewTimelineItem, isLast: Bool) -> some View {
+        VStack(alignment: .leading, spacing: AppSpacing.xxs) {
+            timelineDateRow(item)
+            timelineSummaryRow(item)
+        }
+        .padding(.bottom, isLast ? 0 : AppSpacing.md)
+    }
+
+    private func timelineDateRow(_ item: OverviewTimelineItem) -> some View {
+        HStack(spacing: AppSpacing.xs) {
+            Text(item.dateText)
+                .font(AppTypography.overviewFont(.annotation, scale: textScale))
+                .foregroundStyle(AppColor.accent)
+                .bold()
+
+            if item.isFuturePlan {
+                TagView(
+                    title: "Plan",
+                    tint: AppColor.accent,
+                    font: AppTypography.overviewFont(.micro, scale: textScale)
+                )
+                .accessibilityLabel("Planned event")
+            }
+
+            if let pubDate = item.publicationDate, item.eventDate != nil {
+                Text("Reported \(formatTimelineDate(pubDate))")
+                    .font(AppTypography.overviewFont(.micro, scale: textScale))
+                    .foregroundStyle(currentTertiaryTextColor)
+            }
+        }
+    }
+
+    private func timelineSummaryRow(_ item: OverviewTimelineItem) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: AppSpacing.xxs) {
+            Text(item.summary)
+                .font(AppTypography.overviewFont(.body, scale: textScale))
+                .foregroundStyle(AppColor.primaryText)
+                .lineSpacing(AppSpacing.textStack * textScale)
+                .fixedSize(horizontal: false, vertical: true)
+                .textSelection(.enabled)
+
+            let indices = sourceIndices(for: item.citationIDs)
+            ForEach(indices, id: \.self) { idx in
+                superscriptCitationButton(
+                    idx, citation: item.citationIDs.compactMap { overview.citations[$0] }.first)
+            }
         }
     }
 
@@ -792,8 +915,13 @@ struct EventOverviewReaderView: View {
 
             VStack(alignment: .leading, spacing: AppSpacing.sm) {
                 ForEach(validPerspectives) { perspective in
-                    VStack(alignment: .leading, spacing: AppSpacing.xxs) {
+                    VStack(alignment: .leading, spacing: AppSpacing.xs) {
                         HStack(alignment: .firstTextBaseline, spacing: AppSpacing.xs) {
+                            Image(systemName: "quote.opening")
+                                .font(AppTypography.overviewFont(.caption, scale: textScale))
+                                .foregroundStyle(AppColor.accent)
+                                .accessibilityHidden(true)
+
                             Text(perspective.participant)
                                 .font(AppTypography.overviewFont(.emphasis, scale: textScale))
                                 .foregroundStyle(AppColor.primaryText)
@@ -808,27 +936,31 @@ struct EventOverviewReaderView: View {
                                     .font(AppTypography.overviewFont(.captionMedium, scale: textScale))
                                     .foregroundStyle(currentTertiaryTextColor)
                             }
+
+                            let indices = sourceIndices(for: perspective.citationIDs)
+                            ForEach(indices, id: \.self) { idx in
+                                superscriptCitationButton(
+                                    idx, citation: perspective.citationIDs.compactMap { overview.citations[$0] }.first)
+                            }
                         }
 
                         Text(perspective.position)
                             .font(AppTypography.overviewFont(.body, scale: textScale))
                             .foregroundStyle(currentSecondaryTextColor)
                             .lineSpacing(AppSpacing.textStack * textScale)
+                            .fixedSize(horizontal: false, vertical: true)
                             .textSelection(.enabled)
-
-                        citationPillsView(perspective.citationIDs)
-                            .padding(.top, AppSpacing.textStack)
                     }
-                    .padding(.vertical, AppSpacing.xxs)
-
-                    if perspective.id != validPerspectives.last?.id {
-                        Divider()
-                            .opacity(Self.dividerOpacity(for: contrast))
-                    }
+                    .padding(AppSpacing.sm)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(AppColor.surface.opacity(0.6))
+                    .clipShape(RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous)
+                            .strokeBorder(currentBorderStrokeColor.opacity(0.5), lineWidth: 0.5)
+                    )
                 }
             }
-            .padding(AppSpacing.md)
-            .overviewCardSurface(borderColor: currentBorderStrokeColor, contrast: contrast)
         }
     }
 
@@ -853,36 +985,33 @@ struct EventOverviewReaderView: View {
                 if !validAngleFacts.isEmpty {
                     thematicAngleFactsView(validAngleFacts)
                 } else if !angle.citationIDs.isEmpty {
-                    citationPillsView(angle.citationIDs)
+                    let indices = sourceIndices(for: angle.citationIDs)
+                    HStack(spacing: AppSpacing.xxs) {
+                        ForEach(indices, id: \.self) { idx in
+                            superscriptCitationButton(
+                                idx, citation: angle.citationIDs.compactMap { overview.citations[$0] }.first)
+                        }
+                    }
                 }
             }
-            .padding(AppSpacing.md)
-            .overviewCardSurface(borderColor: currentBorderStrokeColor, contrast: contrast)
+            .padding(.vertical, AppSpacing.xxs)
         }
     }
 
     private func thematicAngleFactsView(_ facts: [OverviewFact]) -> some View {
-        VStack(alignment: .leading, spacing: AppSpacing.xs) {
+        VStack(alignment: .leading, spacing: AppSpacing.sm) {
             ForEach(facts) { fact in
                 HStack(alignment: .top, spacing: AppSpacing.xs) {
                     Circle()
                         .frame(width: AppSpacing.xxs, height: AppSpacing.xxs)
                         .foregroundStyle(AppColor.accent)
-                        .padding(.top, AppSpacing.eyebrowGap)
+                        .padding(.top, 7 * textScale)
                         .accessibilityHidden(true)
 
-                    VStack(alignment: .leading, spacing: AppSpacing.xxs) {
-                        Text(fact.text)
-                            .font(AppTypography.overviewFont(.detail, scale: textScale))
-                            .foregroundStyle(AppColor.primaryText)
-                            .textSelection(.enabled)
-
-                        citationPillsView(fact.citationIDs)
-                    }
+                    factWithSuperscript(fact)
                 }
             }
         }
-        .padding(.top, AppSpacing.xxs)
     }
 
     private func sentimentSection(_ sentiment: OverviewCoverageSentiment) -> some View {
