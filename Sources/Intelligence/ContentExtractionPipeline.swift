@@ -672,22 +672,8 @@ enum HTMLDOMBuilder {
     }
 
     private static func skipIgnoredSubtree(scanner: Scanner, tagName: String) {
-        // Script and style are raw text: they end at the first closing tag, and markup inside them (such as
-        // `document.write('<script …>')`) never opens a nested element.
         if tagName == "script" || tagName == "style" {
-            while !scanner.isAtEnd {
-                _ = scanner.scanUpToString("</")
-                guard scanner.scanString("</") != nil else { return }
-                let start = scanner.currentIndex
-                if let name = scanner.scanUpToCharacters(from: CharacterSet(charactersIn: "> \t\r\n/")),
-                    name.lowercased() == tagName
-                {
-                    _ = scanner.scanUpToString(">")
-                    _ = scanner.scanString(">")
-                    return
-                }
-                if scanner.currentIndex == start { _ = scanner.scanCharacter() }
-            }
+            skipRawText(scanner: scanner, tagName: tagName)
             return
         }
         var depth = 1
@@ -715,6 +701,24 @@ enum HTMLDOMBuilder {
             } else {
                 _ = scanner.scanCharacter()
             }
+        }
+    }
+
+    /// Script and style are raw text: they end at the first closing tag, and markup inside them (such as
+    /// `document.write('<script …>')`) never opens a nested element.
+    private static func skipRawText(scanner: Scanner, tagName: String) {
+        while !scanner.isAtEnd {
+            _ = scanner.scanUpToString("</")
+            guard scanner.scanString("</") != nil else { return }
+            let start = scanner.currentIndex
+            if let name = scanner.scanUpToCharacters(from: CharacterSet(charactersIn: "> \t\r\n/")),
+                name.lowercased() == tagName
+            {
+                _ = scanner.scanUpToString(">")
+                _ = scanner.scanString(">")
+                return
+            }
+            if scanner.currentIndex == start { _ = scanner.scanCharacter() }
         }
     }
 
@@ -1417,28 +1421,35 @@ final class ContentExtractionPipeline: Sendable {
                 || element.tagName() == "template"
                 || DOMElementNode(tag: element.tagName(), attributes: attributes(element)).isReaderExcluded
         }
-        func convert(_ node: SwiftSoup.Node, depth: Int) -> DOMElementNode? {
+        func convert(_ node: SwiftSoup.Node, depth: Int, insideArticle: Bool) -> DOMElementNode? {
             guard !Task.isCancelled, depth < 128, count < 50_000 else { return nil }
             count += 1
             if let text = node as? SwiftSoup.TextNode {
                 return DOMElementNode(tag: "#text", text: text.getWholeText())
             }
+            // An article's own header stays, as in the DOM builder: its standfirst is story text.
             guard let element = node as? SwiftSoup.Element,
-                !HTMLDOMBuilder.isIgnored(tag: element.tagName(), attributes: attributes(element)),
+                !HTMLDOMBuilder.isIgnored(
+                    tag: element.tagName(), attributes: attributes(element), insideArticle: insideArticle),
                 element.tagName() != "template"
             else { return nil }
+            let inArticle = insideArticle || element.tagName() == "article"
             // Exclusion reads the element's text, so it is judged with its children: an empty paragraph shell would
             // look like boilerplate and drop every paragraph of the body.
             let converted = DOMElementNode(
                 tag: element.tagName(), attributes: attributes(element),
-                children: element.getChildNodes().compactMap { convert($0, depth: depth + 1) })
+                children: element.getChildNodes().compactMap {
+                    convert($0, depth: depth + 1, insideArticle: inArticle)
+                })
             return converted.isReaderExcluded ? nil : converted
         }
         // ponytail: bounded repair of explicit article containers; no second readability scoring engine.
         let containers = explicit ?? ((try? document.select("[itemprop~=articleBody], article, main").array()) ?? [])
         for element in containers.prefix(32) {
             guard !element.parents().array().contains(where: excluded) else { continue }
-            guard let node = convert(element, depth: 0), !node.isReaderExcluded else { continue }
+            let insideArticle = element.parents().array().contains { $0.tagName() == "article" }
+            guard let node = convert(element, depth: 0, insideArticle: insideArticle), !node.isReaderExcluded
+            else { continue }
             let blocks = node.readingBlocks().compactMap(\.readerBlock)
             let prose = blocks.filter { [.paragraph, .quote, .listItem].contains($0.kind) }.map(\.text)
             if ContentQualityValidator.validate(paragraphs: prose) == .valid { return blocks }

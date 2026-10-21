@@ -1522,6 +1522,17 @@ struct NewsTests {
             "Markup written inside a script does not swallow the page (Africanews, CNA, Science News)")
         assertEqual(
             pipeline.extractFromHTML(
+                "<style>a::before { content: '<style>'; } /* </b> */</style><script>var s = '</div>';</script><article>\(threeParagraphs)</article>"
+            ).content, "\(prose)\n\n\(second)\n\n\(third)",
+            "Style and script end at their own first closing tag, whatever markup they contain")
+        assertEqual(
+            pipeline.extractFromHTML(
+                "<nav><nav><p>Menu link text that is long enough to read as prose here.</p></nav></nav><article>\(threeParagraphs)</article>"
+            )
+            .content, "\(prose)\n\n\(second)\n\n\(third)",
+            "Nested ignored elements still close by depth")
+        assertEqual(
+            pipeline.extractFromHTML(
                 "<div class='menu'><h3>Topics</h3><h3>Sections</h3></div><div class='entry-content'><figure><img src='https://news.example/a.jpg' width='1200' height='800'></figure>\(threeParagraphs)</div>"
             ).content, "\(prose)\n\n\(second)\n\n\(third)",
             "An explicit publisher body keeps every paragraph (NASA)")
@@ -1558,6 +1569,11 @@ struct NewsTests {
         assertEqual(
             guardianLike.content, "\(standfirst)\n\n\(prose)\n\n\(second)\n\n\(third)",
             "An explicit body keeps the article's standfirst but not other lead-in text (the Guardian)")
+        assertEqual(
+            pipeline.extractFromHTML(
+                "<article><header><h1>Review shapes plans</h1><p class='standfirst'>\(standfirst)</p></header><div class='entry-content'>\(threeParagraphs)</div></article>"
+            ).content, "\(standfirst)\n\n\(prose)\n\n\(second)\n\n\(third)",
+            "A standfirst in the article's own header survives the explicit-body repair")
         assertEqual(
             pipeline.extractFromHTML(
                 "<article><h3>Email Story</h3><p>Join our Whatsapp Channel</p>\(threeParagraphs)</article>"
