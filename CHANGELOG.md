@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased — 20 October 2026
+## Unreleased — 21 October 2026
+
+- Event overview cards (Highlights, Perspectives, Timeline, Earlier in This Story and their inner cards) fill the reading column instead of shrinking to short content, so every card shares one width.
 
 - Fix a crash when VoiceOver or another accessibility client read a story whose lead image had a credit or was still loading (for example while opening an "Earlier in This Story" link): labels set directly on selectable text and spinners made label resolution loop until the stack overflowed. The same pattern is fixed for the Settings feed-refresh and event-source spinners, and the design lint now rejects such labels across multi-line modifier chains.
 

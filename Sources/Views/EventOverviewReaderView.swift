@@ -503,6 +503,7 @@ struct EventOverviewReaderView: View {
                 }
             }
             .padding(AppSpacing.md)
+            .frame(maxWidth: .infinity, alignment: .leading)
             .background(AppColor.cardBackground)
             .clipShape(RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous))
             .overlay(
@@ -638,6 +639,7 @@ struct EventOverviewReaderView: View {
             }
         }
         .padding(AppSpacing.sm)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .background(AppColor.cardBackground)
         .clipShape(RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous))
         .overlay(
@@ -688,6 +690,7 @@ struct EventOverviewReaderView: View {
                 }
             }
             .padding(AppSpacing.md)
+            .frame(maxWidth: .infinity, alignment: .leading)
             .background(AppColor.cardBackground)
             .clipShape(RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous))
         }
@@ -781,6 +784,7 @@ struct EventOverviewReaderView: View {
                 }
             }
             .padding(AppSpacing.md)
+            .frame(maxWidth: .infinity, alignment: .leading)
             .background(AppColor.cardBackground)
             .clipShape(RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous))
             .overlay(
@@ -836,6 +840,7 @@ struct EventOverviewReaderView: View {
                 }
             }
             .padding(AppSpacing.md)
+            .frame(maxWidth: .infinity, alignment: .leading)
             .background(AppColor.cardBackground)
             .clipShape(RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous))
             .overlay(
@@ -870,6 +875,7 @@ struct EventOverviewReaderView: View {
                 }
             }
             .padding(AppSpacing.md)
+            .frame(maxWidth: .infinity, alignment: .leading)
             .background(AppColor.cardBackground)
             .clipShape(RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous))
             .overlay(
