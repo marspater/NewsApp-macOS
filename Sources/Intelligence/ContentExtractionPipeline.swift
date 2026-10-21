@@ -177,6 +177,9 @@ final class DOMElementNode: Sendable {
             of: #"(?:display\s*:\s*none|visibility\s*:\s*hidden)"#, options: [.regularExpression, .caseInsensitive])
             != nil || attributes["hidden"] != nil || attributes["aria-hidden"]?.lowercased() == "true"
             || className.split(whereSeparator: { $0.isWhitespace }).contains("visually-hidden")
+            // Alpine.js panels stay hidden until page scripts run, and the reader never runs them (Ars Technica's
+            // text-size menu).
+            || attributes["x-cloak"] != nil
     }
 
     /// Recursively collects visible text from this node and its children.
@@ -255,16 +258,24 @@ final class DOMElementNode: Sendable {
             className, idValue, dataComponent, attributes["data-testid"] ?? "", attributes["data-block"] ?? "",
             attributes["role"] ?? "",
         ]
-        return identifiers.contains {
-            Self.auxiliaryPattern.firstMatch(in: $0, range: NSRange($0.startIndex..., in: $0)) != nil
+        func matches(_ pattern: NSRegularExpression) -> Bool {
+            identifiers.contains { pattern.firstMatch(in: $0, range: NSRange($0.startIndex..., in: $0)) != nil }
         }
+        if matches(Self.auxiliaryPattern) { return true }
+        // A metering wrapper that still holds the story's paragraphs is the body the page served (Variety's
+        // pmc-paywall); one holding only a subscription prompt is furniture.
+        return matches(Self.paywallPattern)
+            && findNodes(tag: "p").filter { $0.combinedText().count >= 80 }.count < 2
     }
+
+    private static let paywallPattern =
+        (try? NSRegularExpression(pattern: #"(?i)(?:^|[^a-z0-9])paywall(?:$|[^a-z0-9])"#)) ?? NSRegularExpression()
 
     // Token boundaries keep editorial "commentary" distinct from comment widgets.
     private static let auxiliaryPattern =
         (try? NSRegularExpression(
             pattern:
-                #"(?i)(?:^|[^a-z0-9])(?:comments?|comment-thread|disqus|also-read|read-more|most-?viewed|most-?popular|onward|onwards|submeta|subscription|paywall|related(?:-content|-stories|-articles)?|links-block|newsletter|byline|timestamp-block|recommendations?|social-share|share-tools|promo|advertisement|outbrain|taboola|eventpromo|promolist|topiclist|uploaderembed)(?:$|[^a-z0-9])"#
+                #"(?i)(?:^|[^a-z0-9])(?:comments?|comment-thread|disqus|also-read|read-more|most-?viewed|most-?popular|onward|onwards|submeta|subscription|related(?:-content|-stories|-articles)?|links-block|newsletter|byline|timestamp-block|recommendations?|social-share|share-tools|promo|advertisement|outbrain|taboola|eventpromo|promolist|topiclist|uploaderembed)(?:$|[^a-z0-9])"#
         )) ?? NSRegularExpression()
 
     func readingBlocks(allowDivFallback: Bool = true) -> [DOMElementNode] {
@@ -538,7 +549,7 @@ enum HTMLDOMBuilder {
 
     fileprivate static let ignoredTags: Set<String> = [
         "script", "style", "iframe", "svg", "nav", "footer",
-        "header", "form", "aside", "dialog", "button",
+        "header", "form", "aside", "dialog", "button", "select", "textarea",
     ]
 
     /// Pull quotes and standfirsts that publishers wrap in otherwise ignored `<aside>` and `<header>` elements.
@@ -661,6 +672,10 @@ enum HTMLDOMBuilder {
     }
 
     private static func skipIgnoredSubtree(scanner: Scanner, tagName: String) {
+        if tagName == "script" || tagName == "style" {
+            skipRawText(scanner: scanner, tagName: tagName)
+            return
+        }
         var depth = 1
         while !scanner.isAtEnd && depth > 0 {
             _ = scanner.scanUpToString("<")
@@ -686,6 +701,24 @@ enum HTMLDOMBuilder {
             } else {
                 _ = scanner.scanCharacter()
             }
+        }
+    }
+
+    /// Script and style are raw text: they end at the first closing tag, and markup inside them (such as
+    /// `document.write('<script …>')`) never opens a nested element.
+    private static func skipRawText(scanner: Scanner, tagName: String) {
+        while !scanner.isAtEnd {
+            _ = scanner.scanUpToString("</")
+            guard scanner.scanString("</") != nil else { return }
+            let start = scanner.currentIndex
+            if let name = scanner.scanUpToCharacters(from: CharacterSet(charactersIn: "> \t\r\n/")),
+                name.lowercased() == tagName
+            {
+                _ = scanner.scanUpToString(">")
+                _ = scanner.scanString(">")
+                return
+            }
+            if scanner.currentIndex == start { _ = scanner.scanCharacter() }
         }
     }
 
@@ -719,6 +752,9 @@ enum HTMLDOMBuilder {
                 != nil
             {
                 attributes["hidden"] = ""
+            }
+            if attrString.range(of: "(?:^|\\s)x-cloak(?:\\s|=|$)", options: .regularExpression) != nil {
+                attributes["x-cloak"] = ""
             }
             let matches = Self.attrRegex.matches(
                 in: attrString, range: NSRange(attrString.startIndex..., in: attrString))
@@ -988,12 +1024,17 @@ final class ContentExtractionPipeline: Sendable {
         // Explicit publisher bodies beat page-wide scoring: recommendation furniture must not enlarge the story.
         if let soup,
             let explicit = try? soup.select(
-                "[itemprop~=articleBody], [data-component=text-block], .article__body, .article-body, .article-body-commercial-selector, .wysiwyg, .story-body, .rich-text, .caas-body, .articlebodycontent, .entry-content"
+                "[itemprop~=articleBody], [data-component=text-block], .article__body, .article-body, .article-body-commercial-selector, .wysiwyg, .story-body, .rich-text, .caas-body, .articlebodycontent, .entry-content, .body-description"
             ).array()
         {
+            // ponytail: a fixed share of the scored body; an explicit class on a small sponsor box (BleepingComputer's
+            // .article-body) must not replace the story. Tune with the catalog reader-access run if it misfires.
+            let scoredLength = Self.proseLength(candidateParagraphs)
             for element in explicit.prefix(8) {
-                if let blocks = repairedReadingBlocks(in: soup, containers: [element]) {
-                    candidateParagraphs = blocks
+                if let blocks = repairedReadingBlocks(in: soup, containers: [element]),
+                    Self.proseLength(blocks) * 5 >= scoredLength * 2
+                {
+                    candidateParagraphs = leadIn(before: blocks, of: element, in: soup) + blocks
                     break
                 }
             }
@@ -1140,6 +1181,47 @@ final class ContentExtractionPipeline: Sendable {
         case .rejected(let reason):
             return .qualityValidationFailed(reason: reason)
         }
+    }
+
+    /// Lead media and a standfirst the article shows just before its explicit body (the Guardian's media and standfirst
+    /// sit beside the body, not inside it). At most four blocks are considered; only figures and one paragraph from a
+    /// standfirst-marked element are kept, so headlines, bylines and player notes stay out.
+    private func leadIn(before body: [ReaderBlock], of element: SwiftSoup.Element, in document: SwiftSoup.Document)
+        -> [ReaderBlock]
+    {
+        guard let first = body.first(where: { $0.kind != .figure })?.text,
+            let article = element.parents().array().first(where: { $0.tagName() == "article" }),
+            let blocks = repairedReadingBlocks(in: document, containers: [article]),
+            let start = blocks.firstIndex(where: { $0.text == first })
+        else { return [] }
+        func normalized(_ text: String) -> String {
+            text.replacingOccurrences(of: "[ \t\r\n]+", with: " ", options: .regularExpression)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        let standfirsts = Set(
+            ((try? article.getAllElements().array()) ?? []).filter { candidate in
+                (try? candidate.attr("data-gu-name")) == "standfirst"
+                    || HTMLDOMBuilder.isEditorial([
+                        "class": (try? candidate.className()) ?? "", "id": candidate.id(),
+                    ])
+            }.compactMap { try? normalized($0.text()) })
+        let bodyImages = Set(body.compactMap(\.imageURL))
+        let bodyTexts = Set(body.map(\.text))
+        var keptStandfirst = false
+        return blocks[..<start].suffix(4).filter { block in
+            if block.kind == .figure {
+                return block.imageURL.map { !bodyImages.contains($0) } ?? false
+            }
+            guard block.kind == .paragraph, !keptStandfirst, !bodyTexts.contains(block.text),
+                standfirsts.contains(normalized(block.text))
+            else { return false }
+            keptStandfirst = true
+            return true
+        }
+    }
+
+    private static func proseLength(_ blocks: [ReaderBlock]) -> Int {
+        blocks.filter { [.paragraph, .quote, .listItem].contains($0.kind) }.map(\.text.count).reduce(0, +)
     }
 
     struct StructuredArticle {
@@ -1339,22 +1421,35 @@ final class ContentExtractionPipeline: Sendable {
                 || element.tagName() == "template"
                 || DOMElementNode(tag: element.tagName(), attributes: attributes(element)).isReaderExcluded
         }
-        func convert(_ node: SwiftSoup.Node, depth: Int) -> DOMElementNode? {
+        func convert(_ node: SwiftSoup.Node, depth: Int, insideArticle: Bool) -> DOMElementNode? {
             guard !Task.isCancelled, depth < 128, count < 50_000 else { return nil }
             count += 1
             if let text = node as? SwiftSoup.TextNode {
                 return DOMElementNode(tag: "#text", text: text.getWholeText())
             }
-            guard let element = node as? SwiftSoup.Element, !excluded(element) else { return nil }
-            return DOMElementNode(
+            // An article's own header stays, as in the DOM builder: its standfirst is story text.
+            guard let element = node as? SwiftSoup.Element,
+                !HTMLDOMBuilder.isIgnored(
+                    tag: element.tagName(), attributes: attributes(element), insideArticle: insideArticle),
+                element.tagName() != "template"
+            else { return nil }
+            let inArticle = insideArticle || element.tagName() == "article"
+            // Exclusion reads the element's text, so it is judged with its children: an empty paragraph shell would
+            // look like boilerplate and drop every paragraph of the body.
+            let converted = DOMElementNode(
                 tag: element.tagName(), attributes: attributes(element),
-                children: element.getChildNodes().compactMap { convert($0, depth: depth + 1) })
+                children: element.getChildNodes().compactMap {
+                    convert($0, depth: depth + 1, insideArticle: inArticle)
+                })
+            return converted.isReaderExcluded ? nil : converted
         }
         // ponytail: bounded repair of explicit article containers; no second readability scoring engine.
         let containers = explicit ?? ((try? document.select("[itemprop~=articleBody], article, main").array()) ?? [])
         for element in containers.prefix(32) {
             guard !element.parents().array().contains(where: excluded) else { continue }
-            guard let node = convert(element, depth: 0), !node.isReaderExcluded else { continue }
+            let insideArticle = element.parents().array().contains { $0.tagName() == "article" }
+            guard let node = convert(element, depth: 0, insideArticle: insideArticle), !node.isReaderExcluded
+            else { continue }
             let blocks = node.readingBlocks().compactMap(\.readerBlock)
             let prose = blocks.filter { [.paragraph, .quote, .listItem].contains($0.kind) }.map(\.text)
             if ContentQualityValidator.validate(paragraphs: prose) == .valid { return blocks }
