@@ -52,6 +52,7 @@ struct ReaderAccessibilityTests {
         testFigureAccessibilityAltTextFallback()
         testSourceLineVoiceOverFormatting()
         testIncreaseContrastValues()
+        testReaderTypographyAndSpacing()
         testReduceMotionReaderPolicy()
         testKeyboardShortcutsAndModifiers()
         testLeadImageFraming()
@@ -211,6 +212,29 @@ struct ReaderAccessibilityTests {
             "Source line is formatted cleanly for VoiceOver without separators or screaming caps")
     }
 
+    // MARK: - Reader typography and block spacing
+    static func testReaderTypographyAndSpacing() {
+        print("  - Testing reader heading sizes and block spacing...")
+        for theme in ArticleThemeType.allCases {
+            let body = AppTypography.bodySize(for: theme)
+            let heading = AppTypography.readerHeadingSize(level: 2, theme: theme)
+            let subheading = AppTypography.readerHeadingSize(level: 3, theme: theme)
+            assertTrue(subheading > body, "\(theme.displayName) subheadings are larger than body text")
+            assertTrue(heading > subheading, "\(theme.displayName) headings are larger than subheadings")
+        }
+
+        let spacing = { (after: ReaderBlock.Kind, before: ReaderBlock.Kind?, scale: CGFloat) in
+            ArticleDetailView.blockSpacing(after: after, before: before, scale: scale)
+        }
+        assertEqual(spacing(.paragraph, .paragraph, 1), AppSpacing.lg, "Paragraphs are a full step apart")
+        assertEqual(spacing(.listItem, .listItem, 1), AppSpacing.xs, "List items stay together")
+        assertEqual(spacing(.listItem, .paragraph, 1), AppSpacing.lg, "A list ends with a full step")
+        assertEqual(spacing(.paragraph, .heading, 1), AppSpacing.xl, "A heading is set apart from the text before it")
+        assertEqual(spacing(.heading, .paragraph, 1), AppSpacing.xs, "A heading sits close to the text it introduces")
+        assertEqual(spacing(.subheading, .subheading, 1), AppSpacing.xs, "Stacked headings stay together")
+        assertEqual(spacing(.paragraph, .heading, 1.5), AppSpacing.xl * 1.5, "Spacing scales with the text size")
+    }
+
     // MARK: - 4. Increase Contrast Values Tests
     static func testIncreaseContrastValues() {
         print("  - Testing Increase Contrast Color and Stroke Adjustments...")
@@ -222,7 +246,7 @@ struct ReaderAccessibilityTests {
             increasedDividerOpacity > standardDividerOpacity,
             "Increased contrast divider opacity must be stronger than standard")
         assertEqual(standardDividerOpacity, 0.15, "Standard divider opacity is 0.15")
-        assertEqual(increasedDividerOpacity, 0.60, "Increased divider opacity is 0.60")
+        assertEqual(increasedDividerOpacity, 1.0, "Increased divider opacity is the full separator")
 
         // Quote bar opacity
         let standardQuoteBarOpacity = ArticleDetailView.quoteBarOpacity(for: .standard)

@@ -2,6 +2,7 @@
 
 ## Unreleased — 21 October 2026
 
+- Reader typography: section headings follow the reading style (serif in Casper, monospaced in Alto) and are always larger than body text; subheadings used to be smaller than Casper and Edition body text. Spacing between blocks scales with the text size and no longer doubles above headings. Code blocks follow the text size, captions are larger and reach full contrast with Increase Contrast, and section rules show the full separator with Increase Contrast. Story text keeps one colour while the full story loads, the publisher line uses the secondary colour, and a shown standfirst is the only lead-size paragraph.
 - Fix event overview citations: each numbered superscript in Highlights, Timeline, Perspectives and the thematic angle now opens its own source's passage; every number used to open the item's first citation.
 - Settings: a feed that cannot be added from Subscriptions now says so in that tab (the message only appeared in Storage), OPML import results use the same status line, and clearing story text, AI analysis or all caches asks first. The toolbar search field no longer animates its width with Reduce Motion on.
 

@@ -60,6 +60,11 @@ enum AppColor {
         contrast == .increased ? primaryText.opacity(0.50) : borderSubtle
     }
 
+    /// Captions and other secondary text in the reader reach full contrast with Increase Contrast.
+    static func secondaryText(for contrast: ColorSchemeContrast) -> Color {
+        contrast == .increased ? primaryText : secondaryText
+    }
+
     /// Dates and other metadata move one label level up with Increase Contrast.
     static func tertiaryText(for contrast: ColorSchemeContrast) -> Color {
         contrast == .increased ? secondaryText : tertiaryText
@@ -199,19 +204,38 @@ enum AppTypography {
         }
     }
 
-    static func bodyFont(for theme: ArticleThemeType, scale: CGFloat = 1) -> Font {
+    /// Body text size at text scale 1; reader headings and code are sized from it.
+    static func bodySize(for theme: ArticleThemeType) -> CGFloat {
         switch theme {
-        case .casper: return .system(size: 18 * scale, weight: .regular, design: .serif)
-        case .edition: return .system(size: 16 * scale, weight: .regular, design: .default)
-        case .alto: return .system(size: 15 * scale, weight: .regular, design: .default)
+        case .casper: return 18
+        case .edition: return 16
+        case .alto: return 15
         }
     }
 
-    /// Section headings inside publisher text: level 2 (heading) or 3 (subheading).
-    static func readerHeadingFont(level: Int, scale: CGFloat = 1) -> Font {
-        level <= 2
-            ? .system(size: 22 * scale, weight: .bold)
-            : .system(size: 15 * scale, weight: .semibold)
+    static func bodyFont(for theme: ArticleThemeType, scale: CGFloat = 1) -> Font {
+        .system(size: bodySize(for: theme) * scale, weight: .regular, design: theme == .casper ? .serif : .default)
+    }
+
+    /// Headings use the style's display face (the headline's), so Casper stays serif and Alto monospaced.
+    private static func displayDesign(for theme: ArticleThemeType) -> Font.Design {
+        switch theme {
+        case .casper: return .serif
+        case .edition: return .default
+        case .alto: return .monospaced
+        }
+    }
+
+    /// Section heading size inside publisher text: level 2 (heading) or 3 and deeper (subheading). Never smaller than
+    /// the body, so a subheading still reads as one.
+    static func readerHeadingSize(level: Int, theme: ArticleThemeType) -> CGFloat {
+        (bodySize(for: theme) * (level <= 2 ? 1.35 : 1.1)).rounded()
+    }
+
+    static func readerHeadingFont(level: Int, theme: ArticleThemeType, scale: CGFloat = 1) -> Font {
+        .system(
+            size: readerHeadingSize(level: level, theme: theme) * scale, weight: level <= 2 ? .bold : .semibold,
+            design: displayDesign(for: theme))
     }
 
     static func readerQuoteFont(for theme: ArticleThemeType, scale: CGFloat = 1) -> Font {
@@ -220,7 +244,7 @@ enum AppTypography {
 
     /// Figure captions and credits.
     static func readerCaptionFont(scale: CGFloat = 1) -> Font {
-        .system(size: 11 * scale)
+        .system(size: 13 * scale)
     }
 
     /// A cited publisher passage, distinct from generated summaries.
@@ -256,8 +280,9 @@ enum AppTypography {
         }
     }
 
-    static func readerCodeFont() -> Font {
-        .system(.body, design: .monospaced)
+    /// Code blocks and inline code: monospaced, a step below the body and scaled with it.
+    static func readerCodeFont(for theme: ArticleThemeType, scale: CGFloat = 1) -> Font {
+        .system(size: (bodySize(for: theme) * 0.85).rounded() * scale, design: .monospaced)
     }
 
     static func bodyLineSpacing(for theme: ArticleThemeType) -> CGFloat {

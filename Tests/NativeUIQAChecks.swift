@@ -702,8 +702,8 @@ struct NativeUIQAChecks {
         // Article detail contrast
         assertEqual(ArticleDetailView.dividerOpacity(for: .standard), 0.15, "Article standard divider opacity is 0.15")
         assertEqual(
-            ArticleDetailView.dividerOpacity(for: .increased), 0.60,
-            "Article increased contrast divider opacity is 0.60")
+            ArticleDetailView.dividerOpacity(for: .increased), 1.0,
+            "Article increased contrast divider opacity is the full separator")
         assertEqual(
             ArticleDetailView.quoteBarOpacity(for: .standard), 0.50, "Article standard quote bar opacity is 0.50")
         assertEqual(
