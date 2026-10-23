@@ -374,7 +374,8 @@ final class DOMElementNode: Sendable {
         let emphasis = emphasis || ["em", "i"].contains(tag)
         let code = code || tag == "code"
         let link = tag == "a" ? attributes["href"] : link
-        let shift = tag == "sup" ? 1 : tag == "sub" ? -1 : baselineShift
+        let shifts = ["sup": 1, "sub": -1]
+        let shift = shifts[tag] ?? baselineShift
         var runs =
             text.isEmpty
             ? []
