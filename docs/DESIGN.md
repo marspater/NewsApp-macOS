@@ -236,19 +236,19 @@ macOS has no Dynamic Type. Chrome uses system text styles so it matches system c
 
 Each pattern has one implementation; new code reuses it and extends it rather than copying.
 
-| Component | Owner (current or planned) | Covers |
+| Component | Owner | Covers |
 | --- | --- | --- |
 | Tokens | `DesignSystem.swift` | Color, typography, spacing, radius, layout, shadow, motion |
 | Glass helpers | `GlassSystem.swift` | Custom glass, glass containers, glass button style, macOS 15 fallback |
 | Story card | `ArticleCardView.swift` | All story cards and their context menus |
 | Event coverage | `EventCardView.swift` | Coverage disclosure and member rows |
-| Tag | Planned in `DesignSystem.swift` | Category, entity, Updated, Plan, AI, Verified Excerpts and citation pills |
-| Eyebrow | Planned in `DesignSystem.swift` | Publisher and kicker lines in cards, reader and overview |
-| Intelligence label | Planned in `DesignSystem.swift` | Every generated-content heading and badge |
+| Tag | `TagView` in `DesignSystem.swift` | Category, entity, Updated, Plan, AI, Verified Excerpts and citation pills |
+| Eyebrow | `EyebrowText` in `DesignSystem.swift` | Publisher and kicker lines in cards, reader and overview |
+| Intelligence label | `IntelligenceLabel`, `TagView.intelligence` in `DesignSystem.swift` | Every generated-content heading and badge |
 | Masthead | `ArticleListView.swift` | List title and status line |
 | Updates button | `ArticleListView.swift` | Leading toolbar queued-update control |
-| Notice | Planned in `DesignSystem.swift` | Inline callouts in content |
-| Reading column | Planned in `DesignSystem.swift` | Measure and insets for reader and overview |
+| Notice | `NoticeView` in `DesignSystem.swift` | Inline callouts in content |
+| Reading column | `ReadingColumn` in `DesignSystem.swift` | Measure and insets for reader and overview |
 | Empty states | `ContentUnavailableView` | All empty, error and no-result states |
 
 ## 19. Review checklist

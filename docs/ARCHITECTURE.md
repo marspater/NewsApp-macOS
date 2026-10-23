@@ -107,13 +107,14 @@ gitGraph
     branch macos-hig-design
     commit id: "style: cards, reader, chrome"
     commit id: "refactor(overview)"
-    commit id: "Kagi-style journey" type: HIGHLIGHT tag: "PR #481 open"
+    commit id: "Kagi-style journey" type: HIGHLIGHT
     checkout main
     commit id: "#475 HIG refinement"
     commit id: "#470 #471 feeds"
     commit id: "#474 reader v9"
     commit id: "#478 #479 file splits"
-    commit id: "#480 state review" tag: "HEAD"
+    commit id: "#480 state review"
+    merge macos-hig-design id: "#481 overview journey" tag: "HEAD"
 ```
 
 ## Where the code is
@@ -220,7 +221,7 @@ Open a section before changing that area. Each rule is load-bearing; tests cover
 
 - `HTMLDOMBuilder` scoring with a quality-checked preference for explicit publisher bodies chosen through SwiftSoup. Repaired nodes pass the same rules.
 - Reader v9: scripts/styles end at their first closing tag; explicit bodies are judged with children and must hold ≥40% of scored prose; metering wrappers with ≥2 paragraphs stay; `x-cloak` and form controls are hidden. v8 drops timestamp-only blocks; v7 adds `subscriberOnly` (barriers, `isAccessibleForFree: false`, 401/402; 403 shows the same preview), JSON-LD `articleBody` and `__NEXT_DATA__` fallbacks, standfirsts, pull quotes. Older stored documents re-extract on open.
-- Document v4 keeps inline runs, image candidates, credit and an explicit selected lead. Only a document with publisher text (`ReaderDocument.hasPublisherText`) replaces extraction; feed media never overwrites stored text.
+- Document v4 keeps inline runs, image candidates, credit and an explicit selected lead; without a selected lead, `ReaderDocument.selectedImage` falls back to the first usable extracted image. The JSON-LD lead image is read before scripts are stripped; feed parsing accepts image file extensions, `data-src`/`data-original`, and `content:encoded` images without body text. Only a document with publisher text (`ReaderDocument.hasPublisherText`) replaces extraction; feed media never overwrites stored text.
 - Extraction records the protected final URL and at most one same-origin canonical URL, only after matching text and title. Canonical declarations alone never merge identities.
 - Render sanitized HTML. WebKit previews disable publisher scripts and block local resources. Never log secrets, article contents or full sensitive URLs.
 
@@ -247,6 +248,7 @@ Open a section before changing that area. Each rule is load-bearing; tests cover
 - `OverviewGenerationCoordinator` shares a run only for the same membership version, input hash and publisher inputs; changed inputs cancel it; only the latest inputs commit. `cancel(eventID:)` stops it for all callers.
 - A reader clears the visible event only if it set it (`clearVisibleEvent(owner:)`); after each storage suspension it rechecks its article and input.
 - Production overviews are deterministic publisher sentences with per-source citations (`fallbackExcerpts` provenance). Analysis version 9. Up to four representatives without text are extracted first (≤2 concurrent, 4 s each). Citation rows key on overview ID + citation ID.
+- The overview reader shows introduction → Highlights grouped by publisher (`ClusteredHighlightGroup`) → timeline rail → perspective cards → numbered sources; superscript citations open the cited passage. Sentences come from `PassageFactExtractor.segmentedSentences`, which rejoins `NLTokenizer` splits at abbreviations (`St.`, `U.S.`, `Dr.`) and inside open quotes; `OverviewComposer` evidence counting uses it.
 - Timelines (`OverviewTimelineBuilder`): a verified quote with exactly one explicit date, shown at its stated precision; relative dates are not resolved; fewer than two dates means no timeline.
 - "Earlier in This Story" (`EventStoryRelation`): English, earlier event within 7 days, a shared uncommon typed actor (not in >5% and ≥10 of last week's events), a shared place, two shared topic terms, ⅔ member support. ≤80 FTS rows, ≤40 candidates, ≤3 links. Writes nothing. [Audit](audits/2026-10-20-developing-story-links.md): 1 wrong of 45 after the common-actor rule.
 
@@ -274,16 +276,3 @@ Open a section before changing that area. Each rule is load-bearing; tests cover
 - World Tension (`WorldTension`, methodology v2) reasons over bounded headlines with lexical grounding. `TensionMethodology` and [the v1 methodology](methodology/tension-index-v1.md) change together; it computes no score until weights are calibrated (#158).
 
 </details>
-
-## In review: [#481](https://github.com/marspater/NewsApp-macOS/pull/481)
-
-Not on `main` yet, and currently conflicting with it. Move each row into the invariants above when it merges.
-
-| Area | Change |
-|---|---|
-| Overview UI | Hero → highlights grouped by publisher (`ClusteredHighlightGroup`) → timeline rail → perspective cards → numbered sources. Superscript citations replace source pills; the "Publisher excerpts" tag goes. |
-| Sentences | `PassageFactExtractor.segmentedSentences` rejoins `NLTokenizer` splits at abbreviations (`St.`, `U.S.`, `Dr.`) and inside open quotes; `OverviewComposer` evidence counting uses it. |
-| Images | JSON-LD lead image is read before script stripping. Feed parser accepts image file extensions and `data-src`/`data-original`, and reads `content:encoded` images even without body text. |
-| Invariant change | `ReaderDocument.selectedImage` (v4) falls back to the first usable extracted image when no lead is selected. Today v4 curation is authoritative, including no lead. |
-| Catalog | 18 new English feeds (NPR, PBS, Sky, Semafor, Roll Call, Quartz, MarketWatch, The Verge, Wired, 9to5Mac, MacRumors, Smithsonian, Phys.org, Pitchfork, Polygon, ABC Australia). `FeedCatalogView` gains category pills, search and monograms. |
-| Chrome | Tension footer uses native hover styling. |
