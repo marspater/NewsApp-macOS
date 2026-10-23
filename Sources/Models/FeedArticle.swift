@@ -133,8 +133,17 @@ struct FeedArticleWrap: Identifiable, Hashable, Sendable {
 
 /// Publisher-authored structure. Plain text remains separate for search and analysis.
 public struct ReaderBlock: Codable, Hashable, Sendable {
+    /// `standfirst` and `pullQuote` are publisher display text; a `table` holds tab-separated cells, one row per line, with `ordinal` 1 when the first row is a header;
+    /// an `embed` stands for media the reader cannot show (a post, video or oversized table), its host in `text` and
+    /// its address, when safe, in `imageURL`.
     public enum Kind: String, Codable, Sendable {
         case paragraph, heading, subheading, quote, listItem, code, figure, divider
+        case standfirst, pullQuote, table, embed
+
+        /// Unknown kinds from a newer reader read as paragraphs instead of failing the whole document.
+        public init(from decoder: Decoder) throws {
+            self = Self(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .paragraph
+        }
     }
     public let kind: Kind
     public let text: String
@@ -145,10 +154,12 @@ public struct ReaderBlock: Codable, Hashable, Sendable {
     public var imageCredit: String? = nil
     public var imageWidth: Int? = nil
     public var imageHeight: Int? = nil
+    /// Nesting depth of a list item; nil for a top-level item.
+    public var level: Int? = nil
 }
 
 public struct ReaderDocument: Codable, Hashable, Sendable {
-    public static let currentVersion = 9
+    public static let currentVersion = 10
     public var version = currentVersion
     public let blocks: [ReaderBlock]
     public var images: [ReaderImageCandidate]? = nil
@@ -205,7 +216,7 @@ public struct ReaderDocument: Codable, Hashable, Sendable {
     /// Feed media alone is not a reader document: only publisher text lets a stored document stand in for
     /// extraction or survive a refresh that brings none. `DatabaseEngine.upsertArticles` applies the same rule in SQL.
     var hasPublisherText: Bool {
-        blocks.contains { $0.kind != .figure && $0.kind != .divider }
+        blocks.contains { ![.figure, .divider, .embed].contains($0.kind) }
     }
 
     /// True if this document represents a complete standalone article rather than a brief feed teaser/excerpt.
@@ -398,6 +409,8 @@ public struct ReaderInlineRun: Codable, Hashable, Sendable {
     public var emphasis = false
     public var code = false
     public var link: String? = nil
+    /// 1 for superscript (`<sup>`), -1 for subscript (`<sub>`), nil on the baseline.
+    public var baselineShift: Int? = nil
 }
 
 public struct ReaderImageCandidate: Codable, Hashable, Sendable {

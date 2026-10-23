@@ -319,7 +319,8 @@ struct OverviewPassageSelector: Sendable {
             for (index, block) in blocks.enumerated() {
                 // Keep only prose blocks; skip figure, caption, code, or tiny snippets
                 guard
-                    block.kind == .paragraph || block.kind == .quote || block.kind == .subheading
+                    block.kind == .paragraph || block.kind == .standfirst || block.kind == .quote
+                        || block.kind == .subheading
                         || block.kind == .listItem
                 else {
                     continue

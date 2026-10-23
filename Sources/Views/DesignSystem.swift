@@ -247,6 +247,10 @@ enum AppTypography {
         .system(size: 13 * scale)
     }
 
+    /// Raise and drop of `<sup>` and `<sub>` text in the reader, in points.
+    static let superscriptOffset: CGFloat = 6
+    static let subscriptOffset: CGFloat = 3
+
     /// A cited publisher passage, distinct from generated summaries.
     static let readerCitation = Font.system(size: 13, weight: .medium, design: .serif)
 

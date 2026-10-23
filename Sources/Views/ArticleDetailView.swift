@@ -577,7 +577,10 @@ struct ArticleDetailView: View {
             currentArticle.readerDocument?.blocks.first { $0.kind == .paragraph }?.text
             ?? displayParagraphs.first ?? ""
         let key = { (text: String) in String(EventFeedSummary.titleKey(text).prefix(60)) }
-        guard contentState == .ready, (20...400).contains(dek.count), !key(opening).hasPrefix(key(dek)),
+        // The page's own standfirst, when extracted, is shown in the body instead.
+        let pageHasStandfirst = currentArticle.readerDocument?.blocks.contains { $0.kind == .standfirst } == true
+        guard contentState == .ready, !pageHasStandfirst, (20...400).contains(dek.count),
+            !key(opening).hasPrefix(key(dek)),
             !key(dek).hasPrefix(key(opening))
         else { return nil }
         return dek
@@ -643,8 +646,10 @@ struct ArticleDetailView: View {
                 blocks.remove(at: first)
             }
         }
-        // A shown standfirst already leads the story in the lead size.
-        let leadIndex = standfirstText == nil ? blocks.firstIndex { $0.kind == .paragraph } : nil
+        // A shown feed standfirst or a page standfirst already leads the story in the lead size.
+        let leadIndex =
+            standfirstText == nil && !blocks.contains { $0.kind == .standfirst }
+            ? blocks.firstIndex { $0.kind == .paragraph } : nil
         return VStack(alignment: .leading, spacing: 0) {
             // Positions are stable within the immutable, article-keyed reader document.
             ForEach(Array(blocks.enumerated()), id: \.offset) { index, block in
@@ -712,6 +717,7 @@ struct ArticleDetailView: View {
             }
             .font(AppTypography.bodyFont(for: themeManager.articleTheme, scale: readerTextScale))
             .lineSpacing(AppTypography.bodyLineSpacing(for: themeManager.articleTheme) * readerTextScale)
+            .padding(.leading, CGFloat(block.level ?? 0) * AppSpacing.lg * readerTextScale)
         case .code:
             Text(readerText(block))
                 .font(AppTypography.readerCodeFont(for: themeManager.articleTheme, scale: readerTextScale))
@@ -719,6 +725,44 @@ struct ArticleDetailView: View {
                 .padding(AppSpacing.md * readerTextScale)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(AppColor.surface, in: RoundedRectangle(cornerRadius: AppRadius.control, style: .continuous))
+        case .standfirst:
+            Text(readerText(block))
+                .font(AppTypography.leadFont(for: themeManager.articleTheme, scale: readerTextScale))
+                .foregroundStyle(AppColor.secondaryText)
+                .lineSpacing(AppTypography.bodyLineSpacing(for: themeManager.articleTheme) * readerTextScale)
+                .fixedSize(horizontal: false, vertical: true)
+                .textSelection(.enabled)
+        case .pullQuote:
+            VStack(alignment: .leading, spacing: AppSpacing.sm * readerTextScale) {
+                Divider().opacity(Self.dividerOpacity(for: contrast))
+                Text(readerText(block))
+                    .font(AppTypography.leadFont(for: themeManager.articleTheme, scale: readerTextScale).italic())
+                    .foregroundStyle(AppColor.primaryText)
+                    .lineSpacing(AppTypography.bodyLineSpacing(for: themeManager.articleTheme) * readerTextScale)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
+                Divider().opacity(Self.dividerOpacity(for: contrast))
+            }
+        case .table:
+            ReaderTableView(
+                block: block,
+                font: AppTypography.bodyFont(for: themeManager.articleTheme, scale: readerTextScale * 0.9))
+        case .embed:
+            NoticeView {
+                HStack(spacing: AppSpacing.sm) {
+                    Label(
+                        Self.embedTitle(for: block),
+                        systemImage: Self.isTableNotice(block) ? "tablecells" : "text.bubble"
+                    )
+                    .font(AppTypography.callout)
+                    .foregroundStyle(AppColor.secondaryText)
+                    Spacer()
+                    Button("Open Web View", systemImage: "globe") { viewMode = .web }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .help("Open web view (W)")
+                }
+            }
         case .paragraph:
             Text(readerText(block))
                 .font(
@@ -1105,6 +1149,16 @@ struct ArticleDetailView: View {
         -> String
     {
         "\(source), \(publicationDateText), \(readingTimeEstimate)"
+    }
+
+    /// What an embed placeholder stands for: a post from its host, or content the reader cannot lay out.
+    static func embedTitle(for block: ReaderBlock) -> String {
+        if isTableNotice(block) { return "Large table on the publisher’s page" }
+        return block.text == "Social post" ? "Embedded post" : "Embedded post from \(block.text)"
+    }
+
+    private static func isTableNotice(_ block: ReaderBlock) -> Bool {
+        block.imageURL == nil && block.text == "Table"
     }
 
     /// Section rules are quiet; Increase Contrast shows the full separator, as plain dividers do.
