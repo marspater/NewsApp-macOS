@@ -319,7 +319,7 @@ struct ArticleDetailView: View {
 
                     // Eyebrow: Source, Date, Reading Time
                     HStack(spacing: AppSpacing.eyebrowGap) {
-                        EyebrowText(displaySource, color: AppColor.accent)
+                        EyebrowText(displaySource)
 
                         Text("·")
                             .foregroundStyle(tertiaryText)
@@ -518,11 +518,9 @@ struct ArticleDetailView: View {
 
                 Divider().opacity(Self.dividerOpacity(for: contrast))
 
-                Text(currentArticle.fullContent == nil ? "Feed summary preview" : "Previously saved text")
-                    .font(AppTypography.eyebrow)
-                    .tracking(AppTypography.eyebrowTracking)
-                    .textCase(.uppercase)
-                    .foregroundStyle(tertiaryText)
+                EyebrowText(
+                    currentArticle.fullContent == nil ? "Feed summary preview" : "Previously saved text",
+                    color: tertiaryText)
 
                 articleDescriptionParagraphs
             }
@@ -572,8 +570,7 @@ struct ArticleDetailView: View {
     }
 
     /// The feed's standfirst under the headline, unless the story's opening paragraph already says it.
-    @ViewBuilder
-    private var standfirst: some View {
+    private var standfirstText: String? {
         let dek = ArticleContentRedactor.cleanText(currentArticle.description)
             .trimmingCharacters(in: .whitespacesAndNewlines)
         let opening =
@@ -582,10 +579,16 @@ struct ArticleDetailView: View {
         let key = { (text: String) in String(EventFeedSummary.titleKey(text).prefix(60)) }
         // The page's own standfirst, when extracted, is shown in the body instead.
         let pageHasStandfirst = currentArticle.readerDocument?.blocks.contains { $0.kind == .standfirst } == true
-        if contentState == .ready, !pageHasStandfirst, (20...400).contains(dek.count),
+        guard contentState == .ready, !pageHasStandfirst, (20...400).contains(dek.count),
             !key(opening).hasPrefix(key(dek)),
             !key(dek).hasPrefix(key(opening))
-        {
+        else { return nil }
+        return dek
+    }
+
+    @ViewBuilder
+    private var standfirst: some View {
+        if let dek = standfirstText {
             Text(dek)
                 .font(AppTypography.leadFont(for: themeManager.articleTheme, scale: readerTextScale))
                 .foregroundStyle(AppColor.secondaryText)
@@ -602,7 +605,7 @@ struct ArticleDetailView: View {
             ForEach(Array(paragraphs.enumerated()), id: \.offset) { _, paragraph in
                 Text(paragraph)
                     .font(AppTypography.bodyFont(for: themeManager.articleTheme, scale: readerTextScale))
-                    .foregroundStyle(readableText(0.9))
+                    .foregroundStyle(AppColor.primaryText)
                     .lineSpacing(AppTypography.bodyLineSpacing(for: themeManager.articleTheme) * readerTextScale)
                     .textSelection(.enabled)
                     .accessibilityLinkedGroup(id: currentArticle.id, in: storyParagraphs)
@@ -643,23 +646,20 @@ struct ArticleDetailView: View {
                 blocks.remove(at: first)
             }
         }
-        // A page standfirst already leads the story in the lead size.
-        let leadIndex = blocks.contains { $0.kind == .standfirst } ? nil : blocks.firstIndex { $0.kind == .paragraph }
+        // A shown feed standfirst or a page standfirst already leads the story in the lead size.
+        let leadIndex =
+            standfirstText == nil && !blocks.contains { $0.kind == .standfirst }
+            ? blocks.firstIndex { $0.kind == .paragraph } : nil
         return VStack(alignment: .leading, spacing: 0) {
             // Positions are stable within the immutable, article-keyed reader document.
             ForEach(Array(blocks.enumerated()), id: \.offset) { index, block in
-                let nextBlock = index + 1 < blocks.count ? blocks[index + 1] : nil
-                let bottomSpacing: CGFloat = {
-                    if block.kind == .listItem && nextBlock?.kind == .listItem {
-                        return AppSpacing.xs * readerTextScale
-                    }
-                    if block.kind == .heading || block.kind == .subheading {
-                        return AppSpacing.sm * readerTextScale
-                    }
-                    return AppSpacing.lg * readerTextScale
-                }()
                 readerBlock(block, isLead: index == leadIndex)
-                    .padding(.bottom, bottomSpacing)
+                    .padding(
+                        .bottom,
+                        Self.blockSpacing(
+                            after: block.kind, before: index + 1 < blocks.count ? blocks[index + 1].kind : nil,
+                            scale: readerTextScale)
+                    )
                     .accessibilityLinkedGroup(id: currentArticle.id, in: storyParagraphs)
             }
         }
@@ -677,10 +677,10 @@ struct ArticleDetailView: View {
             Text(readerText(block))
                 .font(
                     AppTypography.readerHeadingFont(
-                        level: block.kind == .heading ? 2 : 3, scale: readerTextScale)
+                        level: block.kind == .heading ? 2 : 3, theme: themeManager.articleTheme, scale: readerTextScale)
                 )
                 .foregroundStyle(AppColor.primaryText)
-                .padding(.top, AppSpacing.lg)
+                .lineSpacing(AppSpacing.xxs * readerTextScale)
                 .accessibilityAddTraits(.isHeader)
                 .accessibilityHeading(block.kind == .heading ? .h2 : .h3)
                 .textSelection(.enabled)
@@ -691,20 +691,20 @@ struct ArticleDetailView: View {
                     .frame(width: 3)
                     .accessibilityHidden(true)
                 Text(readerText(block))
-                    .font(AppTypography.bodyFont(for: themeManager.articleTheme, scale: readerTextScale).italic())
+                    .font(AppTypography.readerQuoteFont(for: themeManager.articleTheme, scale: readerTextScale))
                     .lineSpacing(AppTypography.bodyLineSpacing(for: themeManager.articleTheme) * readerTextScale)
                     .textSelection(.enabled)
             }
             .fixedSize(horizontal: false, vertical: true)
-            .padding(AppSpacing.md)
+            .padding(AppSpacing.md * readerTextScale)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(AppColor.surface, in: RoundedRectangle(cornerRadius: AppRadius.control))
+            .background(AppColor.surface, in: RoundedRectangle(cornerRadius: AppRadius.control, style: .continuous))
         case .divider:
             Divider()
                 .opacity(Self.dividerOpacity(for: contrast))
                 .frame(maxWidth: AppLayout.readerSectionRuleWidth)
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, AppSpacing.sm)
+                .padding(.vertical, AppSpacing.sm * readerTextScale)
                 .accessibilityHidden(true)
         case .listItem:
             HStack(alignment: .firstTextBaseline, spacing: AppSpacing.sm) {
@@ -720,11 +720,11 @@ struct ArticleDetailView: View {
             .padding(.leading, CGFloat(block.level ?? 0) * AppSpacing.lg * readerTextScale)
         case .code:
             Text(readerText(block))
-                .font(.system(.body, design: .monospaced))
+                .font(AppTypography.readerCodeFont(for: themeManager.articleTheme, scale: readerTextScale))
                 .textSelection(.enabled)
-                .padding(AppSpacing.md)
+                .padding(AppSpacing.md * readerTextScale)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(AppColor.surface, in: RoundedRectangle(cornerRadius: AppRadius.control))
+                .background(AppColor.surface, in: RoundedRectangle(cornerRadius: AppRadius.control, style: .continuous))
         case .standfirst:
             Text(readerText(block))
                 .font(AppTypography.leadFont(for: themeManager.articleTheme, scale: readerTextScale))
@@ -1161,8 +1161,26 @@ struct ArticleDetailView: View {
         block.imageURL == nil && block.text == "Table"
     }
 
+    /// Section rules are quiet; Increase Contrast shows the full separator, as plain dividers do.
     static func dividerOpacity(for contrast: ColorSchemeContrast) -> Double {
-        contrast == .increased ? 0.60 : 0.15
+        contrast == .increased ? 1.0 : 0.15
+    }
+
+    /// Space below a reader block, scaled with the text. List items stay together; a heading sits close to the text
+    /// it introduces and apart from what precedes it.
+    static func blockSpacing(after block: ReaderBlock.Kind, before next: ReaderBlock.Kind?, scale: CGFloat) -> CGFloat {
+        let isHeading = { (kind: ReaderBlock.Kind?) in kind == .heading || kind == .subheading }
+        let points: CGFloat
+        if isHeading(block) {
+            points = AppSpacing.xs
+        } else if isHeading(next) {
+            points = AppSpacing.xl
+        } else if block == .listItem && next == .listItem {
+            points = AppSpacing.xs
+        } else {
+            points = AppSpacing.lg
+        }
+        return points * scale
     }
 
     static func quoteBarOpacity(for contrast: ColorSchemeContrast) -> Double {
@@ -1175,15 +1193,6 @@ struct ArticleDetailView: View {
 
     private var tertiaryText: Color {
         AppColor.tertiaryText(for: contrast)
-    }
-
-    /// Increase Contrast restores full-strength text that is otherwise slightly softened.
-    private func readableText(_ opacity: Double) -> Color {
-        contrast == .increased ? AppColor.primaryText : AppColor.primaryText.opacity(opacity)
-    }
-
-    private func borderColor(_ standard: Color) -> Color {
-        contrast == .increased ? AppColor.primaryText.opacity(0.3) : standard
     }
 
     private var displaySource: String { currentArticle.publisherName }
@@ -1232,7 +1241,7 @@ struct ArticleDetailView: View {
 
                 Text(analysis.summary)
                     .font(AppTypography.overviewFont(.body, scale: readerTextScale))
-                    .foregroundStyle(readableText(0.92))
+                    .foregroundStyle(AppColor.primaryText)
                     .lineSpacing(AppTypography.bodyLineSpacing(for: themeManager.articleTheme) * readerTextScale)
                     .textSelection(.enabled)
 
@@ -1252,7 +1261,7 @@ struct ArticleDetailView: View {
                                     .accessibilityHidden(true)
                                 Text(point)
                                     .font(AppTypography.overviewFont(.body, scale: readerTextScale))
-                                    .foregroundStyle(readableText(0.88))
+                                    .foregroundStyle(AppColor.primaryText)
                                     .textSelection(.enabled)
                             }
                         }
@@ -1307,7 +1316,7 @@ struct ArticleDetailView: View {
 
                 Text(ai)
                     .font(AppTypography.overviewFont(.body, scale: readerTextScale))
-                    .foregroundStyle(readableText(0.92))
+                    .foregroundStyle(AppColor.primaryText)
                     .lineSpacing(AppTypography.bodyLineSpacing(for: themeManager.articleTheme) * readerTextScale)
                     .textSelection(.enabled)
             }

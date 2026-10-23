@@ -158,7 +158,7 @@ struct ReaderFigureView: View {
             }
             if !block.text.isEmpty && block.text.lowercased() != "article image" {
                 Text(block.text).font(AppTypography.readerCaptionFont(scale: textScale)).foregroundStyle(
-                    AppColor.secondaryText
+                    AppColor.secondaryText(for: contrast)
                 )
                 .textSelection(.enabled)
             }
