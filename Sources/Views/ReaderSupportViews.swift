@@ -158,7 +158,7 @@ struct ReaderFigureView: View {
             }
             if !block.text.isEmpty && block.text.lowercased() != "article image" {
                 Text(block.text).font(AppTypography.readerCaptionFont(scale: textScale)).foregroundStyle(
-                    AppColor.secondaryText
+                    AppColor.secondaryText(for: contrast)
                 )
                 .textSelection(.enabled)
             }
@@ -210,9 +210,41 @@ func readerText(_ block: ReaderBlock) -> AttributedString {
         if run.emphasis { part.inlinePresentationIntent = (part.inlinePresentationIntent ?? []).union(.emphasized) }
         if run.code { part.inlinePresentationIntent = (part.inlinePresentationIntent ?? []).union(.code) }
         if let link = ContentExtractionPipeline.readerImageURL(run.link, baseURL: nil) { part.link = URL(string: link) }
+        if let shift = run.baselineShift, shift != 0 {
+            part.baselineOffset = shift > 0 ? AppTypography.superscriptOffset : -AppTypography.subscriptOffset
+        }
         text.append(part)
     }
     return text
+}
+
+/// A publisher data table: the header row in semibold, hairlines between rows, scrolling sideways when wide.
+struct ReaderTableView: View {
+    let block: ReaderBlock
+    let font: Font
+
+    var body: some View {
+        let rows = block.text.components(separatedBy: "\n").map { $0.components(separatedBy: "\t") }
+        ScrollView(.horizontal) {
+            Grid(alignment: .leading, horizontalSpacing: AppSpacing.md, verticalSpacing: AppSpacing.xs) {
+                ForEach(Array(rows.enumerated()), id: \.offset) { index, cells in
+                    GridRow {
+                        ForEach(Array(cells.enumerated()), id: \.offset) { _, cell in
+                            Text(cell)
+                                .fontWeight(index == 0 && block.ordinal == 1 ? .semibold : nil)
+                                .foregroundStyle(AppColor.primaryText)
+                                .textSelection(.enabled)
+                        }
+                    }
+                    if index < rows.count - 1 {
+                        Divider().gridCellUnsizedAxes(.horizontal)
+                    }
+                }
+            }
+            .font(font)
+            .padding(.vertical, AppSpacing.xxs)
+        }
+    }
 }
 
 /// An isolated, fixed-height loading indicator bubble in the reader toolbar.

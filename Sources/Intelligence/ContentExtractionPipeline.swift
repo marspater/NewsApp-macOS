@@ -182,17 +182,18 @@ final class DOMElementNode: Sendable {
             || attributes["x-cloak"] != nil
     }
 
-    /// Recursively collects visible text from this node and its children.
-    func combinedText() -> String {
+    /// Recursively collects visible text from this node and its children. `lineBreak` marks `<br>` and the boundary
+    /// before a nested paragraph, division or list item.
+    func combinedText(lineBreak: String = "\n") -> String {
         guard !isReaderExcluded else { return "" }
-        if tag == "br" { return "\n" }
+        if tag == "br" { return lineBreak }
         if tag == "noscript" { return "" }
         var result = text
         for child in children {
-            let childText = child.combinedText()
+            let childText = child.combinedText(lineBreak: lineBreak)
             if !childText.isEmpty {
                 if ["p", "div", "li"].contains(child.tag), !result.isEmpty {
-                    result += "\n"
+                    result += lineBreak
                 } else if !result.isEmpty,
                     let lastChar = result.last, !lastChar.isWhitespace && !lastChar.isPunctuation,
                     let firstChar = childText.first, !firstChar.isWhitespace && !firstChar.isPunctuation,
@@ -308,11 +309,25 @@ final class DOMElementNode: Sendable {
                 var attributes = child.attributes
                 attributes["reader-ordinal"] = String(ordinal)
                 if ordinal < Int.max { ordinal += 1 }
-                return [
-                    DOMElementNode(tag: child.tag, attributes: attributes, children: child.children, text: child.text)
-                ]
+                return DOMElementNode(
+                    tag: child.tag, attributes: attributes, children: child.children, text: child.text
+                )
+                .readingBlocks()
             }
         }
+        // A nested list follows its parent item as items one level deeper instead of running into its text.
+        if tag == "li", children.contains(where: { ["ul", "ol"].contains($0.tag) }) {
+            let isList = { (node: DOMElementNode) in ["ul", "ol"].contains(node.tag) }
+            let own = DOMElementNode(
+                tag: tag, attributes: attributes, children: children.filter { !isList($0) }, text: text)
+            let nested = children.filter(isList).flatMap { $0.readingBlocks(allowDivFallback: false) }.map { item in
+                var attributes = item.attributes
+                attributes["reader-level"] = String((Int(attributes["reader-level"] ?? "") ?? 0) + 1)
+                return DOMElementNode(tag: item.tag, attributes: attributes, children: item.children, text: item.text)
+            }
+            return [own] + nested
+        }
+        if tag == "table", tableRows() != nil { return [self] }
         if ["p", "h2", "h3", "h4", "h5", "h6", "li", "blockquote", "pre", "aside"].contains(tag) { return [self] }
         var blocks = [DOMElementNode]()
         var inline = [DOMElementNode]()
@@ -346,20 +361,35 @@ final class DOMElementNode: Sendable {
         return []
     }
 
-    func inlineContent(strong: Bool = false, emphasis: Bool = false, code: Bool = false, link: String? = nil)
-        -> [ReaderInlineRun]
-    {
+    /// Marks a publisher line break in block text and runs until whitespace is collapsed (`readerWhitespace`), so
+    /// source-formatting newlines stay spaces.
+    static let lineBreak = "\u{2028}"
+
+    func inlineContent(
+        strong: Bool = false, emphasis: Bool = false, code: Bool = false, link: String? = nil,
+        baselineShift: Int? = nil
+    ) -> [ReaderInlineRun] {
         guard !isReaderExcluded else { return [] }
+        if tag == "br" { return [ReaderInlineRun(text: Self.lineBreak)] }
         let strong = strong || ["strong", "b"].contains(tag)
         let emphasis = emphasis || ["em", "i"].contains(tag)
         let code = code || tag == "code"
         let link = tag == "a" ? attributes["href"] : link
+        let shifts = ["sup": 1, "sub": -1]
+        let shift = shifts[tag] ?? baselineShift
         var runs =
             text.isEmpty
-            ? [] : [ReaderInlineRun(text: text, strong: strong, emphasis: emphasis, code: code, link: link)]
+            ? []
+            : [
+                ReaderInlineRun(
+                    text: text, strong: strong, emphasis: emphasis, code: code, link: link, baselineShift: shift)
+            ]
         for child in children {
-            if ["p", "div", "li"].contains(child.tag), !runs.isEmpty { runs.append(ReaderInlineRun(text: " ")) }
-            let childRuns = child.inlineContent(strong: strong, emphasis: emphasis, code: code, link: link)
+            let childRuns = child.inlineContent(
+                strong: strong, emphasis: emphasis, code: code, link: link, baselineShift: shift)
+            if ["p", "div", "li"].contains(child.tag), !runs.isEmpty, !childRuns.isEmpty {
+                runs.append(ReaderInlineRun(text: Self.lineBreak))
+            }
             if let lastRun = runs.last, let lastChar = lastRun.text.last,
                 !lastChar.isWhitespace && !lastChar.isPunctuation,
                 let firstRun = childRuns.first, let firstChar = firstRun.text.first,
@@ -413,13 +443,25 @@ final class DOMElementNode: Sendable {
                 imageHeight: (image.attributes["height"] ?? findNodes(tag: "img").first?.attributes["height"]).flatMap(
                     Int.init))
         }
-        let plain = combinedText().replacingOccurrences(of: "[ \t\r\n]+", with: " ", options: .regularExpression)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !plain.isEmpty, !ArticleContentRedactor.isBoilerplateLine(plain) else { return nil }
+        if tag == "table", let rows = tableRows() {
+            guard computeLinkDensity() < 0.8 else { return nil }
+            // ponytail: wide or long tables become a notice; no scrolling grid beyond 8 × 40 cells.
+            guard rows.count <= 40, rows.map(\.count).max() ?? 0 <= 8 else {
+                return ReaderBlock(kind: .embed, text: "Table")
+            }
+            return ReaderBlock(
+                kind: .table, text: rows.map { $0.joined(separator: "\t") }.joined(separator: "\n"),
+                ordinal: findNodes(tag: "tr").first?.children.contains { $0.tag == "th" } == true ? 1 : nil)
+        }
+        if tag == "blockquote", let embed = socialEmbed() { return embed }
+        let plain = Self.readerWhitespace(combinedText(lineBreak: Self.lineBreak))
+        // Checks read the text as one line, as they did before line breaks were kept.
+        let flat = plain.replacingOccurrences(of: "\n", with: " ")
+        guard !plain.isEmpty, !ArticleContentRedactor.isBoilerplateLine(flat) else { return nil }
         // A metadata strip item holding only a <time> (BBC's "· 20 October 2026, 14:13 BST") is not story text.
         let timestamps = findNodes(tag: "time").map { $0.combinedText() }
         if !timestamps.isEmpty {
-            var residue = plain
+            var residue = flat
             for stamp in timestamps {
                 residue = residue.replacingOccurrences(
                     of: stamp.trimmingCharacters(in: .whitespacesAndNewlines), with: "")
@@ -427,21 +469,97 @@ final class DOMElementNode: Sendable {
             let words = residue.lowercased().split { !$0.isLetter && !$0.isNumber }
             if words.allSatisfy({ ["published", "updated", "last", "on", "at"].contains($0) }) { return nil }
         }
+        // A plain "(Updated: 21 October 2026)" line under the headline (CNA) is metadata, not story text.
+        if flat.range(
+            of: #"^(?=.*\d)(?:\((?:last )?updated:?\s[^()]{4,40}\)|(?:last )?updated:\s[^()]{4,40})$"#,
+            options: [.regularExpression, .caseInsensitive]) != nil
+        {
+            return nil
+        }
         let kind: ReaderBlock.Kind
         switch tag {
         case "h2": kind = .heading
         case "h3", "h4", "h5", "h6": kind = .subheading
         case "li": kind = .listItem
-        case "blockquote", "aside": kind = .quote
+        case "aside": kind = HTMLDOMBuilder.editorialKind(attributes) ?? .quote
+        case "blockquote": kind = HTMLDOMBuilder.editorialKind(attributes) == .pullQuote ? .pullQuote : .quote
         case "pre": kind = .code
         default: kind = .paragraph
         }
         // Standalone linked teasers are navigation, while inline citations remain part of prose.
         guard computeLinkDensity() < 0.8 else { return nil }
-        guard kind != .paragraph || plain.count >= 25 else { return nil }
+        // Short publisher paragraphs stay when they are sentences ("He was 34."); labels and button text do not.
+        guard kind != .paragraph || plain.count >= 25 || (tag == "p" && Self.isShortSentence(flat)) else {
+            return nil
+        }
         return ReaderBlock(
             kind: kind, text: kind == .code ? combinedText().trimmingCharacters(in: .whitespacesAndNewlines) : plain,
-            ordinal: attributes["reader-ordinal"].flatMap(Int.init), inlineRuns: kind == .code ? nil : inlineContent())
+            ordinal: attributes["reader-ordinal"].flatMap(Int.init), inlineRuns: kind == .code ? nil : inlineContent(),
+            level: attributes["reader-level"].flatMap(Int.init))
+    }
+
+    /// Collapses whitespace as the reader shows it: a run holding a publisher line break becomes one newline, any
+    /// other run one space; the ends are trimmed.
+    static func readerWhitespace(_ text: String) -> String {
+        var result = ""
+        var pending: Character?
+        for character in text {
+            if character.isWhitespace {
+                if character == "\u{2028}" || pending == nil { pending = character == "\u{2028}" ? "\n" : " " }
+            } else {
+                if let gap = pending, !result.isEmpty { result.append(gap) }
+                pending = nil
+                result.append(character)
+            }
+        }
+        return result
+    }
+
+    static func isShortSentence(_ text: String) -> Bool {
+        let words = text.split(whereSeparator: \.isWhitespace)
+        guard words.count >= 2, let first = text.first,
+            first.isUppercase || first.isNumber || "\"“‘'".contains(first),
+            let last = text.trimmingCharacters(in: CharacterSet(charactersIn: "\"”’')")).last
+        else { return false }
+        return ".!?…".contains(last)
+    }
+
+    /// Cell text by row for a data table: at least two rows and two columns of short, plain cells. Layout tables
+    /// (cells holding paragraphs, figures or long prose) return nil and are read as ordinary content.
+    func tableRows() -> [[String]]? {
+        guard tag == "table", findNodes(tag: "table").count == 1 else { return nil }
+        var rows = [[String]]()
+        for row in findNodes(tag: "tr") {
+            let cells = row.children.filter { ["td", "th"].contains($0.tag) }
+            guard
+                !cells.contains(where: { cell in
+                    ["p", "div", "figure", "img", "ul", "ol"].contains { !cell.findNodes(tag: $0).isEmpty }
+                })
+            else { return nil }
+            let texts = cells.map {
+                Self.readerWhitespace($0.combinedText()).replacingOccurrences(of: "\n", with: " ")
+            }
+            guard texts.allSatisfy({ $0.count <= 200 }) else { return nil }
+            if texts.contains(where: { !$0.isEmpty }) { rows.append(texts) }
+        }
+        guard rows.count >= 2, rows.map(\.count).max() ?? 0 >= 2 else { return nil }
+        return rows
+    }
+
+    /// A social post embedded as a blockquote (X, Instagram, TikTok, Bluesky, Threads) is a placeholder for the
+    /// publisher's page, not a quote the publisher wrote.
+    func socialEmbed() -> ReaderBlock? {
+        let classes = className
+        guard
+            ["twitter-tweet", "instagram-media", "tiktok-embed", "bluesky-embed", "text-post-media"].contains(where: {
+                classes.contains($0)
+            })
+        else { return nil }
+        let link = findNodes(tag: "a").compactMap { $0.attributes["href"] }.last {
+            ContentExtractionPipeline.readerImageURL($0, baseURL: nil) != nil
+        }
+        let host = link.flatMap { URL(string: $0)?.host?.replacingOccurrences(of: "www.", with: "") }
+        return ReaderBlock(kind: .embed, text: host ?? "Social post", imageURL: link)
     }
 
     var readerImageSource: String? {
@@ -559,6 +677,14 @@ enum HTMLDOMBuilder {
             pattern:
                 #"(?i)pull-?quote|standfirst|(?:^|[-_ ])dek(?:$|[-_ ])|subtitle|sub-?headline|article-summary|intro-text"#
         )) ?? NSRegularExpression()
+
+    /// The reader kind an editorial element's class names: a pull quote, or a standfirst (standfirst, dek, subtitle,
+    /// sub-headline, summary or intro text).
+    static func editorialKind(_ attributes: [String: String]) -> ReaderBlock.Kind? {
+        guard isEditorial(attributes) else { return nil }
+        let identifier = "\(attributes["class"] ?? "") \(attributes["id"] ?? "")"
+        return identifier.range(of: #"(?i)pull-?quote"#, options: .regularExpression) != nil ? .pullQuote : .standfirst
+    }
 
     static func isEditorial(_ attributes: [String: String]) -> Bool {
         let identifier = "\(attributes["class"] ?? "") \(attributes["id"] ?? "")"
@@ -1075,19 +1201,23 @@ final class ContentExtractionPipeline: Sendable {
         candidateParagraphs = candidateParagraphs.map { block in
             var block = block
             if let runs = block.inlineRuns {
+                // The same collapse as `DOMElementNode.readerWhitespace`, across runs: a gap goes before the next word,
+                // in the run that holds it.
                 var normalized = [ReaderInlineRun]()
-                var precedingWhitespace = true
+                var pending: Character?
+                var started = false
                 for var run in runs {
                     var text = ""
                     for character in run.text {
                         if character.isWhitespace {
-                            if !precedingWhitespace {
-                                text += " "
-                                precedingWhitespace = true
+                            if character == "\u{2028}" || pending == nil {
+                                pending = character == "\u{2028}" ? "\n" : " "
                             }
                         } else {
+                            if let gap = pending, started { text.append(gap) }
+                            pending = nil
+                            started = true
                             text.append(character)
-                            precedingWhitespace = false
                         }
                     }
                     run.text = text
