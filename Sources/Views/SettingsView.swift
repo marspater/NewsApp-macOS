@@ -52,7 +52,7 @@ struct SettingsView: View {
     @State private var totalStorageSize: String = "Calculating…"
     @State private var cacheActionMessage: String? = nil
     @State private var cacheActionFailed = false
-    @State private var opmlStatusMessage: String? = nil
+    @State private var pendingClear: StorageClear?
     @State private var showsCatalog = false
     @State private var newMutedSource = ""
     @State private var newMutedTopic = ""
@@ -209,11 +209,8 @@ struct SettingsView: View {
                 Button {
                     OPMLDialogs.importOPML { data in
                         let count = feedManager.importFeeds(from: data)
-                        opmlStatusMessage =
-                            count > 0 ? "Imported \(count) \(count == 1 ? "feed" : "feeds")" : "No new feeds imported"
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
-                            opmlStatusMessage = nil
-                        }
+                        showActionMessage(
+                            count > 0 ? "Imported \(count) \(count == 1 ? "feed" : "feeds")" : "No new feeds imported")
                     }
                 } label: {
                     Label("Import OPML…", systemImage: "square.and.arrow.down")
@@ -230,11 +227,7 @@ struct SettingsView: View {
                 .buttonStyle(.bordered)
                 .controlSize(.small)
 
-                if let msg = opmlStatusMessage {
-                    Text(msg)
-                        .font(AppTypography.caption)
-                        .foregroundStyle(AppColor.success)
-                }
+                actionStatus
 
                 Spacer()
                 Text("\(feedManager.feedURLs.count) \(feedManager.feedURLs.count == 1 ? "feed" : "feeds")")
@@ -726,23 +719,7 @@ struct SettingsView: View {
 
                 Spacer()
 
-                if let message = cacheActionMessage {
-                    // Status colour marks the symbol only; the text stays a label colour (DESIGN.md 11).
-                    Label {
-                        Text(message).foregroundStyle(AppColor.primaryText)
-                    } icon: {
-                        Image(systemName: cacheActionFailed ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
-                            .foregroundStyle(cacheActionFailed ? AppColor.danger : AppColor.success)
-                    }
-                    .font(AppTypography.label)
-                    .padding(.horizontal, AppSpacing.xs)
-                    .padding(.vertical, AppSpacing.xxs)
-                    .background(
-                        RoundedRectangle(cornerRadius: AppRadius.control, style: .continuous).fill(
-                            AppColor.badgeBackground)
-                    )
-                    .transition(.opacity)
-                }
+                actionStatus
             }
             .padding(.horizontal, AppLayout.pageInset)
             .padding(.top, AppSpacing.md)
@@ -792,8 +769,8 @@ struct SettingsView: View {
                             .foregroundStyle(AppColor.secondaryText)
                     }
                     Spacer()
-                    Button("Clear") {
-                        clearArticleData()
+                    Button("Clear…") {
+                        pendingClear = .stories
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
@@ -816,8 +793,8 @@ struct SettingsView: View {
                             .foregroundStyle(AppColor.secondaryText)
                     }
                     Spacer()
-                    Button("Clear") {
-                        clearAIData()
+                    Button("Clear…") {
+                        pendingClear = .analysis
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
@@ -865,9 +842,9 @@ struct SettingsView: View {
                     }
                     Spacer()
                     Button(role: .destructive) {
-                        clearEverythingData()
+                        pendingClear = .all
                     } label: {
-                        Text("Clear All")
+                        Text("Clear All…")
                     }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.small)
@@ -877,6 +854,43 @@ struct SettingsView: View {
             .padding(.bottom, AppSpacing.lg)
         }
         .frame(width: Self.paneWidth)
+        .confirmationDialog(
+            pendingClear?.question ?? "",
+            isPresented: Binding(get: { pendingClear != nil }, set: { if !$0 { pendingClear = nil } }),
+            presenting: pendingClear
+        ) { target in
+            Button(target.action, role: .destructive) {
+                switch target {
+                case .stories: clearArticleData()
+                case .analysis: clearAIData()
+                case .all: clearEverythingData()
+                }
+            }
+        } message: { target in
+            Text(target.consequence)
+        }
+    }
+
+    /// The latest action result in Subscriptions and Storage: status colour marks the symbol only, the text stays a
+    /// label colour (DESIGN.md 11).
+    @ViewBuilder
+    private var actionStatus: some View {
+        if let message = cacheActionMessage {
+            Label {
+                Text(message).foregroundStyle(AppColor.primaryText)
+            } icon: {
+                Image(systemName: cacheActionFailed ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
+                    .foregroundStyle(cacheActionFailed ? AppColor.danger : AppColor.success)
+            }
+            .font(AppTypography.label)
+            .padding(.horizontal, AppSpacing.xs)
+            .padding(.vertical, AppSpacing.xxs)
+            .background(
+                RoundedRectangle(cornerRadius: AppRadius.control, style: .continuous).fill(
+                    AppColor.badgeBackground)
+            )
+            .transition(.opacity)
+        }
     }
 
     // MARK: - 8. Updates Tab
@@ -1033,6 +1047,39 @@ struct SettingsView: View {
                     cacheActionMessage = nil
                 }
             }
+        }
+    }
+}
+
+/// Storage clean-ups that remove stored work the reader would have to wait for again.
+private enum StorageClear: Identifiable {
+    case stories, analysis, all
+
+    var id: Self { self }
+
+    var question: String {
+        switch self {
+        case .stories: return "Clear cached story text?"
+        case .analysis: return "Clear AI analysis data?"
+        case .all: return "Clear all caches?"
+        }
+    }
+
+    var action: String {
+        switch self {
+        case .stories: return "Clear Story Text"
+        case .analysis: return "Clear Analysis"
+        case .all: return "Clear All"
+        }
+    }
+
+    var consequence: String {
+        switch self {
+        case .stories: return "Stories download their text again when opened. Subscriptions and saved stories are kept."
+        case .analysis: return "Summaries, key points and entities are generated again on request."
+        case .all:
+            return
+                "Web cache, story text and AI analysis are removed. Subscriptions, saved stories and read history are kept."
         }
     }
 }
