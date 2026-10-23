@@ -5,6 +5,15 @@ import AppKit
 import Foundation
 import SwiftUI
 
+// Defined in NewsApp.swift, which this standalone runner does not compile; the reader's command modifier uses them.
+extension Notification.Name {
+    static let nextArticleCommand = Notification.Name("nextArticleCommand")
+    static let prevArticleCommand = Notification.Name("prevArticleCommand")
+    static let toggleReadCommand = Notification.Name("toggleReadCommand")
+    static let toggleSaveCommand = Notification.Name("toggleSaveCommand")
+    static let openInBrowserCommand = Notification.Name("openInBrowserCommand")
+}
+
 @main
 @MainActor
 struct EventOverviewAccessibilityTests {
@@ -146,6 +155,16 @@ struct EventOverviewAccessibilityTests {
         )
         let resolvedGhost = EventOverviewReaderView.matchingArticle(for: citationUnresolvable, in: articles)
         assertTrue(resolvedGhost == nil, "Returns nil when citation has no matching member article")
+
+        // 6. Each superscript opens its own source's citation, numbered as under Sources
+        let citations = Dictionary(
+            uniqueKeysWithValues: [citationByURL, citationByID, citationByTitle, citationUnresolvable].map {
+                ($0.id, $0)
+            })
+        let cited = EventOverviewReaderView.citedSources(
+            ["cit_2", "cit_1", "cit_3", "cit_5", "missing"], citations: citations, memberArticles: articles)
+        assertEqual(cited.map(\.index), [1, 2], "Sources are numbered once each, in source order")
+        assertEqual(cited.map(\.citation.id), ["cit_1", "cit_2"], "Source 2 opens its own citation, not the first one")
     }
 
     // MARK: - 2. Sparse Sections Filtering
