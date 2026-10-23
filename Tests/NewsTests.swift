@@ -13556,6 +13556,17 @@ struct NewsTests {
 
     static func testReaderPhaseC(fixtureRoot: URL) async throws {
         print("  - Testing reader v4 formatting, media curation and feed-only structure...")
+        // A paywall-classed paragraph once made reader exclusion ask itself again until the stack overflowed (Bus
+        // error in the live catalog run).
+        let meteredParagraph =
+            "<article><p>Publisher reporting preserves meaningful structure for readers and supplies context today.</p><p class='paywall'>Subscribe to keep reading this story and every other one on the site.</p><p>A second paragraph provides independent details and explains the evidence in the publisher's own words.</p></article>"
+        if case .success(let content, _, _) = ContentExtractionPipeline.shared.extractFromHTML(
+            meteredParagraph, baseUrl: fixtureRoot.appendingPathComponent("news/metered").absoluteString)
+        {
+            assertFalse(content.contains("Subscribe to keep reading"), "A paywall-classed paragraph is furniture")
+        } else {
+            assertTrue(false, "A story with a paywall-classed paragraph extracts")
+        }
         let first =
             "Publisher reporting preserves meaningful structure for readers and supplies enough context to understand this specific event."
         let second =

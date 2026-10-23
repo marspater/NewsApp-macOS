@@ -263,9 +263,10 @@ final class DOMElementNode: Sendable {
         }
         if matches(Self.auxiliaryPattern) { return true }
         // A metering wrapper that still holds the story's paragraphs is the body the page served (Variety's
-        // pmc-paywall); one holding only a subscription prompt is furniture.
+        // pmc-paywall); one holding only a subscription prompt is furniture. Only descendants count: a paywall-classed
+        // <p> reading its own text would ask this property again and recurse until the stack overflows.
         return matches(Self.paywallPattern)
-            && findNodes(tag: "p").filter { $0.combinedText().count >= 80 }.count < 2
+            && children.flatMap { $0.findNodes(tag: "p") }.filter { $0.combinedText().count >= 80 }.count < 2
     }
 
     private static let paywallPattern =

@@ -2,6 +2,8 @@
 
 ## Unreleased — 21 October 2026
 
+- Fix a crash when opening a story whose page marks a paragraph with a paywall class: reader extraction checked that paragraph against itself until the stack overflowed. The live catalog check crashed the same way.
+
 - Event overviews read as one journey: an introduction, Highlights grouped by publisher, a timeline rail, perspective cards and numbered sources, with superscript citations in place of source pills (#481). Sentences no longer split at abbreviations such as "St.", "U.S." or "Dr." or inside an open quote.
 - Story images: the JSON-LD lead image is read before scripts are stripped, feed images are found by file extension and in `data-src`/`data-original`, and `content:encoded` images are kept even without body text; a story without a selected lead shows its first usable extracted image (#481).
 - The starter catalog adds 18 free English feeds (NPR, PBS, Sky, Semafor, Roll Call, Quartz, MarketWatch, The Verge, Wired, 9to5Mac, MacRumors, Smithsonian, Phys.org, Pitchfork, Polygon, ABC Australia and others) and gains category filters, search and publisher monograms (#481).
