@@ -1286,7 +1286,7 @@ actor DatabaseEngine {
     // keeps a stored document that has text, and its content (ReaderDocument.hasPublisherText).
     private static let storedHasPublisherText = """
         EXISTS (SELECT 1 FROM json_each(CASE WHEN json_valid(articles.reader_document)
-            THEN articles.reader_document ELSE '{}' END, '$.blocks') WHERE json_extract(value, '$.kind') <> 'figure')
+            THEN articles.reader_document ELSE '{}' END, '$.blocks') WHERE json_extract(value, '$.kind') NOT IN ('figure', 'divider', 'embed'))
         """
 
     private static let articleUpsertSQL = """

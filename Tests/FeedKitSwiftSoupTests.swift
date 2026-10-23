@@ -89,8 +89,8 @@ enum FeedKitSwiftSoupTests {
             editorial.content?.contains("repairs will finish before winter") == true,
             "A header standfirst is kept inside the article")
         check(
-            editorial.document?.blocks.contains { $0.kind == .quote && $0.text.hasPrefix("The structure") } == true,
-            "An aside pull quote becomes a quote block")
+            editorial.document?.blocks.contains { $0.kind == .pullQuote && $0.text.hasPrefix("The structure") } == true,
+            "An aside pull quote becomes a pull quote block")
         check(editorial.content?.contains("Other coverage") == false, "Related-story asides stay excluded")
         let hydrated = """
             <html><head><script id="__NEXT_DATA__" type="application/json">{"props":{"pageProps":{"story":

@@ -485,6 +485,7 @@ struct NewsTests {
         if CommandLine.arguments.contains("--story-regressions") {
             try await testReaderPhaseC(fixtureRoot: fixtureRoot)
             try await testReaderFigures(fixtureRoot: fixtureRoot)
+            testReaderExtractionFidelity(fixtureRoot: fixtureRoot)
             try await testCanonicalArticleIngestion(fixtureRoot: fixtureRoot)
             try await testPersistentArticleAliases(fixtureRoot: fixtureRoot)
             try await testBatchStateAliasResolution()
@@ -571,6 +572,7 @@ struct NewsTests {
         try await testWorldTension()
         try await testUndatedArticleOrdering()
         try await testReaderFigures(fixtureRoot: fixtureRoot)
+        testReaderExtractionFidelity(fixtureRoot: fixtureRoot)
         await testReaderParsingRegressions()
         await testStructuredReaderAndTags()
         await testReaderStoreUpdates()
@@ -1796,8 +1798,8 @@ struct NewsTests {
         assertEqual(
             document.blocks.filter { $0.kind == .listItem }.map(\.ordinal), [3, 4], "Ordered lists retain numbering")
         assertTrue(
-            document.blocks.contains { $0.kind == .quote && $0.text.contains("stable. We") },
-            "Quote paragraphs retain word boundaries")
+            document.blocks.contains { $0.kind == .quote && $0.text.contains("stable.\nWe") },
+            "Quote paragraphs keep their break")
         assertTrue(document.blocks.contains { $0.kind == .code && $0.text.contains("\n") }, "Code retains line breaks")
         for unwanted in [
             "USER COMMENT", "Other report", "Another report", "newsletter", "PODCAST", "Related topics",
@@ -4581,6 +4583,98 @@ struct NewsTests {
         // Legacy reconciliation
         let reconciled = ArticleIdentity.reconcileLegacyId("http://test.com/path/?utm_source=newsletter")
         assertEqual(reconciled, "https://test.com/path", "Should reconcile legacy URL")
+    }
+
+    static func testReaderExtractionFidelity(fixtureRoot: URL) {
+        print("  - Testing reader v10 structure: short paragraphs, line breaks, lists, quotes, tables and embeds...")
+        let first =
+            "Publisher reporting preserves meaningful structure for readers and supplies enough context to understand this specific event."
+        let second =
+            "A second paragraph provides independent details and explains the evidence without substituting any generated prose for the publisher's words."
+        // Stories are mostly prose; the quality gate rejects pages made mainly of short lines.
+        let third =
+            "A third paragraph closes the report with the reaction of officials and the steps they announced for next week."
+        let base = fixtureRoot.appendingPathComponent("news/story").absoluteString
+        func blocks(_ body: String) -> [ReaderBlock] {
+            guard
+                case .success(_, _, let document) = ContentExtractionPipeline.shared.extractFromHTML(
+                    "<article><p>\(first)</p>\(body)<p>\(second)</p><p>\(third)</p></article>", baseUrl: base),
+                let document
+            else {
+                assertTrue(false, "Fixture extracts: \(body.prefix(40))")
+                return []
+            }
+            return document.blocks
+        }
+
+        let short = blocks("<p>He was 34.</p><p>Share</p>")
+        assertTrue(short.contains { $0.kind == .paragraph && $0.text == "He was 34." }, "A short sentence is kept")
+        assertFalse(short.contains { $0.text == "Share" }, "A one-word label is not a paragraph")
+
+        let verse = blocks("<p><strong>Roses</strong> are red,<br>violets are <a href='/blue'>blue</a>.</p>")
+            .first { $0.text.hasPrefix("Roses") }
+        assertEqual(verse?.text, "Roses are red,\nviolets are blue.", "A line break inside a paragraph is kept")
+        assertTrue(verse?.inlineRuns?.contains { $0.strong } == true, "Bold survives a line break")
+        assertTrue(verse?.inlineRuns?.contains { $0.link != nil } == true, "Links survive a line break")
+        let wrapped = blocks("<p>Source formatting wraps this\n   sentence across two lines of markup.</p>")
+        assertTrue(
+            wrapped.contains { $0.text == "Source formatting wraps this sentence across two lines of markup." },
+            "Newlines in the markup stay spaces")
+
+        let unordered = blocks(
+            "<ul><li>First item in the outer list<ul><li>Nested item one</li><li>Nested item two</li></ul></li><li>Second outer item</li></ul>"
+        ).filter { $0.kind == .listItem }
+        assertEqual(
+            unordered.map(\.text),
+            ["First item in the outer list", "Nested item one", "Nested item two", "Second outer item"],
+            "Nested list items follow their parent instead of joining its text")
+        assertEqual(unordered.map(\.level), [nil, 1, 1, nil], "Nested items are one level deeper")
+        let ordered = blocks("<ol><li>Step one of the method<ol><li>Sub step</li></ol></li><li>Step two</li></ol>")
+            .filter { $0.kind == .listItem }
+        assertEqual(ordered.map(\.ordinal), [1, 1, 2], "Each ordered list keeps its own numbering")
+        assertEqual(ordered.map(\.level), [nil, 1, nil], "Ordered sub-steps are nested")
+
+        let quoted = blocks(
+            "<blockquote><p>First quoted paragraph from the source.</p><p>Second quoted paragraph from it.</p></blockquote>"
+                + "<aside class='pull-quote'>A line pulled from the story itself for display.</aside>"
+                + "<aside class='standfirst'>The page's own standfirst under the headline.</aside>"
+                + "<blockquote class='twitter-tweet'><p>A post embedded in the story for this check.</p><a href='https://twitter.com/user/status/1'>Link</a></blockquote>"
+        )
+        assertEqual(
+            quoted.first { $0.kind == .quote }?.text,
+            "First quoted paragraph from the source.\nSecond quoted paragraph from it.",
+            "A multi-paragraph quote keeps its paragraph breaks")
+        assertTrue(quoted.contains { $0.kind == .pullQuote }, "A pull-quote aside is a pull quote")
+        assertTrue(quoted.contains { $0.kind == .standfirst }, "A standfirst aside is a standfirst, not a quote")
+        let post = quoted.first { $0.kind == .embed }
+        assertEqual(post?.text, "twitter.com", "An embedded post names its host")
+        assertEqual(post?.imageURL, "https://twitter.com/user/status/1", "An embedded post keeps its address")
+
+        let table = blocks(
+            "<table><tr><th>Team</th><th>Wins</th></tr><tr><td>Team A</td><td>3</td></tr><tr><td>Team B</td><td>2</td></tr></table>"
+        ).first { $0.kind == .table }
+        assertEqual(table?.text, "Team\tWins\nTeam A\t3\nTeam B\t2", "A data table keeps its rows and cells")
+        assertEqual(table?.ordinal, 1, "A th first row is the header")
+        let layout = blocks("<table><tr><td><p>\(first) Laid out inside a table cell.</p></td></tr></table>")
+        assertFalse(layout.contains { $0.kind == .table }, "A layout table is read as ordinary content")
+        assertTrue(layout.contains { $0.text.hasSuffix("Laid out inside a table cell.") }, "Layout table prose is kept")
+
+        let script =
+            blocks("<p>Water is H<sub>2</sub>O and the plot covers 5 km<sup>2</sup> in total area.</p>")
+            .first { $0.text.hasPrefix("Water") }?.inlineRuns ?? []
+        assertTrue(script.contains { $0.text == "2" && $0.baselineShift == -1 }, "Subscript is marked")
+        assertTrue(script.contains { $0.text == "2" && $0.baselineShift == 1 }, "Superscript is marked")
+
+        let stamped = blocks("<p>(Updated: 21 Oct 2026 05:12PM)</p><p>Updated rules take effect in March.</p>")
+        assertFalse(stamped.contains { $0.text.hasPrefix("(Updated") }, "A plain update stamp is not story text")
+        assertTrue(
+            stamped.contains { $0.text == "Updated rules take effect in March." }, "A sentence about updates stays")
+
+        let stored =
+            #"{"version":9,"blocks":[{"kind":"paragraph","text":"Old text"},{"kind":"hologram","text":"Later"}]}"#
+        let decoded = try? JSONDecoder().decode(ReaderDocument.self, from: Data(stored.utf8))
+        assertEqual(decoded?.blocks.map(\.kind), [.paragraph, .paragraph], "Stored and unknown kinds still decode")
+        assertEqual(decoded?.blocks.first?.level, nil, "Documents without new fields decode")
     }
 
     static func testReaderFigures(fixtureRoot: URL) async throws {
