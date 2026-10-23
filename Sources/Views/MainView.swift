@@ -442,6 +442,7 @@ private struct ArchiveSearchToolbar<Suggestions: View>: ViewModifier {
     let archiveQuery: String
     let presentSearch: () -> Void
     let suggestions: Suggestions
+    @Environment(\.effectiveReduceMotion) private var reduceMotion
 
     func body(content: Content) -> some View {
         content
@@ -454,7 +455,7 @@ private struct ArchiveSearchToolbar<Suggestions: View>: ViewModifier {
             .searchSuggestions { suggestions }
             .focusedSceneValue(\.archiveSearch, presentSearch)
             .background(
-                CompactArchiveSearch(expanded: searchPresented || !archiveQuery.isEmpty)
+                CompactArchiveSearch(expanded: searchPresented || !archiveQuery.isEmpty, animates: !reduceMotion)
                     .frame(width: 0, height: 0)
             )
     }
@@ -464,15 +465,18 @@ private struct ArchiveSearchToolbar<Suggestions: View>: ViewModifier {
 /// macOS exposes automatic space-based collapse, but no SwiftUI always-collapsed search behavior.
 private struct CompactArchiveSearch: NSViewRepresentable {
     let expanded: Bool
+    let animates: Bool
     func makeNSView(context _: Context) -> SearchSizer { SearchSizer() }
     func updateNSView(_ view: SearchSizer, context _: Context) {
         view.expanded = expanded
+        view.animates = animates
         view.scheduleUpdate()
     }
     static func dismantleNSView(_ view: SearchSizer, coordinator _: ()) { view.width?.isActive = false }
 
     final class SearchSizer: NSView {
         var expanded = false
+        var animates = true
         var width: NSLayoutConstraint?
         weak var field: NSSearchField?
         override func viewDidMoveToWindow() {
@@ -492,7 +496,7 @@ private struct CompactArchiveSearch: NSViewRepresentable {
                     lessThanOrEqualToConstant: AppLayout.archiveSearchCollapsedWidth)
                 width?.priority = .init(999)
             }
-            if window != nil {
+            if window != nil, animates {
                 NSAnimationContext.runAnimationGroup { context in
                     context.duration = 0.22
                     context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)

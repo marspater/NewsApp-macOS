@@ -470,8 +470,9 @@ struct EventOverviewReaderView: View {
         .accessibilityLabel(Self.leadImageAccessibilityLabel(leadImage))
     }
 
-    private func sourceIndex(for citation: OverviewCitation) -> Int? {
-        if let match = matchingArticle(for: citation),
+    /// The 1-based number of the member article a citation comes from, as listed under Sources.
+    static func sourceIndex(for citation: OverviewCitation, in memberArticles: [FeedArticle]) -> Int? {
+        if let match = matchingArticle(for: citation, in: memberArticles),
             let idx = memberArticles.firstIndex(where: { $0.id == match.id })
         {
             return idx + 1
@@ -487,21 +488,29 @@ struct EventOverviewReaderView: View {
         return nil
     }
 
-    private func sourceIndices(for citationIDs: [String]) -> [Int] {
-        let indices = citationIDs.compactMap { citID -> Int? in
-            guard let citation = overview.citations[citID] else { return nil }
-            return sourceIndex(for: citation)
+    /// Each cited source number once, in source order, paired with the item's first citation from that source,
+    /// so a superscript opens its own source's passage.
+    static func citedSources(
+        _ citationIDs: [String], citations: [String: OverviewCitation], memberArticles: [FeedArticle]
+    ) -> [(index: Int, citation: OverviewCitation)] {
+        var seen = Set<Int>()
+        return citationIDs.compactMap { id -> (index: Int, citation: OverviewCitation)? in
+            guard let citation = citations[id], let index = sourceIndex(for: citation, in: memberArticles),
+                seen.insert(index).inserted
+            else { return nil }
+            return (index, citation)
         }
-        return Array(Set(indices)).sorted()
+        .sorted { $0.index < $1.index }
+    }
+
+    private func citedSources(_ citationIDs: [String]) -> [(index: Int, citation: OverviewCitation)] {
+        Self.citedSources(citationIDs, citations: overview.citations, memberArticles: memberArticles)
     }
 
     @ViewBuilder
-    private func superscriptCitationButton(_ index: Int, citation: OverviewCitation?) -> some View {
+    private func superscriptCitationButton(_ index: Int, citation: OverviewCitation) -> some View {
         Button {
-            if let citation {
-                let match = matchingArticle(for: citation)
-                onSelectCitation(citation, match)
-            }
+            onSelectCitation(citation, matchingArticle(for: citation))
         } label: {
             Text("[\(index)]")
                 .font(AppTypography.overviewFont(.micro, scale: textScale))
@@ -510,8 +519,8 @@ struct EventOverviewReaderView: View {
                 .bold()
         }
         .buttonStyle(.plain)
-        .help("Jump to source [\(index)]: \(citation?.sourceName ?? "Source")")
-        .accessibilityLabel("Citation \(index), \(citation?.sourceName ?? "source")")
+        .help("Jump to source [\(index)]: \(citation.sourceName ?? "Source")")
+        .accessibilityLabel("Citation \(index), \(citation.sourceName ?? "source")")
     }
 
     struct ClusteredHighlightGroup: Identifiable {
@@ -580,7 +589,7 @@ struct EventOverviewReaderView: View {
 
     @ViewBuilder
     private func factWithSuperscript(_ fact: OverviewFact) -> some View {
-        let indices = sourceIndices(for: fact.citationIDs)
+        let sources = citedSources(fact.citationIDs)
         HStack(alignment: .firstTextBaseline, spacing: AppSpacing.xxs) {
             Text(fact.text)
                 .font(AppTypography.overviewFont(.fact, scale: textScale))
@@ -589,9 +598,8 @@ struct EventOverviewReaderView: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .textSelection(.enabled)
 
-            ForEach(indices, id: \.self) { idx in
-                superscriptCitationButton(
-                    idx, citation: fact.citationIDs.compactMap { overview.citations[$0] }.first)
+            ForEach(sources, id: \.index) { source in
+                superscriptCitationButton(source.index, citation: source.citation)
             }
         }
     }
@@ -897,10 +905,9 @@ struct EventOverviewReaderView: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .textSelection(.enabled)
 
-            let indices = sourceIndices(for: item.citationIDs)
-            ForEach(indices, id: \.self) { idx in
-                superscriptCitationButton(
-                    idx, citation: item.citationIDs.compactMap { overview.citations[$0] }.first)
+            let sources = citedSources(item.citationIDs)
+            ForEach(sources, id: \.index) { source in
+                superscriptCitationButton(source.index, citation: source.citation)
             }
         }
     }
@@ -937,10 +944,9 @@ struct EventOverviewReaderView: View {
                                     .foregroundStyle(currentTertiaryTextColor)
                             }
 
-                            let indices = sourceIndices(for: perspective.citationIDs)
-                            ForEach(indices, id: \.self) { idx in
-                                superscriptCitationButton(
-                                    idx, citation: perspective.citationIDs.compactMap { overview.citations[$0] }.first)
+                            let sources = citedSources(perspective.citationIDs)
+                            ForEach(sources, id: \.index) { source in
+                                superscriptCitationButton(source.index, citation: source.citation)
                             }
                         }
 
@@ -985,11 +991,10 @@ struct EventOverviewReaderView: View {
                 if !validAngleFacts.isEmpty {
                     thematicAngleFactsView(validAngleFacts)
                 } else if !angle.citationIDs.isEmpty {
-                    let indices = sourceIndices(for: angle.citationIDs)
+                    let sources = citedSources(angle.citationIDs)
                     HStack(spacing: AppSpacing.xxs) {
-                        ForEach(indices, id: \.self) { idx in
-                            superscriptCitationButton(
-                                idx, citation: angle.citationIDs.compactMap { overview.citations[$0] }.first)
+                        ForEach(sources, id: \.index) { source in
+                            superscriptCitationButton(source.index, citation: source.citation)
                         }
                     }
                 }
