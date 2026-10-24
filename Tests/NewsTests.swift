@@ -13586,6 +13586,12 @@ struct NewsTests {
             "0 new articles from 1 source", "Edge case: 0 articles, 1 source")
 
         // 3. Importance computation range [0.0, 1.0]
+        assertEqual(
+            NotificationService.breakingSignalCount(in: "Studies show diesel bodies replacement"), 0,
+            "Signal words match whole words only")
+        assertEqual(
+            NotificationService.breakingSignalCount(in: "Man dies in attack, police say"), 2,
+            "Whole-word signals still count")
         let score = service.computeImportance(
             title: "Breaking News: Major Crisis Declared", description: "Officials announce emergency response.")
         assertTrue(score >= 0.0 && score <= 1.0, "Score must be bounded between 0.0 and 1.0")
