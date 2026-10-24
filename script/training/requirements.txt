@@ -1,4 +1,5 @@
-# Mars's Mac only, never CI (#525). Python 3.13: coremltools 9.0 has no native build for 3.14 and is tested up to torch 2.7.
-torch==2.7.1
-transformers==4.56.2
+# Mars's Mac only, never CI (#525). Python 3.13: coremltools 9.0 has no native build for 3.14. torch and transformers
+# are pinned past their security advisories (torch < 2.13.0, transformers <= 5.8.1); the export was checked on these.
+torch==2.14.1
+transformers==5.20.2
 coremltools==9.0

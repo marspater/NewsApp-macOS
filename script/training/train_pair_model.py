@@ -24,7 +24,12 @@ import zlib
 import coremltools as ct
 import numpy as np
 import torch
-from transformers import BertConfig, BertForSequenceClassification, BertModel, get_linear_schedule_with_warmup
+from transformers import (
+    BertConfig,
+    BertForSequenceClassification,
+    BertModel,
+    get_linear_schedule_with_warmup,
+)
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 SHIPPED = ROOT / 'Sources/Resources/Models/minilm.mlmodelc'
@@ -267,7 +272,8 @@ class Scorer(torch.nn.Module):
         hidden = bert.embeddings.LayerNorm(embeddings)
         blocked = (1.0 - attention_mask[:, None, None, :].to(hidden.dtype)) * -10000.0
         for layer in bert.encoder.layer:
-            hidden = layer(hidden, attention_mask=blocked)[0]
+            output = layer(hidden, attention_mask=blocked)
+            hidden = output[0] if isinstance(output, tuple) else output  # transformers 5 returns the tensor alone
         logits = self.model.classifier(bert.pooler(hidden))
         return torch.sigmoid(logits[:, 0])
 

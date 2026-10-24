@@ -4,6 +4,13 @@ import Foundation
 import os
 
 /// Pure-Swift WordPiece tokenizer for standard BERT / MiniLM / BGE vocabularies.
+/// One pair of texts as the pair model reads it (#525).
+struct PairEncoding: Equatable, Sendable {
+    var inputIDs: [Int32]
+    var attentionMask: [Int32]
+    var tokenTypeIDs: [Int32]
+}
+
 final class BertWordPieceTokenizer: Sendable {
     private let vocab: [String: Int]
     private let unkTokenId: Int
@@ -66,9 +73,7 @@ final class BertWordPieceTokenizer: Sendable {
 
     /// `[CLS] a [SEP] b [SEP]` with longest-first truncation (b on ties), type ids 0 then 1, padded to
     /// `maxSequenceLength`. `script/training/train_pair_model.py` encodes its training pairs exactly so (#525).
-    func encodePair(_ a: String, _ b: String, maxSequenceLength: Int = 256)
-        -> (inputIDs: [Int32], attentionMask: [Int32], tokenTypeIDs: [Int32])
-    {
+    func encodePair(_ a: String, _ b: String, maxSequenceLength: Int = 256) -> PairEncoding {
         var first = pieces(a)
         var second = pieces(b)
         while first.count + second.count > maxSequenceLength - 3 {
@@ -77,11 +82,12 @@ final class BertWordPieceTokenizer: Sendable {
         let ids = [clsTokenId] + first + [sepTokenId] + second + [sepTokenId]
         let padding = max(0, maxSequenceLength - ids.count)
         let types = Array(repeating: 0, count: first.count + 2) + Array(repeating: 1, count: second.count + 1)
-        return (
-            (ids + Array(repeating: padTokenId, count: padding)).map { Int32($0) },
-            (Array(repeating: 1, count: ids.count) + Array(repeating: 0, count: padding)).map { Int32($0) },
-            (types + Array(repeating: 0, count: padding)).map { Int32($0) }
-        )
+        return PairEncoding(
+            inputIDs: (ids + Array(repeating: padTokenId, count: padding)).map { Int32($0) },
+            attentionMask: (Array(repeating: 1, count: ids.count) + Array(repeating: 0, count: padding)).map {
+                Int32($0)
+            },
+            tokenTypeIDs: (types + Array(repeating: 0, count: padding)).map { Int32($0) })
     }
 
     /// BERT's uncased basic tokenizer lowercases and strips accents: the vocabulary holds "erdogan" and "sanchez",
