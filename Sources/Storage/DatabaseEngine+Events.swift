@@ -625,21 +625,65 @@ extension DatabaseEngine {
             {
                 throw Self.eventError("An event changed before it could be merged")
             }
-            let now = date.timeIntervalSince1970
-            try eventRows(
-                "UPDATE event_members SET event_id = ?, joined_version = ? WHERE event_id = ?;",
-                [.text(survivor.id), .integer(survivor.version + 1), .text(absorbed.id)])
-            let moved = sqlite3_changes(db) > 0
-            // Forwards stay one hop deep.
-            try eventRows(
-                "UPDATE events SET merged_into = ? WHERE merged_into = ?;", [.text(survivor.id), .text(absorbed.id)])
-            try eventRows(
-                "UPDATE events SET merged_into = ?, membership_version = membership_version + 1, updated_at = ? WHERE id = ?;",
-                [.text(survivor.id), .real(now), .text(absorbed.id)])
-            if moved { try bumpMembershipVersion(survivor.id, at: now) }
+            try moveMembers(of: absorbed, into: survivor, at: date.timeIntervalSince1970)
             return survivor.id
         }
         return try requireEvent(id)
+    }
+
+    /// "Same event": merges `sourceEventID` into `targetEventID` and records an inclusion for every pair across
+    /// them, so later passes keep them together (#524). An exclusion of such a pair is dropped: the newer correction
+    /// wins, as `separateArticle` drops inclusions.
+    @discardableResult
+    func includeEvent(_ sourceEventID: String, inEvent targetEventID: String, at date: Date = Date()) throws
+        -> StoryEvent
+    {
+        let id = try inEventTransaction { () throws -> String in
+            let target = try liveEvent(targetEventID)
+            let source = try liveEvent(sourceEventID)
+            guard source.id != target.id else { return target.id }
+            func members(_ eventID: String) throws -> [String] {
+                try eventRows("SELECT article_id FROM event_members WHERE event_id = ?;", [.text(eventID)])
+                    .compactMap { $0[0] }
+            }
+            let now = date.timeIntervalSince1970
+            let staying = try members(target.id)
+            let incoming = try members(source.id)
+            guard staying.count + incoming.count <= EventMatchPolicy.standard.maximumEventSize else {
+                throw Self.eventError("A combined event would exceed the event size limit")
+            }
+            for moving in incoming {
+                for other in staying {
+                    let (low, high) = moving < other ? (moving, other) : (other, moving)
+                    try eventRows(
+                        "DELETE FROM event_exclusions WHERE article_id = ? AND other_article_id = ?;",
+                        [.text(low), .text(high)])
+                    try eventRows(
+                        "INSERT OR REPLACE INTO event_inclusions(article_id, other_article_id, created_at) VALUES (?, ?, ?);",
+                        [.text(low), .text(high), .real(now)])
+                }
+            }
+            try moveMembers(of: source, into: target, at: now)
+            return target.id
+        }
+        return try requireEvent(id)
+    }
+
+    /// Moves every member of `absorbed` into `survivor` and forwards the absorbed ID; inside a transaction.
+    private func moveMembers(
+        of absorbed: (id: String, version: Int), into survivor: (id: String, version: Int), at now: TimeInterval
+    ) throws {
+        try eventRows(
+            "UPDATE event_members SET event_id = ?, joined_version = ? WHERE event_id = ?;",
+            [.text(survivor.id), .integer(survivor.version + 1), .text(absorbed.id)])
+        let moved = sqlite3_changes(db) > 0
+        // Forwards stay one hop deep.
+        try eventRows(
+            "UPDATE events SET merged_into = ? WHERE merged_into = ?;", [.text(survivor.id), .text(absorbed.id)])
+        try eventRows(
+            "UPDATE events SET merged_into = ?, membership_version = membership_version + 1, updated_at = ? WHERE id = ?;",
+            [.text(survivor.id), .real(now), .text(absorbed.id)])
+        if moved { try bumpMembershipVersion(survivor.id, at: now) }
     }
 
     /// Moves some members into a new event with its own stable ID. The original keeps its ID and the
@@ -982,6 +1026,15 @@ extension DatabaseEngine {
 
     /// A symmetric exclusion snapshot for stored member IDs, in bounded SQLite batches.
     func eventExclusions(for articleIDs: [String]) throws -> [String: Set<String>] {
+        try correctedPairs(in: "event_exclusions", for: articleIDs)
+    }
+
+    /// Pairs the reader put in one event ("Same Event", #524), both directions.
+    func eventInclusions(for articleIDs: [String]) throws -> [String: Set<String>] {
+        try correctedPairs(in: "event_inclusions", for: articleIDs)
+    }
+
+    private func correctedPairs(in table: String, for articleIDs: [String]) throws -> [String: Set<String>] {
         let ids = Set(articleIDs).sorted()
         var exclusions: [String: Set<String>] = [:]
         for start in stride(from: 0, to: ids.count, by: 400) {
@@ -990,7 +1043,7 @@ extension DatabaseEngine {
             let placeholders = Array(repeating: "?", count: slice.count).joined(separator: ",")
             let rows = try eventRows(
                 """
-                SELECT article_id, other_article_id FROM event_exclusions
+                SELECT article_id, other_article_id FROM \(table)
                 WHERE article_id IN (\(placeholders)) OR other_article_id IN (\(placeholders));
                 """, (slice + slice).map { .text($0) })
             for row in rows {
@@ -1089,8 +1142,16 @@ extension DatabaseEngine {
             try eventRows(
                 "DELETE FROM event_members WHERE article_id = ? AND event_id = ?;", [.text(member), .text(target.id)])
             try bumpMembershipVersion(target.id, at: now)
-            for other in members where other != member {
+            // Undoing "Same Event" separates the story from the side it was combined with; its own event's other
+            // reports stay free to form that event again (#524).
+            let others = members.filter { $0 != member }
+            let combined = try eventInclusions(for: [member])[member] ?? []
+            let partners = others.filter { combined.contains($0) }
+            for other in partners.isEmpty ? others : partners {
                 let (low, high) = member < other ? (member, other) : (other, member)
+                try eventRows(
+                    "DELETE FROM event_inclusions WHERE article_id = ? AND other_article_id = ?;",
+                    [.text(low), .text(high)])
                 try eventRows(
                     "INSERT OR IGNORE INTO event_exclusions(article_id, other_article_id, created_at) VALUES (?, ?, ?);",
                     [.text(low), .text(high), .real(now)])

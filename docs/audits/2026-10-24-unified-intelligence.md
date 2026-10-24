@@ -60,6 +60,19 @@ No measured matcher number changes.
 
 Review fixes before merge: a saved refusal estimate no longer blocks the estimate of a newer headline set, and is not counted as an assessed day in the past-month comparison; the estimate is saved only if no assessment was saved meanwhile (checked inside the database actor); the in-process memo of refused inputs applies only while an assessment exists and not to Reassess. One banner per event applies to full notifications only (the summary modes still count every story and source), and its scoring runs off the main actor and only when notifications are on.
 
+## PR 4 (#524): fitted head measured and not adopted; "Same Event" inclusions (schema v25)
+
+`script/evaluation/fit_pair_head.py` (standard library) fits an L2 logistic regression over the exported pair features on tune's conflict-free pairs (hard conflicts keep vetoing), picks the lowest threshold with tune precision ≥ 0.95, and scores the holdout once. Pair level, private exports of the final #527 run:
+
+| | Tune | Holdout |
+| --- | --- | --- |
+| Shipped rule (`is_match`) | precision 1.000, recall 0.419 (TP 39 / FP 0) | precision 0.875, recall 0.553 (TP 21 / FP 3) |
+| Fitted head, threshold 0.698 | precision 0.961, recall 0.527 (TP 49 / FP 2) | precision 0.776, recall 1.000 (TP 38 / FP 11) |
+
+Gate 2 fails: holdout precision drops. The result does not move with the regularization (0.3, 1, 3) or a tune precision target of 1.0 (holdout precision 0.80–0.83). Tune has only 59 conflict-free pairs, 9 of them different events, and the 12 conflict-free holdout negatives look like positives on these features. As #524 provides, the head is not shipped, so per-user calibration of it is not built either; the script stays as the measurement. The clustering replay never ran with a head because the pair screen already fails.
+
+Inclusions: `event_inclusions` mirrors `event_exclusions`. "Same Event" on an "Earlier in This Story" row merges that event into the open one and records every pair across them; `EventMatcher.forced` makes a recorded pair a match inside the clusterer's `assessed`, which covers joining, creating, revalidation and fragment merging. Inclusion is transitive in every admission path: a report that matches one side is the same event as the other side, so later reports still join (without it, joining's all-pairs rule froze a combined event). Separation drops the member's inclusions and excludes it only from the side it was combined with, so its own event can form again; inclusion drops exclusions of the pairs it records, so the newer correction wins. The combine respects the 100-member cap, revalidation reads inclusions fresh, the matcher's own verdict is what `pair_assessments` records, and combining marks the event seen. `testEventInclusions` covers a vote and its protest that the rules keep apart: combined, the retitled vote report is re-matched into the event, a later vote report joins, separated a report is excluded only from the protest side, included again it returns. The story-row variant ("Same Event as…" with up to three related events) and `--export-pairs` are not in this PR: the first needs the related events before the context menu opens, the second has its consumer in #525.
+
 ## Limits
 
 - The act-class table encodes the corpus convention (one act, one event); it is small and tested, and every miss costs recall, never precision.
