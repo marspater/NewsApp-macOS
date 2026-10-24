@@ -10485,11 +10485,11 @@ struct NewsTests {
         assertTrue(events["acts-1"] != nil && events["acts-1"] == events["acts-2"], "Both vote reports share an event")
         assertTrue(events["acts-3"] != nil && events["acts-3"] == events["acts-4"], "Both protest reports share one")
         assertTrue(events["acts-1"] != events["acts-3"], "The vote and the protest are different events")
-        let related = try await db.eventRows(
-            "SELECT count(*) FROM pair_assessments WHERE decision = 'related-act';").first?[0]
+        let relatedRows = try await db.eventRows("SELECT count(*) FROM pair_assessments WHERE decision = 'related-act';")
+        let related = relatedRows.first?[0]
         assertTrue((related.flatMap(Int.init) ?? 0) >= 1, "A vote/protest pair is recorded as a related act")
-        let matches = try await db.eventRows(
-            "SELECT count(*) FROM pair_assessments WHERE decision = 'match';").first?[0]
+        let matchRows = try await db.eventRows("SELECT count(*) FROM pair_assessments WHERE decision = 'match';")
+        let matches = matchRows.first?[0]
         assertTrue((matches.flatMap(Int.init) ?? 0) >= 2, "The matching pairs inside each event are recorded")
         if let protestEvent = events["acts-3"], let voteEvent = events["acts-1"] {
             let links = try await db.relatedActEvents(eventID: protestEvent)
@@ -10996,8 +10996,9 @@ struct NewsTests {
             if CommandLine.arguments.contains("--export-features") {
                 let pairs = try await exportPairFeatures(
                     items: items.map {
-                        (id: $0.id, title: $0.title, description: $0.description ?? "", published: $0.published,
-                         event: $0.event)
+                        PairExportItem(
+                            id: $0.id, title: $0.title, description: $0.description ?? "", published: $0.published,
+                            event: $0.event)
                     },
                     predicted: predicted, split: split, outputDirectory: outputDirectory)
                 print("    exported \(pairs) candidate pairs with features for the fit (#524)")
@@ -11023,9 +11024,16 @@ struct NewsTests {
     /// One CSV row per pair within the candidate window that shares a specific anchor or a gold event: the matcher's
     /// pair features, the act classes and the labels, for the offline fit of the decision head (#524). Corpus ids
     /// only; no publisher text. Requires `NEWS_EVENT_OUTPUT` and refuses to overwrite.
+    struct PairExportItem {
+        let id: String
+        let title: String
+        let description: String
+        let published: Date
+        let event: String?
+    }
+
     static func exportPairFeatures(
-        items: [(id: String, title: String, description: String, published: Date, event: String?)],
-        predicted: [String?], split: String, outputDirectory: String?
+        items: [PairExportItem], predicted: [String?], split: String, outputDirectory: String?
     ) async throws -> Int {
         guard let outputDirectory else {
             throw StoryCorpus.Failure.invalid("--export-features needs NEWS_EVENT_OUTPUT")
@@ -11044,7 +11052,8 @@ struct NewsTests {
         ]
         for i in items.indices {
             for j in items.indices where j > i {
-                let a = extracted[i], b = extracted[j]
+                let a = extracted[i]
+                let b = extracted[j]
                 let gap = abs(a.date.timeIntervalSince(b.date))
                 guard gap <= EventCandidatePolicy.standard.window else { continue }
                 var cosine: Double? = nil
