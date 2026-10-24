@@ -316,6 +316,7 @@ Open a section before changing that area. Each rule is load-bearing; tests cover
 <summary><b>Intelligence, catalog, World Tension</b></summary>
 
 - `NaturalLanguage` + conditional `FoundationModels`, fixed 12-category taxonomy, plain-text model contracts with strict parsing and extractive fallbacks. v20 stamps the macOS build; a model change invalidates generated summaries, not publisher excerpts.
+- Only the reader summary calls the on-device model; ingestion, classification, search and clustering never do. `NewsTextModel.onDevice` maps every `LanguageModelSession.GenerationError` to one outcome: `Rejected` (guardrails, refusal, context window, unsupported language, undecodable output) is final and the extractive result stands; `TemporarilyUnavailable` (model off, downloading, busy, rate limited) keeps a provisional result that is redone when the summary is next opened. Only the outcome label is logged, never text. Publisher category hints match whole words only.
 
 - Persist only intelligence that product behavior needs; keep model identifiers, analysis versions and deterministic fallbacks.
 

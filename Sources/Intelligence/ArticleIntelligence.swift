@@ -46,82 +46,88 @@ public enum NewsCategory: String, CaseIterable, Sendable, Codable {
         guard !trimmed.isEmpty else { return nil }
 
         if let exact = matchExact(trimmed) { return exact }
-        let lower = trimmed.lowercased()
-        if let highPriority = matchHighPriorityOverlap(lower) { return highPriority }
-        let tokens = Set(lower.components(separatedBy: CharacterSet.alphanumerics.inverted).filter { !$0.isEmpty })
-        return matchSynonyms(lower, tokens: tokens)
+        // Whole words only: "Wildlife" is not Lifestyle, "Stockholm" is not Business and "Homeland" is not a home.
+        let padded = MuteRules.paddedPhrase(trimmed)
+        if let highPriority = matchHighPriorityOverlap(padded) { return highPriority }
+        return matchSynonyms(padded)
     }
 
     private static func matchExact(_ trimmed: String) -> NewsCategory? {
         allCases.first { $0.rawValue.localizedCaseInsensitiveCompare(trimmed) == .orderedSame }
     }
 
-    private static func matchHighPriorityOverlap(_ lower: String) -> NewsCategory? {
-        if lower.contains("health") || lower.contains("medical") || lower.contains("clinical")
-            || lower.contains("hospital") || lower.contains("vaccine") || lower.contains("disease")
-            || lower.contains("pharma")
+    private static func contains(_ padded: String, any cues: [String]) -> Bool {
+        cues.contains { padded.contains(MuteRules.paddedPhrase($0)) }
+    }
+
+    private static func matchHighPriorityOverlap(_ padded: String) -> NewsCategory? {
+        if contains(
+            padded,
+            any: [
+                "health", "medical", "medicine", "clinical", "hospital", "hospitals", "vaccine", "vaccines", "disease",
+                "diseases", "pharma", "pharmaceutical", "pharmaceuticals",
+            ])
         {
             return .health
         }
-        if lower.contains("space") || lower.contains("nasa") || lower.contains("astronomy") || lower.contains("quantum")
-            || lower.contains("biology") || lower.contains("physics") || lower.contains("telescope")
+        if contains(
+            padded, any: ["space", "nasa", "astronomy", "quantum", "biology", "physics", "telescope", "telescopes"])
         {
             return .science
         }
-        if lower.contains("stock") || lower.contains("wall street") || lower.contains("earnings")
-            || lower.contains("inflation") || lower.contains("investor") || lower.contains("revenue")
-            || lower.contains("recession") || lower.contains("finance") || lower.contains("dividend")
+        if contains(
+            padded,
+            any: [
+                "stock", "stocks", "wall street", "earnings", "inflation", "investor", "investors", "investing",
+                "revenue", "revenues", "recession", "finance", "financial", "dividend", "dividends",
+            ])
         {
             return .business
         }
-        if lower.contains("congress") || lower.contains("senate") || lower.contains("election")
-            || lower.contains("politic") || lower.contains("lawmaker") || lower.contains("parliament")
-            || lower.contains("white house") || lower.contains("governor") || lower.contains("campaign")
+        if contains(
+            padded,
+            any: [
+                "congress", "senate", "election", "elections", "politics", "political", "lawmaker", "lawmakers",
+                "parliament", "white house", "governor", "campaign", "campaigns",
+            ])
         {
             return .politics
         }
         return nil
     }
 
-    private struct SynonymGroup {
-        let category: NewsCategory
-        let keywords: [String]
-        let token: String?
-
-        init(_ category: NewsCategory, _ keywords: [String], token: String? = nil) {
-            self.category = category
-            self.keywords = keywords
-            self.token = token
-        }
-    }
-
-    private static let synonymKeywordGroups: [SynonymGroup] = [
-        SynonymGroup(
-            .technology, ["tech", "software", "hardware", "artificial intelligence", "cyber", "chip"], token: "ai"),
-        SynonymGroup(.business, ["econ", "biz", "market"]),
-        SynonymGroup(.sports, ["sport", "football", "basketball", "soccer", "league"]),
-        SynonymGroup(.entertainment, ["entertain", "movie", "film", "music", "celebrity", "cinema"]),
-        SynonymGroup(.health, ["wellness", "fitness", "nutrition"]),
-        SynonymGroup(.travel, ["travel", "tourism", "vacation", "flight"]),
-        SynonymGroup(.food, ["food", "cook", "dining", "culinary", "recipe", "restaurant"]),
-        SynonymGroup(.fashion, ["style", "fashion", "runway", "apparel"]),
-        SynonymGroup(
-            .world, ["global", "world", "international", "foreign", "geopolitic", "united nations", "diplomat"],
-            token: "un"),
-        SynonymGroup(.lifestyle, ["life", "living", "lifestyle", "home", "parenting"]),
-        SynonymGroup(.science, ["sci", "research"]),
+    /// Whole-word cues in priority order; earlier groups win ("Life & Style" is Lifestyle, "Style" alone is Fashion).
+    private static let synonymKeywordGroups: [(category: NewsCategory, cues: [String])] = [
+        (
+            .technology,
+            [
+                "tech", "technology", "fintech", "software", "hardware", "artificial intelligence", "ai", "cyber",
+                "cybersecurity", "chip", "chips",
+            ]
+        ),
+        (.business, ["econ", "economy", "economics", "economic", "biz", "market", "markets"]),
+        (.sports, ["sport", "sports", "football", "basketball", "soccer", "league"]),
+        (
+            .entertainment,
+            ["entertain", "entertainment", "movie", "movies", "film", "films", "music", "celebrity", "celebrities", "cinema"]
+        ),
+        (.health, ["wellness", "fitness", "nutrition"]),
+        (.travel, ["travel", "tourism", "vacation", "flight", "flights"]),
+        (.food, ["food", "cook", "cooking", "dining", "culinary", "recipe", "recipes", "restaurant", "restaurants"]),
+        (
+            .world,
+            [
+                "global", "world", "international", "foreign", "geopolitics", "geopolitical", "united nations", "un",
+                "diplomat", "diplomats", "diplomacy", "diplomatic",
+            ]
+        ),
+        (.lifestyle, ["life", "living", "lifestyle", "home", "parenting"]),
+        (.fashion, ["style", "fashion", "runway", "apparel"]),
+        (.science, ["sci", "science", "research"]),
     ]
 
-    private static func matchSynonyms(_ lower: String, tokens: Set<String>) -> NewsCategory? {
-        for group in synonymKeywordGroups {
-            if let token = group.token, tokens.contains(token) {
-                return group.category
-            }
-            if group.keywords.contains(where: { lower.contains($0) }) {
-                return group.category
-            }
-        }
-        return nil
+    private static func matchSynonyms(_ padded: String) -> NewsCategory? {
+        synonymKeywordGroups.first { contains(padded, any: $0.cues) }?.category
     }
 }
 
@@ -129,10 +135,48 @@ public enum NewsCategory: String, CaseIterable, Sendable, Codable {
 public struct NewsTextModel: Sendable {
     let respond: @Sendable (String, Int) async throws -> String
 
-    /// Apple Intelligence is switched off or its model is still downloading, so a later request may succeed. Results
-    /// made without the model are then kept only until it can run. `URLError(.resourceUnavailable)` means this Mac
-    /// cannot run the model, and deterministic results are final.
+    /// Apple Intelligence is switched off, its model is still downloading, or the model is busy or rate limited, so a
+    /// later request may succeed. Results made without the model are then kept only until it can run.
+    /// `URLError(.resourceUnavailable)` means this Mac cannot run the model, and deterministic results are final.
     public struct TemporarilyUnavailable: Error {}
+
+    /// The model declined or cannot process this exact input (its safety guardrails, an explicit refusal, a prompt
+    /// larger than the context window, an unsupported language, or undecodable output). Greedy sampling would answer
+    /// the same text the same way, so the deterministic result is final. Carries the reason only, never publisher text.
+    public struct Rejected: Error, Equatable, Sendable {
+        public enum Reason: String, Sendable {
+            case guardrail, refusal, contextWindow, unsupportedLanguage, decoding, unsupportedGuide
+        }
+        public let reason: Reason
+        public init(reason: Reason) { self.reason = reason }
+    }
+
+    private static let logger = Logger(subsystem: "com.marspater.news", category: "NewsTextModel")
+
+    #if canImport(FoundationModels)
+        /// Every framework failure becomes one of three outcomes the callers already handle: final (`Rejected`),
+        /// retry later (`TemporarilyUnavailable`) or unknown (rethrown, treated as provisional). Only the outcome
+        /// label is logged.
+        @available(macOS 26.0, *)
+        static func failure(_ error: LanguageModelSession.GenerationError) -> Error {
+            let outcome: Error
+            switch error {
+            case .guardrailViolation: outcome = Rejected(reason: .guardrail)
+            case .refusal: outcome = Rejected(reason: .refusal)
+            case .exceededContextWindowSize: outcome = Rejected(reason: .contextWindow)
+            case .unsupportedLanguageOrLocale: outcome = Rejected(reason: .unsupportedLanguage)
+            case .decodingFailure: outcome = Rejected(reason: .decoding)
+            case .unsupportedGuide: outcome = Rejected(reason: .unsupportedGuide)
+            case .assetsUnavailable, .rateLimited, .concurrentRequests: outcome = TemporarilyUnavailable()
+            default: outcome = error
+            }
+            let label =
+                (outcome as? Rejected).map { "rejected:" + $0.reason.rawValue }
+                ?? (outcome is TemporarilyUnavailable ? "temporarily-unavailable" : "unclassified")
+            logger.notice("On-device model request failed: \(label, privacy: .public)")
+            return outcome
+        }
+    #endif
 
     /// The on-device model generation. FoundationModels exposes no model version and the model ships with macOS, so
     /// the macOS build identifies it; an update that keeps the model only causes one extra regeneration.
@@ -145,12 +189,19 @@ public struct NewsTextModel: Sendable {
             if #available(macOS 26.0, *) {
                 switch SystemLanguageModel.default.availability {
                 case .available:
+                    // News reports violence, terror and death; the default guardrails refuse such input. Summaries and
+                    // classification are content transformations, which the permissive guardrails allow.
                     let session = LanguageModelSession(
                         model: SystemLanguageModel(guardrails: .permissiveContentTransformations))
-                    let response = try await session.respond(
-                        to: prompt, options: GenerationOptions(samplingMode: .greedy, maximumResponseTokens: tokens))
-                    try Task.checkCancellation()
-                    return response.content
+                    do {
+                        let response = try await session.respond(
+                            to: prompt,
+                            options: GenerationOptions(samplingMode: .greedy, maximumResponseTokens: tokens))
+                        try Task.checkCancellation()
+                        return response.content
+                    } catch let error as LanguageModelSession.GenerationError {
+                        throw NewsTextModel.failure(error)
+                    }
                 case .unavailable(.deviceNotEligible):
                     break
                 case .unavailable:
@@ -905,6 +956,8 @@ public final class ArticleAnalyzer: Sendable {
                 return try await modelAnalysis(title: title, content: budgetedContent, category: category)
             } catch is CancellationError {
                 throw AIAnalysisError.cancelled
+            } catch is NewsTextModel.Rejected {
+                // The model declined this exact text (guardrails, refusal, context size): asking again would repeat it.
             } catch let error as URLError where error.code == .resourceUnavailable || error.code == .cannotParseResponse
             {
                 // No model on this Mac, or a malformed answer that greedy sampling would repeat: the fallback is final.
@@ -937,6 +990,8 @@ public final class ArticleAnalyzer: Sendable {
         let prompt = """
             \(GenerationPromptDefense.untrustedDataSystemGuard)
             Summarize only the supplied news article, preserving uncertainty, attribution and quantities.
+            The article is published news reporting and may describe war, violence, crime or disasters; summarize such \
+            reporting factually and without comment.
             Return these literal line prefixes, with each item on its own line:
             SUMMARY|one paragraph summary
             POINT|first key point
