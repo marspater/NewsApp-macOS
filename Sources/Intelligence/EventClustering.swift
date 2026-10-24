@@ -89,7 +89,11 @@ enum EventClusterer {
                     }
                 }
             }
-            let unembedded = rows.filter { embeddingCache[$0.id] == nil && !embeddingLookups.contains($0.id) }
+            // Reports recognized as another language never use the embedding (#553), so none is computed for them.
+            let unembedded = rows.filter {
+                embeddingCache[$0.id] == nil && !embeddingLookups.contains($0.id)
+                    && (features($0).language ?? "en") == "en"
+            }
             guard !unembedded.isEmpty else { return }
             embeddingLookups.formUnion(unembedded.map(\.id))
             let stored =
