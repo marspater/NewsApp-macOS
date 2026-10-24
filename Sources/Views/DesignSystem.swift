@@ -103,6 +103,9 @@ enum AppLayout {
     /// Portrait figures stop here instead of filling the window height.
     static let readerFigureMaxHeight: CGFloat = 560
     static let progressBarHeight: CGFloat = 2
+    static let catalogSheetMinWidth: CGFloat = 680
+    static let catalogSheetIdealWidth: CGFloat = 720
+    static let catalogSheetMinHeight: CGFloat = 560
     /// Overview timeline rail: dot, rail column and the connecting line.
     static let timelineDotSize: CGFloat = 8
     static let timelineRailWidth: CGFloat = 12

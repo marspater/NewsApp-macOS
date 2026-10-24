@@ -63,7 +63,7 @@ struct NewsApp: App {
                 }
             }
             CommandGroup(replacing: .importExport) {
-                Button("Add Feed Subscription…") { addFeedSubscription?() }
+                Button("Add Feed…") { addFeedSubscription?() }
                     .disabled(addFeedSubscription == nil)
                 Divider()
                 Button("Import Subscriptions (OPML)…") {
@@ -89,8 +89,6 @@ struct NewsApp: App {
             CommandMenu("Navigate") {
                 Button("Back to Stories") { readerActions?.back() }
                     .disabled(readerActions == nil)
-                Button("New Briefing") { listActions?.newBriefing?() }
-                    .disabled(listActions?.newBriefing == nil)
                 Divider()
                 Button("Today") {
                     NotificationCenter.default.post(name: .jumpToTodayCommand, object: nil)
@@ -130,7 +128,7 @@ struct NewsApp: App {
             }
             // Actions on the focused or open story, as Mail's Message menu (DESIGN.md 14).
             CommandMenu("Story") {
-                Button("Mark as Read or Unread") {
+                Button(selectedStory.map { readManager.isRead($0.id) } == true ? "Mark as Unread" : "Mark as Read") {
                     NotificationCenter.default.post(name: .toggleReadCommand, object: nil)
                 }
                 .keyboardShortcut("u", modifiers: [.command, .shift])
@@ -142,7 +140,9 @@ struct NewsApp: App {
                 .keyboardShortcut("u", modifiers: [.command, .option])
                 .disabled(listActions == nil)
 
-                Button("Save or Remove from Saved") {
+                Button(
+                    selectedStory.map { savedStories.isSaved($0) } == true ? "Remove from Saved Stories" : "Save Story"
+                ) {
                     NotificationCenter.default.post(name: .toggleSaveCommand, object: nil)
                 }
                 .keyboardShortcut("s", modifiers: .command)
@@ -228,6 +228,9 @@ struct ListViewCommands: Commands {
 
             Toggle("Group Stories by Event", isOn: $groupsEvents)
                 .disabled(listActions?.canGroupStories != true)
+
+            Button("New Briefing") { listActions?.newBriefing?() }
+                .disabled(listActions?.newBriefing == nil)
 
             Button("World Tension…") {
                 NotificationCenter.default.post(name: .showNewsTensionCommand, object: nil)

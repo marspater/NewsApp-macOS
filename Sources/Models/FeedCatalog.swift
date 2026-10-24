@@ -36,7 +36,7 @@ struct CatalogFeed: Identifiable, Equatable, Sendable {
 }
 
 /// An opt-in group of catalog feeds.
-enum CatalogSet: String, CaseIterable, Identifiable, Sendable {
+enum CatalogSet: String, CaseIterable, Identifiable, Hashable, Sendable {
     case world, politics, business, technology, scienceHealth, cultureLifestyle, ukraine, europe, regional
 
     var id: String { rawValue }

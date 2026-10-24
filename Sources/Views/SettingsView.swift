@@ -184,7 +184,7 @@ struct SettingsView: View {
                 Image(systemName: "plus.circle.fill")
                     .foregroundStyle(AppColor.accent)
                     .imageScale(.large)
-                TextField("Enter RSS / Atom / JSON Feed URL", text: $newFeedURL)
+                TextField("Feed URL", text: $newFeedURL)
                     .textFieldStyle(.roundedBorder)
                     .onSubmit(subscribeFromField)
                 Button("Subscribe", action: subscribeFromField)
@@ -516,23 +516,23 @@ struct SettingsView: View {
                         get: { appSettings.aiEnabled },
                         set: { appSettings.setAIEnabled($0) }
                     ))
-                Text("Generates executive summaries, key takeaways, entity tags, and sentiment analysis.")
+                Text("Summaries, key points, entities and tone for each story, generated on this Mac.")
                     .font(AppTypography.caption)
                     .foregroundStyle(AppColor.secondaryText)
             }
 
-            Section(header: sectionHeader("Architecture & Privacy Guarantees")) {
+            Section(header: sectionHeader("How It Works")) {
                 VStack(alignment: .leading, spacing: AppSpacing.xs) {
                     HStack(alignment: .top, spacing: AppSpacing.xs) {
                         Image(systemName: "sparkles")
                             .foregroundStyle(AppColor.intelligence)
                             .padding(.top, AppSpacing.textStack)
                         VStack(alignment: .leading, spacing: AppSpacing.textStack) {
-                            Text("Apple-Native On-Device Models")
+                            Text("Apple models on this Mac")
                                 .font(AppTypography.label)
                                 .foregroundStyle(AppColor.primaryText)
                             Text(
-                                "Powered exclusively by Apple NaturalLanguage and on-device FoundationModels when available."
+                                "Uses Apple's Natural Language framework and, where available, the on-device Foundation Models."
                             )
                             .font(AppTypography.caption)
                             .foregroundStyle(AppColor.secondaryText)
@@ -544,7 +544,7 @@ struct SettingsView: View {
                             .foregroundStyle(AppColor.accent)
                             .padding(.top, AppSpacing.textStack)
                         VStack(alignment: .leading, spacing: AppSpacing.textStack) {
-                            Text("On-Demand Execution")
+                            Text("When it runs")
                                 .font(AppTypography.label)
                                 .foregroundStyle(AppColor.primaryText)
                             Text(
@@ -560,11 +560,11 @@ struct SettingsView: View {
                             .foregroundStyle(AppColor.success)
                             .padding(.top, AppSpacing.textStack)
                         VStack(alignment: .leading, spacing: AppSpacing.textStack) {
-                            Text("Zero Cloud Telemetry")
+                            Text("Nothing leaves your Mac")
                                 .font(AppTypography.label)
                                 .foregroundStyle(AppColor.primaryText)
                             Text(
-                                "No text, prompts, or embeddings are ever transmitted to third-party servers or external AI APIs."
+                                "No text, prompts or embeddings are sent anywhere."
                             )
                             .font(AppTypography.caption)
                             .foregroundStyle(AppColor.secondaryText)
@@ -600,7 +600,7 @@ struct SettingsView: View {
 
     private var privacyTab: some View {
         Form {
-            Section(header: sectionHeader("Network Security Boundary")) {
+            Section(header: sectionHeader("Network")) {
                 Toggle(
                     "Allow Insecure HTTP Feeds",
                     isOn: Binding(
@@ -609,17 +609,17 @@ struct SettingsView: View {
                     ))
 
                 if appSettings.allowInsecureHTTP {
-                    HStack(spacing: AppSpacing.eyebrowGap) {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .foregroundStyle(AppColor.warning)
-                        Text(
-                            "Warning: Unencrypted HTTP feeds transmit data in plain text across your local network and internet providers."
-                        )
-                        .font(AppTypography.caption)
-                        .foregroundStyle(AppColor.warning)
+                    NoticeView(tint: AppColor.warning) {
+                        Label {
+                            Text("Feeds over plain HTTP can be read and changed by anyone on the network path.")
+                                .font(AppTypography.caption)
+                                .foregroundStyle(AppColor.primaryText)
+                        } icon: {
+                            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(AppColor.warning)
+                        }
                     }
                 } else {
-                    Text("Enforces strict HTTPS connections for all feed ingestion and remote media assets.")
+                    Text("Feeds and images are loaded over HTTPS only.")
                         .font(AppTypography.caption)
                         .foregroundStyle(AppColor.secondaryText)
                 }
@@ -717,164 +717,63 @@ struct SettingsView: View {
     // MARK: - 7. Storage Tab
 
     private var storageTab: some View {
-        VStack(spacing: AppSpacing.md) {
-            // Header stats
-            HStack(spacing: AppSpacing.md) {
-                Image(systemName: "externaldrive.fill")
-                    .font(AppTypography.masthead)
-                    .foregroundStyle(AppColor.secondaryText)
-
-                VStack(alignment: .leading, spacing: AppSpacing.textStack) {
-                    Text("Total Storage Usage")
-                        .font(AppTypography.callout)
-                        .foregroundStyle(AppColor.secondaryText)
+        Form {
+            Section {
+                LabeledContent {
                     Text(totalStorageSize)
                         .font(AppTypography.title.monospacedDigit())
                         .foregroundStyle(AppColor.primaryText)
+                } label: {
+                    Label("Total Storage", systemImage: "externaldrive")
                 }
-
-                Spacer()
-
                 actionStatus
             }
-            .padding(.horizontal, AppLayout.pageInset)
-            .padding(.top, AppSpacing.md)
 
-            Divider()
-
-            // Itemized breakdown table
-            VStack(spacing: AppSpacing.sm) {
-                // Row 1: Web & Media Cache
-                HStack {
-                    VStack(alignment: .leading, spacing: AppSpacing.textStack) {
-                        HStack(spacing: AppSpacing.eyebrowGap) {
-                            Text("Web & Media Cache")
-                                .font(AppTypography.sectionTitle)
-                                .foregroundStyle(AppColor.primaryText)
-                            Text(webCacheSize)
-                                .font(AppTypography.label.monospaced())
-                                .foregroundStyle(AppColor.secondaryText)
-                        }
-                        Text("HTTP network responses, temporary web data, and cached images.")
-                            .font(AppTypography.caption)
-                            .foregroundStyle(AppColor.secondaryText)
-                    }
-                    Spacer()
-                    Button("Clear") {
-                        clearWebCache()
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
+            Section(header: sectionHeader("Caches")) {
+                storageRow(
+                    "Web & Media Cache", detail: webCacheSize,
+                    description: "HTTP responses, temporary web data and cached images."
+                ) {
+                    Button("Clear") { clearWebCache() }
                 }
-
-                // Row 2: Article Bodies
-                HStack {
-                    VStack(alignment: .leading, spacing: AppSpacing.textStack) {
-                        HStack(spacing: AppSpacing.eyebrowGap) {
-                            Text("Story Content Cache")
-                                .font(AppTypography.sectionTitle)
-                                .foregroundStyle(AppColor.primaryText)
-                            Text(
-                                "\(articleStore.articles.count) \(articleStore.articles.count == 1 ? "story" : "stories")"
-                            )
-                            .font(AppTypography.label.monospacedDigit())
-                            .foregroundStyle(AppColor.secondaryText)
-                        }
-                        Text("Cached full story bodies. Subscriptions and saved stories are kept.")
-                            .font(AppTypography.caption)
-                            .foregroundStyle(AppColor.secondaryText)
-                    }
-                    Spacer()
-                    Button("Clear…") {
-                        pendingClear = .stories
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
+                storageRow(
+                    "Story Text",
+                    detail: "\(articleStore.articles.count) \(articleStore.articles.count == 1 ? "story" : "stories")",
+                    description: "Cached full story text. Subscriptions and saved stories are kept."
+                ) {
+                    Button("Clear…") { pendingClear = .stories }
                 }
-
-                // Row 3: AI Analysis Data
-                HStack {
-                    VStack(alignment: .leading, spacing: AppSpacing.textStack) {
-                        HStack(spacing: AppSpacing.eyebrowGap) {
-                            Text("AI Analysis Data")
-                                .font(AppTypography.sectionTitle)
-                                .foregroundStyle(AppColor.primaryText)
-                            let aiCount = articleStore.articles.filter { $0.aiSummary != nil }.count
-                            Text("\(aiCount) enriched")
-                                .font(AppTypography.label.monospacedDigit())
-                                .foregroundStyle(AppColor.secondaryText)
-                        }
-                        Text(
-                            "Summaries, key points, entities, event overviews and story embeddings. Subscriptions and stories remain."
-                        )
-                        .font(AppTypography.caption)
-                        .foregroundStyle(AppColor.secondaryText)
-                    }
-                    Spacer()
-                    Button("Clear…") {
-                        pendingClear = .analysis
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
+                storageRow(
+                    "AI Analysis Data",
+                    detail: "\(articleStore.articles.filter { $0.aiSummary != nil }.count) analysed",
+                    description:
+                        "Summaries, key points, entities, event overviews and story embeddings. Subscriptions and stories remain."
+                ) {
+                    Button("Clear…") { pendingClear = .analysis }
                 }
-
-                // Row 4: Database Storage
-                HStack {
-                    VStack(alignment: .leading, spacing: AppSpacing.textStack) {
-                        HStack(spacing: AppSpacing.eyebrowGap) {
-                            Text("Local SQLite & FTS5 Index")
-                                .font(AppTypography.sectionTitle)
-                                .foregroundStyle(AppColor.primaryText)
-                            Text(databaseSize)
-                                .font(AppTypography.label.monospaced())
-                                .foregroundStyle(AppColor.secondaryText)
-                        }
-                        Text("Persistent WAL database containing subscriptions, history, and search index.")
-                            .font(AppTypography.caption)
-                            .foregroundStyle(AppColor.secondaryText)
-                    }
-                    Spacer()
-                    Text("Active")
-                        .font(AppTypography.caption.bold())
-                        .foregroundStyle(AppColor.secondaryText)
-                        .padding(.horizontal, AppSpacing.xs)
-                        .padding(.vertical, AppSpacing.textStack)
-                        .background(
-                            RoundedRectangle(cornerRadius: AppRadius.control, style: .continuous).fill(AppColor.surface)
-                        )
-                }
-
-                Divider().padding(.vertical, AppSpacing.xxs)
-
-                retentionRow
-
-                Divider().padding(.vertical, AppSpacing.xxs)
-
-                // Clear everything
-                HStack {
-                    VStack(alignment: .leading, spacing: AppSpacing.textStack) {
-                        Text("Purge All Caches")
-                            .font(AppTypography.sectionTitle)
-                            .foregroundStyle(AppColor.danger)
-                        Text(
-                            "Purges web cache, story content, and AI analysis. Preserves subscriptions, saved stories, and read history."
-                        )
-                        .font(AppTypography.caption)
-                        .foregroundStyle(AppColor.secondaryText)
-                    }
-                    Spacer()
-                    Button(role: .destructive) {
-                        pendingClear = .all
-                    } label: {
-                        Text("Clear All…")
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.small)
+                storageRow(
+                    "Library Database", detail: databaseSize,
+                    description: "Subscriptions, read history, saved stories and the search index."
+                ) {
+                    TagView(title: "Active")
                 }
             }
-            .padding(.horizontal, AppLayout.pageInset)
-            .padding(.bottom, AppSpacing.lg)
+
+            Section(header: sectionHeader("Retention")) {
+                retentionRow
+            }
+
+            Section {
+                storageRow(
+                    "Clear All Caches", detail: nil,
+                    description:
+                        "Removes the web cache, story text and AI analysis. Subscriptions, saved stories and read history are kept."
+                ) {
+                    Button("Clear All…", role: .destructive) { pendingClear = .all }
+                }
+            }
         }
+        .formStyle(.grouped)
         .frame(width: Self.paneWidth)
         .confirmationDialog(
             pendingClear?.question ?? "",
@@ -890,6 +789,23 @@ struct SettingsView: View {
             }
         } message: { target in
             Text(target.consequence)
+        }
+    }
+
+    /// One storage row: title and size, a caption, and the action on the trailing edge.
+    private func storageRow<Action: View>(
+        _ title: String, detail: String?, description: String, @ViewBuilder action: () -> Action
+    ) -> some View {
+        LabeledContent {
+            action().controlSize(.small)
+        } label: {
+            HStack(spacing: AppSpacing.eyebrowGap) {
+                Text(title)
+                if let detail {
+                    Text(detail).font(AppTypography.label.monospacedDigit()).foregroundStyle(AppColor.secondaryText)
+                }
+            }
+            Text(description).font(AppTypography.caption).foregroundStyle(AppColor.secondaryText)
         }
     }
 
@@ -1029,9 +945,7 @@ struct SettingsView: View {
     }
 
     private nonisolated static func formatBytes(_ bytes: Int64) -> String {
-        if bytes < 1024 { return "\(bytes) B" }
-        if bytes < 1024 * 1024 { return String(format: "%.1f KB", Double(bytes) / 1024.0) }
-        return String(format: "%.1f MB", Double(bytes) / (1024.0 * 1024.0))
+        ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
     }
 
     private func clearWebCache() {
@@ -1093,7 +1007,8 @@ struct SettingsView: View {
             cacheActionFailed = failed
             cacheActionMessage = msg
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+        // The same five seconds as the masthead notice.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5) {
             withAnimation(reduceMotion ? nil : AppMotion.responsive) {
                 if cacheActionMessage == msg {
                     cacheActionMessage = nil
