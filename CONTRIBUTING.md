@@ -19,6 +19,7 @@ script/format.sh                  # swift-format; automatically formats staged S
 script/format.sh --check          # Strict repository-wide Swift formatting lint
 script/design_lint.sh              # DESIGN.md ratchet (first step of ./test.sh); --update only after lowering counts
 ./test.sh --story-regressions     # Focused offline identity, reader and persistence checks
+./test.sh --matcher-regressions   # Authored matcher corpus (#506): pairwise line and failing pair ids, nothing else
 ./test.sh --curation-live /private/tmp/library-backup.sqlite3 /private/tmp/curation-report # Opt-in on-device rating audit of a SQLite backup; private titles stay local
 python3 script/evaluation/importance_review.py sheet /private/tmp/curation-report  # #309: blind private sheet of minor-rated stories (never overwrites a sheet)
 python3 script/evaluation/importance_review.py report /private/tmp/curation-report # #309: aggregate-only hidden-important rate with Wilson bounds and re-rate stability
@@ -49,6 +50,7 @@ NEWS_READING_FULL_APP=1 ./script/native_performance_baseline.sh # Live: sandboxe
 ./test.sh --publisher-cancellation # Opt-in, live: refresh and stop the twelve panel feeds over real HTTPS
 NEWS_EVENT_CORPUS=corpus.json ./test.sh --event-corpus # Event clustering precision/recall on a local labeled corpus (#102)
 NEWS_EMBEDDING_THRESHOLD=0.4 NEWS_EVENT_CORPUS=corpus.json ./test.sh --event-corpus --corpus-holdout # Holdout, embeddings at the cutoff chosen on tune (#127)
+NEWS_EVENT_DIAGNOSE=1 NEWS_EVENT_CORPUS=corpus.json ./test.sh --event-corpus # Adds one line per labeled or linked pair (ids only): conflict, gates, what, score, cosine (#509)
 ./test.sh --corpus-capture DIR    # Opt-in, live: capture catalog feed items into a private directory (#102)
 ./test.sh --corpus-review DIR     # Fingerprint match review sheet and precision against private labels (#102)
 ./test.sh --corpus-readiness DIR --corpus-holdout # Eligible held-out document counts only; no scores, labels or review-file writes
@@ -56,6 +58,7 @@ NEWS_EMBEDDING_THRESHOLD=0.4 NEWS_EVENT_CORPUS=corpus.json ./test.sh --event-cor
 ./test.sh --corpus-page-texts DIR # Offline private readability evidence; no matching predictions
 ./build.sh                        # arm64 app with ad-hoc verification signing
 NEWS_LIVE_READER_CHECK=1 ./test.sh # Optional controlled-network and publisher checks
+./test.sh --model-outcome-check   # Opt-in, local: the real on-device model over authored violent reports; outcome labels in the NewsTextModel log category (#508)
 NEWS_LIVE_CATALOG_CHECK=1 ./test.sh # Optional: fetch every catalog feed through the app's own networking and parsers
 ./test.sh --catalog-reader-access # Opt-in, live: open each catalog feed's newest stories in the app's reader extraction (NEWS_CATALOG_FEEDS=id,… NEWS_CATALOG_SAMPLE=N)
 ./build_release.sh                # Optimized arm64 verification bundle

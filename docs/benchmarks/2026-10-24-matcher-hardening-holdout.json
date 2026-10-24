@@ -1,0 +1,199 @@
+{
+  "date": "2026-10-24",
+  "program": "#501",
+  "issues": [
+    "#509",
+    "#508",
+    "#510"
+  ],
+  "toolchain": {
+    "swift": "6.4 swiftlang-6.4.0.34.1",
+    "xcode": "27.0 27A266a",
+    "macos": "27.0.1",
+    "architecture": "arm64"
+  },
+  "corpusSHA256": "868c62a0ec973d07aa2ca3d63de8623fbe866359d1e082fadacd7bd456acf2a0",
+  "settings": {
+    "language": "en",
+    "articleBudget": 2000,
+    "judgeRequested": false,
+    "embeddingsAvailable": true,
+    "command": "NEWS_EVENT_CORPUS=<corpus> NEWS_EVENT_LANGUAGE=en NEWS_EVENT_JUDGE=0 NEWS_EVENT_OUTPUT=<private 0700 dir> ./test.sh --event-corpus --corpus-holdout"
+  },
+  "holdout": {
+    "articles": 49,
+    "labelPositivePairs": 38,
+    "runs": [
+      {
+        "label": "before PR A",
+        "commit": "1417703",
+        "matcherVersion": 7,
+        "truePositivePairs": 17,
+        "falsePositivePairs": 1,
+        "falseNegativePairs": 21,
+        "precision": 0.944,
+        "precisionWilson95": [
+          0.742,
+          0.99
+        ],
+        "recall": 0.447,
+        "recallWilson95": [
+          0.301,
+          0.603
+        ],
+        "impureEvents": 1
+      },
+      {
+        "label": "after PR A and B",
+        "commit": "6079e7c",
+        "matcherVersion": 8,
+        "truePositivePairs": 17,
+        "falsePositivePairs": 1,
+        "falseNegativePairs": 21,
+        "precision": 0.944,
+        "precisionWilson95": [
+          0.742,
+          0.99
+        ],
+        "recall": 0.447,
+        "recallWilson95": [
+          0.301,
+          0.603
+        ],
+        "impureEvents": 1,
+        "partitionIdenticalToV7": true
+      },
+      {
+        "label": "candidate v9 (semanticMatchThreshold 0.70)",
+        "commit": "this PR",
+        "matcherVersion": 9,
+        "truePositivePairs": 22,
+        "falsePositivePairs": 0,
+        "falseNegativePairs": 16,
+        "precision": 1.0,
+        "precisionWilson95": [
+          0.851,
+          1.0
+        ],
+        "recall": 0.579,
+        "recallWilson95": [
+          0.422,
+          0.721
+        ],
+        "impureEvents": 0,
+        "scoredCandidateRuns": 1
+      }
+    ]
+  },
+  "tune": {
+    "articles": 105,
+    "labelPositivePairs": 93,
+    "runs": {
+      "v8": [
+        35,
+        0,
+        58
+      ],
+      "vetoOff": [
+        36,
+        0,
+        57
+      ],
+      "vetoNonRuleOnly": [
+        36,
+        0,
+        57
+      ],
+      "veto0.45": [
+        36,
+        0,
+        57
+      ],
+      "strictOff": [
+        36,
+        0,
+        57
+      ],
+      "scoreWithoutCosine": [
+        35,
+        0,
+        58
+      ],
+      "consequenceTermsExtended": [
+        35,
+        0,
+        58
+      ],
+      "rescue0.75": [
+        38,
+        0,
+        55
+      ],
+      "rescue0.72": [
+        38,
+        0,
+        55
+      ],
+      "rescue0.70": [
+        40,
+        0,
+        53
+      ],
+      "rescue0.68": [
+        40,
+        0,
+        53
+      ],
+      "rescue0.65": [
+        40,
+        3,
+        53
+      ]
+    },
+    "format": "[TP, FP, FN]"
+  },
+  "authoredCorpus": {
+    "fixture": "Tests/Fixtures/story-corpus/matcher-regressions-v1.json",
+    "runs": {
+      "v7": [
+        19,
+        2,
+        5
+      ],
+      "v8": [
+        21,
+        2,
+        3
+      ],
+      "v9": [
+        21,
+        2,
+        3
+      ],
+      "vetoNonRuleOnly": [
+        21,
+        6,
+        3
+      ]
+    },
+    "format": "[TP, FP, FN]"
+  },
+  "decisions": {
+    "semanticVeto": "keep",
+    "pairScoreCosineFloor": "keep",
+    "commonActorGuardInMatching": "not adopted",
+    "strictTimeRule": "keep",
+    "consequenceTermsExtended": "not adopted",
+    "semanticMatchThreshold": "0.82 -> 0.70 (matcher v9)"
+  },
+  "modelOutcomeCheck": {
+    "reports": [
+      "benign",
+      "shooting",
+      "war"
+    ],
+    "result": "all answered by the on-device model, version 3, repeat identical",
+    "oversizedPrompt": "LanguageModelError (macOS 27 type), unmapped before this PR"
+  },
+  "privateEvidenceDirectory": "~/Documents/NewsHoldout-2026-10-03/hardening-replay-2026-10-24"
+}

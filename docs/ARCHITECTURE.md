@@ -38,7 +38,7 @@ flowchart LR
     subgraph Intel["Intelligence · on device"]
         EQ["<b>EnrichmentQueue</b><br/>bounded classification"]
         EC["<b>EventClusterer</b>"]
-        EM["<b>EventMatcher v8</b><br/>MiniLM embeddings"]
+        EM["<b>EventMatcher v9</b><br/>MiniLM embeddings"]
         CEP["<b>ContentExtraction<br/>Pipeline</b><br/>reader v11 · SwiftSoup"]
         OV["<b>Overview builders</b><br/>cited sentences"]
         WT["<b>WorldTension</b>"]
@@ -263,7 +263,7 @@ Open a section before changing that area. Each rule is load-bearing; tests cover
 
 - Candidates (`EventCandidateFinder`): ≤8 terms per article as FTS5 phrases (headline names, then headline words, then names from the description), ≤2× `EventCandidatePolicy.limit` rows, ±48 h window, 72 h active lifetime. Candidates are not matches.
 
-- `EventMatcher` v8: `EventFeatures.matchingText` (plain headline + first 600 plain description characters) is the one text both the deterministic features and the sentence embedding read. A pair needs dates within 36 h, a shared specific anchor (a country alone is not enough) and no conflict in language, period, year, weekday, distinguishing figure or place. A headline's primary clause before "after"/"following" guards against background-clause merges only when it names an act; a clause that only counts consequences ("Three dead after …") does not. A word of a typed person name is never canonicalized to a country. Grey-zone pairs use MiniLM cosine (`SentenceEmbedder` model version 2: uncased, accent-stripped WordPiece; v21 embeddings recompute per version). Admission: one matching pair, ⅔ compatible members (rounded up), the mean-score threshold.
+- `EventMatcher` v9: `EventFeatures.matchingText` (plain headline + first 600 plain description characters) is the one text both the deterministic features and the sentence embedding read. A pair needs dates within 36 h, a shared specific anchor (a country alone is not enough) and no conflict in language, period, year, weekday, distinguishing figure or place. A headline's primary clause before "after"/"following" guards against background-clause merges only when it names an act; a clause that only counts consequences ("Three dead after …") does not. A word of a typed person name is never canonicalized to a country. Grey-zone pairs use MiniLM cosine (`SentenceEmbedder` model version 2: uncased, accent-stripped WordPiece; v21 embeddings recompute per version). Semantic rescue links a pair the rules miss when it shares a specific anchor, has no conflict and its cosine is ≥ 0.70: the cutoff was chosen on the tune split (24 October 2026; 0.65 produced the first false pairs) and confirmed once on the English holdout (precision 1.000, recall 0.447 → 0.579). The 0.55 veto also applies to rule matches (skipping it merged four authored negatives), the >12 h strict rule stays (dropping it merged two), and the pair score keeps `max(rule, cosine)` (no measured effect); a common-actor guard exists only in developing-story links. Admission: one matching pair, ⅔ compatible members (rounded up), the mean-score threshold.
 - `Tests/Fixtures/story-corpus/matcher-regressions-v1.json` is an authored English corpus replayed through the real clusterer on every test run with a true-positive floor and a false-pair ceiling; it is regression evidence, not the acceptance gate (the private holdout is).
 
 - Clustering is fully on device; no external LLM. Legacy judge types stay only for audit callers.
@@ -316,7 +316,7 @@ Open a section before changing that area. Each rule is load-bearing; tests cover
 <summary><b>Intelligence, catalog, World Tension</b></summary>
 
 - `NaturalLanguage` + conditional `FoundationModels`, fixed 12-category taxonomy, plain-text model contracts with strict parsing and extractive fallbacks. v20 stamps the macOS build; a model change invalidates generated summaries, not publisher excerpts.
-- Only the reader summary calls the on-device model; ingestion, classification, search and clustering never do. `NewsTextModel.onDevice` maps every `LanguageModelSession.GenerationError` to one outcome: `Rejected` (guardrails, refusal, context window, unsupported language, undecodable output) is final and the extractive result stands; `TemporarilyUnavailable` (model off, downloading, busy, rate limited) keeps a provisional result that is redone when the summary is next opened. Only the outcome label is logged, never text. Publisher category hints match whole words only.
+- Only the reader summary calls the on-device model; ingestion, classification, search and clustering never do. `NewsTextModel.onDevice` maps every `LanguageModelSession.GenerationError`, and on macOS 27 every `LanguageModelError` and `SystemLanguageModel.Error` (the types that SDK actually throws; built only with it), to one outcome: `Rejected` (guardrails, refusal, context window, unsupported language, undecodable output) is final and the extractive result stands; `TemporarilyUnavailable` (model off, downloading, busy, rate limited) keeps a provisional result that is redone when the summary is next opened. Only the outcome label is logged, never text. Publisher category hints match whole words only.
 
 - Persist only intelligence that product behavior needs; keep model identifiers, analysis versions and deterministic fallbacks.
 

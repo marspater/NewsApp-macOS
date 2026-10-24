@@ -49,6 +49,8 @@
 - Reader v7: subscriber-only pages (FT barrier, `isAccessibleForFree: false`, HTTP 401/402) show the teaser with a quiet subscriber card instead of a parser error, and HTTP 403 bot checks get the same preview with a web-view prompt; thin pages fall back to JSON-LD `articleBody` or Next.js hydration state; article-header standfirsts and `<aside>` pull quotes are kept; `<hr>` section rules survive; wall-of-text paragraphs split at sentence boundaries; a standfirst appears under the headline; inline formatting no longer drops when a paragraph ends after a bold or linked run.
 - Lead story card: no longer bleeds into the toolbar while scrolling, and square or portrait photos are shown whole over a blurred backdrop instead of being cropped at the face.
 - The list shows cached stories on the first frame and keeps them in place while background refresh runs; new stories wait behind the updates button.
+- Story matching (matcher v9): two reports that share a name or place, contradict nothing and read as the same story to the on-device sentence model now join at a cosine of 0.70 instead of 0.82. Chosen on the private tune split (five more labeled pairs linked, no false pair; 0.65 adds three) and confirmed once on the English holdout: precision 1.000 (22 TP, 0 FP, 16 FN), recall 0.579, up from 0.944 / 0.447, and the one long-standing false merge is gone. The semantic veto, the >12 h strict rule and the pair score were measured and kept.
+- Reader summaries on macOS 27: the model's refusals, guardrail stops and oversized stories arrive as a new error type there, which was treated as unknown and re-requested on every open; they are now final like on macOS 26. A timeout or missing model assets retry later.
 
 ## 18 October 2026
 

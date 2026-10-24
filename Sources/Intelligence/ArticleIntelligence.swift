@@ -152,7 +152,8 @@ public struct NewsTextModel: Sendable {
     }
 
     public enum RejectionReason: String, Sendable {
-        case guardrail, refusal, contextWindow, unsupportedLanguage, decoding, unsupportedGuide
+        case guardrail, refusal, contextWindow, unsupportedLanguage, decoding, unsupportedGuide, unsupportedCapability,
+            unsupportedTranscript
     }
 
     private static let logger = Logger(subsystem: "com.marspater.news", category: "NewsTextModel")
@@ -177,26 +178,72 @@ public struct NewsTextModel: Sendable {
         /// label is logged.
         @available(macOS 26.0, *)
         static func failure(_ error: LanguageModelSession.GenerationError) -> Error {
-            let outcome: Error
-            let label: String
-            if let reason = rejectedReason(error) {
-                outcome = Rejected(reason: reason)
-                label = "rejected:" + reason.rawValue
-            } else {
+            let transient: Bool
+            switch error {
+            case .assetsUnavailable, .rateLimited, .concurrentRequests: transient = true
+            default: transient = false
+            }
+            return classified(rejectedReason(error), transient: transient, unknown: error)
+        }
+
+        #if compiler(>=6.4)
+            /// macOS 27 throws `LanguageModelError` instead (the `GenerationError` cases are deprecated there). Without
+            /// this mapping a refusal on macOS 27 was "unclassified" and re-requested on every open (#508).
+            @available(macOS 27.0, *)
+            static func rejectedReason(_ error: LanguageModelError) -> RejectionReason? {
                 switch error {
-                case .assetsUnavailable, .rateLimited, .concurrentRequests:
-                    outcome = TemporarilyUnavailable()
-                    label = "temporarily-unavailable"
-                default:
-                    outcome = error
-                    label = "unclassified"
+                case .guardrailViolation: return .guardrail
+                case .refusal: return .refusal
+                case .contextSizeExceeded: return .contextWindow
+                case .unsupportedLanguageOrLocale: return .unsupportedLanguage
+                case .unsupportedGenerationGuide: return .unsupportedGuide
+                case .unsupportedCapability: return .unsupportedCapability
+                case .unsupportedTranscriptContent: return .unsupportedTranscript
+                default: return nil
                 }
             }
-            logger.notice("On-device model request failed: \(label, privacy: .public)")
-            return outcome
-        }
+
+            @available(macOS 27.0, *)
+            static func failure(_ error: LanguageModelError) -> Error {
+                let transient: Bool
+                switch error {
+                case .rateLimited, .timeout: transient = true
+                default: transient = false
+                }
+                return classified(rejectedReason(error), transient: transient, unknown: error)
+            }
+        #endif
     #endif
 
+    /// Any other error from a request: the macOS 27 error types when built with their SDK, cancellation unchanged,
+    /// everything else unknown (provisional).
+    static func failure(any error: Error) -> Error {
+        if error is CancellationError { return error }
+        #if canImport(FoundationModels) && compiler(>=6.4)
+            if #available(macOS 27.0, *) {
+                if let error = error as? LanguageModelError { return failure(error) }
+                if error is SystemLanguageModel.Error { return classified(nil, transient: true, unknown: error) }
+            }
+        #endif
+        return classified(nil, transient: false, unknown: error)
+    }
+
+    private static func classified(_ reason: RejectionReason?, transient: Bool, unknown: Error) -> Error {
+        let outcome: Error
+        let label: String
+        if let reason {
+            outcome = Rejected(reason: reason)
+            label = "rejected:" + reason.rawValue
+        } else if transient {
+            outcome = TemporarilyUnavailable()
+            label = "temporarily-unavailable"
+        } else {
+            outcome = unknown
+            label = "unclassified"
+        }
+        logger.notice("On-device model request failed: \(label, privacy: .public)")
+        return outcome
+    }
     /// The on-device model generation. FoundationModels exposes no model version and the model ships with macOS, so
     /// the macOS build identifies it; an update that keeps the model only causes one extra regeneration.
     public static var generation: String { ProcessInfo.processInfo.operatingSystemVersionString }
@@ -220,6 +267,8 @@ public struct NewsTextModel: Sendable {
                         return response.content
                     } catch let error as LanguageModelSession.GenerationError {
                         throw NewsTextModel.failure(error)
+                    } catch {
+                        throw NewsTextModel.failure(any: error)
                     }
                 case .unavailable(.deviceNotEligible):
                     break
