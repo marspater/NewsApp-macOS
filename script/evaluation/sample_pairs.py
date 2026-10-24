@@ -51,7 +51,7 @@ def main(argv=None):
             parser.error('--labels needs --snapshot and --out, outside the checkout')
         written = export_labels(args.export, args.kind, args.labels, args.snapshot, args.out)
         print(f'{args.kind}: {written} rows written')
-        return 0
+        return
     with args.export.open(newline='', encoding='utf-8') as handle:
         rows = [row for row in csv.DictReader(handle) if CLASSES[args.kind](row)]
     rows.sort(key=order)
@@ -74,8 +74,9 @@ def export_labels(export, kind, labels, snapshot, out):
     tokenizer port. Never for the library holdout, which stays the gate."""
     import re
     import sqlite3
+    import urllib.parse
     sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / 'training'))
-    from wordpiece import Tokenizer
+    from wordpiece import Tokenizer, pair_prefix
     tag, space = re.compile(r'<[^>]+>'), re.compile(r'\s+')
     with export.open(newline='', encoding='utf-8') as handle:
         rows = [row for row in csv.DictReader(handle) if CLASSES[kind](row)]
@@ -86,7 +87,11 @@ def export_labels(export, kind, labels, snapshot, out):
             parts = line.split()
             if len(parts) == 2 and parts[0].isdigit():
                 verdicts[int(parts[0])] = parts[1]
-    db = sqlite3.connect(f'file:{snapshot}?mode=ro', uri=True)
+    # The copy is opened read-only by a validated path: a regular .sqlite3 file outside any app container.
+    copy = pathlib.Path(snapshot).expanduser().resolve()
+    if not copy.is_file() or copy.suffix != '.sqlite3' or '/Library/Containers/' in str(copy):
+        raise SystemExit(f'{snapshot} is not a library copy')
+    db = sqlite3.connect('file:' + urllib.parse.quote(str(copy)) + '?mode=ro', uri=True)
     tokenizer = Tokenizer()
 
     def text(article_id):
@@ -100,7 +105,7 @@ def export_labels(export, kind, labels, snapshot, out):
 
     exists = out.exists()
     with out.open('a', newline='', encoding='utf-8') as handle:
-        writer = csv.writer(handle)
+        writer = csv.writer(handle)  # nosemgrep: python.lang.security.use-defusedcsv.use-defusedcsv (local training rows)
         if not exists:
             writer.writerow(['label', 'group', 'text_a', 'text_b', 'pieces_a', 'pieces_b', 'weight'])
         written = 0
@@ -109,6 +114,10 @@ def export_labels(export, kind, labels, snapshot, out):
             a, b = text(row['article_id']), text(row['other_article_id'])
             if verdict not in ('same', 'related', 'different') or not a or not b:
                 continue
+            # The prefix the model reads at run time (#626): the pair's gap and whether one publisher wrote both.
+            prefix = pair_prefix(abs(float(row['published_a']) - float(row['published_b'])) / 3600,
+                                 row['source_a'] == row['source_b'])
+            a, b = prefix + a, prefix + b
             writer.writerow([1 if verdict == 'same' else 0, f'r:{kind}:{index}', a, b,
                              ' '.join(map(str, tokenizer.pieces(a))), ' '.join(map(str, tokenizer.pieces(b))), 5])
             written += 1
