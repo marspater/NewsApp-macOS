@@ -50,6 +50,7 @@ struct EventOverviewAccessibilityTests {
         print("=== Running Event Overview Accessibility Tests (Issue #155) ===")
 
         testCitationSourceResolution()
+        testInlineCitationLinks()
         testSparseSectionsFiltering()
         testVoiceOverLabelsAndSemantics()
         testIncreaseContrastScalers()
@@ -168,6 +169,24 @@ struct EventOverviewAccessibilityTests {
     }
 
     // MARK: - 2. Sparse Sections Filtering
+    static func testInlineCitationLinks() {
+        print("  - Testing inline citation superscripts: one text per fact, each number a news-citation link...")
+        let attributed = EventOverviewReaderView.citedAttributedString(
+            "Talks resumed on Monday.", sources: [2, 3], scale: 1)
+        assertEqual(String(attributed.characters), "Talks resumed on Monday. [2] [3]", "Numbers follow the sentence")
+        let links = attributed.runs.compactMap(\.link).map(\.absoluteString)
+        assertEqual(links, ["news-citation://2", "news-citation://3"], "Each number links to its own source index")
+        assertTrue(
+            attributed.runs.first { $0.link != nil }?.baselineOffset == AppTypography.superscriptOffset,
+            "Citation numbers are raised by the superscript token")
+        assertTrue(
+            attributed.runs.first.map { $0.link == nil && $0.baselineOffset == nil } ?? false,
+            "The sentence itself carries no link or offset")
+        assertEqual(
+            String(EventOverviewReaderView.citedAttributedString("No sources.", sources: [], scale: 1).characters),
+            "No sources.", "A fact without citations stays plain")
+    }
+
     static func testSparseSectionsFiltering() {
         print("  - Testing Sparse Sections Filtering (empty sections stay hidden)...")
 

@@ -201,6 +201,7 @@ struct ArticleDetailView: View {
                     overview: overview,
                     memberArticles: eventMemberArticles.isEmpty ? [currentArticle] : eventMemberArticles,
                     textScale: readerTextScale,
+                    theme: themeManager.articleTheme,
                     relatedEvents: Self.relatedEventsToShow(relatedStories, overviewEventID: overview.eventID),
                     onSelectArticle: { article in
                         activeArticle = article
@@ -1647,5 +1648,23 @@ struct ArticleDetailView: View {
         webCanGoBack = false
         webCanGoForward = false
         highlightedPassage = nil
+    }
+}
+
+/// Menu commands for the open story; the names live in NewsApp, so this stays beside the reader.
+struct ArticleNavigationCommands: ViewModifier {
+    let onNextArticle: () -> Void
+    let onPrevArticle: () -> Void
+    let onToggleRead: () -> Void
+    let onToggleSave: () -> Void
+    let onOpenInBrowser: () -> Void
+
+    func body(content: Content) -> some View {
+        content
+            .onReceive(NotificationCenter.default.publisher(for: .nextArticleCommand)) { _ in onNextArticle() }
+            .onReceive(NotificationCenter.default.publisher(for: .prevArticleCommand)) { _ in onPrevArticle() }
+            .onReceive(NotificationCenter.default.publisher(for: .toggleReadCommand)) { _ in onToggleRead() }
+            .onReceive(NotificationCenter.default.publisher(for: .toggleSaveCommand)) { _ in onToggleSave() }
+            .onReceive(NotificationCenter.default.publisher(for: .openInBrowserCommand)) { _ in onOpenInBrowser() }
     }
 }
