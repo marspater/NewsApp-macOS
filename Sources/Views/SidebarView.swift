@@ -91,7 +91,7 @@ struct SidebarView: View {
             RoundedRectangle(cornerRadius: AppRadius.control)
                 .stroke(isDropTargeted ? AppColor.accent : Color.clear, lineWidth: 1.5)
                 .padding(AppSpacing.xxs)
-                .animation(reduceMotion ? nil : AppMotion.quick, value: isDropTargeted)
+                .animation(reduceMotion ? nil : AppMotion.hover, value: isDropTargeted)
         )
     }
 
