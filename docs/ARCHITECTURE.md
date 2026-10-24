@@ -203,6 +203,10 @@ Open a section before changing that area. Each rule is load-bearing; tests cover
 
 - Multi-step writes use transactions.
 
+- Retention: `FeedManager` runs `pruneOldArticles` once a day after a completed refresh, with the Settings › Storage age (default 30 days, 0 = never). Only read, unsaved stories older than that go; unread, saved and overview-cited stories and events with a stored overview stay. Clearing AI analysis removes enrichment, overviews, embeddings and tension history in one transaction; stories and events stay.
+
+- Stories a cancelled refresh had already committed are notified by the next completed refresh; cancelling ends the loading state at once.
+
 </details>
 
 <details>

@@ -59,6 +59,10 @@ class FeedManager: NSObject, ObservableObject {
     private var powerObservers: [AnyCancellable] = []
     private var wakeTask: Task<Void, Never>?
     private var refreshInterruptedBySleep = false
+    /// Stories a cancelled refresh had already committed; the next completed refresh notifies them.
+    private var pendingNotificationArticles: [FeedArticle] = []
+    /// Retention runs at most once a day per launch, after a completed refresh.
+    private var lastPruneAt: Date?
     /// When the latest refresh published its stories; shown in the list header.
     @Published private(set) var lastRefreshCompletedAt: Date?
     private let wakeRefreshDelay: Duration
@@ -386,6 +390,9 @@ class FeedManager: NSObject, ObservableObject {
         refreshTask?.cancel()
         refreshTask = nil
         refreshRunID = nil
+        // The waiting caller returns without finishing the run, so the loading state ends here.
+        for (url, status) in feedStatuses where status == .loading { feedStatuses[url] = .idle }
+        isAnyFeedLoading = false
     }
 
     func stopBackgroundWork() {
@@ -439,7 +446,11 @@ class FeedManager: NSObject, ObservableObject {
         // Retain the work itself so subscription changes cancel ingestion as well as fetching.
         refreshTask = task
         let newArticles = await task.value
-        guard refreshRunID == runID else { return }
+        guard refreshRunID == runID else {
+            // Cancelled between the pipeline's return and this resumption: the next run notifies these.
+            pendingNotificationArticles.append(contentsOf: newArticles)
+            return
+        }
         refreshTask = nil
         refreshRunID = nil
         isAnyFeedLoading = false
@@ -447,6 +458,7 @@ class FeedManager: NSObject, ObservableObject {
         refreshInterruptedBySleep = false
 
         guard !isStopped else { return }
+        await pruneIfDue()
         clusterEventsInBackground()
         // Rate before triage. Collection and its spinner have ended; another refresh can proceed.
         await waitForEventClustering()
@@ -468,6 +480,16 @@ class FeedManager: NSObject, ObservableObject {
         }
         guard !Task.isCancelled, !isStopped else { return }
         enrichArticlesInBackground()
+    }
+
+    /// Deletes read, unsaved stories older than the retention setting, once a day after a completed refresh.
+    private func pruneIfDue() async {
+        let days = appSettings.articleRetentionDays
+        guard days > 0 else { return }
+        let current = now()
+        if let last = lastPruneAt, current.timeIntervalSince(last) < 24 * 3600 { return }
+        lastPruneAt = current
+        await articleStore.pruneOldArticles(keepReadDays: days)
     }
 
     private func performRefreshPipeline() async -> [FeedArticle] {
@@ -511,23 +533,35 @@ class FeedManager: NSObject, ObservableObject {
 
         // Publish one coherent snapshot per collection, including any committed prefix if it was cancelled.
         await articleStore.refreshState()
-        guard !Task.isCancelled else { return [] }
         allParsed.sort { $0.pubDate > $1.pubDate }
 
+        // Stories a cancelled run had committed come first; the next run sees them as existing rows.
         var notifiedIDs = Set<String>()
         let userSubscribed = Set(appSettings.feedURLs)
-        let newArticles = allParsed.filter {
-            insertedIDs.contains($0.id) && userSubscribed.contains($0.identityFeedURL ?? "")
-                && notifiedIDs.insert($0.id).inserted
+        let pendingIDs = Set(pendingNotificationArticles.map(\.id))
+        let newArticles = (pendingNotificationArticles + allParsed).filter {
+            (insertedIDs.contains($0.id) || pendingIDs.contains($0.id))
+                && userSubscribed.contains($0.identityFeedURL ?? "") && notifiedIDs.insert($0.id).inserted
         }
+        guard !Task.isCancelled else {
+            pendingNotificationArticles = newArticles
+            return []
+        }
+        pendingNotificationArticles = []
 
         do {
             let stored = try await articleStore.fetchArticles()
-            guard !Task.isCancelled else { return [] }
+            guard !Task.isCancelled else {
+                pendingNotificationArticles = newArticles
+                return []
+            }
             self.articles = stored
             await reloadFeedHealth()
         } catch {
-            guard !Task.isCancelled else { return [] }
+            guard !Task.isCancelled else {
+                pendingNotificationArticles = newArticles
+                return []
+            }
             articleStore.operationError = "Stored articles could not be loaded. Your current library has been retained."
             logger.error("Failed to reload articles after refresh: \(error.localizedDescription)")
         }

@@ -224,7 +224,7 @@ struct FeedUpdateBuffer: Equatable, Sendable {
     /// today's reading, so a refresh replaces it instead of waiting behind the updates button.
     func showsOnlyEarlierDays(now: Date = Date(), calendar: Calendar = .current) -> Bool {
         let today = calendar.startOfDay(for: now)
-        return !displayed.articles.isEmpty && displayed.articles.allSatisfy { $0.pubDate < today }
+        return !displayed.articles.isEmpty && displayed.articles.allSatisfy { $0.orderDate < today }
     }
 
     /// A refreshed first page. `hasMore` says further pages follow it, so pages already loaded
@@ -363,9 +363,10 @@ struct FiniteBriefing: Equatable, Sendable {
         var seen = Set<String>()
         return Array(
             candidates.filter {
-                !readIDs.contains($0.id) && $0.pubDate >= now.addingTimeInterval(-Self.duration)
-                    && $0.pubDate <= now && seen.insert($0.id).inserted
-            }.sorted { $0.pubDate == $1.pubDate ? $0.id < $1.id : $0.pubDate > $1.pubDate }.prefix(Self.candidateLimit))
+                !readIDs.contains($0.id) && $0.orderDate >= now.addingTimeInterval(-Self.duration)
+                    && $0.orderDate <= now && seen.insert($0.id).inserted
+            }.sorted { $0.orderDate == $1.orderDate ? $0.id < $1.id : $0.orderDate > $1.orderDate }
+                .prefix(Self.candidateLimit))
     }
 
     private static func source(_ article: FeedArticle) -> String {
