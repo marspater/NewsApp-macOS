@@ -92,17 +92,23 @@ def check_shipped():
     print('Shipped MiniLM weights import check passed')
 
 
-def read_pairs(path):
+def read_pairs(path, cap=None):
+    """Rows of one CSV as (label, group, pieces_a, pieces_b, weight); the pieces are int32 arrays, so a million-pair
+    file fits in memory. With `cap`, a fixed pseudo-random subset of that many rows (CRC-32 order of the texts)."""
     file = pathlib.Path(path).resolve()
     require(file.suffix == '.csv' and file.is_file(), 'Use the --export-pairs CSV')
     require(not any((parent / '.git').exists() for parent in file.parents), 'Keep the pairs outside Git checkouts')
     csv.field_size_limit(1 << 20)
     def ids(value):
-        return [int(piece) for piece in value.split()]
+        return np.array(value.split(), dtype=np.int32)
     with file.open(newline='', encoding='utf-8') as handle:
-        return [(int(row['label']), row['group'], ids(row['pieces_a']), ids(row['pieces_b']),
+        rows = [(int(row['label']), row['group'], ids(row['pieces_a']), ids(row['pieces_b']),
                  float(row.get('weight') or 1.0))
                 for row in csv.DictReader(handle)]
+    if cap and len(rows) > cap:
+        rows.sort(key=lambda r: zlib.crc32(r[2].tobytes() + r[3].tobytes()))
+        rows = rows[:cap]
+    return rows
 
 
 def describe(path, rows):
@@ -116,16 +122,28 @@ def split(rows):
     """A tenth of the texts is held out, and a pair is held out only when both of its texts are; pairs that straddle
     the split are dropped, so no held-out text was trained on."""
     def held(pieces):
-        return zlib.crc32(' '.join(map(str, pieces)).encode()) % 10 == 0
+        return zlib.crc32(' '.join(map(str, pieces)).encode()) % 10 == 0  # unchanged since v11: same held-out texts
     fit = [r for r in rows if not held(r[2]) and not held(r[3])]
     return fit, [r for r in rows if held(r[2]) and held(r[3])]
 
 
 def tensors(tokenizer, rows):
-    encoded = [tokenizer.encode_ids(r[2], r[3]) for r in rows]
-    return (torch.tensor([e[0] for e in encoded]), torch.tensor([e[1] for e in encoded]),
-            torch.tensor([e[2] for e in encoded]), torch.tensor([float(r[0]) for r in rows]),
-            torch.tensor([float(r[4]) for r in rows]))
+    """[CLS] a [SEP] b [SEP] per row as int32 arrays filled in place (no Python lists of ids), plus labels and
+    weights; one row of 256 ids costs a kilobyte instead of tens."""
+    count = len(rows)
+    ids = np.zeros((count, MAX_LENGTH), dtype=np.int32)
+    mask = np.zeros((count, MAX_LENGTH), dtype=np.int32)
+    types = np.zeros((count, MAX_LENGTH), dtype=np.int32)
+    for index, row in enumerate(rows):
+        pa, pb = list(row[2]), list(row[3])
+        while len(pa) + len(pb) > MAX_LENGTH - 3:
+            (pa if len(pa) > len(pb) else pb).pop()
+        sequence = [tokenizer.cls, *pa, tokenizer.sep, *pb, tokenizer.sep]
+        ids[index, :len(sequence)] = sequence
+        mask[index, :len(sequence)] = 1
+        types[index, len(pa) + 2:len(sequence)] = 1
+    return (torch.from_numpy(ids), torch.from_numpy(mask), torch.from_numpy(types),
+            torch.tensor([float(r[0]) for r in rows]), torch.tensor([float(r[4]) for r in rows]))
 
 
 def auc(scores, labels):
@@ -161,7 +179,7 @@ def predict(model, data, device, batch=64):
     with torch.no_grad():
         for start in range(0, len(data[0]), batch):
             ids, mask, types = (t[start:start + batch].to(device) for t in data[:3])
-            logits = model(input_ids=ids, attention_mask=mask, token_type_ids=types).logits[:, 0]
+            logits = model(input_ids=ids.long(), attention_mask=mask.long(), token_type_ids=types.long()).logits[:, 0]
             scores.extend(torch.sigmoid(logits).float().cpu().tolist())
     return scores
 
@@ -174,7 +192,7 @@ def run_epoch(model, data, device, optimization, batch):
     for start in range(0, len(order), batch):
         index = order[start:start + batch]
         ids, mask, types, target, weight = (t[index].to(device) for t in data)
-        logits = model(input_ids=ids, attention_mask=mask, token_type_ids=types).logits[:, 0]
+        logits = model(input_ids=ids.long(), attention_mask=mask.long(), token_type_ids=types.long()).logits[:, 0]
         # Per-row weights (#624): reader verdicts count five times, graded SemEval pairs twice.
         (loss_function(logits, target) * weight).sum().div(weight.sum().clamp(min=1.0)).backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
@@ -281,10 +299,16 @@ def self_check():
     ids, mask, types = tokenizer.encode_pair('a ' * 300, 'b ' * 10)
     require(len(ids) == MAX_LENGTH and sum(mask) == MAX_LENGTH and types.count(1) == 11, 'Longest-first truncation')
     require(abs(auc([0.1, 0.4, 0.35, 0.8], [False, False, True, True]) - 0.75) < 1e-9, 'AUC by ranks')
-    rows = [(1, 'g', [7, 8], [9], 1.0), (0, 'h', [10], [11, 12], 5.0)]
+    rows = [(1, 'g', np.array([7, 8], dtype=np.int32), np.array([9], dtype=np.int32), 1.0),
+            (0, 'h', np.array([10], dtype=np.int32), np.array([11, 12], dtype=np.int32), 5.0)]
     fit, held = split(rows)
     require(not {tuple(r[2]) for r in fit} & {tuple(r[2]) for r in held}, 'No held-out text is trained on')
-    require(tensors(tokenizer, rows)[4].tolist() == [1.0, 5.0], 'Row weights travel with the tensors')
+    built = tensors(tokenizer, rows)
+    require(built[4].tolist() == [1.0, 5.0], 'Row weights travel with the tensors')
+    require(built[0][0, :6].tolist() == [tokenizer.cls, 7, 8, tokenizer.sep, 9, tokenizer.sep]
+            and built[2][0, :6].tolist() == [0, 0, 0, 0, 1, 1] and int(built[1][0].sum()) == 6,
+            'Tensors match encode_ids')
+    require(built[0][0].tolist() == tokenizer.encode_ids([7, 8], [9])[0], 'Array rows equal the list encoder')
     print('Pair model training self-check passed')
 
 
@@ -296,10 +320,11 @@ def main(argv):
     parser.add_argument('out')
     parser.add_argument('--pretrain', nargs='*', default=[])
     parser.add_argument('--pretrain-epochs', type=int, default=2)
+    parser.add_argument('--pretrain-cap', type=int, default=120_000, help='rows kept per pretraining CSV')
     parser.add_argument('--epochs', type=int, default=3)
     args = parser.parse_args(argv)
     rows = read_pairs(args.pairs)
-    pretrain = [r for path in args.pretrain for r in read_pairs(path)]
+    pretrain = [r for path in args.pretrain for r in read_pairs(path, cap=args.pretrain_cap)]
     trained, tok, held_out, report = train(rows, epochs=args.epochs, pretrain=pretrain or None,
                                            pretrain_epochs=args.pretrain_epochs)
     out = pathlib.Path(args.out)
@@ -308,7 +333,8 @@ def main(argv):
     metadata = {
         'model': 'pairscorer', 'base': 'sentence-transformers/all-MiniLM-L6-v2 (shipped minilm.mlmodelc weights)',
         'inputs': {'library': describe(args.pairs, rows),
-                   'pretrain': [describe(path, read_pairs(path)) for path in args.pretrain]},
+                   'pretrain': [describe(path, read_pairs(path, cap=args.pretrain_cap)) for path in args.pretrain]},
+        'pretrain_cap': args.pretrain_cap,
         'stages': report, 'batch': 32,
         'versions': {'python': platform.python_version(), 'torch': torch.__version__,
                      'transformers': __import__('transformers').__version__, 'coremltools': ct.__version__},
