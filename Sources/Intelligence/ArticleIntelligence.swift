@@ -144,35 +144,51 @@ public struct NewsTextModel: Sendable {
     /// larger than the context window, an unsupported language, or undecodable output). Greedy sampling would answer
     /// the same text the same way, so the deterministic result is final. Carries the reason only, never publisher text.
     public struct Rejected: Error, Equatable, Sendable {
-        public enum Reason: String, Sendable {
-            case guardrail, refusal, contextWindow, unsupportedLanguage, decoding, unsupportedGuide
-        }
-        public let reason: Reason
-        public init(reason: Reason) { self.reason = reason }
+        public let reason: RejectionReason
+        public init(reason: RejectionReason) { self.reason = reason }
+    }
+
+    public enum RejectionReason: String, Sendable {
+        case guardrail, refusal, contextWindow, unsupportedLanguage, decoding, unsupportedGuide
     }
 
     private static let logger = Logger(subsystem: "com.marspater.news", category: "NewsTextModel")
 
     #if canImport(FoundationModels)
+        /// Failures that repeat for the same input under greedy sampling; nil for transient or unknown ones.
+        @available(macOS 26.0, *)
+        static func rejectedReason(_ error: LanguageModelSession.GenerationError) -> RejectionReason? {
+            switch error {
+            case .guardrailViolation: return .guardrail
+            case .refusal: return .refusal
+            case .exceededContextWindowSize: return .contextWindow
+            case .unsupportedLanguageOrLocale: return .unsupportedLanguage
+            case .decodingFailure: return .decoding
+            case .unsupportedGuide: return .unsupportedGuide
+            default: return nil
+            }
+        }
+
         /// Every framework failure becomes one of three outcomes the callers already handle: final (`Rejected`),
         /// retry later (`TemporarilyUnavailable`) or unknown (rethrown, treated as provisional). Only the outcome
         /// label is logged.
         @available(macOS 26.0, *)
         static func failure(_ error: LanguageModelSession.GenerationError) -> Error {
             let outcome: Error
-            switch error {
-            case .guardrailViolation: outcome = Rejected(reason: .guardrail)
-            case .refusal: outcome = Rejected(reason: .refusal)
-            case .exceededContextWindowSize: outcome = Rejected(reason: .contextWindow)
-            case .unsupportedLanguageOrLocale: outcome = Rejected(reason: .unsupportedLanguage)
-            case .decodingFailure: outcome = Rejected(reason: .decoding)
-            case .unsupportedGuide: outcome = Rejected(reason: .unsupportedGuide)
-            case .assetsUnavailable, .rateLimited, .concurrentRequests: outcome = TemporarilyUnavailable()
-            default: outcome = error
+            let label: String
+            if let reason = rejectedReason(error) {
+                outcome = Rejected(reason: reason)
+                label = "rejected:" + reason.rawValue
+            } else {
+                switch error {
+                case .assetsUnavailable, .rateLimited, .concurrentRequests:
+                    outcome = TemporarilyUnavailable()
+                    label = "temporarily-unavailable"
+                default:
+                    outcome = error
+                    label = "unclassified"
+                }
             }
-            let label =
-                (outcome as? Rejected).map { "rejected:" + $0.reason.rawValue }
-                ?? (outcome is TemporarilyUnavailable ? "temporarily-unavailable" : "unclassified")
             logger.notice("On-device model request failed: \(label, privacy: .public)")
             return outcome
         }
