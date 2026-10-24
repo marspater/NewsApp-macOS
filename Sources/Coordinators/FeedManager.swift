@@ -34,7 +34,7 @@ class FeedManager: NSObject, ObservableObject {
 
     typealias FeedBatch = [FeedFetchResult]
     private let fetchBatch: @Sendable ([String], Bool) async -> FeedBatch
-    private let notifyBatch: @MainActor ([FeedArticle], AppSettings.NotificationMode) async -> Void
+    private let notifyBatch: @MainActor ([FeedArticle], NotificationDelivery) async -> Void
     private let enrichmentQueue: EnrichmentQueue
     private let allowsBackgroundWork: @MainActor () -> Bool
     private let imageFinder: StoryImageFinder
@@ -78,9 +78,9 @@ class FeedManager: NSObject, ObservableObject {
     init(
         settings: AppSettings? = nil, store: ArticleStore? = nil, schedulesRefresh: Bool = true,
         fetchBatch: (@Sendable ([String], Bool) async -> FeedBatch)? = nil,
-        notifyBatch: @escaping @MainActor ([FeedArticle], AppSettings.NotificationMode) async -> Void = {
-            articles, mode in
-            await NotificationService.shared.triageAndNotify(newArticles: articles, mode: mode)
+        notifyBatch: @escaping @MainActor ([FeedArticle], NotificationDelivery) async -> Void = {
+            articles, delivery in
+            await NotificationService.shared.triageAndNotify(newArticles: articles, delivery: delivery)
         },
         enrichmentQueue: EnrichmentQueue? = nil,
         importanceJudge _: StoryImportanceJudge = .unavailable,
@@ -469,15 +469,10 @@ class FeedManager: NSObject, ObservableObject {
         let muting = appSettings.muteRules
         let notifiable = newArticles.filter { eligible.contains($0.id) && !muting.mutes($0) }
         if appSettings.notificationsEnabled && !notifiable.isEmpty {
-            let mode = appSettings.notificationMode
-            var batch = notifiable
-            // Clustering has run: in full mode, which posts a banner per story, reports of one event notify once, by
-            // their strongest report (#523). The summary modes count every new story and source, so they get all.
-            if mode == .full {
-                let events = (try? await articleStore.database.eventIDs(forArticles: notifiable.map(\.id))) ?? [:]
-                batch = await NotificationService.representatives(of: notifiable, events: events)
-            }
-            await notifyBatch(batch, mode)
+            // Clustering has run: reports of one event notify once, by their strongest report, in every mode (#523,
+            // #587); the service picks them from the events handed over.
+            let events = (try? await articleStore.database.eventIDs(forArticles: notifiable.map(\.id))) ?? [:]
+            await notifyBatch(notifiable, NotificationDelivery(mode: appSettings.notificationMode, events: events))
         }
         guard !Task.isCancelled, !isStopped else { return }
         enrichArticlesInBackground()
