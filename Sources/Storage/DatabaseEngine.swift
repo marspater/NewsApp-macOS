@@ -212,11 +212,17 @@ actor DatabaseEngine {
                     VALUES (new.id, new.title, coalesce(new.description, ''), coalesce(new.content, ''), new.source, coalesce(new.category, ''));
                 END;
                 """
-            try executeSimple(schema)
-
-            try setUserVersion(1)
+            // One transaction: a half-created schema would otherwise report version 0 and fail on the next launch.
+            try beginTransaction()
+            do {
+                try executeSimple(schema)
+                try setUserVersion(1)
+                try commitTransaction()
+            } catch {
+                try? rollbackTransaction()
+                throw error
+            }
             logger.info("Database schema migrated to version 1")
-
         }
         if version < 2 {
             try beginTransaction()
@@ -1079,13 +1085,21 @@ actor DatabaseEngine {
                 domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Database not open"])
         }
         var stmt: OpaquePointer?
-        if sqlite3_prepare_v2(db, "PRAGMA user_version;", -1, &stmt, nil) == SQLITE_OK {
-            defer { sqlite3_finalize(stmt) }
-            if sqlite3_step(stmt) == SQLITE_ROW {
-                return Int(sqlite3_column_int(stmt, 0))
-            }
+        // A failed read must not look like a fresh file: the version 1 schema would then run again.
+        guard sqlite3_prepare_v2(db, "PRAGMA user_version;", -1, &stmt, nil) == SQLITE_OK else {
+            throw sqliteError(db, "Could not read the database version")
         }
-        return 0
+        defer { sqlite3_finalize(stmt) }
+        guard sqlite3_step(stmt) == SQLITE_ROW else {
+            throw sqliteError(db, "Could not read the database version")
+        }
+        return Int(sqlite3_column_int(stmt, 0))
+    }
+
+    private func sqliteError(_ db: OpaquePointer, _ context: String) -> NSError {
+        NSError(
+            domain: "DatabaseEngine", code: Int(sqlite3_errcode(db)),
+            userInfo: [NSLocalizedDescriptionKey: "\(context): \(String(cString: sqlite3_errmsg(db)))"])
     }
 
     private func setUserVersion(_ version: Int) throws {
@@ -1588,15 +1602,21 @@ actor DatabaseEngine {
                 ? nil : Date(timeIntervalSince1970: sqlite3_column_double(statement, column))
         }
         var result: [String: FeedFetchState] = [:]
-        while sqlite3_step(statement) == SQLITE_ROW {
-            guard let url = text(0) else { continue }
-            let validators = FeedValidators(etag: text(1), lastModified: text(2))
-            result[url] = FeedFetchState(
-                validators: validators.isEmpty ? nil : validators,
-                failures: Int(sqlite3_column_int(statement, 3)),
-                retryAt: date(4), lastFetchedAt: date(5), latestItemAt: date(6),
-                itemCount: Int(sqlite3_column_int(statement, 7)), fullTextItems: Int(sqlite3_column_int(statement, 8)))
+        var status = sqlite3_step(statement)
+        while status == SQLITE_ROW {
+            if let url = text(0) {
+                let validators = FeedValidators(etag: text(1), lastModified: text(2))
+                result[url] = FeedFetchState(
+                    validators: validators.isEmpty ? nil : validators,
+                    failures: Int(sqlite3_column_int(statement, 3)),
+                    retryAt: date(4), lastFetchedAt: date(5), latestItemAt: date(6),
+                    itemCount: Int(sqlite3_column_int(statement, 7)),
+                    fullTextItems: Int(sqlite3_column_int(statement, 8)))
+            }
+            status = sqlite3_step(statement)
         }
+        // A partial map would drop validators and backoff for the feeds after the error.
+        guard status == SQLITE_DONE else { throw sqliteError(db, "Could not load feed fetch states") }
         return result
     }
 
@@ -1836,7 +1856,8 @@ actor DatabaseEngine {
     private func publicationWindowConditions(_ publicationWindow: ClosedRange<Date>) -> (
         sql: String, params: [QueryParameter]
     ) {
-        let sql = " AND a.published_at >= ? AND a.published_at <= ?"
+        // Undated stories fall back to ingestion time, as ordering and paging do.
+        let sql = " AND \(Self.articleDateOrder) >= ? AND \(Self.articleDateOrder) <= ?"
         let params: [QueryParameter] = [
             ("double", publicationWindow.lowerBound.timeIntervalSince1970),
             ("double", publicationWindow.upperBound.timeIntervalSince1970),
@@ -2302,15 +2323,21 @@ actor DatabaseEngine {
         let sql =
             "SELECT article_id FROM article_state s WHERE is_read = 1 AND NOT EXISTS (SELECT 1 FROM article_reconciliations r WHERE r.duplicate_id = s.article_id);"
         var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw sqliteError(db, "Could not load read stories")
+        }
         defer { sqlite3_finalize(stmt) }
 
         var set = Set<String>()
-        while sqlite3_step(stmt) == SQLITE_ROW {
+        var status = sqlite3_step(stmt)
+        while status == SQLITE_ROW {
             if let cStr = sqlite3_column_text(stmt, 0) {
                 set.insert(String(cString: cStr))
             }
+            status = sqlite3_step(stmt)
         }
+        // A partial list would show read stories as unread.
+        guard status == SQLITE_DONE else { throw sqliteError(db, "Could not load read stories") }
         return set
     }
 
@@ -2713,12 +2740,21 @@ actor DatabaseEngine {
 
     // MARK: - Granular Cache Purging
 
-    /// Clears all AI enrichment analysis data (summaries, key points, entities).
-    /// Articles and subscriptions remain completely intact.
+    /// Clears all AI analysis data: summaries, key points, entities, event overviews, story embeddings and the
+    /// World Tension history. Articles, events and subscriptions remain completely intact.
     func clearArticleEnrichment() throws {
         guard db != nil else { return }
-        try clearWorldTensionHistory()
-        try executeSimple("DELETE FROM article_enrichment;")
+        try beginTransaction()
+        do {
+            try clearWorldTensionHistory()
+            try executeSimple("DELETE FROM article_enrichment;")
+            try clearEventOverviews()
+            try executeSimple("DELETE FROM article_embeddings;")
+            try commitTransaction()
+        } catch {
+            try? rollbackTransaction()
+            throw error
+        }
         logger.info("Cleared all article enrichment data.")
     }
 
@@ -2785,20 +2821,20 @@ actor DatabaseEngine {
             );
             """
         var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return 0 }
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw sqliteError(db, "Could not prepare retention pruning")
+        }
         defer { sqlite3_finalize(stmt) }
 
         sqlite3_bind_double(stmt, 1, cutoff)
         sqlite3_bind_double(stmt, 2, cutoff)
-        if sqlite3_step(stmt) == SQLITE_DONE {
-            let changes = Int(sqlite3_changes(db))
-            try pruneEmptyEvents()
-            if changes > 0 {
-                logger.info("Pruned \(changes) read articles older than \(keepReadDays) days")
-            }
-            return changes
+        guard sqlite3_step(stmt) == SQLITE_DONE else { throw sqliteError(db, "Retention pruning failed") }
+        let changes = Int(sqlite3_changes(db))
+        try pruneEmptyEvents()
+        if changes > 0 {
+            logger.info("Pruned \(changes) read articles older than \(keepReadDays) days")
         }
-        return 0
+        return changes
     }
 
     // MARK: - Counts & Diagnostics

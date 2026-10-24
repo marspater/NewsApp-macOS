@@ -67,7 +67,14 @@ actor FeedFetcher {
     /// Scheduled and manual refreshes take this same path, so neither can bypass a server's wait.
     func fetchAllFeeds(urls: [String], allowHTTP: Bool = false, state: DatabaseEngine? = nil) async -> [FeedFetchResult]
     {
-        let stored = (try? await state?.feedFetchStates()) ?? [:]
+        var stored: [String: FeedFetchState] = [:]
+        do {
+            stored = try await state?.feedFetchStates() ?? [:]
+        } catch {
+            logger.error(
+                "Could not load feed fetch states; requesting every feed unconditionally: \(error.localizedDescription)"
+            )
+        }
         let started = now()
         hostCooldowns = hostCooldowns.filter { $0.value > started }
         var results = [FeedFetchResult]()
