@@ -124,51 +124,6 @@ sequenceDiagram
     end
 ```
 
-## How `main` moves
-
-Every change lands as a focused PR, squash-merged. Open and parked branches stay off `main` until reviewed against current code.
-
-```mermaid
-gitGraph
-    commit id: "#261 reader structure"
-    branch event-feature-fallback
-    commit id: "non-English matching" tag: "parked #264"
-    checkout main
-    commit id: "#453 feed quality"
-    branch kagi-compact-layout
-    commit id: "Headlines layout" tag: "kept, #456 closed"
-    checkout main
-    commit id: "#455 paywalls, World Tension"
-    commit id: "#457 daily edition"
-    commit id: "#462 Earlier in This Story"
-    commit id: "#467 multi-source overview"
-    commit id: "#473 test atoms"
-    branch macos-hig-design
-    commit id: "style: cards, reader, chrome"
-    commit id: "refactor(overview)"
-    commit id: "Kagi-style journey" type: HIGHLIGHT
-    checkout main
-    commit id: "#475 HIG refinement"
-    commit id: "#470 #471 feeds"
-    commit id: "#474 reader v9"
-    commit id: "#478 #479 file splits"
-    commit id: "#480 state review"
-    merge macos-hig-design id: "#481 overview journey" tag: "HEAD"
-```
-
-## Where the code is
-
-```mermaid
-pie showData title Swift lines in Sources/ (21 Oct 2026)
-    "Intelligence" : 12058
-    "Views" : 8418
-    "Storage" : 5488
-    "Models" : 2491
-    "Services" : 2196
-    "App" : 1334
-    "Coordinators" : 951
-```
-
 | Area | Owns |
 |---|---|
 | `Sources/App/` | `NewsApp` lifecycle, scenes, commands, notification routing · `AppContainer` DI · `AppSettings` defaults, feed URL normalization, mute rules storage · `ThemeManager` · `UpdateChecker` · `NewsSignposts` |
