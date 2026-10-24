@@ -105,3 +105,24 @@ A → B → C (C after A/B so deletions do not conflict with fixes in FM/DB/ADV)
 - Slice D: shortcut table test (every `keyboardShortcut` in `NewsApp` appears in the window); CI configs run format check on the PR.
 - Slices E–K: per the finish-pass plan's verification list; slice 10 by Mars.
 - Not covered: macOS 15/26 runtime, live VoiceOver (#268 parked), real sleep/wake (fix 3 is tested by calling `cancelRefresh` directly).
+
+## Outcomes — 24 October 2026
+
+Every slice is open for review as a pull request; all were built, tested (`./test.sh` via the pre-commit hook), formatted and staged-built. Mars runs the appearance harnesses (finish-pass slice 10) once the stack lands.
+
+| Slice | PR | Base | Notes |
+|---|---|---|---|
+| A — storage and refresh correctness | #490 | `main` | retention wired with a Settings › Storage age; cancelled-refresh notifications; undated stories in windows; JSON ids; Clear AI scope; DB errors thrown |
+| B — UI and services correctness | #491 | `main` | separate session: update/OPML feedback, reader reset, stable notification ids, gateway restart, DNS off the actor |
+| 7 — cards and list | #492 | `main` | separate session |
+| C — dead code removal | #493 | A | −865 lines, no behaviour change |
+| D — small missing features | #494 | C | Mark All as Read, confirmations, Dock badge, shortcuts, format check in CI |
+| 4 — reader block rendering | #495 | D | links, quotes, code, figures, media embeds, reader chrome |
+| 5 — citation jump to passage | #496 | 4 | `ReaderPassageMatcher`, scroll and highlight |
+| 6 — overview polish | #497 | 5 | inline citation links, reading-style type, shared figure, tokens |
+| 8 — sidebar, menus, catalog, settings, tension | #498 | 6 | |
+| 9 — tokens and lint ratchet | (this PR) | 8 | adaptive gold/flame, alias cleanup, eight new lint ratchets |
+
+Merge order: #490, #491 and #492 against `main` (independent), then #493 → #494 → #495 → #496 → #497 → #498 → #499 in that order, each retargeted to `main` as its base merges. Codacy's Swift parser reads `Type.init` member references as method starts; two such lines were rewritten as closures (#490, #497).
+
+Left for later, on purpose: the three unreferenced accessibility and calibration scripts stay (audit tooling); `TensionBriefFacts`, `TensionCalibrator` and the `OverviewQualityAuditor` release-gate types stay for the opt-in audits; the VoiceOver override plumbing stays for parked #268; List/Grid keyboard shortcuts (inline `Picker`); `AttributedString` memoization in the reader (no measured cost).
