@@ -203,16 +203,6 @@ struct ArticleListView: View {
             } actions: {
                 Button("Retry") { pageRequest += 1 }
             }
-            if let queryError {
-                DisclosureGroup("Technical Details") {
-                    Text(queryError)
-                        .font(AppTypography.caption)
-                        .foregroundStyle(AppColor.secondaryText)
-                        .textSelection(.enabled)
-                }
-                .font(AppTypography.caption)
-                .padding(.horizontal, AppLayout.pageInset)
-            }
         }
         .frame(maxWidth: .infinity)
     }
@@ -258,7 +248,7 @@ struct ArticleListView: View {
             // An empty list keeps its masthead at the top and centers its state in the visible area.
             .overlay { emptyListOverlay }
             .onChange(of: queuedUpdateCount, handleQueuedUpdatesChange)
-            // Another window stored a new edition (New Edition, or the next day's): show the same one here.
+            // Another window stored a new briefing (New Briefing, or the next day's): show the same one here.
             .onChange(of: briefingEditionSelectedAt) { _, stored in
                 guard let shown = briefing, shown.startedAt.timeIntervalSince1970 != stored else { return }
                 briefing = nil
@@ -532,9 +522,10 @@ struct ArticleListView: View {
             applyPendingUpdates(proxy: proxy)
         } label: {
             Label(
-                count > 0 ? "\(count) new \(count == 1 ? "story" : "stories")" : "Show Updates", systemImage: "arrow.up"
+                count > 0 ? "\(count) New \(count == 1 ? "Story" : "Stories")" : "Show Updates", systemImage: "arrow.up"
             )
             .font(AppTypography.label)
+            .monospacedDigit()
             .labelStyle(.titleAndIcon)
         }
         .help("Show the latest stories (U). The list keeps its place until you do.")
@@ -650,18 +641,16 @@ struct ArticleListView: View {
             .toggleStyle(.button)
             .help(
                 groupsEvents
-                    ? "Showing one card per event. Show individual publications (G)"
-                    : "Showing individual publications. Group coverage of the same event (G)"
+                    ? "Showing one card per event. Show every story on its own (G)"
+                    : "Showing every story on its own. Group stories of the same event (G)"
             )
-            .accessibilityLabel("Group Coverage by Event")
 
             Picker("Story Layout", selection: $gridLayout) {
-                Image(systemName: "list.bullet").tag(false)
-                    .accessibilityLabel("List")
-                Image(systemName: "square.grid.2x2").tag(true)
-                    .accessibilityLabel("Grid")
+                Label("List", systemImage: "list.bullet").tag(false)
+                Label("Grid", systemImage: "square.grid.2x2").tag(true)
             }
             .pickerStyle(.segmented)
+            .labelStyle(.iconOnly)
             .labelsHidden()
             .fixedSize()
             .help("Choose list or grid layout")
@@ -682,10 +671,11 @@ struct ArticleListView: View {
             refreshToolbarItem
         #endif
         if isBriefing {
-            if #available(macOS 26, *) { ToolbarSpacer(.fixed, placement: .primaryAction) }
             ToolbarItem(placement: .primaryAction) {
-                Button("New Edition", action: startNewBriefing)
-                    .help("Select a new edition now from the latest unread stories")
+                Button(action: startNewBriefing) {
+                    Label("New Briefing", systemImage: "text.book.closed")
+                }
+                .help("Select a new briefing now from the latest unread stories")
             }
         }
     }
@@ -710,7 +700,7 @@ struct ArticleListView: View {
     private var listSubtitle: String {
         if isBriefing {
             let edition = (briefing?.startedAt ?? Date()).formatted(.dateTime.weekday(.wide).month(.wide).day())
-            return "\(edition) edition · Main stories · Your interests and importance"
+            return "\(edition) briefing · Selected by importance and your interests"
         }
         var parts = ["\(entries.count) \(entries.count == 1 ? "story" : "stories")"]
         if !isSearching && (selectedTopic ?? "Today") == "Today" {
@@ -761,7 +751,7 @@ struct ArticleListView: View {
                 )
                 .font(AppTypography.sectionTitle)
                 Text(
-                    "Edition selected at \(briefing.startedAt.formatted(date: .omitted, time: .shortened)). The next edition arrives at \(nextEditionText). New stories stay in your regular feed."
+                    "Briefing selected at \(briefing.startedAt.formatted(date: .omitted, time: .shortened)). The next briefing arrives at \(nextEditionText). New stories stay in Today."
                 )
                 .font(AppTypography.caption)
                 .foregroundStyle(AppColor.secondaryText)
@@ -775,7 +765,7 @@ struct ArticleListView: View {
 
     // MARK: - Article Grid
 
-    /// The lead takes the full detail-column width, including the edge by the sidebar.
+    /// The lead is an inset card like the others and shares the list measure (DESIGN.md 3.4, 12).
     /// Both collections retain their original ordering and existing lazy rendering.
     private func articleGrid(proxy _: ScrollViewProxy) -> some View {
         let listed = entries
@@ -792,19 +782,18 @@ struct ArticleListView: View {
             if let leadID, let leadIndex = listed.firstIndex(where: { $0.id == leadID }) {
                 if leadIndex > 0 {
                     cardCollection(Array(listed[..<leadIndex]))
-                        .padding(.horizontal, AppLayout.pageInset)
                 }
                 entryCard(listed[leadIndex], isLead: true)
+                    .frame(maxWidth: AppLayout.listMaxWidth)
                     .frame(maxWidth: .infinity)
                 if leadIndex + 1 < listed.count {
                     cardCollection(Array(listed[(leadIndex + 1)...]))
-                        .padding(.horizontal, AppLayout.pageInset)
                 }
             } else {
                 cardCollection(listed)
-                    .padding(.horizontal, AppLayout.pageInset)
             }
         }
+        .padding(.horizontal, AppLayout.pageInset)
         .padding(.bottom, AppSpacing.xl)
     }
 
@@ -823,7 +812,7 @@ struct ArticleListView: View {
                 ForEach(listed) { entry in entryCard(entry) }
             }
         } else {
-            LazyVStack(spacing: AppSpacing.sm) {
+            LazyVStack(spacing: AppLayout.cardGap) {
                 ForEach(listed) { entry in entryCard(entry) }
             }
             .frame(maxWidth: AppLayout.listMaxWidth)
@@ -836,7 +825,7 @@ struct ArticleListView: View {
         switch entry {
         case .article(let article):
             ArticleCardView(
-                article: article, isSelected: article.id == focusedArticleID,
+                article: article, isSelected: listHasFocus && article.id == focusedArticleID,
                 compact: !gridLayout, isLead: isLead
             ) {
                 openArticle(article)
@@ -851,7 +840,7 @@ struct ArticleListView: View {
                 representative: representative,
                 summary: summary,
                 visibleMembers: visibleMembers,
-                isSelected: representative.id == focusedArticleID,
+                isSelected: listHasFocus && representative.id == focusedArticleID,
                 compact: !gridLayout,
                 isLead: isLead,
                 isExpanded: expansionBinding(summary.eventID),
@@ -905,24 +894,11 @@ struct ArticleListView: View {
                             ? "1 Feed Couldn’t Refresh" : "\(failedFeeds.count) Feeds Couldn’t Refresh",
                         systemImage: "exclamationmark.triangle")
                 } description: {
-                    Text("No stories are currently available from these feeds.")
+                    Text(
+                        "No stories are available from these feeds. Each feed’s status is in Settings → Subscriptions.")
                 } actions: {
                     Button("Retry Feeds") { refreshFeeds() }
                 }
-                DisclosureGroup("Technical Details") {
-                    VStack(alignment: .leading, spacing: AppSpacing.xxs) {
-                        ForEach(failedFeeds, id: \.self) { url in
-                            if case .some(.failed(let error)) = feedManager.feedStatuses[url] {
-                                Text("\(url): \(error.localizedDescription)")
-                                    .font(AppTypography.caption)
-                                    .foregroundStyle(AppColor.secondaryText)
-                                    .textSelection(.enabled)
-                            }
-                        }
-                    }
-                }
-                .font(AppTypography.caption)
-                .padding(.horizontal, AppLayout.pageInset)
             } else {
                 ContentUnavailableView {
                     Label(emptyStateTitle, systemImage: emptyStateIcon)
@@ -969,9 +945,9 @@ struct ArticleListView: View {
         case "Briefing":
             return
                 "There are no unread, unmuted stories published in the last 24 hours. Your archive and normal feed remain available."
-        case "Today": return "Subscribe to feeds or click refresh to load the latest stories."
-        case "Unread": return "You've read all stories in your feeds. Check back later for updates."
-        case "Saved Stories": return "Stories you bookmark will be kept here for easy reading."
+        case "Today": return "Subscribe to feeds or refresh to load the latest stories."
+        case "Unread": return "You’ve read every story in your feeds."
+        case "Saved Stories": return "Stories you save are kept here."
         case "History": return "Stories you have opened will appear here."
         default:
             return "New stories matching \(selectedTopic ?? "this section") will appear here once your feeds refresh."
@@ -1174,7 +1150,7 @@ struct KeyboardShortcutsView: View {
         (
             "List",
             [
-                ("G", "Group coverage by event"),
+                ("G", "Group stories by event"),
                 ("U", "Show queued updates"),
                 ("R or ⌘R", "Refresh feeds"),
                 ("⌘1 – ⌘4", "Today, Unread, Saved Stories, History"),

@@ -1,18 +1,20 @@
 // ArticleCardView.swift
-// NewsApp Article Grid Card View
+// NewsApp Story Card View
 
 import AppKit
 import SwiftUI
 
-struct ArticleCardView: View {
+struct ArticleCardView<Footer: View>: View {
     let article: FeedArticle
     var isSelected: Bool = false
     var compact: Bool = false
-    /// Other coverage of the same event; the card shows the first of their images when this article has none.
+    /// Other coverage of the same event; the card shows the best of their images when this article has none.
     var imageFallbacks: [FeedArticle] = []
     /// Opt-in to the macOS 26 image-backed lead treatment.
     var isLead = false
     let action: () -> Void
+    /// Rows that share the card surface below the story, such as an event's coverage.
+    let footer: Footer
 
     @EnvironmentObject private var readManager: ReadManager
     @EnvironmentObject private var savedStories: SavedStoriesManager
@@ -20,17 +22,22 @@ struct ArticleCardView: View {
     @Environment(\.effectiveReduceMotion) private var reduceMotion
     @Environment(\.effectiveContrast) private var contrast
     @State private var isHovered = false
-    @State private var hoverImageIndex = 0
 
-    private var candidateImages: [URL] {
-        FeedArticle.cardImages(in: [article] + imageFallbacks)
+    init(
+        article: FeedArticle, isSelected: Bool = false, compact: Bool = false, imageFallbacks: [FeedArticle] = [],
+        isLead: Bool = false, action: @escaping () -> Void, @ViewBuilder footer: () -> Footer
+    ) {
+        self.article = article
+        self.isSelected = isSelected
+        self.compact = compact
+        self.imageFallbacks = imageFallbacks
+        self.isLead = isLead
+        self.action = action
+        self.footer = footer()
     }
 
-    private var activeCardImageURL: URL? {
-        let images = candidateImages
-        guard !images.isEmpty else { return nil }
-        let index = min(hoverImageIndex, images.count - 1)
-        return images[index]
+    private var cardImageURL: URL? {
+        FeedArticle.bestCardImage(in: [article] + imageFallbacks)
     }
 
     private var isRead: Bool {
@@ -46,6 +53,16 @@ struct ArticleCardView: View {
         appSettings.sourceMuting(for: article.link)
     }
 
+    /// The image-backed lead needs macOS 26 and an image to show.
+    private var showsLeadImage: Bool {
+        if #available(macOS 26.0, *), isLead, cardImageURL != nil { return true }
+        return false
+    }
+
+    private var radius: CGFloat {
+        showsLeadImage ? AppRadius.container : AppRadius.card
+    }
+
     private var cardLayout: AnyLayout {
         compact
             ? AnyLayout(HStackLayout(alignment: .center, spacing: 0))
@@ -55,82 +72,78 @@ struct ArticleCardView: View {
     private var appearance: (border: Color, width: CGFloat, shadow: Color, radius: CGFloat, y: CGFloat) {
         if isSelected {
             return (
-                AppColor.accent, 1.5, AppShadow.cardFocusRingColor, AppShadow.cardFocusRingRadius,
+                AppColor.accent, AppLayout.focusStroke, AppShadow.cardFocusRingColor, AppShadow.cardFocusRingRadius,
                 AppShadow.cardFocusRingY
             )
         }
         if isHovered {
             return (
-                AppColor.accent.opacity(0.4), 1.0, AppShadow.cardHoverColor, AppShadow.cardHoverRadius,
+                AppColor.hoverBorder, AppLayout.hoverStroke, AppShadow.cardHoverColor, AppShadow.cardHoverRadius,
                 AppShadow.cardHoverY
             )
         }
         return (
-            AppColor.border(for: contrast), 0.5, AppShadow.cardRestingColor, AppShadow.cardRestingRadius,
+            AppColor.border(for: contrast), AppLayout.hairline, AppShadow.cardRestingColor, AppShadow.cardRestingRadius,
             AppShadow.cardRestingY
         )
     }
 
+    /// One surface for the story and its footer: the card fill, radius, stroke, shadow and hover.
     var body: some View {
-        Button(action: action) {
-            cardFace
-        }
-        .buttonStyle(.plain)
-        .buttonBorderShape(.roundedRectangle(radius: AppRadius.card))
-        .contextMenu {
-            storyContextMenu
-        }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(accessibilityDescription)
-        .accessibilityAction(named: isRead ? "Mark as Unread" : "Mark as Read") {
-            readManager.toggleRead(article.id)
-        }
-        .accessibilityAction(named: isSaved ? "Remove from Saved" : "Save Story") {
-            if isSaved {
-                savedStories.remove(article)
-            } else {
-                savedStories.save(article)
+        VStack(alignment: .leading, spacing: 0) {
+            Button(action: action) {
+                cardFace
             }
-        }
-        .accessibilityActions {
-            if let muting = sourceMuting {
-                Button(muting.title, action: muting.apply)
+            .buttonStyle(.plain)
+            .buttonBorderShape(.roundedRectangle(radius: radius))
+            .contextMenu {
+                StoryContextMenuItems(article: article)
             }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(accessibilityDescription)
+            .accessibilityAction(named: isRead ? "Mark as Unread" : "Mark as Read") {
+                readManager.toggleRead(article.id)
+            }
+            .accessibilityAction(named: isSaved ? "Remove from Saved" : "Save Story") {
+                if isSaved {
+                    savedStories.remove(article)
+                } else {
+                    savedStories.save(article)
+                }
+            }
+            .accessibilityActions {
+                if let muting = sourceMuting {
+                    Button(muting.title, action: muting.apply)
+                }
+            }
+
+            footer
         }
+        .background(AppColor.surface)
+        .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
+        .containerShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: radius, style: .continuous)
+                .strokeBorder(appearance.border, lineWidth: appearance.width)
+        )
+        .shadow(color: appearance.shadow, radius: appearance.radius, x: 0, y: appearance.y)
+        .animation(reduceMotion ? nil : AppMotion.hover, value: isHovered)
+        .animation(reduceMotion ? nil : AppMotion.state, value: isSelected)
+        .onHover { isHovered = $0 }
     }
 
     @ViewBuilder
     private var cardFace: some View {
-        Group {
-            if #available(macOS 26.0, *), isLead,
-                let url = activeCardImageURL
-            {
-                ZStack {
-                    ArticleRemoteImage(url: url) { phase in
-                        leadImage(for: phase, aspectRatio: DecodedImageCache.aspectRatio(for: url))
-                    }
-                    .id(url)
-                    .transition(reduceMotion ? .identity : .opacity)
-                }
-            } else {
-                regularSurface()
+        if #available(macOS 26.0, *), isLead, let url = cardImageURL {
+            ArticleRemoteImage(url: url) { phase in
+                leadImage(for: phase, aspectRatio: DecodedImageCache.aspectRatio(for: url))
             }
-        }
-        .task(id: isHovered) {
-            let images = candidateImages
-            guard isHovered, !reduceMotion, images.count > 1 else {
-                if hoverImageIndex != 0 {
-                    hoverImageIndex = 0
-                }
-                return
+        } else {
+            cardLayout {
+                cardImage
+                regularStoryText
             }
-            while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(2.5))
-                guard !Task.isCancelled else { break }
-                withAnimation(reduceMotion ? nil : AppMotion.state) {
-                    hoverImageIndex = (hoverImageIndex + 1) % images.count
-                }
-            }
+            .frame(height: compact ? AppLayout.listCardHeight : nil)
         }
     }
 
@@ -143,56 +156,40 @@ struct ArticleCardView: View {
         case .empty:
             leadSurface(image: nil)
         case .failure:
-            failedLeadSurface
+            leadSurface(image: nil, failed: true)
         @unknown default:
-            failedLeadSurface
+            leadSurface(image: nil, failed: true)
         }
     }
 
-    @ViewBuilder
-    private var storyContextMenu: some View {
-        StoryContextMenuItems(article: article)
+    // MARK: - Regular card
+
+    private var cardHeaderHeight: CGFloat {
+        compact ? AppLayout.listCardHeight : AppLayout.editorialHeaderHeight
     }
 
-    // MARK: - Card surfaces
-
-    /// Reuse the phase-four card design, buttons, context menu and accessibility actions.
-    private func regularSurface(editorialFallbackOnly: Bool = false) -> some View {
-        cardLayout {
-            cardImage(editorialFallbackOnly: editorialFallbackOnly)
-            regularStoryText
-        }
-        .frame(height: compact ? 170 : nil)
-        .background(AppColor.surface)
-        .clipShape(RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous)
-                .strokeBorder(appearance.border, lineWidth: appearance.width)
-        )
-        .shadow(color: appearance.shadow, radius: appearance.radius, x: 0, y: appearance.y)
-        .animation(reduceMotion ? nil : AppMotion.hover, value: isHovered)
-        .animation(reduceMotion ? nil : AppMotion.state, value: isSelected)
-        .opacity(isRead ? 0.90 : 1.0)
-        .onHover { hovering in
-            isHovered = hovering
-            if !hovering {
-                hoverImageIndex = 0
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func cardImage(editorialFallbackOnly: Bool) -> some View {
-        // Header Image Container
+    /// The header image, or the editorial placeholder while it loads, fails or is missing. Grid cards keep one
+    /// header height with or without an image, so a row's cards line up.
+    private var cardImage: some View {
         Group {
-            if editorialFallbackOnly {
-                editorialFallbackHeader
-                    .frame(height: compact ? 170 : 54)
+            if let url = cardImageURL {
+                ArticleRemoteImage(url: url) { phase in
+                    if case .success(let image) = phase {
+                        // The clear frame takes the column's size; a filled image wider than it must not push past it.
+                        Color.clear
+                            .frame(maxWidth: .infinity)
+                            .frame(height: cardHeaderHeight)
+                            .overlay { image.resizable().aspectRatio(contentMode: .fill) }
+                            .clipped()
+                    } else {
+                        editorialPlaceholder
+                    }
+                }
             } else {
-                cardImageHeader
+                editorialPlaceholder
             }
         }
-        .frame(width: compact ? 170 : nil)
+        .frame(width: compact ? AppLayout.listCardImageWidth : nil, height: cardHeaderHeight)
         .accessibilityHidden(true)
     }
 
@@ -226,21 +223,22 @@ struct ArticleCardView: View {
     private var regularEyebrow: some View {
         HStack(spacing: AppSpacing.eyebrowGap) {
             EyebrowText(displaySource)
-
             Spacer()
+            stateGlyphs
+        }
+    }
 
-            if isSaved {
-                Image(systemName: "bookmark.fill")
-                    .font(AppTypography.eyebrow)
-                    .foregroundStyle(AppColor.accent)
-            }
-
-            if !isRead {
-                Circle()
-                    .fill(AppColor.accent)
-                    .frame(width: 6, height: 6)
-                    .accessibilityLabel("Unread")
-            }
+    /// Saved glyph and unread dot, in this order, at the trailing end of the eyebrow line.
+    @ViewBuilder
+    private var stateGlyphs: some View {
+        if isSaved {
+            Image(systemName: "bookmark.fill")
+                .font(AppTypography.eyebrow)
+                .foregroundStyle(AppColor.accent)
+                .accessibilityLabel("Saved")
+        }
+        if !isRead {
+            UnreadDot()
         }
     }
 
@@ -275,73 +273,65 @@ struct ArticleCardView: View {
         }
     }
 
+    /// A story without a usable image: a flat elevated surface and the newspaper glyph. It fills whatever frame
+    /// its caller gives it, from a grid header to the whole lead.
+    private var editorialPlaceholder: some View {
+        AppColor.elevatedSurface
+            .overlay(alignment: .topLeading) {
+                Image(systemName: "newspaper")
+                    .imageScale(.large)
+                    .foregroundStyle(AppColor.quaternaryLabel)
+                    .padding(AppSpacing.sm)
+            }
+    }
+
+    // MARK: - Lead card
+
     /// Below this width-to-height ratio a lead image is framed whole rather than cropped to fill.
-    static let wideLeadImageRatio: CGFloat = 1.25
+    static var wideLeadImageRatio: CGFloat { 1.25 }
 
     /// Square and portrait lead images (and wide ones only once their size is known) are framed whole.
     static func framesLeadImageWhole(aspectRatio: CGFloat?) -> Bool {
         aspectRatio.map { $0 < wideLeadImageRatio } ?? false
     }
 
-    /// Match the normal list or grid card geometry when an image cannot decode.
-    private var failedLeadSurface: some View {
-        regularSurface(editorialFallbackOnly: true)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .frame(height: AppLayout.leadStoryHeight, alignment: .top)
-    }
-
     /// Wide images fill the frame anchored to the top, where subjects usually sit above the caption scrim.
     /// Square and portrait images are shown whole over a blurred copy of themselves, so faces are never cropped.
-    /// The image stays clipped to the card; the caption and controls are separate foreground layers.
+    /// A failed image leaves the editorial placeholder at full height; the card clips everything to one radius.
     @available(macOS 26.0, *)
-    private func leadSurface(image: Image?, aspectRatio: CGFloat? = nil) -> some View {
+    private func leadSurface(image: Image?, aspectRatio: CGFloat? = nil, failed: Bool = false) -> some View {
         ZStack(alignment: .bottomLeading) {
-            if let image {
-                Color.clear
-                    .frame(maxWidth: .infinity)
-                    .frame(height: AppLayout.leadStoryHeight)
-                    .overlay(alignment: .top) {
-                        if Self.framesLeadImageWhole(aspectRatio: aspectRatio) {
-                            ZStack(alignment: .top) {
+            Group {
+                if let image {
+                    Color.clear
+                        .overlay(alignment: .top) {
+                            if Self.framesLeadImageWhole(aspectRatio: aspectRatio) {
+                                ZStack(alignment: .top) {
+                                    image.resizable().aspectRatio(contentMode: .fill)
+                                        .blur(radius: AppLayout.leadBackdropBlur)
+                                        .overlay(AppColor.leadBackdropDim)
+                                    image.resizable().aspectRatio(contentMode: .fit)
+                                }
+                            } else {
                                 image.resizable().aspectRatio(contentMode: .fill)
-                                    .blur(radius: AppLayout.leadBackdropBlur)
-                                    .overlay(AppColor.leadBackdropDim)
-                                image.resizable().aspectRatio(contentMode: .fit)
+                                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                             }
-                        } else {
-                            image.resizable().aspectRatio(contentMode: .fill)
-                                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                         }
-                    }
-                    .clipped()
-                    .clipShape(RoundedRectangle(cornerRadius: AppRadius.container, style: .continuous))
-                    .accessibilityHidden(true)
-            } else {
-                // Keep the loading surface dark so the image caption stays readable.
-                AppColor.leadPlaceholder
-                    .clipShape(RoundedRectangle(cornerRadius: AppRadius.container, style: .continuous))
-                    .accessibilityHidden(true)
+                        .clipped()
+                } else if failed {
+                    editorialPlaceholder
+                } else {
+                    // Keep the loading surface dark so the image caption stays readable.
+                    AppColor.leadPlaceholder
+                }
             }
+            .accessibilityHidden(true)
 
             leadCaption
                 .padding(.bottom, AppSpacing.sm)
         }
         .frame(maxWidth: .infinity)
         .frame(height: AppLayout.leadStoryHeight)
-        .containerShape(RoundedRectangle(cornerRadius: AppRadius.container, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: AppRadius.container, style: .continuous)
-                .strokeBorder(appearance.border, lineWidth: appearance.width)
-        }
-        .shadow(color: appearance.shadow, radius: appearance.radius, x: 0, y: appearance.y)
-        .animation(reduceMotion ? nil : AppMotion.hover, value: isHovered)
-        .animation(reduceMotion ? nil : AppMotion.state, value: isSelected)
-        .onHover { hovering in
-            isHovered = hovering
-            if !hovering {
-                hoverImageIndex = 0
-            }
-        }
     }
 
     /// Dark image-caption backing remains legible at every glass transparency
@@ -352,18 +342,12 @@ struct ArticleCardView: View {
             HStack(spacing: AppSpacing.sm) {
                 EyebrowText(displaySource, color: AppColor.leadText)
                 Spacer(minLength: AppSpacing.xs)
-                if isSaved {
-                    Label("Saved", systemImage: "bookmark.fill")
-                        .font(AppTypography.caption)
-                }
-                if !isRead {
-                    Label("Unread", systemImage: "circle.fill")
-                        .font(AppTypography.caption)
-                }
+                stateGlyphs
             }
 
             Text(article.title)
                 .font(AppTypography.leadStoryHeadline)
+                .foregroundStyle(isRead ? AppColor.leadSecondaryText : AppColor.leadText)
                 .lineLimit(3)
                 .multilineTextAlignment(.leading)
                 .layoutPriority(1)
@@ -403,53 +387,7 @@ struct ArticleCardView: View {
         .padding(.horizontal, AppSpacing.sm)
     }
 
-    // MARK: - Subviews & Helpers
-
-    @ViewBuilder
-    private var cardImageHeader: some View {
-        if let url = activeCardImageURL {
-            ZStack {
-                ArticleRemoteImage(url: url) { phase in
-                    switch phase {
-                    case .success(let image):
-                        // The clear frame takes the column's size; a filled image wider than it must not push past it.
-                        Color.clear
-                            .frame(maxWidth: .infinity)
-                            .frame(height: compact ? 170 : 140)
-                            .overlay { image.resizable().aspectRatio(contentMode: .fill) }
-                            .clipped()
-                            .saturation(isRead ? 0.92 : 1.0)
-                            .accessibilityHidden(true)
-                    default:
-                        editorialFallbackHeader.frame(height: compact ? 170 : 140)
-                    }
-                }
-                .id(url)
-                .transition(reduceMotion ? .identity : .opacity)
-            }
-            .frame(height: compact ? 170 : 140)
-        } else {
-            editorialFallbackHeader
-        }
-    }
-
-    private var editorialFallbackHeader: some View {
-        ZStack(alignment: .bottomLeading) {
-            LinearGradient(
-                colors: [AppColor.surface, AppColor.elevatedSurface],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            // Grid cards keep one header height with or without an image, so a row's cards line up.
-            .frame(height: compact ? 170 : 140)
-            .frame(maxWidth: .infinity)
-
-            Image(systemName: "newspaper")
-                .imageScale(.large)
-                .foregroundStyle(AppColor.quaternaryLabel)
-                .padding(AppSpacing.sm)
-        }
-    }
+    // MARK: - Helpers
 
     private var displaySource: String { article.publisherName }
 
@@ -458,6 +396,17 @@ struct ArticleCardView: View {
         let savedState = isSaved ? ", saved in your library" : ""
         let dateFormatted = article.publicationDateText
         return "\(article.title), from \(displaySource), published \(dateFormatted). \(readState)\(savedState)."
+    }
+}
+
+extension ArticleCardView where Footer == EmptyView {
+    init(
+        article: FeedArticle, isSelected: Bool = false, compact: Bool = false, imageFallbacks: [FeedArticle] = [],
+        isLead: Bool = false, action: @escaping () -> Void
+    ) {
+        self.init(
+            article: article, isSelected: isSelected, compact: compact, imageFallbacks: imageFallbacks, isLead: isLead,
+            action: action, footer: { EmptyView() })
     }
 }
 

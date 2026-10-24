@@ -4,8 +4,8 @@
 import AppKit
 import SwiftUI
 
-/// One card for a confirmed event: the representative publication as an ordinary card, followed by
-/// the event's coverage and, on request, every member publication. Publisher text is never replaced.
+/// One card for a confirmed event: the representative story as an ordinary card, with the event's coverage row
+/// and, on request, every member story on the same card surface. Publisher text is never replaced.
 struct EventCardView: View {
     let representative: FeedArticle
     let summary: EventFeedSummary
@@ -23,27 +23,32 @@ struct EventCardView: View {
     @Environment(\.effectiveReduceMotion) private var reduceMotion
     @Environment(\.effectiveContrast) private var contrast
     @State private var members: [FeedArticle] = []
+    @State private var hasLoaded = false
     @State private var loadFailed = false
+    @State private var loadAttempt = 0
 
     var body: some View {
-        VStack(alignment: .leading, spacing: AppSpacing.xs) {
-            ArticleCardView(
-                article: representative, isSelected: isSelected, compact: compact,
-                imageFallbacks: visibleMembers.filter { $0.id != representative.id },
-                isLead: isLead, action: openRepresentative)
+        ArticleCardView(
+            article: representative, isSelected: isSelected, compact: compact,
+            imageFallbacks: visibleMembers.filter { $0.id != representative.id },
+            isLead: isLead, action: openRepresentative
+        ) {
+            Divider()
             coverageToggle
             if isExpanded {
+                Divider()
                 sourceList
                     .transition(reduceMotion ? .identity : .opacity)
             }
         }
-        .task(id: "\(summary.eventID):\(summary.membershipVersion):\(isExpanded)") {
+        .task(id: "\(summary.eventID):\(summary.membershipVersion):\(isExpanded):\(loadAttempt)") {
             // Collapsed cards already have the visible page's image candidates. Fetch full coverage only on demand.
             guard isExpanded else { return }
             do {
                 let loaded = try await articleStore.eventMemberArticles(eventID: summary.eventID)
                 try Task.checkCancellation()
                 members = loaded
+                hasLoaded = true
                 loadFailed = false
             } catch {
                 if !Task.isCancelled { loadFailed = true }
@@ -83,17 +88,13 @@ struct EventCardView: View {
             .foregroundStyle(AppColor.secondaryText)
             .padding(.horizontal, AppSpacing.sm)
             .padding(.vertical, AppSpacing.xs)
-            .background(
-                RoundedRectangle(cornerRadius: AppRadius.control, style: .continuous).fill(AppColor.badgeBackground)
-            )
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .buttonBorderShape(.roundedRectangle(radius: AppRadius.control))
-        .help(isExpanded ? "Hide the sources covering this event (E)" : "Show every source covering this event (E)")
+        .help(isExpanded ? "Hide the sources covering this story (E)" : "Show every source covering this story (E)")
         .accessibilityLabel(coverageDescription)
         .accessibilityValue(isExpanded ? "Expanded" : "Collapsed")
-        .accessibilityHint("Lists every publication covering this event")
+        .accessibilityHint("Lists every source covering this story")
     }
 
     private var coverageDescription: String {
@@ -107,14 +108,23 @@ struct EventCardView: View {
 
     // MARK: - Source List
 
+    /// Loading, failure with Retry, no sources, or the member rows (DESIGN.md 8.3 and 8.4).
     private var sourceList: some View {
         VStack(alignment: .leading, spacing: 0) {
             if loadFailed {
-                Text("Sources could not be loaded. Collapse and expand to try again.")
-                    .font(AppTypography.caption)
-                    .foregroundStyle(AppColor.secondaryText)
-                    .padding(AppSpacing.sm)
-            } else if members.isEmpty {
+                HStack(spacing: AppSpacing.xs) {
+                    Text("Sources couldn’t be loaded.")
+                        .font(AppTypography.caption)
+                        .foregroundStyle(AppColor.secondaryText)
+                    Spacer(minLength: AppSpacing.xs)
+                    Button("Retry") {
+                        loadFailed = false
+                        loadAttempt += 1
+                    }
+                    .controlSize(.small)
+                }
+                .padding(AppSpacing.sm)
+            } else if !hasLoaded {
                 // The AppKit-backed spinner is hidden; a plain container carries the label (DESIGN.md 16).
                 HStack {
                     ProgressView()
@@ -124,6 +134,11 @@ struct EventCardView: View {
                 .padding(AppSpacing.sm)
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel("Loading sources")
+            } else if members.isEmpty {
+                Text("No sources")
+                    .font(AppTypography.caption)
+                    .foregroundStyle(AppColor.secondaryText)
+                    .padding(AppSpacing.sm)
             }
             ForEach(members) { member in
                 EventSourceRow(
@@ -138,17 +153,12 @@ struct EventCardView: View {
             }
         }
         .padding(.vertical, AppSpacing.xxs)
-        .background(RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous).fill(AppColor.surface))
-        .overlay(
-            RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous)
-                .strokeBorder(AppColor.border(for: contrast), lineWidth: 0.5)
-        )
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("Sources covering this event")
+        .accessibilityLabel("Sources covering this story")
     }
 }
 
-/// One member publication. Read, save and separation act on this article only, so they stay
+/// One member story. Read, save and separation act on this article only, so they stay
 /// independent of how the event is grouped later.
 private struct EventSourceRow: View {
     let article: FeedArticle
@@ -168,9 +178,6 @@ private struct EventSourceRow: View {
     var body: some View {
         Button(action: open) {
             HStack(alignment: .firstTextBaseline, spacing: AppSpacing.xs) {
-                Circle()
-                    .fill(isRead ? Color.clear : AppColor.unreadDot)
-                    .frame(width: 6, height: 6)
                 VStack(alignment: .leading, spacing: AppSpacing.textStack) {
                     EyebrowText(source)
                     Text(article.title)
@@ -189,6 +196,9 @@ private struct EventSourceRow: View {
                     .font(AppTypography.caption)
                     .foregroundStyle(AppColor.tertiaryText(for: contrast))
                     .monospacedDigit()
+                if !isRead {
+                    UnreadDot()
+                }
             }
             .padding(.horizontal, AppSpacing.sm)
             .padding(.vertical, AppSpacing.xs)
@@ -210,8 +220,8 @@ private struct EventSourceRow: View {
         }
         .help(
             canSeparate
-                ? "Open this publication. Use the context menu if it reports a different event."
-                : "Open this publication"
+                ? "Open this story. Use the context menu if it reports a different event."
+                : "Open this story"
         )
         .accessibilityElement(children: .combine)
         .accessibilityLabel(
