@@ -335,7 +335,7 @@ struct ArticleQueryCursor: Equatable, Sendable {
 
 extension FeedArticle {
     /// The date the library orders and windows by: the publication date, or ingestion time for an undated story.
-    var orderDate: Date { queryOrderValue.map(Date.init(timeIntervalSince1970:)) ?? pubDate }
+    var orderDate: Date { queryOrderValue.map { Date(timeIntervalSince1970: $0) } ?? pubDate }
 }
 
 enum ArticleSection {
