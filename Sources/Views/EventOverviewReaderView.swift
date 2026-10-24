@@ -582,7 +582,7 @@ struct EventOverviewReaderView: View {
     /// Opens the source a `news-citation://<index>` link names; every other link keeps the system behaviour.
     private func citationOpenURLAction(_ sources: [(index: Int, citation: OverviewCitation)]) -> OpenURLAction {
         OpenURLAction { url in
-            guard url.scheme == Self.citationScheme, let index = url.host.flatMap(Int.init),
+            guard url.scheme == Self.citationScheme, let index = url.host.flatMap({ Int($0) }),
                 let source = sources.first(where: { $0.index == index })
             else { return .systemAction }
             onSelectCitation(source.citation, matchingArticle(for: source.citation))
