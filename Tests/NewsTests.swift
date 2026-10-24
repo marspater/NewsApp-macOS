@@ -15202,6 +15202,30 @@ struct NewsTests {
         assertEqual(continued.document?.isComplete, false, "A Guardian-style Continue reading… link marks a teaser")
         let whole = pipeline.extractFromHTML(body, baseUrl: "https://news.example/story/")
         assertEqual(whole.document?.isComplete, true, "Three full paragraphs without a trailing link are complete")
+        // The Verge: three paragraphs over 600 characters that end "… Read the full story at The Verge." (#586). The
+        // completeness rule does not override the closing line, and the same body trailing off in an ellipsis is a
+        // teaser too; a sentence that merely says "read more" is not.
+        let verge = pipeline.extractFromHTML(
+            body.replacingOccurrences(
+                of: "</p>", with: "… Read the full story at The Verge.</p>", options: .backwards,
+                range: body.range(of: "</p>", options: .backwards)),
+            baseUrl: "https://www.theverge.com/story/")
+        assertEqual(verge.document?.isComplete, false, "A Verge teaser closing with the publisher line is incomplete")
+        assertEqual(verge.document?.hasCompleteArticleBody, false, "The reader fetches The Verge page")
+        let trailing = pipeline.extractFromHTML(
+            body.replacingOccurrences(
+                of: "</p>", with: "…</p>", options: .backwards, range: body.range(of: "</p>", options: .backwards)),
+            baseUrl: "https://news.example/story/")
+        assertEqual(trailing.document?.isComplete, false, "A last paragraph trailing off in an ellipsis is a teaser")
+        let mention = pipeline.extractFromHTML(
+            body.replacingOccurrences(
+                of: "</p>", with: " Those who want detail can read more in the report.</p>", options: .backwards,
+                range: body.range(of: "</p>", options: .backwards)),
+            baseUrl: "https://news.example/story/")
+        assertEqual(mention.document?.isComplete, true, "A sentence that merely says \"read more\" is not a teaser")
+        assertTrue(ReaderDocument.closesAsTeaser("Read more on Ars Technica"), "Read more on <publisher>")
+        assertTrue(ReaderDocument.closesAsTeaser("Continue reading at Engadget…"), "Continue reading at <publisher>")
+        assertFalse(ReaderDocument.closesAsTeaser("The minister said she would read more before deciding."), "Prose")
     }
 
     static func testExtractionOutcomeDiagnostics() async {
