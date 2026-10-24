@@ -475,6 +475,10 @@ struct EventMatchPolicy: Sendable, Equatable {
     var semanticMatchThreshold: Double = 0.70
     var semanticVetoThreshold: Double = 0.55
     var semanticFragmentThreshold: Double = 0.70
+    /// A borderline pair the pair model (#525) scores at or above this is one event, standing in for a shared
+    /// specific anchor. The highest cutoff that keeps the best tune recall without a false pair (24 October 2026:
+    /// 0.5–0.9 link 44 tune pairs and no false one, 0.95–0.98 link 43).
+    var pairModelThreshold: Double = 0.9
     static let standard = EventMatchPolicy()
 }
 
@@ -499,12 +503,14 @@ struct EventPairAssessment: Sendable, Equatable {
     var isMatch: Bool
     var isCompatible: Bool
     var embeddingCosine: Double?
+    /// The pair model judged this borderline pair one event (#525).
+    var modelConfirmed = false
 }
 
 enum EventMatcher {
-    /// Bump when matching changes; recent articles and active memberships are revalidated.
-    /// Unchanged archived memberships remain intact.
-    static let version = 10
+    /// Bump when matching changes, a retrained pair model included; recent articles and active memberships are
+    /// revalidated. Unchanged archived memberships remain intact.
+    static let version = 11
 
     private static func pairConflict(
         _ a: EventFeatures, _ b: EventFeatures, gap: TimeInterval, maximumTimeGap: TimeInterval
@@ -619,6 +625,26 @@ enum EventMatcher {
         return pair
     }
 
+    /// A pair left to the pair model (#525): no conflict, no rule match, borderline evidence and at least one shared
+    /// name, place or country. Without any anchor two generic reports ("Central bank holds interest rates") can be
+    /// about different places, so the model never stands in for all of them.
+    static func needsPairModel(_ pair: EventPairAssessment) -> Bool {
+        pair.conflict == nil && !pair.isMatch && pair.isBorderline && pair.sharedAnchors >= 1
+    }
+
+    /// The pair model judged a borderline pair one event; it stands in for the shared specific anchor (#525).
+    static func modelConfirmed(_ pair: EventPairAssessment, policy: EventMatchPolicy = .standard) -> EventPairAssessment
+    {
+        var pair = pair
+        pair.isMatch = true
+        pair.isCompatible = true
+        pair.isBorderline = false
+        pair.needsConfirmation = false
+        pair.modelConfirmed = true
+        pair.score = max(pair.score, policy.matchScore)
+        return pair
+    }
+
     /// A pair the reader put in one event ("Same Event", #524): a match whatever its signals say.
     static func forced(_ pair: EventPairAssessment, policy: EventMatchPolicy = .standard) -> EventPairAssessment {
         var pair = pair
@@ -643,7 +669,7 @@ enum EventMatcher {
 
     static func eventScore(pairs: [EventPairAssessment], policy: EventMatchPolicy = .standard) -> Double? {
         guard !pairs.isEmpty, pairs.count < policy.maximumEventSize,
-            pairs.allSatisfy({ $0.conflict == nil && $0.sharedSpecificAnchors >= 1 }),
+            pairs.allSatisfy({ $0.conflict == nil && ($0.sharedSpecificAnchors >= 1 || $0.modelConfirmed) }),
             pairs.contains(where: \.isMatch)
         else { return nil }
         let required = Int((Double(pairs.count) * policy.compatibleShare).rounded(.up))

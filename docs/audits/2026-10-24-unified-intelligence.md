@@ -73,6 +73,35 @@ Gate 2 fails: holdout precision drops. The result does not move with the regular
 
 Inclusions: `event_inclusions` mirrors `event_exclusions`. "Same Event" on an "Earlier in This Story" row merges that event into the open one and records every pair across them; `EventMatcher.forced` makes a recorded pair a match inside the clusterer's `assessed`, which covers joining, creating, revalidation and fragment merging. Inclusion is transitive in every admission path: a report that matches one side is the same event as the other side, so later reports still join (without it, joining's all-pairs rule froze a combined event). Separation drops the member's inclusions and excludes it only from the side it was combined with, so its own event can form again; inclusion drops exclusions of the pairs it records, so the newer correction wins. The combine respects the 100-member cap, revalidation reads inclusions fresh, the matcher's own verdict is what `pair_assessments` records, and combining marks the event seen. `testEventInclusions` covers a vote and its protest that the rules keep apart: combined, the retitled vote report is re-matched into the event, a later vote report joins, separated a report is excluded only from the protest side, included again it returns. The story-row variant ("Same Event as…" with up to three related events) and `--export-pairs` are not in this PR: the first needs the related events before the context menu opens, the second has its consumer in #525.
 
+## PR 5 (#525): the project's pair model (matcher v11)
+
+Local, Mars's Mac (Xcode 27, Python 3.13 venv; the shipped model was trained with torch 2.7.1 and transformers 4.56.2). The pins were then raised past security advisories to torch 2.14.1 and transformers 5.20.2. On those pins the training self-check, the shipped-weight import and a training step pass, and re-exporting the trained weights reproduces the shipped Core ML model exactly (largest difference 0.0000 on 64 pairs). Receipts in `~/Documents/NewsHoldout-2026-10-03/unified-intelligence-2026-10-24/` and `~/news-eval/` (0700, not in the repository).
+
+**Data.** `--export-pairs` read copies of the live library (5,551 articles) and of the relationcheck library (4,303). Every corpus article (tune and holdout) is left out by URL and headline, and so is every article from a day around the corpus dates: 766 in all. Positives: 3,178 cross-publisher pairs inside stored events that the v10 rules match directly. Negatives: 6,165 cross-publisher pairs sharing a specific name or place 36 h to 7 days apart, sampled to twice the positives. Each text carries the app's own word pieces, so training sees the ids the app sends. A leakage check of the window-clean export against the corpus finds no holdout headline at word-set Jaccard ≥ 0.5 with any training headline. Four tune headlines are near-matches (at most 0.62); one of them, a car driven into a crowd in Australia, is the same event reported outside the window, so tune is very slightly optimistic.
+
+**Model.** The weights of the shipped `minilm.mlmodelc` load into a Hugging Face `BertModel` (hidden states within 0.016 of Core ML), plus a one-logit head, trained for 3 epochs with class-weighted BCE and the final epoch kept. Core ML fp16 export: 43 MB, within 0.015 of PyTorch. The held-out tenth of articles (105 pairs, none sharing a text with training) gives AUC 0.993 and precision 0.921 / recall 0.972 at 0.9. That figure is an in-distribution check, not the gate.
+
+**Use.** Only a borderline pair with no conflict and at least one shared anchor is scored (both orders averaged, cached per text pair). At or above the cutoff it is a match that stands in for the shared specific anchor in admission. A shared anchor is required because two generic reports ("Central bank holds interest rates") with none may be about different places. Hard conflicts, exclusions and the semantic veto still refuse a pair, and fragment merges are settled by the rules before the model is asked.
+
+**Cutoff, chosen on tune** (the model as shipped):
+
+| Cutoff | 0.5 | 0.7 | 0.8 | 0.9 | 0.95 | 0.98 |
+| --- | --- | --- | --- | --- | --- | --- |
+| Tune TP / FP | 44 / 0 | 44 / 0 | 44 / 0 | 44 / 0 | 43 / 0 | 43 / 0 |
+
+Rule: the highest cutoff that keeps the best tune recall without a false pair, 0.9. Without the model, tune is 40 / 0 / 53.
+
+**Gate 3, holdout:** precision 1.000, recall 1.000 (TP 38, FP 0, FN 0), against 22 / 0 / 16 for v10. Every one of the 16 misses shares no specific name or place; the model links all of them and no different-event pair.
+
+**Holdout runs in this PR, in order.** Each run used a model and cutoff fixed on tune before it.
+1. First model (negatives included the corpus window; best-AUC epoch, which was epoch 3), cutoff 0.95: 38 / 0 / 0.
+2. Window-clean negatives, final epoch, cutoff 0.8 (the best-AUC rule had picked an overconfident epoch-1 model that merged 4 tune pairs below 0.95): 38 / 0 / 0.
+3. After review (exported Swift word pieces, which fixed a tokenizer skew on 132 texts with zero-width non-joiners; cross-publisher negatives only; an article-level held-out split), cutoff 0.9: 38 / 0 / 0. This model ships.
+
+All three agree. The holdout has now been read nine times (four in the hardening work, two for gate 1, three here), so the next gated matcher change needs a fresh holdout.
+
+**What the evidence does not show.** The new region is pairs with no shared specific anchor. The holdout has only 2 different-event pairs there without any conflict, and tune has none, so precision there rests on a handful of negatives. Positives come from the rule matcher's own events, so the model inherits that matcher's notion of an event. Every training pair shares a specific anchor, while the pairs it scores in use often do not.
+
 ## Limits
 
 - The act-class table encodes the corpus convention (one act, one event); it is small and tested, and every miss costs recall, never precision.

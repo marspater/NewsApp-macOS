@@ -144,8 +144,15 @@ enum StoryCorpus {
                     try await db.upsertArticles(batch)
                     // Keep production's per-pass article and judge limits in evaluation too.
                     let judged = ProcessInfo.processInfo.environment["NEWS_EVENT_JUDGE"] == "1"
+                    // NEWS_PAIR_THRESHOLD sweeps the pair model's cutoff on tune (#525); NEWS_PAIR_MODEL=0 turns it off.
+                    var policy = EventMatchPolicy.standard
+                    if let value = ProcessInfo.processInfo.environment["NEWS_PAIR_THRESHOLD"].flatMap({ Double($0) }) {
+                        policy.pairModelThreshold = value
+                    }
+                    let modelOff = ProcessInfo.processInfo.environment["NEWS_PAIR_MODEL"] == "0"
                     let report = try await EventClusterer.run(
-                        in: db, judge: judged ? .onDevice : .unavailable, now: clock)
+                        in: db, matchPolicy: policy, judge: judged ? .onDevice : .unavailable, now: clock,
+                        pairProbability: modelOff ? { @Sendable _, _ in nil } : nil)
                     onPass?(report)
                 }
                 clock = clock.addingTimeInterval(6 * 3600)

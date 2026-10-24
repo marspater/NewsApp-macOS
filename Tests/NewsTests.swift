@@ -445,6 +445,10 @@ struct NewsTests {
             try await testFTSRowIDMigration()
             return
         }
+        if CommandLine.arguments.contains("--export-pairs") {
+            try await exportTrainingPairs()
+            return
+        }
         if CommandLine.arguments.contains("--event-corpus") {
             guard let path = ProcessInfo.processInfo.environment["NEWS_EVENT_CORPUS"] else {
                 print("❌ Set NEWS_EVENT_CORPUS to a labeled event corpus JSON file")
@@ -541,6 +545,7 @@ struct NewsTests {
             try await testArticleSignalsRoundTrip()
             try await testPairAssessmentsRecorded()
             try await testEventInclusions()
+            try await testPairModelGreyZone()
             try await testEventEmbeddingIntegration()
             try await testEventFragmentMergingAndJudge(fixtureRoot: fixtureRoot)
             try await testStoryVisibility(fixtureRoot: fixtureRoot)
@@ -644,6 +649,7 @@ struct NewsTests {
         try await testArticleSignalsRoundTrip()
         try await testPairAssessmentsRecorded()
         try await testEventInclusions()
+        try await testPairModelGreyZone()
         try await testEventEmbeddingIntegration()
         try await testEventFragmentMergingAndJudge(fixtureRoot: fixtureRoot)
         try await testStoryVisibility(fixtureRoot: fixtureRoot)
@@ -10572,6 +10578,58 @@ struct NewsTests {
         await db.close()
     }
 
+    /// The pair model (#525) is asked only about borderline pairs. A confident answer joins two reports that share no
+    /// specific name or place; a lower one, or no model, leaves the matcher's decision as it was.
+    static func testPairModelGreyZone() async throws {
+        print("  - Testing the pair model in the grey zone (#525)...")
+        let start = Date(timeIntervalSince1970: 1_700_000_000)
+        func story(_ id: Int, _ title: String, hours: Double) -> FeedArticle {
+            FeedArticle(
+                title: title, link: "https://grey.invalid/\(id)", guid: "grey-\(id)", description: "",
+                pubDate: start.addingTimeInterval(hours * 3600), source: "Publisher \(id)")
+        }
+        let stories = [
+            story(1, "Floods kill dozens across Pakistan after monsoon rains", hours: 0),
+            story(2, "Pakistan flood death toll climbs as monsoon rains continue", hours: 3),
+            story(3, "Parliament votes to oust Prime Minister Novak in Ljubljana", hours: 1),
+            story(4, "Thousands protest in Ljubljana after parliament votes to oust Novak", hours: 2),
+        ]
+        actor Calls {
+            var pairs: [String] = []
+            func add(_ a: String, _ b: String) { pairs.append(a + " | " + b) }
+        }
+        func clustered(_ answer: Double?) async throws -> (events: [String?], calls: [String]) {
+            let db = DatabaseEngine(path: ":memory:")
+            try await db.open()
+            try await db.upsertArticles(stories)
+            let calls = Calls()
+            _ = try await EventClusterer.run(
+                in: db, now: start.addingTimeInterval(4 * 3600),
+                pairProbability: { a, b in
+                    await calls.add(a, b)
+                    return answer
+                })
+            var events: [String?] = []
+            for article in stories {
+                events.append(try await db.eventID(forArticle: try await db.resolvedArticleID(for: article)))
+            }
+            await db.close()
+            return (events, await calls.pairs)
+        }
+        let confident = try await clustered(0.99)
+        assertTrue(
+            confident.events[0] != nil && confident.events[0] == confident.events[1],
+            "A confident pair model joins two flood reports that share only the country")
+        assertFalse(confident.calls.isEmpty, "The borderline flood pair is sent to the pair model")
+        assertFalse(
+            confident.calls.contains { $0.contains("oust Prime Minister Novak") && $0.contains("Thousands protest") },
+            "A pair with a hard conflict (two different acts) is never sent to the model")
+        let unsure = try await clustered(EventMatchPolicy.standard.pairModelThreshold - 0.01)
+        assertEqual(unsure.events[0], nil, "Below the threshold the flood reports stay apart")
+        let unavailable = try await clustered(nil)
+        assertEqual(unavailable.events[0], nil, "Without the model the matcher decides as before")
+    }
+
     /// "Same Event" (#524): the reader's inclusion merges two events, survives a pass that re-matches a member the
     /// rules would split off, and the newer of an inclusion and a separation of one pair wins.
     static func testEventInclusions() async throws {
@@ -11165,6 +11223,14 @@ struct NewsTests {
                             similarity = SentenceEmbedder.cosineSimilarity(va, vb)
                         }
                         let pair = EventMatcher.assess(a, b, embeddingSimilarity: similarity)
+                        let pairModel =
+                            EventMatcher.needsPairModel(pair)
+                            ? await PairScorer.shared.probability(
+                                EventFeatures.matchingText(
+                                    title: items[i].title, description: items[i].description ?? ""),
+                                EventFeatures.matchingText(
+                                    title: items[j].title, description: items[j].description ?? ""))
+                            : nil
                         let nonPlaceB = b.keywords.union(b.titleNumbers).union(b.tollNumbers)
                         let nonPlaceA = a.keywords.union(a.titleNumbers).union(a.tollNumbers)
                         let primaryDisjoint =
@@ -11175,12 +11241,13 @@ struct NewsTests {
                             String(
                                 format: "      pair %@+%@ gold=%d linked=%d gap=%.1fh conflict=%@ primaryDisjoint=%d "
                                     + "match=%d compatible=%d borderline=%d specific=%d anchors=%d keywords=%d what=%.2f "
-                                    + "score=%.2f cosine=%@",
+                                    + "score=%.2f cosine=%@ pairModel=%@",
                                 items[i].id, items[j].id, gold ? 1 : 0, linked ? 1 : 0, gap,
                                 pair.conflict?.rawValue ?? "-", primaryDisjoint ? 1 : 0, pair.isMatch ? 1 : 0,
                                 pair.isCompatible ? 1 : 0, pair.isBorderline ? 1 : 0, pair.sharedSpecificAnchors,
                                 pair.sharedAnchors, pair.sharedKeywords, pair.what, pair.score,
-                                similarity.map { String(format: "%.2f", $0) } ?? "-"))
+                                similarity.map { String(format: "%.2f", $0) } ?? "-",
+                                pairModel.map { String(format: "%.3f", $0) } ?? "-"))
                     }
                 }
             }
@@ -11317,6 +11384,152 @@ struct NewsTests {
         }
         try StoryCorpus.writePrivate(Data(lines.joined(separator: "\n").utf8), to: file, replacing: false)
         return lines.count - 1
+    }
+
+    /// Mines labelled pairs for the pair model (#525) from copies of real libraries into `NEWS_EVENT_OUTPUT/pairs.csv`.
+    /// `NEWS_SNAPSHOT_DB` lists the copies, colon-separated; a file inside an app container is refused, so the live
+    /// library is never opened. Positives: two English reports from different publishers in one stored event that the
+    /// current rules match directly. Negatives: two reports sharing a specific name or place 36 h to 7 days apart, which
+    /// the matcher's window keeps apart by definition; never act-class negatives. Articles of the private corpus
+    /// (`NEWS_EVENT_CORPUS`, tune and holdout) are left out by URL and headline, and every article from a day around the
+    /// corpus dates, so no other report of a corpus event is trained on. The CSV carries headline and lead
+    /// text, so it is written only to the private directory and never overwritten.
+    static func exportTrainingPairs() async throws {
+        let environment = ProcessInfo.processInfo.environment
+        guard let snapshots = environment["NEWS_SNAPSHOT_DB"], let output = environment["NEWS_EVENT_OUTPUT"],
+            let corpusPath = environment["NEWS_EVENT_CORPUS"]
+        else {
+            throw StoryCorpus.Failure.invalid(
+                "--export-pairs needs NEWS_SNAPSHOT_DB, NEWS_EVENT_OUTPUT and NEWS_EVENT_CORPUS")
+        }
+        let file = try StoryCorpus.privateDirectory(output).appendingPathComponent("pairs.csv")
+        struct Corpus: Decodable {
+            struct Item: Decodable {
+                let title: String, url: String?, published: Date
+            }
+            let articles: [Item]
+        }
+        func key(_ title: String) -> String { MuteRules.foldedWords(title).joined(separator: " ") }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let corpus = try decoder.decode(Corpus.self, from: Data(contentsOf: URL(fileURLWithPath: corpusPath)))
+        let corpusTitles = Set(corpus.articles.map { key($0.title) })
+        let corpusURLs = Set(corpus.articles.compactMap(\.url))
+        // Other publishers' reports of the corpus events stay out too: nothing from a day around its dates is used.
+        let dates = corpus.articles.map(\.published)
+        let corpusWindow =
+            (dates.min() ?? .distantFuture).addingTimeInterval(
+                -86400)...(dates.max() ?? .distantPast)
+            .addingTimeInterval(86400)
+        struct Row {
+            let id: String, title: String, description: String, source: String, date: Date, event: String?
+            var text: String { EventFeatures.matchingText(title: title, description: description) }
+        }
+        func quoted(_ value: String) -> String { "\"" + value.replacingOccurrences(of: "\"", with: "\"\"") + "\"" }
+        // The app's own word pieces travel with each text, so training sees exactly the ids the app will send.
+        let tokenizer = try BertWordPieceTokenizer(vocabURL: URL(fileURLWithPath: "Sources/Resources/Models/vocab.txt"))
+        func pieces(_ text: String) -> String { tokenizer.pieces(text).map { String($0) }.joined(separator: " ") }
+        var lines = ["label,group,text_a,text_b,pieces_a,pieces_b"]
+        var seen = Set<String>()
+        var excluded = 0
+        for path in snapshots.split(separator: ":").map(String.init) {
+            guard !path.contains("/Library/Containers/") else {
+                throw StoryCorpus.Failure.invalid("Export from a copy of the library, never the live file")
+            }
+            let db = DatabaseEngine(path: path)
+            try await db.open()
+            var rows: [Row] = []
+            for values in try await db.eventRows(
+                """
+                SELECT a.id, a.title, coalesce(a.description, ''), a.source, a.published_at,
+                    coalesce(a.canonical_url, ''), e.id
+                FROM articles a
+                LEFT JOIN event_members m ON m.article_id = a.id
+                LEFT JOIN events e ON e.id = m.event_id AND e.merged_into IS NULL
+                WHERE a.published_at IS NOT NULL;
+                """)
+            {
+                guard let id = values[0], let title = values[1], let published = values[4].flatMap({ Double($0) })
+                else { continue }
+                if corpusTitles.contains(key(title)) || corpusURLs.contains(values[5] ?? "")
+                    || corpusWindow.contains(Date(timeIntervalSince1970: published))
+                {
+                    excluded += 1
+                    continue
+                }
+                let row = Row(
+                    id: id, title: title, description: values[2] ?? "", source: values[3] ?? "",
+                    date: Date(timeIntervalSince1970: published), event: values[6])
+                if EventMatchKey.language(of: row.title + "\n" + row.description) == "en" { rows.append(row) }
+            }
+            await db.close()
+            let features = rows.map { EventFeatures(title: $0.title, description: $0.description, date: $0.date) }
+            func append(_ label: Int, _ group: String, _ i: Int, _ j: Int) {
+                let pairKey = [key(rows[i].title) + "|" + rows[i].source, key(rows[j].title) + "|" + rows[j].source]
+                    .sorted().joined(separator: "\n")
+                guard seen.insert(pairKey).inserted else { return }
+                lines.append(
+                    [
+                        String(label), quoted(group), quoted(rows[i].text), quoted(rows[j].text), pieces(rows[i].text),
+                        pieces(rows[j].text),
+                    ].joined(separator: ","))
+            }
+            // Positives: events, scored with the same embedding the clusterer uses.
+            let members = Dictionary(grouping: rows.indices.filter { rows[$0].event != nil }) { rows[$0].event ?? "" }
+            var vectors: [Int: [Float]] = [:]
+            for index in members.values.filter({ $0.count >= 2 }).flatMap({ $0 }) {
+                vectors[index] = await SentenceEmbedder.shared.embed(rows[index].text)
+            }
+            var positives = 0
+            for (event, indices) in members where indices.count >= 2 {
+                for (n, i) in indices.enumerated() {
+                    for j in indices[(n + 1)...] where rows[i].source != rows[j].source {
+                        let cosine = vectors[i].flatMap { a in
+                            vectors[j].map { SentenceEmbedder.cosineSimilarity(a, $0) }
+                        }
+                        guard EventMatcher.assess(features[i], features[j], embeddingSimilarity: cosine).isMatch
+                        else { continue }
+                        let before = lines.count
+                        append(1, "e:" + event, i, j)
+                        positives += lines.count - before
+                    }
+                }
+            }
+            // Negatives: a shared specific anchor, too far apart to be one event. Very common anchors are capped.
+            var byAnchor: [String: [Int]] = [:]
+            for (index, value) in features.enumerated() {
+                for anchor in value.specificAnchors { byAnchor[anchor, default: []].append(index) }
+            }
+            var candidates = Set<[Int]>()
+            for indices in byAnchor.values {
+                let sample =
+                    indices.count > 80 ? Array(indices.sorted { rows[$0].id < rows[$1].id }.prefix(80)) : indices
+                for (n, i) in sample.enumerated() {
+                    // Cross-publisher only, like the positives: otherwise the publisher alone would predict the label.
+                    for j in sample[(n + 1)...] where rows[i].source != rows[j].source {
+                        let gap = abs(rows[i].date.timeIntervalSince(rows[j].date))
+                        guard gap > 36 * 3600, gap <= 7 * 86400 else { continue }
+                        if let event = rows[i].event, event == rows[j].event { continue }
+                        candidates.insert(i < j ? [i, j] : [j, i])
+                    }
+                }
+            }
+            // A fixed pseudo-random order (FNV-1a of the ids), then twice as many negatives as positives.
+            func order(_ pair: [Int]) -> UInt64 {
+                (rows[pair[0]].id + rows[pair[1]].id).utf8.reduce(14_695_981_039_346_656_037) {
+                    ($0 ^ UInt64($1)) &* 1_099_511_628_211
+                }
+            }
+            let negatives = candidates.sorted { order($0) < order($1) }.prefix(2 * positives)
+            for pair in negatives { append(0, "n:" + rows[pair[0]].id, pair[0], pair[1]) }
+            print(
+                "    \(URL(fileURLWithPath: path).lastPathComponent): \(rows.count) English articles, \(positives) positives, \(negatives.count) negatives"
+            )
+        }
+        try StoryCorpus.writePrivate(Data(lines.joined(separator: "\n").utf8), to: file, replacing: false)
+        print(
+            "    exported \(lines.count - 1) pairs for the pair model (#525); \(excluded) corpus or corpus-window articles left out"
+        )
     }
 
     /// Native sentence embeddings against deterministic matching on the same labeled pairs (#127).

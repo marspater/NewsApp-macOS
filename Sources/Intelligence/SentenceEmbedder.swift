@@ -4,6 +4,13 @@ import Foundation
 import os
 
 /// Pure-Swift WordPiece tokenizer for standard BERT / MiniLM / BGE vocabularies.
+/// One pair of texts as the pair model reads it (#525).
+struct PairEncoding: Equatable, Sendable {
+    var inputIDs: [Int32]
+    var attentionMask: [Int32]
+    var tokenTypeIDs: [Int32]
+}
+
 final class BertWordPieceTokenizer: Sendable {
     private let vocab: [String: Int]
     private let unkTokenId: Int
@@ -57,6 +64,30 @@ final class BertWordPieceTokenizer: Sendable {
         }
 
         return (tokens, attentionMask)
+    }
+
+    /// Every word piece of the text, unpadded and without special tokens.
+    func pieces(_ text: String) -> [Int] {
+        basicTokenize(text).filter { !$0.isEmpty }.flatMap { wordPiece($0) }
+    }
+
+    /// `[CLS] a [SEP] b [SEP]` with longest-first truncation (b on ties), type ids 0 then 1, padded to
+    /// `maxSequenceLength`. `script/training/train_pair_model.py` encodes its training pairs exactly so (#525).
+    func encodePair(_ a: String, _ b: String, maxSequenceLength: Int = 256) -> PairEncoding {
+        var first = pieces(a)
+        var second = pieces(b)
+        while first.count + second.count > maxSequenceLength - 3 {
+            if first.count > second.count { first.removeLast() } else { second.removeLast() }
+        }
+        let ids = [clsTokenId] + first + [sepTokenId] + second + [sepTokenId]
+        let padding = max(0, maxSequenceLength - ids.count)
+        let types = Array(repeating: 0, count: first.count + 2) + Array(repeating: 1, count: second.count + 1)
+        return PairEncoding(
+            inputIDs: (ids + Array(repeating: padTokenId, count: padding)).map { Int32($0) },
+            attentionMask: (Array(repeating: 1, count: ids.count) + Array(repeating: 0, count: padding)).map {
+                Int32($0)
+            },
+            tokenTypeIDs: (types + Array(repeating: 0, count: padding)).map { Int32($0) })
     }
 
     /// BERT's uncased basic tokenizer lowercases and strips accents: the vocabulary holds "erdogan" and "sanchez",
@@ -121,6 +152,20 @@ final class BertWordPieceTokenizer: Sendable {
     }
 }
 
+/// A bundled resource: the app's `Models` folder, the package bundle, then the checkout (test runners).
+private func bundledModelResource(_ name: String, _ ext: String) -> URL {
+    #if SWIFT_PACKAGE
+        let moduleURL =
+            Bundle.module.url(forResource: name, withExtension: ext, subdirectory: "Resources/Models")
+            ?? Bundle.module.url(forResource: name, withExtension: ext, subdirectory: "Models")
+    #else
+        let moduleURL: URL? = nil
+    #endif
+    return Bundle.main.url(forResource: name, withExtension: ext, subdirectory: "Models")
+        ?? moduleURL
+        ?? URL(fileURLWithPath: "Sources/Resources/Models/\(name).\(ext)")
+}
+
 /// On-device neural sentence embedding engine using bundled CoreML + Accelerate vDSP (#127, #307).
 actor SentenceEmbedder {
     static let shared = SentenceEmbedder()
@@ -134,29 +179,8 @@ actor SentenceEmbedder {
     private let tokenizer: BertWordPieceTokenizer?
 
     init(modelURL: URL? = nil, vocabURL: URL? = nil) {
-        #if SWIFT_PACKAGE
-            let moduleModelURL =
-                Bundle.module.url(forResource: "minilm", withExtension: "mlmodelc", subdirectory: "Resources/Models")
-                ?? Bundle.module.url(forResource: "minilm", withExtension: "mlmodelc", subdirectory: "Models")
-            let moduleVocabURL =
-                Bundle.module.url(forResource: "vocab", withExtension: "txt", subdirectory: "Resources/Models")
-                ?? Bundle.module.url(forResource: "vocab", withExtension: "txt", subdirectory: "Models")
-        #else
-            let moduleModelURL: URL? = nil
-            let moduleVocabURL: URL? = nil
-        #endif
-
-        let defaultModelURL =
-            Bundle.main.url(forResource: "minilm", withExtension: "mlmodelc", subdirectory: "Models")
-            ?? moduleModelURL
-            ?? URL(fileURLWithPath: "Sources/Resources/Models/minilm.mlmodelc")
-        let defaultVocabURL =
-            Bundle.main.url(forResource: "vocab", withExtension: "txt", subdirectory: "Models")
-            ?? moduleVocabURL
-            ?? URL(fileURLWithPath: "Sources/Resources/Models/vocab.txt")
-
-        let effectiveModelURL = modelURL ?? defaultModelURL
-        let effectiveVocabURL = vocabURL ?? defaultVocabURL
+        let effectiveModelURL = modelURL ?? bundledModelResource("minilm", "mlmodelc")
+        let effectiveVocabURL = vocabURL ?? bundledModelResource("vocab", "txt")
 
         if FileManager.default.fileExists(atPath: effectiveVocabURL.path) {
             do {
@@ -258,5 +282,71 @@ actor SentenceEmbedder {
         var dot: Float = 0.0
         vDSP_dotpr(a, 1, b, 1, &dot, vDSP_Length(vectorDimension))
         return Double(dot)
+    }
+}
+
+/// The project's own pair cross-encoder (#525): the probability that two texts report one event, from MiniLM fine-tuned
+/// on pairs mined from library copies (`script/training/train_pair_model.py`). Unavailable without the bundled model;
+/// the matcher then decides as it did before.
+actor PairScorer {
+    static let shared = PairScorer()
+    static let maxSequenceLength = 256
+
+    private let logger = Logger(subsystem: "com.marspater.news", category: "PairScorer")
+    private let model: MLModel?
+    private let tokenizer: BertWordPieceTokenizer?
+    /// Probabilities by text pair for the app's lifetime: the texts determine the answer, so passes that meet the same
+    /// unmerged pair again do not run the model again. ponytail: cleared at 20,000 entries; persist if relaunches matter.
+    private var cache: [Int: Double] = [:]
+
+    init(modelURL: URL? = nil, vocabURL: URL? = nil) {
+        let modelURL = modelURL ?? bundledModelResource("pairscorer", "mlmodelc")
+        let vocabURL = vocabURL ?? bundledModelResource("vocab", "txt")
+        tokenizer = try? BertWordPieceTokenizer(vocabURL: vocabURL)
+        guard FileManager.default.fileExists(atPath: modelURL.path) else {
+            model = nil
+            return
+        }
+        let config = MLModelConfiguration()
+        config.computeUnits = .all
+        do {
+            model = try MLModel(contentsOf: modelURL, configuration: config)
+        } catch {
+            logger.error("Failed to load the pair model: \(error.localizedDescription)")
+            model = nil
+        }
+    }
+
+    var isAvailable: Bool { model != nil && tokenizer != nil }
+
+    /// The mean of both orders, since a cross-encoder reads its two inputs differently.
+    func probability(_ a: String, _ b: String) -> Double? {
+        let key = (a < b ? a + "\u{0}" + b : b + "\u{0}" + a).hashValue
+        if let cached = cache[key] { return cached }
+        guard let forward = score(a, b), let backward = score(b, a) else { return nil }
+        if cache.count >= 20_000 { cache.removeAll() }
+        cache[key] = (forward + backward) / 2
+        return cache[key]
+    }
+
+    private func score(_ a: String, _ b: String) -> Double? {
+        guard let model, let tokenizer else { return nil }
+        let encoded = tokenizer.encodePair(a, b, maxSequenceLength: Self.maxSequenceLength)
+        var inputs: [String: MLFeatureValue] = [:]
+        for (name, values) in [
+            ("input_ids", encoded.inputIDs), ("attention_mask", encoded.attentionMask),
+            ("token_type_ids", encoded.tokenTypeIDs),
+        ] {
+            guard let array = try? MLMultiArray(shape: [1, NSNumber(value: values.count)], dataType: .int32) else {
+                return nil
+            }
+            for (index, value) in values.enumerated() { array[index] = NSNumber(value: value) }
+            inputs[name] = MLFeatureValue(multiArray: array)
+        }
+        guard let provider = try? MLDictionaryFeatureProvider(dictionary: inputs),
+            let output = try? model.prediction(from: provider),
+            let probability = output.featureValue(for: "probability")?.multiArrayValue
+        else { return nil }
+        return probability[0].doubleValue
     }
 }
