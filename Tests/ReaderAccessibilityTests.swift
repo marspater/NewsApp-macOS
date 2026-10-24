@@ -49,6 +49,7 @@ struct ReaderAccessibilityTests {
         print("=== Running Reader Accessibility Tests (Issue #123) ===")
 
         testReaderBlockTextFormattingAndCopy()
+        testReaderLinkResolution()
         testFigureAccessibilityAltTextFallback()
         testSourceLineVoiceOverFormatting()
         testIncreaseContrastValues()
@@ -138,6 +139,27 @@ struct ReaderAccessibilityTests {
             NSPasteboard.general.string(forType: .string), fullText, "Pasted text matches reader block characters")
     }
 
+    // MARK: - 1b. Link resolution and underline
+    static func testReaderLinkResolution() {
+        print("  - Testing reader link resolution against the story URL and link underlines...")
+        // Links: relative hrefs from older stored documents resolve against the story; link runs are underlined.
+        let linked = ReaderBlock(
+            kind: .paragraph, text: "Read the report here.",
+            inlineRuns: [
+                ReaderInlineRun(text: "Read the report "), ReaderInlineRun(text: "here", link: "/reports/2026"),
+                ReaderInlineRun(text: "."),
+            ])
+        let attributed = readerText(linked, baseURL: URL(string: "https://publisher.example/story/1"))
+        let linkRun = attributed.runs.first { $0.link != nil }
+        assertEqual(
+            linkRun?.link?.absoluteString, "https://publisher.example/reports/2026",
+            "A relative link resolves against the story URL")
+        assertTrue(linkRun?.underlineStyle == .single, "Link runs are underlined")
+        assertTrue(
+            readerText(linked, baseURL: nil).runs.allSatisfy { $0.link == nil },
+            "Without a base a relative link stays plain text")
+    }
+
     // MARK: - 2. VoiceOver Alt Text Fallback Tests
     static func testFigureAccessibilityAltTextFallback() {
         print("  - Testing Figure Accessibility Alt Text Fallback...")
@@ -154,16 +176,20 @@ struct ReaderAccessibilityTests {
             kind: .figure, text: "Photo caption", imageURL: "https://example.com/photo2.jpg", imageAlt: nil,
             imageCredit: "Jane Doe", imageWidth: 800, imageHeight: 600)
         let resolvedAlt2 = ReaderFigureView.effectiveImageAlt(for: block2)
-        assertEqual(resolvedAlt2, "Article image", "Nil alt text falls back to 'Article image'")
+        assertEqual(resolvedAlt2, "Photo caption", "Nil alt text falls back to the caption")
 
         // Case 3: Alt text is empty or whitespace-only (defect in current code)
         let block3 = ReaderBlock(
             kind: .figure, text: "Photo caption", imageURL: "https://example.com/photo3.jpg", imageAlt: "   ",
             imageCredit: "Jane Doe", imageWidth: 800, imageHeight: 600)
         let resolvedAlt3 = ReaderFigureView.effectiveImageAlt(for: block3)
-        assertEqual(
-            resolvedAlt3, "Article image",
-            "Whitespace/empty alt text must fall back to 'Article image' instead of empty label")
+        assertEqual(resolvedAlt3, "Photo caption", "Whitespace alt text falls back to the caption")
+
+        // Case 4: No alt and no caption: the image is decorative and hidden from VoiceOver.
+        let block4 = ReaderBlock(
+            kind: .figure, text: "", imageURL: "https://example.com/photo4.jpg", imageAlt: nil, imageCredit: nil,
+            imageWidth: 800, imageHeight: 600)
+        assertEqual(ReaderFigureView.effectiveImageAlt(for: block4), "", "No alt and no caption reads as decorative")
     }
 
     static func testLeadImageFraming() {

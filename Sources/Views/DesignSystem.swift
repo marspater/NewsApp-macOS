@@ -96,6 +96,11 @@ enum AppLayout {
     static let tensionScaleHeight: CGFloat = 8
     /// The centered rule between sections of a story in the reader.
     static let readerSectionRuleWidth: CGFloat = 120
+    /// A decoded image narrower than this keeps its own width; wider ones fill the measure.
+    static let readerSmallImageWidth: CGFloat = 400
+    /// Portrait figures stop here instead of filling the window height.
+    static let readerFigureMaxHeight: CGFloat = 560
+    static let progressBarHeight: CGFloat = 2
     static let tensionScaleMarkerHeight: CGFloat = 16
     static let pageInset: CGFloat = 24.0
     static let sidebarInset: CGFloat = 12.0
@@ -457,6 +462,20 @@ struct NoticeView<Content: View>: View {
                     .strokeBorder(
                         tint.opacity(contrast == .increased ? 1 : 0.30), lineWidth: contrast == .increased ? 1.0 : 0.5)
             }
+    }
+}
+
+/// A quiet panel for in-content sections (reader summary, analysis): surface fill, card radius, contrast-aware border.
+struct ContentPanel: ViewModifier {
+    @Environment(\.effectiveContrast) private var contrast
+    func body(content: Content) -> some View {
+        content
+            .padding(AppSpacing.md)
+            .background(AppColor.surface, in: RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous)
+                    .strokeBorder(AppColor.border(for: contrast), lineWidth: 0.5)
+            )
     }
 }
 

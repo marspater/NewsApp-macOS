@@ -330,20 +330,22 @@ struct ArticleDetailView: View {
                             .foregroundStyle(AppColor.secondaryText)
                             .monospacedDigit()
 
-                        Text("·")
-                            .foregroundStyle(tertiaryText)
+                        if let readingTimeEstimate {
+                            Text("·")
+                                .foregroundStyle(tertiaryText)
 
-                        Text(readingTimeEstimate)
-                            .font(AppTypography.label)
-                            .foregroundStyle(AppColor.secondaryText)
-                            .monospacedDigit()
+                            Text(readingTimeEstimate)
+                                .font(AppTypography.label)
+                                .foregroundStyle(AppColor.secondaryText)
+                                .monospacedDigit()
+                        }
                     }
                     .accessibilityElement(children: .ignore)
                     .accessibilityLabel(
                         Self.sourceLineAccessibilityLabel(
                             source: displaySource,
                             publicationDateText: currentArticle.publicationDateText,
-                            readingTimeEstimate: readingTimeEstimate
+                            readingTimeEstimate: readingTimeEstimate ?? ""
                         ))
 
                     // Headline
@@ -363,8 +365,10 @@ struct ArticleDetailView: View {
                     heroImageHeader
 
                     if appSettings.aiEnabled || currentArticle.aiSummary != nil {
-                        DisclosureGroup("Summary & Key Points", isExpanded: summaryExpandedBinding) {
+                        DisclosureGroup(isExpanded: summaryExpandedBinding) {
                             aiAnalysisSection.padding(.top, AppSpacing.sm)
+                        } label: {
+                            IntelligenceLabel("Summary & Key Points")
                         }
                         .font(AppTypography.body)
                         .foregroundStyle(AppColor.secondaryText)
@@ -386,8 +390,8 @@ struct ArticleDetailView: View {
                         publisherOnlyView(subscriber: subscriber)
                     }
 
-                    // Terminal Affordance: "Read original article on <source>"
-                    terminalAffordance
+                    // Terminal Affordance: "Read original article on <source>", once the story is there.
+                    if case .ready = contentState { terminalAffordance }
 
                 }
                 .modifier(ReadingColumn(textScale: readerTextScale))
@@ -422,22 +426,14 @@ struct ArticleDetailView: View {
 
     @ViewBuilder
     private var heroImageHeader: some View {
-        let hasEarlyFigure =
-            currentArticle.readerDocument?.blocks.prefix(2).contains(where: { $0.kind == .figure }) == true
+        // Decided on the blocks the reader shows, so a dropped early figure does not hide the lead.
+        let blocks = renderedBlocks
+        let hasEarlyFigure = blocks.prefix(2).contains { $0.kind == .figure }
         if !hasEarlyFigure,
             let imageUrl = currentArticle.readerDocument?.selectedImage(fallback: currentArticle.imageUrl)
                 ?? (currentArticle.readerDocument == nil ? currentArticle.imageUrl : nil),
             let url = URL(string: imageUrl),
-            currentArticle.readerDocument?.blocks.contains(where: {
-                guard $0.kind == .figure, let figUrl = $0.imageURL else { return false }
-                if figUrl == imageUrl { return true }
-                if let u1 = URL(string: figUrl), let u2 = URL(string: imageUrl),
-                    u1.lastPathComponent == u2.lastPathComponent && !u1.lastPathComponent.isEmpty
-                {
-                    return true
-                }
-                return false
-            }) != true
+            !blocks.contains(where: { $0.kind == .figure && $0.imageURL == imageUrl })
         {
             let candidate = currentArticle.readerDocument?.images?.first { $0.url == imageUrl }
             ReaderFigureView(
@@ -455,8 +451,16 @@ struct ArticleDetailView: View {
         return ArticleContentRedactor.redactAndSplit(currentArticle.description)
     }
 
-    private var readingTimeEstimate: String {
-        let text = currentArticle.fullContent ?? currentArticle.description
+    /// Counted from the rendered story once it is there; a feed teaser would understate it.
+    private var readingTimeEstimate: String? {
+        let text: String
+        if currentArticle.readerDocument != nil {
+            text = renderedBlocks.map(\.text).joined(separator: " ")
+        } else if case .ready = contentState, let content = currentArticle.fullContent {
+            text = content
+        } else {
+            return nil
+        }
         let words = text.split { $0.isWhitespace || $0.isNewline }.count
         let minutes = max(1, Int(ceil(Double(words) / 200.0)))
         return "\(minutes) min read"
@@ -574,9 +578,7 @@ struct ArticleDetailView: View {
     private var standfirstText: String? {
         let dek = ArticleContentRedactor.cleanText(currentArticle.description)
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        let opening =
-            currentArticle.readerDocument?.blocks.first { $0.kind == .paragraph }?.text
-            ?? displayParagraphs.first ?? ""
+        let opening = renderedBlocks.first { $0.kind == .paragraph }?.text ?? ""
         let key = { (text: String) in String(EventFeedSummary.titleKey(text).prefix(60)) }
         // The page's own standfirst, when extracted, is shown in the body instead.
         let pageHasStandfirst = currentArticle.readerDocument?.blocks.contains { $0.kind == .standfirst } == true
@@ -614,7 +616,8 @@ struct ArticleDetailView: View {
         }
     }
 
-    private var articleContentParagraphs: some View {
+    /// The blocks the reader renders: stored blocks cleaned by today's rules, or feed paragraphs, minus a repeated headline.
+    private var renderedBlocks: [ReaderBlock] {
         let storedBlocks = currentArticle.readerDocument?.blocks ?? []
         // Documents stored before a boilerplate or image rule existed are cleaned here too.
         var blocks =
@@ -647,6 +650,11 @@ struct ArticleDetailView: View {
                 blocks.remove(at: first)
             }
         }
+        return blocks
+    }
+
+    private var articleContentParagraphs: some View {
+        let blocks = renderedBlocks
         // A shown feed standfirst or a page standfirst already leads the story in the lead size.
         let leadIndex =
             standfirstText == nil && !blocks.contains { $0.kind == .standfirst }
@@ -665,6 +673,19 @@ struct ArticleDetailView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        // Story links open in the browser, never inside the reader column.
+        .environment(
+            \.openURL,
+            OpenURLAction { url in
+                guard ["http", "https"].contains(url.scheme?.lowercased() ?? "") else { return .systemAction }
+                NSWorkspace.shared.open(url)
+                return .handled
+            })
+    }
+
+    /// Legacy documents stored relative links; the story URL resolves them.
+    private func readerLinkedText(_ block: ReaderBlock) -> AttributedString {
+        readerText(block, baseURL: URL(string: currentArticle.link))
     }
 
     @ViewBuilder
@@ -675,7 +696,7 @@ struct ArticleDetailView: View {
                 ReaderFigureView(block: block, url: url, textScale: readerTextScale)
             }
         case .heading, .subheading:
-            Text(readerText(block))
+            Text(readerLinkedText(block))
                 .font(
                     AppTypography.readerHeadingFont(
                         level: block.kind == .heading ? 2 : 3, theme: themeManager.articleTheme, scale: readerTextScale)
@@ -691,15 +712,14 @@ struct ArticleDetailView: View {
                     .fill(AppColor.accent.opacity(Self.quoteBarOpacity(for: contrast)))
                     .frame(width: 3)
                     .accessibilityHidden(true)
-                Text(readerText(block))
+                Text(readerLinkedText(block))
                     .font(AppTypography.readerQuoteFont(for: themeManager.articleTheme, scale: readerTextScale))
                     .lineSpacing(AppTypography.bodyLineSpacing(for: themeManager.articleTheme) * readerTextScale)
                     .textSelection(.enabled)
             }
             .fixedSize(horizontal: false, vertical: true)
-            .padding(AppSpacing.md * readerTextScale)
+            .padding(.vertical, AppSpacing.xxs * readerTextScale)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(AppColor.surface, in: RoundedRectangle(cornerRadius: AppRadius.control, style: .continuous))
         case .divider:
             Divider()
                 .opacity(Self.dividerOpacity(for: contrast))
@@ -714,20 +734,23 @@ struct ArticleDetailView: View {
                     // A bullet is decoration; an ordinal is read before the item.
                     .accessibilityHidden(block.ordinal == nil)
                 // Not combined: the item is selectable text and may carry links (DESIGN.md 16).
-                Text(readerText(block)).textSelection(.enabled)
+                Text(readerLinkedText(block)).textSelection(.enabled)
             }
             .font(AppTypography.bodyFont(for: themeManager.articleTheme, scale: readerTextScale))
             .lineSpacing(AppTypography.bodyLineSpacing(for: themeManager.articleTheme) * readerTextScale)
             .padding(.leading, CGFloat(block.level ?? 0) * AppSpacing.lg * readerTextScale)
         case .code:
-            Text(readerText(block))
-                .font(AppTypography.readerCodeFont(for: themeManager.articleTheme, scale: readerTextScale))
-                .textSelection(.enabled)
-                .padding(AppSpacing.md * readerTextScale)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(AppColor.surface, in: RoundedRectangle(cornerRadius: AppRadius.control, style: .continuous))
+            ScrollView(.horizontal, showsIndicators: false) {
+                Text(readerLinkedText(block))
+                    .font(AppTypography.readerCodeFont(for: themeManager.articleTheme, scale: readerTextScale))
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: true, vertical: false)
+                    .padding(AppSpacing.md * readerTextScale)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(AppColor.surface, in: RoundedRectangle(cornerRadius: AppRadius.control, style: .continuous))
         case .standfirst:
-            Text(readerText(block))
+            Text(readerLinkedText(block))
                 .font(AppTypography.leadFont(for: themeManager.articleTheme, scale: readerTextScale))
                 .foregroundStyle(AppColor.secondaryText)
                 .lineSpacing(AppTypography.bodyLineSpacing(for: themeManager.articleTheme) * readerTextScale)
@@ -736,7 +759,7 @@ struct ArticleDetailView: View {
         case .pullQuote:
             VStack(alignment: .leading, spacing: AppSpacing.sm * readerTextScale) {
                 Divider().opacity(Self.dividerOpacity(for: contrast))
-                Text(readerText(block))
+                Text(readerLinkedText(block))
                     .font(AppTypography.leadFont(for: themeManager.articleTheme, scale: readerTextScale).italic())
                     .foregroundStyle(AppColor.primaryText)
                     .lineSpacing(AppTypography.bodyLineSpacing(for: themeManager.articleTheme) * readerTextScale)
@@ -765,7 +788,7 @@ struct ArticleDetailView: View {
                 }
             }
         case .paragraph:
-            Text(readerText(block))
+            Text(readerLinkedText(block))
                 .font(
                     isLead
                         ? AppTypography.leadFont(for: themeManager.articleTheme, scale: readerTextScale)
@@ -811,7 +834,7 @@ struct ArticleDetailView: View {
             HStack {
                 Text("Protected preview · Scripts disabled")
                 Spacer()
-                Button("Open interactive page in browser") { openInBrowser() }
+                Button("Open in Browser") { openInBrowser() }
             }
             .font(AppTypography.caption).foregroundStyle(AppColor.secondaryText)
             .padding(AppSpacing.sm)
@@ -827,9 +850,9 @@ struct ArticleDetailView: View {
                 ProgressView()
                     .progressViewStyle(.linear)
                     .tint(AppColor.accent)
-                    .frame(height: 2)
+                    .frame(height: AppLayout.progressBarHeight)
             } else {
-                Divider().opacity(0.15)
+                Divider()
             }
 
             if let url = URL(string: currentArticle.link) {
@@ -1155,7 +1178,9 @@ struct ArticleDetailView: View {
     /// What an embed placeholder stands for: a post from its host, or content the reader cannot lay out.
     static func embedTitle(for block: ReaderBlock) -> String {
         if isTableNotice(block) { return "Large table on the publisher’s page" }
-        return block.text == "Social post" ? "Embedded post" : "Embedded post from \(block.text)"
+        if block.text == "Social post" { return "Embedded post" }
+        if block.text == "Embedded media" { return "Embedded media" }
+        return "Embedded content from \(block.text)"
     }
 
     private static func isTableNotice(_ block: ReaderBlock) -> Bool {
@@ -1226,12 +1251,7 @@ struct ArticleDetailView: View {
                     .foregroundStyle(AppColor.secondaryText)
                     .accessibilityLabel("Analyzing story with on-device AI")
             }
-            .padding(AppSpacing.md)
-            .background(AppColor.surface, in: RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous)
-                    .strokeBorder(AppColor.border(for: contrast), lineWidth: 0.5)
-            )
+            .modifier(ContentPanel())
         } else if let analysis = analysis {
             VStack(alignment: .leading, spacing: AppSpacing.sm) {
                 // Section Header: Restrained Summary
@@ -1283,18 +1303,13 @@ struct ArticleDetailView: View {
                         .foregroundStyle(AppColor.secondaryText)
                 }
             }
-            .padding(AppSpacing.md)
-            .background(AppColor.surface, in: RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous)
-                    .strokeBorder(AppColor.border(for: contrast), lineWidth: 0.5)
-            )
-        } else if let error = analysisError {
+            .modifier(ContentPanel())
+        } else if analysisError != nil {
             NoticeView(tint: AppColor.warning) {
                 HStack(spacing: AppSpacing.xs) {
                     Image(systemName: "exclamationmark.triangle")
                         .foregroundStyle(AppColor.warning)
-                    Text("AI analysis unavailable: \(error)")
+                    Text("The summary could not be generated for this story.")
                         .font(AppTypography.callout)
                         .foregroundStyle(AppColor.secondaryText)
                     Spacer()
