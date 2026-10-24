@@ -27,6 +27,16 @@ Holdout (local, Mars, #526): before/after lines added when run.
 
 Cue table decisions worth recording: "strike" is no cue (earthquakes, courts and air forces all strike); "rule" and "charge" are no cues ("rules out", "leads the charge"); "execution", "fire" and "explosion" are no cues (background nouns and accidents); "march" never reaches the classifier (month filter). Phrases: "steps down/aside" → resign, "opens fire" → shooting, "strikes down" → overturn, "critical condition" → injure.
 
+## PR 3 (#523): one energy rule, final refusals, one banner per event
+
+| Change | Where | Effect |
+| --- | --- | --- |
+| `IntelligencePolicy.allowsEnergy` | `FeedManager`, `OverviewGenerationCoordinator`, `WorldTensionService` | Three copies of the Low Power / thermal rule become one |
+| `WorldTensionError.rejected`; estimate saved under the real hash when no reading exists; rejected hashes remembered in-process otherwise | `WorldTension.generate`, `assess` | A refusal no longer re-asks the model on every reload for the same headlines; an accepted reading is never overwritten |
+| `NotificationService.representatives(of:events:)` | `FeedManager` after clustering | One banner per event, the strongest report; `triageAndNotify` unchanged |
+
+No measured matcher number changes.
+
 ## Limits
 
 - The act-class table encodes the corpus convention (one act, one event); it is small and tested, and every miss costs recall, never precision.

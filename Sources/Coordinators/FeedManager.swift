@@ -85,10 +85,7 @@ class FeedManager: NSObject, ObservableObject {
         enrichmentQueue: EnrichmentQueue? = nil,
         importanceJudge _: StoryImportanceJudge = .unavailable,
         imageFinder: StoryImageFinder = .publisherPages,
-        allowsBackgroundWork: @escaping @MainActor () -> Bool = {
-            let info = ProcessInfo.processInfo
-            return !info.isLowPowerModeEnabled && info.thermalState.rawValue < ProcessInfo.ThermalState.serious.rawValue
-        },
+        allowsBackgroundWork: @escaping @MainActor () -> Bool = { IntelligencePolicy.allowsEnergy() },
         powerEvents: NotificationCenter? = nil,
         wakeRefreshDelay: Duration = .seconds(10),
         now: @escaping () -> Date = { Date() }
@@ -471,8 +468,11 @@ class FeedManager: NSObject, ObservableObject {
         // Muting applies in every notification privacy mode; stored importance does not hide stories.
         let muting = appSettings.muteRules
         let notifiable = newArticles.filter { eligible.contains($0.id) && !muting.mutes($0) }
-        if appSettings.notificationsEnabled && !notifiable.isEmpty {
-            await notifyBatch(notifiable, appSettings.notificationMode)
+        // Clustering has run: reports of one event notify once, by their strongest report (#523).
+        let events = (try? await articleStore.database.eventIDs(forArticles: notifiable.map(\.id))) ?? [:]
+        let representatives = NotificationService.representatives(of: notifiable, events: events)
+        if appSettings.notificationsEnabled && !representatives.isEmpty {
+            await notifyBatch(representatives, appSettings.notificationMode)
         }
         guard !Task.isCancelled, !isStopped else { return }
         enrichArticlesInBackground()

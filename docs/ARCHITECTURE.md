@@ -220,7 +220,7 @@ Open a section before changing that area. Each rule is load-bearing; tests cover
 
 - Background classification skips Low Power Mode and serious thermal state; scheduled refreshes honor `NSBackgroundActivityScheduler.shouldDefer`.
 
-- New-story notifications use IDs inserted by a committed transaction, skip muted stories, and resolve via SQLite by stable ID once storage is ready.
+- New-story notifications use IDs inserted by a committed transaction, skip muted stories, and resolve via SQLite by stable ID once storage is ready. Clustering runs first, so the reports of one event notify once, through the report that scores highest.
 
 - All URLs, feed bodies, HTML, redirects and OPML are untrusted. Remote fetching goes through the protected gateway: public-DNS validation, numeric-IP pinning, response bounds, cancellation. URLSession and WebKit previews share it.
 
@@ -320,7 +320,8 @@ Open a section before changing that area. Each rule is load-bearing; tests cover
 <summary><b>Intelligence, catalog, World Tension</b></summary>
 
 - `NaturalLanguage` + conditional `FoundationModels`, fixed 12-category taxonomy, plain-text model contracts with strict parsing and extractive fallbacks. v20 stamps the macOS build; a model change invalidates generated summaries, not publisher excerpts.
-- Only the reader summary calls the on-device model; ingestion, classification, search and clustering never do. `NewsTextModel.onDevice` maps every `LanguageModelSession.GenerationError` to one outcome: `Rejected` (guardrails, refusal, context window, unsupported language, undecodable output) is final and the extractive result stands; `TemporarilyUnavailable` (model off, downloading, busy, rate limited) keeps a provisional result that is redone when the summary is next opened. Only the outcome label is logged, never text. Publisher category hints match whole words only.
+- Two prose surfaces call Foundation Models, the reader summary and World Tension; ingestion, classification, search and clustering never do (clustering uses the bundled MiniLM CoreML model and, once measured, the project's own pair model, never a language model). `NewsTextModel.onDevice` maps every `LanguageModelSession.GenerationError` to one outcome: `Rejected` (guardrails, refusal, context window, unsupported language, undecodable output) is final, so the extractive summary stands and a refused World Tension input keeps its keyword estimate as the day's saved reading until the headlines change; `TemporarilyUnavailable` (model off, downloading, busy, rate limited) keeps a provisional result (an unsaved estimate for World Tension) that is redone when next requested. Only the outcome label is logged, never text. Publisher category hints match whole words only.
+- One energy rule (`IntelligencePolicy.allowsEnergy`): background classification, overview warm-up, story images and World Tension pause in Low Power Mode and from the serious thermal state on.
 
 - Persist only intelligence that product behavior needs; keep model identifiers, analysis versions and deterministic fallbacks.
 

@@ -3757,14 +3757,32 @@ struct NewsTests {
         assertFalse(
             unavailableDay.last?.headlines.contains { $0.title == soft.title } ?? true,
             "Soft news is left out of the panel headlines")
+        // A refusal is final for these headlines: the estimate is saved under the real input hash (#523).
+        let refusing = WorldTensionService(
+            model: NewsTextModel { _, _ in throw NewsTextModel.Rejected(reason: .guardrail) })
+        let refusedDay = try await refusing.assess(
+            database: database, now: now, aiEnabled: true, collectionEnabled: true)
+        assertEqual(refusedDay.last?.assessment.isEstimate, true, "A refusal shows the keyword estimate")
+        assertEqual(try await database.worldTensionHistory().count, 1, "The estimate for refused headlines is saved")
+        assertFalse(refusedDay.last?.inputHash.hasSuffix(":estimate") ?? true, "… under the real input hash")
+        let silent = WorldTensionService(
+            model: NewsTextModel { _, _ in
+                assertTrue(false, "Refused headlines are not sent to the model again")
+                throw NewsTextModel.Rejected(reason: .guardrail)
+            })
+        assertEqual(
+            try await silent.assess(database: database, now: now, aiEnabled: true, collectionEnabled: true), refusedDay,
+            "The same headlines return the saved estimate without a model call")
         let model = NewsTextModel { prompt, _ in
             assertFalse(
                 prompt.contains(unrelated.title), "Unrelated prior events are excluded from the novelty baseline")
             return encoded
         }
         let service = WorldTensionService(model: model)
-        let history = try await service.assess(database: database, now: now, aiEnabled: true, collectionEnabled: true)
-        assertEqual(history.count, 1, "AI assessments create their own history")
+        let history = try await service.assess(
+            database: database, now: now, aiEnabled: true, collectionEnabled: true, force: true)
+        assertEqual(history.count, 1, "An accepted assessment replaces the day's saved estimate")
+        assertEqual(history.last?.assessment.isEstimate ?? false, false, "… and is not an estimate")
         assertEqual(
             history.last?.assessment.score, 28, "The model chooses the score; no deterministic formula replaces it")
         let warm = try await WorldTensionService(model: .unavailable).assess(
@@ -13828,6 +13846,23 @@ struct NewsTests {
         let score = service.computeImportance(
             title: "Breaking News: Major Crisis Declared", description: "Officials announce emergency response.")
         assertTrue(score >= 0.0 && score <= 1.0, "Score must be bounded between 0.0 and 1.0")
+
+        // One banner per event (#523): the strongest report represents its event; singles stand alone.
+        func report(_ id: Int, _ title: String) -> FeedArticle {
+            FeedArticle(
+                title: title, link: "https://notify.invalid/\(id)", guid: "notify-\(id)", description: "",
+                pubDate: Date(timeIntervalSince1970: 1_700_000_000), source: "Publisher \(id)")
+        }
+        let quiet = report(1, "Council meets on Tuesday")
+        let loud = report(2, "Breaking: explosion kills dozens, president declares emergency")
+        let third = report(3, "Explosion reported downtown")
+        let single = report(4, "Local library extends opening hours")
+        let events = [quiet.id: "event-a", loud.id: "event-a", third.id: "event-a"]
+        let chosen = NotificationService.representatives(of: [quiet, loud, third, single], events: events)
+        assertEqual(chosen.map(\.id), [loud.id, single.id], "One report per event, the strongest, then the single")
+        assertEqual(
+            NotificationService.representatives(of: [quiet, single], events: [:]).map(\.id), [quiet.id, single.id],
+            "Without events every story stands alone in order")
 
         // 4. Robust dispatching (no crashes across all 3 notification tiers)
         let sampleArticle = FeedArticle(

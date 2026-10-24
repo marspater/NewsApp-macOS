@@ -549,6 +549,22 @@ extension DatabaseEngine {
         return try eventRows("SELECT event_id FROM event_members WHERE article_id = ?;", [.text(member)]).first?[0]
     }
 
+    /// The events currently holding the given stored article IDs; articles outside any event are absent.
+    func eventIDs(forArticles articleIDs: [String]) throws -> [String: String] {
+        var result: [String: String] = [:]
+        for start in stride(from: 0, to: articleIDs.count, by: 400) {
+            let slice = Array(articleIDs[start..<min(start + 400, articleIDs.count)])
+            let placeholders = Array(repeating: "?", count: slice.count).joined(separator: ",")
+            for row in try eventRows(
+                "SELECT article_id, event_id FROM event_members WHERE article_id IN (\(placeholders));",
+                slice.map { .text($0) })
+            {
+                if let article = row[0], let event = row[1] { result[article] = event }
+            }
+        }
+        return result
+    }
+
     /// Creates an event with a new stable ID. Articles already in another event move here.
     @discardableResult
     func createEvent(memberArticleIDs articleIDs: [String], at date: Date = Date()) throws -> StoryEvent {

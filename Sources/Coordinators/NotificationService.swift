@@ -63,6 +63,21 @@ final class NotificationService: Sendable {
         return breakingSignals.filter { padded.contains(MuteRules.paddedPhrase($0)) }.count
     }
 
+    /// One report per event, the one that scores highest, in first-seen order; stories outside any event stand alone.
+    /// Several publishers covering one story then notify once instead of once each (#523).
+    static func representatives(of articles: [FeedArticle], events: [String: String]) -> [FeedArticle] {
+        var order: [String] = []
+        var best: [String: (article: FeedArticle, score: Double)] = [:]
+        for article in articles {
+            let key = events[article.id] ?? article.id
+            let score = shared.computeImportance(title: article.title, description: article.description)
+            if let current = best[key], current.score >= score { continue }
+            if best[key] == nil { order.append(key) }
+            best[key] = (article, score)
+        }
+        return order.compactMap { best[$0]?.article }
+    }
+
     /// NLP-driven triage: dispatches notifications according to the active NotificationMode.
     func triageAndNotify(
         newArticles: [FeedArticle],
