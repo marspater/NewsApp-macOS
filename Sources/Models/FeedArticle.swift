@@ -361,12 +361,12 @@ enum ArticleSection {
             "netflix", "disney", "actor", "actress", "box office", "concert", "album", "grammy", "oscar", "emmy",
         ],
         "Politics": [
-            "politics", "political", "congress", "senate", "democrat", "republican", "election", "vote", "legislation", "government",
-            "white house", "parliament", "policy", "campaign", "liberal", "conservative",
+            "politics", "political", "congress", "senate", "democrat", "republican", "election", "vote", "legislation",
+            "government", "white house", "parliament", "policy", "campaign", "liberal", "conservative",
         ],
         "U.S. Politics": [
-            "politics", "political", "congress", "senate", "democrat", "republican", "election", "vote", "legislation", "white house",
-            "biden", "trump", "campaign",
+            "politics", "political", "congress", "senate", "democrat", "republican", "election", "vote", "legislation",
+            "white house", "biden", "trump", "campaign",
         ],
         "Business": [
             "business", "market", "stock", "economy", "finance", "wall street", "investor", "startup", "venture", "ipo",
@@ -399,8 +399,8 @@ enum ArticleSection {
             "travel", "flight", "airline", "hotel", "tourism", "destination", "vacation", "trip", "airport", "cruise",
         ],
         "Sports": [
-            "sport", "sports", "football", "basketball", "soccer", "baseball", "nfl", "nba", "mlb", "athlete", "championship",
-            "match", "team", "league", "coach", "score", "olympic", "tennis", "golf",
+            "sport", "sports", "football", "basketball", "soccer", "baseball", "nfl", "nba", "mlb", "athlete",
+            "championship", "match", "team", "league", "coach", "score", "olympic", "tennis", "golf",
         ],
         "World": [
             "world", "international", "global", "europe", "asia", "africa", "foreign", "nation", "united nations",
