@@ -26,7 +26,7 @@ struct EventPairFeatures: Codable, Equatable, Sendable {
     var json: String? {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
-        return (try? encoder.encode(self)).map { String(decoding: $0, as: UTF8.self) }
+        return (try? encoder.encode(self)).flatMap { String(data: $0, encoding: .utf8) }
     }
 }
 
