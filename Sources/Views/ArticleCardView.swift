@@ -13,7 +13,7 @@ struct ArticleCardView<Footer: View>: View {
     /// Opt-in to the macOS 26 image-backed lead treatment.
     var isLead = false
     let action: () -> Void
-    /// Rows that share the card surface below the story, such as an event's coverage.
+    /// Rows that share the card surface below the story, such as an event's coverage; `EmptyView()` for none.
     let footer: Footer
 
     @EnvironmentObject private var readManager: ReadManager
@@ -22,19 +22,6 @@ struct ArticleCardView<Footer: View>: View {
     @Environment(\.effectiveReduceMotion) private var reduceMotion
     @Environment(\.effectiveContrast) private var contrast
     @State private var isHovered = false
-
-    init(
-        article: FeedArticle, isSelected: Bool = false, compact: Bool = false, imageFallbacks: [FeedArticle] = [],
-        isLead: Bool = false, action: @escaping () -> Void, @ViewBuilder footer: () -> Footer
-    ) {
-        self.article = article
-        self.isSelected = isSelected
-        self.compact = compact
-        self.imageFallbacks = imageFallbacks
-        self.isLead = isLead
-        self.action = action
-        self.footer = footer()
-    }
 
     private var cardImageURL: URL? {
         FeedArticle.bestCardImage(in: [article] + imageFallbacks)
@@ -396,17 +383,6 @@ struct ArticleCardView<Footer: View>: View {
         let savedState = isSaved ? ", saved in your library" : ""
         let dateFormatted = article.publicationDateText
         return "\(article.title), from \(displaySource), published \(dateFormatted). \(readState)\(savedState)."
-    }
-}
-
-extension ArticleCardView where Footer == EmptyView {
-    init(
-        article: FeedArticle, isSelected: Bool = false, compact: Bool = false, imageFallbacks: [FeedArticle] = [],
-        isLead: Bool = false, action: @escaping () -> Void
-    ) {
-        self.init(
-            article: article, isSelected: isSelected, compact: compact, imageFallbacks: imageFallbacks, isLead: isLead,
-            action: action, footer: { EmptyView() })
     }
 }
 

@@ -826,10 +826,8 @@ struct ArticleListView: View {
         case .article(let article):
             ArticleCardView(
                 article: article, isSelected: listHasFocus && article.id == focusedArticleID,
-                compact: !gridLayout, isLead: isLead
-            ) {
-                openArticle(article)
-            }
+                compact: !gridLayout, isLead: isLead, action: { openArticle(article) }, footer: EmptyView()
+            )
             .id(entry.id)
             .onAppear {
                 NewsSignposts.firstCardAppeared()

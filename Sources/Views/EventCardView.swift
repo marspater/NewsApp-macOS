@@ -31,16 +31,8 @@ struct EventCardView: View {
         ArticleCardView(
             article: representative, isSelected: isSelected, compact: compact,
             imageFallbacks: visibleMembers.filter { $0.id != representative.id },
-            isLead: isLead, action: openRepresentative
-        ) {
-            Divider()
-            coverageToggle
-            if isExpanded {
-                Divider()
-                sourceList
-                    .transition(reduceMotion ? .identity : .opacity)
-            }
-        }
+            isLead: isLead, action: openRepresentative, footer: coverage
+        )
         .task(id: "\(summary.eventID):\(summary.membershipVersion):\(isExpanded):\(loadAttempt)") {
             // Collapsed cards already have the visible page's image candidates. Fetch full coverage only on demand.
             guard isExpanded else { return }
@@ -57,6 +49,18 @@ struct EventCardView: View {
     }
 
     // MARK: - Coverage
+
+    /// The coverage row and, when expanded, the source list, on the card's own surface.
+    @ViewBuilder
+    private var coverage: some View {
+        Divider()
+        coverageToggle
+        if isExpanded {
+            Divider()
+            sourceList
+                .transition(reduceMotion ? .identity : .opacity)
+        }
+    }
 
     private var coverageToggle: some View {
         Button {
