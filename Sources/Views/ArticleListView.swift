@@ -863,7 +863,8 @@ struct ArticleListView: View {
                         summary.eventID, article: member, context: members,
                         initialExperienceMode: .sourcePublication)
                 },
-                separate: { member in separate(member, from: summary.eventID) }
+                separate: { member in separate(member, from: summary.eventID) },
+                combine: { related in combine(related, into: summary.eventID) }
             )
             .id(entry.id)
             .onAppear {
@@ -1094,9 +1095,18 @@ struct ArticleListView: View {
     }
 
     private func separate(_ article: FeedArticle, from eventID: String) {
+        correctEvent { await articleStore.separateArticle(article.id, fromEvent: eventID) }
+    }
+
+    private func combine(_ related: RelatedStoryEvent, into eventID: String) {
+        correctEvent { await articleStore.includeEvent(related.eventID, inEvent: eventID) }
+    }
+
+    /// A reader's correction shows at once; the next clustering pass applies it to the rest of the feed.
+    private func correctEvent(_ change: @escaping () async -> Bool) {
         Task {
             appliesNextUpdate = true
-            if await articleStore.separateArticle(article.id, fromEvent: eventID) {
+            if await change() {
                 feedManager.clusterEventsInBackground()
             } else {
                 appliesNextUpdate = false

@@ -18,11 +18,15 @@ struct EventCardView: View {
     let openRepresentative: () -> Void
     let openMember: (FeedArticle, [FeedArticle]) -> Void
     let separate: (FeedArticle) -> Void
+    /// "Same Event as…": the reader says a related event reports this one (#524).
+    let combine: (RelatedStoryEvent) -> Void
 
     @EnvironmentObject private var articleStore: ArticleStore
     @Environment(\.effectiveReduceMotion) private var reduceMotion
     @Environment(\.effectiveContrast) private var contrast
     @State private var members: [FeedArticle] = []
+    /// Loaded with the members, so the submenu is ready before a context menu opens on a row.
+    @State private var relatedEvents: [RelatedStoryEvent] = []
     @State private var hasLoaded = false
     @State private var loadFailed = false
     @State private var loadAttempt = 0
@@ -42,6 +46,9 @@ struct EventCardView: View {
                 members = loaded
                 hasLoaded = true
                 loadFailed = false
+                // Optional: a failed or slow lookup only leaves the submenu out.
+                let related = (try? await articleStore.relatedStoryEvents(eventID: summary.eventID)) ?? []
+                if !Task.isCancelled { relatedEvents = related }
             } catch {
                 if !Task.isCancelled { loadFailed = true }
             }
@@ -148,8 +155,10 @@ struct EventCardView: View {
                 EventSourceRow(
                     article: member,
                     canSeparate: members.count > 1,
+                    relatedEvents: relatedEvents,
                     open: { openMember(member, members) },
-                    separate: { separate(member) }
+                    separate: { separate(member) },
+                    combine: combine
                 )
                 if member.id != members.last?.id {
                     Divider().padding(.leading, AppSpacing.sm)
@@ -163,12 +172,14 @@ struct EventCardView: View {
 }
 
 /// One member story. Read, save and separation act on this article only, so they stay
-/// independent of how the event is grouped later.
+/// independent of how the event is grouped later. "Same Event as…" acts on the whole event.
 private struct EventSourceRow: View {
     let article: FeedArticle
     let canSeparate: Bool
+    let relatedEvents: [RelatedStoryEvent]
     let open: () -> Void
     let separate: () -> Void
+    let combine: (RelatedStoryEvent) -> Void
 
     @EnvironmentObject private var readManager: ReadManager
     @EnvironmentObject private var savedStories: SavedStoriesManager
@@ -212,19 +223,30 @@ private struct EventSourceRow: View {
         .buttonBorderShape(.roundedRectangle(radius: AppRadius.card))
         .contextMenu {
             StoryContextMenuItems(article: article) {
-                if canSeparate {
+                if canSeparate || !relatedEvents.isEmpty {
                     Divider()
+                }
+                if canSeparate {
                     Button {
                         separate()
                     } label: {
                         Label("Not the Same Event", systemImage: "rectangle.split.2x1")
                     }
                 }
+                if !relatedEvents.isEmpty {
+                    Menu {
+                        ForEach(relatedEvents, id: \.eventID) { event in
+                            Button(event.title) { combine(event) }
+                        }
+                    } label: {
+                        Label("Same Event as…", systemImage: "arrow.triangle.merge")
+                    }
+                }
             }
         }
         .help(
-            canSeparate
-                ? "Open this story. Use the context menu if it reports a different event."
+            canSeparate || !relatedEvents.isEmpty
+                ? "Open this story. Use the context menu if it reports a different event or an earlier one."
                 : "Open this story"
         )
         .accessibilityElement(children: .combine)
@@ -240,6 +262,9 @@ private struct EventSourceRow: View {
             }
             if canSeparate {
                 Button("Not the Same Event") { separate() }
+            }
+            ForEach(relatedEvents, id: \.eventID) { event in
+                Button("Same Event as \(event.title)") { combine(event) }
             }
         }
     }
