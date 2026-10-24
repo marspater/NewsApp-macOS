@@ -57,32 +57,41 @@ enum ActClass: String, Codable, CaseIterable, Sendable {
         func add(_ act: ActClass, _ words: String) {
             for word in words.split(separator: " ") { cues[String(word)] = act }
         }
-        add(.vote, "vote voter election referendum ballot elect reelect runoff")
-        add(.protest, "protest protester protestor rally demonstration demonstrator riot rioter unrest")
+        // Inflections are listed where the lemma tagger may leave the surface form. Outcomes a vote, a court or a coup
+        // can produce ("oust", "ban") are no cues: "votes to oust" names one act, the vote.
+        add(.vote, "vote votes voted voter election referendum ballot elect elects elected reelect runoff")
+        add(
+            .protest,
+            "protest protests protested protester protestor rally rallies demonstration demonstrator riot rioter unrest")
         add(
             .attack,
-            "attack attacker airstrike shelling bombing bomber bombardment bombard missile shooting shooter gunman"
-                + " gunmen gunfire stabbing ambush assault raid massacre")
-        add(.agreement, "agreement agree accord pact treaty ceasefire truce deal")
+            "attack attacks attacked attacker airstrike shelling bombing bomber bombardment bombard missile shooting"
+                + " shooter gunman gunmen gunfire stabbing ambush assault raid massacre")
+        add(.agreement, "agreement agree agrees agreed accord pact treaty ceasefire truce deal")
         add(
             .personnel,
-            "resign resignation appoint appointment dismiss dismissal sack oust ouster reshuffle nominate"
-                + " nomination quit")
+            "resign resigns resigned resignation appoint appoints appointed appointment dismiss dismissal sack sacked"
+                + " reshuffle nominate nomination quit quits")
         add(
             .ruling,
-            "ruling verdict convict conviction sentence acquit acquittal indict indictment arrest overturn uphold"
+            "ruling verdict convict convicted conviction sentence sentenced acquit acquitted acquittal indict indicted"
+                + " indictment arrest arrests arrested overturn overturns overturned uphold upholds upheld"
                 + " unconstitutional")
-        add(.sanction, "sanction embargo blacklist")
+        add(.sanction, "sanction sanctions sanctioned embargo blacklist")
         add(
             .disaster,
-            "earthquake quake tremor flood flooding hurricane typhoon cyclone storm tornado wildfire eruption erupt"
-                + " landslide mudslide tsunami avalanche blizzard heatwave")
-        add(.crash, "crash collision collide derail derailment capsize sink")
+            "earthquake quake tremor flood floods flooding hurricane typhoon cyclone storm tornado wildfire eruption"
+                + " erupt erupts erupted landslide mudslide tsunami avalanche blizzard heatwave")
+        add(
+            .crash,
+            "crash crashes crashed collision collide collides collided derail derails derailed derailment capsize"
+                + " capsizes capsized sink sinks sank sunk")
         return cues
     }()
 
     private static let rescueCues = Set(
-        "rescue rescuer evacuate evacuation evacuee".split(separator: " ").map(String.init))
+        "rescue rescues rescued rescuer rescuers evacuate evacuates evacuated evacuation evacuee evacuees"
+            .split(separator: " ").map(String.init))
     private static let casualtyCues = Set(
         ("kill killed dead death deaths die died dying injure injured injury injuries wound wounded hurt casualty"
             + " casualties missing victim victims toll survivor survivors survive survived hospitalise hospitalize"
