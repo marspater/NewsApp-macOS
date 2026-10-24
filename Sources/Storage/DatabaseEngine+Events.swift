@@ -559,29 +559,9 @@ extension DatabaseEngine {
         ).compactMap { $0[0] }
     }
 
-    /// Related-act decisions between members of two different live events updated since `activeSince`, with the
-    /// decision's features, for the clusterer's story pass.
-    func storyLinkRows(since activeSince: Date) throws -> [(event: String, other: String, features: String?)] {
-        let since = activeSince.timeIntervalSince1970
-        return try eventRows(
-            """
-            SELECT ma.event_id, mb.event_id, p.features
-            FROM pair_assessments p
-            JOIN event_members ma ON ma.article_id = p.article_id
-            JOIN event_members mb ON mb.article_id = p.other_article_id
-            JOIN events ea ON ea.id = ma.event_id AND ea.merged_into IS NULL AND ea.updated_at >= ?
-            JOIN events eb ON eb.id = mb.event_id AND eb.merged_into IS NULL AND eb.updated_at >= ?
-            WHERE p.decision = 'related-act' AND ma.event_id != mb.event_id;
-            """, [.real(since), .real(since)]
-        ).compactMap { row in
-            guard let a = row[0], let b = row[1] else { return nil }
-            return (a, b, row[2])
-        }
-    }
-
     /// Writes the story of every live event updated since `activeSince`: the earliest event of each group names the
     /// story, an event in no group is a story of its own. Returns the events whose story changed.
-    func assignStories(_ groups: [[String]], since activeSince: Date, at date: Date = Date()) throws -> Set<String> {
+    func assignStories(_ groups: [[String]], since activeSince: Date) throws -> Set<String> {
         try inEventTransaction { () throws -> Set<String> in
             var current: [String: (story: String?, created: Double)] = [:]
             for row in try eventRows(
@@ -1297,7 +1277,10 @@ extension DatabaseEngine {
             }
         }
         struct Row {
-            let event: String, version: Int, seen: Int?, member: EventFeedMember
+            let event: String
+            let version: Int
+            let seen: Int?
+            let member: EventFeedMember
         }
         var summaries: [EventFeedSummary] = []
         for start in stride(from: 0, to: storyIDs.count, by: 400) {
