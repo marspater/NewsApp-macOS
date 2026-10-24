@@ -292,8 +292,7 @@ actor EnrichmentQueue {
             description: article.description,
             text: article.fullContent,
             // Stored categories may be earlier classifier output; never feed that output back as a publisher hint.
-            rssCategory: nil,
-            allowFoundationModels: false
+            rssCategory: nil
         )
 
         if jobs[articleId]?.generation != generation || isJobCancelled(articleId) {

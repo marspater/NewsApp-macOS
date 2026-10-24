@@ -283,18 +283,6 @@ public struct NewsTextModel: Sendable {
 
 /// Strict text contracts keep malformed model output on the existing deterministic fallback path.
 enum ArticleTextAnswer {
-    static func classification(_ answer: String) -> (category: String, confidence: Double)? {
-        let fields = answer.trimmingCharacters(in: .whitespacesAndNewlines).components(separatedBy: "|")
-        guard fields.count == 2,
-            let category = NewsCategory.allCases.first(where: {
-                $0.rawValue.caseInsensitiveCompare(fields[0].trimmingCharacters(in: .whitespaces)) == .orderedSame
-            }),
-            let confidence = Double(fields[1].trimmingCharacters(in: .whitespaces)), confidence.isFinite,
-            (0...1).contains(confidence)
-        else { return nil }
-        return (category.rawValue, confidence)
-    }
-
     static func analysis(_ answer: String) -> (summary: String, keyPoints: [String])? {
         var summary: String?
         var points: [String] = []
@@ -542,8 +530,12 @@ public final class NaturalLanguageTopicClassifier: TopicClassifying {
             [
                 "tech", "software", "hardware", "artificial intelligence", "ai", "computer", "silicon valley", "cyber",
                 "programming", "developer", "machine learning", "chip", "semiconductor", "startup", "coding",
-                "algorithm", "neural", "apple", "google", "microsoft", "nvidia", "intel", "amd", "cloud", "server",
-                "linux", "ios", "macos", "android", "iphone", "macbook",
+                "algorithm", "neural", "apple's", "apple music", "apple tv", "apple watch", "apple intelligence",
+                "apple store", "google", "microsoft", "nvidia", "intel", "amd", "cloud", "server",
+                "linux", "ios", "macos", "android", "iphone", "macbook", "app", "apps", "smartphone", "gadget",
+                "gaming", "video game", "video games", "console", "nintendo", "playstation", "xbox", "tiktok",
+                "instagram", "facebook", "meta", "openai", "chatgpt", "electric vehicle", "ev", "evs", "robot",
+                "robots", "social media", "hack", "hackers", "camera", "cameras", "airship",
             ]
         ),
         (
@@ -551,23 +543,29 @@ public final class NaturalLanguageTopicClassifier: TopicClassifying {
             [
                 "science", "research", "study", "discovery", "space", "nasa", "physics", "biology", "chemistry",
                 "climate", "species", "quantum", "astronomy", "planet", "genome", "laboratory", "experiment", "rocket",
-                "satellite", "mars", "telescope", "fossil", "ecosystem",
+                "satellite", "mars", "telescope", "fossil", "ecosystem", "deforestation", "el nino", "emissions",
+                "warming", "coral", "reef", "reefs", "scientists", "scientist", "asteroid", "spacecraft",
             ]
         ),
         (
             .business,
             [
-                "market", "stock", "economy", "finance", "wall street", "investor", "venture", "ipo", "revenue",
-                "profit", "earnings", "trade", "inflation", "bank", "gdp", "recession", "shares", "dividend", "crypto",
-                "bitcoin", "central bank", "interest rate", "valuation",
+                "markets", "stock market", "market share", "stock", "economy", "finance", "wall street", "investor",
+                "venture", "ipo", "revenue", "profit", "earnings", "trade", "inflation", "bank", "gdp", "recession",
+                "shares", "dividend", "crypto", "bitcoin", "central bank", "interest rate", "valuation", "business",
+                "company", "companies", "customers", "prices", "price", "tax", "taxes", "deal", "merger", "acquisition",
+                "debt", "bankruptcy", "chapter 11", "bond", "bonds", "yields", "tariff", "tariffs", "exports",
+                "imports",
+                "layoffs", "job cuts", "ceo", "firm", "petrol", "fuel prices", "oil prices", "fta", "free trade",
+                "spin-off", "megadeal", "billionaire",
             ]
         ),
         (
             .politics,
             [
                 "congress", "senate", "democrat", "republican", "white house", "legislation", "campaign", "electoral",
-                "president", "biden", "trump", "parliament", "vote", "voter", "lawmaker", "governor", "supreme court",
-                "election", "policy", "sanction",
+                "biden", "trump", "parliament", "vote", "voter", "lawmaker", "governor", "supreme court", "election",
+                "policy", "sanction", "executive order", "midterm", "midterms", "capitol",
             ]
         ),
         (
@@ -575,7 +573,17 @@ public final class NaturalLanguageTopicClassifier: TopicClassifying {
             [
                 "international", "global", "europe", "asia", "africa", "middle east", "ukraine", "russia", "china",
                 "foreign", "united nations", "un", "diplomat", "treaty", "conflict", "war", "peace", "nato", "embassy",
-                "border", "refugee", "geopolitics",
+                "border", "refugee", "geopolitics", "president", "prime minister", "foreign minister", "envoy",
+                "ceasefire", "truce", "militants", "militia", "airstrike", "airstrikes", "missile", "missiles",
+                "troops",
+                "killed", "attack", "attacks", "protest", "protests", "riots", "unrest", "curfew", "migrants", "asylum",
+                "putin", "zelensky", "netanyahu", "macron", "kremlin", "france", "french", "germany", "german",
+                "israel", "israeli", "iran", "iranian", "gaza", "palestinian", "palestinians", "sudan", "pakistan",
+                "india", "indian", "brazil", "australia", "australian", "kenya", "nigeria", "japan", "korea", "taiwan",
+                "turkey", "turkiye", "saudi", "yemen", "syria", "iraq", "lebanon", "mexico", "canada", "canadian",
+                "britain", "uk", "london", "paris", "kyiv", "moscow", "beijing", "ethiopia", "congo", "rwanda",
+                "uganda", "egypt", "jordan", "qatar", "uae", "spain", "italy", "italian", "poland", "hungary", "greece",
+                "cuba", "venezuela", "argentina", "philippines", "indonesia", "afghanistan", "nepal",
             ]
         ),
         (
@@ -583,7 +591,11 @@ public final class NaturalLanguageTopicClassifier: TopicClassifying {
             [
                 "sport", "football", "basketball", "soccer", "baseball", "nfl", "nba", "mlb", "athlete", "championship",
                 "league", "coach", "olympic", "tennis", "golf", "tournament", "fifa", "premier league", "quarterback",
-                "stadium", "goal", "formula 1", "f1",
+                "stadium", "goal", "formula 1", "f1", "formula one", "grand prix", "world cup", "ligue 1", "serie a",
+                "bundesliga", "la liga", "champions league", "europa league", "fa cup", "uefa", "afc", "nhl", "wnba",
+                "ipl", "t20", "cricket", "rugby", "wicket", "innings", "test match", "matchday", "fixture", "fixtures",
+                "derby", "clasico", "midfielder", "striker", "goalkeeper", "boxing", "marathon", "medal", "medals",
+                "olympics", "paralympics", "man utd", "pro league", "title race",
             ]
         ),
         (
@@ -591,7 +603,8 @@ public final class NaturalLanguageTopicClassifier: TopicClassifying {
             [
                 "entertainment", "movie", "film", "celebrity", "music", "television", "hollywood", "streaming",
                 "netflix", "disney", "actor", "actress", "concert", "album", "grammy", "oscar", "cinema", "box office",
-                "pop star", "emmy", "broadway",
+                "pop star", "emmy", "broadway", "documentary", "sitcom", "tv series", "tv channel", "tv channels",
+                "podcast", "gallery", "exhibition", "photography",
             ]
         ),
         (
@@ -599,7 +612,8 @@ public final class NaturalLanguageTopicClassifier: TopicClassifying {
             [
                 "health", "medical", "doctor", "hospital", "disease", "treatment", "vaccine", "mental health",
                 "wellness", "fitness", "nutrition", "therapy", "clinical", "virus", "cancer", "surgery", "medicine",
-                "fda", "diet", "workout", "cardio", "pharma",
+                "fda", "diet", "workout", "cardio", "pharma", "ebola", "outbreak", "epidemic", "pandemic", "cholera",
+                "measles", "chemo", "chemotherapy", "tumour", "tumor", "patients", "nhs",
             ]
         ),
         (
@@ -627,7 +641,8 @@ public final class NaturalLanguageTopicClassifier: TopicClassifying {
             .lifestyle,
             [
                 "lifestyle", "home", "garden", "parenting", "relationship", "decor", "mindfulness", "habits",
-                "productivity", "diy", "family", "pets", "minimalism", "culture",
+                "productivity", "diy", "family", "pets", "minimalism", "culture", "dog", "dogs", "cat", "cats",
+                "etiquette", "politeness", "wedding", "weddings", "commuters",
             ]
         ),
     ]
@@ -645,11 +660,31 @@ public final class NaturalLanguageTopicClassifier: TopicClassifying {
         return Self.classifyContent(title: title, description: description, text: text)
     }
 
+    /// Phrases whose words would score a category they do not belong to: "food aid" is World, not Food. They are
+    /// removed before any cue is counted (#546).
+    static let compoundExclusions = [
+        "food aid", "food agency", "food program", "food programme", "food security", "food shortages", "food supplies",
+    ]
+
+    /// Cues of national politics; with one of them a Politics story stays Politics even when the headline also names
+    /// a foreign place or leader (#546).
+    static let domesticPoliticsCues = [
+        "congress", "senate", "white house", "governor", "supreme court", "democrat", "republican", "lawmaker",
+        "executive order", "midterm", "midterms", "capitol",
+    ]
+
     static func classifyContent(title: String, description: String, text: String?) -> TopicResult? {
         // Score whole words; short cues such as AI must not match Dubai, said or aircraft.
-        let titleLower = MuteRules.paddedPhrase(title)
-        let descLower = MuteRules.paddedPhrase(description)
-        let bodyLower = MuteRules.paddedPhrase(String((text ?? "").prefix(2000)))
+        func padded(_ value: String) -> String {
+            var result = MuteRules.paddedPhrase(value)
+            for phrase in compoundExclusions {
+                result = result.replacingOccurrences(of: MuteRules.paddedPhrase(phrase), with: " ")
+            }
+            return result
+        }
+        let titleLower = padded(title)
+        let descLower = padded(description)
+        let bodyLower = padded(String((text ?? "").prefix(2000)))
         let hasTitle = !titleLower.isEmpty
         let hasDesc = !descLower.isEmpty
         let hasBody = !bodyLower.isEmpty
@@ -657,6 +692,7 @@ public final class NaturalLanguageTopicClassifier: TopicClassifying {
         var bestCategory: NewsCategory?
         var maxScore = 0.0
         var bestEvidence: [String] = []
+        var worldInTitle = false
 
         for item in Self.taxonomy {
             var score = 0.0
@@ -667,6 +703,7 @@ public final class NaturalLanguageTopicClassifier: TopicClassifying {
                 if hasTitle && titleLower.contains(phrase) {
                     score += 3.0
                     matched.append(kw)
+                    if item.category == .world { worldInTitle = true }
                 }
                 if hasDesc && descLower.contains(phrase) {
                     score += 1.5
@@ -677,11 +714,21 @@ public final class NaturalLanguageTopicClassifier: TopicClassifying {
                 }
             }
 
-            if score > maxScore {
+            // World is the catch-all, so it wins only when it scores strictly higher than a later category.
+            if score > maxScore || (score == maxScore && score > 0 && bestCategory == .world) {
                 maxScore = score
                 bestCategory = item.category
                 bestEvidence = Array(Set(matched))
             }
+        }
+
+        // A foreign place or leader in the headline makes a Politics story World news unless it also carries a cue
+        // of national politics: "Macron takes aim at Trump over France riots" is World, "Trump praises rally crowd
+        // in South Carolina" is Politics.
+        if bestCategory == .politics, worldInTitle,
+            !Self.domesticPoliticsCues.contains(where: { titleLower.contains(MuteRules.paddedPhrase($0)) })
+        {
+            bestCategory = .world
         }
 
         if let cat = bestCategory, maxScore >= 2.0 {
@@ -867,20 +914,16 @@ public final class ProseContentCleaner: ContentCleaning {
 
 // MARK: - ArticleClassifier (Automatic Ingestion Capability)
 
-/// Dedicated, high-accuracy topic classifier used automatically during feed ingestion.
-/// Multi-stage pipeline: RSS hints -> Apple Foundation Models (when available) -> NaturalLanguage fallback.
+/// Topic classifier used automatically during feed ingestion: a publisher category hint, then the deterministic
+/// whole-word classifier. No language model is involved; a Foundation Models stage existed but no caller reached it
+/// and it was removed (#546).
 public final class ArticleClassifier: Sendable {
     public static let shared = ArticleClassifier()
 
     private let fallbackClassifier: NaturalLanguageTopicClassifier
-    private let textModel: NewsTextModel
 
-    public init(
-        fallbackClassifier: NaturalLanguageTopicClassifier = NaturalLanguageTopicClassifier(),
-        textModel: NewsTextModel = .onDevice
-    ) {
+    public init(fallbackClassifier: NaturalLanguageTopicClassifier = NaturalLanguageTopicClassifier()) {
         self.fallbackClassifier = fallbackClassifier
-        self.textModel = textModel
     }
 
     /// Classifies an article into one of the 12 fixed application categories.
@@ -888,8 +931,7 @@ public final class ArticleClassifier: Sendable {
         title: String,
         description: String,
         text: String? = nil,
-        rssCategory: String? = nil,
-        allowFoundationModels: Bool = true
+        rssCategory: String? = nil
     ) async -> TopicResult {
         let signpostState = NewsSignposts.begin(
             NewsSignposts.intelligence, name: "AIClassification", metadata: "title_len=\(title.count)")
@@ -902,62 +944,14 @@ public final class ArticleClassifier: Sendable {
             return TopicResult(category: matched.rawValue, confidence: 0.95, evidence: [rssHint])
         }
 
-        // Stage 2: Foundation Models classification (when available)
-        if allowFoundationModels {
-            do {
-                let safeData = GenerationPromptDefense.frameArticleData(title: title, description: description)
-                let prompt = """
-                    \(GenerationPromptDefense.untrustedDataSystemGuard)
-
-                    Classify this news article into exactly one category from the allowed list:
-                    Allowed categories: Technology, Science, Business, Politics, World, Sports, Entertainment, Health, Travel, Food, Fashion, Lifestyle.
-
-                    Return exactly Category|confidence (a number from 0 to 1), without commentary.
-
-                    \(safeData)
-                    """
-
-                let response = try await textModel.respond(prompt, 20)
-                guard let parsed = ArticleTextAnswer.classification(response) else {
-                    throw URLError(.cannotParseResponse)
-                }
-                let modelCategory = parsed.category
-                let confidence = parsed.confidence
-
-                // Confidence evaluation policy:
-                // >= 0.85: accept directly
-                // 0.60 ..< 0.85: verify against deterministic classifier
-                // < 0.60: fall back
-                if confidence >= 0.85 {
-                    return TopicResult(category: modelCategory, confidence: confidence, evidence: ["foundation_model"])
-                } else if confidence >= 0.60 {
-                    if let deterministic = await fallbackClassifier.classifyTopic(
-                        title: title, description: description, text: text, rssCategory: rssCategory)
-                    {
-                        if deterministic.category == modelCategory {
-                            return TopicResult(
-                                category: modelCategory, confidence: max(confidence, deterministic.confidence),
-                                evidence: ["foundation_model_verified"] + deterministic.evidence)
-                        } else if deterministic.confidence > confidence {
-                            return deterministic
-                        }
-                    }
-                    return TopicResult(
-                        category: modelCategory, confidence: confidence, evidence: ["foundation_model_unverified"])
-                }
-            } catch {
-                // Foundation Models failure -> fall through to deterministic fallback
-            }
-        }
-
-        // Stage 3: NaturalLanguage & Keyword deterministic fallback
+        // Stage 2: NaturalLanguage & Keyword deterministic fallback
         if let result = await fallbackClassifier.classifyTopic(
             title: title, description: description, text: text, rssCategory: rssCategory)
         {
             return result
         }
 
-        // Stage 4: Default generic fallback
+        // Stage 3: Default generic fallback
         return TopicResult(category: NewsCategory.world.rawValue, confidence: 0.5, evidence: ["default_fallback"])
     }
 }
