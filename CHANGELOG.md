@@ -2,6 +2,7 @@
 
 ## Unreleased — 21 October 2026
 
+- Story matching in Low Power Mode or under thermal pressure now uses the deterministic rules alone: no embedding is computed and the pair model is not asked. Reports whose decision needed a model wait and are matched again on the next pass with energy, so nothing is merged unchecked, nothing is lost and no event is split by a rules-only pass.
 - Story matching: the sentence embedding and the pair model, both English-only, are no longer consulted for reports in another language; such pairs are decided by the deterministic rules alone, and no embedding is computed for them.
 - Story matching (matcher v11): reports of one event that share only a country or a common name, not a specific name or place, now join when the app's own on-device pair model is confident. The model is all-MiniLM-L6-v2 fine-tuned by this project on report pairs from local libraries and runs only for borderline pairs. On the private English holdout it recovered all 16 pairs the rules missed with no false pair (recall 0.579 to 1.000, precision 1.000). The app is about 43 MB larger.
 - Event overviews: "Same Event" in the context menu of an "Earlier in This Story" row combines that event with the open one, and later refreshes keep them together; "Not the Same Event" on a story undoes it for that story. In the list, a story row of an expanded event offers "Same Event as…" with the same earlier events.

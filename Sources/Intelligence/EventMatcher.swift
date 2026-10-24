@@ -657,6 +657,15 @@ enum EventMatcher {
         return pair
     }
 
+    /// A rule match without the vector the semantic veto needs (#534): it stays open until a pass with energy.
+    static func unvetted(_ pair: EventPairAssessment) -> EventPairAssessment {
+        var pair = pair
+        pair.isMatch = false
+        pair.isCompatible = false
+        pair.isBorderline = true
+        return pair
+    }
+
     /// A pair the reader put in one event ("Same Event", #524): a match whatever its signals say.
     static func forced(_ pair: EventPairAssessment, policy: EventMatchPolicy = .standard) -> EventPairAssessment {
         var pair = pair

@@ -8,6 +8,8 @@ struct EventClusteringReport: Equatable, Sendable {
     var conflicts = 0
     /// Event fragments of one story joined by the merge pass.
     var merged = 0
+    /// Rows left for a pass with energy because a model they needed did not run (#534).
+    var deferred = 0
     /// Legacy audit metric; deterministic clustering always reports zero.
     var judged = 0
     var changedEvents: Set<String> = []
@@ -28,10 +30,15 @@ enum EventClusterer {
         judgeBudget _: Int = 150,
         now: Date = Date(),
         limit: Int = 2_000,
+        allowsEnergy: Bool = IntelligencePolicy.allowsEnergy(),
         pairProbability: (@Sendable (String, String) async -> Double?)? = nil
     ) async throws -> EventClusteringReport {
         let pairProbability = pairProbability ?? { a, b in await PairScorer.shared.probability(a, b) }
         var report = EventClusteringReport()
+        /// Under the energy rule (#534) neither model runs: pairs they might have settled stay as the rules left them
+        /// and the rows involved are marked one matcher version behind, so the next pass with energy reads them again.
+        var deferred = Set<String>()
+        var deferredCurrentRow = false
         /// Pair-model probabilities this pass, keyed low ID first (#525).
         var modelScores: [String: Double?] = [:]
         var cache: [String: EventFeatures] = [:]
@@ -103,7 +110,7 @@ enum EventClusterer {
             for row in unembedded {
                 if let vector = stored[row.id] { embeddingCache[row.id] = vector } else { pending.append(row) }
             }
-            guard !pending.isEmpty, await SentenceEmbedder.shared.isAvailable else { return }
+            guard !pending.isEmpty, allowsEnergy, await SentenceEmbedder.shared.isAvailable else { return }
             let vectors = await SentenceEmbedder.shared.embedBatch(
                 pending.map { EventFeatures.matchingText(title: $0.title, description: $0.description) })
             for (row, vector) in zip(pending, vectors) {
@@ -147,7 +154,17 @@ enum EventClusterer {
         }
         func assessed(_ a: EventMatchRow, _ b: EventMatchRow) async -> EventPairAssessment {
             var pair = await ruled(a, b)
-            if EventMatcher.needsPairModel(pair) {
+            if !allowsEnergy {
+                // Without a vector the semantic veto has not cleared a rule match, a rescue may be missing and the
+                // model may have confirmed a borderline pair: such pairs stay open and are decided again later.
+                let unvetted =
+                    pair.embeddingCosine == nil && pair.neuralEligible && pair.conflict == nil
+                    && pair.sharedSpecificAnchors >= 1
+                if unvetted || EventMatcher.needsPairModel(pair) {
+                    deferredCurrentRow = true
+                    if pair.isMatch { pair = EventMatcher.unvetted(pair) }
+                }
+            } else if EventMatcher.needsPairModel(pair) {
                 let key = a.id < b.id ? a.id + "\n" + b.id : b.id + "\n" + a.id
                 if modelScores[key] == nil {
                     modelScores[key] = await pairProbability(
@@ -194,14 +211,18 @@ enum EventClusterer {
         var remaining = limit
         matching: while remaining > 0 {
             try Task.checkCancellation()
+            // Without energy, members already matched are not revalidated: the rules alone could split what the
+            // model joined. They wait, pending, for a pass with energy.
             let pending = try await database.pendingEventMatchRows(
                 activeSince: now.addingTimeInterval(-candidatePolicy.activeEventLifetime),
-                matcherVersion: EventMatcher.version, limit: min(batchSize, remaining))
+                matcherVersion: EventMatcher.version, limit: min(batchSize, remaining), revalidating: allowsEnergy)
             guard !pending.isEmpty else { break }
             await prefetch(pending)
             for row in pending where !handled.contains(row.id) {
                 guard remaining > 0 else { break matching }
                 try Task.checkCancellation()
+                deferredCurrentRow = false
+                defer { if deferredCurrentRow { deferred.insert(row.id) } }
                 if row.previouslyMatched, let eventID = row.eventID,
                     let event = try await database.fetchEvent(id: eventID),
                     event.updatedAt >= now.addingTimeInterval(-candidatePolicy.activeEventLifetime),
@@ -258,7 +279,7 @@ enum EventClusterer {
                         let fits =
                             row.previouslyMatched
                             || (!isExcluded && EventMatcher.eventScore(pairs: pairs, policy: matchPolicy) != nil)
-                        if fits {
+                        if fits || (!allowsEnergy && deferredCurrentRow) {
                             try await database.markEventMatchProcessed(
                                 [row.id], matcherVersion: EventMatcher.version, at: now)
                             continue
@@ -341,6 +362,7 @@ enum EventClusterer {
                         handled.formUnion(partners)
                         report.processed += partners.count
                         remaining -= partners.count
+                        if deferredCurrentRow { deferred.formUnion(partners) }
                     }
                 case .conflict:
                     // Membership changed underneath the decision; the next batch decides again.
@@ -354,6 +376,12 @@ enum EventClusterer {
             }
             // Match state is already committed per article; a later throw or cancellation keeps this batch's work.
             await store()
+            if !deferred.isEmpty {
+                try await database.markEventMatchProcessed(
+                    Array(deferred), matcherVersion: EventMatcher.version - 1, at: now)
+                report.deferred += deferred.count
+                deferred = []
+            }
         }
         /// Every cross-pair needs specific shared evidence; a contradiction or exclusion always vetoes a merge.
         var fragmentExclusions: [String: Set<String>] = [:]

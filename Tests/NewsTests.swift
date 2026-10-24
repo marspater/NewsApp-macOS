@@ -10671,6 +10671,40 @@ struct NewsTests {
         assertEqual(unsure.events[0], nil, "Below the threshold the flood reports stay apart")
         let unavailable = try await clustered(nil)
         assertEqual(unavailable.events[0], nil, "Without the model the matcher decides as before")
+
+        // Under the energy rule (#534) neither model runs; the pair waits for a pass with energy.
+        let lowPower = DatabaseEngine(path: ":memory:")
+        try await lowPower.open()
+        try await lowPower.upsertArticles(stories)
+        let rulesOnly = try await EventClusterer.run(
+            in: lowPower, now: start.addingTimeInterval(4 * 3600), allowsEnergy: false,
+            pairProbability: { _, _ in
+                assertTrue(false, "The pair model is not asked without energy")
+                return 0.99
+            })
+        var ids: [String] = []
+        for article in stories { ids.append(try await lowPower.resolvedArticleID(for: article)) }
+        assertEqual(try await lowPower.eventID(forArticle: ids[0]), nil, "The rules alone leave the flood pair apart")
+        assertTrue(
+            try await lowPower.fetchArticleEmbeddings(articleIDs: ids, modelVersion: SentenceEmbedder.modelVersion)
+                .isEmpty, "No embedding is computed without energy")
+        assertEqual(rulesOnly.deferred, 2, "Both flood reports wait for a pass with energy")
+        let againWithoutEnergy = try await EventClusterer.run(
+            in: lowPower, now: start.addingTimeInterval(5 * 3600), allowsEnergy: false,
+            pairProbability: { _, _ in
+                assertTrue(false, "Deferred rows are not read again without energy")
+                return 0.99
+            })
+        assertEqual(againWithoutEnergy.processed, 0, "Deferred rows wait for energy instead of being re-read")
+        let withEnergy = try await EventClusterer.run(
+            in: lowPower, now: start.addingTimeInterval(6 * 3600), allowsEnergy: true,
+            pairProbability: { _, _ in 0.99 })
+        assertTrue(withEnergy.processed >= 2, "A pass with energy reads the deferred rows again")
+        let joinedFlood = try await lowPower.eventID(forArticle: ids[0])
+        let joinedFloodPartner = try await lowPower.eventID(forArticle: ids[1])
+        assertTrue(
+            joinedFlood != nil && joinedFlood == joinedFloodPartner, "The pair model then joins the flood reports")
+        await lowPower.close()
     }
 
     /// "Same Event" (#524): the reader's inclusion merges two events, survives a pass that re-matches a member the

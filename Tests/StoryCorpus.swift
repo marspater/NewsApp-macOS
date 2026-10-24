@@ -150,9 +150,11 @@ enum StoryCorpus {
                         policy.pairModelThreshold = value
                     }
                     let modelOff = ProcessInfo.processInfo.environment["NEWS_PAIR_MODEL"] == "0"
+                    // NEWS_ENERGY=0 replays the rules-only pass of Low Power Mode (#534).
+                    let energy = ProcessInfo.processInfo.environment["NEWS_ENERGY"] != "0"
                     let report = try await EventClusterer.run(
                         in: db, matchPolicy: policy, judge: judged ? .onDevice : .unavailable, now: clock,
-                        pairProbability: modelOff ? { @Sendable _, _ in nil } : nil)
+                        allowsEnergy: energy, pairProbability: modelOff ? { @Sendable _, _ in nil } : nil)
                     onPass?(report)
                 }
                 clock = clock.addingTimeInterval(6 * 3600)
