@@ -4375,6 +4375,13 @@ struct NewsTests {
         let date2Str = "2026-05-19T20:30:00Z"
         let date2 = DateParser.parse(date2Str)
         assertTrue((date2?.timeIntervalSince1970 ?? 0) > 0, "Should successfully parse ISO 8601 date")
+        assertEqual(
+            DateParser.parse("2026-10-24"), Date(timeIntervalSince1970: 1_792_800_000),
+            "A date-only ISO 8601 value is midnight UTC instead of an unknown date")
+        assertEqual(
+            DateParser.parse("2026-10-24T06:00:00"), Date(timeIntervalSince1970: 1_792_821_600),
+            "A zone-less ISO 8601 time is read as UTC")
+        assertEqual(DateParser.parse("yesterday"), nil, "Prose is still not a date")
     }
 
     static func testXMLParsing() async {
@@ -6355,6 +6362,12 @@ struct NewsTests {
                 try await db.searchArticles(query: "qubit quantum is:unread").map(\.id), [artA.id],
                 "Same words match with an operator")
             assertTrue(try await db.searchArticles(query: "qubit shares").isEmpty, "Every word must match")
+            assertEqual(
+                try await db.searchArticles(query: "\"").count, 2,
+                "A quote-only term is ignored instead of becoming an empty FTS5 phrase")
+            assertEqual(
+                try await db.searchArticles(query: "qubit \"\"").map(\.id), [artA.id],
+                "An empty quoted term beside a real one is ignored")
 
             // Operator searches
             let searchSource = try await db.searchArticles(query: "source:Nature")
@@ -13419,6 +13432,20 @@ struct NewsTests {
         assertTrue(!analysis.modelIdentifier.isEmpty, "Model identifier should identify engine")
         assertEqual(
             analysis.analysisVersion, 3, "Analysis version invalidates summaries from the old extraction pipeline")
+
+        // 6. Headline words next to punctuation still count for sentence selection (#514).
+        let punctuated = await ExtractiveArticleSummarizer().summarize(
+            title: "Westfield: gunman's 'identity' revealed",
+            content: """
+                The city council met on Tuesday to discuss parking fees. \
+                Residents asked for lower rates near the harbour. \
+                Councillors agreed to review the schedule next month. \
+                Separately, police named the Westfield gunman as a local man. \
+                The gunman had been known to officers for years.
+                """)
+        assertTrue(
+            punctuated.text.contains("Westfield gunman"),
+            "The sentence repeating the headline's punctuated nouns is selected over earlier unrelated ones")
     }
 
     static func testInteractiveAnalysisCancellation() async {

@@ -1781,15 +1781,13 @@ actor DatabaseEngine {
         var join = " WHERE 1=1"
         var sql = ""
         var params: [QueryParameter] = []
-        if !parsed.terms.isEmpty {
+        // Each term is a quoted prefix phrase, so typed quotes cannot inject FTS5 syntax; a term that is only quotes
+        // would leave an empty phrase, which FTS5 rejects, so it is dropped instead.
+        let searchTerms = parsed.terms.map { $0.replacingOccurrences(of: "\"", with: "") }.filter { !$0.isEmpty }
+        if !searchTerms.isEmpty {
             join =
                 " JOIN article_fts_rows f ON f.article_id = a.id JOIN articles_fts fts ON fts.rowid = f.fts_rowid WHERE articles_fts MATCH ?"
-            // Sanitize FTS search term: wrap terms with quotes or escape special FTS characters
-            let sanitizedFtsTerm = parsed.terms.map { term in
-                let cleaned = term.replacingOccurrences(of: "\"", with: "")
-                return "\"\(cleaned)\"*"
-            }.joined(separator: " ")
-            params.append(("text", sanitizedFtsTerm))
+            params.append(("text", searchTerms.map { "\"\($0)\"*" }.joined(separator: " ")))
         }
         let scope = collectionScope()
         sql += scope.sql

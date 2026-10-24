@@ -30,6 +30,10 @@ struct DateParser {
             "yyyy-MM-dd'T'HH:mm:ssZ",
             "yyyy-MM-dd HH:mm:ss",
             "MMM d, yyyy",
+            // Zone-less and date-only ISO 8601 forms some feeds emit; UTC is assumed. An unparsed date would leave the
+            // story undated, ordered by ingestion time and never clustered.
+            "yyyy-MM-dd'T'HH:mm:ss",
+            "yyyy-MM-dd",
         ]
 
         for fmt in formats {
