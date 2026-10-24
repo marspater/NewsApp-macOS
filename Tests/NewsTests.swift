@@ -7459,6 +7459,17 @@ struct NewsTests {
             description: "Thousands marched in Paris on Saturday.", date: now)
         assertFalse(plainStart.names.contains("thousands"), "An ordinary sentence-initial word is still no name")
 
+        // The pair model's input prefix (#626): the gap and the publishers in plain words, "unknown" when absent.
+        assertEqual(
+            EventMatcher.pairModelInput("Headline\nLead", gap: 14.4 * 3600, samePublisher: true),
+            "gap 14 hours; same publisher. Headline\nLead", "Gap and one publisher")
+        assertEqual(
+            EventMatcher.pairModelInput("H", gap: 1.6 * 3600, samePublisher: false),
+            "gap 2 hours; different publishers. H", "Rounded gap and two publishers")
+        assertEqual(
+            EventMatcher.pairModelInput("H", gap: nil, samePublisher: nil), "gap unknown; publishers unknown. H",
+            "Public pretraining rows without dates or publishers")
+
         // Admission and rescue knobs measured in #582, all off in the standard policy.
         var sweep = EventMatchPolicy.standard
         let storm = features(
@@ -11710,14 +11721,18 @@ struct NewsTests {
                             similarity = SentenceEmbedder.cosineSimilarity(va, vb)
                         }
                         let pair = EventMatcher.assess(a, b, embeddingSimilarity: similarity)
+                        let diagnosePolicy = StoryCorpus.policyFromEnvironment()
+                        func input(_ index: Int) -> String {
+                            let text = EventFeatures.matchingText(
+                                title: items[index].title, description: items[index].description ?? "")
+                            return diagnosePolicy.pairModelPrefix
+                                ? EventMatcher.pairModelInput(
+                                    text, gap: abs(items[i].published.timeIntervalSince(items[j].published)),
+                                    samePublisher: items[i].source == items[j].source) : text
+                        }
                         let pairModel =
                             EventMatcher.needsPairModel(pair)
-                            ? await PairScorer.shared.probability(
-                                EventFeatures.matchingText(
-                                    title: items[i].title, description: items[i].description ?? ""),
-                                EventFeatures.matchingText(
-                                    title: items[j].title, description: items[j].description ?? ""))
-                            : nil
+                            ? await PairScorer.shared.probability(input(i), input(j)) : nil
                         let nonPlaceB = b.keywords.union(b.titleNumbers).union(b.tollNumbers)
                         let nonPlaceA = a.keywords.union(a.titleNumbers).union(a.tollNumbers)
                         let primaryDisjoint =
@@ -12315,14 +12330,22 @@ struct NewsTests {
                 """)
             await db.close()
             let features = rows.map { EventFeatures(title: $0.title, description: $0.description, date: $0.date) }
+            let prefixed = StoryCorpus.policyFromEnvironment().pairModelPrefix
             func append(_ label: Int, _ group: String, _ i: Int, _ j: Int, weight: Int = 1) {
                 let pairKey = [key(rows[i].title) + "|" + rows[i].source, key(rows[j].title) + "|" + rows[j].source]
                     .sorted().joined(separator: "\n")
                 guard seen.insert(pairKey).inserted else { return }
+                // The prefix the model reads at run time (#626): the pair's gap and whether one publisher wrote both.
+                func input(_ index: Int) -> String {
+                    prefixed
+                        ? EventMatcher.pairModelInput(
+                            rows[index].text, gap: abs(rows[i].date.timeIntervalSince(rows[j].date)),
+                            samePublisher: rows[i].source == rows[j].source) : rows[index].text
+                }
                 lines.append(
                     [
-                        String(label), quoted(group), quoted(rows[i].text), quoted(rows[j].text), pieces(rows[i].text),
-                        pieces(rows[j].text), String(weight),
+                        String(label), quoted(group), quoted(input(i)), quoted(input(j)), pieces(input(i)),
+                        pieces(input(j)), String(weight),
                     ].joined(separator: ","))
             }
             let indexByID = Dictionary(rows.indices.map { (rows[$0].id, $0) }, uniquingKeysWith: { a, _ in a })

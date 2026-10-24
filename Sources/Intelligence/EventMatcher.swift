@@ -534,6 +534,9 @@ struct EventMatchPolicy: Sendable, Equatable {
     /// A related-act pair links two events into one story when it shares at least this many specific names (#581):
     /// a country or a common name alone linked unrelated stories in 35 of 56 reviewed related-act rows.
     var storyLinkAnchors = 2
+    /// The pair model reads the time gap and whether both reports come from one publisher as plain words in front of
+    /// each text (#626); off to evaluate a model trained without the prefix.
+    var pairModelPrefix = true
     static let standard = EventMatchPolicy()
 }
 
@@ -667,6 +670,17 @@ enum EventMatcher {
             sharedSpecificAnchors: sharedSpecific, sharedKeywords: sharedKeywords,
             isMatch: isMatch, isCompatible: isCompatible, embeddingCosine: embeddingSimilarity,
             neuralEligible: neuralEligible, anchorlessModelCandidate: anchorlessCandidate)
+    }
+
+    /// The pair model's input for one side of a pair (#626): "gap 14 hours; same publisher. " and then the matching
+    /// text. The prefix is the same on both sides, plain words only, and says "unknown" where the data has no gap or
+    /// publisher (the public pretraining sets), so the model learns what the words mean from the library rows.
+    /// `wordpiece.pair_prefix` in `script/training` writes the same prefix for the training rows.
+    static func pairModelInput(_ text: String, gap: TimeInterval?, samePublisher: Bool?) -> String {
+        let hours = gap.map { "gap \(Int(($0 / 3600).rounded())) hours" } ?? "gap unknown"
+        let publisher =
+            samePublisher.map { $0 ? "same publisher" : "different publishers" } ?? "publishers unknown"
+        return hours + "; " + publisher + ". " + text
     }
 
     /// Both models are English-only (MiniLM vocabulary, pair model trained on English pairs), so the semantic veto,

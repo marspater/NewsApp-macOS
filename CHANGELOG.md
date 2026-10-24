@@ -2,6 +2,7 @@
 
 ## Unreleased — 21 October 2026
 
+- Story matching: the pair model is told how far apart two reports are and whether one publisher wrote both, so it can weigh a repost against fresh coverage; the retrained model that uses it ships when it passes the library holdout.
 - Developer tooling: reviewed pair labels and same-day cross-event negatives join the pair model's training set, so each retrain learns from the previous model's reviewed mistakes.
 - Developer tooling: the reader's "Same Event" and "Not the Same Event" verdicts become training rows for the pair model and a gate that no matcher or model change may violate.
 - Developer tooling: the pair model can be pretrained on public event-clustered news (WCEP-10 clusters, GDELT same-actor hard negatives, SemEval-2022 human-rated pairs) built locally by `pretrain_pairs.py`; the app's WordPiece tokenizer in Python moved to its own torch-free module.

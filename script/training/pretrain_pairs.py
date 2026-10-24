@@ -39,7 +39,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import date, timedelta
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
-from wordpiece import Tokenizer, require
+from wordpiece import Tokenizer, pair_prefix, require
 
 HEADER = ['label', 'group', 'text_a', 'text_b', 'pieces_a', 'pieces_b', 'weight']
 LEAD = 600
@@ -105,8 +105,16 @@ def headline_and_lead(text):
     return headline, lead
 
 
-def pair_text(headline, lead):
-    return headline + '\n' + lead
+def pair_text(headline, lead, gap_hours=None, same_publisher=None):
+    """The model's input: the pair prefix (#626) and the matching text."""
+    return pair_prefix(gap_hours, same_publisher) + headline + '\n' + lead
+
+
+def host(url):
+    """The publisher's host of a URL, through an Internet Archive prefix."""
+    original = re.sub(r'^https?://web\.archive\.org/web/[^/]+/', '', url)
+    match = re.match(r'^https?://([^/]+)', original)
+    return match.group(1).lower().removeprefix('www.') if match else None
 
 
 def names_in(headline):
@@ -287,11 +295,11 @@ def gdelt_rows(slots, cache):
 
 
 def gdelt_title(event_id, mentions, titles):
-    """A usable headline of one event: four words or more and not a site's front page."""
+    """A usable headline of one event with its host: four words or more and not a site's front page."""
     for url in mentions.get(event_id, []):
         title = titles.get(url)
         if title and len(title.split()) >= 4 and not title.lower().startswith(('home', 'news')):
-            return title
+            return title, host(url)
     return None
 
 
@@ -300,31 +308,39 @@ def gdelt_candidates(events, mentions, titles):
     the pair is the same-topic-different-story case the model confuses, not two unrelated reports."""
     groups = {}
     for event_id, (day, actor1, actor2, country) in events.items():
-        title = gdelt_title(event_id, mentions, titles)
-        if title and (when := yyyymmdd(day)):
-            groups.setdefault((actor1, actor2, country), []).append((event_id, when, title, names_in(title)))
-    candidates = [pair for members in groups.values() for pair in gdelt_group_pairs(sorted(members)[:GDELT_SAMPLE])]
+        titled = gdelt_title(event_id, mentions, titles)
+        if titled and (when := yyyymmdd(day)):
+            title, site = titled
+            groups.setdefault((actor1, actor2, country), []).append((event_id, when, title, names_in(title), site))
+    candidates = []
+    for members in groups.values():
+        candidates.extend(gdelt_group_pairs(sorted(members)[:GDELT_SAMPLE]))
     return sorted(candidates, key=lambda c: order(c[0], c[1]))
 
 
 def gdelt_group_pairs(members):
-    """The pairs of one actor group one to seven days apart whose different headlines share a name."""
+    """Pairs inside one actor group one to seven days apart with different headlines that share a name, with the gap
+    in hours and whether both came from one host (None when a host is unknown)."""
     pairs = []
-    for n, (a_id, a_day, a_title, a_names) in enumerate(members):
-        for b_id, b_day, b_title, b_names in members[n + 1:]:
+    for n, (a_id, a_day, a_title, a_names, a_site) in enumerate(members):
+        for b_id, b_day, b_title, b_names, b_site in members[n + 1:]:
             gap = abs((a_day - b_day).days)
-            if 1 <= gap <= 7 and a_title.lower() != b_title.lower() and a_names & b_names:
-                pairs.append((a_id, b_id, a_title, b_title))
+            if not 1 <= gap <= 7 or a_title.lower() == b_title.lower() or not a_names & b_names:
+                continue
+            same_site = (a_site == b_site) if a_site and b_site else None
+            pairs.append((a_id, b_id, a_title, b_title, gap * 24, same_site))
     return pairs
 
 
 def build_gdelt(events, mentions, titles, writer, cap):
-    """Same actors and country, different event and day, one to seven days apart: a hard negative."""
+    """Same actors and country, different event and day, one to seven days apart: a hard negative. The gap is known
+    to the day and the publishers from the hosts."""
     written = 0
-    for a_id, _, a_title, b_title in gdelt_candidates(events, mentions, titles):
+    for a_id, _, a_title, b_title, gap_hours, same_site in gdelt_candidates(events, mentions, titles):
         if written >= cap:
             break
-        if writer.write(0, 'g:' + a_id, pair_text(a_title, ''), pair_text(b_title, '')):
+        if writer.write(0, 'g:' + a_id, pair_text(a_title, '', gap_hours, same_site),
+                        pair_text(b_title, '', gap_hours, same_site)):
             written += 1
     return written
 
@@ -401,8 +417,10 @@ def build_semeval(pairs, writer, page, workers=FETCH_WORKERS):
     written = 0
     for pair_id, link1, link2, overall in pairs:
         a, b = pages.get(link1), pages.get(link2)
-        if a and b and writer.write(semeval_label(overall), 's:' + pair_id, pair_text(a['title'], a['lead']),
-                                    pair_text(b['title'], b['lead']), 2):
+        same_site = host(link1) == host(link2) if host(link1) and host(link2) else None
+        if a and b and writer.write(semeval_label(overall), 's:' + pair_id,
+                                    pair_text(a['title'], a['lead'], None, same_site),
+                                    pair_text(b['title'], b['lead'], None, same_site), 2):
             written += 1
     return written
 
@@ -448,6 +466,10 @@ def self_check():
         # 1–2 and 3–2 qualify but carry the same two texts, so one row; 1–3 share a day; 4 is too far away; 5 shares
         # no headline name.
         require(written == 1, f'GDELT self-check: {written} negatives')
+        with (out / 'gdelt.csv').open(newline='') as handle:
+            gdelt_row = next(csv.DictReader(handle))
+        require(gdelt_row['text_a'].startswith('gap 48 hours; publishers unknown. '), 'GDELT rows carry the prefix')
+        require(host('https://web.archive.org/web/2020id_/https://www.bbc.co.uk/news/1') == 'bbc.co.uk', 'host()')
         pages = {'a': {'title': 'Storm hits coast', 'lead': 'x' * 300},
                  'b': {'title': 'Coastal storm batters towns', 'lead': 'y' * 300},
                  'c': {'title': 'Budget vote delayed', 'lead': 'z' * 300}}
