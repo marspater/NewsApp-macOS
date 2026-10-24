@@ -70,6 +70,8 @@ Further opt-in variables: `NEWS_SNAPSHOT_DB=path` makes the default run open a c
 
 SwiftSoup and FeedKit are resolved by `Package.swift` and the committed `Package.resolved`. Native app and QA scripts source `script/swiftpm_dependencies.sh`, which builds one static dependency archive with SwiftPM and supplies its module and link paths to the existing compiler commands. No separate dependency installation or system library search path is needed. Bundles include `Sources/ThirdPartyNotices.txt`.
 
+Releases: pushing a `vX.Y.Z` tag runs `.github/workflows/release.yml`, which builds with `build_release.sh`, checks the bundle version equals the tag and publishes the arm64 zip with its sha256 as a GitHub release (ad-hoc signed, no notarization). Tag only after the version stamping (#566) is on `main`.
+
 `make build` and `make release` compile SwiftPM executables; `make app` and `make run` use the app-bundle workflow. Packaging helpers live under `script/distribution/` and are inactive in development CI. Do not run notarization or build Intel slices in the current scope.
 
 Add deterministic regressions for changed parsing, classification, persistence, migrations, security boundaries and state transitions. Synchronize async tests on observable state rather than short sleeps; model-dependent tests must use deterministic fallbacks. Preserve tests rather than removing failing coverage. Keep tests isolated from real user settings, databases and logs. Create temporary defaults with `testDefaultsSuite` and remove them with `removeTestDefaults` from `Tests/TestDefaults.swift`: a plain suite name leaves a plist in `~/Library/Preferences` that cfprefsd rewrites after deletion.
