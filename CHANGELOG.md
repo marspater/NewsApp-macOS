@@ -2,6 +2,7 @@
 
 ## Unreleased — 21 October 2026
 
+- Notification images are a tall portrait crop that blurs and fades toward the banner's trailing edge instead of a hard-edged square; small images keep their size.
 - Notification scoring weighs announcement and office-holder words ("president", "announces", "launches") half as much as breaking-news words, and an event already announced in the last day stays quiet when more reports of it arrive, unless its lead headline changed.
 - Full notifications now follow interest and importance: a banner arrives for a breaking story, for a story in one of your top three reading interests (the Briefing's, from what you open and save) once three or more publishers cover it, and for every story from a feed you star in Settings › Subscriptions; everything else stays quiet, at most five banners a refresh besides starred feeds. Settings › Notifications states the rule with your current interests.
 - Notifications no longer arrive in pairs: full mode posts one banner at a time, two seconds apart, each threaded under its story so later reports of the same story group with it in Notification Center; breaking stories sound and interrupt, lesser ones are listed quietly. Summary notifications count one report per event.

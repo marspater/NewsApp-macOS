@@ -1,3 +1,5 @@
+import CoreImage
+import CoreImage.CIFilterBuiltins
 import Foundation
 import ImageIO
 import NaturalLanguage
@@ -312,8 +314,10 @@ final class NotificationService: Sendable {
     }
 
     /// Notification attachments do not support every format the protected reader can decode (notably WebP/AVIF).
+    /// The attachment is the tall fading crop of `notificationImage`, or the decoded image when the source is small.
     static func makeImageAttachment(data: Data) throws -> UNNotificationAttachment {
-        let image = try SecureHTTPClient.decodeReaderImage(data)
+        let decoded = try SecureHTTPClient.decodeReaderImage(data)
+        let image = notificationImage(decoded) ?? decoded
         let encoded = NSMutableData()
         guard let destination = CGImageDestinationCreateWithData(encoded, UTType.png.identifier as CFString, 1, nil)
         else { throw URLError(.cannotDecodeContentData) }
@@ -330,5 +334,51 @@ final class NotificationService: Sendable {
             try? FileManager.default.removeItem(at: fileURL)
             throw error
         }
+    }
+
+    /// Short side a source needs for the tall crop; smaller images stay as they are.
+    static let notificationImageMinimumSide = 300
+    /// Rendered width of the tall crop; the height is 1.5 times it.
+    static let notificationImageWidth = 600
+
+    /// A portrait crop (2:3) of the image, at most 600 × 900, that blurs progressively and fades to transparent toward
+    /// its trailing edge (#589). macOS has no custom banner layout, so the effect is baked into the PNG the system
+    /// places as the thumbnail. Rendered on the CPU, so the same input gives the same bytes. nil when the source's
+    /// short side is under 300 px, when the square the system shows is the better choice.
+    static func notificationImage(_ image: CGImage) -> CGImage? {
+        guard min(image.width, image.height) >= notificationImageMinimumSide else { return nil }
+        let width = Double(image.width)
+        let height = Double(image.height)
+        var cropWidth = width
+        var cropHeight = height
+        if cropWidth / cropHeight > 2.0 / 3.0 { cropWidth = cropHeight * 2 / 3 } else { cropHeight = cropWidth * 3 / 2 }
+        let crop = CGRect(
+            x: (width - cropWidth) / 2, y: (height - cropHeight) / 2, width: cropWidth, height: cropHeight
+        ).integral
+        guard let cropped = image.cropping(to: crop) else { return nil }
+        let scale = min(1, Double(notificationImageWidth) / Double(cropped.width))
+        let source = CIImage(cgImage: cropped).transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+        let extent = source.extent.integral
+        // Blur rises from nothing at 55% of the width to full at the trailing edge; the fade starts at 70%.
+        func ramp(from start: Double) -> CIImage? {
+            let gradient = CIFilter.linearGradient()
+            gradient.point0 = CGPoint(x: extent.minX + extent.width * start, y: extent.midY)
+            gradient.point1 = CGPoint(x: extent.maxX, y: extent.midY)
+            gradient.color0 = .black
+            gradient.color1 = .white
+            return gradient.outputImage?.cropped(to: extent)
+        }
+        let blur = CIFilter.maskedVariableBlur()
+        blur.inputImage = source
+        blur.mask = ramp(from: 0.55)
+        blur.radius = 18
+        let fade = CIFilter.blendWithMask()
+        fade.inputImage = CIImage(color: .clear).cropped(to: extent)
+        fade.backgroundImage = blur.outputImage?.cropped(to: extent)
+        fade.maskImage = ramp(from: 0.7)
+        guard let output = fade.outputImage?.cropped(to: extent) else { return nil }
+        let context = CIContext(options: [.useSoftwareRenderer: true, .cacheIntermediates: false])
+        return context.createCGImage(
+            output, from: extent, format: .RGBA8, colorSpace: CGColorSpace(name: CGColorSpace.sRGB))
     }
 }
