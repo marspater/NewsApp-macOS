@@ -3323,20 +3323,28 @@ actor DatabaseEngine {
         return history.sorted { $0.evaluatedAt < $1.evaluatedAt }
     }
 
-    func saveWorldTensionReading(_ reading: WorldTensionReading) throws {
+    /// Replaces the day's reading. With `keepingAssessment`, a model assessment already saved for that day stays and
+    /// nothing is written (false), so a keyword estimate never replaces one (#523).
+    @discardableResult
+    func saveWorldTensionReading(_ reading: WorldTensionReading, keepingAssessment: Bool = false) throws -> Bool {
         try Task.checkCancellation()
         guard reading.assessment.isValid(headlines: reading.headlines),
             reading.evaluatedAt.timeIntervalSince1970.isFinite
         else { throw CocoaError(.fileWriteInvalidFileName) }
-        var history = try worldTensionHistory().filter { $0.id != reading.id }
+        var history = try worldTensionHistory()
+        if keepingAssessment, history.contains(where: { $0.id == reading.id && $0.assessment.isEstimate != true }) {
+            return false
+        }
+        history.removeAll { $0.id == reading.id }
         history.append(reading)
         history.sort { $0.evaluatedAt < $1.evaluatedAt }
         history = Array(history.suffix(30))
         if dbPath == ":memory:" {
             inMemoryWorldTension = history
-            return
+            return true
         }
         try JSONEncoder().encode(history).write(to: worldTensionURL, options: .atomic)
+        return true
     }
 
     private func parseArticleRow(_ stmt: OpaquePointer?) -> FeedArticle? {

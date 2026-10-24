@@ -3785,6 +3785,17 @@ struct NewsTests {
         assertEqual(
             try await silent.assess(database: database, now: now, aiEnabled: true, collectionEnabled: true), refusedDay,
             "The same headlines return the saved estimate without a model call")
+        // New headlines the model also declines replace the saved estimate with one of their own, not the morning's.
+        let escalation = FeedArticle(
+            title: "Missile strike hits border town as delegation talks stall", link: "https://example.com/world/new",
+            guid: "world-new", description: "", pubDate: now.addingTimeInterval(900), source: "Panel 2")
+        try await database.upsertArticles([escalation], feedUrl: TensionMethodology.v1.panel[2].url)
+        let refreshed = try await refusing.assess(
+            database: database, now: now.addingTimeInterval(1800), aiEnabled: true, collectionEnabled: true)
+        assertEqual(refreshed.count, 1, "The day keeps one reading")
+        assertTrue(
+            refreshed.last?.headlines.contains { $0.title == escalation.title } ?? false,
+            "The refreshed estimate reads the new headlines")
         let model = NewsTextModel { prompt, _ in
             assertFalse(
                 prompt.contains(unrelated.title), "Unrelated prior events are excluded from the novelty baseline")
@@ -3795,6 +3806,11 @@ struct NewsTests {
             database: database, now: now, aiEnabled: true, collectionEnabled: true, force: true)
         assertEqual(history.count, 1, "An accepted assessment replaces the day's saved estimate")
         assertEqual(history.last?.assessment.isEstimate ?? false, false, "… and is not an estimate")
+        if let estimate = refusedDay.last {
+            let replaced = try await database.saveWorldTensionReading(estimate, keepingAssessment: true)
+            assertFalse(replaced, "A keyword estimate saved after an assessment does not replace it")
+            assertEqual(try await database.worldTensionHistory(), history, "The assessment stays the day's reading")
+        }
         assertEqual(
             history.last?.assessment.score, 28, "The model chooses the score; no deterministic formula replaces it")
         let warm = try await WorldTensionService(model: .unavailable).assess(

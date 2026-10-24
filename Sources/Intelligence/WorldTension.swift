@@ -416,7 +416,12 @@ actor WorldTensionService {
             description: NewsTextModel.generation, content: prompt)
         let history = try await database.worldTensionHistory()
         if !force, history.last?.inputHash == hash { return history }
-        if rejectedHashes.contains(hash) { throw WorldTensionError.rejected }
+        let today = TensionMethodology.day(containing: now).start
+        /// A saved estimate is the day's stand-in, not an assessment: only a model reading blocks the fallback.
+        func hasAssessment(_ readings: [WorldTensionReading]) -> Bool {
+            readings.contains { $0.id == today && $0.assessment.isEstimate != true }
+        }
+        if !force, rejectedHashes.contains(hash), hasAssessment(history) { throw WorldTensionError.rejected }
         let storageKey = await database.worldTensionStorageKey()
         let key = storageKey + hash
         let task: Task<WorldTensionAssessment, Error>
@@ -434,23 +439,25 @@ actor WorldTensionService {
         } catch let error as WorldTensionError
             where [.unavailable, .generationFailed, .unsupported, .rejected].contains(error)
         {
-            // Without a reading for today, show a labelled keyword estimate rather than an empty sheet. An accepted
-            // reading is never replaced by it. While the model is only unavailable the estimate is not saved, so the
-            // model is asked again next time; when it declined the headlines, the estimate is saved under the real
-            // input hash, so the same headlines are final and only a new set asks again.
+            // Without an assessment for today, show a labelled keyword estimate of the current headlines rather than
+            // an empty sheet or an earlier estimate. An accepted reading is never replaced by it. While the model is
+            // only unavailable the estimate is not saved, so the model is asked again next time; when it declined the
+            // headlines, the estimate is saved under the real input hash, so the same headlines are final and only a
+            // new set asks again. History is read again: another assessment may have been saved while the model ran.
             try Task.checkCancellation()
-            let today = TensionMethodology.day(containing: now).start
-            guard !history.contains(where: { $0.id == today }),
-                let estimate = WorldTensionAssessment.estimate(current: current)
-            else {
+            let latest = try await database.worldTensionHistory()
+            guard !hasAssessment(latest), let estimate = WorldTensionAssessment.estimate(current: current) else {
                 if error == .rejected { rejectedHashes.insert(hash) }
                 throw error
             }
             let reading = WorldTensionReading(
                 evaluatedAt: now, inputHash: error == .rejected ? hash : hash + ":estimate",
                 modelGeneration: NewsTextModel.generation, headlines: current + previous, assessment: estimate)
-            guard error == .rejected else { return history + [reading] }
-            try await database.saveWorldTensionReading(reading)
+            guard error == .rejected else { return latest.filter { $0.id != today } + [reading] }
+            if try await !database.saveWorldTensionReading(reading, keepingAssessment: true) {
+                rejectedHashes.insert(hash)
+                throw error
+            }
             return try await database.worldTensionHistory()
         }
         try Task.checkCancellation()
