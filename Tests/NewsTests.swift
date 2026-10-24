@@ -424,6 +424,10 @@ struct NewsTests {
             try await testMatcherRegressionCorpus()
             return
         }
+        if CommandLine.arguments.contains("--fragment-merge-timing") {
+            try await timeFragmentMerge()
+            return
+        }
         if CommandLine.arguments.contains("--model-outcome-check") {
             try await checkOnDeviceModelOutcomes()
             return
@@ -11399,6 +11403,38 @@ struct NewsTests {
             results[split] = total
         }
         return results
+    }
+
+    /// Opt-in, local: times one fragment-merge pass (`limit: 0`) over a temporary copy of `NEWS_SNAPSHOT_DB`, with
+    /// `now` at the newest event, and prints the merge count (#541, #582). The copy is deleted afterwards; a file
+    /// inside an app container is refused, so the live library is never opened.
+    static func timeFragmentMerge() async throws {
+        guard let snapshot = ProcessInfo.processInfo.environment["NEWS_SNAPSHOT_DB"] else {
+            throw StoryCorpus.Failure.invalid("--fragment-merge-timing needs NEWS_SNAPSHOT_DB")
+        }
+        guard !snapshot.contains("/Library/Containers/") else {
+            throw StoryCorpus.Failure.invalid("Measure on a copy of the library, never the live file")
+        }
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let copy = directory.appendingPathComponent("library.sqlite3").path
+        try FileManager.default.copyItem(atPath: snapshot, toPath: copy)
+        let db = DatabaseEngine(path: copy)
+        try await db.open()
+        let newest =
+            try await db.eventRows("SELECT max(updated_at) FROM events WHERE merged_into IS NULL;").first?.first
+            .flatMap { $0 }.flatMap(Double.init) ?? Date().timeIntervalSince1970
+        let active = try await db.activeEventMembers(
+            since: Date(timeIntervalSince1970: newest - EventCandidatePolicy.standard.activeEventLifetime))
+        let started = Date()
+        let report = try await EventClusterer.run(in: db, now: Date(timeIntervalSince1970: newest), limit: 0)
+        let elapsed = Date().timeIntervalSince(started)
+        await db.close()
+        print(
+            String(
+                format: "    fragment merge: %d active events, %d members, %d merged in %.2f s",
+                active.count, active.reduce(0) { $0 + $1.members.count }, report.merged, elapsed))
     }
 
     /// One CSV row per pair within the candidate window that shares an anchor or a keyword, or a gold event: the
