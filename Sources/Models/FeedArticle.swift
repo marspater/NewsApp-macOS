@@ -333,6 +333,11 @@ struct ArticleQueryCursor: Equatable, Sendable {
     }
 }
 
+extension FeedArticle {
+    /// The date the library orders and windows by: the publication date, or ingestion time for an undated story.
+    var orderDate: Date { queryOrderValue.map(Date.init(timeIntervalSince1970:)) ?? pubDate }
+}
+
 enum ArticleSection {
     static func matches(_ section: String, title: String, description: String, category: String?) -> Bool {
         if keywords[section] != nil, section != "U.S. Politics",

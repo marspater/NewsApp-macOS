@@ -73,6 +73,6 @@ No access is requested or granted for:
 
 ## 6. Data Retention & User Control
 
-* **Retention Policies**: Configurable automatic pruning keeps local SQLite storage lightweight without removing bookmarked articles.
+* **Retention Policies**: Read stories that are not saved are deleted after 30 days by default (Settings › Storage: Never, 30 or 90 days). Saved stories, unread stories and stories cited by an event overview are kept.
 * **Exportability**: You can export your entire feed library at any time via the standard OPML 2.0 format (`File > Export OPML...`).
 * **Complete Erasure**: Current application data is stored under `~/Library/Containers/com.marspater.news/`. Quit the app before manually removing its sandbox container. Removing that container does not erase exported OPML files or historical backups stored elsewhere.
