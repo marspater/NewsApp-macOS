@@ -648,7 +648,11 @@ extension DatabaseEngine {
             }
             let now = date.timeIntervalSince1970
             let staying = try members(target.id)
-            for moving in try members(source.id) {
+            let incoming = try members(source.id)
+            guard staying.count + incoming.count <= EventMatchPolicy.standard.maximumEventSize else {
+                throw Self.eventError("A combined event would exceed the event size limit")
+            }
+            for moving in incoming {
                 for other in staying {
                     let (low, high) = moving < other ? (moving, other) : (other, moving)
                     try eventRows(
@@ -1138,7 +1142,12 @@ extension DatabaseEngine {
             try eventRows(
                 "DELETE FROM event_members WHERE article_id = ? AND event_id = ?;", [.text(member), .text(target.id)])
             try bumpMembershipVersion(target.id, at: now)
-            for other in members where other != member {
+            // Undoing "Same Event" separates the story from the side it was combined with; its own event's other
+            // reports stay free to form that event again (#524).
+            let others = members.filter { $0 != member }
+            let combined = try eventInclusions(for: [member])[member] ?? []
+            let partners = others.filter { combined.contains($0) }
+            for other in partners.isEmpty ? others : partners {
                 let (low, high) = member < other ? (member, other) : (other, member)
                 try eventRows(
                     "DELETE FROM event_inclusions WHERE article_id = ? AND other_article_id = ?;",

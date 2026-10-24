@@ -134,10 +134,29 @@ enum EventClusterer {
             } else {
                 sim = nil
             }
-            var pair = EventMatcher.assess(features(a), features(b), policy: matchPolicy, embeddingSimilarity: sim)
-            if inclusions[a.id]?.contains(b.id) == true { pair = EventMatcher.forced(pair, policy: matchPolicy) }
+            let pair = EventMatcher.assess(features(a), features(b), policy: matchPolicy, embeddingSimilarity: sim)
+            // The matcher's own verdict is recorded; a reader's inclusion only overrides it here.
             record(a, b, pair)
-            return pair
+            return inclusions[a.id]?.contains(b.id) == true ? EventMatcher.forced(pair, policy: matchPolicy) : pair
+        }
+        /// The row against each member. "Same Event" is transitive: a member the reader put in one event with a member
+        /// the row matches is the same event for the row too, so a report of either side can still join (#524).
+        func assessed(_ row: EventMatchRow, with members: [EventMatchRow]) async -> [EventPairAssessment] {
+            var pairs: [EventPairAssessment] = []
+            for member in members { pairs.append(await assessed(row, member)) }
+            let matched = Set(zip(members, pairs).filter { $0.1.isMatch }.map { $0.0.id })
+            guard !matched.isEmpty else { return pairs }
+            return zip(members, pairs).map { member, pair in
+                (inclusions[member.id] ?? []).isDisjoint(with: matched)
+                    ? pair : EventMatcher.forced(pair, policy: matchPolicy)
+            }
+        }
+        /// Reads the inclusions of an event's members again: the reader may have combined events since prefetch.
+        func refreshInclusions(_ rows: [EventMatchRow]) async {
+            let ids = rows.map(\.id)
+            let found = (try? await database.eventInclusions(for: ids)) ?? [:]
+            for id in ids { inclusions[id] = found[id] ?? [] }
+            inclusionLookups.formUnion(ids)
         }
         func store() async {
             try? await database.storeClusteringPass(
@@ -168,6 +187,7 @@ enum EventClusterer {
                     let members = snapshot.members.sorted { ($0.date, $0.id) < ($1.date, $1.id) }
                     guard members.count <= remaining else { break matching }
                     await prefetch(members)
+                    await refreshInclusions(members)
                     let exclusions = try await database.eventExclusions(for: members.map(\.id))
                     var groups: [[EventMatchRow]] = []
                     for member in members {
@@ -177,10 +197,7 @@ enum EventClusterer {
                             guard !group.contains(where: { exclusions[member.id, default: []].contains($0.id) }) else {
                                 continue
                             }
-                            var pairs: [EventPairAssessment] = []
-                            for other in group {
-                                pairs.append(await assessed(member, other))
-                            }
+                            let pairs = await assessed(member, with: group)
                             if EventMatcher.eventScore(pairs: pairs, policy: matchPolicy) != nil {
                                 partnerIndex = idx
                                 break
@@ -212,10 +229,8 @@ enum EventClusterer {
                 if let current = row.eventID, let event = try await database.eventMatchMembers(eventID: current) {
                     let others = event.members.filter { $0.id != row.id }
                     if !others.isEmpty {
-                        var pairs: [EventPairAssessment] = []
-                        for other in others {
-                            pairs.append(await assessed(row, other))
-                        }
+                        await refreshInclusions(event.members)
+                        let pairs = await assessed(row, with: others)
                         let isExcluded = others.contains { excluded.contains($0.id) }
                         let fits =
                             row.previouslyMatched
@@ -251,10 +266,7 @@ enum EventClusterer {
                         !members.contains(where: { excluded.contains($0.id) })
                     else { continue }
                     await prefetch(members)
-                    var pairs: [EventPairAssessment] = []
-                    for member in members {
-                        pairs.append(await assessed(row, member))
-                    }
+                    let pairs = await assessed(row, with: members)
                     guard let score = EventMatcher.eventScore(pairs: pairs, policy: matchPolicy) else { continue }
                     if score > (best?.score ?? 0) { best = (event.id, event.version, score) }
                 }

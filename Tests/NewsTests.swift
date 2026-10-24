@@ -10612,12 +10612,19 @@ struct NewsTests {
         try await db.upsertArticles([retitled])
         _ = try await EventClusterer.run(in: db, now: now.addingTimeInterval(60))
         assertEqual(try await event(0), protest, "The included report stays after the next pass")
+        // A new report of either side still joins: it matches the vote reports, which are one event with the protest.
+        let later = story(5, "Parliament in Ljubljana votes to oust Novak as prime minister", hours: 2)
+        try await db.upsertArticles([later])
+        ids.append(try await db.resolvedArticleID(for: later))
+        _ = try await EventClusterer.run(in: db, now: now.addingTimeInterval(90))
+        assertEqual(try await event(4), protest, "A later vote report joins the combined event")
 
         // Separating it later wins over the inclusion, and including it again wins over the separation.
         try await db.separateArticle(ids[0], fromEvent: protest)
         assertEqual(try await db.eventInclusions(for: [ids[0]])[ids[0]] ?? [], [], "Separation drops its inclusions")
-        assertTrue(
-            try await db.eventExclusions(of: ids[0]).isSuperset(of: [ids[2], ids[3]]), "… and records exclusions")
+        assertEqual(
+            try await db.eventExclusions(of: ids[0]), Set([ids[2], ids[3]]),
+            "… and excludes only the side it was combined with, not the other vote reports")
         _ = try await EventClusterer.run(in: db, now: now.addingTimeInterval(120))
         assertTrue(try await event(0) != protest, "A separated report never rejoins the event by itself")
         let alone = try await db.createEvent(memberArticleIDs: [ids[0]])
