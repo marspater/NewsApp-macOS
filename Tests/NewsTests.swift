@@ -11918,13 +11918,14 @@ struct NewsTests {
         let newest = try await recentLibraryRows(db).newest
         let policy = StoryCorpus.policyFromEnvironment()
         let modelOff = ProcessInfo.processInfo.environment["NEWS_PAIR_MODEL"] == "0"
+        let candidate = ProcessInfo.processInfo.environment["NEWS_PAIR_MODEL_PATH"]
         let started = Date()
         var passes = 0
         var total = EventClusteringReport()
         repeat {
             let report = try await EventClusterer.run(
                 in: db, matchPolicy: policy, now: newest, allowsEnergy: true,
-                pairProbability: modelOff ? { @Sendable _, _ in nil } : nil)
+                pairProbability: StoryCorpus.pairProbabilityFromEnvironment())
             passes += 1
             total.processed += report.processed
             total.joined += report.joined
@@ -12025,7 +12026,8 @@ struct NewsTests {
                     + "processed %d, joined %d, created %d, merged %d, %.1f s; matcher v%d, pair cutoff %.2f%@",
                 recent.count, multi, recent.isEmpty ? 0 : 100 * Double(multi) / Double(recent.count), passes,
                 total.processed, total.joined, total.created, total.merged, elapsed, EventMatcher.version,
-                policy.pairModelThreshold, modelOff ? ", pair model off" : ""))
+                policy.pairModelThreshold,
+                modelOff ? ", pair model off" : (candidate.map { ", pair model \($0)" } ?? "")))
     }
 
     /// Opt-in, local: times one fragment-merge pass (`limit: 0`) over a temporary copy of `NEWS_SNAPSHOT_DB`, with

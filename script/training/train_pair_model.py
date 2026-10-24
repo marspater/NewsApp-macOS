@@ -3,16 +3,22 @@
 
 Mars's Mac only, never CI: run it from a virtual environment built from `script/training/requirements.txt`.
 
-`train_pair_model.py PAIRS.csv OUT_DIR` reads the private `./test.sh --export-pairs` CSV (headline and lead text with
-the app's own word pieces), fine-tunes a pair classifier initialized from `Sources/Resources/Models/minilm.mlmodelc`,
-reports numbers on a tenth of the articles held out (an in-distribution check, not the gate), writes
-OUT_DIR/pairscorer.mlpackage and checks that Core ML and PyTorch agree. Tune and holdout never enter the CSV; the
-threshold is chosen afterwards on tune by the Swift replay, which is also the only gate.
+`train_pair_model.py PAIRS.csv OUT_DIR [--pretrain A.csv B.csv ...]` reads the private `./test.sh --export-pairs` CSV
+(headline and lead text with the app's own word pieces, an optional `weight` column), fine-tunes a pair classifier
+initialized from `Sources/Resources/Models/minilm.mlmodelc`, reports numbers on a tenth of the articles held out (an
+in-distribution check, not the gate), writes OUT_DIR/pairscorer.mlpackage, OUT_DIR/metadata.json (inputs with SHA-256,
+epochs, rates, versions, held-out numbers) and checks that Core ML and PyTorch agree. With `--pretrain` (#624) the
+model first trains on the public pretraining CSVs from `pretrain_pairs.py` (stage 1, two epochs), then on the library
+pairs (stage 2). Tune and holdout never enter any CSV; the cutoff is chosen afterwards by the Swift replay against the
+library holdout, which is the gate.
 `train_pair_model.py --check-shipped` checks the weight import alone against the shipped model.
 Training uses the word pieces the app exported, so it sees exactly the ids the app sends. The tokenizer port below only
 serves the shipped-model check and the self-check; `encode_ids` mirrors `BertWordPieceTokenizer.encodePair`.
 """
 import csv
+import hashlib
+import json
+import platform
 import math
 import pathlib
 import re
@@ -93,9 +99,17 @@ def read_pairs(path):
     csv.field_size_limit(1 << 20)
     def ids(value):
         return [int(piece) for piece in value.split()]
-    with file.open(newline='') as handle:
-        return [(int(row['label']), row['group'], ids(row['pieces_a']), ids(row['pieces_b']))
+    with file.open(newline='', encoding='utf-8') as handle:
+        return [(int(row['label']), row['group'], ids(row['pieces_a']), ids(row['pieces_b']),
+                 float(row.get('weight') or 1.0))
                 for row in csv.DictReader(handle)]
+
+
+def describe(path, rows):
+    """What `metadata.json` records about one input CSV."""
+    file = pathlib.Path(path)
+    return {'file': file.name, 'sha256': hashlib.sha256(file.read_bytes()).hexdigest(), 'rows': len(rows),
+            'positives': sum(r[0] for r in rows), 'weight_sum': round(sum(r[4] for r in rows), 1)}
 
 
 def split(rows):
@@ -108,9 +122,10 @@ def split(rows):
 
 
 def tensors(tokenizer, rows):
-    encoded = [tokenizer.encode_ids(a, b) for _, _, a, b in rows]
+    encoded = [tokenizer.encode_ids(r[2], r[3]) for r in rows]
     return (torch.tensor([e[0] for e in encoded]), torch.tensor([e[1] for e in encoded]),
-            torch.tensor([e[2] for e in encoded]), torch.tensor([float(r[0]) for r in rows]))
+            torch.tensor([e[2] for e in encoded]), torch.tensor([float(r[0]) for r in rows]),
+            torch.tensor([float(r[4]) for r in rows]))
 
 
 def auc(scores, labels):
@@ -126,6 +141,8 @@ def auc(scores, labels):
         i = j + 1
     positives = sum(labels)
     negatives = len(labels) - positives
+    if not positives or not negatives:
+        return float('nan')  # a held-out split with one class only (tiny inputs) has no AUC
     return (sum(r for r, y in zip(ranks, labels, strict=True) if y) - positives * (positives + 1) / 2) / (
         positives * negatives)
 
@@ -156,29 +173,26 @@ def run_epoch(model, data, device, optimization, batch):
     order = torch.randperm(len(data[0]))
     for start in range(0, len(order), batch):
         index = order[start:start + batch]
-        ids, mask, types, target = (t[index].to(device) for t in data)
+        ids, mask, types, target, weight = (t[index].to(device) for t in data)
         logits = model(input_ids=ids, attention_mask=mask, token_type_ids=types).logits[:, 0]
-        loss_function(logits, target).backward()
+        # Per-row weights (#624): reader verdicts count five times, graded SemEval pairs twice.
+        (loss_function(logits, target) * weight).sum().div(weight.sum().clamp(min=1.0)).backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
         optimizer.step()
         schedule.step()
         optimizer.zero_grad()
 
 
-def train(rows, epochs=3, batch=32, rate=3e-5):
-    torch.manual_seed(525)
-    tokenizer = Tokenizer()
+def fit_stage(model, tokenizer, rows, device, epochs, batch, rate, name, report):
+    """One training stage on `rows`; per-epoch held-out numbers are printed and the last ones recorded."""
     fit, held = split(rows)
-    print(f'pairs: {len(fit)} training ({sum(r[0] for r in fit)} same event), {len(held)} held out '
+    print(f'{name}: {len(fit)} training ({sum(r[0] for r in fit)} same event), {len(held)} held out '
           f'({sum(r[0] for r in held)} same event), {len(rows) - len(fit) - len(held)} straddling dropped')
+    require(fit and held, f'{name}: too few pairs to train and hold out')
     train_data, held_data = tensors(tokenizer, fit), tensors(tokenizer, held)
-    device = torch.device('mps' if torch.backends.mps.is_available() else 'cpu')
-    model = BertForSequenceClassification(CONFIG)
-    load_shipped(model.bert)
-    model.to(device)
     positives = float(train_data[3].sum())
-    loss_function = torch.nn.BCEWithLogitsLoss(
-        pos_weight=torch.tensor((len(fit) - positives) / positives, device=device))
+    pos_weight = torch.tensor(max(1.0, (len(fit) - positives) / max(1.0, positives)), device=device)
+    loss_function = torch.nn.BCEWithLogitsLoss(reduction='none', pos_weight=pos_weight)
     optimizer = torch.optim.AdamW(model.parameters(), lr=rate, weight_decay=0.01)
     steps = epochs * math.ceil(len(fit) / batch)
     schedule = get_linear_schedule_with_warmup(optimizer, int(0.1 * steps), steps)
@@ -188,9 +202,27 @@ def train(rows, epochs=3, batch=32, rate=3e-5):
     for epoch in range(epochs):
         run_epoch(model, train_data, device, (loss_function, optimizer, schedule), batch)
         scores = predict(model, held_data, device)
-        print(f'epoch {epoch + 1}: held-out AUC {auc(scores, labels):.4f}; at 0.5 {at_threshold(scores, labels, 0.5)}; '
-              f'at 0.9 {at_threshold(scores, labels, 0.9)}')
-    return model.cpu().eval(), tokenizer, held
+        line = (f'{name} epoch {epoch + 1}: held-out AUC {auc(scores, labels):.4f}; at 0.5 '
+                f'{at_threshold(scores, labels, 0.5)}; at 0.9 {at_threshold(scores, labels, 0.9)}')
+        print(line)
+        report[name] = {'epochs': epochs, 'rate': rate, 'training': len(fit), 'held_out': len(held),
+                        'held_out_auc': round(auc(scores, labels), 4), 'last_epoch': line}
+    return held
+
+
+def train(rows, epochs=3, batch=32, rate=3e-5, pretrain=None, pretrain_epochs=2, pretrain_rate=3e-5):
+    """Stage 1 on the public pretraining pairs when given (#624), stage 2 on the library pairs."""
+    torch.manual_seed(525)
+    tokenizer = Tokenizer()
+    device = torch.device('mps' if torch.backends.mps.is_available() else 'cpu')
+    model = BertForSequenceClassification(CONFIG)
+    load_shipped(model.bert)
+    model.to(device)
+    report = {}
+    if pretrain:
+        fit_stage(model, tokenizer, pretrain, device, pretrain_epochs, batch, pretrain_rate, 'pretrain', report)
+    held = fit_stage(model, tokenizer, rows, device, epochs, batch, rate, 'library', report)
+    return model.cpu().eval(), tokenizer, held, report
 
 
 class Scorer(torch.nn.Module):
@@ -230,7 +262,8 @@ def export(model, tokenizer, held, out):
     path = pathlib.Path(out) / 'pairscorer.mlpackage'
     mlmodel.save(str(path))
     worst = 0.0
-    for _, _, a, b in held[:64]:
+    for row in held[:64]:
+        a, b = row[2], row[3]
         ids, mask, types = tokenizer.encode_ids(a, b)
         with torch.no_grad():
             ours = float(scorer(torch.tensor([ids]), torch.tensor([mask]), torch.tensor([types]))[0])
@@ -248,20 +281,47 @@ def self_check():
     ids, mask, types = tokenizer.encode_pair('a ' * 300, 'b ' * 10)
     require(len(ids) == MAX_LENGTH and sum(mask) == MAX_LENGTH and types.count(1) == 11, 'Longest-first truncation')
     require(abs(auc([0.1, 0.4, 0.35, 0.8], [False, False, True, True]) - 0.75) < 1e-9, 'AUC by ranks')
-    rows = [(1, 'g', [7, 8], [9]), (0, 'h', [10], [11, 12])]
+    rows = [(1, 'g', [7, 8], [9], 1.0), (0, 'h', [10], [11, 12], 5.0)]
     fit, held = split(rows)
     require(not {tuple(r[2]) for r in fit} & {tuple(r[2]) for r in held}, 'No held-out text is trained on')
+    require(tensors(tokenizer, rows)[4].tolist() == [1.0, 5.0], 'Row weights travel with the tensors')
     print('Pair model training self-check passed')
+
+
+def main(argv):
+    """PAIRS.csv OUT_DIR [--pretrain A.csv ...] [--pretrain-epochs N]: train, export and write metadata.json."""
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('pairs')
+    parser.add_argument('out')
+    parser.add_argument('--pretrain', nargs='*', default=[])
+    parser.add_argument('--pretrain-epochs', type=int, default=2)
+    parser.add_argument('--epochs', type=int, default=3)
+    args = parser.parse_args(argv)
+    rows = read_pairs(args.pairs)
+    pretrain = [r for path in args.pretrain for r in read_pairs(path)]
+    trained, tok, held_out, report = train(rows, epochs=args.epochs, pretrain=pretrain or None,
+                                           pretrain_epochs=args.pretrain_epochs)
+    out = pathlib.Path(args.out)
+    torch.save(trained.state_dict(), out / 'pairscorer-state.pt')
+    export(trained, tok, held_out, args.out)
+    metadata = {
+        'model': 'pairscorer', 'base': 'sentence-transformers/all-MiniLM-L6-v2 (shipped minilm.mlmodelc weights)',
+        'inputs': {'library': describe(args.pairs, rows),
+                   'pretrain': [describe(path, read_pairs(path)) for path in args.pretrain]},
+        'stages': report, 'batch': 32,
+        'versions': {'python': platform.python_version(), 'torch': torch.__version__,
+                     'transformers': __import__('transformers').__version__, 'coremltools': ct.__version__},
+    }
+    (out / 'metadata.json').write_text(json.dumps(metadata, indent=1, sort_keys=True) + '\n')
+    print(f'wrote {out / "metadata.json"}')
 
 
 if __name__ == '__main__':
     if sys.argv[1:] == ['--check-shipped']:
         check_shipped()
-    elif len(sys.argv) == 3:
-        rows = read_pairs(sys.argv[1])
-        trained, tok, held_out = train(rows)
-        torch.save(trained.state_dict(), pathlib.Path(sys.argv[2]) / 'pairscorer-state.pt')
-        export(trained, tok, held_out, sys.argv[2])
+    elif len(sys.argv) >= 3 and sys.argv[1] != '--export':
+        main(sys.argv[1:])
     elif len(sys.argv) == 4 and sys.argv[1] == '--export':
         rows = read_pairs(sys.argv[2])
         model = BertForSequenceClassification(CONFIG)
@@ -272,4 +332,5 @@ if __name__ == '__main__':
     elif len(sys.argv) == 1:
         self_check()
     else:
-        sys.exit('usage: train_pair_model.py PAIRS.csv OUT_DIR | --export PAIRS.csv OUT_DIR | --check-shipped')
+        sys.exit('usage: train_pair_model.py PAIRS.csv OUT_DIR [--pretrain A.csv ...] | --export PAIRS.csv OUT_DIR '
+                 '| --check-shipped')
