@@ -19,6 +19,11 @@ actor DatabaseEngine {
     private let dbPath: String
     private var inMemoryWorldTension: [WorldTensionReading] = []
     private var collectionOnlyFeedURLs: [String] = []
+    private(set) var healthNotice: String?
+
+    func databaseHealthNotice() -> String? {
+        healthNotice
+    }
 
     func setCollectionOnlyFeedURLs(_ urls: [String]) {
         collectionOnlyFeedURLs = Array(Set(urls)).sorted()
@@ -61,6 +66,52 @@ actor DatabaseEngine {
         }
     }
 
+    /// Runs `PRAGMA optimize;` and `PRAGMA wal_checkpoint(TRUNCATE);` before app termination (#536).
+    func checkpointAndOptimize() {
+        guard db != nil else { return }
+        do {
+            try executeSimple("PRAGMA optimize;")
+            try executeSimple("PRAGMA wal_checkpoint(TRUNCATE);")
+        } catch {
+            logger.error("Database checkpoint/optimize failed: \(error.localizedDescription)")
+        }
+    }
+
+    private func verifyQuickCheck() -> String? {
+        guard let db = db else { return "Database not open" }
+        var stmt: OpaquePointer?
+        let status = sqlite3_prepare_v2(db, "PRAGMA quick_check(1);", -1, &stmt, nil)
+        guard status == SQLITE_OK else {
+            return String(cString: sqlite3_errmsg(db))
+        }
+        defer { sqlite3_finalize(stmt) }
+        let stepStatus = sqlite3_step(stmt)
+        if stepStatus == SQLITE_ROW {
+            let text = sqlite3_column_text(stmt, 0).map { String(cString: $0) } ?? "unknown"
+            return text.lowercased() == "ok" ? nil : text
+        }
+        if stepStatus == SQLITE_DONE {
+            return nil
+        }
+        return String(cString: sqlite3_errmsg(db))
+    }
+
+    private func getAutoVacuumMode() throws -> Int {
+        guard let db = db else {
+            throw NSError(
+                domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Database not open"])
+        }
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, "PRAGMA auto_vacuum;", -1, &stmt, nil) == SQLITE_OK else {
+            throw sqliteError(db, "Could not read auto_vacuum mode")
+        }
+        defer { sqlite3_finalize(stmt) }
+        guard sqlite3_step(stmt) == SQLITE_ROW else {
+            throw sqliteError(db, "Could not read auto_vacuum mode")
+        }
+        return Int(sqlite3_column_int(stmt, 0))
+    }
+
     deinit {
         if let handle = connection.handle {
             sqlite3_close_v2(handle)
@@ -71,6 +122,7 @@ actor DatabaseEngine {
 
     func open() throws {
         guard db == nil else { return }
+        healthNotice = nil
 
         let parentDir = URL(fileURLWithPath: dbPath).deletingLastPathComponent()
         if !FileManager.default.fileExists(atPath: parentDir.path) {
@@ -90,7 +142,36 @@ actor DatabaseEngine {
 
         self.db = openDb
 
+        if let issue = verifyQuickCheck() {
+            let notice =
+                "The library database reported an integrity issue (\(issue)). Back up your library file before clearing or replacing storage."
+            healthNotice = notice
+            logger.error(
+                "SQLite quick_check reported an integrity issue at \(self.dbPath, privacy: .public): \(issue, privacy: .public)"
+            )
+            sqlite3_close_v2(openDb)
+            self.db = nil
+            var roHandle: OpaquePointer?
+            let roFlags = SQLITE_OPEN_READONLY | SQLITE_OPEN_FULLMUTEX
+            if sqlite3_open_v2(dbPath, &roHandle, roFlags, nil) == SQLITE_OK, let roDb = roHandle {
+                self.db = roDb
+                do {
+                    try registerFunctions()
+                } catch {
+                    logger.error(
+                        "Failed to register functions on read-only fallback database: \(error.localizedDescription)")
+                }
+            } else if let roHandle = roHandle {
+                sqlite3_close_v2(roHandle)
+            }
+            return
+        }
+
         do {
+            // Configure incremental auto-vacuum before first-page allocation on brand-new databases (#536).
+            if loggedOptional("getUserVersion", { try getUserVersion() }) == 0 {
+                try executeSimple("PRAGMA auto_vacuum = INCREMENTAL;")
+            }
             // Optimize SQLite for high concurrency and safety
             try executeSimple("PRAGMA journal_mode = WAL;")
             try executeSimple("PRAGMA synchronous = NORMAL;")
@@ -219,7 +300,7 @@ actor DatabaseEngine {
                 try setUserVersion(1)
                 try commitTransaction()
             } catch {
-                try? rollbackTransaction()
+                loggedOptional("rollbackTransaction") { try rollbackTransaction() }
                 throw error
             }
             logger.info("Database schema migrated to version 1")
@@ -231,7 +312,7 @@ actor DatabaseEngine {
                 try setUserVersion(2)
                 try commitTransaction()
             } catch {
-                try? rollbackTransaction()
+                loggedOptional("rollbackTransaction") { try rollbackTransaction() }
                 throw error
             }
         }
@@ -251,7 +332,7 @@ actor DatabaseEngine {
                 try setUserVersion(3)
                 try commitTransaction()
             } catch {
-                try? rollbackTransaction()
+                loggedOptional("rollbackTransaction") { try rollbackTransaction() }
                 throw error
             }
         }
@@ -286,7 +367,7 @@ actor DatabaseEngine {
                 try setUserVersion(4)
                 try commitTransaction()
             } catch {
-                try? rollbackTransaction()
+                loggedOptional("rollbackTransaction") { try rollbackTransaction() }
                 throw error
             }
         }
@@ -331,7 +412,7 @@ actor DatabaseEngine {
                 try setUserVersion(5)
                 try commitTransaction()
             } catch {
-                try? rollbackTransaction()
+                loggedOptional("rollbackTransaction") { try rollbackTransaction() }
                 throw error
             }
         }
@@ -375,7 +456,7 @@ actor DatabaseEngine {
                 try setUserVersion(6)
                 try commitTransaction()
             } catch {
-                try? rollbackTransaction()
+                loggedOptional("rollbackTransaction") { try rollbackTransaction() }
                 throw error
             }
         }
@@ -429,7 +510,7 @@ actor DatabaseEngine {
                 try setUserVersion(7)
                 try commitTransaction()
             } catch {
-                try? rollbackTransaction()
+                loggedOptional("rollbackTransaction") { try rollbackTransaction() }
                 throw error
             }
         }
@@ -476,7 +557,7 @@ actor DatabaseEngine {
                 try commitTransaction()
                 logger.info("Database schema migrated to version 8 (event overviews and citations)")
             } catch {
-                try? rollbackTransaction()
+                loggedOptional("rollbackTransaction") { try rollbackTransaction() }
                 throw error
             }
         }
@@ -503,7 +584,7 @@ actor DatabaseEngine {
                 try setUserVersion(9)
                 try commitTransaction()
             } catch {
-                try? rollbackTransaction()
+                loggedOptional("rollbackTransaction") { try rollbackTransaction() }
                 throw error
             }
         }
@@ -522,7 +603,7 @@ actor DatabaseEngine {
                 try setUserVersion(10)
                 try commitTransaction()
             } catch {
-                try? rollbackTransaction()
+                loggedOptional("rollbackTransaction") { try rollbackTransaction() }
                 throw error
             }
         }
@@ -541,7 +622,7 @@ actor DatabaseEngine {
                 try setUserVersion(11)
                 try commitTransaction()
             } catch {
-                try? rollbackTransaction()
+                loggedOptional("rollbackTransaction") { try rollbackTransaction() }
                 throw error
             }
         }
@@ -565,7 +646,7 @@ actor DatabaseEngine {
                 try setUserVersion(12)
                 try commitTransaction()
             } catch {
-                try? rollbackTransaction()
+                loggedOptional("rollbackTransaction") { try rollbackTransaction() }
                 throw error
             }
         }
@@ -596,7 +677,7 @@ actor DatabaseEngine {
                 try setUserVersion(13)
                 try commitTransaction()
             } catch {
-                try? rollbackTransaction()
+                loggedOptional("rollbackTransaction") { try rollbackTransaction() }
                 throw error
             }
         }
@@ -637,7 +718,7 @@ actor DatabaseEngine {
                 try setUserVersion(14)
                 try commitTransaction()
             } catch {
-                try? rollbackTransaction()
+                loggedOptional("rollbackTransaction") { try rollbackTransaction() }
                 throw error
             }
         }
@@ -694,7 +775,7 @@ actor DatabaseEngine {
                 try setUserVersion(15)
                 try commitTransaction()
             } catch {
-                try? rollbackTransaction()
+                loggedOptional("rollbackTransaction") { try rollbackTransaction() }
                 throw error
             }
         }
@@ -758,7 +839,7 @@ actor DatabaseEngine {
                 try setUserVersion(16)
                 try commitTransaction()
             } catch {
-                try? rollbackTransaction()
+                loggedOptional("rollbackTransaction") { try rollbackTransaction() }
                 throw error
             }
         }
@@ -788,7 +869,7 @@ actor DatabaseEngine {
                 try setUserVersion(17)
                 try commitTransaction()
             } catch {
-                try? rollbackTransaction()
+                loggedOptional("rollbackTransaction") { try rollbackTransaction() }
                 throw error
             }
         }
@@ -808,7 +889,7 @@ actor DatabaseEngine {
                 try setUserVersion(18)
                 try commitTransaction()
             } catch {
-                try? rollbackTransaction()
+                loggedOptional("rollbackTransaction") { try rollbackTransaction() }
                 throw error
             }
         }
@@ -820,7 +901,7 @@ actor DatabaseEngine {
                 try setUserVersion(19)
                 try commitTransaction()
             } catch {
-                try? rollbackTransaction()
+                loggedOptional("rollbackTransaction") { try rollbackTransaction() }
                 throw error
             }
         }
@@ -835,7 +916,7 @@ actor DatabaseEngine {
                 try setUserVersion(20)
                 try commitTransaction()
             } catch {
-                try? rollbackTransaction()
+                loggedOptional("rollbackTransaction") { try rollbackTransaction() }
                 throw error
             }
         }
@@ -858,7 +939,7 @@ actor DatabaseEngine {
                 try setUserVersion(21)
                 try commitTransaction()
             } catch {
-                try? rollbackTransaction()
+                loggedOptional("rollbackTransaction") { try rollbackTransaction() }
                 throw error
             }
         }
@@ -875,7 +956,7 @@ actor DatabaseEngine {
                 try setUserVersion(22)
                 try commitTransaction()
             } catch {
-                try? rollbackTransaction()
+                loggedOptional("rollbackTransaction") { try rollbackTransaction() }
                 throw error
             }
         }
@@ -894,7 +975,7 @@ actor DatabaseEngine {
                 try setUserVersion(23)
                 try commitTransaction()
             } catch {
-                try? rollbackTransaction()
+                loggedOptional("rollbackTransaction") { try rollbackTransaction() }
                 throw error
             }
         }
@@ -943,7 +1024,7 @@ actor DatabaseEngine {
                 try setUserVersion(24)
                 try commitTransaction()
             } catch {
-                try? rollbackTransaction()
+                loggedOptional("rollbackTransaction") { try rollbackTransaction() }
                 throw error
             }
         }
@@ -969,9 +1050,24 @@ actor DatabaseEngine {
                 try setUserVersion(25)
                 try commitTransaction()
             } catch {
-                try? rollbackTransaction()
+                loggedOptional("rollbackTransaction") { try rollbackTransaction() }
                 throw error
             }
+        }
+        if version < 26 {
+            try Task.checkCancellation()
+            // Switch existing libraries to incremental auto-vacuum (#536) so daily retention pruning can return free
+            // pages to the filesystem without a full rebuild on every launch. VACUUM cannot run inside a transaction.
+            let currentAutoVacuum = loggedOptional("getAutoVacuumMode", { try getAutoVacuumMode() }) ?? 0
+            if currentAutoVacuum != 2 {
+                try executeSimple("PRAGMA auto_vacuum = INCREMENTAL;")
+                if dbPath != ":memory:" {
+                    logger.info("Rebuilding library database once to enable incremental auto-vacuum (v26)")
+                    try executeSimple("VACUUM;")
+                }
+            }
+            try Task.checkCancellation()
+            try setUserVersion(26)
         }
     }
 
@@ -1210,6 +1306,16 @@ actor DatabaseEngine {
         try executeSimple("ROLLBACK TRANSACTION;")
     }
 
+    @discardableResult
+    private func loggedOptional<T>(_ operation: StaticString, _ body: () throws -> T) -> T? {
+        do {
+            return try body()
+        } catch {
+            logger.error("\(operation, privacy: .public) failed: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
     // MARK: - Article Ingestion & Upsert
 
     // Root URLs are not document identifiers: feeds can link every item to a homepage.
@@ -1327,7 +1433,7 @@ actor DatabaseEngine {
         let id = try resolvedArticleID(articleID)
         try beginTransaction()
         defer {
-            if sqlite3_get_autocommit(db) == 0 { try? rollbackTransaction() }
+            if sqlite3_get_autocommit(db) == 0 { loggedOptional("rollbackTransaction") { try rollbackTransaction() } }
         }
         guard try aliasTarget(kind: "url", value: evidence.requestedURL) == id else {
             throw NSError(
@@ -1484,7 +1590,7 @@ actor DatabaseEngine {
 
         try beginTransaction()
         defer {
-            if sqlite3_get_autocommit(db) == 0 { try? rollbackTransaction() }
+            if sqlite3_get_autocommit(db) == 0 { loggedOptional("rollbackTransaction") { try rollbackTransaction() } }
         }
 
         let stateSql = """
@@ -2234,7 +2340,7 @@ actor DatabaseEngine {
             }
             try commitTransaction()
         } catch {
-            try? rollbackTransaction()
+            loggedOptional("rollbackTransaction") { try rollbackTransaction() }
             throw error
         }
     }
@@ -2279,7 +2385,7 @@ actor DatabaseEngine {
             }
             try commitTransaction()
         } catch {
-            try? rollbackTransaction()
+            loggedOptional("rollbackTransaction") { try rollbackTransaction() }
             throw error
         }
     }
@@ -2540,7 +2646,7 @@ actor DatabaseEngine {
 
         try beginTransaction()
         defer {
-            if sqlite3_get_autocommit(db) == 0 { try? rollbackTransaction() }
+            if sqlite3_get_autocommit(db) == 0 { loggedOptional("rollbackTransaction") { try rollbackTransaction() } }
         }
 
         // 1. Update article table content, category & image if provided
@@ -2627,13 +2733,18 @@ actor DatabaseEngine {
             sqlite3_bind_null(stmt, 2)
         }
         if let sent = sentiment { sqlite3_bind_double(stmt, 3, sent) } else { sqlite3_bind_null(stmt, 3) }
-        if let ent = entities, let data = try? JSONEncoder().encode(ent), let str = String(data: data, encoding: .utf8)
+        if let ent = entities,
+            let data = loggedOptional("encodeEntities", { try JSONEncoder().encode(ent) }),
+            let str = String(data: data, encoding: .utf8)
         {
             sqlite3_bind_text(stmt, 4, str, -1, Self.sqliteTransient)
         } else {
             sqlite3_bind_null(stmt, 4)
         }
-        if let top = topics, let data = try? JSONEncoder().encode(top), let str = String(data: data, encoding: .utf8) {
+        if let top = topics,
+            let data = loggedOptional("encodeTopics", { try JSONEncoder().encode(top) }),
+            let str = String(data: data, encoding: .utf8)
+        {
             sqlite3_bind_text(stmt, 5, str, -1, Self.sqliteTransient)
         } else {
             sqlite3_bind_null(stmt, 5)
@@ -2705,7 +2816,8 @@ actor DatabaseEngine {
         sqlite3_bind_text(stmt, 1, articleId, -1, Self.sqliteTransient)
         sqlite3_bind_text(stmt, 2, analysis.summary, -1, Self.sqliteTransient)
 
-        if let kpData = try? JSONEncoder().encode(analysis.keyPoints), let kpStr = String(data: kpData, encoding: .utf8)
+        if let kpData = loggedOptional("encodeKeyPoints", { try JSONEncoder().encode(analysis.keyPoints) }),
+            let kpStr = String(data: kpData, encoding: .utf8)
         {
             sqlite3_bind_text(stmt, 3, kpStr, -1, Self.sqliteTransient)
         } else {
@@ -2726,7 +2838,7 @@ actor DatabaseEngine {
             sqlite3_bind_null(stmt, 6)
         }
 
-        if let entData = try? JSONEncoder().encode(analysis.entities),
+        if let entData = loggedOptional("encodeAnalysisEntities", { try JSONEncoder().encode(analysis.entities) }),
             let entStr = String(data: entData, encoding: .utf8)
         {
             sqlite3_bind_text(stmt, 7, entStr, -1, Self.sqliteTransient)
@@ -2750,7 +2862,9 @@ actor DatabaseEngine {
 
     /// Fetches persisted ArticleAnalysis for an article (if previously analyzed).
     func fetchArticleAnalysis(for articleId: String) -> ArticleAnalysis? {
-        guard let db = db, let articleId = try? resolvedArticleID(articleId) else { return nil }
+        guard let db = db,
+            let articleId = loggedOptional("resolvedArticleID", { try resolvedArticleID(articleId) })
+        else { return nil }
         let sql = """
             SELECT summary, key_points, category, sentiment, entities, model_identifier, analysis_version
             FROM article_enrichment
@@ -2761,7 +2875,10 @@ actor DatabaseEngine {
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return nil }
         defer { sqlite3_finalize(stmt) }
 
-        guard let article = try? fetchArticles(limit: 1, id: articleId).first else { return nil }
+        guard
+            let article = loggedOptional(
+                "fetchArticlesForAnalysis", { try fetchArticles(limit: 1, id: articleId) })?.first
+        else { return nil }
         sqlite3_bind_text(stmt, 1, articleId, -1, Self.sqliteTransient)
         sqlite3_bind_text(stmt, 2, article.publisherInputHash, -1, Self.sqliteTransient)
         sqlite3_bind_text(stmt, 3, articleId, -1, Self.sqliteTransient)
@@ -2773,7 +2890,9 @@ actor DatabaseEngine {
         var keyPoints: [String] = []
         if let kpCStr = sqlite3_column_text(stmt, 1) {
             let kpStr = String(cString: kpCStr)
-            if let data = kpStr.data(using: .utf8), let decoded = try? JSONDecoder().decode([String].self, from: data) {
+            if let data = kpStr.data(using: .utf8),
+                let decoded = loggedOptional("decodeKeyPoints", { try JSONDecoder().decode([String].self, from: data) })
+            {
                 keyPoints = decoded
             }
         }
@@ -2790,7 +2909,8 @@ actor DatabaseEngine {
         if let entCStr = sqlite3_column_text(stmt, 4) {
             let entStr = String(cString: entCStr)
             if let data = entStr.data(using: .utf8),
-                let decoded = try? JSONDecoder().decode([EntityResult].self, from: data)
+                let decoded = loggedOptional(
+                    "decodeAnalysisEntities", { try JSONDecoder().decode([EntityResult].self, from: data) })
             {
                 entities = decoded
             }
@@ -2825,7 +2945,7 @@ actor DatabaseEngine {
             try executeSimple("DELETE FROM article_features;")
             try commitTransaction()
         } catch {
-            try? rollbackTransaction()
+            loggedOptional("rollbackTransaction") { try rollbackTransaction() }
             throw error
         }
         logger.info("Cleared all article enrichment data.")
@@ -2844,7 +2964,7 @@ actor DatabaseEngine {
             try executeSimple("UPDATE feeds SET etag = NULL, last_modified = NULL;")
             try commitTransaction()
         } catch {
-            try? rollbackTransaction()
+            loggedOptional("rollbackTransaction") { try rollbackTransaction() }
             throw error
         }
     }
@@ -2861,22 +2981,23 @@ actor DatabaseEngine {
             try executeSimple("UPDATE feeds SET etag = NULL, last_modified = NULL;")
             try commitTransaction()
         } catch {
-            try? rollbackTransaction()
+            loggedOptional("rollbackTransaction") { try rollbackTransaction() }
             throw error
         }
     }
 
     // MARK: - Retention Policy & Pruning
 
-    /// Prunes read articles older than `keepReadDays`.
+    /// Prunes read articles older than `keepReadDays` and derived intelligence rows outside active windows (#536, #537).
     /// Never prunes unread articles or saved stories.
     @discardableResult
-    func pruneOldArticles(keepReadDays: Int = 30) throws -> Int {
+    func pruneOldArticles(keepReadDays: Int = 30, now: Date = Date()) throws -> Int {
         guard let db = db else {
             throw NSError(
                 domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Database not open"])
         }
-        let cutoff = Date().timeIntervalSince1970 - Double(keepReadDays * 86400)
+        let nowTimestamp = now.timeIntervalSince1970
+        let cutoff = nowTimestamp - Double(keepReadDays * 86400)
 
         let expired = """
             SELECT a.id FROM articles a JOIN article_state s ON s.article_id = a.id
@@ -2904,6 +3025,40 @@ actor DatabaseEngine {
         guard sqlite3_step(stmt) == SQLITE_DONE else { throw sqliteError(db, "Retention pruning failed") }
         let changes = Int(sqlite3_changes(db))
         try pruneEmptyEvents()
+
+        // Prune derived intelligence rows that are no longer needed for active clustering (#537):
+        // 1. Pair assessments older than 30 days.
+        let pairCutoff = nowTimestamp - 30 * 86400
+        var pairStmt: OpaquePointer?
+        if sqlite3_prepare_v2(db, "DELETE FROM pair_assessments WHERE assessed_at < ?;", -1, &pairStmt, nil)
+            == SQLITE_OK
+        {
+            defer { sqlite3_finalize(pairStmt) }
+            sqlite3_bind_double(pairStmt, 1, pairCutoff)
+            _ = sqlite3_step(pairStmt)
+        }
+
+        // 2. Cached matcher features and sentence embeddings for articles outside the 72-hour active clustering
+        //    window that are not members of any stored event.
+        let activeWindowCutoff = nowTimestamp - 72 * 3600
+        let staleSingletonArticleIDs = """
+            SELECT a.id FROM articles a
+            WHERE \(Self.articleDateOrder) < ?
+                AND NOT EXISTS (SELECT 1 FROM event_members m WHERE m.article_id = a.id)
+            """
+        for derivedTable in ["article_features", "article_embeddings"] {
+            var derivedStmt: OpaquePointer?
+            let derivedSQL = "DELETE FROM \(derivedTable) WHERE article_id IN (\(staleSingletonArticleIDs));"
+            if sqlite3_prepare_v2(db, derivedSQL, -1, &derivedStmt, nil) == SQLITE_OK {
+                defer { sqlite3_finalize(derivedStmt) }
+                sqlite3_bind_double(derivedStmt, 1, activeWindowCutoff)
+                _ = sqlite3_step(derivedStmt)
+            }
+        }
+
+        // Return freed pages to the filesystem without a full-table rebuild (#536).
+        try executeSimple("PRAGMA incremental_vacuum;")
+
         if changes > 0 {
             logger.info("Pruned \(changes) read articles older than \(keepReadDays) days")
         }
@@ -3400,7 +3555,10 @@ actor DatabaseEngine {
         var keyPoints: [String]?
         if let kpCStr = sqlite3_column_text(stmt, 14) {
             let kpStr = String(cString: kpCStr)
-            if let data = kpStr.data(using: .utf8), let decoded = try? JSONDecoder().decode([String].self, from: data) {
+            if let data = kpStr.data(using: .utf8),
+                let decoded = loggedOptional(
+                    "decodeRowKeyPoints", { try JSONDecoder().decode([String].self, from: data) })
+            {
                 keyPoints = decoded
             }
         }
@@ -3409,7 +3567,8 @@ actor DatabaseEngine {
         if let entCStr = sqlite3_column_text(stmt, 15) {
             let entStr = String(cString: entCStr)
             if let data = entStr.data(using: .utf8),
-                let decoded = try? JSONDecoder().decode([EntityResult].self, from: data)
+                let decoded = loggedOptional(
+                    "decodeRowEntities", { try JSONDecoder().decode([EntityResult].self, from: data) })
             {
                 entities = decoded
             }
@@ -3440,8 +3599,10 @@ actor DatabaseEngine {
             entities: entities,
             sentimentScore: sentimentScore,
             sentimentLabel: sentimentLabel,
-            readerDocument: sqlite3_column_text(stmt, 17).flatMap {
-                try? JSONDecoder().decode(ReaderDocument.self, from: Data(String(cString: $0).utf8))
+            readerDocument: sqlite3_column_text(stmt, 17).flatMap { raw in
+                loggedOptional("decodeReaderDocument") {
+                    try JSONDecoder().decode(ReaderDocument.self, from: Data(String(cString: raw).utf8))
+                }
             }
         )
     }
