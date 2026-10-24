@@ -10496,21 +10496,19 @@ struct NewsTests {
         assertEqual(try await count("pair_assessments"), "0", "And its pair decisions")
         // A pass that read the old headline stores nothing computed from it once a refresh has replaced it.
         try await db.storeClusteringPass(
-            features: features, embeddings: [ids[0]: Array(repeating: 0.05, count: 384)], decisions: [pair],
-            cleared: [], readTexts: [ids[0]: first.title + "\n", ids[1]: second.title + "\n"],
-            featureVersion: EventFeatures.storageVersion, embeddingVersion: 1, matcherVersion: EventMatcher.version)
+            DatabaseEngine.ClusteringPassWrites(
+                features: features, embeddings: [ids[0]: Array(repeating: 0.05, count: 384)], decisions: [pair],
+                readTexts: [ids[0]: first.title + "\n", ids[1]: second.title + "\n"]))
         assertEqual(
             try await db.fetchArticleFeatures(articleIDs: ids, version: EventFeatures.storageVersion).keys.sorted(),
             [ids[1]], "Only the unchanged story's signals are stored")
         assertEqual(
-            try await db.fetchArticleEmbeddings(articleIDs: ids, modelVersion: 1).count, 0,
+            try await db.fetchArticleEmbeddings(articleIDs: ids, modelVersion: SentenceEmbedder.modelVersion).count, 0,
             "No vector of the old headline")
         assertEqual(try await count("pair_assessments"), "0", "No decision about it either")
         try await db.upsertPairDecisions([pair], matcherVersion: EventMatcher.version)
         try await db.storeClusteringPass(
-            features: [:], embeddings: [:], decisions: [], cleared: [(pair.articleID, pair.otherArticleID)],
-            readTexts: [:], featureVersion: EventFeatures.storageVersion, embeddingVersion: 1,
-            matcherVersion: EventMatcher.version)
+            DatabaseEngine.ClusteringPassWrites(cleared: [(pair.articleID, pair.otherArticleID)]))
         assertEqual(try await count("pair_assessments"), "0", "A pair that no longer qualifies loses its row")
 
         try await db.upsertArticleFeatures(features, version: EventFeatures.storageVersion)
@@ -14074,9 +14072,8 @@ struct NewsTests {
         let events = [quiet.id: "event-a", loud.id: "event-a", third.id: "event-a"]
         let chosen = await NotificationService.representatives(of: [quiet, loud, third, single], events: events)
         assertEqual(chosen.map(\.id), [loud.id, single.id], "One report per event, the strongest, then the single")
-        assertEqual(
-            await NotificationService.representatives(of: [quiet, single], events: [:]).map(\.id), [quiet.id, single.id],
-            "Without events every story stands alone in order")
+        let alone = await NotificationService.representatives(of: [quiet, single], events: [:])
+        assertEqual(alone.map(\.id), [quiet.id, single.id], "Without events every story stands alone in order")
 
         // 4. Robust dispatching (no crashes across all 3 notification tiers)
         let sampleArticle = FeedArticle(
