@@ -49,6 +49,10 @@ enum AppColor {
     // Borders, Focus Rings & Badges
     static let borderSubtle = Color(NSColor.separatorColor)
     static let separator = Color(NSColor.separatorColor)
+
+    /// A hovered card's accent border (DESIGN.md 8.2).
+    static let hoverBorderOpacity: Double = 0.40
+    static var hoverBorder: Color { accent.opacity(hoverBorderOpacity) }
     static let badgeBackground = Color(NSColor.quaternaryLabelColor).opacity(0.12)
     static let unreadDot = Color.accentColor
 
@@ -107,7 +111,19 @@ enum AppLayout {
         readingMeasure * min(scale, 1.3)
     }
     static let listMaxWidth: CGFloat = 1000.0
+    /// List card: one fixed height, with a square image column of the same width.
+    static let listCardHeight: CGFloat = 170.0
+    static let listCardImageWidth: CGFloat = 170.0
+    /// Grid card image or editorial placeholder header.
+    static let editorialHeaderHeight: CGFloat = 140.0
     static let leadStoryHeight: CGFloat = 360.0
+    static let unreadDotSize: CGFloat = 6.0
+    /// Sidebar and reader popovers.
+    static let popoverWidth: CGFloat = 280.0
+    // Strokes: a Retina hairline at rest, the hover border and the keyboard focus ring (DESIGN.md 8.2).
+    static let hairline: CGFloat = 0.5
+    static let hoverStroke: CGFloat = 1.0
+    static let focusStroke: CGFloat = 1.5
     /// Blur of the backdrop behind a square or portrait lead image.
     static let leadBackdropBlur: CGFloat = 40
     static let gridColumnMinimum: CGFloat = 300.0
@@ -355,6 +371,16 @@ struct EyebrowText: View {
             .textCase(.uppercase)
             .foregroundStyle(color)
             .lineLimit(1)
+    }
+}
+
+/// The unread marker: an accent dot at the trailing end of a card's or row's eyebrow line (DESIGN.md 8.2).
+struct UnreadDot: View {
+    var body: some View {
+        Circle()
+            .fill(AppColor.unreadDot)
+            .frame(width: AppLayout.unreadDotSize, height: AppLayout.unreadDotSize)
+            .accessibilityLabel("Unread")
     }
 }
 
