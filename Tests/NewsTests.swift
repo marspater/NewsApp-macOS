@@ -11193,9 +11193,10 @@ struct NewsTests {
         return results
     }
 
-    /// One CSV row per pair within the candidate window that shares a specific anchor or a gold event: the matcher's
-    /// pair features, the act classes and the labels, for the offline fit of the decision head (#524). Corpus ids
-    /// only; no publisher text. Requires `NEWS_EVENT_OUTPUT` and refuses to overwrite.
+    /// One CSV row per pair within the candidate window that shares an anchor or a keyword, or a gold event: the
+    /// matcher's pair features, the act classes and the labels, for the offline fit of the decision head (#524). Pairs
+    /// without a specific anchor are kept, so the fit can measure that gate. Corpus ids only; no publisher text.
+    /// Requires `NEWS_EVENT_OUTPUT` and refuses to overwrite.
     struct PairExportItem {
         let id: String
         let title: String
@@ -11234,7 +11235,7 @@ struct NewsTests {
                 }
                 let pair = EventMatcher.assess(a, b, embeddingSimilarity: cosine)
                 let gold = items[i].event != nil && items[i].event == items[j].event
-                guard gold || pair.sharedSpecificAnchors >= 1 else { continue }
+                guard gold || pair.sharedAnchors + pair.sharedKeywords >= 1 else { continue }
                 let same = predicted[i] != nil && predicted[i] == predicted[j]
                 let tollAgree = !a.tollNumbers.isDisjoint(with: b.tollNumbers)
                 let numberAgree = !a.titleNumbers.isDisjoint(with: b.titleNumbers)
