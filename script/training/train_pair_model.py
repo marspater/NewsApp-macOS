@@ -22,6 +22,9 @@ import unicodedata
 import zlib
 
 import coremltools as ct
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+from wordpiece import MAX_LENGTH, VOCAB, Tokenizer, require  # noqa: E402
 import numpy as np
 import torch
 from transformers import (
@@ -33,8 +36,6 @@ from transformers import (
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 SHIPPED = ROOT / 'Sources/Resources/Models/minilm.mlmodelc'
-VOCAB = ROOT / 'Sources/Resources/Models/vocab.txt'
-MAX_LENGTH = 256
 CONFIG = BertConfig(
     vocab_size=30522, hidden_size=384, num_hidden_layers=6, num_attention_heads=12, intermediate_size=1536,
     max_position_embeddings=512, type_vocab_size=2, hidden_act='gelu', layer_norm_eps=1e-12, num_labels=1,
@@ -43,72 +44,6 @@ CONST = re.compile(
     r'tensor<fp16, \[([0-9, ]+)\]> (\w+) = const\(\)\[name = tensor<string, \[\]>\("\w+"\), '
     r'val = tensor<fp16, \[[0-9, ]+\]>\(BLOBFILE\(path = tensor<string, \[\]>\("@model_path/weights/weight.bin"\), '
     r'offset = tensor<uint64, \[\]>\((\d+)\)')
-
-
-def require(condition, message):
-    if not condition:
-        raise ValueError(message)
-
-
-class Tokenizer:
-    """Uncased, accent-stripped WordPiece exactly as the app's `BertWordPieceTokenizer` splits text."""
-
-    def __init__(self, path=VOCAB):
-        self.vocab = {}
-        for index, line in enumerate(path.read_text(encoding='utf-8').split('\n')):
-            if line.strip():
-                self.vocab[line.strip()] = index
-        self.pad, self.unk = self.vocab.get('[PAD]', 0), self.vocab.get('[UNK]', 100)
-        self.cls, self.sep = self.vocab.get('[CLS]', 101), self.vocab.get('[SEP]', 102)
-
-    @staticmethod
-    def words(text):
-        folded = ''.join(c for c in unicodedata.normalize('NFD', text) if unicodedata.category(c) != 'Mn').lower()
-        words, current = [], ''
-        for char in folded:
-            if char.isspace():
-                words, current = words + [current] if current else words, ''
-            elif unicodedata.category(char)[0] in 'PS':
-                words, current = (words + [current] if current else words) + [char], ''
-            else:
-                current += char
-        return words + [current] if current else words
-
-    def pieces(self, text):
-        ids = []
-        for word in self.words(text):
-            ids.extend(self.word_piece(word))
-        return ids
-
-    def word_piece(self, word):
-        if len(word) > 100:
-            return [self.unk]
-        ids, start = [], 0
-        while start < len(word):
-            end = len(word)
-            while start < end and (('##' if start else '') + word[start:end]) not in self.vocab:
-                end -= 1
-            if start == end:
-                return [self.unk]
-            ids.append(self.vocab[('##' if start else '') + word[start:end]])
-            start = end
-        return ids
-
-    def encode_single(self, text, max_length=128):
-        return [self.cls] + self.pieces(text)[:max_length - 2] + [self.sep]
-
-    def encode_pair(self, a, b, max_length=MAX_LENGTH):
-        return self.encode_ids(self.pieces(a), self.pieces(b), max_length)
-
-    def encode_ids(self, pa, pb, max_length=MAX_LENGTH):
-        """[CLS] a [SEP] b [SEP], longest first truncation (b on ties), padded; ids, mask, type ids."""
-        pa, pb = list(pa), list(pb)
-        while len(pa) + len(pb) > max_length - 3:
-            (pa if len(pa) > len(pb) else pb).pop()
-        ids = [self.cls] + pa + [self.sep] + pb + [self.sep]
-        types = [0] * (len(pa) + 2) + [1] * (len(pb) + 1)
-        padding = max_length - len(ids)
-        return ids + [self.pad] * padding, [1] * len(ids) + [0] * padding, types + [0] * padding
 
 
 def shipped_state(path=SHIPPED):

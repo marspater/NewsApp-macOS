@@ -68,6 +68,10 @@ NEWS_LIVE_READER_CHECK=1 ./test.sh # Optional controlled-network and publisher c
 ./test.sh --model-outcome-check   # Opt-in, local: the real on-device model over authored violent reports; outcome labels in the NewsTextModel log category (#508)
 NEWS_SNAPSHOT_DB=copy.sqlite3 NEWS_EVENT_OUTPUT=DIR NEWS_EVENT_CORPUS=corpus.json ./test.sh --export-pairs # Local: mine pair-model training pairs from library copies, corpus left out (#525)
 ~/news-eval/venv/bin/python script/training/train_pair_model.py DIR/pairs.csv OUT # Local only: retrain the pair model (script/training/requirements.txt); a new model bumps EventMatcher.version
+~/news-eval/venv/bin/python script/training/pretrain_pairs.py wcep DIR # Local only (#623): WCEP-10 event clusters as pretraining pairs (positives inside a cluster, name-sharing negatives across clusters), DIR/wcep-pairs.csv
+~/news-eval/venv/bin/python script/training/pretrain_pairs.py gdelt DIR --from 20260924 --to 20261023 # Local only (#623): GDELT 2.1 hard negatives with real headlines (same actors and country, different event, 1–7 days apart), DIR/gdelt-negatives.csv; files cached under DIR/gdelt
+~/news-eval/venv/bin/python script/training/pretrain_pairs.py semeval DIR # Local only (#623): SemEval-2022 Task 8 English pairs by human similarity (1 → same, 3–4 → different), pages from the Internet Archive cached under DIR/semeval, DIR/semeval-pairs.csv
+python3 script/training/pretrain_pairs.py --self-check # Synthetic clusters and events through the builders, no downloads; runs in ./test.sh
 NEWS_LIVE_CATALOG_CHECK=1 ./test.sh # Optional: fetch every catalog feed through the app's own networking and parsers
 ./test.sh --catalog-reader-access # Opt-in, live: open each catalog feed's newest stories in the app's reader extraction (NEWS_CATALOG_FEEDS=id,… NEWS_CATALOG_SAMPLE=N)
 ./build_release.sh                # Optimized arm64 verification bundle

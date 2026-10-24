@@ -2,6 +2,7 @@
 
 ## Unreleased — 21 October 2026
 
+- Developer tooling: the pair model can be pretrained on public event-clustered news (WCEP-10 clusters, GDELT same-actor hard negatives, SemEval-2022 human-rated pairs) built locally by `pretrain_pairs.py`; the app's WordPiece tokenizer in Python moved to its own torch-free module.
 - Stories: two events the matcher keeps apart as different acts of one story (a fire and the arrest after it, an attack and the closure it caused) now show as one card with all their reports; opening it shows the lead act's overview with the other acts under "Earlier in This Story". The card's new-coverage mark and "Not the Same Event" work across the whole story. Library schema v26.
 - A publisher that ships one story twice under two links within twelve hours (CNA, 9to5Mac and Arab News do) now yields one story instead of two cards; a daily column with the same headline a day apart stays separate.
 - Story matching (matcher v12): headline names the matcher used to miss now count: brands and products written with an inner capital ("OpenAI", "iOS 27.2"), a name that opens the headline when the lead repeats it, names in headlines written in Title Case, and "Pope". Identical CNA headlines, the iOS 27.2 reports and the Pope Leo reports now form one story each; a sports report and its live blog are no longer kept apart by a player's name read as a place. Stored headline signals recompute once. The unused on-device event judge is removed.
