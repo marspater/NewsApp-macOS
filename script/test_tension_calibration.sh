@@ -66,6 +66,7 @@ swiftc "${NEWS_DEPENDENCY_FLAGS[@]}" -target "$(uname -m)-apple-macos${TARGET_MA
     Sources/Services/OPMLManager.swift \
     Sources/Views/DesignSystem.swift \
     Sources/Views/ArticleRemoteImage.swift \
+    Sources/Views/ReaderSupportViews.swift \
     Sources/Views/EventOverviewReaderView.swift \
     Sources/App/NewsSignposts.swift \
     Sources/App/UpdateChecker.swift \

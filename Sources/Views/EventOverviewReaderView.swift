@@ -18,6 +18,8 @@ struct EventOverviewReaderView: View {
     let overview: EventOverviewDocument
     let memberArticles: [FeedArticle]
     let textScale: CGFloat
+    /// The reading style the body text follows; harnesses keep the default.
+    let theme: ArticleThemeType
     let onSelectArticle: (FeedArticle) -> Void
     let onSelectCitation: (OverviewCitation, FeedArticle?) -> Void
     /// Earlier events of the same developing story; never merged into this one.
@@ -28,6 +30,7 @@ struct EventOverviewReaderView: View {
         overview: EventOverviewDocument,
         memberArticles: [FeedArticle],
         textScale: CGFloat = 1.0,
+        theme: ArticleThemeType = .edition,
         relatedEvents: [RelatedStoryEvent] = [],
         onSelectArticle: @escaping (FeedArticle) -> Void,
         onSelectCitation: @escaping (OverviewCitation, FeedArticle?) -> Void,
@@ -38,6 +41,7 @@ struct EventOverviewReaderView: View {
         self.overview = overview
         self.memberArticles = memberArticles
         self.textScale = textScale
+        self.theme = theme
         self.relatedEvents = relatedEvents
         self.onSelectArticle = onSelectArticle
         self.onSelectCitation = onSelectCitation
@@ -49,8 +53,6 @@ struct EventOverviewReaderView: View {
 
     /// Open by default: the list is the overview's only route to the original publications.
     @State private var isSourcesExpanded: Bool = true
-    /// The lead image could not load, so its caption and credit are hidden with it.
-    @State private var leadImageFailed = false
 
     // MARK: - Layout Metrics & Bounds
     static let horizontalPageInset = AppLayout.pageInset
@@ -255,17 +257,25 @@ struct EventOverviewReaderView: View {
         return list
     }
 
-    private var formattedUpdateTime: String {
+    private static let relativeFormatter: RelativeDateTimeFormatter = {
         let formatter = RelativeDateTimeFormatter()
         formatter.unitsStyle = .full
-        return formatter.localizedString(for: overview.updatedAt, relativeTo: Date())
-    }
+        return formatter
+    }()
 
-    private func formatTimelineDate(_ date: Date) -> String {
+    private static let timelineDateFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.dateStyle = .medium
         formatter.timeStyle = .none
-        return formatter.string(from: date)
+        return formatter
+    }()
+
+    private var formattedUpdateTime: String {
+        Self.relativeFormatter.localizedString(for: overview.updatedAt, relativeTo: Date())
+    }
+
+    private func formatTimelineDate(_ date: Date) -> String {
+        Self.timelineDateFormatter.string(from: date)
     }
 
     private var articleCountText: String {
@@ -325,12 +335,9 @@ struct EventOverviewReaderView: View {
 
     private var headerSection: some View {
         VStack(alignment: .leading, spacing: AppSpacing.sm) {
-            HStack(spacing: AppSpacing.xs) {
-                TagView(
-                    title: "Event overview", tint: AppColor.accent,
-                    font: AppTypography.overviewFont(.eyebrow, scale: textScale))
-            }
-            .accessibilityElement(children: .combine)
+            IntelligenceLabel("Event overview")
+                .font(AppTypography.overviewFont(.eyebrow, scale: textScale))
+                .accessibilityElement(children: .combine)
 
             Text(overview.title)
                 .font(AppTypography.overviewFont(.title, scale: textScale))
@@ -341,7 +348,7 @@ struct EventOverviewReaderView: View {
                 .textSelection(.enabled)
 
             HStack(spacing: AppSpacing.eyebrowGap) {
-                Text("Updated \(formattedUpdateTime)")
+                (Text("Updated ") + Text(overview.updatedAt, style: .relative) + Text(" ago"))
                     .font(AppTypography.overviewFont(.metadata, scale: textScale))
                     .foregroundStyle(currentSecondaryTextColor)
                     .monospacedDigit()
@@ -391,7 +398,7 @@ struct EventOverviewReaderView: View {
                         .foregroundStyle(AppColor.primaryText)
                         .fixedSize(horizontal: false, vertical: true)
                         .textSelection(.enabled)
-                    HStack(spacing: AppSpacing.eyebrowGap) {
+                    ReaderTagLayout(spacing: AppSpacing.eyebrowGap) {
                         ForEach(fact.citationIDs, id: \.self) { id in
                             if let citation = overview.citations[id] { citationPill(citation) }
                         }
@@ -416,35 +423,15 @@ struct EventOverviewReaderView: View {
     private func leadImageSection(_ leadImage: OverviewLeadImage) -> some View {
         VStack(alignment: .leading, spacing: AppSpacing.xs) {
             if let url = URL(string: leadImage.url) {
-                ArticleRemoteImage(url: url) { phase in
-                    if let image = phase.image {
-                        // Figures fill the measure and are never cropped (DESIGN.md 9).
-                        image
-                            .resizable()
-                            .aspectRatio(contentMode: .fit)
-                            .frame(maxWidth: .infinity, maxHeight: 380)
-                            .clipShape(RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous)
-                                    .strokeBorder(AppColor.borderSubtle, lineWidth: 0.5)
-                            )
-                    } else if phase.error != nil {
-                        Color.clear
-                            .frame(height: 0)
-                            .onAppear { leadImageFailed = true }
-                    } else {
-                        Rectangle()
-                            .fill(AppColor.surface)
-                            .frame(height: 220)
-                            .clipShape(RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous))
-                            .overlay(ProgressView().controlSize(.small))
-                    }
-                }
+                // The same figure as the reader: fills the measure, portrait cap, contrast-aware border.
+                ReaderFigureView(
+                    block: ReaderBlock(kind: .figure, text: "", imageURL: leadImage.url, imageAlt: leadImage.caption),
+                    url: url, textScale: textScale
+                )
                 .accessibilityHidden(true)
-                .onChange(of: leadImage.url) { _, _ in leadImageFailed = false }
             }
 
-            if !leadImageFailed, let caption = leadImage.caption?.trimmingCharacters(in: .whitespacesAndNewlines),
+            if let caption = leadImage.caption?.trimmingCharacters(in: .whitespacesAndNewlines),
                 !caption.isEmpty
             {
                 Text(caption)
@@ -453,7 +440,7 @@ struct EventOverviewReaderView: View {
                     .textSelection(.enabled)
             }
 
-            if !leadImageFailed, let credit = leadImage.credit?.trimmingCharacters(in: .whitespacesAndNewlines),
+            if let credit = leadImage.credit?.trimmingCharacters(in: .whitespacesAndNewlines),
                 !credit.isEmpty
             {
                 Text(credit)
@@ -505,22 +492,6 @@ struct EventOverviewReaderView: View {
         Self.citedSources(citationIDs, citations: overview.citations, memberArticles: memberArticles)
     }
 
-    @ViewBuilder
-    private func superscriptCitationButton(_ index: Int, citation: OverviewCitation) -> some View {
-        Button {
-            onSelectCitation(citation, matchingArticle(for: citation))
-        } label: {
-            Text("[\(index)]")
-                .font(AppTypography.overviewFont(.micro, scale: textScale))
-                .baselineOffset(4)
-                .foregroundStyle(AppColor.accent)
-                .bold()
-        }
-        .buttonStyle(.plain)
-        .help("Jump to source [\(index)]: \(citation.sourceName ?? "Source")")
-        .accessibilityLabel("Citation \(index), \(citation.sourceName ?? "source")")
-    }
-
     struct ClusteredHighlightGroup: Identifiable {
         let id: String
         let publisherName: String?
@@ -560,17 +531,19 @@ struct EventOverviewReaderView: View {
         VStack(alignment: .leading, spacing: AppSpacing.sm) {
             Text("Highlights")
                 .font(AppTypography.overviewFont(.section, scale: textScale))
-                .foregroundColor(AppColor.primaryText)
+                .foregroundStyle(AppColor.primaryText)
                 .accessibilityAddTraits(.isHeader)
                 .accessibilityHeading(.h2)
+            IntelligenceLabel("Assembled on this Mac from the cited passages")
+                .font(AppTypography.overviewFont(.caption, scale: textScale))
 
             VStack(alignment: .leading, spacing: AppSpacing.md) {
                 ForEach(clusteredHighlights) { group in
                     HStack(alignment: .top, spacing: AppSpacing.sm) {
                         Circle()
                             .frame(width: AppSpacing.xxs, height: AppSpacing.xxs)
-                            .foregroundColor(AppColor.accent)
-                            .padding(.top, 7 * textScale)
+                            .foregroundStyle(AppColor.accent)
+                            .padding(.top, AppLayout.bulletTopInset * textScale)
                             .accessibilityHidden(true)
 
                         VStack(alignment: .leading, spacing: AppSpacing.xxs) {
@@ -585,21 +558,61 @@ struct EventOverviewReaderView: View {
         }
     }
 
-    @ViewBuilder
     private func factWithSuperscript(_ fact: OverviewFact) -> some View {
-        let sources = citedSources(fact.citationIDs)
-        HStack(alignment: .firstTextBaseline, spacing: AppSpacing.xxs) {
-            Text(fact.text)
-                .font(AppTypography.overviewFont(.fact, scale: textScale))
-                .lineSpacing(AppSpacing.xxs * textScale)
-                .foregroundStyle(AppColor.primaryText)
-                .fixedSize(horizontal: false, vertical: true)
-                .textSelection(.enabled)
+        citedText(fact.text, citationIDs: fact.citationIDs, font: bodyFont)
+            .foregroundStyle(AppColor.primaryText)
+    }
 
-            ForEach(sources, id: \.index) { source in
-                superscriptCitationButton(source.index, citation: source.citation)
+    private var bodyFont: Font { AppTypography.bodyFont(for: theme, scale: textScale) }
+    private var bodyLineSpacing: CGFloat { AppTypography.bodyLineSpacing(for: theme) * textScale }
+
+    /// One text with the source numbers as superscript links (`news-citation://<index>`), so the citations wrap
+    /// with the sentence; VoiceOver offers "Open source N" actions instead of separate buttons.
+    private func citedText(_ text: String, citationIDs: [String], font: Font) -> some View {
+        let sources = citedSources(citationIDs)
+        return Text(Self.citedAttributedString(text, sources: sources.map(\.index), scale: textScale))
+            .font(font)
+            .lineSpacing(bodyLineSpacing)
+            .fixedSize(horizontal: false, vertical: true)
+            .textSelection(.enabled)
+            .environment(\.openURL, citationOpenURLAction(sources))
+            .accessibilityActions { citationAccessibilityActions(sources) }
+    }
+
+    /// Opens the source a `news-citation://<index>` link names; every other link keeps the system behaviour.
+    private func citationOpenURLAction(_ sources: [(index: Int, citation: OverviewCitation)]) -> OpenURLAction {
+        OpenURLAction { url in
+            guard url.scheme == Self.citationScheme, let index = url.host.flatMap({ Int($0) }),
+                let source = sources.first(where: { $0.index == index })
+            else { return .systemAction }
+            onSelectCitation(source.citation, matchingArticle(for: source.citation))
+            return .handled
+        }
+    }
+
+    private func citationAccessibilityActions(_ sources: [(index: Int, citation: OverviewCitation)]) -> some View {
+        ForEach(sources, id: \.index) { source in
+            Button("Open source \(source.index), \(source.citation.sourceName ?? "source")") {
+                onSelectCitation(source.citation, matchingArticle(for: source.citation))
             }
         }
+    }
+
+    static let citationScheme = "news-citation"
+
+    /// The sentence followed by its source numbers as accent superscripts linking to `news-citation://<index>`.
+    static func citedAttributedString(_ text: String, sources: [Int], scale: CGFloat) -> AttributedString {
+        var result = AttributedString(text)
+        for index in sources {
+            var mark = AttributedString("[\(index)]")
+            mark.link = URL(string: "\(citationScheme)://\(index)")
+            mark.font = AppTypography.overviewFont(.micro, scale: scale).bold()
+            mark.baselineOffset = AppTypography.superscriptOffset
+            mark.foregroundColor = AppColor.accent
+            result.append(AttributedString(" "))
+            result.append(mark)
+        }
+        return result
     }
 
     @ViewBuilder
@@ -649,7 +662,9 @@ struct EventOverviewReaderView: View {
                             .foregroundStyle(AppColor.accent)
                             .bold()
                             .monospacedDigit()
-                            .frame(width: 24, alignment: .leading)
+                            .frame(
+                                width: AppLayout.overviewIndexColumnWidth(count: memberArticles.count),
+                                alignment: .leading)
 
                         VStack(alignment: .leading, spacing: AppSpacing.textStack) {
                             EyebrowText(
@@ -835,17 +850,17 @@ struct EventOverviewReaderView: View {
         VStack(spacing: 0) {
             Circle()
                 .fill(AppColor.accent)
-                .frame(width: 8, height: 8)
-                .padding(.top, 5)
+                .frame(width: AppLayout.timelineDotSize, height: AppLayout.timelineDotSize)
+                .padding(.top, AppSpacing.textStack)
 
             if !isLast {
                 Rectangle()
-                    .fill(AppColor.accent.opacity(0.3))
-                    .frame(width: 1.5)
+                    .fill(AppColor.timelineRail(for: contrast))
+                    .frame(width: AppLayout.timelineRailStroke)
                     .frame(maxHeight: .infinity)
             }
         }
-        .frame(width: 12)
+        .frame(width: AppLayout.timelineRailWidth)
     }
 
     private func timelineRowContent(_ item: OverviewTimelineItem, isLast: Bool) -> some View {
@@ -881,19 +896,8 @@ struct EventOverviewReaderView: View {
     }
 
     private func timelineSummaryRow(_ item: OverviewTimelineItem) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: AppSpacing.xxs) {
-            Text(item.summary)
-                .font(AppTypography.overviewFont(.body, scale: textScale))
-                .foregroundStyle(AppColor.primaryText)
-                .lineSpacing(AppSpacing.textStack * textScale)
-                .fixedSize(horizontal: false, vertical: true)
-                .textSelection(.enabled)
-
-            let sources = citedSources(item.citationIDs)
-            ForEach(sources, id: \.index) { source in
-                superscriptCitationButton(source.index, citation: source.citation)
-            }
-        }
+        citedText(item.summary, citationIDs: item.citationIDs, font: bodyFont)
+            .foregroundStyle(AppColor.primaryText)
     }
 
     private var perspectivesSection: some View {
@@ -913,10 +917,11 @@ struct EventOverviewReaderView: View {
                                 .foregroundStyle(AppColor.accent)
                                 .accessibilityHidden(true)
 
-                            Text(perspective.participant)
-                                .font(AppTypography.overviewFont(.emphasis, scale: textScale))
-                                .foregroundStyle(AppColor.primaryText)
-                                .textSelection(.enabled)
+                            citedText(
+                                perspective.participant, citationIDs: perspective.citationIDs,
+                                font: AppTypography.overviewFont(.emphasis, scale: textScale)
+                            )
+                            .foregroundStyle(AppColor.primaryText)
 
                             if let wire = perspective.originalWireSource, !wire.isEmpty {
                                 Text("via \(wire) syndicate")
@@ -927,28 +932,17 @@ struct EventOverviewReaderView: View {
                                     .font(AppTypography.overviewFont(.captionMedium, scale: textScale))
                                     .foregroundStyle(currentTertiaryTextColor)
                             }
-
-                            let sources = citedSources(perspective.citationIDs)
-                            ForEach(sources, id: \.index) { source in
-                                superscriptCitationButton(source.index, citation: source.citation)
-                            }
                         }
 
                         Text(perspective.position)
-                            .font(AppTypography.overviewFont(.body, scale: textScale))
+                            .font(bodyFont)
                             .foregroundStyle(currentSecondaryTextColor)
-                            .lineSpacing(AppSpacing.textStack * textScale)
+                            .lineSpacing(bodyLineSpacing)
                             .fixedSize(horizontal: false, vertical: true)
                             .textSelection(.enabled)
                     }
                     .padding(AppSpacing.sm)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(AppColor.surface.opacity(0.6))
-                    .clipShape(RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous)
-                            .strokeBorder(currentBorderStrokeColor.opacity(0.5), lineWidth: 0.5)
-                    )
+                    .overviewCardSurface(borderColor: currentBorderStrokeColor, contrast: contrast)
                 }
             }
         }
@@ -965,8 +959,8 @@ struct EventOverviewReaderView: View {
             VStack(alignment: .leading, spacing: AppSpacing.xs) {
                 if Self.showsThematicAngleSummary(angle) {
                     Text(angle.summary)
-                        .font(AppTypography.overviewFont(.body, scale: textScale))
-                        .lineSpacing(AppSpacing.xxs * textScale)
+                        .font(bodyFont)
+                        .lineSpacing(bodyLineSpacing)
                         .foregroundStyle(AppColor.primaryText)
                         .textSelection(.enabled)
                 }
@@ -975,12 +969,11 @@ struct EventOverviewReaderView: View {
                 if !validAngleFacts.isEmpty {
                     thematicAngleFactsView(validAngleFacts)
                 } else if !angle.citationIDs.isEmpty {
-                    let sources = citedSources(angle.citationIDs)
-                    HStack(spacing: AppSpacing.xxs) {
-                        ForEach(sources, id: \.index) { source in
-                            superscriptCitationButton(source.index, citation: source.citation)
-                        }
-                    }
+                    citedText(
+                        "Sources", citationIDs: angle.citationIDs,
+                        font: AppTypography.overviewFont(.caption, scale: textScale)
+                    )
+                    .foregroundStyle(currentSecondaryTextColor)
                 }
             }
             .padding(.vertical, AppSpacing.xxs)
@@ -994,7 +987,7 @@ struct EventOverviewReaderView: View {
                     Circle()
                         .frame(width: AppSpacing.xxs, height: AppSpacing.xxs)
                         .foregroundStyle(AppColor.accent)
-                        .padding(.top, 7 * textScale)
+                        .padding(.top, AppLayout.bulletTopInset * textScale)
                         .accessibilityHidden(true)
 
                     factWithSuperscript(fact)

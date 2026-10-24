@@ -57,6 +57,10 @@ enum AppColor {
     static let unreadDot = Color.accentColor
     /// The block a citation jumped to, until the reader dismisses the citation.
     static let passageHighlight = Color.accentColor.opacity(0.12)
+    /// The overview timeline's connecting line, stronger with Increase Contrast.
+    static func timelineRail(for contrast: ColorSchemeContrast) -> Color {
+        Color.accentColor.opacity(contrast == .increased ? 0.6 : 0.3)
+    }
 
     /// Card and container strokes: the separator, or a stronger stroke with Increase Contrast (DESIGN.md 11).
     static func border(for contrast: ColorSchemeContrast) -> Color {
@@ -103,6 +107,14 @@ enum AppLayout {
     /// Portrait figures stop here instead of filling the window height.
     static let readerFigureMaxHeight: CGFloat = 560
     static let progressBarHeight: CGFloat = 2
+    /// Overview timeline rail: dot, rail column and the connecting line.
+    static let timelineDotSize: CGFloat = 8
+    static let timelineRailWidth: CGFloat = 12
+    static let timelineRailStroke: CGFloat = 1.5
+    /// Highlight bullets sit on the first line's x-height.
+    static let bulletTopInset: CGFloat = 7
+    /// The "[n]" column in Sources grows with the digit count.
+    static func overviewIndexColumnWidth(count: Int) -> CGFloat { count >= 10 ? 32 : 24 }
     static let tensionScaleMarkerHeight: CGFloat = 16
     static let pageInset: CGFloat = 24.0
     static let sidebarInset: CGFloat = 12.0

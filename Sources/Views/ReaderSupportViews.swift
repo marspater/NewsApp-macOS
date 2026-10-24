@@ -191,23 +191,6 @@ struct ReaderFigureView: View {
     }
 }
 
-struct ArticleNavigationCommands: ViewModifier {
-    let onNextArticle: () -> Void
-    let onPrevArticle: () -> Void
-    let onToggleRead: () -> Void
-    let onToggleSave: () -> Void
-    let onOpenInBrowser: () -> Void
-
-    func body(content: Content) -> some View {
-        content
-            .onReceive(NotificationCenter.default.publisher(for: .nextArticleCommand)) { _ in onNextArticle() }
-            .onReceive(NotificationCenter.default.publisher(for: .prevArticleCommand)) { _ in onPrevArticle() }
-            .onReceive(NotificationCenter.default.publisher(for: .toggleReadCommand)) { _ in onToggleRead() }
-            .onReceive(NotificationCenter.default.publisher(for: .toggleSaveCommand)) { _ in onToggleSave() }
-            .onReceive(NotificationCenter.default.publisher(for: .openInBrowserCommand)) { _ in onOpenInBrowser() }
-    }
-}
-
 /// Inline runs as attributed text. `baseURL` resolves relative links from documents stored before links were absolute.
 func readerText(_ block: ReaderBlock, baseURL: URL? = nil) -> AttributedString {
     guard let runs = block.inlineRuns, runs.map(\.text).joined() == block.text else {
