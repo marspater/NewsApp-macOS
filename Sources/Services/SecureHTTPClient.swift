@@ -15,13 +15,17 @@ actor SecureHTTPClient {
     static let maxRedirects: Int = 5
 
     private var session: URLSession?
+    private var sessionPort: UInt16?
     private let delegateCoordinator: SecureSessionDelegateCoordinator
-    private let resolver: NetworkBoundaryProxy.Resolver
+    private let resolver: ProxyResolver
+    /// Nil when a test supplies a fixed session configuration.
+    private let gateway: NetworkBoundaryProxy?
 
     private init() {
         let coordinator = SecureSessionDelegateCoordinator()
         self.delegateCoordinator = coordinator
-        self.resolver = { IPAddressValidator.validateHost($0) }
+        self.resolver = ProxyResolver(body: { IPAddressValidator.validateHost($0) })
+        self.gateway = .shared
     }
 
     internal init(
@@ -30,23 +34,35 @@ actor SecureHTTPClient {
     ) {
         let coordinator = SecureSessionDelegateCoordinator(resolver: resolver)
         self.delegateCoordinator = coordinator
-        self.resolver = resolver
+        self.resolver = ProxyResolver(body: resolver)
+        self.gateway = nil
         self.session = URLSession(configuration: configuration, delegate: coordinator, delegateQueue: nil)
     }
 
+    internal init(
+        gateway: NetworkBoundaryProxy,
+        resolver: @escaping NetworkBoundaryProxy.Resolver = { IPAddressValidator.validateHost($0) }
+    ) {
+        self.delegateCoordinator = SecureSessionDelegateCoordinator(resolver: resolver)
+        self.resolver = ProxyResolver(body: resolver)
+        self.gateway = gateway
+    }
+
     private func protectedSession() async throws -> URLSession {
-        if let session { return session }
-        let proxy = try await NetworkBoundaryProxy.shared.configuration()
-        // Another caller may have configured the session while listener readiness was awaited.
-        if let session { return session }
+        guard let gateway else { return session! }
+        // A restarted gateway listens on a new port; a session built for the old one would fail every request.
+        let port = try await gateway.port()
+        if let session, sessionPort == port { return session }
         let configuration = URLSessionConfiguration.default
         configuration.timeoutIntervalForRequest = Self.defaultTimeout
         configuration.timeoutIntervalForResource = Self.defaultTimeout * 2
         configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
         configuration.httpShouldSetCookies = false
-        configuration.proxyConfigurations = [proxy]
+        configuration.proxyConfigurations = [NetworkBoundaryProxy.configuration(port: port)]
+        session?.finishTasksAndInvalidate()
         let session = URLSession(configuration: configuration, delegate: delegateCoordinator, delegateQueue: nil)
         self.session = session
+        sessionPort = port
         return session
     }
 
@@ -107,8 +123,8 @@ actor SecureHTTPClient {
         return image
     }
 
-    /// Shared navigation/ingestion preflight. DNS work stays on this actor, off the UI actor.
-    func validateDestination(_ url: URL, allowHTTP: Bool = false) throws {
+    /// Shared navigation/ingestion preflight. Blocking DNS work runs off this actor and off the UI actor.
+    func validateDestination(_ url: URL, allowHTTP: Bool = false) async throws {
         // 1. Scheme & Port Validation
         guard let scheme = url.scheme?.lowercased() else {
             throw FeedError.malformedURL(url.absoluteString)
@@ -128,7 +144,7 @@ actor SecureHTTPClient {
             throw FeedError.malformedURL(url.absoluteString)
         }
 
-        switch resolver(host) {
+        switch await resolver.resolve(host) {
         case .allowed:
             break
         case .blocked(let reason):
@@ -152,7 +168,7 @@ actor SecureHTTPClient {
         customHeaders: [String: String]? = nil,
         prefixOnly: Bool = false
     ) async throws -> (Data, HTTPURLResponse) {
-        try validateDestination(url, allowHTTP: allowHTTP)
+        try await validateDestination(url, allowHTTP: allowHTTP)
 
         // 3. Register Task Security Policy in Delegate Coordinator
         var request = URLRequest(url: url, cachePolicy: cachePolicy, timeoutInterval: timeout)
