@@ -70,35 +70,6 @@ public struct FactExtractionDiagnostic: Sendable {
     }
 }
 
-// MARK: - Foundation Models Typed Schemas
-
-#if canImport(FoundationModels)
-    @available(macOS 26.0, *)
-    @Generable
-    public struct GenerablePassageFactItem: Sendable, Codable {
-        @Guide(
-            description:
-                "A single atomic, evidence-backed factual statement derived strictly from the referenced passage.")
-        public var statement: String
-
-        @Guide(description: "The exact passage_id identifier from which this statement was extracted.")
-        public var passageID: String
-
-        @Guide(description: "The exact verbatim phrase or sentence quote from the passage supporting the statement.")
-        public var quote: String
-    }
-
-    @available(macOS 26.0, *)
-    @Generable
-    public struct GenerablePassageFactExtraction: Sendable, Codable {
-        @Guide(
-            description:
-                "List of atomic facts extracted from the provided evidence passages. Every fact must reference a valid passage ID."
-        )
-        public var facts: [GenerablePassageFactItem]
-    }
-#endif
-
 // MARK: - Passage Fact Validator
 
 /// Validates candidate facts against input passages, deterministically rejecting phantom IDs and ungrounded claims.
@@ -267,20 +238,4 @@ public struct PassageFactExtractor: Sendable {
         let diagnostic = PassageFactValidator.validateCandidates(candidates, against: passages)
         return diagnostic.acceptedFacts
     }
-
-    #if canImport(FoundationModels)
-        /// Performs guided fact extraction using Foundation Models when available on macOS 26+.
-        @available(macOS 26.0, *)
-        public static func extractFactsWithModel(
-            passages: [EvidencePassage]
-        ) async throws -> FactExtractionDiagnostic {
-            let session = LanguageModelSession()
-            let prompt = buildFactExtractionPrompt(passages: passages)
-            let response = try await session.respond(to: prompt, generating: GenerablePassageFactExtraction.self)
-            let rawCandidates = response.content.facts.map {
-                RawFactCandidate(statement: $0.statement, passageID: $0.passageID, quote: $0.quote)
-            }
-            return PassageFactValidator.validateCandidates(rawCandidates, against: passages)
-        }
-    #endif
 }

@@ -376,7 +376,7 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
         let article = FeedArticle(
             title: decodedTitle,
             link: resolvedURL(link, baseURL: itemBaseURL), guid: guid.isEmpty ? nil : guid,
-            description: stripHTMLSimple(itemDescription).trimmingCharacters(in: .whitespacesAndNewlines),
+            description: Self.stripHTMLSimple(itemDescription).trimmingCharacters(in: .whitespacesAndNewlines),
             pubDate: DateParser.parse(rawDate) ?? DateParser.unknownDate, source: itemSourceName(),
             imageUrl: itemImageUrl.isEmpty ? nil : resolvedURL(itemImageUrl), aiSummary: nil,
             fullContent: content.extracted?.content ?? content.text, category: category,
@@ -422,7 +422,7 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
         } else if itemContentIsPlainText {
             content = trimmed
         } else {
-            content = stripHTMLSimple(trimmed)
+            content = Self.stripHTMLSimple(trimmed)
         }
         let cleaned = content?.isEmpty == true ? nil : content
         let extracted =
@@ -521,7 +521,7 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
         let title = ContentExtractionPipeline.shared.decodeHTMLEntities(rawTitle)
         let desc =
             article.description.isEmpty
-            ? stripHTMLSimple(item.description ?? dc?.description ?? "") : article.description
+            ? Self.stripHTMLSimple(item.description ?? dc?.description ?? "") : article.description
         let date =
             article.pubDate == DateParser.unknownDate ? item.pubDate ?? dc?.date ?? article.pubDate : article.pubDate
         let cat = article.category ?? item.categories?.first?.text ?? dc?.subject
@@ -535,7 +535,7 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
     private func atomArticle(_ item: FeedKit.AtomFeedEntry, keeping article: FeedArticle) -> FeedArticle {
         let rawTitle = article.title.isEmpty ? item.title ?? "" : article.title
         let title = ContentExtractionPipeline.shared.decodeHTMLEntities(rawTitle)
-        let desc = article.description.isEmpty ? stripHTMLSimple(item.summary?.text ?? "") : article.description
+        let desc = article.description.isEmpty ? Self.stripHTMLSimple(item.summary?.text ?? "") : article.description
         let date =
             article.pubDate == DateParser.unknownDate
             ? item.published ?? item.updated ?? article.pubDate : article.pubDate
@@ -606,7 +606,7 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
             .absoluteURL.absoluteString ?? value
     }
 
-    private func stripHTMLSimple(_ html: String) -> String {
+    static func stripHTMLSimple(_ html: String) -> String {
         var text = html.replacingOccurrences(
             of: "(?i)</(p|div|blockquote|h[1-6]|li|tr)>", with: "\n\n", options: .regularExpression
         )

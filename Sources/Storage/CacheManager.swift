@@ -61,18 +61,4 @@ public final class CacheManager: @unchecked Sendable {
         logger.info("Cleared HTTP network cache.")
     }
 
-    /// Clears all AI enrichment analysis data (summaries, key points, entities).
-    /// Articles and subscriptions remain completely intact.
-    func clearAIAnalysis(database: DatabaseEngine = DatabaseEngine.shared) async throws {
-        try await database.clearArticleEnrichment()
-        logger.info("Cleared AI analysis cache via CacheManager.")
-    }
-
-    /// Clears persisted article body text from local storage.
-    /// Preserves subscriptions, saved stories, and read history markers.
-    func clearArticleCache(database: DatabaseEngine = DatabaseEngine.shared) async throws {
-        try await database.clearArticleCache()
-        logger.info("Cleared article cache via CacheManager.")
-    }
-
 }

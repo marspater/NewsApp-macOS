@@ -139,16 +139,6 @@ actor EnrichmentQueue {
         processNextJobs()
     }
 
-    /// Explicitly promotes an article to interactive priority (e.g. user clicked).
-    func promote(articleId: String, to priority: EnrichmentPriority = .interactive) {
-        if var job = jobs[articleId], case .queued(let cur) = job.state, priority > cur {
-            job.priority = priority
-            job.state = .queued(priority)
-            jobs[articleId] = job
-            processNextJobs()
-        }
-    }
-
     // MARK: - Cancellation
 
     /// Cancels a specific article's enrichment job.
@@ -231,13 +221,6 @@ actor EnrichmentQueue {
 
     func activeJobCount() -> Int {
         activeCount
-    }
-
-    func pendingJobCount() -> Int {
-        jobs.values.filter {
-            if case .queued = $0.state { return true }
-            return false
-        }.count
     }
 
     // MARK: - Scheduler Execution

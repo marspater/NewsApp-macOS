@@ -5,7 +5,6 @@ import Foundation
 /// backed asynchronously by ArticleStore and SQLite persistence.
 @MainActor
 final class SavedStoriesManager: ObservableObject {
-    static let shared = SavedStoriesManager()
 
     @Published var savedArticles: [FeedArticle] = []
     @Published var savedArticleIDs: Set<String> = []

@@ -71,10 +71,7 @@ struct ArticleIdentity: Sendable {
             !url.path.trimmingCharacters(in: CharacterSet(charactersIn: "/")).isEmpty
                 || !(url.query ?? "").isEmpty
         else { return [] }
-        func normalized(_ text: String) -> String {
-            text.precomposedStringWithCanonicalMapping
-                .split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
-        }
+        let normalized = ContentExtractionPipeline.normalizedEvidenceText
         let title = normalized(article.title)
         guard !title.isEmpty else { return [] }
         let publisher = host + (url.port.map { ":\($0)" } ?? "")

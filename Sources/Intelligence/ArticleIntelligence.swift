@@ -767,16 +767,6 @@ public final class ArticleClassifier: Sendable {
         self.textModel = textModel
     }
 
-    /// Whether Apple Foundation Models is ready and available on this hardware.
-    public var isFoundationModelsAvailable: Bool {
-        #if canImport(FoundationModels)
-            if #available(macOS 26.0, *) {
-                return SystemLanguageModel.default.availability == .available
-            }
-        #endif
-        return false
-    }
-
     /// Classifies an article into one of the 12 fixed application categories.
     public func classify(
         title: String,
@@ -966,70 +956,6 @@ public final class ArticleAnalyzer: Sendable {
         return ArticleAnalysis(
             summary: parsed.summary, keyPoints: parsed.keyPoints, entities: entities,
             category: category, sentiment: sentiment, modelIdentifier: "apple.foundation-model", analysisVersion: 3)
-    }
-}
-
-// MARK: - Unified ArticleIntelligence Facade (Backwards Compatibility)
-
-public final class ArticleIntelligence: Sendable {
-    public static let shared = ArticleIntelligence()
-
-    public let classifier: ArticleClassifier
-    public let analyzer: ArticleAnalyzer
-
-    public let sentimentAnalyzer: SentimentAnalyzing
-    public let entityExtractor: EntityExtracting
-    public let topicClassifier: TopicClassifying
-    public let summarizer: ArticleSummarizing
-    public let contentCleaner: ContentCleaning
-
-    public init(
-        classifier: ArticleClassifier = .shared,
-        analyzer: ArticleAnalyzer = .shared,
-        sentimentAnalyzer: SentimentAnalyzing = NaturalLanguageSentimentAnalyzer(),
-        entityExtractor: EntityExtracting = NaturalLanguageEntityExtractor(),
-        topicClassifier: TopicClassifying = NaturalLanguageTopicClassifier(),
-        summarizer: ArticleSummarizing = ExtractiveArticleSummarizer(),
-        contentCleaner: ContentCleaning = ProseContentCleaner()
-    ) {
-        self.classifier = classifier
-        self.analyzer = analyzer
-        self.sentimentAnalyzer = sentimentAnalyzer
-        self.entityExtractor = entityExtractor
-        self.topicClassifier = topicClassifier
-        self.summarizer = summarizer
-        self.contentCleaner = contentCleaner
-    }
-
-    /// Multi-dimensional analysis generating insight string, entities, and sentiment.
-    public func analyzeArticle(title: String, description: String) async -> String {
-        let fullText = "\(title). \(description)"
-        let sentiment = await sentimentAnalyzer.analyzeSentiment(for: fullText)
-        let entities = await entityExtractor.extractEntities(from: fullText)
-
-        if !entities.isEmpty {
-            let entityList = entities.prefix(3).map { $0.name }.joined(separator: ", ")
-            return "\(sentiment.label) coverage · Key focus: \(entityList)"
-        } else {
-            return "\(sentiment.label) analysis · Developing story"
-        }
-    }
-
-    /// Categorizes article with confidence score and supporting evidence.
-    public func categorizeArticle(title: String, description: String, text: String? = nil, rssCategory: String? = nil)
-        async -> TopicResult?
-    {
-        await classifier.classify(title: title, description: description, text: text, rssCategory: rssCategory)
-    }
-
-    /// Produces concise extractive summary of full article text.
-    public func summarizeArticle(title: String, content: String) async -> SummaryResult {
-        await summarizer.summarize(title: title, content: content)
-    }
-
-    /// Cleans extracted raw HTML text to remove boilerplate and navigation artifacts.
-    public func cleanContent(_ rawText: String) -> String {
-        contentCleaner.cleanContent(rawText)
     }
 }
 
@@ -1239,46 +1165,5 @@ public enum ArticleContentRedactor {
             paragraphs.append(currentPara)
         }
         return paragraphs.isEmpty ? [text] : paragraphs
-    }
-}
-
-// MARK: - Article Content Policy (Full Unabridged Content)
-
-public enum ArticleContentPolicy {
-    /// Returns all verified clean paragraphs for unabridged reading.
-    /// NewsApp displays full extracted article content in the reader without intentional truncation.
-    public static func computeContent(paragraphs: [String]) -> [String] {
-        return paragraphs
-    }
-}
-
-// Backward-compatibility alias
-public typealias ArticlePreviewPolicy = ArticleContentPolicy
-extension ArticleContentPolicy {
-    public static func computePreview(paragraphs: [String], isExtracted _: Bool = true) -> [String] {
-        return computeContent(paragraphs: paragraphs)
-    }
-}
-
-// MARK: - Trackpad Swipe Navigation Evaluator
-
-public enum TrackpadSwipeDirection: Equatable, Sendable {
-    case previous
-    case next
-    case none
-}
-
-public enum TrackpadSwipeEvaluator {
-    /// Evaluates accumulated horizontal and vertical trackpad deltas.
-    /// Returns .previous for dominant rightward swipe, .next for dominant leftward swipe,
-    /// and .none if vertical scroll dominates or threshold is not met.
-    public static func evaluate(deltaX: CGFloat, deltaY: CGFloat, threshold: CGFloat = 60.0) -> TrackpadSwipeDirection {
-        let absX = abs(deltaX)
-        let absY = abs(deltaY)
-
-        guard absX >= threshold else { return .none }
-        guard absX > (absY * 1.8) else { return .none }
-
-        return deltaX > 0 ? .previous : .next
     }
 }

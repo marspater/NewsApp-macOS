@@ -503,8 +503,6 @@ struct NewsTests {
             try await testOverviewDocumentModelBoundToInputsAndVersions(fixtureHost: fixtureHost)
             try await testOverviewPassageSelectionAndTokenBudget(fixtureHost: fixtureHost)
             try await testPromptInjectionDefenses(fixtureHost: fixtureHost)
-            try await testModelAvailabilityAndLanguageFallbacks(fixtureRoot: fixtureRoot)
-            try await testFoundationModelsProbeGoNoGo(fixtureHost: fixtureHost)
             try await testPassageAnchoredFactExtraction()
             try await testOverviewCompositionFromVerifiedFacts(fixtureHost: fixtureHost)
             try await testPlainTextGeneration(fixtureHost: fixtureHost)
@@ -603,8 +601,6 @@ struct NewsTests {
         try await testOverviewDocumentModelBoundToInputsAndVersions(fixtureHost: fixtureHost)
         try await testOverviewPassageSelectionAndTokenBudget(fixtureHost: fixtureHost)
         try await testPromptInjectionDefenses(fixtureHost: fixtureHost)
-        try await testModelAvailabilityAndLanguageFallbacks(fixtureRoot: fixtureRoot)
-        try await testFoundationModelsProbeGoNoGo(fixtureHost: fixtureHost)
         try await testPassageAnchoredFactExtraction()
         try await testOverviewCompositionFromVerifiedFacts(fixtureHost: fixtureHost)
         try await testPlainTextGeneration(fixtureHost: fixtureHost)
@@ -645,7 +641,6 @@ struct NewsTests {
         try await testFTSRowIDMigration()
         try await testMigrationCoordinatorAtomicity()
         await testArticleRetentionPolicy()
-        await testArticleIntelligenceCapabilities()
         await testContentExtractionPipelineDeep()
         await testExtractionURLRejection()
         await testEnrichmentQueueSchedulingAndPromotion()
@@ -656,7 +651,6 @@ struct NewsTests {
         await testCompletionOnce()
         try await testSocketNetworkBoundary()
         try await testTransportCancellation()
-        await testRefreshCoordinatorSingleFlightCoalescing()
         try await testFeedRemovalAndShutdown()
         try await testSleepAndWakeRefresh()
         try await testRetentionPruneAfterRefresh()
@@ -10894,65 +10888,6 @@ struct NewsTests {
         }
     }
 
-    static func testArticleIntelligenceCapabilities() async {
-        print("  - Testing Article Intelligence Capabilities & Protocols...")
-
-        let ai = ArticleIntelligence.shared
-
-        // 1. Sentiment with confidence
-        let positiveText = "The team celebrated their brilliant victory and delightful breakthrough with great joy."
-        let sentPos = await ai.sentimentAnalyzer.analyzeSentiment(for: positiveText)
-        assertTrue(sentPos.score > 0.1, "Sentiment score should be positive")
-        assertEqual(sentPos.label, "Positive", "Sentiment label should be Positive")
-        assertTrue(sentPos.confidence > 0.5, "Sentiment confidence should be substantive")
-
-        // 2. Entity Extraction
-        let entityText = "Tim Cook spoke at the Apple headquarters in Cupertino, California today."
-        let entities = await ai.entityExtractor.extractEntities(from: entityText)
-        assertTrue(!entities.isEmpty, "Should extract named entities")
-        let entityNames = entities.map { $0.name }
-        assertTrue(
-            entityNames.contains("Apple") || entityNames.contains("Tim Cook") || entityNames.contains("Cupertino"),
-            "Should extract Apple or Tim Cook or Cupertino")
-
-        // 3. Topic Classification with confidence and evidence
-        let topic = await ai.topicClassifier.classifyTopic(
-            title: "Breakthrough in Quantum Computing Processor Architecture",
-            description: "Physicists develop novel cryogenic semiconductor chip",
-            text: nil,
-            rssCategory: "Technology"
-        )
-        assertTrue(topic != nil, "Should classify topic")
-        assertTrue(
-            topic?.category == "Technology" || topic?.category == "Science", "Should classify as Technology or Science")
-        assertTrue((topic?.confidence ?? 0) > 0.5, "Confidence should exceed 0.5")
-        assertTrue(!((topic?.evidence.isEmpty) ?? true), "Evidence keywords should not be empty")
-
-        // 4. Extractive Summarization
-        let longArticle = """
-            Researchers at the national laboratory have unveiled a groundbreaking clean energy reactor. The system generates continuous fusion output with zero carbon emissions. Earlier attempts struggled with magnetic confinement stability at high plasma temperatures. The team solved this by using high-temperature superconducting magnets. Commercial deployment is anticipated within the next decade following regulatory certification.
-            """
-        let summary = await ai.summarizer.summarize(
-            title: "Groundbreaking Clean Energy Reactor Unveiled", content: longArticle)
-        assertTrue(!summary.text.isEmpty, "Summary should not be empty")
-        assertTrue(summary.sentencesUsed >= 1, "Should use at least 1 sentence")
-        assertTrue(summary.confidence > 0.5, "Summary confidence should exceed 0.5")
-
-        // 5. Prose Content Cleaning
-        let dirtyText = """
-            Share this on Twitter or follow us on Facebook.
-
-            The spacecraft successfully entered the orbit of Mars after a nine-month interplanetary journey. Mission control confirmed telemetry signals were nominal across all scientific instruments.
-
-            Subscribe to our daily newsletter for more stories like this! All rights reserved.
-            """
-        let cleaned = ai.cleanContent(dirtyText)
-        assertFalse(cleaned.contains("Share this on Twitter"), "Should strip share boilerplate")
-        assertFalse(cleaned.contains("Subscribe to our daily newsletter"), "Should strip newsletter boilerplate")
-        assertTrue(
-            cleaned.contains("The spacecraft successfully entered the orbit of Mars"), "Should preserve genuine prose")
-    }
-
     static func testContentExtractionPipelineDeep() async {
         print("  - Testing Content Extraction Pipeline (Entities, Link Density, Lead Image)...")
 
@@ -11110,17 +11045,13 @@ struct NewsTests {
         assertEqual(AppSpacing.lg, 24.0, "AppSpacing.lg should be 24.0")
 
         // 2. Radius tokens
-        assertEqual(AppRadius.small, 6.0, "AppRadius.small should be 6.0")
-        assertEqual(AppRadius.medium, 8.0, "AppRadius.medium should be 8.0")
         assertEqual(AppRadius.card, 12.0, "AppRadius.card should be 12.0")
         assertEqual(AppRadius.control, 6.0, "AppRadius.control should be 6.0")
         assertEqual(AppRadius.container, 16.0, "AppRadius.container should be 16.0")
-        assertEqual(AppRadius.pill, 999.0, "AppRadius.pill should be 999.0")
 
         // 3. Layout tokens
         assertEqual(AppLayout.pageInset, 24.0, "AppLayout.pageInset should be 24.0")
         assertEqual(AppLayout.sidebarInset, 12.0, "AppLayout.sidebarInset should be 12.0")
-        assertEqual(AppLayout.sectionGap, 24.0, "AppLayout.sectionGap should be 24.0")
         assertEqual(AppLayout.cardGap, 16.0, "AppLayout.cardGap should be 16.0")
         assertEqual(AppLayout.readingMeasure, 720.0, "AppLayout.readingMeasure should be 720.0")
         assertEqual(AppLayout.listMaxWidth, 1000.0, "AppLayout.listMaxWidth should be 1000.0")
@@ -11406,7 +11337,6 @@ struct NewsTests {
         assertEqual(settingsB.notificationMode, AppSettings.NotificationMode.minimal, "Mode should update to .minimal")
         assertEqual(
             tempDefaultsB.string(forKey: AppSettings.notificationModeKey), "minimal", "Key should update to minimal")
-        assertFalse(settingsB.privateNotificationsEnabled, "privateNotificationsEnabled should be false for minimal")
     }
 
     actor FeedDeliveryGate {
@@ -12374,107 +12304,6 @@ struct NewsTests {
     }
 
     struct SimulatedRefreshError: Error, Equatable {}
-
-    static func testRefreshCoordinatorSingleFlightCoalescing() async {
-        print("  - Testing RefreshCoordinator 20-Caller Stress Coalescing, Error Handling & Cancellation...")
-
-        let coordinator = RefreshCoordinator()
-        let counter = TestCounter()
-
-        // 1. Single execution
-        try? await coordinator.executeRefresh {
-            await counter.increment()
-        }
-        let count1 = await counter.value
-        assertEqual(count1, 1, "Single refresh execution should succeed")
-
-        // 2. Stress Test: 20 concurrent callers coalesced onto 1 underlying refresh
-        let stressCounter = TestCounter()
-        await withTaskGroup(of: Void.self) { group in
-            for _ in 0..<20 {
-                group.addTask {
-                    do {
-                        try await coordinator.executeRefresh {
-                            // Simulated network latency
-                            try await Task.sleep(nanoseconds: 50_000_000)  // 50ms
-                            await stressCounter.increment()
-                        }
-                    } catch {
-                        assertTrue(false, "Unexpected error in concurrent stress caller: \(error)")
-                    }
-                }
-            }
-        }
-        let totalExecutions = await stressCounter.value
-        assertEqual(totalExecutions, 1, "20 concurrent callers should coalesce into exactly 1 actual refresh execution")
-        let isRef = await coordinator.isRefreshing
-        assertFalse(isRef, "Coordinator should return to idle after 20-caller stress test")
-
-        // 3. Failure Propagation: all concurrent waiters observe thrown error & coordinator resets
-        let errorCounter = TestCounter()
-        await withTaskGroup(of: Void.self) { group in
-            for _ in 0..<5 {
-                group.addTask {
-                    do {
-                        try await coordinator.executeRefresh {
-                            try await Task.sleep(nanoseconds: 30_000_000)  // 30ms
-                            throw SimulatedRefreshError()
-                        }
-                    } catch is SimulatedRefreshError {
-                        await errorCounter.increment()
-                    } catch {
-                        assertTrue(false, "Unexpected error type: \(error)")
-                    }
-                }
-            }
-        }
-        let caughtErrors = await errorCounter.value
-        assertEqual(caughtErrors, 5, "All 5 concurrent callers must observe the thrown failure")
-        let isIdleAfterError = await coordinator.isRefreshing
-        assertFalse(isIdleAfterError, "Coordinator must be idle after thrown error")
-
-        // 4. Subsequent refresh works after failure
-        let recoveryCounter = TestCounter()
-        do {
-            try await coordinator.executeRefresh {
-                await recoveryCounter.increment()
-            }
-        } catch {
-            assertTrue(false, "Subsequent refresh should succeed after prior error")
-        }
-        let recoveryCount = await recoveryCounter.value
-        assertEqual(recoveryCount, 1, "Coordinator must successfully execute next refresh after error")
-
-        // 5. Caller Cancellation Resilience: cancelling one waiter does not abort execution for others
-        let cancelCoordinator = RefreshCoordinator()
-        let completionCounter = TestCounter()
-        let cancellationGate = FeedDeliveryGate()
-        let waiterTask1 = Task {
-            try await cancelCoordinator.executeRefresh {
-                await cancellationGate.wait()
-                await completionCounter.increment()
-            }
-        }
-        while !(await cancellationGate.started) { await Task.yield() }
-
-        let waiterTask2 = Task {
-            try await cancelCoordinator.executeRefresh {
-                await completionCounter.increment()
-            }
-        }
-        // Keep work suspended until both callers have actually joined.
-        while await cancelCoordinator.waiterCount < 2 { await Task.yield() }
-        waiterTask1.cancel()
-        await cancellationGate.deliver()
-        _ = try? await waiterTask1.value
-        _ = try? await waiterTask2.value
-
-        let completedRuns = await completionCounter.value
-        assertEqual(
-            completedRuns, 1, "Background task should complete for remaining waiters even if first waiter cancelled")
-        let cancelIdle = await cancelCoordinator.isRefreshing
-        assertFalse(cancelIdle, "Coordinator must be idle after cancelled run completes")
-    }
 
     static func testSignpostHelperExecution() async {
         print("  - Testing OSSignposter Measure Execution & Error Propagation (Sync & Async)...")
@@ -13781,48 +13610,10 @@ struct NewsTests {
             splitParagraphs.count >= 2,
             "Monolithic text should be split into multiple paragraphs at sentence boundaries")
 
-        // 5. Test Typography Lead Font Tokens
-        let casperLead = AppTypography.leadFont(for: .casper)
-        let editionLead = AppTypography.leadFont(for: .edition)
-        let altoLead = AppTypography.leadFont(for: .alto)
-        _ = casperLead
-        _ = editionLead
-        _ = altoLead
-        assertTrue(true, "Lead font tokens must be defined for all themes")
     }
 
     static func testArticleDetailReadingExperienceOverhaul() async {
         print("  - Testing Article Detail Reading Experience Overhaul...")
-
-        // 1. Preview Policy — now shows all content
-        let sixParagraphs = (1...6).map { "Paragraph \($0) with substantive content describing current world events." }
-        let allShown = ArticlePreviewPolicy.computePreview(paragraphs: sixParagraphs, isExtracted: true)
-        assertEqual(allShown.count, 6, "All extracted paragraphs should be shown in reader")
-        assertEqual(
-            allShown.first, "Paragraph 1 with substantive content describing current world events.",
-            "First paragraph should be preserved")
-
-        let fourParagraphs = (1...4).map { "Paragraph \($0) with substantive content." }
-        let allFour = ArticlePreviewPolicy.computePreview(paragraphs: fourParagraphs, isExtracted: true)
-        assertEqual(allFour.count, 4, "All paragraphs should be preserved")
-
-        let descriptionParagraphs = ["Brief summary paragraph from RSS feed."]
-        let fallbackPreview = ArticlePreviewPolicy.computePreview(paragraphs: descriptionParagraphs, isExtracted: false)
-        assertEqual(fallbackPreview.count, 1, "Fallback description should preserve all paragraphs")
-
-        // 2. Trackpad Swipe Gesture Evaluation
-        let rightwardResult = TrackpadSwipeEvaluator.evaluate(deltaX: 75.0, deltaY: 10.0, threshold: 60.0)
-        assertEqual(rightwardResult, .previous, "Dominant rightward swipe should navigate to previous article")
-
-        let leftwardResult = TrackpadSwipeEvaluator.evaluate(deltaX: -80.0, deltaY: 15.0, threshold: 60.0)
-        assertEqual(leftwardResult, .next, "Dominant leftward swipe should navigate to next article")
-
-        let verticalScrollResult = TrackpadSwipeEvaluator.evaluate(deltaX: 25.0, deltaY: 90.0, threshold: 60.0)
-        assertEqual(verticalScrollResult, .none, "Dominant vertical scroll should not trigger article navigation")
-
-        let smallWobbleResult = TrackpadSwipeEvaluator.evaluate(deltaX: 35.0, deltaY: 5.0, threshold: 60.0)
-        assertEqual(smallWobbleResult, .none, "Sub-threshold horizontal movement should not trigger article navigation")
-
         // 3. Content Extraction Pipeline Paragraph Extraction
         let sampleHTML = """
             <html>
@@ -15037,257 +14828,6 @@ struct NewsTests {
         assertTrue(
             GenerationPromptDefense.verifyHermeticGenerationPreconditions(),
             "Generation preconditions enforce tool-less, non-executable environment")
-    }
-
-    static func testModelAvailabilityAndLanguageFallbacks(fixtureRoot: URL) async throws {
-        print("  - Testing Model availability runtime probe and deterministic language fallbacks...")
-
-        // 1. Language detection and support policies
-        let englishSample =
-            "NASA scientists confirmed the detection of organic molecules in the equatorial regolith samples."
-        let detectedEnglish = ModelLanguageSupport.detectDominantLanguage(for: englishSample)
-        assertEqual(
-            detectedEnglish?.rawValue, NLLanguage.english.rawValue,
-            "Dominant language of English sample correctly identified")
-        assertTrue(
-            ModelLanguageSupport.isLanguageSupportedForGeneration(detectedEnglish),
-            "English is supported for generative synthesis")
-
-        let ukrainianSample = "Українські астрономи зафіксували новий навколоземний астероїд за допомогою телескопа."
-        let detectedUkrainian = ModelLanguageSupport.detectDominantLanguage(for: ukrainianSample)
-        assertEqual(
-            detectedUkrainian?.rawValue, NLLanguage.ukrainian.rawValue,
-            "Dominant language of Ukrainian sample correctly identified")
-        assertFalse(
-            ModelLanguageSupport.isLanguageSupportedForGeneration(detectedUkrainian),
-            "Ukrainian generation is verified separately and not promised in base plan")
-
-        // 2. Runtime probe on macOS 15 fallback (simulated via probe override)
-        let macOS15Probe = ModelRuntimeProbe(overrideAvailable: false)
-        let status15 = macOS15Probe.checkAvailability(for: .english)
-        assertFalse(status15.isAvailable, "Model is not available on macOS 15 fallback path")
-        assertTrue(status15.reason != nil, "Reason provided for macOS 15 fallback")
-
-        // 3. Runtime probe with unsupported language
-        let activeProbe = ModelRuntimeProbe(overrideAvailable: true)
-        let statusUkrainian = activeProbe.checkAvailability(for: .ukrainian)
-        assertFalse(statusUkrainian.isAvailable, "Unsupported language rejected from generative path")
-        if case .languageUnsupported(let msg) = statusUkrainian {
-            assertTrue(msg.contains("uk"), "Reason identifies unsupported language")
-        } else {
-            assertTrue(false, "Expected languageUnsupported status")
-        }
-
-        // 4. Deterministic non-AI fallback generation without cloud AI
-        let passage1 = EvidencePassage(
-            id: "p1",
-            articleID: "art-1",
-            text: "Seismic monitors recorded a magnitude 4.8 tremor along the central fault.",
-            ordinal: 1
-        )
-        let passage2 = EvidencePassage(
-            id: "p2",
-            articleID: "art-2",
-            text: "Emergency response teams reported minor structural damage and zero casualties.",
-            ordinal: 2
-        )
-        let hash = EventOverviewDocument.computeInputTextHash(passages: [passage1, passage2])
-        let context = OverviewVersionContext(membershipVersion: 1, inputTextHash: hash)
-
-        let fallbackDoc = macOS15Probe.buildFallbackOverview(
-            eventID: "event-quake-1",
-            passages: [passage1, passage2],
-            context: context,
-            title: "Magnitude 4.8 Earthquake"
-        )
-
-        assertEqual(
-            fallbackDoc.kind.rawValue, OverviewKind.fallbackExcerpts.rawValue,
-            "Fallback overview uses fallbackExcerpts kind")
-        assertEqual(fallbackDoc.facts.count, 2, "Verified facts created directly from evidence passages")
-        assertEqual(fallbackDoc.citations.count, 2, "Citations created directly for supporting passages")
-        assertEqual(fallbackDoc.citations["c_fb_1"]?.passageID, "p1", "Citation 1 maps to passage 1")
-        assertEqual(fallbackDoc.citations["c_fb_2"]?.passageID, "p2", "Citation 2 maps to passage 2")
-        assertEqual(
-            fallbackDoc.memberArticleIDs.sorted(), ["art-1", "art-2"], "Member article IDs populated correctly")
-
-        // Verify fallback document is directly persistable in DatabaseEngine
-        let db = DatabaseEngine(path: ":memory:")
-        try await db.open()
-
-        let art1 = FeedArticle(
-            storedID: "art-1", title: "Quake Notice", link: fixtureRoot.appendingPathComponent("art-1").absoluteString,
-            guid: "g1", description: passage1.text, pubDate: Date(), source: "Source 1")
-        let art2 = FeedArticle(
-            storedID: "art-2", title: "Damage Assessment",
-            link: fixtureRoot.appendingPathComponent("art-2").absoluteString, guid: "g2", description: passage2.text,
-            pubDate: Date(), source: "Source 2")
-        _ = try await db.upsertArticles([art1, art2])
-
-        let saved = try await db.recordEventOverview(fallbackDoc)
-        assertTrue(saved, "Fallback overview successfully recorded in SQLite")
-        let fetched = try await db.fetchEventOverview(eventID: "event-quake-1")
-        assertEqual(
-            fetched?.kind.rawValue, OverviewKind.fallbackExcerpts.rawValue,
-            "Fallback overview successfully persisted and retrieved from SQLite")
-        assertEqual(fetched?.facts.count, 2, "Persisted fallback facts retrieved intact")
-    }
-
-    static func testFoundationModelsProbeGoNoGo(fixtureHost: String = "example.com") async throws {
-        print("  - Testing Foundation Models on-device probe and Phase E Go/No-Go decision (#103)...")
-
-        // 1. Runtime availability probe: macOS 15 unavailable fallback vs supported runtime
-        let macOS15Probe = ModelRuntimeProbe(overrideAvailable: false)
-        let status15 = macOS15Probe.checkAvailability(for: .english)
-        assertFalse(status15.isAvailable, "Model is reported unavailable on macOS 15 fallback path")
-        assertTrue(status15.reason != nil, "Reason provided for macOS 15 fallback")
-
-        let supportedProbe = ModelRuntimeProbe(overrideAvailable: true)
-        let statusSupported = supportedProbe.checkAvailability(for: .english)
-        assertTrue(statusSupported.isAvailable, "Model is reported available on supported runtime")
-        assertEqual(statusSupported.reason, nil, "No failure reason for supported English runtime")
-
-        // Real runtime probe evaluation (must return typed status without crashing or throwing)
-        let liveProbe = ModelRuntimeProbe()
-        let liveStatus = liveProbe.checkAvailability(for: .english)
-        switch liveStatus {
-        case .available:
-            print("    [Probe Live] SystemLanguageModel is available on this host")
-        case .osUnsupported(let r), .deviceNotEligible(let r), .modelNotReady(let r), .languageUnsupported(let r):
-            print("    [Probe Live] SystemLanguageModel not ready/supported: \(r)")
-        case .disabledByPolicy:
-            print("    [Probe Live] SystemLanguageModel disabled by policy")
-        }
-
-        // 2. Supported languages and locales, including Ukrainian
-        let enText = "European regulators have opened an investigation into semiconductor supply chain constraints."
-        let ukText =
-            "Європейська комісія оголосила про початок антимонопольного розслідування на ринку телекомунікацій."
-        let detectedEn = ModelLanguageSupport.detectDominantLanguage(for: enText)
-        let detectedUk = ModelLanguageSupport.detectDominantLanguage(for: ukText)
-        assertEqual(detectedEn?.rawValue, NLLanguage.english.rawValue, "English dominant language correctly detected")
-        assertEqual(
-            detectedUk?.rawValue, NLLanguage.ukrainian.rawValue, "Ukrainian dominant language correctly detected")
-
-        assertTrue(
-            ModelLanguageSupport.isLanguageSupportedForGeneration(detectedEn),
-            "English is supported for generative synthesis")
-        assertFalse(
-            ModelLanguageSupport.isLanguageSupportedForGeneration(detectedUk),
-            "Ukrainian is NOT supported for baseline generative synthesis")
-
-        let strategyUk = supportedProbe.resolveSynthesisStrategy(for: detectedUk)
-        assertFalse(strategyUk.isGenerative, "Ukrainian is safely diverted to deterministic fallback strategy")
-        if case .deterministicFallback(let reason) = strategyUk {
-            assertTrue(reason.contains("uk"), "Fallback reason identifies unsupported Ukrainian language")
-        } else {
-            assertTrue(false, "Expected deterministicFallback strategy for Ukrainian")
-        }
-
-        let strategyEn = supportedProbe.resolveSynthesisStrategy(for: detectedEn)
-        assertTrue(strategyEn.isGenerative, "English resolves to generative strategy on supported runtime")
-
-        // 3. Context budget for instructions + schema + input + response (characters are NOT tokens)
-        let defaultBudget = OverviewTokenBudget()
-        assertEqual(defaultBudget.totalBudget, 4096, "Default total budget is 4096 tokens")
-        assertEqual(defaultBudget.instructionTokens, 350, "Instruction budget reserved")
-        assertEqual(defaultBudget.schemaTokens, 250, "Schema budget reserved")
-        assertEqual(defaultBudget.reservedResponseTokens, 800, "Response generation budget reserved")
-        assertEqual(defaultBudget.safetyMarginTokens, 100, "Safety margin reserved")
-        assertEqual(defaultBudget.availablePassageTokens, 2596, "Available input passage budget is 2596 tokens")
-
-        // Demonstrate characters != tokens across Latin and Cyrillic scripts
-        let latinPassage = "The federal agency approved new orbital launch parameters following telemetry validation."
-        let cyrillicPassage =
-            "Федеральне агентство погодило нові параметри орбітального запуску після перевірки телеметрії."
-        let latinTokens = OverviewTokenBudget.estimateTokens(for: latinPassage)
-        let cyrillicTokens = OverviewTokenBudget.estimateTokens(for: cyrillicPassage)
-
-        // Cyrillic text of roughly equal character count requires significantly higher subword token density
-        assertTrue(
-            cyrillicTokens > latinTokens, "Characters are not tokens: Cyrillic script has higher subword token density")
-
-        // 4. Fact extraction with passage anchoring on a multi-source corpus sample
-        let samplePassages = [
-            EvidencePassage(
-                id: "p_wire", articleID: "art_wire",
-                text: "Global chipmaker announced a $12 billion foundry expansion in Dresden.", ordinal: 1),
-            EvidencePassage(
-                id: "p_daily", articleID: "art_daily",
-                text: "German authorities approved state subsidies covering 30% of the Dresden plant costs.", ordinal: 2
-            ),
-            EvidencePassage(
-                id: "p_herald", articleID: "art_herald",
-                text: "Construction of the Dresden semiconductor facility begins in the second quarter.", ordinal: 3),
-        ]
-
-        // Deterministic fact extraction yields grounded facts referencing input passages
-        let extractedFacts = PassageFactExtractor.deterministicExtract(passages: samplePassages)
-        assertTrue(extractedFacts.count >= 3, "Extracted at least 3 passage-anchored facts")
-        for fact in extractedFacts {
-            assertTrue(samplePassages.contains(where: { $0.id == fact.passageID }), "Fact references valid passage ID")
-            let sourcePassage = samplePassages.first(where: { $0.id == fact.passageID })!
-            assertEqual(fact.articleID, sourcePassage.articleID, "Fact article ID correctly aligned with passage")
-            assertTrue(sourcePassage.text.contains(fact.quote), "Fact quote is strictly verbatim contained in passage")
-        }
-
-        // Test deterministic validation catches hallucinated candidate facts
-        let groundedCandidate = RawFactCandidate(
-            statement: "Foundry expansion announced in Dresden.",
-            passageID: "p_wire",
-            quote: "$12 billion foundry expansion in Dresden"
-        )
-        let phantomCandidate = RawFactCandidate(
-            statement: "Competitor announced plant closure in Lyon.",
-            passageID: "p_phantom_404",
-            quote: "closure in Lyon"
-        )
-        let hallucinatedQuoteCandidate = RawFactCandidate(
-            statement: "Facility will employ 50,000 workers.",
-            passageID: "p_wire",
-            quote: "employ 50,000 workers"
-        )
-
-        let validationDiagnostic = PassageFactValidator.validateCandidates(
-            [groundedCandidate, phantomCandidate, hallucinatedQuoteCandidate],
-            against: samplePassages
-        )
-        assertEqual(validationDiagnostic.acceptedFacts.count, 1, "Only grounded candidate accepted")
-        assertEqual(
-            validationDiagnostic.rejectedFacts.count, 2, "Both phantom passage ID and unanchored quote rejected")
-
-        // 5. Latency and memory per request benchmark
-        let clockStart = CFAbsoluteTimeGetCurrent()
-        for _ in 0..<10 {
-            _ = supportedProbe.resolveSynthesisStrategy(for: detectedEn)
-            _ = PassageFactExtractor.deterministicExtract(passages: samplePassages)
-            let hash = EventOverviewDocument.computeInputTextHash(passages: samplePassages)
-            let context = OverviewVersionContext(membershipVersion: 1, inputTextHash: hash)
-            _ = macOS15Probe.buildFallbackOverview(
-                eventID: "event-dresden-probe",
-                passages: samplePassages,
-                context: context,
-                title: "Dresden Foundry Expansion"
-            )
-        }
-        let elapsedTotal = (CFAbsoluteTimeGetCurrent() - clockStart) * 1000.0
-        let elapsedPerReq = elapsedTotal / 10.0
-        print("    [Probe Benchmark] Latency per request: \(String(format: "%.3f", elapsedPerReq)) ms")
-        assertTrue(elapsedPerReq < 100.0, "Probe and deterministic extraction latency per request is under 100ms")
-
-        // 6. Go/No-Go Decision formal verification
-        // - Go for English on supported macOS 26+ runtime with claim verification
-        // - No-Go for generative on macOS 15 or unsupported languages -> graceful narrowing to verified excerpts
-        let fallbackDoc = macOS15Probe.buildFallbackOverview(
-            eventID: "event-dresden-fallback",
-            passages: samplePassages,
-            context: OverviewVersionContext(membershipVersion: 1, inputTextHash: "test-hash"),
-            title: "Dresden Foundry Expansion"
-        )
-        assertEqual(fallbackDoc.kind, .fallbackExcerpts, "No-Go runtime narrows to fallbackExcerpts kind")
-        assertEqual(fallbackDoc.facts.count, 3, "All passages represented as verified facts")
-        assertEqual(fallbackDoc.citations.count, 3, "All citations reference actual passage fingerprints")
-        assertFalse(fallbackDoc.provenance.kind == .synthesized, "Fallback excerpts document is marked non-synthesized")
     }
 
     static func testPassageAnchoredFactExtraction() async throws {

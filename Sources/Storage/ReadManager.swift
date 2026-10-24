@@ -5,7 +5,6 @@ import Foundation
 /// backed asynchronously by ArticleStore and SQLite persistence.
 @MainActor
 final class ReadManager: ObservableObject {
-    static let shared = ReadManager()
 
     @Published var readArticles: Set<String> = []
     private let articleStore: ArticleStore

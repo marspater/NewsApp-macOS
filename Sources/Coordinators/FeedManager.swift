@@ -239,10 +239,6 @@ class FeedManager: NSObject, ObservableObject {
         appSettings.setAIEnabled(enabled)
     }
 
-    func setPrivateNotificationsEnabled(_ enabled: Bool) {
-        appSettings.setPrivateNotificationsEnabled(enabled)
-    }
-
     func setTensionCollectionOptIn(_ enabled: Bool) {
         appSettings.setTensionCollectionOptIn(enabled)
     }

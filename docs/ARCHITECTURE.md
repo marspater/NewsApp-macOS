@@ -23,8 +23,7 @@ Five layers, colour-coded. Arrows are calls; the thick arrow to publishers is th
 %%{init: {"flowchart": {"curve": "basis", "nodeSpacing": 22, "rankSpacing": 44, "padding": 10}}}%%
 flowchart LR
     subgraph Coord["Coordinators"]
-        RC["<b>RefreshCoordinator</b><br/>lifecycle, sleep, wake"]
-        FM["<b>FeedManager</b><br/>orchestration"]
+        FM["<b>FeedManager</b><br/>orchestration<br/>lifecycle, sleep, wake"]
         NS["<b>NotificationService</b><br/>triage"]
     end
 
@@ -59,7 +58,6 @@ flowchart LR
 
     Net(("<b>Publishers</b>"))
 
-    RC --> FM
     FM -->|due feeds| FF
     FM -->|after publication| EC
     FM --> EQ & NS
@@ -85,7 +83,7 @@ flowchart LR
     classDef store fill:#FDEBEC,stroke:#CF4A4A,stroke-width:1.5px,color:#4A1212
     classDef ext fill:#ECEFF3,stroke:#5F6B7A,stroke-width:2px,color:#1E2630
     class Main,List,Reader,Overview,Tension ui
-    class RC,FM,NS coord
+    class FM,NS coord
     class CEP,EQ,EC,EM,OV,WT intel
     class FF,Parse,HTTP,GW svc
     class AS,DB store
@@ -104,18 +102,17 @@ The refresh ends at publication. Everything after it is follow-up work that neve
 ```mermaid
 sequenceDiagram
     autonumber
-    participant RC as RefreshCoordinator
     participant FM as FeedManager
     participant FF as FeedFetcher
     participant DB as DatabaseEngine
     participant EQ as EnrichmentQueue
     participant EC as EventClusterer
     participant SC as StoryCurator
-    RC->>FM: fetchFeedsAsync
+    Note over FM: fetchFeedsAsync — timer, background activity, wake or ⌘R
     FM->>FF: due feeds (≤6 requests, ≤2 per host)
     FF-->>FM: 200 / 304 / failure + Retry-After
     FM->>DB: one transaction per feed: articles + validators
-    FM-->>RC: publish one library snapshot — refresh ends
+    Note over FM: publish one library snapshot — refresh ends
     par follow-up, caller-owned
         FM->>EQ: notification triage, bounded classification
     and
@@ -127,12 +124,12 @@ sequenceDiagram
 | Area | Owns |
 |---|---|
 | `Sources/App/` | `NewsApp` lifecycle, scenes, commands, notification routing · `AppContainer` DI · `AppSettings` defaults, feed URL normalization, mute rules storage · `ThemeManager` · `UpdateChecker` · `NewsSignposts` |
-| `Sources/Views/` | `MainView` coordinator · `SidebarView`, `ArticleListView`, `ArticleCardView`, `EventCardView`, `FeedHealthLine` · `ArticleDetailView` + `ReaderSupportViews`, `ArticleWebView`, `WebPreviewPolicy` · `EventOverviewReaderView` · `TensionIndexView` · `ArticleRemoteImage` · `FeedCatalogView` · `SettingsView` · `DesignSystem`, `GlassSystem` |
+| `Sources/Views/` | `MainView` coordinator · `SidebarView`, `ArticleListView`, `ArticleCardView`, `EventCardView`, `FeedHealthLine` · `ArticleDetailView` + `ReaderSupportViews`, `ArticleWebView`, `WebPreviewPolicy` · `EventOverviewReaderView` · `TensionIndexView` · `ArticleRemoteImage` · `FeedCatalogView` · `SettingsView` · `DesignSystem` |
 | `Sources/Storage/` | `DatabaseEngine` schema, WAL/FTS5 · `DatabaseEngine+Events` events, overviews, reading state, embeddings · `ArticleStore` · `MigrationCoordinator` · `ReadManager`, `SavedStoriesManager` · `CacheManager` (HTTP cache, separate from user state) |
 | `Sources/Models/` | `FeedArticle`, `ArticleIdentity` · `FeedFetchState` validators and backoff · `FeedCatalog` · `EventOverview`, `EventFeed` · `FeedAdvisory`, `ArchiveSearchToken` · `MuteRules` · `FeedError` |
-| `Sources/Coordinators/` | `FeedManager` orchestration · `RefreshCoordinator` lifecycle · `NotificationService` triage |
+| `Sources/Coordinators/` | `FeedManager` orchestration, lifecycle, sleep and wake · `NotificationService` triage |
 | `Sources/Services/` | `FeedFetcher`, `SecureHTTPClient` · `FeedXMLParser`, `JSONFeedParser`, `DateParser` · `IPAddressValidator`, `NetworkBoundaryProxy` · `OPMLManager` |
-| `Sources/Intelligence/` | `ContentExtractionPipeline` · `ArticleIntelligence` · `EnrichmentQueue` · `EventCandidates` (+ `EventStoryRelation`) · `EventMatcher`, `EventClustering`, `SentenceEmbedder` · `Overview*`, `PassageFactExtractor`, `CoverageSentimentEvaluator` · `StoryImportance`, `EventJudge`, `ModelAvailability`, `PromptDefense` · `WorldTension`, `TensionMethodology` |
+| `Sources/Intelligence/` | `ContentExtractionPipeline` · `ArticleIntelligence` · `EnrichmentQueue` · `EventCandidates` (+ `EventStoryRelation`) · `EventMatcher`, `EventClustering`, `SentenceEmbedder` · `Overview*`, `PassageFactExtractor`, `CoverageSentimentEvaluator` · `StoryImportance`, `EventJudge`, `PromptDefense` · `WorldTension`, `TensionMethodology` |
 | `Tests/` | `NewsTests` runner and suites · `FeedKitSwiftSoupTests`, `EventEmbeddingTests`, `NotificationAttachmentTests`, `StoryCorpus` · `Native*` and accessibility harnesses (some open windows, opt-in) · `TestDefaults` |
 | Platform | `News.entitlements` · `build.sh`, `test.sh`, `script/build_test_runner.sh` (runner build, `NEWS_TEST_ATOM`), `script/ci_testsuite.sh` (one JUnit case per `Tests/*.swift` atom, `--lcov` for impact analysis) · dormant `build_release.sh`, `script/distribution/` · CI: `.github/workflows/`, `.circleci/config.yml`, `codemagic.yaml` |
 

@@ -656,13 +656,6 @@ enum TensionHistory {
     }
 }
 
-extension TensionHistory {
-    /// The most recent day with a 7-day index: the reading the sidebar and the tension sheet lead with.
-    static func latestReading(in history: [TensionHistoryDay]) -> TensionHistoryDay? {
-        history.last { $0.score.smoothedIndex != nil }
-    }
-}
-
 // MARK: - Presentation bands
 
 /// Names for ranges of the 0–100 index, so a reading can say "44° Warm". Presentation only: the bands never feed

@@ -58,7 +58,6 @@ swiftc "${NEWS_DEPENDENCY_FLAGS[@]}" "$@" -target "$(uname -m)-apple-macos${TARG
     Sources/Intelligence/ArticleIntelligence.swift \
     Sources/Intelligence/OverviewPassageSelector.swift \
     Sources/Intelligence/PromptDefense.swift \
-    Sources/Intelligence/ModelAvailability.swift \
     Sources/Intelligence/PassageFactExtractor.swift \
     Sources/Intelligence/TensionMethodology.swift \
     Sources/Intelligence/WorldTension.swift \
@@ -96,10 +95,8 @@ swiftc "${NEWS_DEPENDENCY_FLAGS[@]}" "$@" -target "$(uname -m)-apple-macos${TARG
     Sources/Storage/SavedStoriesManager.swift \
     Sources/Services/OPMLManager.swift \
     Sources/Views/DesignSystem.swift \
-    Sources/Views/GlassSystem.swift \
     Sources/Views/ArticleRemoteImage.swift \
     Sources/Views/EventOverviewReaderView.swift \
-    Sources/Coordinators/RefreshCoordinator.swift \
     Sources/App/NewsSignposts.swift \
     Sources/App/UpdateChecker.swift \
     Tests/StoryCorpus.swift \

@@ -1118,7 +1118,8 @@ final class ContentExtractionPipeline: Sendable {
             urls: Array(Set(urls.map { ArticleIdentity.canonicalizeURL($0) })).sorted())
     }
 
-    private static func normalizedEvidenceText(_ text: String) -> String {
+    /// Canonical composition and single spaces: the form identities, aliases and evidence are compared in.
+    static func normalizedEvidenceText(_ text: String) -> String {
         text.precomposedStringWithCanonicalMapping.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
     }
 
@@ -1800,12 +1801,6 @@ final class ContentExtractionPipeline: Sendable {
     func computeLinkDensity(_ htmlSnippet: String) -> Double {
         let dom = HTMLDOMBuilder.parse(html: htmlSnippet)
         return dom.computeLinkDensity()
-    }
-
-    /// Converts HTML snippet to plain text and unescapes entities.
-    func htmlToPlainText(_ html: String) -> String {
-        let dom = HTMLDOMBuilder.parse(html: html)
-        return decodeHTMLEntities(dom.combinedText())
     }
 
     // MARK: - Character Encoding Normalization
