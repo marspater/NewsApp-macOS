@@ -1151,6 +1151,14 @@ public enum ArticleContentRedactor {
         {
             return true
         }
+        // Follow prompts for a personalised feed (The Verge).
+        if rawLower.contains("personalized homepage feed") || rawLower.contains("personalised homepage feed")
+            || (rawLower.hasPrefix("follow topics") && rawLower.count < 80)
+            || (rawLower.hasPrefix("follow ") && rawLower.contains("email updates"))
+            || (rawLower.hasPrefix("posts from this") && rawLower.contains("homepage feed"))
+        {
+            return true
+        }
         // Google Preferred Source prompts (CNA, DW, Google News CTAs)
         if rawLower.contains("preferred source on google")
             || rawLower.contains("trusted source to help google")

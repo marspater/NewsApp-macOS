@@ -466,7 +466,14 @@ struct NewsTests {
                     print(
                         "DBG", path.split(separator: "/").last!, "OK words",
                         content.split(whereSeparator: \.isWhitespace).count,
-                        doc?.blocks.prefix(4).map { "\($0.kind):\($0.text.prefix(40))" } ?? [])
+                        "complete", doc?.isComplete.map(String.init) ?? "nil")
+                    // NEWS_DEBUG_BLOCKS=1 prints every block: kind, then its text or image URL.
+                    if ProcessInfo.processInfo.environment["NEWS_DEBUG_BLOCKS"] != nil {
+                        for block in doc?.blocks ?? [] {
+                            let image = block.kind == .figure ? (block.imageURL ?? "") + " | " : ""
+                            print("  [\(block.kind)] \(image)\(block.text)")
+                        }
+                    }
                 } else {
                     print("DBG", path.split(separator: "/").last!, outcome)
                 }
@@ -544,6 +551,7 @@ struct NewsTests {
             await testArticleRetentionPolicy()
             try await testGranularCacheClearingAndRetention()
             await testMultiPublisherExtractionFixtures()
+            await testReaderFurnitureRemoval()
             print("✅ Story regressions passed")
             return
         }
@@ -669,6 +677,7 @@ struct NewsTests {
         try await testReaderPhaseC(fixtureRoot: fixtureRoot)
         await testBBCExtractionFixture()
         await testMultiPublisherExtractionFixtures()
+        await testReaderFurnitureRemoval()
         await testContentQualityValidation()
         await testExtractionOutcomeDiagnostics()
         await testCanonicalClassificationDisambiguation()
@@ -14171,6 +14180,105 @@ struct NewsTests {
         } else {
             assertTrue(false, "Should reject repetitive syndication loops")
         }
+    }
+
+    static func testReaderFurnitureRemoval() async {
+        print("  - Testing reader furniture removal (title, stamps, bios, follow prompts, rails, teasers)...")
+        let pipeline = ContentExtractionPipeline.shared
+        let body = """
+            <p>We gave the phone a seven out of ten. But that was not always the score we planned, and it might not be the right score forever. Such are the challenges of reviewing a big new idea about the most popular device.</p>
+            <p>On this episode, the hosts debate whether the phone deserved the score it got, and try to work through how this device might change over time. Is the outer screen a feature or a bug for the device as a whole?</p>
+            <p>After that, the hosts talk about the huge security flaw that rocked the web this week and what it means for the future of the web, artificial intelligence, and everything else people build online.</p>
+            """
+        func texts(_ outcome: ExtractionOutcome) -> [String] {
+            outcome.document?.blocks.map { "\($0.kind):\($0.text)" } ?? []
+        }
+
+        // A publisher lede: the title, a standfirst after it, a time stamp, an author bio, a follow prompt and
+        // rails of teaser cards, none with a semantic class name.
+        let ledePage = """
+            <html><head><title>Phones</title></head><body><article>
+            <div class="l1"><div><h1>The phone should have been a tablet</h1><p class="c1">On the podcast: Notes on a phone review, a security scandal, and more.</p></div>
+            <div><span class="s1"><time datetime="2026-10-23T17:00:00Z">Oct 23, 2026, 5:00 PM UTC</time></span></div>
+            <div><div><span class="c1">is editor-at-large and podcast co-host with over a decade of experience covering consumer tech. Previously, at three other publications.</span></div></div></div>
+            <div class="e1">\(body)
+            <div class="t1"><span><strong>Follow topics and authors</strong> from this story to see more like this in your personalized homepage feed and to receive email updates.</span><ul><li id="follow-author-x"><span>Dana Pierce</span></li></ul></div>
+            </div></article>
+            <div class="x1"><h2>Most Popular</h2><ol><li><a href="/a">A dangerous grip on outer space</a></li><li><a href="/b">People are coding their way to better TVs</a></li></ol></div>
+            <div class="y1"><h2>Top Stories</h2><div class="z1"><span>Jess Weatherbed 4:52 PM UTC</span><a href="/c">No, the phone is not a small phone and that is fine</a></div><div class="z1"><span>Andrew Webster 12:00 PM UTC</span><a href="/d">A streamer cannot fire its way out of this downward spiral</a></div></div>
+            </body></html>
+            """
+        let lede = pipeline.extractFromHTML(ledePage, baseUrl: "https://news.example/a")
+        let ledeKinds = lede.document?.blocks.map(\.kind) ?? []
+        assertEqual(
+            ledeKinds, [.standfirst, .paragraph, .paragraph, .paragraph],
+            "The paragraph after <h1> is the standfirst; stamp, bio, follow prompt and rails are not story text: "
+                + "\(texts(lede))")
+        assertTrue(
+            lede.document?.blocks.first?.text.hasPrefix("On the podcast:") == true,
+            "The standfirst keeps the publisher's text")
+
+        // A recommendation section inside the body (Al Jazeera's more-on) and a class-less one both go; a real
+        // section heading stays, as does prose that names a former editor.
+        let sectioned = """
+            <html><body><main><div class="wysiwyg">\(body)
+            <section class="more-on"><h2>Recommended Stories</h2><ul><li><a href="/x">Regulator sues network claiming retaliation over coverage</a></li></ul></section>
+            <h2>Public, private, or both?</h2>
+            <p>Jordan Smith is a former editor of the paper, and said the plan would take a strong partnership with local and state governments before anything could be built on the coast.</p>
+            <section><h2>Related Articles</h2><p><a href="/y">Launch site study names three candidates</a></p></section>
+            <p>There were 175 orbital launch attempts last year from the two existing ranges, and officials project the country will need far more capacity before the end of the decade.</p>
+            <div class="author-mini-bio"><img src="https://news.example/head.jpg" width="200" height="200"><p>Stephen Clark Space Reporter</p></div>
+            <p>Stephen Clark is a space reporter at the publication, covering private space companies and the world's space agencies.</p>
+            </div></main></body></html>
+            """
+        let section = pipeline.extractFromHTML(sectioned, baseUrl: "https://news.example/b")
+        let sectionTexts = texts(section)
+        assertEqual(
+            section.document?.blocks.map(\.kind) ?? [],
+            [.paragraph, .paragraph, .paragraph, .heading, .paragraph, .paragraph],
+            "Navigation headings and bios go, section headings and prose stay: \(sectionTexts)")
+        assertTrue(
+            sectionTexts.contains { $0.hasPrefix("heading:Public, private") }
+                && sectionTexts.contains { $0.contains("former editor") }
+                && !sectionTexts.contains {
+                    $0.contains("Recommended") || $0.contains("Related") || $0.contains("space reporter at")
+                },
+            "Only the publisher's own heading and prose remain: \(sectionTexts)")
+
+        // Utility-class hidden duplicates are not shown twice; a feed teaser ending in its own link is incomplete.
+        let hiddenDuplicate = pipeline.extractFromHTML(
+            "<html><body><article><div class=\"ad-shell hidden\"><p>A sponsored placeholder paragraph the page keeps hidden until an advertising script fills it.</p></div>\(body)</article></body></html>"
+        )
+        assertEqual(
+            hiddenDuplicate.document?.blocks.count, 3,
+            "A `hidden` utility class hides its subtree: \(texts(hiddenDuplicate))")
+        let responsive = pipeline.extractFromHTML(
+            "<html><body><article><div class=\"hidden md:block\">\(body)</div></article></body></html>")
+        assertEqual(
+            responsive.document?.blocks.count, 3,
+            "`hidden md:block` shows on wide windows, so its body stays: \(texts(responsive))")
+        // Layout modifiers name what sits beside the story, not the story (PBS, Science News, Variety, IEEE).
+        for wrapper in [
+            "<section class=\"article-with-sidebar\">", "<div class=\"page__body page__body--with-sidebar\">",
+            "<div class=\"non_member_follow\">",
+        ] {
+            let tag = wrapper.hasPrefix("<section") ? "section" : "div"
+            let wrapped = pipeline.extractFromHTML("<html><body><main>\(wrapper)\(body)</\(tag)></main></body></html>")
+            assertEqual(wrapped.document?.blocks.count, 3, "\(wrapper) keeps the story: \(texts(wrapped))")
+        }
+        let teaser = pipeline.extractFromHTML(
+            body
+                + "<p><a href=\"https://news.example/story/\">Read full article</a></p><p><a href=\"https://news.example/story/#comments\">Comments</a></p>",
+            baseUrl: "https://news.example/story/")
+        assertEqual(teaser.document?.isComplete, false, "A teaser ending in Read full article is incomplete")
+        assertEqual(
+            teaser.document?.hasCompleteArticleBody, false, "The reader fetches the page for an incomplete teaser")
+        let continued = pipeline.extractFromHTML(
+            body + " <a href=\"https://news.example/story/\">Continue reading...</a>",
+            baseUrl: "https://news.example/story/")
+        assertEqual(continued.document?.isComplete, false, "A Guardian-style Continue reading… link marks a teaser")
+        let whole = pipeline.extractFromHTML(body, baseUrl: "https://news.example/story/")
+        assertEqual(whole.document?.isComplete, true, "Three full paragraphs without a trailing link are complete")
     }
 
     static func testExtractionOutcomeDiagnostics() async {
