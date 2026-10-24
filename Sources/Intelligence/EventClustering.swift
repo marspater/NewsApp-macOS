@@ -27,9 +27,13 @@ enum EventClusterer {
         judge _: EventJudge = .unavailable,
         judgeBudget _: Int = 150,
         now: Date = Date(),
-        limit: Int = 2_000
+        limit: Int = 2_000,
+        pairProbability: (@Sendable (String, String) async -> Double?)? = nil
     ) async throws -> EventClusteringReport {
+        let pairProbability = pairProbability ?? { a, b in await PairScorer.shared.probability(a, b) }
         var report = EventClusteringReport()
+        /// Pair-model probabilities this pass, keyed low ID first (#525).
+        var modelScores: [String: Double?] = [:]
         var cache: [String: EventFeatures] = [:]
         var embeddingCache: [String: [Float]] = [:]
         /// Signals and vectors computed this pass; stored after each batch and at the end (#522).
@@ -124,9 +128,10 @@ enum EventClusterer {
             cleared[key] = nil
             decisions[key] = DatabaseEngine.PairDecision(
                 articleID: low, otherArticleID: high, decision: decision,
-                reason: pair.conflict?.rawValue ?? decision, score: pair.score)
+                reason: pair.modelConfirmed ? "pairModel" : (pair.conflict?.rawValue ?? decision), score: pair.score)
         }
-        func assessed(_ a: EventMatchRow, _ b: EventMatchRow) async -> EventPairAssessment {
+        /// The rules alone: no pair model and no audit row.
+        func ruled(_ a: EventMatchRow, _ b: EventMatchRow) async -> EventPairAssessment {
             await prefetch([a, b])
             let sim: Double?
             if let vA = embeddingCache[a.id], let vB = embeddingCache[b.id] {
@@ -134,7 +139,21 @@ enum EventClusterer {
             } else {
                 sim = nil
             }
-            let pair = EventMatcher.assess(features(a), features(b), policy: matchPolicy, embeddingSimilarity: sim)
+            return EventMatcher.assess(features(a), features(b), policy: matchPolicy, embeddingSimilarity: sim)
+        }
+        func assessed(_ a: EventMatchRow, _ b: EventMatchRow) async -> EventPairAssessment {
+            var pair = await ruled(a, b)
+            if EventMatcher.needsPairModel(pair) {
+                let key = a.id < b.id ? a.id + "\n" + b.id : b.id + "\n" + a.id
+                if modelScores[key] == nil {
+                    modelScores[key] = await pairProbability(
+                        EventFeatures.matchingText(title: a.title, description: a.description),
+                        EventFeatures.matchingText(title: b.title, description: b.description))
+                }
+                if let probability = modelScores[key] ?? nil, probability >= matchPolicy.pairModelThreshold {
+                    pair = EventMatcher.modelConfirmed(pair, policy: matchPolicy)
+                }
+            }
             // The matcher's own verdict is recorded; a reader's inclusion only overrides it here.
             record(a, b, pair)
             return inclusions[a.id]?.contains(b.id) == true ? EventMatcher.forced(pair, policy: matchPolicy) : pair
@@ -334,18 +353,32 @@ enum EventClusterer {
         }
         /// Every cross-pair needs specific shared evidence; a contradiction or exclusion always vetoes a merge.
         var fragmentExclusions: [String: Set<String>] = [:]
-        func compatibleFragments(_ first: [EventMatchRow], _ second: [EventMatchRow]) async -> Bool {
+        func compatibleFragments(_ first: [EventMatchRow], _ second: [EventMatchRow]) async throws -> Bool {
             for member in second {
                 let exclusions = fragmentExclusions[member.id] ?? []
                 if first.contains(where: { exclusions.contains($0.id) }) { return false }
             }
+            // The rules settle most pairs of fragments: a conflict, or a pair without a shared specific anchor that
+            // the pair model may not rescue, refuses the merge before the model is asked about anything.
+            for a in first {
+                for b in second where inclusions[a.id]?.contains(b.id) != true {
+                    let pair = await ruled(a, b)
+                    if pair.conflict != nil || (pair.sharedSpecificAnchors < 1 && !EventMatcher.needsPairModel(pair)) {
+                        return false
+                    }
+                }
+            }
             var pairs: [EventPairAssessment] = []
             for a in first {
                 for b in second {
+                    try Task.checkCancellation()
                     pairs.append(await assessed(a, b))
                 }
             }
-            guard pairs.allSatisfy({ $0.conflict == nil && $0.sharedSpecificAnchors >= 1 }) else { return false }
+            guard pairs.allSatisfy({ $0.conflict == nil && ($0.sharedSpecificAnchors >= 1 || $0.modelConfirmed) })
+            else {
+                return false
+            }
             let required = Int((Double(pairs.count) * matchPolicy.compatibleShare).rounded(.up))
             let mean = pairs.isEmpty ? 0 : pairs.map(\.score).reduce(0, +) / Double(pairs.count)
             let related = pairs.contains(where: \.isMatch)
@@ -374,7 +407,7 @@ enum EventClusterer {
                 }
                 var other = index + 1
                 while other < events.count {
-                    // Cross-pair checks are bounded; stop cancellation before each candidate.
+                    // Cross pairs are checked by the rules first and the model only after; cancellation stops both.
                     try Task.checkCancellation()
                     let candidate = events[other]
                     let candidateTerms = candidate.members.reduce(into: Set<String>()) {
@@ -388,7 +421,7 @@ enum EventClusterer {
                         other += 1
                         continue
                     }
-                    guard await compatibleFragments(survivor.members, candidate.members) else {
+                    guard try await compatibleFragments(survivor.members, candidate.members) else {
                         other += 1
                         continue
                     }

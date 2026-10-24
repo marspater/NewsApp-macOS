@@ -59,6 +59,26 @@ extension NewsTests {
         let (ascii, _) = tokenizer.encode("Erdogan met Sanchez in Canakkale", maxSequenceLength: 32)
         assertEqual(accented, ascii, "Accented names tokenize like their ASCII forms")
         assertFalse(accented.contains(100), "No accented name becomes an unknown token")
+
+        // 4. Pair encoding for the pair model (#525): ids from script/training/train_pair_model.py's tokenizer port.
+        let a = "Erdoğan meets Sánchez in Ankara"
+        let b = "Turkey's president hosts Spain's prime minister"
+        let pair = tokenizer.encodePair(a, b, maxSequenceLength: 24)
+        assertEqual(
+            pair.inputIDs,
+            [
+                101, 9413, 16168, 2319, 6010, 10568, 1999, 20312, 102, 4977, 1005, 1055, 2343, 6184, 3577, 1005, 1055,
+                3539, 2704, 102, 0, 0, 0, 0,
+            ], "Pair ids match the training tokenizer")
+        assertEqual(pair.attentionMask, Array(repeating: 1, count: 20) + Array(repeating: 0, count: 4), "Pair mask")
+        assertEqual(
+            pair.tokenTypeIDs,
+            Array(repeating: 0, count: 9) + Array(repeating: 1, count: 11) + Array(repeating: 0, count: 4),
+            "Type ids: 0 through the first [SEP], then 1")
+        let truncated = tokenizer.encodePair(a, b, maxSequenceLength: 12)
+        assertEqual(
+            truncated.inputIDs, [101, 9413, 16168, 2319, 6010, 10568, 102, 4977, 1005, 1055, 2343, 102],
+            "Longest-first truncation, the second text on ties, as in training")
     }
 
     // MARK: - SentenceEmbedder Inference & Normalization (#127)

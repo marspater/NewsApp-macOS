@@ -541,6 +541,7 @@ struct NewsTests {
             try await testArticleSignalsRoundTrip()
             try await testPairAssessmentsRecorded()
             try await testEventInclusions()
+            try await testPairModelGreyZone()
             try await testEventEmbeddingIntegration()
             try await testEventFragmentMergingAndJudge(fixtureRoot: fixtureRoot)
             try await testStoryVisibility(fixtureRoot: fixtureRoot)
@@ -644,6 +645,7 @@ struct NewsTests {
         try await testArticleSignalsRoundTrip()
         try await testPairAssessmentsRecorded()
         try await testEventInclusions()
+        try await testPairModelGreyZone()
         try await testEventEmbeddingIntegration()
         try await testEventFragmentMergingAndJudge(fixtureRoot: fixtureRoot)
         try await testStoryVisibility(fixtureRoot: fixtureRoot)
@@ -10572,6 +10574,58 @@ struct NewsTests {
         await db.close()
     }
 
+    /// The pair model (#525) is asked only about borderline pairs. A confident answer joins two reports that share no
+    /// specific name or place; a lower one, or no model, leaves the matcher's decision as it was.
+    static func testPairModelGreyZone() async throws {
+        print("  - Testing the pair model in the grey zone (#525)...")
+        let start = Date(timeIntervalSince1970: 1_700_000_000)
+        func story(_ id: Int, _ title: String, hours: Double) -> FeedArticle {
+            FeedArticle(
+                title: title, link: "https://grey.invalid/\(id)", guid: "grey-\(id)", description: "",
+                pubDate: start.addingTimeInterval(hours * 3600), source: "Publisher \(id)")
+        }
+        let stories = [
+            story(1, "Floods kill dozens across Pakistan after monsoon rains", hours: 0),
+            story(2, "Pakistan flood death toll climbs as monsoon rains continue", hours: 3),
+            story(3, "Parliament votes to oust Prime Minister Novak in Ljubljana", hours: 1),
+            story(4, "Thousands protest in Ljubljana after parliament votes to oust Novak", hours: 2),
+        ]
+        actor Calls {
+            var pairs: [String] = []
+            func add(_ a: String, _ b: String) { pairs.append(a + " | " + b) }
+        }
+        func clustered(_ answer: Double?) async throws -> (events: [String?], calls: [String]) {
+            let db = DatabaseEngine(path: ":memory:")
+            try await db.open()
+            try await db.upsertArticles(stories)
+            let calls = Calls()
+            _ = try await EventClusterer.run(
+                in: db, now: start.addingTimeInterval(4 * 3600),
+                pairProbability: { a, b in
+                    await calls.add(a, b)
+                    return answer
+                })
+            var events: [String?] = []
+            for article in stories {
+                events.append(try await db.eventID(forArticle: try await db.resolvedArticleID(for: article)))
+            }
+            await db.close()
+            return (events, await calls.pairs)
+        }
+        let confident = try await clustered(0.99)
+        assertTrue(
+            confident.events[0] != nil && confident.events[0] == confident.events[1],
+            "A confident pair model joins two flood reports that share only the country")
+        assertFalse(confident.calls.isEmpty, "The borderline flood pair is sent to the pair model")
+        assertFalse(
+            confident.calls.contains { $0.contains("oust Prime Minister Novak") && $0.contains("Thousands protest") },
+            "A pair with a hard conflict (two different acts) is never sent to the model")
+        let unsure = try await clustered(EventMatchPolicy.standard.pairModelThreshold - 0.01)
+        assertEqual(unsure.events[0], nil, "Below the threshold the flood reports stay apart")
+        let unavailable = try await clustered(nil)
+        assertEqual(unavailable.events[0], nil, "Without the model the matcher decides as before")
+    }
+
     /// "Same Event" (#524): the reader's inclusion merges two events, survives a pass that re-matches a member the
     /// rules would split off, and the newer of an inclusion and a separation of one pair wins.
     static func testEventInclusions() async throws {
@@ -11165,6 +11219,14 @@ struct NewsTests {
                             similarity = SentenceEmbedder.cosineSimilarity(va, vb)
                         }
                         let pair = EventMatcher.assess(a, b, embeddingSimilarity: similarity)
+                        let pairModel =
+                            EventMatcher.needsPairModel(pair)
+                            ? await PairScorer.shared.probability(
+                                EventFeatures.matchingText(
+                                    title: items[i].title, description: items[i].description ?? ""),
+                                EventFeatures.matchingText(
+                                    title: items[j].title, description: items[j].description ?? ""))
+                            : nil
                         let nonPlaceB = b.keywords.union(b.titleNumbers).union(b.tollNumbers)
                         let nonPlaceA = a.keywords.union(a.titleNumbers).union(a.tollNumbers)
                         let primaryDisjoint =
@@ -11175,12 +11237,13 @@ struct NewsTests {
                             String(
                                 format: "      pair %@+%@ gold=%d linked=%d gap=%.1fh conflict=%@ primaryDisjoint=%d "
                                     + "match=%d compatible=%d borderline=%d specific=%d anchors=%d keywords=%d what=%.2f "
-                                    + "score=%.2f cosine=%@",
+                                    + "score=%.2f cosine=%@ pairModel=%@",
                                 items[i].id, items[j].id, gold ? 1 : 0, linked ? 1 : 0, gap,
                                 pair.conflict?.rawValue ?? "-", primaryDisjoint ? 1 : 0, pair.isMatch ? 1 : 0,
                                 pair.isCompatible ? 1 : 0, pair.isBorderline ? 1 : 0, pair.sharedSpecificAnchors,
                                 pair.sharedAnchors, pair.sharedKeywords, pair.what, pair.score,
-                                similarity.map { String(format: "%.2f", $0) } ?? "-"))
+                                similarity.map { String(format: "%.2f", $0) } ?? "-",
+                                pairModel.map { String(format: "%.3f", $0) } ?? "-"))
                     }
                 }
             }
