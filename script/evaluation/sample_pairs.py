@@ -62,7 +62,6 @@ def main(argv=None):
             f"{index:3d} [{gap:+.1f}h s={float(row['score']):.2f}] {row['source_a']}: {row['title_a']}"
             f" || {row['source_b']}: {row['title_b']}"
         )
-    return 0
 
 
 
@@ -105,7 +104,8 @@ def export_labels(export, kind, labels, snapshot, out):
 
     exists = out.exists()
     with out.open('a', newline='', encoding='utf-8') as handle:
-        writer = csv.writer(handle)  # nosemgrep: python.lang.security.use-defusedcsv.use-defusedcsv (local training rows)
+        # Local training rows, never opened as a spreadsheet.
+        writer = csv.writer(handle)  # nosemgrep: python.lang.security.use-defusedcsv.use-defusedcsv
         if not exists:
             writer.writerow(['label', 'group', 'text_a', 'text_b', 'pieces_a', 'pieces_b', 'weight'])
         written = 0
@@ -126,4 +126,4 @@ def export_labels(export, kind, labels, snapshot, out):
 
 
 if __name__ == '__main__':
-    sys.exit(main())
+    main()
