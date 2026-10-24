@@ -1312,6 +1312,7 @@ actor DatabaseEngine {
         if let target = idTarget ?? urlTarget { return target }
         if let target = try publisherTextTarget(article) { return target }
         if let target = try historicalTarget(article) { return target }
+        if let target = try publisherTitleTarget(article) { return target }
         // Direct legacy callers may still supply an unscoped model. Keep that key
         // only if unused; a GUID already owned by another feed needs its scoped key.
         if let scoped, article.storedID == nil,
@@ -1339,6 +1340,41 @@ actor DatabaseEngine {
             if Self.isDocumentURL(url) { try recordAlias(kind: "url", value: url, articleID: id) }
         }
         try commitTransaction()
+    }
+
+    /// The stored story of the same publisher with the same folded headline, published within
+    /// `publisherTitleWindow` (#583). The publisher's stories of that window are read and compared in Swift, so no alias
+    /// row and no schema change are needed; the oldest such story wins when several exist.
+    private func publisherTitleTarget(_ article: FeedArticle) throws -> String? {
+        guard article.pubDate != DateParser.unknownDate,
+            let key = ArticleIdentity.publisherTitleKey(title: article.title, source: article.source)
+        else { return nil }
+        var statement: OpaquePointer?
+        let sql = """
+            SELECT id, title FROM articles
+            WHERE source = ? AND published_at BETWEEN ? AND ?
+                AND NOT EXISTS (SELECT 1 FROM article_reconciliations r WHERE r.duplicate_id = articles.id)
+            ORDER BY published_at, id;
+            """
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+            throw NSError(
+                domain: "DatabaseEngine", code: -1,
+                userInfo: [NSLocalizedDescriptionKey: "Cannot prepare publisher title lookup"])
+        }
+        defer { sqlite3_finalize(statement) }
+        let published = article.pubDate.timeIntervalSince1970
+        sqlite3_bind_text(statement, 1, article.source, -1, Self.sqliteTransient)
+        sqlite3_bind_double(statement, 2, published - ArticleIdentity.publisherTitleWindow)
+        sqlite3_bind_double(statement, 3, published + ArticleIdentity.publisherTitleWindow)
+        while sqlite3_step(statement) == SQLITE_ROW {
+            guard let id = sqlite3_column_text(statement, 0), let title = sqlite3_column_text(statement, 1) else {
+                continue
+            }
+            if ArticleIdentity.publisherTitleKey(title: String(cString: title), source: article.source) == key {
+                return String(cString: id)
+            }
+        }
+        return nil
     }
 
     private func publisherTextTarget(_ article: FeedArticle) throws -> String? {
