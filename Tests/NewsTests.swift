@@ -12650,6 +12650,16 @@ struct NewsTests {
         assertEqual(NewsCategory.match(from: "medical research"), .health, "med synonym")
         assertEqual(NewsCategory.match(from: "culinary arts"), .food, "cook/food synonym")
 
+        // Whole words only (#507): a substring of a longer word is not a cue.
+        assertEqual(NewsCategory.match(from: "Wildlife"), nil, "Wildlife is not Lifestyle")
+        assertEqual(NewsCategory.match(from: "Stockholm"), nil, "Stockholm is not Business")
+        assertEqual(NewsCategory.match(from: "Homeland Security"), nil, "Homeland is not a home")
+        assertEqual(NewsCategory.match(from: "Archipelago"), nil, "Archipelago is not a chip")
+        assertEqual(NewsCategory.match(from: "Ivy League"), .sports, "A whole-word cue still matches")
+        assertEqual(NewsCategory.match(from: "Life & Style"), .lifestyle, "Life & Style is Lifestyle")
+        assertEqual(NewsCategory.match(from: "Style"), .fashion, "Style alone is Fashion")
+        assertEqual(NewsCategory.match(from: "Fintech"), .technology, "Fintech is Technology")
+
         // 4. Rejection of unmapped gibberish
         assertEqual(NewsCategory.match(from: "random-gibberish-string-xyz"), nil, "Unrelated strings should return nil")
         assertEqual(NewsCategory.match(from: ""), nil, "Empty string should return nil")
@@ -13069,6 +13079,15 @@ struct NewsTests {
         assertEqual(
             malformedAnalysis.analysisVersion, 3,
             "A malformed answer that greedy sampling would repeat keeps the extractive summary")
+        let refusedAnalysis = try await ArticleAnalyzer(
+            textModel: NewsTextModel { _, _ in throw NewsTextModel.Rejected(reason: .guardrail) }
+        ).analyze(title: "Bridge reopened", content: text)
+        assertEqual(
+            refusedAnalysis.analysisVersion, 3,
+            "A guardrail refusal of this exact text is final: the extractive summary is not redone on every open")
+        assertEqual(
+            refusedAnalysis.modelIdentifier, "apple.natural-language.fallback",
+            "A refused request keeps source-based extraction")
         assertEqual(
             ArticleTextAnswer.analysis("SUMMARY|x\nSUMMARY|y\nPOINT|a\nPOINT|b\nPOINT|c")?.summary, nil,
             "Duplicate summary is rejected")

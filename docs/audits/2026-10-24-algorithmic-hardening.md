@@ -22,11 +22,19 @@ Refs #501 (program), #502–#510. Base: `origin/main` `89ab7d6`. Implementation 
 
 ## Authored corpus, before and after
 
-Before (matcher v7, fixture floors open): pending CI run.
+After (matcher v8, [CI run 40068841897](https://github.com/marspater/NewsApp-macOS/actions/runs/40068841897), PR #511 merged as `73223d3`):
 
-After (matcher v8): pending CI run.
+```
+matcher regressions v8: precision 0.913 [95% 0.732–0.976] (TP 21, FP 2), recall 0.875 [95% 0.690–0.957] (FN 3)
+false pairs: f08-a+f08-d, f08-b+f08-d
+missed pairs: f03-a+f03-c, f03-b+f03-c, f08-c+f08-d
+```
 
-Both lines are copied from the hosted test log of the PR; the fixture's `expected` block is tightened to the measured "after" result.
+- The two false pairs join "Commissioner steps down over failed Alabama execution" to the execution-aftermath reports: a related act with no "after" clause and shared actors, the known related-act limitation. Its sibling "… resigns after botched execution" stayed out through the primary-clause guard, which is why the resignation pair itself is missed.
+- The Malatya misses are the 20 h later "Rescuers search rubble after Malatya earthquake kills four" report: its primary clause names an act (search), so the background-clause guard keeps it out although search and rescue are a consequence under the corpus rules. Candidate for #509: whether rescue, search and evacuation terms count as consequences.
+- Before (matcher v7 on the same fixture): not measured in hosted CI, because the fixture landed with the fixes. Local command on a checkout of `main`: `git checkout 89ab7d6 -- Sources/Intelligence/EventMatcher.swift Sources/Intelligence/EventCandidates.swift Sources/Intelligence/EventClustering.swift Sources/Intelligence/SentenceEmbedder.swift && ./test.sh --story-regressions`; the corpus line prints with the v7 code and the ratchet reports the difference.
+
+The fixture's `expected` block is TP ≥ 21, FP ≤ 2.
 
 ## Deliberately unchanged, handed to #509
 
@@ -39,7 +47,19 @@ Each needs the holdout replay before and after PR A, with the command recorded i
 
 ## Foundation Models on sensitive news (PR B, #507–#508)
 
-Pending; findings are recorded in #508.
+Production call sites: `EnrichmentQueue` classifies with `allowFoundationModels: false`; the event judge and importance scoring were switched off on 17 October; `ArticleAnalyzer` (reader summary, AI on) is the only live model call. Ingestion, search and clustering therefore cannot be blocked by the model today; the defect was in what happens after a failure.
+
+| Cause | Before | After |
+| --- | --- | --- |
+| Input guardrails on violent text | `permissiveContentTransformations` already in use; a `guardrailViolation` fell into a generic `catch` and was stored as provisional, so every summary open asked again and failed again | `Rejected(.guardrail)`: final extractive summary |
+| Output refusal (`GenerationError.refusal` or refusal prose) | prose failed the `SUMMARY|` contract (final); the typed error was provisional | both final |
+| `exceededContextWindowSize`, `unsupportedLanguageOrLocale`, `decodingFailure`, `unsupportedGuide` | provisional, retried on every open | final |
+| `assetsUnavailable`, `rateLimited`, `concurrentRequests` | provisional (generic) | `TemporarilyUnavailable`, provisional by design |
+| Unknown errors | provisional | provisional; logged as `unclassified` |
+
+Only the outcome label is logged (`NewsTextModel` category). The prompt now states that the text is published news reporting that may describe violence, to be summarized factually. No guided-generation (`@Generable`) path was added: the previous one refused harsh news and cannot be validated from the cloud session (#508 keeps it as a local experiment).
+
+Publisher category hints (`NewsCategory.match`) matched substrings ("Wildlife" → Lifestyle, "Stockholm" → Business, "Homeland" → Lifestyle, "Archipelago" → Technology); they now match whole words with explicit inflections.
 
 ## Limits
 
