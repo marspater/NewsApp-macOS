@@ -10485,7 +10485,8 @@ struct NewsTests {
         assertTrue(events["acts-1"] != nil && events["acts-1"] == events["acts-2"], "Both vote reports share an event")
         assertTrue(events["acts-3"] != nil && events["acts-3"] == events["acts-4"], "Both protest reports share one")
         assertTrue(events["acts-1"] != events["acts-3"], "The vote and the protest are different events")
-        let relatedRows = try await db.eventRows("SELECT count(*) FROM pair_assessments WHERE decision = 'related-act';")
+        let relatedRows = try await db.eventRows(
+            "SELECT count(*) FROM pair_assessments WHERE decision = 'related-act';")
         let related = relatedRows.first?[0]
         assertTrue((related.flatMap(Int.init) ?? 0) >= 1, "A vote/protest pair is recorded as a related act")
         let matchRows = try await db.eventRows("SELECT count(*) FROM pair_assessments WHERE decision = 'match';")
