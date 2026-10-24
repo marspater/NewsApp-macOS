@@ -286,7 +286,10 @@ struct ArticleFilterQuery: Equatable, Sendable {
             } else if lowerToken == "ft" {
                 query.terms += ["financial", "times"]
             } else if !token.isEmpty {
-                query.terms.append(lowerToken)
+                // Quotes never reach FTS5 (each term is quoted there); a token that is only quotes is no term at all,
+                // and every consumer (ranking, the FTS join, in-memory matching) must agree on that.
+                let term = lowerToken.replacingOccurrences(of: "\"", with: "")
+                if !term.isEmpty { query.terms.append(term) }
             }
         }
 
@@ -358,12 +361,12 @@ enum ArticleSection {
             "netflix", "disney", "actor", "actress", "box office", "concert", "album", "grammy", "oscar", "emmy",
         ],
         "Politics": [
-            "politic", "congress", "senate", "democrat", "republican", "election", "vote", "legislation", "government",
-            "white house", "parliament", "policy", "campaign", "liberal", "conservative",
+            "politics", "political", "congress", "senate", "democrat", "republican", "election", "vote", "legislation",
+            "government", "white house", "parliament", "policy", "campaign", "liberal", "conservative",
         ],
         "U.S. Politics": [
-            "politic", "congress", "senate", "democrat", "republican", "election", "vote", "legislation", "white house",
-            "biden", "trump", "campaign",
+            "politics", "political", "congress", "senate", "democrat", "republican", "election", "vote", "legislation",
+            "white house", "biden", "trump", "campaign",
         ],
         "Business": [
             "business", "market", "stock", "economy", "finance", "wall street", "investor", "startup", "venture", "ipo",
@@ -396,8 +399,8 @@ enum ArticleSection {
             "travel", "flight", "airline", "hotel", "tourism", "destination", "vacation", "trip", "airport", "cruise",
         ],
         "Sports": [
-            "sport", "football", "basketball", "soccer", "baseball", "nfl", "nba", "mlb", "athlete", "championship",
-            "match", "team", "league", "coach", "score", "olympic", "tennis", "golf",
+            "sport", "sports", "football", "basketball", "soccer", "baseball", "nfl", "nba", "mlb", "athlete",
+            "championship", "match", "team", "league", "coach", "score", "olympic", "tennis", "golf",
         ],
         "World": [
             "world", "international", "global", "europe", "asia", "africa", "foreign", "nation", "united nations",

@@ -1784,12 +1784,9 @@ actor DatabaseEngine {
         if !parsed.terms.isEmpty {
             join =
                 " JOIN article_fts_rows f ON f.article_id = a.id JOIN articles_fts fts ON fts.rowid = f.fts_rowid WHERE articles_fts MATCH ?"
-            // Sanitize FTS search term: wrap terms with quotes or escape special FTS characters
-            let sanitizedFtsTerm = parsed.terms.map { term in
-                let cleaned = term.replacingOccurrences(of: "\"", with: "")
-                return "\"\(cleaned)\"*"
-            }.joined(separator: " ")
-            params.append(("text", sanitizedFtsTerm))
+            // Each term is a quoted prefix phrase, so typed text cannot inject FTS5 syntax (the parser already
+            // removed quotes themselves).
+            params.append(("text", parsed.terms.map { "\"\($0)\"*" }.joined(separator: " ")))
         }
         let scope = collectionScope()
         sql += scope.sql

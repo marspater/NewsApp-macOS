@@ -4375,6 +4375,13 @@ struct NewsTests {
         let date2Str = "2026-05-19T20:30:00Z"
         let date2 = DateParser.parse(date2Str)
         assertTrue((date2?.timeIntervalSince1970 ?? 0) > 0, "Should successfully parse ISO 8601 date")
+        assertEqual(
+            DateParser.parse("2026-10-24"), Date(timeIntervalSince1970: 1_792_800_000),
+            "A date-only ISO 8601 value is midnight UTC instead of an unknown date")
+        assertEqual(
+            DateParser.parse("2026-10-24T06:00:00"), Date(timeIntervalSince1970: 1_792_821_600),
+            "A zone-less ISO 8601 time is read as UTC")
+        assertEqual(DateParser.parse("yesterday"), nil, "Prose is still not a date")
     }
 
     static func testXMLParsing() async {
@@ -6355,6 +6362,13 @@ struct NewsTests {
                 try await db.searchArticles(query: "qubit quantum is:unread").map(\.id), [artA.id],
                 "Same words match with an operator")
             assertTrue(try await db.searchArticles(query: "qubit shares").isEmpty, "Every word must match")
+            assertTrue(ArticleFilterQuery.parse("\"").terms.isEmpty, "A quote-only token is not a search term")
+            assertEqual(
+                try await db.searchArticles(query: "\"").count, 2,
+                "A quote-only term is ignored instead of becoming an empty FTS5 phrase")
+            assertEqual(
+                try await db.searchArticles(query: "qubit \"\"").map(\.id), [artA.id],
+                "An empty quoted term beside a real one is ignored")
 
             // Operator searches
             let searchSource = try await db.searchArticles(query: "source:Nature")
@@ -13419,6 +13433,20 @@ struct NewsTests {
         assertTrue(!analysis.modelIdentifier.isEmpty, "Model identifier should identify engine")
         assertEqual(
             analysis.analysisVersion, 3, "Analysis version invalidates summaries from the old extraction pipeline")
+
+        // 6. Headline words next to punctuation still count for sentence selection (#514).
+        let punctuated = await ExtractiveArticleSummarizer().summarize(
+            title: "Westfield: gunman's 'identity' revealed",
+            content: """
+                The city council met on Tuesday to discuss parking fees. \
+                Residents asked for lower rates near the harbour. \
+                Councillors agreed to review the schedule next month. \
+                Separately, police named the Westfield gunman as a local man. \
+                The gunman had been known to officers for years.
+                """)
+        assertTrue(
+            punctuated.text.contains("Westfield gunman"),
+            "The sentence repeating the headline's punctuated nouns is selected over earlier unrelated ones")
     }
 
     static func testInteractiveAnalysisCancellation() async {
@@ -13559,6 +13587,12 @@ struct NewsTests {
             "0 new articles from 1 source", "Edge case: 0 articles, 1 source")
 
         // 3. Importance computation range [0.0, 1.0]
+        assertEqual(
+            NotificationService.breakingSignalCount(in: "Studies show diesel bodies replacement"), 0,
+            "Signal words match whole words only")
+        assertEqual(
+            NotificationService.breakingSignalCount(in: "Man dies in attack, police say"), 2,
+            "Whole-word signals still count")
         let score = service.computeImportance(
             title: "Breaking News: Major Crisis Declared", description: "Officials announce emergency response.")
         assertTrue(score >= 0.0 && score <= 1.0, "Score must be bounded between 0.0 and 1.0")
@@ -14454,6 +14488,12 @@ struct NewsTests {
         assertTrue(
             ArticleSection.matches("Tech", title: "AI hardware launches", description: "", category: nil),
             "Standalone AI remains a technology cue")
+        assertTrue(
+            ArticleSection.matches("Politics", title: "Political row over the budget", description: "", category: nil),
+            "Section cues are whole words, so the stem 'politic' had to become 'politics' and 'political'")
+        assertTrue(
+            ArticleSection.matches("Sports", title: "Sports roundup: weekend results", description: "", category: nil),
+            "'sports' is a Sports cue in its own right")
 
         // Overlap 1: Health + Technology (AI scanner for hospital patients)
         assertEqual(

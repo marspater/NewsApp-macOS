@@ -40,22 +40,27 @@ final class NotificationService: Sendable {
         score += entityScore * 0.30
 
         // 3. Breaking news signal words
-        let breakingSignals = [
-            "breaking", "just in", "urgent", "exclusive", "confirmed",
-            "announces", "launches", "acquires", "dies", "killed",
-            "arrested", "charged", "resigns", "fired", "recalled",
-            "emergency", "crisis", "attack", "explosion", "earthquake",
-            "replace", "ceo", "president", "elected", "indicted",
-        ]
-        let lower = fullText.lowercased()
-        let signalHits = breakingSignals.filter { lower.contains($0) }.count
-        let signalScore = min(Double(signalHits) / 3.0, 1.0)
+        let signalScore = min(Double(Self.breakingSignalCount(in: fullText)) / 3.0, 1.0)
         score += signalScore * 0.30
 
         // 4. Baseline recency bonus
         score += 0.15
 
         return min(score, 1.0)
+    }
+
+    private static let breakingSignals = [
+        "breaking", "just in", "urgent", "exclusive", "confirmed",
+        "announces", "launches", "acquires", "dies", "killed",
+        "arrested", "charged", "resigns", "fired", "recalled",
+        "emergency", "crisis", "attack", "explosion", "earthquake",
+        "replace", "ceo", "president", "elected", "indicted",
+    ]
+
+    /// Signal words present as whole words: "dies" must not fire on "studies", "diesel" or "bodies".
+    static func breakingSignalCount(in text: String) -> Int {
+        let padded = MuteRules.paddedPhrase(text)
+        return breakingSignals.filter { padded.contains(MuteRules.paddedPhrase($0)) }.count
     }
 
     /// NLP-driven triage: dispatches notifications according to the active NotificationMode.

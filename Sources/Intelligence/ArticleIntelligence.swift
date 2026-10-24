@@ -672,15 +672,14 @@ public final class ExtractiveArticleSummarizer: ArticleSummarizing {
             return SummaryResult(text: String(trimmed.prefix(200)), sentencesUsed: 1, confidence: 0.5)
         }
 
-        let titleWords = Set(
-            title.lowercased().components(separatedBy: .whitespacesAndNewlines).filter { $0.count > 3 })
+        // Words only: "Westfield:" and "gunman's" must count as the headline's "westfield" and "gunman".
+        let titleWords = Set(MuteRules.words(title).filter { $0.count > 3 })
 
         var scored: [(sentence: String, score: Double, originalIndex: Int)] = []
         for (idx, sentence) in sentences.enumerated() {
             var score = 0.0
             score += max(0, 5.0 - Double(idx) * 0.5)
-            let sWords = Set(sentence.lowercased().components(separatedBy: .whitespacesAndNewlines))
-            let overlap = titleWords.intersection(sWords).count
+            let overlap = titleWords.intersection(MuteRules.words(sentence)).count
             score += Double(overlap) * 2.5
             if sentence.count >= 80 && sentence.count <= 220 {
                 score += 2.0
@@ -688,7 +687,7 @@ public final class ExtractiveArticleSummarizer: ArticleSummarizing {
             scored.append((sentence, score, idx))
         }
 
-        scored.sort { $0.score > $1.score }
+        scored.sort { $0.score != $1.score ? $0.score > $1.score : $0.originalIndex < $1.originalIndex }
         let topCount = min(2, scored.count)
         let selected = scored.prefix(topCount).sorted { $0.originalIndex < $1.originalIndex }
         let summaryText = selected.map { $0.sentence }.joined(separator: " ")
@@ -720,17 +719,15 @@ public final class ExtractiveArticleSummarizer: ArticleSummarizing {
             return sentences
         }
 
-        let titleWords = Set(
-            title.lowercased().components(separatedBy: .whitespacesAndNewlines).filter { $0.count > 3 })
+        let titleWords = Set(MuteRules.words(title).filter { $0.count > 3 })
         var scored: [(sentence: String, score: Double, originalIndex: Int)] = []
         for (idx, s) in sentences.enumerated() {
             var score = max(0, 4.0 - Double(idx) * 0.3)
-            let sWords = Set(s.lowercased().components(separatedBy: .whitespacesAndNewlines))
-            score += Double(titleWords.intersection(sWords).count) * 2.0
+            score += Double(titleWords.intersection(MuteRules.words(s)).count) * 2.0
             scored.append((s, score, idx))
         }
 
-        scored.sort { $0.score > $1.score }
+        scored.sort { $0.score != $1.score ? $0.score > $1.score : $0.originalIndex < $1.originalIndex }
         let selected = scored.prefix(min(4, scored.count)).sorted { $0.originalIndex < $1.originalIndex }
         return selected.map { $0.sentence }
     }
