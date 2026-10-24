@@ -467,8 +467,10 @@ struct EventMatchPolicy: Sendable, Equatable {
     var borderlineScore = 0.3
     var eventScore = 0.45
     var maximumEventSize = 100
-    /// Semantic embedding thresholds (#127, #307)
-    var semanticMatchThreshold: Double = 0.82
+    /// Semantic embedding thresholds (#127, #307, #509). The rescue cutoff was chosen on the tune split on
+    /// 24 October 2026: 0.70 links five more labeled pairs than 0.82 with no false pair, 0.65 adds three false pairs;
+    /// the holdout confirmed it once (precision 1.000, recall 0.447 → 0.579).
+    var semanticMatchThreshold: Double = 0.70
     var semanticVetoThreshold: Double = 0.55
     var semanticFragmentThreshold: Double = 0.70
     static let standard = EventMatchPolicy()
@@ -500,7 +502,7 @@ struct EventPairAssessment: Sendable, Equatable {
 enum EventMatcher {
     /// Bump when matching changes; recent articles and active memberships are revalidated.
     /// Unchanged archived memberships remain intact.
-    static let version = 9
+    static let version = 10
 
     private static func pairConflict(
         _ a: EventFeatures, _ b: EventFeatures, gap: TimeInterval, maximumTimeGap: TimeInterval

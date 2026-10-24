@@ -313,12 +313,18 @@ extension NewsTests {
         let baselineAssessment = EventMatcher.assess(featA, featB, embeddingSimilarity: nil)
         assertFalse(baselineAssessment.isMatch, "Low lexical overlap alone fails to match under strict rules")
 
-        // With high neural semantic similarity (0.86 >= 0.82) and shared specific anchor, semantic rescue activates:
+        // With high neural semantic similarity (0.86 >= 0.70) and shared specific anchor, semantic rescue activates:
         let rescuedAssessment = EventMatcher.assess(featA, featB, embeddingSimilarity: 0.86)
         assertTrue(
             rescuedAssessment.isMatch,
             "High neural similarity (0.86) rescues genuine paraphrase with shared specific anchor")
         assertEqual(rescuedAssessment.conflict, nil, "Rescued pair must have no factual conflict")
+        // The cutoff is 0.70, chosen on the tune split (#509): the first false pairs there appear at 0.65.
+        assertTrue(
+            EventMatcher.assess(featA, featB, embeddingSimilarity: 0.72).isMatch, "0.72 clears the rescue cutoff")
+        let belowCutoff = EventMatcher.assess(featA, featB, embeddingSimilarity: 0.66)
+        assertFalse(belowCutoff.isMatch, "0.66 stays below the rescue cutoff")
+        assertEqual(belowCutoff.conflict, nil, "Below the cutoff is a non-match, not a veto")
 
         // Case 2: Semantic Veto
         // Borderline rule overlap or single shared anchor, but low neural similarity (0.42 < 0.55 veto threshold).

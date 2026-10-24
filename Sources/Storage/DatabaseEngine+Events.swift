@@ -1230,7 +1230,7 @@ extension DatabaseEngine {
         encoder.outputFormatting = [.sortedKeys]
         try inEventTransaction { () throws -> Void in
             for (articleID, value) in features {
-                let json = String(decoding: try encoder.encode(value), as: UTF8.self)
+                guard let json = String(bytes: try encoder.encode(value), encoding: .utf8) else { continue }
                 try eventRows(
                     """
                     INSERT INTO article_features(article_id, version, features, computed_at)

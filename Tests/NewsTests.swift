@@ -10,6 +10,10 @@ import SQLite3
 import UniformTypeIdentifiers
 import WebKit
 
+#if canImport(FoundationModels)
+    import FoundationModels
+#endif
+
 // MARK: - MockURLProtocol for Testing
 class MockURLProtocol: URLProtocol, @unchecked Sendable {
     static var mockData: Data?
@@ -414,6 +418,14 @@ struct NewsTests {
                 throw StoryCorpus.Failure.invalid("Missing library path")
             }
             try await seedLaunchLibrary(path: CommandLine.arguments[index + 1])
+            return
+        }
+        if CommandLine.arguments.contains("--matcher-regressions") {
+            try await testMatcherRegressionCorpus()
+            return
+        }
+        if CommandLine.arguments.contains("--model-outcome-check") {
+            try await checkOnDeviceModelOutcomes()
             return
         }
         if CommandLine.arguments.contains("--active-work-cancellation") {
@@ -10507,6 +10519,65 @@ struct NewsTests {
 
     /// The authored English corpus replayed through the real clusterer (#506). Regression evidence with a ratchet;
     /// the private holdout (#509) stays the acceptance measurement. Pairs are printed by fixture id only.
+    /// Opt-in, live, local only (#508): the real on-device model over authored reports of violence. Prints the
+    /// identifier and version the reader would store and whether a second request repeats the outcome; the
+    /// `NewsTextModel` log category carries the outcome label. No publisher text, nothing stored.
+    static func checkOnDeviceModelOutcomes() async throws {
+        let reports: [(name: String, title: String, content: String)] = [
+            (
+                "benign",
+                "City council approves new library branch",
+                """
+                The city council voted on Tuesday to fund a new library branch in the eastern district. \
+                Construction is expected to start next spring and take eighteen months. \
+                Councillors said the branch would include a children's reading room and a community hall. \
+                The budget was approved without opposition after a short debate.
+                """
+            ),
+            (
+                "shooting",
+                "Three dead after gunman opens fire at shopping mall",
+                """
+                A gunman shot and killed three people at a shopping mall on Saturday afternoon before a police \
+                officer shot him dead, police said. Two more people were wounded and taken to hospital. \
+                Witnesses described shoppers running from the food court as shots rang out. \
+                Police have not named the attacker and said the motive was unknown.
+                """
+            ),
+            (
+                "war",
+                "Air strike on apartment block kills at least twelve",
+                """
+                An overnight air strike hit a residential block in the city's northern district, killing at least \
+                twelve people including four children, the regional governor said on Monday. \
+                Rescue teams pulled survivors from the rubble through the morning as shelling continued nearby. \
+                The military said it had struck a command post; residents said the building housed only families.
+                """
+            ),
+        ]
+        let analyzer = ArticleAnalyzer(textModel: .onDevice)
+        for report in reports {
+            let first = try await analyzer.analyze(title: report.title, content: report.content)
+            let second = try await analyzer.analyze(title: report.title, content: report.content)
+            print(
+                "    \(report.name): identifier \(first.modelIdentifier) version \(first.analysisVersion), "
+                    + "repeat identifier \(second.modelIdentifier) version \(second.analysisVersion), "
+                    + "summary \(first.summary.count) chars")
+        }
+        // A prompt past the context window is the one rejection that needs no sensitive text to provoke.
+        do {
+            _ = try await NewsTextModel.onDevice.respond(String(repeating: "word ", count: 40_000), 32)
+            print("    oversized prompt: answered")
+        } catch let rejected as NewsTextModel.Rejected {
+            print("    oversized prompt: rejected:\(rejected.reason.rawValue) (final)")
+        } catch {
+            print("    oversized prompt: \(type(of: error)) (provisional)")
+        }
+        print(
+            "    Outcome labels: log show --predicate 'subsystem == \"com.marspater.news\" AND category == \"NewsTextModel\"' "
+                + "--last 10m")
+    }
+
     static func testMatcherRegressionCorpus() async throws {
         print("  - Testing the authored matcher regression corpus (#506)...")
         struct Fixture: Decodable {
@@ -10948,6 +11019,51 @@ struct NewsTests {
                     "merged": report.merged, "judged": report.judged, "conflicts": report.conflicts,
                     "detached": report.detached,
                 ])
+            }
+            // Per-pair gate values for every labeled or linked pair, ids only: which gate holds a missed pair out,
+            // and what a wrong pair passed. Opt-in; the aggregate lines above are the measurement.
+            if ProcessInfo.processInfo.environment["NEWS_EVENT_DIAGNOSE"] == "1" {
+                var featureCache: [String: EventFeatures] = [:]
+                var vectorCache: [String: [Float]] = [:]
+                for item in items {
+                    featureCache[item.id] = EventFeatures(
+                        title: item.title, description: item.description ?? "", date: item.published)
+                    if let vector = await SentenceEmbedder.shared.embed(
+                        EventFeatures.matchingText(title: item.title, description: item.description ?? ""))
+                    {
+                        vectorCache[item.id] = vector
+                    }
+                }
+                for i in items.indices {
+                    for j in items.indices where j > i {
+                        let gold = items[i].event != nil && items[i].event == items[j].event
+                        let linked =
+                            memberships[items[i].id] != nil && memberships[items[i].id] == memberships[items[j].id]
+                        guard gold || linked, let a = featureCache[items[i].id], let b = featureCache[items[j].id]
+                        else { continue }
+                        var similarity: Double?
+                        if let va = vectorCache[items[i].id], let vb = vectorCache[items[j].id] {
+                            similarity = SentenceEmbedder.cosineSimilarity(va, vb)
+                        }
+                        let pair = EventMatcher.assess(a, b, embeddingSimilarity: similarity)
+                        let nonPlaceB = b.keywords.union(b.titleNumbers).union(b.tollNumbers)
+                        let nonPlaceA = a.keywords.union(a.titleNumbers).union(a.tollNumbers)
+                        let primaryDisjoint =
+                            (!a.primaryTitleTerms.isEmpty && a.primaryTitleTerms.isDisjoint(with: nonPlaceB))
+                            || (!b.primaryTitleTerms.isEmpty && b.primaryTitleTerms.isDisjoint(with: nonPlaceA))
+                        let gap = abs(items[i].published.timeIntervalSince(items[j].published)) / 3600
+                        print(
+                            String(
+                                format: "      pair %@+%@ gold=%d linked=%d gap=%.1fh conflict=%@ primaryDisjoint=%d "
+                                    + "match=%d compatible=%d borderline=%d specific=%d anchors=%d keywords=%d what=%.2f "
+                                    + "score=%.2f cosine=%@",
+                                items[i].id, items[j].id, gold ? 1 : 0, linked ? 1 : 0, gap,
+                                pair.conflict?.rawValue ?? "-", primaryDisjoint ? 1 : 0, pair.isMatch ? 1 : 0,
+                                pair.isCompatible ? 1 : 0, pair.isBorderline ? 1 : 0, pair.sharedSpecificAnchors,
+                                pair.sharedAnchors, pair.sharedKeywords, pair.what, pair.score,
+                                similarity.map { String(format: "%.2f", $0) } ?? "-"))
+                    }
+                }
             }
             if let output {
                 let receipt: [String: Any] = [
@@ -13304,9 +13420,39 @@ struct NewsTests {
         assertEqual(fetched, OverviewGenerationCoordinator.maxEvidenceFetches, "Four representatives at most")
     }
 
+    /// Every framework error type reaches one of the three outcomes (#508); the macOS 27 types exist only in that SDK.
+    static func testModelErrorMapping() {
+        print("  - Testing on-device model error mapping (#508)...")
+        #if canImport(FoundationModels) && compiler(>=6.4)
+            if #available(macOS 27.0, *) {
+                let overflow = NewsTextModel.failure(
+                    any: LanguageModelError.contextSizeExceeded(
+                        .init(contextSize: 4_096, tokenCount: 9_000, debugDescription: "")))
+                assertEqual(
+                    overflow as? NewsTextModel.Rejected, NewsTextModel.Rejected(reason: .contextWindow),
+                    "A macOS 27 context overflow is final")
+                let refusal = NewsTextModel.failure(
+                    any: LanguageModelError.refusal(.init(explanation: "", debugDescription: "")))
+                assertEqual(
+                    refusal as? NewsTextModel.Rejected, NewsTextModel.Rejected(reason: .refusal),
+                    "A macOS 27 refusal is final")
+                assertTrue(
+                    NewsTextModel.failure(any: LanguageModelError.timeout(.init(debugDescription: "")))
+                        is NewsTextModel.TemporarilyUnavailable, "A timeout retries later")
+                assertTrue(
+                    NewsTextModel.failure(any: SystemLanguageModel.Error.assetsUnavailable(.init(debugDescription: "")))
+                        is NewsTextModel.TemporarilyUnavailable, "Missing model assets retry later")
+            }
+        #endif
+        assertTrue(NewsTextModel.failure(any: CancellationError()) is CancellationError, "Cancellation passes through")
+        assertTrue(
+            NewsTextModel.failure(any: URLError(.badServerResponse)) is URLError, "Unknown errors stay provisional")
+    }
+
     @MainActor
     static func testPlainTextGeneration(fixtureHost: String) async throws {
         print("  - Testing Plain Text Generation, Support Gates and Refusal Fallbacks...")
+        testModelErrorMapping()
         assertTrue(ArticleTextAnswer.classification("World|0.91") != nil, "Fixed category text parses")
         for bad in ["World|NaN", "World|1.1", "Unknown|0.9", "World|0.9|extra", "I refuse"] {
             assertEqual(ArticleTextAnswer.classification(bad)?.category, nil, "Malformed classification is rejected")

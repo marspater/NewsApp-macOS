@@ -12,7 +12,7 @@ Program #520, implemented from a cloud session without a Swift toolchain; every 
 
 `MuteRules.foldedWords` added; four duplicate splitters removed. No measured number changes by design. CI: (run link added when green).
 
-## PR 2 (#522): stored signals, act class, related-act links (matcher v9, schema v24)
+## PR 2 (#522): stored signals, act class, related-act links (matcher v10 after the merge with #519, schema v24)
 
 | Change | Where | Effect |
 | --- | --- | --- |
@@ -21,7 +21,7 @@ Program #520, implemented from a cloud session without a Swift toolchain; every 
 | `pair_assessments` rows for match, related-act and borderline decisions | `EventClustering.record` | Audit trail per pair; related acts shown as earlier events in the overview |
 | `--export-features` | `NewsTests.exportPairFeatures` | CSV of candidate-pair features and labels for the PR 4 fit; corpus ids only |
 
-Authored corpus on v9 (gate 1, hosted CI run 40081886073): precision 1.000 (TP 22, FP 0), recall 0.917 (FN 2). Against v8 (TP 21 / FP 2 / FN 3): both false pairs (f08-a+f08-d, f08-b+f08-d) are gone, the resignation pair f08-c+f08-d is recovered, and the two f03 misses (the rescue report 20 h after the quake) remain. The fixture ratchet is TP ≥ 22 / FP ≤ 0.
+Authored corpus with the act-class veto alone (gate 1, hosted CI run 40081886073, before the merge with #519's semantic rescue at 0.70): precision 1.000 (TP 22, FP 0), recall 0.917 (FN 2). Against v8 (TP 21 / FP 2 / FN 3): both false pairs (f08-a+f08-d, f08-b+f08-d) are gone, the resignation pair f08-c+f08-d is recovered, and the two f03 misses (the rescue report 20 h after the quake) remain. The fixture ratchet is TP ≥ 22 / FP ≤ 0.
 
 Holdout (local, Mars, #526): before/after lines added when run.
 
