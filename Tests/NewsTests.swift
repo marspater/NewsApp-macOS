@@ -9499,8 +9499,8 @@ struct NewsTests {
             activeSince: now.addingTimeInterval(-72 * 3600),
             matcherVersion: EventMatcher.version, limit: 10)
         assertEqual(
-            upgradePending.map(\.id), ["upgrade-1", "upgrade-2", "upgrade-3"],
-            "An older matcher version leaves members pending, earliest first")
+            upgradePending.map(\.id), ["upgrade-3", "upgrade-2", "upgrade-1"],
+            "An older matcher version leaves members pending, newest first (#541)")
         assertTrue(
             upgradePending.allSatisfy(\.previouslyMatched),
             "Members pending only for the matcher version are reported as matched before")
