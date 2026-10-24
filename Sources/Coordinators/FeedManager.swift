@@ -468,11 +468,16 @@ class FeedManager: NSObject, ObservableObject {
         // Muting applies in every notification privacy mode; stored importance does not hide stories.
         let muting = appSettings.muteRules
         let notifiable = newArticles.filter { eligible.contains($0.id) && !muting.mutes($0) }
-        // Clustering has run: reports of one event notify once, by their strongest report (#523).
-        let events = (try? await articleStore.database.eventIDs(forArticles: notifiable.map(\.id))) ?? [:]
-        let representatives = NotificationService.representatives(of: notifiable, events: events)
-        if appSettings.notificationsEnabled && !representatives.isEmpty {
-            await notifyBatch(representatives, appSettings.notificationMode)
+        if appSettings.notificationsEnabled && !notifiable.isEmpty {
+            let mode = appSettings.notificationMode
+            var batch = notifiable
+            // Clustering has run: in full mode, which posts a banner per story, reports of one event notify once, by
+            // their strongest report (#523). The summary modes count every new story and source, so they get all.
+            if mode == .full {
+                let events = (try? await articleStore.database.eventIDs(forArticles: notifiable.map(\.id))) ?? [:]
+                batch = await NotificationService.representatives(of: notifiable, events: events)
+            }
+            await notifyBatch(batch, mode)
         }
         guard !Task.isCancelled, !isStopped else { return }
         enrichArticlesInBackground()

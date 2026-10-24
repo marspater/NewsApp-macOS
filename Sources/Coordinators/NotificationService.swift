@@ -64,8 +64,11 @@ final class NotificationService: Sendable {
     }
 
     /// One report per event, the one that scores highest, in first-seen order; stories outside any event stand alone.
-    /// Several publishers covering one story then notify once instead of once each (#523).
-    static func representatives(of articles: [FeedArticle], events: [String: String]) -> [FeedArticle] {
+    /// Several publishers covering one story then notify once instead of once each (#523). Scoring tags every article,
+    /// so it runs off the main actor.
+    @concurrent nonisolated static func representatives(of articles: [FeedArticle], events: [String: String]) async
+        -> [FeedArticle]
+    {
         var order: [String] = []
         var best: [String: (article: FeedArticle, score: Double)] = [:]
         for article in articles {

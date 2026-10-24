@@ -14034,10 +14034,10 @@ struct NewsTests {
         let third = report(3, "Explosion reported downtown")
         let single = report(4, "Local library extends opening hours")
         let events = [quiet.id: "event-a", loud.id: "event-a", third.id: "event-a"]
-        let chosen = NotificationService.representatives(of: [quiet, loud, third, single], events: events)
+        let chosen = await NotificationService.representatives(of: [quiet, loud, third, single], events: events)
         assertEqual(chosen.map(\.id), [loud.id, single.id], "One report per event, the strongest, then the single")
         assertEqual(
-            NotificationService.representatives(of: [quiet, single], events: [:]).map(\.id), [quiet.id, single.id],
+            await NotificationService.representatives(of: [quiet, single], events: [:]).map(\.id), [quiet.id, single.id],
             "Without events every story stands alone in order")
 
         // 4. Robust dispatching (no crashes across all 3 notification tiers)
