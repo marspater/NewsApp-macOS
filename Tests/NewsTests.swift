@@ -428,6 +428,15 @@ struct NewsTests {
             try await timeFragmentMerge()
             return
         }
+        if CommandLine.arguments.contains("--review-pairs") {
+            let environment = ProcessInfo.processInfo.environment
+            guard let snapshot = environment["NEWS_SNAPSHOT_DB"], let output = environment["NEWS_EVENT_OUTPUT"] else {
+                throw StoryCorpus.Failure.invalid("--review-pairs needs NEWS_SNAPSHOT_DB and NEWS_EVENT_OUTPUT")
+            }
+            let rows = try await exportPairReview(snapshot: snapshot, outputDirectory: output)
+            print("    exported \(rows) pair decisions for review (#551)")
+            return
+        }
         if CommandLine.arguments.contains("--model-outcome-check") {
             try await checkOnDeviceModelOutcomes()
             return
@@ -10622,7 +10631,66 @@ struct NewsTests {
         assertEqual(
             try await db.fetchArticleFeatures(articleIDs: resolved, version: EventFeatures.storageVersion).count, 4,
             "The pass stored every story's signals")
+
+        // Every decision carries what it rested on (#551), and a vetoed pair with shared evidence is kept.
+        let featureRows = try await db.eventRows(
+            "SELECT decision, features FROM pair_assessments WHERE features IS NOT NULL;")
+        assertTrue(featureRows.count >= 3, "Match and related-act rows store their features")
+        let decoded = featureRows.compactMap { row in
+            row[1].flatMap { try? JSONDecoder().decode(EventPairFeatures.self, from: Data($0.utf8)) }
+        }
+        assertEqual(decoded.count, featureRows.count, "The features JSON decodes for every row")
+        assertTrue(
+            decoded.contains { $0.conflict == EventConflict.differentAct.rawValue && $0.sharedSpecific >= 1 },
+            "A related act records its conflict and shared evidence")
+        let vetoedDB = DatabaseEngine(path: ":memory:")
+        try await vetoedDB.open()
+        try await vetoedDB.upsertArticles([
+            story(5, "Drone strike hits market in Kharkiv, Ukraine", hours: 0),
+            story(6, "Drone strike hits market in Idlib, Syria", hours: 1),
+        ])
+        _ = try await EventClusterer.run(in: vetoedDB, now: start.addingTimeInterval(2 * 3600))
+        let vetoedRows = try await vetoedDB.eventRows(
+            "SELECT reason, features FROM pair_assessments WHERE decision = 'vetoed';")
+        assertEqual(vetoedRows.count, 1, "A vetoed pair that shares words is recorded once")
+        assertEqual(vetoedRows.first?[0], EventConflict.places.rawValue, "… with its conflict as the reason")
+        assertTrue(
+            vetoedRows.first?[1].flatMap({ try? JSONDecoder().decode(EventPairFeatures.self, from: Data($0.utf8)) })?
+                .sharedKeywords ?? 0 >= 2, "… and the shared evidence that made it worth reviewing")
+        await vetoedDB.close()
+
+        // The review export writes one row per stored pair with both headlines and the corrections (#551).
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(
+            at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let copy = directory.appendingPathComponent("library.sqlite3").path
+        try await db.eventRows("VACUUM INTO ?;", [.text(copy)])
         await db.close()
+        let stored = try await { () async throws -> Int in
+            let count = DatabaseEngine(path: copy)
+            try await count.open()
+            let rows = try await count.eventRows("SELECT count(*) FROM pair_assessments;")
+            await count.close()
+            return rows.first?[0].flatMap(Int.init) ?? -1
+        }()
+        let exported = try await exportPairReview(snapshot: copy, outputDirectory: directory.path)
+        assertEqual(exported, stored, "The export has one row per stored pair")
+        let csv = try String(contentsOf: directory.appendingPathComponent("pairs-review.csv"), encoding: .utf8)
+        let lines = csv.split(separator: "\n")
+        assertEqual(lines.count, exported + 1, "A header and one line per pair")
+        assertTrue(lines.first?.hasPrefix("article_id,other_article_id,decision") == true, "Columns are named")
+        assertTrue(
+            lines.dropFirst().contains { $0.contains("Parliament votes to oust Prime Minister Novak in Ljubljana") },
+            "Rows carry the headlines")
+        var refused = false
+        do {
+            _ = try await exportPairReview(
+                snapshot: "/Users/x/Library/Containers/app/news.sqlite3", outputDirectory: directory.path)
+        } catch {
+            refused = true
+        }
+        assertTrue(refused, "The live library is refused")
     }
 
     /// The pair model (#525) is asked only about borderline pairs. A confident answer joins two reports that share no
@@ -11403,6 +11471,48 @@ struct NewsTests {
             results[split] = total
         }
         return results
+    }
+
+    /// Every stored pair decision of a library copy with both headlines, publishers, dates, event ids and the reader's
+    /// corrections, as `pairs-review.csv` in the private directory (#551). The CSV carries headlines, so it is never
+    /// written inside the checkout and never overwritten; a file inside an app container is refused.
+    static func exportPairReview(snapshot: String, outputDirectory: String) async throws -> Int {
+        guard !snapshot.contains("/Library/Containers/") else {
+            throw StoryCorpus.Failure.invalid("Export from a copy of the library, never the live file")
+        }
+        let file = try StoryCorpus.privateDirectory(outputDirectory).appendingPathComponent("pairs-review.csv")
+        func quoted(_ value: String) -> String { "\"" + value.replacingOccurrences(of: "\"", with: "\"\"") + "\"" }
+        let db = DatabaseEngine(path: snapshot)
+        try await db.open()
+        let rows = try await db.eventRows(
+            """
+            SELECT p.article_id, p.other_article_id, p.decision, p.reason, p.score, p.matcher_version, p.assessed_at,
+                coalesce(p.features, ''), a.source, a.title, a.published_at, coalesce(ma.event_id, ''),
+                b.source, b.title, b.published_at, coalesce(mb.event_id, ''),
+                EXISTS (SELECT 1 FROM event_inclusions i
+                    WHERE i.article_id = p.article_id AND i.other_article_id = p.other_article_id),
+                EXISTS (SELECT 1 FROM event_exclusions x
+                    WHERE x.article_id = p.article_id AND x.other_article_id = p.other_article_id)
+            FROM pair_assessments p
+            JOIN articles a ON a.id = p.article_id
+            JOIN articles b ON b.id = p.other_article_id
+            LEFT JOIN event_members ma ON ma.article_id = a.id
+            LEFT JOIN event_members mb ON mb.article_id = b.id
+            ORDER BY p.decision, p.score DESC, p.article_id, p.other_article_id;
+            """)
+        await db.close()
+        var lines = [
+            "article_id,other_article_id,decision,reason,score,matcher_version,assessed_at,features,"
+                + "source_a,title_a,published_a,event_a,source_b,title_b,published_b,event_b,included,excluded"
+        ]
+        for row in rows {
+            lines.append(
+                row.enumerated().map { index, value in
+                    [7, 8, 9, 12, 13].contains(index) ? quoted(value ?? "") : (value ?? "")
+                }.joined(separator: ","))
+        }
+        try StoryCorpus.writePrivate(Data(lines.joined(separator: "\n").utf8), to: file, replacing: false)
+        return rows.count
     }
 
     /// Opt-in, local: times one fragment-merge pass (`limit: 0`) over a temporary copy of `NEWS_SNAPSHOT_DB`, with
