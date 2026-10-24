@@ -50,7 +50,6 @@ enum AppColor {
     static let borderSubtle = Color(NSColor.separatorColor)
     static let separator = Color(NSColor.separatorColor)
 
-    static let focusRing = Color.accentColor.opacity(0.65)
     /// A hovered card's accent border (DESIGN.md 8.2).
     static let hoverBorderOpacity: Double = 0.40
     static var hoverBorder: Color { accent.opacity(hoverBorderOpacity) }
