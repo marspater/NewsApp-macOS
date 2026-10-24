@@ -20,7 +20,7 @@ struct MuteRules: Equatable, Hashable, Sendable {
     init(sources: [String] = [], topics: [String] = [], topicSets: [String] = []) {
         for source in sources { addSource(source) }
         for topic in topics { addTopic(topic) }
-        for set in topicSets { addTopicSet(set) }
+        for id in topicSets { addTopicSet(id) }
     }
 
     var isEmpty: Bool { sources.isEmpty && topics.isEmpty && topicSets.isEmpty }

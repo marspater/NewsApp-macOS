@@ -3245,8 +3245,8 @@ actor DatabaseEngine {
             for topic in rules.matchedTopics(title: text(1), description: text(2)) {
                 counts.topics[topic, default: 0] += 1
             }
-            for set in rules.matchedTopicSets(title: text(1), description: text(2)) {
-                counts.topicSets[set, default: 0] += 1
+            for id in rules.matchedTopicSets(title: text(1), description: text(2)) {
+                counts.topicSets[id, default: 0] += 1
             }
             status = sqlite3_step(stmt)
         }

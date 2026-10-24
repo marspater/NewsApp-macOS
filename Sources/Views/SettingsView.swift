@@ -432,14 +432,15 @@ struct SettingsView: View {
     }
 
     /// One switch per fixed topic set, with its phrases and, when on, how many stored stories it hides.
-    private func topicSetRow(_ set: MuteTopicSet) -> some View {
-        let isOn = appSettings.muteRules.topicSets.contains(set.id)
-        let count = muteCounts.topicSets[set.id] ?? 0
-        return Toggle(isOn: Binding(get: { isOn }, set: { appSettings.setTopicSet(set.id, muted: $0) })) {
+    private func topicSetRow(_ topicSet: MuteTopicSet) -> some View {
+        let isOn = appSettings.muteRules.topicSets.contains(topicSet.id)
+        let count = muteCounts.topicSets[topicSet.id] ?? 0
+        let binding = Binding(get: { isOn }, set: { appSettings.setTopicSet(topicSet.id, muted: $0) })
+        return Toggle(isOn: binding) {
             VStack(alignment: .leading, spacing: AppSpacing.textStack) {
-                Text(set.title)
+                Text(topicSet.title)
                     .foregroundStyle(AppColor.primaryText)
-                Text(set.phrases.joined(separator: ", "))
+                Text(topicSet.phrases.joined(separator: ", "))
                     .font(AppTypography.caption)
                     .foregroundStyle(AppColor.secondaryText)
                     .lineLimit(2)
