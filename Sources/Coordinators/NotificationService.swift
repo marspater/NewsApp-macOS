@@ -92,6 +92,11 @@ final class NotificationService: Sendable {
         }
     }
 
+    /// Stable across launches, so a story replaces its earlier banner; `hashValue` is reseeded per process.
+    static func notificationIdentifier(for article: FeedArticle) -> String {
+        "news-\(article.id)"
+    }
+
     /// Formats the minimal notification summary string with singular/plural grammar.
     static func formatMinimalSummary(articleCount: Int, uniqueSourcesCount: Int) -> String {
         let articleText = articleCount == 1 ? "1 new article" : "\(articleCount) new articles"
@@ -178,7 +183,7 @@ final class NotificationService: Sendable {
             content.attachments = [attachment]
         }
 
-        let identifier = "news-\(article.link.hashValue)"
+        let identifier = Self.notificationIdentifier(for: article)
         let request = UNNotificationRequest(identifier: identifier, content: content, trigger: nil)
         do {
             try await UNUserNotificationCenter.current().add(request)

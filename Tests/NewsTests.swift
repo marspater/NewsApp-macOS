@@ -11333,6 +11333,13 @@ struct NewsTests {
     static func testNotificationModeTriageAndGrammar() async {
         print("  - Testing NotificationMode Triage, Privacy & Singular/Plural Grammar...")
 
+        var identified = FeedArticle(
+            title: "Story", link: "https://example.com/a", guid: "a", description: "", pubDate: Date(), source: "P")
+        identified.storedID = "stable-id"
+        assertEqual(
+            NotificationService.notificationIdentifier(for: identified), "news-stable-id",
+            "Notification identifiers come from the stored story identity, not the per-process hash seed")
+
         // 1. Singular/Plural grammar helper
         assertEqual(
             NotificationService.formatMinimalSummary(articleCount: 1, uniqueSourcesCount: 1),
@@ -12202,6 +12209,16 @@ struct NewsTests {
                 IPAddressValidator.checkLiteralIP(host) != nil,
                 "Transition/reserved addresses cannot escape the public boundary")
         }
+        // A gateway that stopped or failed after startup restarts on next use; the client follows its new port.
+        let gatewayClient = SecureHTTPClient(gateway: allowed, resolver: { _ in .allowed(ips: ["93.184.216.34"]) })
+        let restartURL = URL(string: "http://93.184.216.34/restart")!
+        let (beforeStop, _) = try await gatewayClient.fetchArticleHTML(from: restartURL, allowHTTP: true)
+        assertEqual(String(decoding: beforeStop, as: UTF8.self), "OK", "The client reaches the gateway it started")
+        await allowed.stop()
+        let (afterStop, _) = try await gatewayClient.fetchArticleHTML(from: restartURL, allowHTTP: true)
+        assertEqual(
+            String(decoding: afterStop, as: UTF8.self), "OK", "The next request after a gateway stop succeeds")
+        await allowed.stop()
     }
 
     actor TestCounter {
