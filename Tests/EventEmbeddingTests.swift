@@ -108,7 +108,7 @@ extension NewsTests {
         )
 
         // 4. Batch embedding preserves order
-        let batchVectors = await embedder.embedBatch([textA, textB, textC])
+        let batchVectors = await embedder.embedBatch([textA, textB, textC]).compactMap { $0 }
         assertEqual(batchVectors.count, 3, "Batch embed should return 3 vectors")
         assertTrue(
             abs(SentenceEmbedder.cosineSimilarity(batchVectors[0], vecA) - 1.0) < 1e-5,

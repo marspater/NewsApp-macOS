@@ -145,10 +145,16 @@ enum EventStoryRelation {
 
     static func find(eventID: String, in database: DatabaseEngine) async throws -> [RelatedStoryEvent] {
         let snapshot = try await database.relatedStoryEventRows(eventID: eventID)
-        let common = try await commonActors(of: snapshot.target, in: database)
+        // Signals the clusterer stored (#522); the rest are extracted here and, as before, never written.
+        let rows = snapshot.target + snapshot.candidates.flatMap(\.members)
+        var stored = try await database.fetchArticleFeatures(
+            articleIDs: rows.map(\.id), version: EventFeatures.storageVersion)
+        for row in rows { stored[row.id]?.date = row.date }
+        let known = stored
+        let common = try await commonActors(of: snapshot.target, in: database, features: known)
         // NaturalLanguage work must not hold either the database actor or the main actor.
         let work = Task.detached(priority: .utility) {
-            try links(target: snapshot.target, candidates: snapshot.candidates, commonActors: common)
+            try links(target: snapshot.target, candidates: snapshot.candidates, commonActors: common, features: known)
         }
         return try await withTaskCancellationHandler {
             let result = try await work.value
@@ -160,13 +166,15 @@ enum EventStoryRelation {
     }
 
     /// The target's people and organizations that are too common in the preceding week to tie events together.
-    static func commonActors(of target: [EventMatchRow], in database: DatabaseEngine) async throws -> Set<String> {
+    static func commonActors(
+        of target: [EventMatchRow], in database: DatabaseEngine, features known: [String: EventFeatures] = [:]
+    ) async throws -> Set<String> {
         guard let start = target.map(\.date).min() else { return [] }
         let actors = try await Task.detached(priority: .utility) {
             var actors = Set<String>()
             for row in target.prefix(memberLimit) {
                 try Task.checkCancellation()
-                let features = EventFeatures(title: row.title, description: row.description, date: row.date)
+                let features = Self.signals(of: row, known: known)
                 actors.formUnion(features.people.union(features.organizations))
             }
             return actors
@@ -196,9 +204,13 @@ enum EventStoryRelation {
         return true
     }
 
+    private static func signals(of row: EventMatchRow, known: [String: EventFeatures]) -> EventFeatures {
+        known[row.id] ?? EventFeatures(title: row.title, description: row.description, date: row.date)
+    }
+
     static func links(
         target: [EventMatchRow], candidates: [(id: String, members: [EventMatchRow])],
-        commonActors: Set<String> = []
+        commonActors: Set<String> = [], features known: [String: EventFeatures] = [:]
     ) throws -> [RelatedStoryEvent] {
         try Task.checkCancellation()
         guard !target.isEmpty, target.count <= memberLimit,
@@ -206,7 +218,7 @@ enum EventStoryRelation {
             let start = target.map(\.date).min()
         else { return [] }
         let targetIDs = Set(target.compactMap(\.eventID))
-        let targetFeatures = target.map { EventFeatures(title: $0.title, description: $0.description, date: $0.date) }
+        let targetFeatures = target.map { signals(of: $0, known: known) }
         var links: [RelatedStoryEvent] = []
         for candidate in candidates.prefix(candidateLimit) {
             try Task.checkCancellation()
@@ -217,7 +229,7 @@ enum EventStoryRelation {
                 }),
                 let first = members.min(by: { ($0.date, $0.id) < ($1.date, $1.id) })
             else { continue }
-            let features = members.map { EventFeatures(title: $0.title, description: $0.description, date: $0.date) }
+            let features = members.map { signals(of: $0, known: known) }
             var supportedEarlier = Set<Int>()
             var supportedLater = Set<Int>()
             // ponytail: at most 40 events × 100 × 100 pairs; use indexed features if those caps grow.

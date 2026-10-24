@@ -32,6 +32,13 @@ enum EventClusterer {
         var report = EventClusteringReport()
         var cache: [String: EventFeatures] = [:]
         var embeddingCache: [String: [Float]] = [:]
+        /// Signals and vectors computed this pass; stored once at the end (#522).
+        var newFeatures: [String: EventFeatures] = [:]
+        var newEmbeddings: [String: [Float]] = [:]
+        /// Rows whose vector storage was already consulted; a missing model is not asked again per pair.
+        var embeddingLookups = Set<String>()
+        /// Decisions worth keeping, keyed low ID first; stored once at the end.
+        var decisions: [String: DatabaseEngine.PairDecision] = [:]
         var attempts: [String: Int] = [:]
         /// Partners placed earlier in this pass; their rows in the current batch are stale.
         var handled = Set<String>()
@@ -39,34 +46,82 @@ enum EventClusterer {
             if let cached = cache[row.id] { return cached }
             let value = EventFeatures(title: row.title, description: row.description, date: row.date)
             cache[row.id] = value
+            newFeatures[row.id] = value
             return value
         }
-        func embedding(_ row: EventMatchRow) async -> [Float]? {
-            if let cached = embeddingCache[row.id] { return cached }
-            if let stored = try? await database.fetchArticleEmbeddings(
-                articleIDs: [row.id], modelVersion: SentenceEmbedder.modelVersion)[row.id]
-            {
-                embeddingCache[row.id] = stored
-                return stored
+        /// Warms both caches for the rows from storage in two queries, computing what is missing. Only a warm cache
+        /// is read while matching, so the greedy order of decisions does not depend on storage.
+        func prefetch(_ rows: [EventMatchRow]) async {
+            let missing = rows.filter { cache[$0.id] == nil }
+            if !missing.isEmpty {
+                let stored =
+                    (try? await database.fetchArticleFeatures(
+                        articleIDs: missing.map(\.id), version: EventFeatures.storageVersion)) ?? [:]
+                for row in missing {
+                    if var value = stored[row.id] {
+                        // Publication dates are rewritten on upsert without touching the stored signals.
+                        value.date = row.date
+                        cache[row.id] = value
+                    } else {
+                        _ = features(row)
+                    }
+                }
             }
-            guard await SentenceEmbedder.shared.isAvailable else { return nil }
-            let text = EventFeatures.matchingText(title: row.title, description: row.description)
-            if let computed = await SentenceEmbedder.shared.embed(text) {
-                embeddingCache[row.id] = computed
-                try? await database.upsertArticleEmbeddings(
-                    [row.id: computed], modelVersion: SentenceEmbedder.modelVersion)
-                return computed
+            let unembedded = rows.filter { embeddingCache[$0.id] == nil && !embeddingLookups.contains($0.id) }
+            guard !unembedded.isEmpty else { return }
+            embeddingLookups.formUnion(unembedded.map(\.id))
+            let stored =
+                (try? await database.fetchArticleEmbeddings(
+                    articleIDs: unembedded.map(\.id), modelVersion: SentenceEmbedder.modelVersion)) ?? [:]
+            var pending: [EventMatchRow] = []
+            for row in unembedded {
+                if let vector = stored[row.id] { embeddingCache[row.id] = vector } else { pending.append(row) }
             }
-            return nil
+            guard !pending.isEmpty, await SentenceEmbedder.shared.isAvailable else { return }
+            let vectors = await SentenceEmbedder.shared.embedBatch(
+                pending.map { EventFeatures.matchingText(title: $0.title, description: $0.description) })
+            for (row, vector) in zip(pending, vectors) {
+                guard let vector else { continue }
+                embeddingCache[row.id] = vector
+                newEmbeddings[row.id] = vector
+            }
+        }
+        func record(_ a: EventMatchRow, _ b: EventMatchRow, _ pair: EventPairAssessment) {
+            let decision: String
+            if pair.isMatch {
+                decision = "match"
+            } else if pair.conflict == .differentAct, pair.sharedSpecificAnchors >= 1 {
+                decision = "related-act"
+            } else if pair.isBorderline {
+                decision = "borderline"
+            } else {
+                return
+            }
+            let (low, high) = a.id < b.id ? (a.id, b.id) : (b.id, a.id)
+            decisions[low + "\n" + high] = DatabaseEngine.PairDecision(
+                articleID: low, otherArticleID: high, decision: decision,
+                reason: pair.conflict?.rawValue ?? decision, score: pair.score)
         }
         func assessed(_ a: EventMatchRow, _ b: EventMatchRow) async -> EventPairAssessment {
+            await prefetch([a, b])
             let sim: Double?
-            if let vA = await embedding(a), let vB = await embedding(b) {
+            if let vA = embeddingCache[a.id], let vB = embeddingCache[b.id] {
                 sim = SentenceEmbedder.cosineSimilarity(vA, vB)
             } else {
                 sim = nil
             }
-            return EventMatcher.assess(features(a), features(b), policy: matchPolicy, embeddingSimilarity: sim)
+            let pair = EventMatcher.assess(features(a), features(b), policy: matchPolicy, embeddingSimilarity: sim)
+            record(a, b, pair)
+            return pair
+        }
+        func store() async {
+            try? await database.upsertArticleFeatures(newFeatures, version: EventFeatures.storageVersion, at: now)
+            try? await database.upsertArticleEmbeddings(newEmbeddings, modelVersion: SentenceEmbedder.modelVersion)
+            try? await database.upsertPairDecisions(
+                Array(decisions.values), matcherVersion: EventMatcher.version, at: now)
+            newFeatures = [:]
+            newEmbeddings = [:]
+            decisions = [:]
         }
         var remaining = limit
         matching: while remaining > 0 {
@@ -75,6 +130,7 @@ enum EventClusterer {
                 activeSince: now.addingTimeInterval(-candidatePolicy.activeEventLifetime),
                 matcherVersion: EventMatcher.version, limit: min(batchSize, remaining))
             guard !pending.isEmpty else { break }
+            await prefetch(pending)
             for row in pending where !handled.contains(row.id) {
                 guard remaining > 0 else { break matching }
                 try Task.checkCancellation()
@@ -85,6 +141,7 @@ enum EventClusterer {
                 {
                     let members = snapshot.members.sorted { ($0.date, $0.id) < ($1.date, $1.id) }
                     guard members.count <= remaining else { break matching }
+                    await prefetch(members)
                     let exclusions = try await database.eventExclusions(for: members.map(\.id))
                     var groups: [[EventMatchRow]] = []
                     for member in members {
@@ -156,6 +213,7 @@ enum EventClusterer {
                 let rows = Dictionary(
                     try await database.eventMatchRows(articleIDs: candidates.map(\.articleID)).map { ($0.id, $0) },
                     uniquingKeysWith: { first, _ in first })
+                await prefetch(Array(rows.values))
 
                 // Join the best active event the article fits as a whole.
                 var best: (id: String, version: Int, score: Double)?
@@ -166,6 +224,7 @@ enum EventClusterer {
                     guard !members.isEmpty, members.count < matchPolicy.maximumEventSize,
                         !members.contains(where: { excluded.contains($0.id) })
                     else { continue }
+                    await prefetch(members)
                     var pairs: [EventPairAssessment] = []
                     for member in members {
                         pairs.append(await assessed(row, member))
@@ -264,6 +323,7 @@ enum EventClusterer {
             )
             .sorted { $0.members.count != $1.members.count ? $0.members.count > $1.members.count : $0.id < $1.id }
             fragmentExclusions = try await database.eventExclusions(for: events.flatMap { $0.members.map(\.id) })
+            await prefetch(events.flatMap { $0.members })
             var index = 0
             while index < events.count {
                 try Task.checkCancellation()
@@ -315,6 +375,7 @@ enum EventClusterer {
         let merges = try await mergeFragments()
         report.merged = merges.merged
         report.changedEvents.formUnion(merges.changedEvents)
+        await store()
         return report
     }
 

@@ -37,6 +37,7 @@ swiftc "${NEWS_DEPENDENCY_FLAGS[@]}" -swift-version 6 -O -parse-as-library -targ
     Sources/Intelligence/OverviewThematicAngleExtractor.swift \
     Sources/Intelligence/CoverageSentimentEvaluator.swift \
     Sources/Intelligence/EventCandidates.swift \
+    Sources/Intelligence/ActClass.swift \
     Sources/Intelligence/EventMatcher.swift \
     Sources/Intelligence/EventClustering.swift \
     Sources/Intelligence/SentenceEmbedder.swift \

@@ -4,7 +4,7 @@ Start with [README.md](README.md), [architecture and technology constraints](doc
 
 ## Development
 
-Use the existing native Swift/SwiftUI stack, keep changes focused, preserve user data and migrations, and treat feed/article input as untrusted. Maintain Swift 6 isolation and cancellation, deterministic taxonomy, accessibility, and the design language in [docs/DESIGN.md](docs/DESIGN.md): its tokens, components and Liquid Glass rules. Do not add cloud AI, telemetry or third-party models.
+Use the existing native Swift/SwiftUI stack, keep changes focused, preserve user data and migrations, and treat feed/article input as untrusted. Maintain Swift 6 isolation and cancellation, deterministic taxonomy, accessibility, and the design language in [docs/DESIGN.md](docs/DESIGN.md): its tokens, components and Liquid Glass rules. Do not add cloud AI, telemetry or third-party models; the only models that ship are Apple's and CoreML models this project builds, measures and ships itself (#520).
 
 Build on Apple silicon with Xcode 27 selected. The deployment target remains macOS 15; newer APIs require availability checks.
 

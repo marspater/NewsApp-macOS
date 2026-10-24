@@ -3,7 +3,7 @@
 Native macOS, local-first RSS reader. This page is the contract for technology and implementation invariants. Workflow lives in [CONTRIBUTING.md](../CONTRIBUTING.md), design in [DESIGN.md](DESIGN.md), security in [SECURITY.md](../SECURITY.md), privacy in [PRIVACY.md](../PRIVACY.md).
 
 > [!IMPORTANT]
-> Nothing leaves the Mac except feed, article and image requests through the protected gateway. No cloud backend, remote AI, custom AI models, telemetry or analytics SDKs.
+> Nothing leaves the Mac except feed, article and image requests through the protected gateway. No cloud backend, remote AI, telemetry or analytics SDKs, and no custom AI models except CoreML models this project builds, measures and ships itself (#520).
 
 ## Stack
 
@@ -51,7 +51,7 @@ flowchart LR
         GW["<b>NetworkBoundaryProxy</b><br/>IPAddressValidator"]
     end
 
-    subgraph Store["Storage · SQLite v23"]
+    subgraph Store["Storage · SQLite v24"]
         AS["<b>ArticleStore</b>"]
         DB[("<b>DatabaseEngine</b><br/>+Events<br/>WAL · FTS5")]
     end
@@ -162,6 +162,7 @@ timeline
         v21 : MiniLM article_embeddings
         v22 : Category and publisher repair
         v23 : Source newline cleanup
+        v24 : article_features and pair_assessments
 ```
 
 ## Invariants
@@ -200,7 +201,7 @@ Open a section before changing that area. Each rule is load-bearing; tests cover
 
 - Multi-step writes use transactions.
 
-- Retention: `FeedManager` runs `pruneOldArticles` once a day after a completed refresh, with the Settings › Storage age (default 30 days, 0 = never). Only read, unsaved stories older than that go; unread, saved and overview-cited stories and events with a stored overview stay. Clearing AI analysis removes enrichment, overviews, embeddings and tension history in one transaction; stories and events stay.
+- Retention: `FeedManager` runs `pruneOldArticles` once a day after a completed refresh, with the Settings › Storage age (default 30 days, 0 = never). Only read, unsaved stories older than that go; unread, saved and overview-cited stories and events with a stored overview stay. Clearing AI analysis removes enrichment, overviews, embeddings, stored matcher signals and tension history in one transaction; stories, events and pair decisions (ids and scores only) stay.
 
 - Stories a cancelled refresh had already committed are notified by the next completed refresh; cancelling ends the loading state at once.
 
@@ -263,7 +264,10 @@ Open a section before changing that area. Each rule is load-bearing; tests cover
 
 - Candidates (`EventCandidateFinder`): ≤8 terms per article as FTS5 phrases (headline names, then headline words, then names from the description), ≤2× `EventCandidatePolicy.limit` rows, ±48 h window, 72 h active lifetime. Candidates are not matches.
 
-- `EventMatcher` v8: `EventFeatures.matchingText` (plain headline + first 600 plain description characters) is the one text both the deterministic features and the sentence embedding read. A pair needs dates within 36 h, a shared specific anchor (a country alone is not enough) and no conflict in language, period, year, weekday, distinguishing figure or place. A headline's primary clause before "after"/"following" guards against background-clause merges only when it names an act; a clause that only counts consequences ("Three dead after …") does not. A word of a typed person name is never canonicalized to a country. Grey-zone pairs use MiniLM cosine (`SentenceEmbedder` model version 2: uncased, accent-stripped WordPiece; v21 embeddings recompute per version). Admission: one matching pair, ⅔ compatible members (rounded up), the mean-score threshold.
+- `EventMatcher` v9: `EventFeatures.matchingText` (plain headline + first 600 plain description characters) is the one text both the deterministic features and the sentence embedding read. A pair needs dates within 36 h, a shared specific anchor (a country alone is not enough) and no conflict in language, period, year, weekday, act, distinguishing figure or place. A headline's primary clause before "after"/"following" guards against background-clause merges only when it names an act; a clause that only counts consequences ("Three dead after …") does not. A word of a typed person name is never canonicalized to a country. Grey-zone pairs use MiniLM cosine (`SentenceEmbedder` model version 2: uncased, accent-stripped WordPiece; v21 embeddings recompute per version). Admission: one matching pair, ⅔ compatible members (rounded up), the mean-score threshold.
+- Act class (`ActClass`, #522): the lemmas of the act clause (the primary clause before "after", "following", "over", "amid", else the whole headline) map through a small checked-in cue table to one of vote, protest, attack, agreement, personnel, ruling, sanction, disaster, crash, or to the consequence classes casualties and rescue; two act cues or none give `unknown`, which never vetoes. Two known, different acts are two events (`EventConflict.differentAct`); a consequence report stays compatible with the incident that could have caused it and conflicts with bloodless acts (vote, agreement, personnel, ruling, sanction). The cue table is the project's convention written down, not a model; a wrong class costs recall with a visible related-act link, never a merge.
+- Stored signals (v24 `article_features`): `EventFeatures` as JSON under `EventFeatures.storageVersion`, written by the clusterer on first use and read by every later pass and by `EventStoryRelation`; a changed title or description, a version bump or clearing AI analysis drops them (the same trigger now also drops the embedding). Publication dates are always taken from the row, never from the stored record.
+- Pair decisions (v24 `pair_assessments`): the clusterer records each assessed pair it matched, judged a related act (different act, shared specific anchor) or found borderline, keyed low id first, with the matcher version and score and no text. Related-act rows feed "Earlier in This Story" next to the lexical relation's links (earlier events only, ≤3 in all) and are the audit trail for the fitted head (#524).
 - `Tests/Fixtures/story-corpus/matcher-regressions-v1.json` is an authored English corpus replayed through the real clusterer on every test run with a true-positive floor and a false-pair ceiling; it is regression evidence, not the acceptance gate (the private holdout is).
 
 - Clustering is fully on device; no external LLM. Legacy judge types stay only for audit callers.

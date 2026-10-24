@@ -61,6 +61,7 @@ SWIFT_SOURCES=(
     Sources/Intelligence/OverviewThematicAngleExtractor.swift
     Sources/Intelligence/CoverageSentimentEvaluator.swift
     Sources/Intelligence/EventCandidates.swift
+    Sources/Intelligence/ActClass.swift
     Sources/Intelligence/EventMatcher.swift
     Sources/Intelligence/EventClustering.swift
     Sources/Intelligence/SentenceEmbedder.swift

@@ -2,8 +2,11 @@ import Foundation
 import NaturalLanguage
 
 /// Deterministic who/what/where/when signals for one article, taken from its title and the start of
-/// its description. Nothing here is generated or stored; it is recomputed when matching.
-struct EventFeatures: Hashable, Sendable {
+/// its description. Nothing here is generated. The clusterer stores them as JSON (`article_features`, v24) under
+/// `storageVersion` and recomputes them when the version changes or the title or description does (#522).
+struct EventFeatures: Hashable, Sendable, Codable {
+    /// Bump when extraction changes; stored records of older versions are recomputed on first use.
+    static let storageVersion = 1
     /// Dominant language when the recognizer is reasonably sure; nil otherwise.
     var language: String?
     // Who
@@ -26,6 +29,10 @@ struct EventFeatures: Hashable, Sendable {
     var weekdays: Set<String> = []
     /// Non-place headline terms from the primary clause when the headline has a trailing/leading background clause.
     var primaryTitleTerms: Set<String> = []
+    /// Lemmas of the act clause: the primary clause, or the whole headline when it has no background clause.
+    var actLemmas: Set<String> = []
+    /// The act the headline leads with, from `actLemmas` (#522). `unknown` never vetoes.
+    var actClass: ActClass = .unknown
 
     var anchors: Set<String> { people.union(organizations).union(places).union(names) }
     /// Places that name a country, canonicalized to a region code (`@US`).
@@ -139,6 +146,13 @@ extension EventFeatures {
             pattern:
                 #"\b(?:following|in\s+(?:the\s+)?wake\s+of|(?:hours|days|weeks|months|moments|shortly|soon)\s+after|after)\b"#,
             options: [.caseInsensitive])) ?? NSRegularExpression()
+    /// The act clause also ends at "over", "amid" and "in response to" ("steps down over …"). `primaryTitleTerms`
+    /// keep the narrower list: widening it would veto on wording, which the act class exists to avoid.
+    private static let trailingActBackgroundPattern =
+        (try? NSRegularExpression(
+            pattern:
+                #"\b(?:following|in\s+(?:the\s+)?wake\s+of|in\s+response\s+to|(?:hours|days|weeks|months|moments|shortly|soon)\s+after|after|over|amid)\b"#,
+            options: [.caseInsensitive])) ?? NSRegularExpression()
 
     static func normalized(_ value: String) -> String {
         var text = value.folding(options: [.caseInsensitive, .diacriticInsensitive, .widthInsensitive], locale: nil)
@@ -161,7 +175,10 @@ extension EventFeatures {
         return headline + "\n" + String(plain(description).prefix(descriptionPrefix))
     }
 
-    private static func primaryClauseRange(in text: String, titleEnd: String.Index) -> Range<String.Index>? {
+    private static func primaryClauseRange(
+        in text: String, titleEnd: String.Index,
+        trailing trailingPattern: NSRegularExpression = trailingBackgroundPattern
+    ) -> Range<String.Index>? {
         guard text.startIndex <= titleEnd, titleEnd <= text.endIndex else { return nil }
         let nsRange = NSRange(text.startIndex..<titleEnd, in: text)
         if let leading = leadingBackgroundPattern.firstMatch(in: text, range: nsRange),
@@ -170,7 +187,7 @@ extension EventFeatures {
         {
             return clause
         }
-        guard let trailing = trailingBackgroundPattern.firstMatch(in: text, range: nsRange),
+        guard let trailing = trailingPattern.firstMatch(in: text, range: nsRange),
             trailing.range.location != NSNotFound,
             let connector = Range(trailing.range, in: text)
         else { return nil }
@@ -179,11 +196,18 @@ extension EventFeatures {
             ? text.startIndex..<connector.lowerBound : nil
     }
 
+    /// The clause that names the headline's act: the primary clause, else the whole headline.
+    private static func actClauseRange(in text: String, titleEnd: String.Index) -> Range<String.Index> {
+        primaryClauseRange(in: text, titleEnd: titleEnd, trailing: trailingActBackgroundPattern)
+            ?? (text.startIndex..<min(titleEnd, text.endIndex))
+    }
+
     private struct FeatureCollector {
         let text: String
         let whole: Range<String.Index>
         let titleEnd: String.Index
         let primaryRange: Range<String.Index>?
+        let actRange: Range<String.Index>
         let titleCase: Bool
         let usesCapitalization: Bool
         var features: EventFeatures
@@ -292,10 +316,12 @@ extension EventFeatures {
                 if keyword.count >= 3, !EventFeatures.stopwords.contains(keyword) {
                     features.keywords.insert(keyword)
                     if inPrimaryClause { features.primaryTitleTerms.insert(keyword) }
+                    if actRange.overlaps(range) { features.actLemmas.insert(keyword) }
                 }
             } else if word.count >= 4 {
                 features.keywords.insert(word)
                 if inPrimaryClause { features.primaryTitleTerms.insert(word) }
+                if actRange.overlaps(range) { features.actLemmas.insert(word) }
             }
         }
 
@@ -356,9 +382,10 @@ extension EventFeatures {
         tagger.string = text
         if let language { tagger.setLanguage(NLLanguage(rawValue: language), range: whole) }
 
+        let actRange = Self.actClauseRange(in: text, titleEnd: titleEnd)
         var collector = FeatureCollector(
             text: text, whole: whole, titleEnd: titleEnd,
-            primaryRange: Self.primaryClauseRange(in: text, titleEnd: titleEnd),
+            primaryRange: Self.primaryClauseRange(in: text, titleEnd: titleEnd), actRange: actRange,
             titleCase: titleCase, usesCapitalization: usesCapitalization,
             features: EventFeatures(language: language, date: date, periods: Self.collectPeriods(in: text)))
         collector.collectEntities(from: tagger)
@@ -374,6 +401,8 @@ extension EventFeatures {
         }) {
             collector.features.primaryTitleTerms = []
         }
+        collector.features.actClass = ActClass.classify(
+            lemmas: collector.features.actLemmas.union(ActClass.phraseLemmas(in: String(text[actRange]))))
         self = collector.features
     }
 
@@ -447,8 +476,8 @@ struct EventMatchPolicy: Sendable, Equatable {
 
 /// Facts that rule a pair out regardless of how similar the rest of the text is.
 enum EventConflict: String, Sendable, Equatable {
-    case language, unknownDate, timeGap, period, year, weekday, titleNumbers, places, excluded, differentEvent,
-        semanticDivergence
+    case language, unknownDate, timeGap, period, year, weekday, differentAct, titleNumbers, places, excluded,
+        differentEvent, semanticDivergence
 }
 
 struct EventPairAssessment: Sendable, Equatable {
@@ -471,7 +500,7 @@ struct EventPairAssessment: Sendable, Equatable {
 enum EventMatcher {
     /// Bump when matching changes; recent articles and active memberships are revalidated.
     /// Unchanged archived memberships remain intact.
-    static let version = 8
+    static let version = 9
 
     private static func pairConflict(
         _ a: EventFeatures, _ b: EventFeatures, gap: TimeInterval, maximumTimeGap: TimeInterval
@@ -490,6 +519,7 @@ enum EventMatcher {
         if disjoint(a.periods, b.periods) { return .period }
         if disjoint(a.years, b.years) { return .year }
         if disjoint(a.weekdays, b.weekdays) { return .weekday }
+        if a.actClass.conflicts(with: b.actClass) { return .differentAct }
         if disjoint(a.titleNumbers, b.titleNumbers) { return .titleNumbers }
         if !sharesPlace && (disjoint(a.countries, b.countries) || disjoint(a.localPlaces, b.localPlaces)) {
             return .places

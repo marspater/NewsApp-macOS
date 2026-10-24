@@ -524,7 +524,10 @@ struct NewsTests {
             try await testEventCandidateGeneration(fixtureRoot: fixtureRoot)
             try await testRelatedStoryEvents(fixtureRoot: fixtureRoot)
             try await testEventMatcherRules()
+            testActClassTable()
             try await testEventClustering(fixtureRoot: fixtureRoot)
+            try await testArticleSignalsRoundTrip()
+            try await testPairAssessmentsRecorded()
             try await testEventEmbeddingIntegration()
             try await testEventFragmentMergingAndJudge(fixtureRoot: fixtureRoot)
             try await testStoryVisibility(fixtureRoot: fixtureRoot)
@@ -623,7 +626,10 @@ struct NewsTests {
         try await testEventCandidateGeneration(fixtureRoot: fixtureRoot)
         try await testRelatedStoryEvents(fixtureRoot: fixtureRoot)
         try await testEventMatcherRules()
+        testActClassTable()
         try await testEventClustering(fixtureRoot: fixtureRoot)
+        try await testArticleSignalsRoundTrip()
+        try await testPairAssessmentsRecorded()
         try await testEventEmbeddingIntegration()
         try await testEventFragmentMergingAndJudge(fixtureRoot: fixtureRoot)
         try await testStoryVisibility(fixtureRoot: fixtureRoot)
@@ -890,7 +896,7 @@ struct NewsTests {
         execute(copy, "DROP VIEW article_fts_rows;")
         try await db.open()
         assertEqual(
-            value(copy, "PRAGMA user_version;"), "23", "Copied v14 library upgrades through v15 to the current schema")
+            value(copy, "PRAGMA user_version;"), "24", "Copied v14 library upgrades through v15 to the current schema")
         assertEqual(value(path, "PRAGMA user_version;"), "14", "Original library stays untouched")
         assertEqual(
             try await db.searchArticles(query: "Research").map(\.id), originalOrder,
@@ -5074,7 +5080,7 @@ struct NewsTests {
         await cancelledDB.close()
         let db = DatabaseEngine(path: copyPath)
         try await db.open()
-        assertEqual(value(copyPath, "PRAGMA user_version;"), "23", "Copied v4 library upgrades to the current schema")
+        assertEqual(value(copyPath, "PRAGMA user_version;"), "24", "Copied v4 library upgrades to the current schema")
         assertEqual(value(originalPath, "PRAGMA user_version;"), "4", "Original fixture stays untouched")
         assertEqual(try await db.fetchArticles(limit: nil).count, 3, "Migration keeps historical rows")
         assertEqual(
@@ -5327,7 +5333,7 @@ struct NewsTests {
             value(failure, "SELECT article_id FROM article_aliases WHERE value='observed-variant-b';"), "historical-b",
             "Injected failure preserves old aliases")
         try await migrated.open()
-        assertEqual(value(copy, "PRAGMA user_version;"), "23", "Copied library upgrades to the current schema")
+        assertEqual(value(copy, "PRAGMA user_version;"), "24", "Copied library upgrades to the current schema")
         assertEqual(value(path, "PRAGMA user_version;"), "8", "Original fixture remains untouched")
         assertEqual(
             try await migrated.fetchArticles(limit: nil).count, 6, "Only confident same-URL text copies are hidden")
@@ -6656,7 +6662,7 @@ struct NewsTests {
 
         let db = DatabaseEngine(path: copy)
         try await db.open()
-        assertEqual(value(copy, "PRAGMA user_version;"), "23", "Copied v11 library upgrades to the current schema")
+        assertEqual(value(copy, "PRAGMA user_version;"), "24", "Copied v11 library upgrades to the current schema")
         assertEqual(value(path, "PRAGMA user_version;"), "11", "Original v11 fixture stays untouched")
         assertEqual(try await db.fetchArticles(limit: nil).count, 5, "Event migration keeps every article")
         assertTrue(try await db.isRead(articleId: "event-a"), "Event migration keeps read state")
@@ -7132,6 +7138,24 @@ struct NewsTests {
             EventMatcher.assess(thirdQuarter, fourthQuarter).conflict, .period,
             "Quarterly reports of one company are different events")
         assertFalse(EventMatcher.assess(thirdQuarter, fourthQuarter).isMatch, "A period conflict never matches")
+
+        // Two acts by the same actors on the same day are two events (#522); a consequence report follows its incident.
+        var vote = features(["novak"], ["vote", "oust", "parliament", "minister"], places: ["ljubljana"])
+        vote.actClass = .vote
+        var protest = features(["novak"], ["protest", "oust", "parliament", "vote"], hours: 4, places: ["ljubljana"])
+        protest.actClass = .protest
+        assertEqual(EventMatcher.assess(vote, protest).conflict, .differentAct, "A vote and its protest differ")
+        assertEqual(
+            EventMatcher.assess(protest, vote).conflict, .differentAct, "The act conflict is symmetric")
+        var unknownAct = protest
+        unknownAct.actClass = .unknown
+        assertEqual(EventMatcher.assess(vote, unknownAct).conflict, nil, "An unclassified headline never vetoes")
+        var toll = protest
+        toll.actClass = .casualties
+        assertEqual(EventMatcher.assess(vote, toll).conflict, .differentAct, "A toll is no consequence of a vote")
+        var shooting = vote
+        shooting.actClass = .attack
+        assertEqual(EventMatcher.assess(shooting, toll).conflict, nil, "A toll report follows the attack it counts")
 
         let mondayStrike = features(
             ["syniehubov"], ["drone", "strike", "apartment", "kill"], places: ["kharkiv"], weekdays: ["monday"])
@@ -8911,7 +8935,7 @@ struct NewsTests {
             value("SELECT count(*) FROM sqlite_master WHERE name='idx_story_images_url';"), "0",
             "Cancellation leaves no partial index")
         try await db.open()
-        assertEqual(value("PRAGMA user_version;"), "23", "Existing v18 libraries receive the image index migration")
+        assertEqual(value("PRAGMA user_version;"), "24", "Existing v18 libraries receive the image index migration")
         assertEqual(
             sqlite3_exec(handle, "ANALYZE story_images;", nil, nil, nil), SQLITE_OK,
             "Use current fixture cardinality for the query planner")
@@ -9644,7 +9668,7 @@ struct NewsTests {
             ), "0", "Cancelled v14 migration rolls back its tables")
         let migrated = DatabaseEngine(path: copy)
         try await migrated.open()
-        assertEqual(value(copy, "PRAGMA user_version;"), "23", "Copied v13 library upgrades to the current schema")
+        assertEqual(value(copy, "PRAGMA user_version;"), "24", "Copied v13 library upgrades to the current schema")
         assertEqual(value(path, "PRAGMA user_version;"), "13", "Original v13 fixture stays untouched")
         assertEqual(
             try await migrated.fetchEvent(id: event.id)?.memberArticleIDs.count, 5, "Migration keeps events and members"
@@ -10314,10 +10338,150 @@ struct NewsTests {
             guard sqlite3_step(statement) == SQLITE_ROW else { return nil }
             return sqlite3_column_text(statement, 0).map { String(cString: $0) }
         }
-        assertEqual(value(copy, "PRAGMA user_version;"), "23", "Provenance schema upgrades to the current schema")
+        assertEqual(value(copy, "PRAGMA user_version;"), "24", "Provenance schema upgrades to the current schema")
         assertEqual(value(original, "PRAGMA user_version;"), "15", "Original v15 fixture remains untouched")
         assertEqual(value(copy, "PRAGMA quick_check;"), "ok", "Upgraded provenance library passes quick_check")
         assertEqual(value(copy, "PRAGMA foreign_key_check;"), nil, "Provenance has no dangling article references")
+    }
+
+    /// The act class reads the headline's primary clause (#522): one cue → that act, two acts → unknown, a
+    /// consequence only when no act is named. Phrases cover "steps down", "opens fire", "strikes down".
+    static func testActClassTable() {
+        print("  - Testing act classes of headlines (#522)...")
+        let date = Date(timeIntervalSince1970: 1_700_000_000)
+        func act(_ title: String) -> ActClass {
+            EventFeatures(title: title, description: "", date: date).actClass
+        }
+        assertEqual(act("Parliament votes to oust Prime Minister Novak in Ljubljana"), .vote, "A vote")
+        assertEqual(act("Thousands protest in Ljubljana after parliament ousts Novak"), .protest, "The protest after")
+        assertEqual(act("Commissioner steps down over failed Alabama execution"), .personnel, "Steps down, over …")
+        assertEqual(act("Alabama corrections commissioner resigns after botched execution"), .personnel, "Resigns")
+        assertEqual(act("Inmate survives botched execution in Alabama"), .casualties, "Survives: a consequence")
+        assertEqual(act("Alabama inmate in critical condition after failed execution"), .casualties, "Critical cond.")
+        assertEqual(act("Three dead after gunman opens fire at Westfield mall in Sydney"), .casualties, "Toll first")
+        assertEqual(act("Sydney mall shooting: police name Westfield gunman"), .attack, "The shooting itself")
+        assertEqual(act("Witnesses describe panic as gunman opened fire"), .attack, "Opened fire")
+        assertEqual(act("Supreme Court strikes down state social media age law"), .ruling, "Strikes down")
+        assertEqual(act("Supreme Court rules Texas age-verification law unconstitutional"), .ruling, "Unconstitut.")
+        assertEqual(act("Iraq and Turkey sign oil pipeline supply agreement in Ankara"), .agreement, "An agreement")
+        assertEqual(act("Drone attack sets fire to Kirkuk oil field a day after pipeline deal"), .attack, "Act first")
+        assertEqual(act("Magnitude 6.1 earthquake strikes Malatya in eastern Turkey"), .disaster, "Strike is no cue")
+        assertEqual(act("Rescuers search rubble after Malatya earthquake kills four"), .rescue, "Rescue after it")
+        assertEqual(act("Trump says Fed chair should resign at Ohio rally"), .unknown, "Two acts named: unknown")
+        assertEqual(act("Siemens to cut 5,000 jobs in energy division"), .unknown, "No cue: unknown")
+        assertEqual(act("Hungarian novelist wins 2026 Nobel Prize in Literature"), .unknown, "No cue: unknown")
+        assertTrue(ActClass.vote.conflicts(with: .protest), "Two acts conflict")
+        assertFalse(ActClass.vote.conflicts(with: .unknown), "Unknown never conflicts")
+        assertFalse(ActClass.disaster.conflicts(with: .rescue), "A rescue follows a disaster")
+        assertFalse(ActClass.casualties.conflicts(with: .rescue), "Two consequence reports agree")
+        assertTrue(ActClass.casualties.conflicts(with: .personnel), "A resignation leaves no casualties")
+        assertTrue(ActClass.personnel.conflicts(with: .casualties), "… in either order")
+    }
+
+    /// Stored matcher signals (#522): version-gated, JSON round trip, dropped with the embedding and pair decisions
+    /// when the title changes, gone with the article, cleared with AI analysis while pair decisions stay.
+    static func testArticleSignalsRoundTrip() async throws {
+        print("  - Testing stored article signals and pair decisions (#522)...")
+        let db = DatabaseEngine(path: ":memory:")
+        try await db.open()
+        let date = Date(timeIntervalSince1970: 1_700_000_000)
+        func story(_ id: Int, _ title: String) -> FeedArticle {
+            FeedArticle(
+                title: title, link: "https://signals.invalid/\(id)", guid: "signals-\(id)", description: "",
+                pubDate: date, source: "Publisher")
+        }
+        let first = story(1, "Parliament votes to oust Prime Minister Novak in Ljubljana")
+        let second = story(2, "Thousands protest in Ljubljana after parliament ousts Novak")
+        try await db.upsertArticles([first, second])
+        let ids = [try await db.resolvedArticleID(for: first), try await db.resolvedArticleID(for: second)]
+        let features = [
+            ids[0]: EventFeatures(title: first.title, description: "", date: date),
+            ids[1]: EventFeatures(title: second.title, description: "", date: date),
+        ]
+        try await db.upsertArticleFeatures(features, version: EventFeatures.storageVersion)
+        let fetched = try await db.fetchArticleFeatures(articleIDs: ids, version: EventFeatures.storageVersion)
+        assertEqual(fetched, features, "Signals round-trip through JSON unchanged")
+        assertEqual(
+            try await db.fetchArticleFeatures(articleIDs: ids, version: EventFeatures.storageVersion + 1).count, 0,
+            "Another storage version reads nothing")
+        try await db.upsertArticleEmbeddings([ids[0]: Array(repeating: 0.05, count: 384)], modelVersion: 1)
+        let pair = DatabaseEngine.PairDecision(
+            articleID: ids[0], otherArticleID: ids[1], decision: "related-act", reason: "differentAct", score: 0.4)
+        try await db.upsertPairDecisions([pair], matcherVersion: EventMatcher.version)
+        func count(_ table: String) async throws -> String? {
+            try await db.eventRows("SELECT count(*) FROM \(table);").first?[0]
+        }
+        assertEqual(try await count("pair_assessments"), "1", "The decision is stored once per pair")
+        let reversed = DatabaseEngine.PairDecision(
+            articleID: ids[1], otherArticleID: ids[0], decision: "match", reason: "match", score: 1)
+        try await db.upsertPairDecisions([reversed], matcherVersion: EventMatcher.version)
+        assertEqual(try await count("pair_assessments"), "1", "A pair given high ID first is not stored twice")
+
+        // A changed title drops the signals, the embedding and the pair decisions with the match state.
+        try await db.upsertArticles([story(1, "Parliament in Ljubljana ousts Prime Minister Novak in late-night vote")])
+        assertEqual(
+            try await db.fetchArticleFeatures(articleIDs: ids, version: EventFeatures.storageVersion).count, 1,
+            "The retitled story's signals are dropped; the other's stay")
+        assertEqual(
+            try await db.fetchArticleEmbeddings(articleIDs: ids, modelVersion: 1).count, 0, "Its embedding too")
+        assertEqual(try await count("pair_assessments"), "0", "And its pair decisions")
+
+        try await db.upsertArticleFeatures(features, version: EventFeatures.storageVersion)
+        try await db.upsertPairDecisions([pair], matcherVersion: EventMatcher.version)
+        try await db.clearArticleEnrichment()
+        assertEqual(try await count("article_features"), "0", "Clearing AI analysis clears stored signals")
+        assertEqual(try await count("pair_assessments"), "1", "Pair decisions carry no text and stay")
+        try await db.eventRows("DELETE FROM articles WHERE id = ?;", [.text(ids[1])])
+        assertEqual(try await count("pair_assessments"), "0", "A deleted story takes its pair decisions along")
+        await db.close()
+    }
+
+    /// The clusterer keeps a vote and the protest after it apart as two events and records the pair as a related act,
+    /// which the earlier event's overview can list (#522).
+    static func testPairAssessmentsRecorded() async throws {
+        print("  - Testing related-act decisions recorded by the clusterer (#522)...")
+        let db = DatabaseEngine(path: ":memory:")
+        try await db.open()
+        let start = Date(timeIntervalSince1970: 1_700_000_000)
+        func story(_ id: Int, _ title: String, hours: Double) -> FeedArticle {
+            FeedArticle(
+                title: title, link: "https://acts.invalid/\(id)", guid: "acts-\(id)", description: "",
+                pubDate: start.addingTimeInterval(hours * 3600), source: "Publisher \(id)")
+        }
+        let stories = [
+            story(1, "Parliament votes to oust Prime Minister Novak in Ljubljana", hours: 0),
+            story(2, "Parliament in Ljubljana votes to oust Prime Minister Novak", hours: 1),
+            story(3, "Thousands protest in Ljubljana after parliament votes to oust Novak", hours: 5),
+            story(4, "Thousands protest in Ljubljana streets after parliament votes to oust Novak", hours: 6),
+        ]
+        try await db.upsertArticles(stories)
+        let report = try await EventClusterer.run(in: db, now: start.addingTimeInterval(7 * 3600))
+        assertEqual(report.created, 2, "The vote and the protest form two events")
+        var events: [String: String] = [:]
+        for article in stories {
+            let id = try await db.resolvedArticleID(for: article)
+            events[article.guid ?? ""] = try await db.eventID(forArticle: id)
+        }
+        assertTrue(events["acts-1"] != nil && events["acts-1"] == events["acts-2"], "Both vote reports share an event")
+        assertTrue(events["acts-3"] != nil && events["acts-3"] == events["acts-4"], "Both protest reports share one")
+        assertTrue(events["acts-1"] != events["acts-3"], "The vote and the protest are different events")
+        let related = try await db.eventRows(
+            "SELECT count(*) FROM pair_assessments WHERE decision = 'related-act';").first?[0]
+        assertTrue((related.flatMap(Int.init) ?? 0) >= 1, "A vote/protest pair is recorded as a related act")
+        let matches = try await db.eventRows(
+            "SELECT count(*) FROM pair_assessments WHERE decision = 'match';").first?[0]
+        assertTrue((matches.flatMap(Int.init) ?? 0) >= 2, "The matching pairs inside each event are recorded")
+        if let protestEvent = events["acts-3"], let voteEvent = events["acts-1"] {
+            let links = try await db.relatedActEvents(eventID: protestEvent)
+            assertEqual(links.map(\.eventID), [voteEvent], "The protest's overview can list the vote as a related act")
+            assertEqual(links.first?.title, stories[0].title, "… by its earliest report")
+        }
+        var resolved: [String] = []
+        for article in stories { resolved.append(try await db.resolvedArticleID(for: article)) }
+        assertEqual(
+            try await db.fetchArticleFeatures(articleIDs: resolved, version: EventFeatures.storageVersion).count, 4,
+            "The pass stored every story's signals")
+        await db.close()
     }
 
     /// The authored English corpus replayed through the real clusterer (#506). Regression evidence with a ratchet;
@@ -10809,6 +10973,15 @@ struct NewsTests {
             for (source, metrics) in bySource.sorted(by: { $0.key < $1.key }) {
                 print("      source \(source): \(metrics.line)")
             }
+            if CommandLine.arguments.contains("--export-features") {
+                let pairs = try await exportPairFeatures(
+                    items: items.map {
+                        (id: $0.id, title: $0.title, description: $0.description ?? "", published: $0.published,
+                         event: $0.event)
+                    },
+                    predicted: predicted, split: split, outputDirectory: outputDirectory)
+                print("    exported \(pairs) candidate pairs with features for the fit (#524)")
+            }
             var thresholds = EventEmbeddingComparison.sweep
             if split == "holdout" {
                 // The holdout is scored at one cutoff chosen on tune, never swept.
@@ -10825,6 +10998,59 @@ struct NewsTests {
             results[split] = total
         }
         return results
+    }
+
+    /// One CSV row per pair within the candidate window that shares a specific anchor or a gold event: the matcher's
+    /// pair features, the act classes and the labels, for the offline fit of the decision head (#524). Corpus ids
+    /// only; no publisher text. Requires `NEWS_EVENT_OUTPUT` and refuses to overwrite.
+    static func exportPairFeatures(
+        items: [(id: String, title: String, description: String, published: Date, event: String?)],
+        predicted: [String?], split: String, outputDirectory: String?
+    ) async throws -> Int {
+        guard let outputDirectory else {
+            throw StoryCorpus.Failure.invalid("--export-features needs NEWS_EVENT_OUTPUT")
+        }
+        let file = try StoryCorpus.privateDirectory(outputDirectory)
+            .appendingPathComponent("pair-features-\(split).csv")
+        let extracted = items.map { EventFeatures(title: $0.title, description: $0.description, date: $0.published) }
+        var vectors: [[Float]?] = Array(repeating: nil, count: items.count)
+        if await SentenceEmbedder.shared.isAvailable {
+            vectors = await SentenceEmbedder.shared.embedBatch(
+                items.map { EventFeatures.matchingText(title: $0.title, description: $0.description) })
+        }
+        var lines = [
+            "id_a,id_b,label,predicted_same,gap_hours,what,entity,shared_anchors,shared_specific,shared_keywords,"
+                + "toll_agree,number_agree,cosine,act_a,act_b,conflict,is_match,is_borderline"
+        ]
+        for i in items.indices {
+            for j in items.indices where j > i {
+                let a = extracted[i], b = extracted[j]
+                let gap = abs(a.date.timeIntervalSince(b.date))
+                guard gap <= EventCandidatePolicy.standard.window else { continue }
+                var cosine: Double? = nil
+                if let left = vectors[i], let right = vectors[j] {
+                    cosine = SentenceEmbedder.cosineSimilarity(left, right)
+                }
+                let pair = EventMatcher.assess(a, b, embeddingSimilarity: cosine)
+                let gold = items[i].event != nil && items[i].event == items[j].event
+                guard gold || pair.sharedSpecificAnchors >= 1 else { continue }
+                let same = predicted[i] != nil && predicted[i] == predicted[j]
+                let tollAgree = !a.tollNumbers.isDisjoint(with: b.tollNumbers)
+                let numberAgree = !a.titleNumbers.isDisjoint(with: b.titleNumbers)
+                lines.append(
+                    [
+                        items[i].id, items[j].id, gold ? "1" : "0", same ? "1" : "0",
+                        String(format: "%.2f", gap / 3600), String(format: "%.4f", pair.what),
+                        String(format: "%.4f", pair.entity), String(pair.sharedAnchors),
+                        String(pair.sharedSpecificAnchors), String(pair.sharedKeywords), tollAgree ? "1" : "0",
+                        numberAgree ? "1" : "0", cosine.map { String(format: "%.4f", $0) } ?? "",
+                        a.actClass.rawValue, b.actClass.rawValue, pair.conflict?.rawValue ?? "",
+                        pair.isMatch ? "1" : "0", pair.isBorderline ? "1" : "0",
+                    ].joined(separator: ","))
+            }
+        }
+        try StoryCorpus.writePrivate(Data(lines.joined(separator: "\n").utf8), to: file, replacing: false)
+        return lines.count - 1
     }
 
     /// Native sentence embeddings against deterministic matching on the same labeled pairs (#127).

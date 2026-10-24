@@ -1184,6 +1184,118 @@ extension DatabaseEngine {
         }
     }
 
+    // MARK: - Article Features and Pair Decisions (#522)
+
+    /// Stored matcher signals of the given version, decoded; articles without a current record are absent.
+    func fetchArticleFeatures(articleIDs: [String], version: Int) throws -> [String: EventFeatures] {
+        var result: [String: EventFeatures] = [:]
+        let decoder = JSONDecoder()
+        for start in stride(from: 0, to: articleIDs.count, by: 400) {
+            try Task.checkCancellation()
+            let slice = Array(articleIDs[start..<min(start + 400, articleIDs.count)])
+            let placeholders = Array(repeating: "?", count: slice.count).joined(separator: ",")
+            let rows = try eventRows(
+                "SELECT article_id, features FROM article_features WHERE version = ? AND article_id IN (\(placeholders))",
+                [.integer(version)] + slice.map { .text($0) })
+            for row in rows {
+                guard let id = row[0], let json = row[1],
+                    let features = try? decoder.decode(EventFeatures.self, from: Data(json.utf8))
+                else { continue }
+                result[id] = features
+            }
+        }
+        return result
+    }
+
+    /// Stores matcher signals as JSON in one transaction; a deleted article has nothing to store.
+    func upsertArticleFeatures(_ features: [String: EventFeatures], version: Int, at date: Date = Date()) throws {
+        guard !features.isEmpty else { return }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        try inEventTransaction { () throws -> Void in
+            for (articleID, value) in features {
+                let json = String(decoding: try encoder.encode(value), as: UTF8.self)
+                try eventRows(
+                    """
+                    INSERT INTO article_features(article_id, version, features, computed_at)
+                    SELECT ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM articles WHERE id = ?)
+                    ON CONFLICT(article_id) DO UPDATE SET version = excluded.version, features = excluded.features,
+                        computed_at = excluded.computed_at;
+                    """,
+                    [
+                        .text(articleID), .integer(version), .text(json), .real(date.timeIntervalSince1970),
+                        .text(articleID),
+                    ])
+            }
+        }
+    }
+
+    /// A clusterer decision about one pair, keyed low ID first.
+    struct PairDecision: Hashable, Sendable {
+        let articleID: String
+        let otherArticleID: String
+        /// "match", "related-act" or "borderline".
+        let decision: String
+        let reason: String
+        let score: Double
+    }
+
+    func upsertPairDecisions(_ decisions: [PairDecision], matcherVersion: Int, at date: Date = Date()) throws {
+        guard !decisions.isEmpty else { return }
+        try inEventTransaction { () throws -> Void in
+            for pair in decisions where pair.articleID < pair.otherArticleID {
+                try eventRows(
+                    """
+                    INSERT INTO pair_assessments(article_id, other_article_id, matcher_version, decision, reason, score,
+                        assessed_at)
+                    SELECT ?, ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM articles WHERE id = ?)
+                        AND EXISTS (SELECT 1 FROM articles WHERE id = ?)
+                    ON CONFLICT(article_id, other_article_id) DO UPDATE SET matcher_version = excluded.matcher_version,
+                        decision = excluded.decision, reason = excluded.reason, score = excluded.score,
+                        assessed_at = excluded.assessed_at;
+                    """,
+                    [
+                        .text(pair.articleID), .text(pair.otherArticleID), .integer(matcherVersion),
+                        .text(pair.decision), .text(pair.reason), .real(pair.score), .real(date.timeIntervalSince1970),
+                        .text(pair.articleID), .text(pair.otherArticleID),
+                    ])
+            }
+        }
+    }
+
+    /// Live events whose members the matcher judged a different act of the same story as this event's members
+    /// (decision "related-act"), each by its earliest member, newest event first.
+    func relatedActEvents(eventID: String, limit: Int = EventStoryRelation.linkLimit) throws -> [RelatedStoryEvent] {
+        guard let live = try resolvedEventID(eventID) else { return [] }
+        let rows = try eventRows(
+            """
+            SELECT other.event_id, a.id, a.title, a.published_at
+            FROM event_members m
+            JOIN pair_assessments p
+                ON (p.article_id = m.article_id OR p.other_article_id = m.article_id) AND p.decision = 'related-act'
+            JOIN event_members other
+                ON other.article_id = CASE WHEN p.article_id = m.article_id THEN p.other_article_id ELSE p.article_id END
+            JOIN events e ON e.id = other.event_id AND e.merged_into IS NULL
+            JOIN articles a ON a.id = other.article_id
+            WHERE m.event_id = ? AND other.event_id != ? AND \(Self.visibleArticle)
+            ORDER BY a.published_at, a.id;
+            """, [.text(live), .text(live)])
+        var earliest: [String: RelatedStoryEvent] = [:]
+        for row in rows {
+            guard let id = row[0], earliest[id] == nil, let articleID = row[1], let title = row[2],
+                let published = row[3].flatMap({ Double($0) })
+            else { continue }
+            earliest[id] = RelatedStoryEvent(
+                eventID: id, articleID: articleID, title: title,
+                firstPublishedAt: Date(timeIntervalSince1970: published))
+        }
+        return Array(
+            earliest.values.sorted {
+                $0.firstPublishedAt == $1.firstPublishedAt
+                    ? $0.eventID < $1.eventID : $0.firstPublishedAt > $1.firstPublishedAt
+            }.prefix(limit))
+    }
+
     // MARK: - Article Embeddings (#127, #307)
 
     /// Retrieves stored normalized embedding vectors for the given article IDs matching the model version.
