@@ -409,28 +409,7 @@ struct SettingsView: View {
                 Text("Each set mutes a fixed list of words and phrases together, as whole words, with one switch.")
                     .font(AppTypography.caption)
                     .foregroundStyle(AppColor.secondaryText)
-                ForEach(MuteTopicSet.all) { set in
-                    Toggle(
-                        isOn: Binding(
-                            get: { appSettings.muteRules.topicSets.contains(set.id) },
-                            set: { appSettings.setTopicSet(set.id, muted: $0) })
-                    ) {
-                        VStack(alignment: .leading, spacing: AppSpacing.textStack) {
-                            Text(set.title)
-                                .foregroundStyle(AppColor.primaryText)
-                            Text(set.phrases.joined(separator: ", "))
-                                .font(AppTypography.caption)
-                                .foregroundStyle(AppColor.secondaryText)
-                                .lineLimit(2)
-                            if appSettings.muteRules.topicSets.contains(set.id) {
-                                let count = muteCounts.topicSets[set.id] ?? 0
-                                Text(count == 1 ? "Hides 1 stored story" : "Hides \(count) stored stories")
-                                    .font(AppTypography.caption)
-                                    .foregroundStyle(AppColor.secondaryText)
-                            }
-                        }
-                    }
-                }
+                ForEach(MuteTopicSet.all, content: topicSetRow)
             }
 
             Section {
@@ -449,6 +428,27 @@ struct SettingsView: View {
             Button("Unmute All", role: .destructive) { appSettings.clearMuting() }
         } message: {
             Text("Muted stories return to every list, and every topic set is switched off.")
+        }
+    }
+
+    /// One switch per fixed topic set, with its phrases and, when on, how many stored stories it hides.
+    private func topicSetRow(_ set: MuteTopicSet) -> some View {
+        let isOn = appSettings.muteRules.topicSets.contains(set.id)
+        let count = muteCounts.topicSets[set.id] ?? 0
+        return Toggle(isOn: Binding(get: { isOn }, set: { appSettings.setTopicSet(set.id, muted: $0) })) {
+            VStack(alignment: .leading, spacing: AppSpacing.textStack) {
+                Text(set.title)
+                    .foregroundStyle(AppColor.primaryText)
+                Text(set.phrases.joined(separator: ", "))
+                    .font(AppTypography.caption)
+                    .foregroundStyle(AppColor.secondaryText)
+                    .lineLimit(2)
+                if isOn {
+                    Text(count == 1 ? "Hides 1 stored story" : "Hides \(count) stored stories")
+                        .font(AppTypography.caption)
+                        .foregroundStyle(AppColor.secondaryText)
+                }
+            }
         }
     }
 
