@@ -7168,12 +7168,14 @@ struct NewsTests {
         var unknownAct = protest
         unknownAct.actClass = .unknown
         assertEqual(EventMatcher.assess(vote, unknownAct).conflict, nil, "An unclassified headline never vetoes")
-        var toll = protest
-        toll.actClass = .casualties
-        assertEqual(EventMatcher.assess(vote, toll).conflict, .differentAct, "A toll is no consequence of a vote")
+        var casualtyReport = protest
+        casualtyReport.actClass = .casualties
+        assertEqual(
+            EventMatcher.assess(vote, casualtyReport).conflict, .differentAct, "A toll is no consequence of a vote")
         var shooting = vote
         shooting.actClass = .attack
-        assertEqual(EventMatcher.assess(shooting, toll).conflict, nil, "A toll report follows the attack it counts")
+        assertEqual(
+            EventMatcher.assess(shooting, casualtyReport).conflict, nil, "A toll report follows the attack it counts")
 
         let mondayStrike = features(
             ["syniehubov"], ["drone", "strike", "apartment", "kill"], places: ["kharkiv"], weekdays: ["monday"])
