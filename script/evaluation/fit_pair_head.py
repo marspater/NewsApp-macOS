@@ -9,7 +9,8 @@ With no arguments, the script checks itself on synthetic pairs. Standard library
 """
 import csv
 import math
-import random
+import os
+import pathlib
 import sys
 
 # Feature order is the Swift order in `EventMatchPolicy.headWeights`; the bias comes first.
@@ -29,8 +30,17 @@ def features(row):
     ]
 
 
+def require(condition, message):
+    if not condition:
+        raise ValueError(message)
+
+
 def read(path):
-    with open(path, newline='') as handle:
+    """An export CSV the caller owns, outside any Git checkout: the rows come from the private corpus."""
+    file = pathlib.Path(path).resolve()
+    require(file.suffix == '.csv' and file.is_file() and file.stat().st_uid == os.getuid(), 'Use an export CSV you own')
+    require(not any((parent / '.git').exists() for parent in file.parents), 'Keep private exports outside Git checkouts')
+    with file.open(newline='') as handle:
         return list(csv.DictReader(handle))
 
 
@@ -39,7 +49,7 @@ def solve(matrix, vector):
     n = len(vector)
     a = [row[:] + [vector[i]] for i, row in enumerate(matrix)]
     for col in range(n):
-        pivot = max(range(col, n), key=lambda r: abs(a[r][col]))
+        pivot = max(range(col, n), key=lambda r, c=col: abs(a[r][c]))
         a[col], a[pivot] = a[pivot], a[col]
         for r in range(n):
             if r != col and a[col][col]:
@@ -52,19 +62,23 @@ def sigmoid(z):
     return 1 / (1 + math.exp(-max(-30.0, min(30.0, z))))
 
 
+def newton_terms(w, xs, ys, l2):
+    """Hessian and gradient of the L2-penalized log loss at `w`, as `solve` takes them; the bias is not penalized."""
+    grad = [l2 * wi if i else 0.0 for i, wi in enumerate(w)]
+    hess = [[(l2 if i == j and i else 0.0) for j in range(len(w))] for i in range(len(w))]
+    for x, y in zip(xs, ys):
+        p = sigmoid(sum(a * b for a, b in zip(w, x)))
+        for i, xi in enumerate(x):
+            grad[i] += (p - y) * xi
+            hess[i] = [h + p * (1 - p) * xi * xj for h, xj in zip(hess[i], x)]
+    return hess, grad
+
+
 def fit(xs, ys, l2=1.0, steps=50):
-    """Newton's method on the L2-penalized log loss; the bias is not penalized."""
+    """Newton's method on the L2-penalized log loss."""
     w = [0.0] * len(xs[0])
     for _ in range(steps):
-        grad = [l2 * wi if i else 0.0 for i, wi in enumerate(w)]
-        hess = [[(l2 if i == j and i else 0.0) for j in range(len(w))] for i in range(len(w))]
-        for x, y in zip(xs, ys):
-            p = sigmoid(sum(a * b for a, b in zip(w, x)))
-            for i, xi in enumerate(x):
-                grad[i] += (p - y) * xi
-                for j, xj in enumerate(x):
-                    hess[i][j] += p * (1 - p) * xi * xj
-        step = solve(hess, grad)
+        step = solve(*newton_terms(w, xs, ys, l2))
         w = [wi - si for wi, si in zip(w, step)]
         if max(abs(s) for s in step) < 1e-9:
             break
@@ -121,24 +135,28 @@ def report(tune_rows, holdout_rows):
 
 
 def self_check():
-    rng = random.Random(524)
-    def row(label):
-        cosine = rng.uniform(0.7, 0.95) if label else rng.uniform(0.3, 0.75)
+    def spread(i, k):
+        """A fixed, evenly spread value in [0, 1) for row i and column k (no randomness needed)."""
+        return (i * 7919 + k * 104729) % 1000 / 1000
+
+    def row(i, label):
+        cosine = 0.7 + 0.25 * spread(i, 1) if label else 0.3 + 0.45 * spread(i, 1)
         return {
-            'label': '1' if label else '0', 'gap_hours': f'{rng.uniform(0, 30):.2f}', 'what': f'{rng.random():.3f}',
-            'entity': f'{rng.random():.3f}', 'shared_specific': str(rng.randint(0, 3)),
-            'shared_anchors': str(rng.randint(0, 5)), 'shared_keywords': str(rng.randint(0, 8)),
+            'label': '1' if label else '0', 'gap_hours': f'{30 * spread(i, 2):.2f}', 'what': f'{spread(i, 3):.3f}',
+            'entity': f'{spread(i, 4):.3f}', 'shared_specific': str(int(4 * spread(i, 5))),
+            'shared_anchors': str(int(6 * spread(i, 6))), 'shared_keywords': str(int(9 * spread(i, 7))),
             'toll_agree': '0', 'number_agree': '0', 'cosine': f'{cosine:.4f}', 'conflict': '',
             'is_match': '1' if cosine > 0.85 else '0',
         }
-    tune = [row(i % 3 == 0) for i in range(300)]
-    holdout = [row(i % 3 == 0) for i in range(120)]
-    holdout.append(dict(row(True), conflict='places'))
-    w, cutoff, holdout_head = report(tune, holdout)
-    assert w[FEATURES.index('cosine')] > 1, 'Cosine separates the synthetic pairs, so it carries positive weight'
-    assert holdout_head['precision'] >= 0.9 and holdout_head['recall'] > 0.5, 'The fit generalizes to the holdout'
-    assert holdout_head['fn'] >= 1, 'A conflicting pair is never predicted the same event'
-    assert all(abs(a - b) < 1e-12 for a, b in zip(solve([[2, 1], [1, 3]], [3, 5]), [0.8, 1.4])), 'The solver solves'
+    tune = [row(i, i % 3 == 0) for i in range(300)]
+    holdout = [row(i, i % 3 == 0) for i in range(300, 420)]
+    holdout.append(dict(row(420, True), conflict='places'))
+    w, _, holdout_head = report(tune, holdout)
+    require(w[FEATURES.index('cosine')] > 1, 'Cosine separates the synthetic pairs, so it carries positive weight')
+    require(holdout_head['precision'] >= 0.9 and holdout_head['recall'] > 0.5, 'The fit generalizes to the holdout')
+    require(holdout_head['fn'] >= 1, 'A conflicting pair is never predicted the same event')
+    solved = solve([[2, 1], [1, 3]], [3, 5])
+    require(all(abs(a - b) < 1e-12 for a, b in zip(solved, [0.8, 1.4])), 'The solver solves a small system')
     print('Pair head fit self-check passed')
 
 
