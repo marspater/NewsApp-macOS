@@ -407,15 +407,6 @@ final class ArticleStore: ObservableObject {
     // MARK: - Event Overviews
 
     @discardableResult
-    func recordVerifiedOverview(
-        _ document: EventOverviewDocument,
-        passages: [EvidencePassage],
-        articles: [FeedArticle]
-    ) async throws -> (saved: Bool, document: EventOverviewDocument) {
-        try await database.recordVerifiedOverview(document, passages: passages, articles: articles)
-    }
-
-    @discardableResult
     func recordEventOverview(_ document: EventOverviewDocument, expectedArticleInputs: [String: String]? = nil)
         async throws -> Bool
     {
@@ -428,10 +419,5 @@ final class ArticleStore: ObservableObject {
 
     func fetchEventOverview(forArticleID articleID: String) async throws -> EventOverviewDocument? {
         try await database.fetchEventOverview(forArticleID: articleID)
-    }
-
-    @discardableResult
-    func deleteEventOverview(eventID: String) async throws -> Bool {
-        try await database.deleteEventOverview(eventID: eventID)
     }
 }

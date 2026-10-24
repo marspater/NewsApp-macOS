@@ -512,42 +512,6 @@ actor OverviewGenerationCoordinator {
 
     // MARK: - Cache Access
 
-    func cachedOverview(
-        for eventID: String,
-        currentMembershipVersion: Int,
-        currentInputTextHash: String,
-        store: ArticleStore? = nil
-    ) async -> EventOverviewDocument? {
-        if let cached = memoryCache[eventID],
-            !cached.isStale(
-                currentMembershipVersion: currentMembershipVersion, currentInputTextHash: currentInputTextHash)
-        {
-            return cached
-        }
-        let targetStore: ArticleStore
-        if let store {
-            targetStore = store
-        } else if let selfStore = self.store {
-            targetStore = selfStore
-        } else {
-            targetStore = await ArticleStore.shared
-        }
-        do {
-            if let stored = try await targetStore.fetchEventOverview(eventID: eventID),
-                !stored.isStale(
-                    currentMembershipVersion: currentMembershipVersion, currentInputTextHash: currentInputTextHash)
-            {
-                storeInMemoryCache(stored, for: eventID)
-                return stored
-            }
-        } catch {
-            if !(error is CancellationError) {
-                logger.error("Failed to fetch event overview for \(eventID): \(error.localizedDescription)")
-            }
-        }
-        return nil
-    }
-
     private func storeInMemoryCache(_ document: EventOverviewDocument, for eventID: String) {
         if memoryCache[eventID] == nil {
             if memoryCacheOrder.count >= 100 {

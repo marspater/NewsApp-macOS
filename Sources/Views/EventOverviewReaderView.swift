@@ -44,7 +44,6 @@ struct EventOverviewReaderView: View {
         self.onSelectRelatedEvent = onSelectRelatedEvent
     }
 
-    @Environment(\.colorScheme) private var colorScheme
     @Environment(\.effectiveContrast) private var contrast
     @Environment(\.effectiveReduceMotion) private var reduceMotion
 
@@ -52,7 +51,6 @@ struct EventOverviewReaderView: View {
     @State private var isSourcesExpanded: Bool = true
     /// The lead image could not load, so its caption and credit are hidden with it.
     @State private var leadImageFailed = false
-    @State private var activeCitationPreview: OverviewCitation? = nil
 
     // MARK: - Layout Metrics & Bounds
     static let horizontalPageInset = AppLayout.pageInset
@@ -600,20 +598,6 @@ struct EventOverviewReaderView: View {
 
             ForEach(sources, id: \.index) { source in
                 superscriptCitationButton(source.index, citation: source.citation)
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func citationPillsView(_ citationIDs: [String], spacing: CGFloat = AppSpacing.xxs) -> some View {
-        let validCitationIDs = citationIDs.filter { overview.citations[$0] != nil }
-        if !validCitationIDs.isEmpty {
-            HStack(spacing: spacing) {
-                ForEach(validCitationIDs, id: \.self) { citID in
-                    if let citation = overview.citations[citID] {
-                        citationPill(citation)
-                    }
-                }
             }
         }
     }

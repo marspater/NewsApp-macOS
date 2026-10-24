@@ -41,7 +41,7 @@ class JSONFeedParser {
             }
             if (item["tags"] as? [String])?.isEmpty == true { item["tags"] = item["categories"] }
             if item["summary"] == nil || item["summary"] is NSNull {
-                item["summary"] = stripSimpleHTML(item["description"] as? String ?? "")
+                item["summary"] = FeedXMLParser.stripHTMLSimple(item["description"] as? String ?? "")
             }
             if let rawDate = item["date_published"] as? String {
                 if let parsed = DateParser.parse(rawDate) {
@@ -89,7 +89,7 @@ class JSONFeedParser {
         }
 
         let cleanDesc = item.summary ?? ""
-        let cleanContent = item.contentHtml.map(stripSimpleHTML) ?? item.contentText
+        let cleanContent = item.contentHtml.map(FeedXMLParser.stripHTMLSimple) ?? item.contentText
         let readableContent = cleanContent.flatMap {
             $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0
         }
@@ -135,25 +135,5 @@ class JSONFeedParser {
             contentFetched: readableContent != nil,
             readerDocument: curatedDoc
         )
-    }
-
-    private static func stripSimpleHTML(_ html: String) -> String {
-        var str = html.replacingOccurrences(
-            of: "(?i)</(p|div|blockquote|h[1-6]|li|tr)>", with: "\n\n", options: .regularExpression)
-        str = str.replacingOccurrences(of: "(?i)<(br|hr)\\s*/?>", with: "\n", options: .regularExpression)
-        str = str.replacingOccurrences(of: "<[^>]+>", with: " ", options: .regularExpression)
-
-        let entities: [(String, String)] = [
-            ("&nbsp;", " "), ("&amp;", "&"), ("&quot;", "\""), ("&apos;", "'"),
-            ("&#39;", "'"), ("&lt;", "<"), ("&gt;", ">"), ("&#8217;", "\u{2019}"),
-            ("&#8220;", "\u{201C}"), ("&#8221;", "\u{201D}"), ("&#8212;", "\u{2014}"),
-            ("&mdash;", "\u{2014}"), ("&#8211;", "\u{2013}"), ("&ndash;", "\u{2013}"),
-        ]
-        for (entity, replacement) in entities {
-            str = str.replacingOccurrences(of: entity, with: replacement, options: .caseInsensitive)
-        }
-        str = str.replacingOccurrences(of: "[ \\t]+", with: " ", options: .regularExpression)
-        str = str.replacingOccurrences(of: "\\n{3,}", with: "\n\n", options: .regularExpression)
-        return ArticleContentRedactor.cleanText(str.trimmingCharacters(in: .whitespacesAndNewlines))
     }
 }

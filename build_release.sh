@@ -49,7 +49,6 @@ SWIFT_SOURCES=(
     Sources/Intelligence/ArticleIntelligence.swift
     Sources/Intelligence/OverviewPassageSelector.swift
     Sources/Intelligence/PromptDefense.swift
-    Sources/Intelligence/ModelAvailability.swift
     Sources/Intelligence/PassageFactExtractor.swift
     Sources/Intelligence/TensionMethodology.swift
     Sources/Intelligence/WorldTension.swift
@@ -86,7 +85,6 @@ SWIFT_SOURCES=(
     Sources/Coordinators/FeedManager.swift
     Sources/App/AppContainer.swift
     Sources/Views/DesignSystem.swift
-    Sources/Views/GlassSystem.swift
     Sources/Views/SidebarView.swift
     Sources/Views/ArticleCardView.swift
     Sources/Views/EventCardView.swift
@@ -103,7 +101,6 @@ SWIFT_SOURCES=(
     Sources/Storage/SavedStoriesManager.swift
     Sources/Services/OPMLManager.swift
     Sources/Views/ArticleWebView.swift
-    Sources/Coordinators/RefreshCoordinator.swift
     Sources/App/NewsSignposts.swift
     Sources/App/UpdateChecker.swift
     Sources/App/NewsApp.swift

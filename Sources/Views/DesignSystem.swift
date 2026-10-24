@@ -20,9 +20,7 @@ enum AppColor {
     static let tertiaryText = Color(NSColor.tertiaryLabelColor)
 
     // System label colors (DESIGN.md 11): hierarchy without lowering primary-text opacity
-    static let label = Color(NSColor.labelColor)
     static let secondaryLabel = Color(NSColor.secondaryLabelColor)
-    static let tertiaryLabel = Color(NSColor.tertiaryLabelColor)
     static let quaternaryLabel = Color(NSColor.quaternaryLabelColor)
 
     // Semantic Accents & Status (90% Neutral, 7% Accent, 3% Intelligence)
@@ -51,7 +49,6 @@ enum AppColor {
     // Borders, Focus Rings & Badges
     static let borderSubtle = Color(NSColor.separatorColor)
     static let separator = Color(NSColor.separatorColor)
-    static let focusRing = Color.accentColor.opacity(0.65)
     static let badgeBackground = Color(NSColor.quaternaryLabelColor).opacity(0.12)
     static let unreadDot = Color.accentColor
 
@@ -98,7 +95,6 @@ enum AppLayout {
     static let tensionScaleMarkerHeight: CGFloat = 16
     static let pageInset: CGFloat = 24.0
     static let sidebarInset: CGFloat = 12.0
-    static let sectionGap: CGFloat = 24.0
     static let cardGap: CGFloat = 16.0
     /// Reader and event-overview column width at text scale 1 (DESIGN.md 9).
     static let readingMeasure: CGFloat = 720.0
@@ -123,7 +119,6 @@ enum AppSpacing {
     static let md: CGFloat = 16.0
     static let lg: CGFloat = 24.0
     static let xl: CGFloat = 32.0
-    static let xxl: CGFloat = 48.0
 
     // Micro steps for text clusters only (DESIGN.md 12)
     /// Between stacked text lines.
@@ -138,19 +133,14 @@ enum AppRadius {
     static let control: CGFloat = 6.0
     static let card: CGFloat = 12.0
     static let container: CGFloat = 16.0
-    static let pill: CGFloat = 999.0
 
     // Aliases for backward compatibility
-    static let small: CGFloat = 6.0
-    static let medium: CGFloat = 8.0
-    static let bubble: CGFloat = 12.0
 }
 
 // MARK: - App Typography
 
 enum AppTypography {
     static let sectionHeaderTracking: Double = 0.6
-    static let sourceEyebrowTracking: Double = 0.5
     static let eyebrowTracking: Double = 0.5
 
     // Standard semantic typographic scale
@@ -268,7 +258,7 @@ enum AppTypography {
         case .subheading, .introduction: return 16
         case .fact: return 15
         case .body, .bodyMedium: return 14
-        case .detail, .metadata, .emphasis: return 13
+        case .metadata, .emphasis: return 13
         case .annotation: return 12
         case .eyebrow, .caption, .captionMedium: return 11
         case .micro: return 10
@@ -280,7 +270,7 @@ enum AppTypography {
         case .title, .section, .subheading: return .bold
         case .emphasis, .eyebrow, .micro: return .semibold
         case .bodyMedium, .metadata, .annotation, .captionMedium: return .medium
-        case .introduction, .fact, .body, .detail, .caption: return .regular
+        case .introduction, .fact, .body, .caption: return .regular
         }
     }
 
@@ -300,7 +290,7 @@ enum AppTypography {
 
 enum OverviewTextRole: Sendable {
     case title, section, subheading, introduction, fact, body, bodyMedium
-    case detail, metadata, emphasis, annotation, eyebrow, caption, captionMedium, micro
+    case metadata, emphasis, annotation, eyebrow, caption, captionMedium, micro
 }
 
 enum StoryCardLayout: Sendable {
@@ -324,9 +314,6 @@ enum AppShadow {
     static let cardFocusRingY: CGFloat = 0.0
 
     // Backward compatibility alias (now a restrained accent glow, not radioactive pink)
-    static var cardSelectedGlow: Color { AppColor.accent.opacity(0.2) }
-    static let cardSelectedRadius: CGFloat = 8.0
-    static let cardSelectedY: CGFloat = 3.0
 }
 
 // MARK: - App Motion
@@ -335,12 +322,10 @@ enum AppMotion {
     static let hover = Animation.easeOut(duration: 0.12)
     static let state = Animation.smooth(duration: 0.24)
     static let navigation = Animation.smooth(duration: 0.3)
-    static let modal = Animation.easeOut(duration: 0.2)
 
     // Aliases for backward compatibility
     static let quick = hover
     static let responsive = state
-    static let smooth = navigation
 }
 
 // MARK: - Components (DESIGN.md 18)

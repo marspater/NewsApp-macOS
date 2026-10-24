@@ -25,7 +25,6 @@ swiftc "${NEWS_DEPENDENCY_FLAGS[@]}" -swift-version 6 -O -parse-as-library -targ
     Sources/Intelligence/ArticleIntelligence.swift \
     Sources/Intelligence/OverviewPassageSelector.swift \
     Sources/Intelligence/PromptDefense.swift \
-    Sources/Intelligence/ModelAvailability.swift \
     Sources/Intelligence/PassageFactExtractor.swift \
     Sources/Intelligence/TensionMethodology.swift \
     Sources/Intelligence/WorldTension.swift \
@@ -61,7 +60,6 @@ swiftc "${NEWS_DEPENDENCY_FLAGS[@]}" -swift-version 6 -O -parse-as-library -targ
     Sources/Coordinators/FeedManager.swift \
     Sources/App/AppContainer.swift \
     Sources/Views/DesignSystem.swift \
-    Sources/Views/GlassSystem.swift \
     Sources/Views/ArticleCardView.swift \
     Sources/Views/ArticleWebView.swift \
     Sources/Views/ArticleRemoteImage.swift \
@@ -70,7 +68,6 @@ swiftc "${NEWS_DEPENDENCY_FLAGS[@]}" -swift-version 6 -O -parse-as-library -targ
     Sources/Views/ReaderSupportViews.swift \
     Sources/Storage/SavedStoriesManager.swift \
     Sources/Services/OPMLManager.swift \
-    Sources/Coordinators/RefreshCoordinator.swift \
     Sources/App/NewsSignposts.swift \
     Sources/App/UpdateChecker.swift \
     Tests/ReaderAccessibilityTests.swift \

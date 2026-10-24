@@ -1,8 +1,8 @@
 #!/bin/bash
 # Design-language ratchet for docs/DESIGN.md.
 #
-# Counts known deviations per file under Sources/Views (DesignSystem.swift and
-# GlassSystem.swift own the tokens and glass helpers and are exempt) and compares
+# Counts known deviations per file under Sources/Views (DesignSystem.swift owns the
+# tokens and is exempt) and compares
 # them with script/design_lint_baseline.txt. A rising count fails; a falling count
 # also fails until the baseline is lowered with `script/design_lint.sh --update`,
 # so the baseline only moves down. Shell only, so it runs without a Swift toolchain.
@@ -119,7 +119,7 @@ count() {
 current="$(mktemp)"
 trap 'rm -f "$current"' EXIT
 
-find Sources/Views -name '*.swift' ! -name DesignSystem.swift ! -name GlassSystem.swift | sort | while read -r file; do
+find Sources/Views -name '*.swift' ! -name DesignSystem.swift | sort | while read -r file; do
     for entry in "${RULES[@]}"; do
         rule="${entry%%|*}"
         pattern="${entry#*|}"

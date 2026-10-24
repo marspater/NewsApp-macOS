@@ -8,8 +8,6 @@ public struct GenerationPromptDefense: Sendable {
     /// Standard delimiter tags for untrusted data containment.
     public static let sourceDataStartTag = "<source_data>"
     public static let sourceDataEndTag = "</source_data>"
-    public static let passageStartTag = "<evidence_passage"
-    public static let passageEndTag = "</evidence_passage>"
 
     /// Canonical system prompt guard instructing the model to treat content within boundaries strictly as untrusted data.
     public static let untrustedDataSystemGuard = """

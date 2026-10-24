@@ -85,7 +85,6 @@ final class AppSettings: ObservableObject {
     @Published private(set) var articleRetentionDays: Int
     @Published var notificationsEnabled: Bool
     @Published var aiEnabled: Bool
-    @Published var privateNotificationsEnabled: Bool
     @Published var notificationMode: NotificationMode
     @Published var allowInsecureHTTP: Bool
     @Published var tensionCollectionOptIn: Bool
@@ -152,16 +151,13 @@ final class AppSettings: ObservableObject {
             let mode = NotificationMode(rawValue: modeRaw)
         {
             self.notificationMode = mode
-            self.privateNotificationsEnabled = (mode == .privacy)
         } else if defaults.object(forKey: Self.privateNotificationsEnabledKey) != nil
             && defaults.bool(forKey: Self.privateNotificationsEnabledKey)
         {
             self.notificationMode = .privacy
-            self.privateNotificationsEnabled = true
             defaults.set(NotificationMode.privacy.rawValue, forKey: Self.notificationModeKey)
         } else {
             self.notificationMode = .full
-            self.privateNotificationsEnabled = false
             defaults.set(NotificationMode.full.rawValue, forKey: Self.notificationModeKey)
         }
 
@@ -330,13 +326,8 @@ final class AppSettings: ObservableObject {
 
     func setNotificationMode(_ mode: NotificationMode) {
         notificationMode = mode
-        privateNotificationsEnabled = (mode == .privacy)
         defaults.set(mode.rawValue, forKey: Self.notificationModeKey)
         defaults.set(mode == .privacy, forKey: Self.privateNotificationsEnabledKey)
-    }
-
-    func setPrivateNotificationsEnabled(_ enabled: Bool) {
-        setNotificationMode(enabled ? .privacy : .full)
     }
 
     func setAllowInsecureHTTP(_ allowed: Bool) {

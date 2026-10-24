@@ -4,7 +4,6 @@ import UserNotifications
 
 /// Notification posted when the user clicks a notification banner or uses keyboard navigation.
 extension Notification.Name {
-    static let openArticleFromNotification = Notification.Name("openArticleFromNotification")
     static let refreshFeedsCommand = Notification.Name("refreshFeedsCommand")
     static let nextArticleCommand = Notification.Name("nextArticleCommand")
     static let prevArticleCommand = Notification.Name("prevArticleCommand")
@@ -291,11 +290,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
         if let articleLink = userInfo["articleLink"] as? String {
             Task { @MainActor in
                 // Bring app to front
-                if #available(macOS 14.0, *) {
-                    NSApp.activate()
-                } else {
-                    NSApp.activate(ignoringOtherApps: true)
-                }
+                NSApp.activate()
                 ArticleStore.shared.pendingNavigation = .init(
                     articleID: articleID,
                     link: articleLink

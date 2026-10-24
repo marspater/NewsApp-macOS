@@ -35,17 +35,6 @@ public struct ClaimAuditResult: Sendable, Equatable, Identifiable {
         return nil
     }
 
-    public var failureDetail: String? {
-        switch status {
-        case .supported:
-            return nil
-        case .unsupported(let reason):
-            return reason
-        case .criticalError(_, let detail):
-            return detail
-        }
-    }
-
     public init(
         id: String,
         claimText: String,
@@ -288,18 +277,6 @@ public final class OverviewTimingTracker: @unchecked Sendable {
             NewsSignposts.end(NewsSignposts.intelligence, name: "AIOverviewGeneration", state: signpostState)
         }
         let result = try block()
-        let duration = CFAbsoluteTimeGetCurrent() - start
-        record(duration: duration)
-        return (result, duration)
-    }
-
-    public func measureAsync<T>(_ block: () async throws -> T) async rethrows -> (result: T, duration: TimeInterval) {
-        let signpostState = NewsSignposts.begin(NewsSignposts.intelligence, name: "AIOverviewGeneration")
-        let start = CFAbsoluteTimeGetCurrent()
-        defer {
-            NewsSignposts.end(NewsSignposts.intelligence, name: "AIOverviewGeneration", state: signpostState)
-        }
-        let result = try await block()
         let duration = CFAbsoluteTimeGetCurrent() - start
         record(duration: duration)
         return (result, duration)

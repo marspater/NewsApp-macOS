@@ -10,7 +10,7 @@ The single design language for News on macOS. It applies to every change that ad
 2. **Native before custom.** Use the system component whenever one exists: `NavigationSplitView`, toolbars, sidebar lists, `searchable`, menus, `Form`, `ContentUnavailableView`, standard button styles. A custom component needs a reason the system one cannot meet, stated in the PR.
 3. **Glass is for controls, not content.** Liquid Glass belongs to the floating control layer. Cards, rows, reader text, summaries and tags never use it.
 4. **Hierarchy through type, space and grouping.** Express importance with typographic scale, spacing and grouping, not borders, gradients, shadows or color.
-5. **One way to do each thing.** Every color, font, spacing, radius and motion value comes from `Sources/Views/DesignSystem.swift`; every glass surface goes through `Sources/Views/GlassSystem.swift`; every repeated pattern has one component (section 18).
+5. **One way to do each thing.** Every color, font, spacing, radius and motion value comes from `Sources/Views/DesignSystem.swift`; every repeated pattern has one component (section 18).
 6. **Calm and honest.** Motion confirms an action and never decorates. Generated content is always labeled; publisher text is never restyled into something it is not.
 7. **Accessible and adaptive by default.** Every view works in light and dark, with Increase Contrast, Reduce Transparency, Reduce Motion, keyboard-only use and narrow windows, and on macOS 15 without Liquid Glass.
 
@@ -40,7 +40,7 @@ The single design language for News on macOS. It applies to every change that ad
 
 ### 3.3 Implementation rules
 
-- Use the helpers in `GlassSystem.swift` (`nativeLiquidGlass(in:interactive:)`, `inGlassContainer()`, `nativeGlassButtonStyle(prominent:)`). Do not call `glassEffect` or create a `GlassEffectContainer` directly in a feature view.
+- No current surface uses glass (section 3.2 allows it only for floating controls, and there are none). When one appears, add a single shared helper with a macOS 15 fallback to `DesignSystem.swift`; do not call `glassEffect` or create a `GlassEffectContainer` directly in a feature view.
 - Buttons on glass use `.buttonStyle(.glass)` or `.buttonStyle(.glassProminent)` through the helper. Custom glass controls that respond to clicks are `interactive`.
 - Apply glass as the last modifier, after padding and frame, so the padding is part of the glass shape. Glass helpers never add padding of their own. Never nest glass.
 - Group adjacent glass elements in one `GlassEffectContainer` so they sample once and can morph. Morph only with `glassEffectID(_:in:)` inside a container and an animation gated by Reduce Motion.
@@ -192,7 +192,7 @@ macOS has no Dynamic Type. Chrome uses system text styles so it matches system c
 - Radii: `AppRadius.control` (6) for small rectangles, `card` (12), `container` (16), and `Capsule()` for tags and pills. Use continuous corners. On macOS 26 and later, a shape inside another rounded container or near the window corner is concentric: `ConcentricRectangle(corners: .concentric(minimum: .fixed(AppRadius.card)), isUniform: true)`.
 - Never hard-code control heights or toolbar heights; the system owns them and changed them in macOS 26.
 - Elevation: content cards use the resting, hover and focus shadow tokens only. Glass brings its own depth; never add shadows to glass or system controls.
-- Layout tokens: `pageInset` 24, `sectionGap` 24, `cardGap` 16, list maximum width 1000, grid columns adaptive 300–420, `readingMeasure` 720.
+- Layout tokens: `pageInset` 24, `cardGap` 16, list maximum width 1000, grid columns adaptive 300–420, `readingMeasure` 720.
 
 ## 13. Motion
 
@@ -239,7 +239,6 @@ Each pattern has one implementation; new code reuses it and extends it rather th
 | Component | Owner | Covers |
 | --- | --- | --- |
 | Tokens | `DesignSystem.swift` | Color, typography, spacing, radius, layout, shadow, motion |
-| Glass helpers | `GlassSystem.swift` | Custom glass, glass containers, glass button style, macOS 15 fallback |
 | Story card | `ArticleCardView.swift` | All story cards and their context menus |
 | Event coverage | `EventCardView.swift` | Coverage disclosure and member rows |
 | Tag | `TagView` in `DesignSystem.swift` | Category, entity, Updated, Plan, AI, Verified Excerpts and citation pills |
@@ -256,7 +255,7 @@ Each pattern has one implementation; new code reuses it and extends it rather th
 Copy into the PR description for UI changes and tick only what was checked.
 
 - [ ] No new literal font size, color, spacing, radius or control height outside `DesignSystem.swift`.
-- [ ] Glass only where section 3.2 allows it, through `GlassSystem.swift`, not nested, macOS 15 path present.
+- [ ] Glass only where section 3.2 allows it, through one shared helper, not nested, macOS 15 path present.
 - [ ] No toolbar or sidebar background, no forced scroll edge style.
 - [ ] Toolbar placement, grouping, tooltips and labels follow section 5; every toolbar action has a menu command.
 - [ ] Sidebar, search and empty states use the system components in sections 6–8.
@@ -266,4 +265,4 @@ Copy into the PR description for UI changes and tick only what was checked.
 
 ## 20. Changing this document
 
-Change the rules here first, in a focused PR with the reason and the evidence, and update the tokens in `DesignSystem.swift` or the helpers in `GlassSystem.swift` in the same PR when they change. Mars approves changes to this document. A one-off exception is recorded in the PR that needs it; a recurring exception becomes a rule.
+Change the rules here first, in a focused PR with the reason and the evidence, and update the tokens in `DesignSystem.swift` in the same PR when they change. Mars approves changes to this document. A one-off exception is recorded in the PR that needs it; a recurring exception becomes a rule.
