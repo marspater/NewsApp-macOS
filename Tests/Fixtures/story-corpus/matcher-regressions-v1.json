@@ -1,0 +1,396 @@
+{
+  "version": 1,
+  "note": "Authored English regression corpus for EventClusterer (#506). Not acceptance evidence: the private holdout (#509) is the gate. Families sit five days apart so the candidate window isolates them; negatives are deliberately inside the window. 'expected' is the CI ratchet.",
+  "expected": {
+    "minimumTruePositives": 0,
+    "maximumFalsePositives": 1000
+  },
+  "articles": [
+    {
+      "id": "f01-a",
+      "title": "Three dead after gunman opens fire at Westfield mall in Sydney",
+      "description": "Police said a gunman shot shoppers at the Westfield Bondi Junction mall in Sydney on Saturday before an officer shot him dead. Two more people were injured.",
+      "source": "Wire One",
+      "published": "2026-10-01T09:00:00Z",
+      "event": "f01-shooting"
+    },
+    {
+      "id": "f01-b",
+      "title": "Sydney mall shooting: police name Westfield gunman",
+      "description": "New South Wales police identified the gunman who shot shoppers at Westfield Bondi Junction in Sydney before an officer shot him. Three people died.",
+      "source": "Daily Two",
+      "published": "2026-10-01T11:30:00Z",
+      "event": "f01-shooting"
+    },
+    {
+      "id": "f01-c",
+      "title": "Witnesses describe panic inside Westfield Bondi Junction as gunman opened fire",
+      "description": "Shoppers at the Sydney mall told of running for the exits when a gunman began shooting at Westfield Bondi Junction. Police said three people were killed and the attacker was shot by an officer.",
+      "source": "Herald Three",
+      "published": "2026-10-01T23:00:00Z",
+      "event": "f01-shooting"
+    },
+    {
+      "id": "f01-s",
+      "title": "Sydney Opera House announces summer concert season",
+      "description": "The Sydney Opera House unveiled its summer programme of concerts and festivals on Saturday, with tickets on sale next month.",
+      "source": "Tribune Four",
+      "published": "2026-10-01T15:00:00Z"
+    },
+    {
+      "id": "f02-a",
+      "title": "Spanish parliament rejects government's housing decree",
+      "description": "Lawmakers in Madrid voted down the housing decree proposed by Prime Minister Pedro Sánchez on Tuesday, a defeat for the government's rent controls.",
+      "source": "Wire One",
+      "published": "2026-10-06T10:00:00Z",
+      "event": "f02-vote"
+    },
+    {
+      "id": "f02-b",
+      "title": "Sánchez suffers defeat as Congress votes down housing decree",
+      "description": "The Spanish Congress rejected the government's housing decree in Madrid on Tuesday, with the opposition and separatist parties voting against the rent measures.",
+      "source": "Daily Two",
+      "published": "2026-10-06T12:00:00Z",
+      "event": "f02-vote"
+    },
+    {
+      "id": "f02-c",
+      "title": "Thousands march in Madrid over housing after decree defeat",
+      "description": "Tens of thousands protested in Madrid on Tuesday evening demanding rent controls, hours after parliament rejected the government's housing decree.",
+      "source": "Herald Three",
+      "published": "2026-10-06T19:00:00Z",
+      "event": "f02-protest"
+    },
+    {
+      "id": "f02-d",
+      "title": "Housing protesters fill Madrid streets after parliament vote",
+      "description": "Demonstrators marched through the Spanish capital calling for affordable rents after Congress voted down Pedro Sánchez's housing decree.",
+      "source": "Tribune Four",
+      "published": "2026-10-06T21:00:00Z",
+      "event": "f02-protest"
+    },
+    {
+      "id": "f03-a",
+      "title": "Magnitude 6.1 earthquake strikes Malatya in eastern Turkey",
+      "description": "A magnitude 6.1 earthquake hit Malatya province in eastern Turkey on Thursday morning, damaging buildings, the AFAD disaster agency said.",
+      "source": "Wire One",
+      "published": "2026-10-11T07:00:00Z",
+      "event": "f03-quake"
+    },
+    {
+      "id": "f03-b",
+      "title": "Buildings collapse as strong quake hits Turkey's Malatya",
+      "description": "An earthquake of magnitude 6.1 struck near Malatya in eastern Turkey, AFAD said, with several buildings damaged and rescue teams deployed to the province.",
+      "source": "Daily Two",
+      "published": "2026-10-11T10:00:00Z",
+      "event": "f03-quake"
+    },
+    {
+      "id": "f03-c",
+      "title": "Rescuers search rubble after Malatya earthquake kills four",
+      "description": "Rescue teams in Malatya searched damaged buildings after the magnitude 6.1 earthquake in eastern Turkey, AFAD said; four people died and dozens were injured.",
+      "source": "Herald Three",
+      "published": "2026-10-12T03:00:00Z",
+      "event": "f03-quake"
+    },
+    {
+      "id": "f04-a",
+      "title": "Russian missile strike damages major bridge in Kyiv",
+      "description": "A Russian missile hit the Pivnichnyi bridge across the Dnipro in Kyiv overnight, Ukrainian officials said, closing the crossing to traffic.",
+      "source": "Wire One",
+      "published": "2026-10-16T04:00:00Z",
+      "event": "f04-kyiv"
+    },
+    {
+      "id": "f04-b",
+      "title": "Kyiv bridge closed after overnight Russian strike",
+      "description": "Ukraine's capital closed the Pivnichnyi bridge over the Dnipro after a Russian missile struck it overnight, city officials said; repairs will take weeks.",
+      "source": "Daily Two",
+      "published": "2026-10-16T06:00:00Z",
+      "event": "f04-kyiv"
+    },
+    {
+      "id": "f04-c",
+      "title": "Russian drone strike hits apartment block in Kharkiv, two injured",
+      "description": "A Russian drone struck a residential building in Kharkiv overnight, injuring two people, regional governor Oleh Syniehubov said.",
+      "source": "Herald Three",
+      "published": "2026-10-16T05:00:00Z",
+      "event": "f04-kharkiv"
+    },
+    {
+      "id": "f04-d",
+      "title": "Two hurt as drones hit Kharkiv housing block overnight",
+      "description": "Russian drones damaged an apartment building in Kharkiv, Ukraine's second city, Syniehubov said; two residents were injured and taken to hospital.",
+      "source": "Tribune Four",
+      "published": "2026-10-16T07:00:00Z",
+      "event": "f04-kharkiv"
+    },
+    {
+      "id": "f05-a",
+      "title": "Hungarian novelist wins 2026 Nobel Prize in Literature",
+      "description": "The Swedish Academy awarded the 2026 Nobel Prize in Literature to Hungarian novelist Ilona Varga on Thursday for her trilogy on postwar Budapest.",
+      "source": "Wire One",
+      "published": "2026-10-21T11:00:00Z",
+      "event": "f05-literature"
+    },
+    {
+      "id": "f05-b",
+      "title": "Ilona Varga awarded Nobel literature prize",
+      "description": "The Swedish Academy named Hungarian writer Ilona Varga the winner of this year's Nobel Prize in Literature, praising her novels about Budapest.",
+      "source": "Daily Two",
+      "published": "2026-10-21T15:00:00Z",
+      "event": "f05-literature"
+    },
+    {
+      "id": "f05-c",
+      "title": "Nobel Peace Prize goes to Sudanese doctors' network",
+      "description": "The Norwegian Nobel Committee awarded the 2026 Nobel Peace Prize to a network of volunteer doctors in Sudan for their work during the war, it announced in Oslo on Friday.",
+      "source": "Herald Three",
+      "published": "2026-10-22T09:00:00Z",
+      "event": "f05-peace"
+    },
+    {
+      "id": "f05-d",
+      "title": "Sudan volunteer doctors win Nobel Peace Prize",
+      "description": "A Sudanese network of volunteer doctors was awarded the Nobel Peace Prize in Oslo for treating the wounded during the civil war, the Nobel Committee said.",
+      "source": "Tribune Four",
+      "published": "2026-10-22T12:00:00Z",
+      "event": "f05-peace"
+    },
+    {
+      "id": "f06-a",
+      "title": "Erdoğan and Macron agree on Syria aid corridor at Ankara talks",
+      "description": "Turkish President Recep Tayyip Erdoğan and French President Emmanuel Macron agreed in Ankara to open a humanitarian corridor into northern Syria, the two leaders said.",
+      "source": "Wire One",
+      "published": "2026-10-26T13:00:00Z",
+      "event": "f06-corridor"
+    },
+    {
+      "id": "f06-b",
+      "title": "Turkey and France agree Syria humanitarian corridor after Erdogan-Macron meeting",
+      "description": "President Erdogan and President Macron said after talks in Ankara that Turkey and France would open an aid corridor into northern Syria within weeks.",
+      "source": "Daily Two",
+      "published": "2026-10-26T18:00:00Z",
+      "event": "f06-corridor"
+    },
+    {
+      "id": "f07-a",
+      "title": "Trump signs order imposing 25% tariff on imported steel",
+      "description": "President Donald Trump signed an executive order at the White House on Monday imposing a 25 percent tariff on imported steel, citing national security.",
+      "source": "Wire One",
+      "published": "2026-10-31T14:00:00Z",
+      "event": "f07-tariff"
+    },
+    {
+      "id": "f07-b",
+      "title": "Trump imposes 25% steel tariff by executive order",
+      "description": "The White House said President Trump signed an order placing a 25 percent tariff on steel imports on Monday, drawing protests from trading partners.",
+      "source": "Daily Two",
+      "published": "2026-10-31T17:00:00Z",
+      "event": "f07-tariff"
+    },
+    {
+      "id": "f07-c",
+      "title": "Trump says Fed chair should resign at Ohio rally",
+      "description": "President Donald Trump told supporters at a rally in Ohio on Tuesday that the Federal Reserve chair should resign over interest rates.",
+      "source": "Herald Three",
+      "published": "2026-11-01T19:00:00Z"
+    },
+    {
+      "id": "f07-d",
+      "title": "Trump threatens tariffs on European cars in rally speech",
+      "description": "President Trump said at a rally in Ohio that he would impose tariffs on European cars if the EU did not lower its own duties on American goods.",
+      "source": "Tribune Four",
+      "published": "2026-11-01T20:00:00Z"
+    },
+    {
+      "id": "f08-a",
+      "title": "Inmate survives botched execution in Alabama, hospitalised in critical condition",
+      "description": "An Alabama inmate survived a botched lethal injection on Thursday night and was taken to hospital in critical condition, the corrections department said.",
+      "source": "Wire One",
+      "published": "2026-11-05T06:00:00Z",
+      "event": "f08-execution"
+    },
+    {
+      "id": "f08-b",
+      "title": "Alabama inmate in critical condition after failed execution",
+      "description": "Doctors are treating an Alabama prisoner who survived a failed lethal injection; the corrections department said the execution was halted after two hours.",
+      "source": "Daily Two",
+      "published": "2026-11-05T12:00:00Z",
+      "event": "f08-execution"
+    },
+    {
+      "id": "f08-c",
+      "title": "Alabama corrections commissioner resigns after botched execution",
+      "description": "The head of Alabama's corrections department resigned on Friday, a day after an inmate survived a botched lethal injection and was hospitalised.",
+      "source": "Herald Three",
+      "published": "2026-11-06T10:00:00Z",
+      "event": "f08-resignation"
+    },
+    {
+      "id": "f08-d",
+      "title": "Commissioner steps down over failed Alabama execution",
+      "description": "Alabama's prisons commissioner stepped down after the failed execution of an inmate who survived the lethal injection, the governor's office said.",
+      "source": "Tribune Four",
+      "published": "2026-11-06T12:00:00Z",
+      "event": "f08-resignation"
+    },
+    {
+      "id": "f09-a",
+      "title": "Hurricane Delia makes landfall in Florida Panhandle as Category 3 storm",
+      "description": "Hurricane Delia came ashore near Apalachicola in the Florida Panhandle on Wednesday with 120 mph winds, the National Hurricane Center said, knocking out power to hundreds of thousands of homes.",
+      "source": "Wire One",
+      "published": "2026-11-10T08:00:00Z",
+      "event": "f09-hurricane"
+    },
+    {
+      "id": "f09-b",
+      "title": "Delia leaves hundreds of thousands without power after Florida landfall",
+      "description": "Crews worked to restore electricity across the Florida Panhandle after Hurricane Delia made landfall near Apalachicola as a Category 3 storm, the National Hurricane Center said.",
+      "source": "Daily Two",
+      "published": "2026-11-11T04:00:00Z",
+      "event": "f09-hurricane"
+    },
+    {
+      "id": "f10-a",
+      "title": "Iraq and Turkey sign oil pipeline supply agreement in Ankara",
+      "description": "Iraq and Turkey signed an agreement in Ankara on Monday to resume crude oil exports through the Kirkuk-Ceyhan pipeline, the two energy ministries said.",
+      "source": "Wire One",
+      "published": "2026-11-15T11:00:00Z",
+      "event": "f10-agreement"
+    },
+    {
+      "id": "f10-b",
+      "title": "Baghdad and Ankara agree to restart Kirkuk-Ceyhan oil exports",
+      "description": "Iraq's oil ministry and Turkey's energy ministry signed a deal in Ankara to restart crude shipments through the Kirkuk-Ceyhan pipeline after a two-year halt.",
+      "source": "Daily Two",
+      "published": "2026-11-15T15:00:00Z",
+      "event": "f10-agreement"
+    },
+    {
+      "id": "f10-c",
+      "title": "Drone attack sets fire to Kirkuk oil field a day after pipeline deal",
+      "description": "A drone strike set fire to storage tanks at an oil field in Kirkuk on Tuesday, a day after Iraq and Turkey agreed to resume exports through the Kirkuk-Ceyhan pipeline, officials said.",
+      "source": "Herald Three",
+      "published": "2026-11-16T09:00:00Z",
+      "event": "f10-attack"
+    },
+    {
+      "id": "f10-d",
+      "title": "Fire at Kirkuk oil field after drone strike",
+      "description": "Iraqi firefighters battled a blaze at a Kirkuk oil field after a drone attack hit storage tanks, the oil ministry said; exports were not affected.",
+      "source": "Tribune Four",
+      "published": "2026-11-16T12:00:00Z",
+      "event": "f10-attack"
+    },
+    {
+      "id": "f11-a",
+      "title": "Tens of thousands rally in Belgrade against government on Saturday",
+      "description": "Tens of thousands marched through Belgrade on Saturday demanding early elections, the largest protest since the station canopy collapse.",
+      "source": "Wire One",
+      "published": "2026-11-20T16:00:00Z",
+      "event": "f11-saturday"
+    },
+    {
+      "id": "f11-b",
+      "title": "Huge anti-government protest fills Belgrade streets",
+      "description": "Serbian protesters filled central Belgrade on Saturday calling for early elections, in the biggest demonstration in months.",
+      "source": "Daily Two",
+      "published": "2026-11-20T19:00:00Z",
+      "event": "f11-saturday"
+    },
+    {
+      "id": "f11-c",
+      "title": "Students block Belgrade bridges in second day of protests",
+      "description": "Student protesters blocked three bridges in Belgrade on Sunday, a day after tens of thousands rallied against the government.",
+      "source": "Herald Three",
+      "published": "2026-11-21T12:00:00Z",
+      "event": "f11-sunday"
+    },
+    {
+      "id": "f12-a",
+      "title": "Supreme Court strikes down state social media age law",
+      "description": "The U.S. Supreme Court ruled 6-3 on Wednesday that a Texas law requiring age verification for social media accounts violates the First Amendment.",
+      "source": "Wire One",
+      "published": "2026-11-25T14:00:00Z",
+      "event": "f12-ruling"
+    },
+    {
+      "id": "f12-b",
+      "title": "Supreme Court rules Texas social media age-verification law unconstitutional",
+      "description": "",
+      "source": "Daily Two",
+      "published": "2026-11-25T16:00:00Z",
+      "event": "f12-ruling"
+    },
+    {
+      "id": "f13-a",
+      "title": "Siemens to cut 5,000 jobs in energy division",
+      "description": "Siemens said on Thursday it would cut 5,000 jobs in its energy business over two years as part of a restructuring announced in Munich.",
+      "source": "Wire One",
+      "published": "2026-11-30T08:00:00Z",
+      "event": "f13-cuts"
+    },
+    {
+      "id": "f13-b",
+      "title": "Siemens announces 5,000 job cuts at energy unit",
+      "description": "The German industrial group Siemens will eliminate 5,000 positions in its energy unit, the company said in Munich, citing weak demand.",
+      "source": "Daily Two",
+      "published": "2026-11-30T09:00:00Z",
+      "event": "f13-cuts"
+    },
+    {
+      "id": "f13-c",
+      "title": "Siemens wins €2bn rail contract in Egypt",
+      "description": "Siemens signed a €2 billion contract on Thursday to supply trains for Egypt's new high-speed rail line, the company said.",
+      "source": "Herald Three",
+      "published": "2026-11-30T14:00:00Z"
+    },
+    {
+      "id": "f14-a",
+      "title": "Judge blocks federal ban on gas stoves in new homes",
+      "description": "A federal judge in Washington on Monday blocked a rule banning gas stoves in newly built homes, finding the agency exceeded its authority.",
+      "source": "Wire One",
+      "published": "2026-12-05T15:00:00Z",
+      "event": "f14-ruling"
+    },
+    {
+      "id": "f14-b",
+      "title": "Federal court halts gas stove ban for new housing",
+      "description": "A U.S. district judge in Washington halted the government's ban on gas stoves in new homes on Monday, ruling the energy department overstepped.",
+      "source": "Daily Two",
+      "published": "2026-12-05T18:00:00Z",
+      "event": "f14-ruling"
+    },
+    {
+      "id": "f14-c",
+      "title": "Administration appeals ruling that blocked gas stove ban",
+      "description": "The Justice Department filed an appeal on Tuesday against the Washington judge's order blocking the ban on gas stoves in new homes.",
+      "source": "Herald Three",
+      "published": "2026-12-06T16:00:00Z"
+    },
+    {
+      "id": "f15-a",
+      "title": "Zelensky says Ukraine ready for ceasefire talks in Riyadh",
+      "description": "President Volodymyr Zelensky said on Friday that Ukraine was ready to join ceasefire talks hosted by Saudi Arabia in Riyadh next week.",
+      "source": "Wire One",
+      "published": "2026-12-10T09:00:00Z",
+      "event": "f15-talks"
+    },
+    {
+      "id": "f15-b",
+      "title": "Ukraine ready for Riyadh ceasefire talks, Zelensky says",
+      "description": "Zelensky told reporters in Kyiv that Ukrainian negotiators would travel to Riyadh for ceasefire talks hosted by Saudi Arabia.",
+      "source": "Daily Two",
+      "published": "2026-12-10T11:00:00Z",
+      "event": "f15-talks"
+    },
+    {
+      "id": "f15-c",
+      "title": "Zelensky orders mobilisation of 50,000 more troops",
+      "description": "President Zelensky signed a decree on Friday mobilising 50,000 additional soldiers, his office said, as Russian attacks continued in the east.",
+      "source": "Herald Three",
+      "published": "2026-12-10T13:00:00Z"
+    }
+  ]
+}

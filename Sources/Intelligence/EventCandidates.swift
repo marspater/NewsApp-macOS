@@ -23,13 +23,21 @@ struct EventMatchKey: Hashable, Sendable {
             else { return }
             terms.append(trimmed)
         }
-        // Named participants and places first, then distinctive title words.
+        // Headline names first, then distinctive headline words, then names from the description: a lead that names
+        // eight participants must not push every headline word out of the query.
         let tagger = NLTagger(tagSchemes: [.nameType])
         tagger.string = text
         let options: NLTagger.Options = [.omitWhitespace, .omitPunctuation, .joinNames]
+        let titleEnd = text.index(text.startIndex, offsetBy: title.count, limitedBy: text.endIndex) ?? text.endIndex
+        var descriptionNames: [String] = []
         tagger.enumerateTags(in: text.startIndex..<text.endIndex, unit: .word, scheme: .nameType, options: options) {
             tag, range in
-            if let tag, [.personalName, .placeName, .organizationName].contains(tag) { add(String(text[range])) }
+            guard let tag, [.personalName, .placeName, .organizationName].contains(tag) else { return true }
+            if range.lowerBound < titleEnd {
+                add(String(text[range]))
+            } else {
+                descriptionNames.append(String(text[range]))
+            }
             return true
         }
         let tokenizer = NLTokenizer(unit: .word)
@@ -38,6 +46,7 @@ struct EventMatchKey: Hashable, Sendable {
             add(String(title[range]).lowercased())
             return true
         }
+        for name in descriptionNames { add(name) }
         self.terms = terms
     }
 

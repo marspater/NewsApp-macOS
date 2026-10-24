@@ -537,6 +537,7 @@ struct NewsTests {
             try await testPublisherContentProvenance()
             try await testRefreshClustersEvents(fixtureRoot: fixtureRoot)
             try await testEventCorpusHarness(fixtureRoot: fixtureRoot)
+            try await testMatcherRegressionCorpus()
             try testCapturedFingerprintReview()
             try await testAuditPersistenceAndRoutingRegressions(fixtureRoot: fixtureRoot)
             try await testUndatedArticleOrdering()
@@ -636,6 +637,7 @@ struct NewsTests {
         try await testPublisherContentProvenance()
         try await testRefreshClustersEvents(fixtureRoot: fixtureRoot)
         try await testEventCorpusHarness(fixtureRoot: fixtureRoot)
+        try await testMatcherRegressionCorpus()
         try testCapturedFingerprintReview()
         await testFTS5SearchAndOperators()
         try await testUnchangedFTSRefresh()
@@ -6748,6 +6750,14 @@ struct NewsTests {
         assertTrue(key.terms.contains { $0.lowercased() == "earthquake" }, "Distinctive title words become terms")
         assertEqual(key.terms.filter { $0.lowercased() == "lviv" }.count, 1, "Names and title words are deduplicated")
         assertFalse(key.terms.contains("the"), "Short words are not terms")
+        let crowded = EventMatchKey(
+            title: "Earthquake strikes Lviv region overnight",
+            description:
+                "Officials in Kyiv, Warsaw, Berlin, Paris, Rome, Madrid, Vienna, Prague and Lisbon sent condolences.")
+        assertTrue(
+            crowded.terms.contains { $0.lowercased() == "earthquake" }
+                && crowded.terms.count <= EventMatchKey.maximumTerms,
+            "Headline words keep their place in the query when the lead names many places")
         let hostile = EventMatchKey(title: "Ceasefire\" OR content:* NEAR(talks) {source} collapse", description: "")
         assertTrue(hostile.ftsQuery?.contains("\"\"") == false, "Quotes in publisher text cannot break out of a phrase")
         assertTrue(
@@ -7398,6 +7408,38 @@ struct NewsTests {
             !colonLeading.primaryTitleTerms.isEmpty
                 && !colonLeading.primaryTitleTerms.contains("verdict"),
             "Leading connector with colon delimiter isolates primary clause")
+
+        // Hardening (#502–#504): shared matching text, consequence-only primary clauses, person tokens.
+        let plainText = EventFeatures.matchingText(
+            title: "A <b>bold</b>\nheadline", description: "<p>Lead &amp; more</p><img src=\"x\">")
+        assertTrue(
+            !plainText.contains("<") && plainText.contains("Lead & more") && plainText.hasPrefix("A ")
+                && plainText.filter(\.isNewline).count == 1,
+            "Matching text strips markup and entities and keeps one headline line")
+        let tollAfter = EventFeatures(
+            title: "Three dead after gunman opens fire at Westfield mall in Sydney",
+            description:
+                "Police said a gunman shot shoppers at the Westfield Bondi Junction mall in Sydney on Saturday before an officer shot him dead.",
+            date: now)
+        assertTrue(
+            tollAfter.primaryTitleTerms.isEmpty,
+            "A primary clause that only counts the dead names no act of its own")
+        let namedGunman = EventFeatures(
+            title: "Sydney mall shooting: police name Westfield gunman",
+            description:
+                "New South Wales police identified the gunman who shot shoppers at Westfield Bondi Junction in Sydney before an officer shot him.",
+            date: now.addingTimeInterval(2 * 3600))
+        assertTrue(
+            EventMatcher.assess(tollAfter, namedGunman).isMatch,
+            "A toll-after headline matches the report that leads with the shooting itself")
+        assertFalse(
+            EventMatcher.assess(pontoonFollowUp, bridgeStrike).isCompatible,
+            "A primary clause that names an act keeps the background-clause guard")
+        let jordan = EventFeatures(
+            title: "Michael Jordan returns to Chicago for championship ceremony",
+            description: "The former Chicago Bulls star Michael Jordan attended the ceremony at the United Center.",
+            date: now)
+        assertFalse(jordan.countries.contains("@JO"), "A word of a typed person name is never a country")
 
         let emDashLeading = EventFeatures(
             title: "Soon after power outage — subway lines reopen across city",
@@ -10256,6 +10298,55 @@ struct NewsTests {
         assertEqual(value(original, "PRAGMA user_version;"), "15", "Original v15 fixture remains untouched")
         assertEqual(value(copy, "PRAGMA quick_check;"), "ok", "Upgraded provenance library passes quick_check")
         assertEqual(value(copy, "PRAGMA foreign_key_check;"), nil, "Provenance has no dangling article references")
+    }
+
+    /// The authored English corpus replayed through the real clusterer (#506). Regression evidence with a ratchet;
+    /// the private holdout (#509) stays the acceptance measurement. Pairs are printed by fixture id only.
+    static func testMatcherRegressionCorpus() async throws {
+        print("  - Testing the authored matcher regression corpus (#506)...")
+        struct Fixture: Decodable {
+            struct Item: Decodable {
+                let id: String, title: String, description: String?, source: String, published: Date, event: String?
+            }
+            struct Expected: Decodable { let minimumTruePositives: Int, maximumFalsePositives: Int }
+            let articles: [Item]
+            let expected: Expected
+        }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let fixture = try decoder.decode(
+            Fixture.self,
+            from: Data(contentsOf: URL(fileURLWithPath: "Tests/Fixtures/story-corpus/matcher-regressions-v1.json")))
+        let items = fixture.articles.sorted { ($0.published, $0.id) < ($1.published, $1.id) }
+        let articles = items.map {
+            FeedArticle(
+                storedID: $0.id, title: $0.title, link: "https://matcher-regressions.invalid/\($0.id)", guid: $0.id,
+                description: $0.description ?? "", pubDate: $0.published, source: $0.source)
+        }
+        let memberships = try await StoryCorpus.eventMemberships(articles: articles)
+        var metrics = EventCorpusMetrics()
+        var falsePairs: [String] = []
+        var missedPairs: [String] = []
+        for i in items.indices {
+            for j in items.indices where j > i {
+                let predicted =
+                    memberships[items[i].id] != nil && memberships[items[i].id] == memberships[items[j].id]
+                let gold = items[i].event != nil && items[i].event == items[j].event
+                guard predicted || gold else { continue }
+                metrics.add(predicted: predicted, gold: gold)
+                if predicted && !gold { falsePairs.append("\(items[i].id)+\(items[j].id)") }
+                if gold && !predicted { missedPairs.append("\(items[i].id)+\(items[j].id)") }
+            }
+        }
+        print("    matcher regressions v\(EventMatcher.version): \(metrics.line)")
+        print("    false pairs: \(falsePairs.isEmpty ? "none" : falsePairs.joined(separator: ", "))")
+        print("    missed pairs: \(missedPairs.isEmpty ? "none" : missedPairs.joined(separator: ", "))")
+        assertTrue(
+            metrics.truePositives >= fixture.expected.minimumTruePositives,
+            "Authored corpus true positives fell below the recorded floor (\(metrics.truePositives))")
+        assertTrue(
+            metrics.falsePositives <= fixture.expected.maximumFalsePositives,
+            "Authored corpus false pairs exceeded the recorded ceiling (\(metrics.falsePositives))")
     }
 
     static func testEventCorpusHarness(fixtureRoot: URL) async throws {

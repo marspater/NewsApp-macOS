@@ -53,6 +53,12 @@ extension NewsTests {
         assertEqual(shortIDs[0], 101, "Truncated sequence begins with [CLS]")
         assertEqual(shortIDs[7], 102, "Truncated sequence ends with [SEP]")
         assertEqual(shortMask, [Int32](repeating: 1, count: 8), "Truncated sequence has full attention mask")
+
+        // 3. Uncased BERT strips accents: an accented name must tokenize like its ASCII form, never as [UNK] (100).
+        let (accented, _) = tokenizer.encode("Erdoğan met Sánchez in Çanakkale", maxSequenceLength: 32)
+        let (ascii, _) = tokenizer.encode("Erdogan met Sanchez in Canakkale", maxSequenceLength: 32)
+        assertEqual(accented, ascii, "Accented names tokenize like their ASCII forms")
+        assertFalse(accented.contains(100), "No accented name becomes an unknown token")
     }
 
     // MARK: - SentenceEmbedder Inference & Normalization (#127)

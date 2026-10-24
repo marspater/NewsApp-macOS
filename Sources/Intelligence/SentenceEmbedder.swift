@@ -59,11 +59,13 @@ final class BertWordPieceTokenizer: Sendable {
         return (tokens, attentionMask)
     }
 
+    /// BERT's uncased basic tokenizer lowercases and strips accents: the vocabulary holds "erdogan" and "sanchez",
+    /// never "erdoğan" or "sánchez", so an accented name would otherwise become one `[UNK]` token.
     private func basicTokenize(_ text: String) -> [String] {
         var tokens: [String] = []
         var currentWord = ""
 
-        for char in text.lowercased() {
+        for char in text.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: nil).lowercased() {
             if char.isWhitespace {
                 if !currentWord.isEmpty {
                     tokens.append(currentWord)
@@ -122,7 +124,8 @@ final class BertWordPieceTokenizer: Sendable {
 /// On-device neural sentence embedding engine using bundled CoreML + Accelerate vDSP (#127, #307).
 actor SentenceEmbedder {
     static let shared = SentenceEmbedder()
-    static let modelVersion = 1
+    /// Bump when the tokenizer or the embedded text changes; stored vectors of older versions are recomputed.
+    static let modelVersion = 2
     static let vectorDimension = 384
     static let maxSequenceLength = 128
 
