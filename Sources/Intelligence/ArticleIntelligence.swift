@@ -109,7 +109,10 @@ public enum NewsCategory: String, CaseIterable, Sendable, Codable {
         (.sports, ["sport", "sports", "football", "basketball", "soccer", "league"]),
         (
             .entertainment,
-            ["entertain", "entertainment", "movie", "movies", "film", "films", "music", "celebrity", "celebrities", "cinema"]
+            [
+                "entertain", "entertainment", "movie", "movies", "film", "films", "music", "celebrity", "celebrities",
+                "cinema",
+            ]
         ),
         (.health, ["wellness", "fitness", "nutrition"]),
         (.travel, ["travel", "tourism", "vacation", "flight", "flights"]),
