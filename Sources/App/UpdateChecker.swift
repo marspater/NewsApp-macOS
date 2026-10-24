@@ -96,7 +96,7 @@ final class UpdateChecker: ObservableObject {
     private let minimumCheckInterval: TimeInterval = 6 * 3600  // 6 hours
 
     var currentAppVersion: String {
-        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "2.0.0"
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0.0"
     }
 
     /// Checks for newer releases on GitHub.

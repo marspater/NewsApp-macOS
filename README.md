@@ -5,9 +5,9 @@
 
 A native, local-first RSS, Atom and JSON Feed reader built with SwiftUI, WebKit, SQLite and Apple's on-device intelligence frameworks. No cloud AI services or telemetry.
 
-## Story experience — 18 October 2026
+## Story experience — 24 October 2026
 
-- Group reports of one event into a card with its coverage and an overview using hybrid EventMatcher v7 (deterministic entity/lexical features and on-device CoreML `all-MiniLM-L6-v2` embeddings with zero false merges on the holdout suite). Read and saved state stay with each publication.
+- Group reports of one event into a card with its coverage and an overview using hybrid EventMatcher v11 (deterministic entity/lexical features and on-device CoreML `all-MiniLM-L6-v2` embeddings with a pair model for borderline pairs; zero false pairs on the English holdout). Read and saved state stay with each publication.
 - Parsing powered by SwiftSoup (CSS metadata selection and bounded DOM repair) and FeedKit (typed RSS/Atom/JSON feed parsing with streaming XML security boundaries).
 - Keep stories visible regardless of importance. Today and archive stay chronological; Briefing balances publishers/categories, then prefers broader coverage and existing importance ratings. Refresh never runs importance scoring or deletes stories for being minor.
 - Reliable user notifications with normalized native PNG hero image attachments and background delivery triage.
@@ -23,7 +23,7 @@ See the [acceptance audit](docs/audits/2026-10-18-post-wave2-release-acceptance.
 - Publisher content appears in a selectable, paragraph-based reader. AI-generated summaries are labelled and collapsible.
 - Full feed content is used immediately. For summary-only feeds, the app fetches the article when opened, and an event overview may first fetch up to four of its articles when energy policy allows, each limited to four seconds; failed extraction leaves the feed preview and an explicit reason, with an in-app Web view and external browser option. Use **More Actions → Reload Reader Content** to refresh older cached extractions without clearing the library.
 - Atom namespaces, XHTML paragraphs, alternate links, relative URLs and distinct publication/update dates are supported. JSON `content_text` remains plain text.
-- Local SQLite persistence preserves saved stories, read history and extracted content. OPML imports and exports subscriptions. An opt-in starter catalog of 38 English-language feeds, verified on 1 October 2026, groups feeds into sets you can subscribe to; custom RSS keeps working. Feeds in other languages are parked until event matching supports them (#264).
+- Local SQLite persistence preserves saved stories, read history and extracted content. OPML imports and exports subscriptions. An opt-in starter catalog of 65 English-language feeds, verified on 8 October 2026, groups feeds into sets you can subscribe to; custom RSS keeps working. Feeds in other languages are parked until event matching supports them (#264).
 - Mute publisher hosts and topic words in Settings → Muting or from a story's context menu. Lists say how many stories muting hid and can show them again; Saved Stories and History are never filtered.
 - Ingestion uses cheap deterministic topic classification. Generative summaries run when the summary is expanded and AI is enabled, with deterministic fallbacks when Foundation Models is unavailable.
 
@@ -51,6 +51,10 @@ swift build --target News         # SwiftPM compiler check; not an app bundle
 `make run` and the Codex Run action use the app-bundle launcher. `TARGET_MACOS` defaults to `15.0`; SDK selection follows the selected Xcode. Both build scripts use ad-hoc signing for verification. Developer ID signing, notarization and Intel builds are outside the current development scope; the dormant notarization script is not part of the build workflow.
 
 CI uses [GitHub’s `xcode-27` Apple-silicon runner](https://github.com/actions/runner-images/blob/main/images/macos/xcode-27-arm64-Readme.md) for the required SDK. Uploaded bundles are development verification artifacts, not notarized releases.
+
+## Install and versions
+
+There is no installer yet: build from source as above, or use a CI verification artifact (ad-hoc signed, not notarized; macOS asks for confirmation on first open). `build.sh` and `build_release.sh` stamp `CFBundleShortVersionString` from the latest `X.Y.Z` or `vX.Y.Z` git tag (`0.0.0` without one) and `CFBundleVersion` from the commit count, through `script/version.sh`; Settings › Updates compares that version with the latest GitHub release tag. Releases are a tag plus a GitHub release.
 
 ## Icon Composer
 

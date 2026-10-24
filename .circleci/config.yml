@@ -9,11 +9,10 @@ jobs:
     steps:
       - checkout
       - run:
-          name: "Design lint, evaluation and testsuite self-checks"
+          name: "Design lint, evaluation and testsuite self-checks (Swift formatting runs in GitHub Actions)"
           command: |
             script/design_lint.sh
-            script/format.sh --check
-            for check in evaluate publisher_review publisher_dates overview_review importance_review relation_review catalog_review; do
+            for check in evaluate publisher_review publisher_dates overview_review importance_review relation_review catalog_review fit_pair_head; do
               python3 "script/evaluation/$check.py"
             done
             script/test_ci_testsuite.sh

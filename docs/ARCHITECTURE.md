@@ -51,7 +51,7 @@ flowchart LR
         GW["<b>NetworkBoundaryProxy</b><br/>IPAddressValidator"]
     end
 
-    subgraph Store["Storage · SQLite v24"]
+    subgraph Store["Storage · SQLite v25"]
         AS["<b>ArticleStore</b>"]
         DB[("<b>DatabaseEngine</b><br/>+Events<br/>WAL · FTS5")]
     end
@@ -131,7 +131,7 @@ sequenceDiagram
 | `Sources/Services/` | `FeedFetcher`, `SecureHTTPClient` · `FeedXMLParser`, `JSONFeedParser`, `DateParser` · `IPAddressValidator`, `NetworkBoundaryProxy` · `OPMLManager` |
 | `Sources/Intelligence/` | `ContentExtractionPipeline` · `ArticleIntelligence` · `EnrichmentQueue` · `EventCandidates` (+ `EventStoryRelation`) · `EventMatcher`, `EventClustering`, `SentenceEmbedder` · `Overview*`, `PassageFactExtractor`, `CoverageSentimentEvaluator` · `StoryImportance`, `EventJudge`, `PromptDefense` · `WorldTension`, `TensionMethodology` |
 | `Tests/` | `NewsTests` runner and suites · `FeedKitSwiftSoupTests`, `EventEmbeddingTests`, `NotificationAttachmentTests`, `StoryCorpus` · `Native*` and accessibility harnesses (some open windows, opt-in) · `TestDefaults` |
-| Platform | `News.entitlements` · `build.sh`, `test.sh`, `script/build_test_runner.sh` (runner build, `NEWS_TEST_ATOM`), `script/ci_testsuite.sh` (one JUnit case per `Tests/*.swift` atom, `--lcov` for impact analysis) · dormant `build_release.sh`, `script/distribution/` · CI: `.github/workflows/`, `.circleci/config.yml`, `codemagic.yaml` |
+| Platform | `News.entitlements` · `build.sh`, `test.sh`, `script/build_test_runner.sh` (runner build, `NEWS_TEST_ATOM`), `script/ci_testsuite.sh` (one JUnit case per `Tests/*.swift` atom, `--lcov` for impact analysis) · `build_release.sh` (runs in every CI build), `script/version.sh` (bundle version from git tags), dormant `script/distribution/` · CI: GitHub Actions is the pipeline of record, CircleCI adds test-impact analysis, Codemagic is manual-dispatch only; `.github/workflows/`, `.circleci/config.yml`, `codemagic.yaml` |
 
 ## Schema history
 

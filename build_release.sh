@@ -2,6 +2,7 @@
 set -e
 
 APP_NAME="News"
+source script/version.sh
 APP_DIR="${APP_NAME}.app"
 CONTENTS_DIR="${APP_DIR}/Contents"
 MACOS_DIR="${CONTENTS_DIR}/MacOS"
@@ -14,7 +15,7 @@ export SWIFT_MODULECACHE_PATH="$CLANG_MODULE_CACHE_PATH"
 
 
 echo "=================================================="
-echo "🚀 Building arm64 Verification for ${APP_NAME} (macOS ${TARGET_MACOS})"
+echo "🚀 Building arm64 Verification for ${APP_NAME} ${NEWS_VERSION} (${NEWS_BUILD}, macOS ${TARGET_MACOS})"
 echo "=================================================="
 
 rm -rf "${APP_DIR}" "${BUILD_TMP}"
@@ -141,9 +142,9 @@ cat > "${CONTENTS_DIR}/Info.plist" << PLIST_EOF
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>2.0.0</string>
+    <string>${NEWS_VERSION}</string>
     <key>CFBundleVersion</key>
-    <string>1</string>
+    <string>${NEWS_BUILD}</string>
     <key>LSMinimumSystemVersion</key>
     <string>${TARGET_MACOS}</string>
     <key>NSSupportsAutomaticGraphicsSwitching</key>
