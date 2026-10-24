@@ -10608,7 +10608,8 @@ struct NewsTests {
             "Every pair across the two events is recorded")
 
         // A retitled vote report is matched again; the rules alone would split it off, the inclusion keeps it.
-        try await db.upsertArticles([story(1, "Parliament votes to oust Prime Minister Novak in Ljubljana late at night", hours: 0)])
+        let retitled = story(1, "Parliament votes to oust Prime Minister Novak in Ljubljana late at night", hours: 0)
+        try await db.upsertArticles([retitled])
         _ = try await EventClusterer.run(in: db, now: now.addingTimeInterval(60))
         assertEqual(try await event(0), protest, "The included report stays after the next pass")
 
