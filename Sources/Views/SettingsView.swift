@@ -788,9 +788,11 @@ struct SettingsView: View {
                                 .font(AppTypography.label.monospacedDigit())
                                 .foregroundStyle(AppColor.secondaryText)
                         }
-                        Text("Generated summaries, key points, and entities. Subscriptions and stories remain.")
-                            .font(AppTypography.caption)
-                            .foregroundStyle(AppColor.secondaryText)
+                        Text(
+                            "Summaries, key points, entities, event overviews and story embeddings. Subscriptions and stories remain."
+                        )
+                        .font(AppTypography.caption)
+                        .foregroundStyle(AppColor.secondaryText)
                     }
                     Spacer()
                     Button("Clear…") {
@@ -825,6 +827,10 @@ struct SettingsView: View {
                             RoundedRectangle(cornerRadius: AppRadius.control, style: .continuous).fill(AppColor.surface)
                         )
                 }
+
+                Divider().padding(.vertical, AppSpacing.xxs)
+
+                retentionRow
 
                 Divider().padding(.vertical, AppSpacing.xxs)
 
@@ -868,6 +874,36 @@ struct SettingsView: View {
             }
         } message: { target in
             Text(target.consequence)
+        }
+    }
+
+    /// Retention: read, unsaved stories older than the chosen age are deleted once a day after a refresh.
+    private var retentionRow: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: AppSpacing.textStack) {
+                Text("Delete Read Stories")
+                    .font(AppTypography.sectionTitle)
+                    .foregroundStyle(AppColor.primaryText)
+                Text("Saved stories, unread stories and sources cited by an event overview are kept.")
+                    .font(AppTypography.caption)
+                    .foregroundStyle(AppColor.secondaryText)
+            }
+            Spacer()
+            Picker(
+                "Delete read stories after",
+                selection: Binding(
+                    get: { appSettings.articleRetentionDays },
+                    set: { appSettings.setArticleRetentionDays($0) }
+                )
+            ) {
+                Text("Never").tag(0)
+                Text("After 30 days").tag(30)
+                Text("After 90 days").tag(90)
+            }
+            .labelsHidden()
+            .pickerStyle(.menu)
+            .controlSize(.small)
+            .fixedSize()
         }
     }
 
@@ -1076,7 +1112,9 @@ private enum StorageClear: Identifiable {
     var consequence: String {
         switch self {
         case .stories: return "Stories download their text again when opened. Subscriptions and saved stories are kept."
-        case .analysis: return "Summaries, key points and entities are generated again on request."
+        case .analysis:
+            return
+                "Summaries, key points, entities, event overviews and story embeddings are generated again on request."
         case .all:
             return
                 "Web cache, story text and AI analysis are removed. Subscriptions, saved stories and read history are kept."

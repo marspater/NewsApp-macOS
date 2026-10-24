@@ -659,6 +659,9 @@ struct NewsTests {
         await testRefreshCoordinatorSingleFlightCoalescing()
         try await testFeedRemovalAndShutdown()
         try await testSleepAndWakeRefresh()
+        try await testRetentionPruneAfterRefresh()
+        try await testCancelledRefreshCarriesNotifications()
+        try await testUndatedStoriesInPublicationWindow()
         try await testActiveWorkCancellation()
         await testSignpostHelperExecution()
         await testAppSettingsIsolationAndURLNormalization()
@@ -1771,6 +1774,13 @@ struct NewsTests {
             "JSON summaries preserve plain text comparisons and literal entities")
         let legacyArticle = JSONFeedParser.parse(data: Data(json.utf8), feedURL: "https://example.com/feed")?.last
         assertEqual(legacyArticle?.description, "Legacy HTML & text.", "Legacy JSON descriptions retain HTML cleanup")
+        let unidentified = """
+            {"version":"https://jsonfeed.org/version/1.1","items":[{"id":"1","url":"https://example.com/1","title":"Kept"},{"title":"No id or URL","content_text":"Dropped"}]}
+            """
+        assertEqual(
+            JSONFeedParser.parse(data: Data(unidentified.utf8), feedURL: "https://example.com/feed")?.map(\.title),
+            ["Kept"], "An item with neither id nor URL is skipped instead of getting a random identity on every refresh"
+        )
     }
 
     static func testStructuredReaderAndTags() async {
@@ -11535,6 +11545,8 @@ struct NewsTests {
         let interrupted = Task { await manager.fetchFeedsAsync() }
         while !(await gate.started) { await Task.yield() }
         center.post(name: NSWorkspace.willSleepNotification, object: nil)
+        assertFalse(manager.isAnyFeedLoading, "Sleep ends the loading state of the refresh it cancels")
+        assertFalse(manager.feedStatuses.values.contains(.loading), "No feed stays marked as loading after sleep")
         await gate.deliver()
         await interrupted.value
         assertTrue(try await db.fetchArticles().isEmpty, "A refresh cut off by sleep stores nothing")
@@ -11561,6 +11573,141 @@ struct NewsTests {
         clock = clock.addingTimeInterval(60 * 60)
         await sleepAndWake()
         assertEqual(await calls.count, 3, "A stopped manager ignores wake")
+        await db.close()
+    }
+
+    @MainActor
+    static func testRetentionPruneAfterRefresh() async throws {
+        print(
+            "  - Testing retention: read, unsaved stories older than the setting are deleted once a day after a refresh..."
+        )
+        let suite = testDefaultsSuite("test.retention")
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { removeTestDefaults(suite) }
+        let settings = AppSettings(defaults: defaults)
+        assertEqual(settings.articleRetentionDays, 30, "Read stories are kept for 30 days by default")
+        settings.feedURLs = ["https://example.com/feed"]
+        settings.aiEnabled = false
+        settings.notificationsEnabled = false
+        let db = DatabaseEngine(path: ":memory:")
+        let store = ArticleStore(database: db)
+        await store.initialize()
+        // Pruning compares against the wall clock; the injected clock only drives the once-a-day throttle.
+        var clock = Date()
+        let manager = FeedManager(
+            settings: settings, store: store, schedulesRefresh: false,
+            fetchBatch: { urls, _ in urls.map { ($0, [], nil, nil) } }, imageFinder: .unavailable, now: { clock })
+        func storeOldStory(_ name: String, read: Bool, saved: Bool = false) async throws -> String {
+            let article = FeedArticle(
+                title: name, link: "https://example.com/\(name)", guid: name, description: name,
+                pubDate: clock.addingTimeInterval(-40 * 86400), source: "Test")
+            await store.batchUpsert(articles: [article], feedUrl: settings.feedURLs[0])
+            guard let id = try await db.fetchArticles().first(where: { $0.title == name })?.id else {
+                assertTrue(false, "Stored the \(name) story")
+                return ""
+            }
+            if read { try await db.markRead(articleId: id, isRead: true) }
+            if saved { _ = try await db.toggleSaved(articleId: id) }
+            return id
+        }
+        func stored(_ id: String) async throws -> Bool { try await db.fetchArticles().contains { $0.id == id } }
+
+        let read = try await storeOldStory("read", read: true)
+        let saved = try await storeOldStory("saved", read: true, saved: true)
+        let unread = try await storeOldStory("unread", read: false)
+        await manager.fetchFeedsAsync()
+        assertFalse(try await stored(read), "A read, unsaved story older than 30 days is deleted after the refresh")
+        let savedKept = try await stored(saved)
+        let unreadKept = try await stored(unread)
+        assertTrue(savedKept && unreadKept, "Saved and unread stories are kept")
+
+        let later = try await storeOldStory("later", read: true)
+        clock = clock.addingTimeInterval(6 * 3600)
+        await manager.fetchFeedsAsync()
+        assertTrue(try await stored(later), "Retention runs at most once a day")
+        clock = clock.addingTimeInterval(19 * 3600)
+        await manager.fetchFeedsAsync()
+        assertFalse(try await stored(later), "The next day's refresh prunes again")
+
+        settings.setArticleRetentionDays(0)
+        assertEqual(AppSettings(defaults: defaults).articleRetentionDays, 0, "The retention setting persists")
+        let kept = try await storeOldStory("kept", read: true)
+        clock = clock.addingTimeInterval(25 * 3600)
+        await manager.fetchFeedsAsync()
+        assertTrue(try await stored(kept), "Never keeps every story")
+        manager.stopBackgroundWork()
+        await db.close()
+    }
+
+    @MainActor
+    static func testCancelledRefreshCarriesNotifications() async throws {
+        print(
+            "  - Testing a refresh cancelled by a subscription change: stories it stored are notified by the next run..."
+        )
+        let suite = testDefaultsSuite("test.cancelled-refresh-notifications")
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { removeTestDefaults(suite) }
+        let settings = AppSettings(defaults: defaults)
+        settings.feedURLs = ["https://example.com/one", "https://example.com/two"]
+        settings.aiEnabled = false
+        settings.notificationsEnabled = true
+        let db = DatabaseEngine(path: ":memory:")
+        let store = ArticleStore(database: db)
+        await store.initialize()
+        let stories = [
+            "https://example.com/one": "first", "https://example.com/two": "second",
+            "https://example.com/three": "third",
+        ]
+        var notified: [String] = []
+        let manager = FeedManager(
+            settings: settings, store: store, schedulesRefresh: false,
+            fetchBatch: { urls, _ in
+                urls.map { url in
+                    let name = stories[url] ?? "other"
+                    let article = FeedArticle(
+                        title: name, link: "https://example.com/\(name)", guid: name, description: name,
+                        pubDate: Date(),
+                        source: "Test")
+                    return (url, [article], nil, nil)
+                }
+            },
+            notifyBatch: { articles, _ in notified.append(contentsOf: articles.map(\.id)) }, imageFinder: .unavailable)
+
+        let first = Task { await manager.fetchFeedsAsync() }
+        // Cancel once the first feed's story is committed and before the run can notify it.
+        while try await db.fetchArticles().isEmpty { await Task.yield() }
+        manager.addFeed(url: "https://example.com/three")
+        assertFalse(manager.isAnyFeedLoading, "Cancelling a refresh ends its loading state")
+        await first.value
+        // The subscription change started the next refresh; its caller runs triage after clustering.
+        for _ in 0..<2000 where notified.count < 3 { try await Task.sleep(for: .milliseconds(5)) }
+        let expected = stories.map { ArticleIdentity.scopedGUID($0.value, feedURL: $0.key)! }
+        assertEqual(Set(notified), Set(expected), "Stories stored by the cancelled run and by the new run are notified")
+        assertEqual(notified.count, 3, "Each story is notified once")
+        manager.stopBackgroundWork()
+        await db.close()
+    }
+
+    static func testUndatedStoriesInPublicationWindow() async throws {
+        print("  - Testing undated stories fall into a publication window by ingestion time...")
+        let db = DatabaseEngine(path: ":memory:")
+        try await db.open()
+        let undated = FeedArticle(
+            title: "Undated", link: "https://example.com/undated", guid: "undated", description: "",
+            pubDate: DateParser.unknownDate, source: "Test")
+        let old = FeedArticle(
+            title: "Old", link: "https://example.com/old", guid: "old", description: "",
+            pubDate: Date().addingTimeInterval(-3 * 86400), source: "Test")
+        try await db.upsertArticles([undated, old], feedUrl: "https://example.com/feed")
+        let now = Date()
+        let window = try await db.fetchArticles(
+            publicationWindow: now.addingTimeInterval(-3600)...now.addingTimeInterval(60))
+        assertEqual(
+            window.map(\.title), ["Undated"],
+            "An undated story stored now is within the last hour; a three-day-old story is not")
+        assertTrue(
+            window.first.map { abs($0.orderDate.timeIntervalSince(now)) < 60 } ?? false,
+            "orderDate falls back to ingestion time for an undated story")
         await db.close()
     }
 
@@ -13349,12 +13496,31 @@ struct NewsTests {
         let initialAnalysis2 = await db.fetchArticleAnalysis(for: article2.id)
         assertTrue(initialAnalysis2 != nil, "Article 2 should have analysis")
 
-        // 2. Test clearArticleEnrichment(): clears AI analysis, keeps articles and feeds
+        try await db.upsertArticleEmbeddings([article2.id: [0.5, 0.25]], modelVersion: 1)
+        let event = try await db.createEvent(memberArticleIDs: [article2.id])
+        _ = try await db.recordEventOverview(
+            EventOverviewDocument(
+                eventID: event.id,
+                version: OverviewVersionContext(membershipVersion: event.membershipVersion, inputTextHash: "hash"),
+                content: OverviewContent(
+                    title: "Event", summary: "Summary",
+                    citations: [
+                        OverviewCitation(
+                            id: "citation", articleID: article2.id, passageID: "p", passageFingerprint: "f",
+                            quote: "Quote")
+                    ])))
+
+        // 2. Test clearArticleEnrichment(): clears AI analysis, overviews and embeddings, keeps articles and events
         try await db.clearArticleEnrichment()
         let clearedAnalysis1 = await db.fetchArticleAnalysis(for: article1.id)
         assertTrue(clearedAnalysis1 == nil, "Article 1 enrichment must be purged")
         let clearedAnalysis2 = await db.fetchArticleAnalysis(for: article2.id)
         assertTrue(clearedAnalysis2 == nil, "Article 2 enrichment must be purged")
+        assertTrue(
+            try await db.fetchArticleEmbeddings(articleIDs: [article2.id], modelVersion: 1).isEmpty,
+            "Clearing AI analysis removes story embeddings")
+        assertTrue(try await db.fetchEventOverview(eventID: event.id) == nil, "Clearing AI analysis removes overviews")
+        assertTrue(try await db.fetchEvent(id: event.id) != nil, "Events themselves are kept")
 
         let articlesAfterEnrichmentClear = try await db.fetchArticles(limit: 10)
         assertEqual(articlesAfterEnrichmentClear.count, 2, "Articles must remain intact after enrichment purge")

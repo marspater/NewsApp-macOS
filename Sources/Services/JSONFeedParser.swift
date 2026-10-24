@@ -35,7 +35,9 @@ class JSONFeedParser {
                 if item[key] == nil || item[key] is NSNull { item[key] = item[alias] }
             }
             if item["id"] == nil || item["id"] is NSNull {
-                item["id"] = item["url"] ?? UUID().uuidString
+                // Without an id or a URL the item has no identity; a random one would store it again on every refresh.
+                guard let url = item["url"], !(url is NSNull) else { continue }
+                item["id"] = url
             }
             if (item["tags"] as? [String])?.isEmpty == true { item["tags"] = item["categories"] }
             if item["summary"] == nil || item["summary"] is NSNull {

@@ -11,6 +11,7 @@ final class AppSettings: ObservableObject {
     static let feedURLsKey = "saved_feed_urls"
     static let userSectionsKey = "user_sections"
     static let fetchIntervalKey = "feed_fetch_interval_minutes"
+    static let articleRetentionDaysKey = "article_retention_days"
     static let notificationsEnabledKey = "notifications_enabled"
     static let aiEnabledKey = "ai_enabled"
     static let privateNotificationsEnabledKey = "private_notifications_enabled"
@@ -80,6 +81,8 @@ final class AppSettings: ObservableObject {
     @Published var feedURLs: [String]
     @Published var userSections: [String]
     @Published var fetchIntervalMinutes: Double
+    /// Days a read, unsaved story stays before retention deletes it; 0 keeps every story.
+    @Published private(set) var articleRetentionDays: Int
     @Published var notificationsEnabled: Bool
     @Published var aiEnabled: Bool
     @Published var privateNotificationsEnabled: Bool
@@ -120,6 +123,12 @@ final class AppSettings: ObservableObject {
             self.fetchIntervalMinutes = defaults.double(forKey: Self.fetchIntervalKey)
         } else {
             self.fetchIntervalMinutes = 15.0
+        }
+
+        if defaults.object(forKey: Self.articleRetentionDaysKey) != nil {
+            self.articleRetentionDays = max(0, defaults.integer(forKey: Self.articleRetentionDaysKey))
+        } else {
+            self.articleRetentionDays = 30
         }
 
         if defaults.object(forKey: Self.notificationsEnabledKey) != nil {
@@ -302,6 +311,11 @@ final class AppSettings: ObservableObject {
     func setFetchInterval(minutes: Double) {
         fetchIntervalMinutes = minutes
         defaults.set(minutes, forKey: Self.fetchIntervalKey)
+    }
+
+    func setArticleRetentionDays(_ days: Int) {
+        articleRetentionDays = max(0, days)
+        defaults.set(articleRetentionDays, forKey: Self.articleRetentionDaysKey)
     }
 
     func setNotificationsEnabled(_ enabled: Bool) {
