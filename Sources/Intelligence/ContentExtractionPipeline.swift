@@ -176,11 +176,24 @@ final class DOMElementNode: Sendable {
         attributes["style"]?.range(
             of: #"(?:display\s*:\s*none|visibility\s*:\s*hidden)"#, options: [.regularExpression, .caseInsensitive])
             != nil || attributes["hidden"] != nil || attributes["aria-hidden"]?.lowercased() == "true"
-            || className.split(whereSeparator: { $0.isWhitespace }).contains("visually-hidden")
+            || Self.isUtilityHidden(className)
             // Alpine.js panels stay hidden until page scripts run, and the reader never runs them (Ars Technica's
             // text-size menu).
             || attributes["x-cloak"] != nil
     }
+
+    /// Utility class frameworks (Tailwind, Bootstrap) hide duplicates of responsive content and ad shells with
+    /// `hidden` or `d-none`. A responsive display class (`sm:block`, `d-md-flex`) shows the element on wider windows,
+    /// so it stays.
+    static func isUtilityHidden(_ className: String) -> Bool {
+        let tokens = className.split(whereSeparator: { $0.isWhitespace })
+        if tokens.contains("visually-hidden") { return true }
+        guard tokens.contains(where: { $0 == "hidden" || $0 == "d-none" }) else { return false }
+        return !tokens.contains { $0.range(of: responsiveDisplayPattern, options: .regularExpression) != nil }
+    }
+
+    private static let responsiveDisplayPattern =
+        #"^(?:[a-z0-9]+:|d-[a-z]+-)(?:block|flex|grid|inline|inline-block|table|contents)$"#
 
     /// Recursively collects visible text from this node and its children. `lineBreak` marks `<br>` and the boundary
     /// before a nested paragraph, division or list item.
@@ -277,7 +290,7 @@ final class DOMElementNode: Sendable {
     private static let auxiliaryPattern =
         (try? NSRegularExpression(
             pattern:
-                #"(?i)(?:^|[^a-z0-9])(?:comments?|comment-thread|disqus|also-read|read-more|most-?viewed|most-?popular|onward|onwards|submeta|subscription|related(?:-content|-stories|-articles)?|links-block|newsletter|byline|timestamp-block|recommendations?|social-share|share-tools|promo|advertisement|outbrain|taboola|eventpromo|promolist|topiclist|uploaderembed)(?:$|[^a-z0-9])"#
+                #"(?i)(?:^|[^a-z0-9])(?:comments?|comment-thread|disqus|also-read|read-more|more-on|most-?viewed|most-?popular|most-?read|top-?stories|onward|onwards|submeta|subscription|related(?:-content|-stories|-articles)?|links-block|newsletter|byline|timestamp(?:-block)?|recommendations?|recommended-(?:stories|articles|content)|social-share|share-tools|promo|advertisement|native-?ad|outbrain|taboola|eventpromo|promolist|topiclist|uploaderembed|author-?bio|mini-bio|follow-(?:authors?|topics?))(?:$|[^a-z0-9])"#
         )) ?? NSRegularExpression()
 
     func readingBlocks(allowDivFallback: Bool = true) -> [DOMElementNode] {
@@ -331,14 +344,34 @@ final class DOMElementNode: Sendable {
         if ["p", "h2", "h3", "h4", "h5", "h6", "li", "blockquote", "pre", "aside"].contains(tag) { return [self] }
         var blocks = [DOMElementNode]()
         var inline = [DOMElementNode]()
+        // Phrasing elements (a time stamp, a bold label, a link) never become paragraphs of their own text: their
+        // block-level parent groups them with the text around them, so a <time> is judged as a stamp and a
+        // "<strong>Follow topics</strong> from this story…" prompt is read as one line.
+        let isPhrasing = Self.phrasingTags.contains(tag)
         func flushInline() {
+            defer { inline.removeAll() }
+            guard !isPhrasing else { return }
             let paragraph = DOMElementNode(tag: "p", children: inline)
             if paragraph.combinedText().trimmingCharacters(in: .whitespacesAndNewlines).count >= 25 {
                 blocks.append(paragraph)
             }
-            inline.removeAll()
         }
+        var previousTag = ""
         for child in children {
+            // The page title is shown by the app; the paragraph a publisher sets right after it is the standfirst.
+            if child.tag == "h1" {
+                flushInline()
+                previousTag = "h1"
+                continue
+            }
+            var child = child
+            if child.tag == "p", previousTag == "h1", child.combinedText().count <= 300 {
+                var attributes = child.attributes
+                attributes["reader-standfirst"] = "1"
+                child = DOMElementNode(
+                    tag: child.tag, attributes: attributes, children: child.children, text: child.text)
+            }
+            if child.tag != "#text" { previousTag = child.tag }
             let nested = child.readingBlocks(allowDivFallback: false)
             if !nested.isEmpty {
                 flushInline()
@@ -350,6 +383,7 @@ final class DOMElementNode: Sendable {
             }
         }
         flushInline()
+        if isPhrasing { return blocks }
         if blocks.contains(where: { $0.tag != "figure" }) || !allowDivFallback { return blocks }
         let divs = children.flatMap { $0.readingBlocks() }
         if !divs.isEmpty { return divs }
@@ -360,6 +394,11 @@ final class DOMElementNode: Sendable {
         }
         return []
     }
+
+    static let phrasingTags: Set<String> = [
+        "a", "abbr", "b", "bdi", "bdo", "cite", "code", "data", "del", "dfn", "em", "font", "i", "ins", "kbd", "label",
+        "mark", "q", "s", "samp", "small", "span", "strong", "sub", "sup", "time", "u", "var",
+    ]
 
     /// Marks a publisher line break in block text and runs until whitespace is collapsed (`readerWhitespace`), so
     /// source-formatting newlines stay spaces.
@@ -459,12 +498,13 @@ final class DOMElementNode: Sendable {
         let flat = plain.replacingOccurrences(of: "\n", with: " ")
         guard !plain.isEmpty, !ArticleContentRedactor.isBoilerplateLine(flat) else { return nil }
         // A metadata strip item holding only a <time> (BBC's "· 20 October 2026, 14:13 BST") is not story text.
-        let timestamps = findNodes(tag: "time").map { $0.combinedText() }
+        let timestamps = findNodes(tag: "time").map {
+            Self.readerWhitespace($0.combinedText()).replacingOccurrences(of: "\n", with: " ")
+        }
         if !timestamps.isEmpty {
             var residue = flat
-            for stamp in timestamps {
-                residue = residue.replacingOccurrences(
-                    of: stamp.trimmingCharacters(in: .whitespacesAndNewlines), with: "")
+            for stamp in timestamps where !stamp.isEmpty {
+                residue = residue.replacingOccurrences(of: stamp, with: "")
             }
             let words = residue.lowercased().split { !$0.isLetter && !$0.isNumber }
             if words.allSatisfy({ ["published", "updated", "last", "on", "at"].contains($0) }) { return nil }
@@ -484,7 +524,7 @@ final class DOMElementNode: Sendable {
         case "aside": kind = HTMLDOMBuilder.editorialKind(attributes) ?? .quote
         case "blockquote": kind = HTMLDOMBuilder.editorialKind(attributes) == .pullQuote ? .pullQuote : .quote
         case "pre": kind = .code
-        default: kind = .paragraph
+        default: kind = attributes["reader-standfirst"] == nil ? .paragraph : .standfirst
         }
         // Standalone linked teasers are navigation, while inline citations remain part of prose.
         guard computeLinkDensity() < 0.8 else { return nil }
@@ -1196,6 +1236,13 @@ final class ContentExtractionPipeline: Sendable {
         }) {
             return .subscriberOnly
         }
+        candidateParagraphs = Self.withoutFurniture(candidateParagraphs)
+        // A feed teaser ends in its own "Read full article" or "Continue reading" link: the page holds more. A whole
+        // page ends in its footer, so only short bodies are judged; a stray "Read more" link never re-extracts a page.
+        let isTruncated =
+            soup.flatMap { try? $0.body()?.text() }.map(DOMElementNode.readerWhitespace).map {
+                $0.count <= 5000 && $0.range(of: Self.truncationPattern, options: .regularExpression) != nil
+            } == true
 
         // Keep media in publisher order, without allowing images to qualify an empty article.
         candidateParagraphs = candidateParagraphs.map { block in
@@ -1250,11 +1297,7 @@ final class ContentExtractionPipeline: Sendable {
         // 4. Validate Content Quality
         let isText: (ReaderBlock) -> Bool = { $0.kind == .paragraph || $0.kind == .quote || $0.kind == .listItem }
         let key: (ReaderBlock) -> String = { $0.text.lowercased().trimmingCharacters(in: .whitespacesAndNewlines) }
-        let isProse: (ReaderBlock) -> Bool = { block in
-            block.text.count >= 120
-                || block.text.trimmingCharacters(in: CharacterSet(charactersIn: " )]}\"'’”»›"))
-                    .last.map { ".!?…".contains($0) } == true
-        }
+        let isProse: (ReaderBlock) -> Bool = { Self.isProseText($0.text) }
         // Repeated labels (headlines, related links, buttons, bylines, video placeholders) are page furniture: every copy
         // goes before validation, so the repetition check only judges prose.
         let counts = Dictionary(candidateParagraphs.filter(isText).map { (key($0), 1) }, uniquingKeysWith: +)
@@ -1300,7 +1343,8 @@ final class ContentExtractionPipeline: Sendable {
             }
             let title = dom.findNodes(tag: "title").map { $0.combinedText() }.joined()
             let lead = ReaderImageCandidate.select(from: images, title: title)?.url
-            let isComplete = candidateParagraphs.filter { $0.kind == .paragraph }.count >= 3 && joined.count >= 600
+            let isComplete =
+                !isTruncated && candidateParagraphs.filter { $0.kind == .paragraph }.count >= 3 && joined.count >= 600
             return .success(
                 content: joined, imageUrl: lead,
                 document: ReaderDocument(
@@ -1348,11 +1392,69 @@ final class ContentExtractionPipeline: Sendable {
             else { return false }
             keptStandfirst = true
             return true
+        }.map { block in
+            block.kind == .paragraph
+                ? ReaderBlock(kind: .standfirst, text: block.text, inlineRuns: block.inlineRuns) : block
         }
     }
 
     private static func proseLength(_ blocks: [ReaderBlock]) -> Int {
         blocks.filter { [.paragraph, .quote, .listItem].contains($0.kind) }.map(\.text.count).reduce(0, +)
+    }
+
+    /// Prose as the reader judges it: a paragraph-length block, or a sentence; headlines, labels and bylines are not.
+    static func isProseText(_ text: String) -> Bool {
+        text.count >= 120
+            || text.trimmingCharacters(in: CharacterSet(charactersIn: " )]}\"'’”»›")).last.map { ".!?…".contains($0) }
+                == true
+    }
+
+    /// Whole-text headings a page uses over navigation, not story sections.
+    static let navigationHeadingPattern =
+        #"(?i)^(?:most (?:popular|read|viewed|shared|watched|recent|commented)|top (?:stories|news|picks|reads)|"#
+        + #"recommended(?: (?:stories|articles|videos|reads?|for you))?|related(?: (?:stories|articles|content|news|topics|links|posts|coverage|videos))?|"#
+        + #"(?:read|see|watch|listen|discover|explore) (?:more|next|also)(?: .{0,40})?|more (?:from|on|stories|news|like this|in|about|coverage|to read|reading|for you)(?: .{0,40})?|"#
+        + #"also read|you (?:may|might) (?:also )?(?:like|be interested in)|trending(?: (?:now|stories))?|latest(?: (?:news|stories|articles|headlines|videos))?|"#
+        + #"(?:editor'?s|editors'?|staff) picks|(?:in|from) this (?:article|story|section|series)|popular(?: (?:stories|now|articles|on .{0,40}))?|"#
+        + #"don'?t miss|what to read next|up next|next up|further reading|explore more(?: on these topics)?|sign up(?: .{0,60})?|newsletters?(?: .{0,40})?|"#
+        + #"advertisement|sponsored(?: content)?|comments?|share(?: this.{0,30})?|follow (?:us|topics).{0,40}|tags?|topics?|more news|around the web|from our partners|"#
+        + #"most read|in case you missed it|story continues below|continue reading|keep reading|up next|about the authors?|meet the authors?)[\s:.…!]*$"#
+
+    /// A short paragraph that introduces its author ("Jane Doe is a senior reporter at …"), at the story's edges.
+    static let authorBioPattern =
+        #"(?i)^(?:[\p{Lu}][\p{L}.'’-]+(?: [\p{Lu}][\p{L}.'’-]+){0,3} )?(?:is|has been|was) (?:a |an |the )?(?:[\p{L}-]+ ){0,4}"#
+        + #"(?:editor|reporter|writer|correspondent|journalist|columnist|host|co-host|producer|critic|contributor|analyst)\b"#
+
+    /// A feed teaser's closing link ("Read full article", "Continue reading…", optionally followed by "Comments").
+    static let truncationPattern =
+        #"(?i)(?:read (?:the )?full (?:article|story|post)|continue reading|read more)[.…\s]*(?:comments?)?[\s.…]*$"#
+
+    /// Drops page furniture that survives container selection on any publisher: navigation headings
+    /// ("Most Popular", "Recommended Stories"), the cards that follow a trailing one, and author bios.
+    static func withoutFurniture(_ blocks: [ReaderBlock]) -> [ReaderBlock] {
+        let isText: (ReaderBlock) -> Bool = { ![.figure, .divider, .embed].contains($0.kind) }
+        let isNavigationHeading: (ReaderBlock) -> Bool = {
+            [.heading, .subheading].contains($0.kind)
+                && $0.text.range(of: navigationHeadingPattern, options: .regularExpression) != nil
+        }
+        var result = blocks
+        // A standfirst the page repeats as a plain paragraph (a mobile and a desktop lede) is shown once.
+        let standfirsts = Set(result.filter { $0.kind == .standfirst }.map { $0.text.lowercased() })
+        result.removeAll { $0.kind == .paragraph && standfirsts.contains($0.text.lowercased()) }
+        // Everything after the last navigation heading goes when none of it is prose: those are teaser cards.
+        if let last = result.lastIndex(where: isNavigationHeading),
+            !result[(last + 1)...].contains(where: { isText($0) && isProseText($0.text) })
+        {
+            result.removeSubrange(last...)
+        }
+        result.removeAll(where: isNavigationHeading)
+        // Author bios open the story under its standfirst or close it after the last paragraph, never in between.
+        let textIndices = result.indices.filter { isText(result[$0]) && result[$0].kind != .standfirst }
+        let edges = Set([textIndices.first, textIndices.last].compactMap { $0 })
+        return result.enumerated().filter { index, block in
+            guard edges.contains(index), block.kind == .paragraph, block.text.count <= 400 else { return true }
+            return block.text.range(of: authorBioPattern, options: .regularExpression) == nil
+        }.map(\.element)
     }
 
     struct StructuredArticle {
