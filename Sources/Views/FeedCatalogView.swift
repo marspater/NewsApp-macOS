@@ -10,7 +10,7 @@ struct FeedCatalogView: View {
     @EnvironmentObject private var appSettings: AppSettings
     @EnvironmentObject private var feedManager: FeedManager
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.colorSchemeContrast) private var contrast
+    @Environment(\.effectiveContrast) private var contrast
 
     @State private var searchText = ""
     @State private var selectedSet: CatalogSet? = nil
@@ -59,21 +59,17 @@ struct FeedCatalogView: View {
             .padding(.top, AppLayout.pageInset)
             .padding(.bottom, AppSpacing.xs)
 
-            // Category Filter Pills
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: AppSpacing.xs) {
-                    categoryPill("All Topics", isSelected: selectedSet == nil) {
-                        selectedSet = nil
-                    }
-                    ForEach(CatalogSet.offered) { set in
-                        categoryPill(set.title, isSelected: selectedSet == set) {
-                            selectedSet = set
-                        }
-                    }
+            // Topic filter: the system segmented control carries the selected state for VoiceOver.
+            Picker("Topic", selection: $selectedSet) {
+                Text("All Topics").tag(CatalogSet?.none)
+                ForEach(CatalogSet.offered) { set in
+                    Text(set.title).tag(CatalogSet?.some(set))
                 }
-                .padding(.horizontal, AppLayout.pageInset)
-                .padding(.vertical, AppSpacing.xs)
             }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .padding(.horizontal, AppLayout.pageInset)
+            .padding(.vertical, AppSpacing.xs)
 
             Divider()
 
@@ -81,6 +77,12 @@ struct FeedCatalogView: View {
             if allMatchingFeedsCount == 0 && !searchText.isEmpty {
                 ContentUnavailableView.search(text: searchText)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if allMatchingFeedsCount == 0 {
+                ContentUnavailableView(
+                    "No Feeds in This Topic", systemImage: "newspaper",
+                    description: Text("The catalog has no feeds here yet.")
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 List {
                     // Suggested gaps only when browsing all topics with empty search
@@ -113,7 +115,10 @@ struct FeedCatalogView: View {
                 .listStyle(.inset)
             }
         }
-        .frame(minWidth: 680, idealWidth: 720, minHeight: 560)
+        .frame(
+            minWidth: AppLayout.catalogSheetMinWidth, idealWidth: AppLayout.catalogSheetIdealWidth,
+            minHeight: AppLayout.catalogSheetMinHeight
+        )
         .navigationTitle(Self.navigationTitleText)
         .toolbar(removing: .title)
         .toolbar {
@@ -125,23 +130,6 @@ struct FeedCatalogView: View {
         .searchable(text: $searchText, prompt: "Search publications, topics, regions…")
         .task { await feedManager.reloadFeedHealth() }
         .onExitCommand { dismiss() }
-    }
-
-    private func categoryPill(_ title: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Text(title)
-                .font(AppTypography.label)
-                .padding(.horizontal, AppSpacing.sm)
-                .padding(.vertical, AppSpacing.xxs)
-                .background(isSelected ? AppColor.accent : AppColor.surface)
-                .foregroundStyle(isSelected ? AppColor.leadText : AppColor.primaryText)
-                .clipShape(Capsule())
-                .overlay(
-                    Capsule()
-                        .strokeBorder(isSelected ? Color.clear : AppColor.border(for: contrast), lineWidth: 0.5)
-                )
-        }
-        .buttonStyle(.plain)
     }
 
     private var gapsHeader: some View {
@@ -162,9 +150,9 @@ struct FeedCatalogView: View {
 
     private func gapRow(_ gap: TopicGap) -> some View {
         HStack(spacing: AppSpacing.sm) {
-            Image(systemName: "sparkles")
-                .foregroundStyle(AppColor.intelligence)
-                .frame(width: 20)
+            Image(systemName: "plus.circle")
+                .foregroundStyle(AppColor.secondaryText)
+                .frame(width: AppSpacing.lg)
                 .accessibilityHidden(true)
 
             VStack(alignment: .leading, spacing: AppSpacing.xxs) {
@@ -201,9 +189,12 @@ struct FeedCatalogView: View {
             }
             Spacer()
             if remaining.isEmpty {
-                Label("Subscribed to all", systemImage: "checkmark.circle.fill")
-                    .font(AppTypography.label)
-                    .foregroundStyle(AppColor.success)
+                Label {
+                    Text("Subscribed to all").foregroundStyle(AppColor.primaryText)
+                } icon: {
+                    Image(systemName: "checkmark.circle.fill").foregroundStyle(AppColor.success)
+                }
+                .font(AppTypography.label)
             } else {
                 Button(
                     remaining.count == matchingFeeds.count
@@ -275,27 +266,21 @@ struct FeedCatalogView: View {
     private func feedActionButtons(_ feed: CatalogFeed, subscribed: Bool) -> some View {
         if subscribed {
             HStack(spacing: AppSpacing.xs) {
-                Label("Subscribed", systemImage: "checkmark.circle.fill")
-                    .font(AppTypography.label)
-                    .foregroundStyle(AppColor.success)
+                Label {
+                    Text("Subscribed").foregroundStyle(AppColor.primaryText)
+                } icon: {
+                    Image(systemName: "checkmark.circle.fill").foregroundStyle(AppColor.success)
+                }
+                .font(AppTypography.label)
 
                 Button("Remove") { feedManager.removeFeed(url: feed.url) }
-                    .buttonStyle(.plain)
-                    .font(AppTypography.caption)
-                    .foregroundStyle(AppColor.secondaryText)
-                    .padding(.horizontal, AppSpacing.xs)
-                    .padding(.vertical, AppSpacing.xxs)
-                    .background(AppColor.surface)
-                    .clipShape(RoundedRectangle(cornerRadius: AppRadius.control, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: AppRadius.control, style: .continuous)
-                            .strokeBorder(AppColor.border(for: contrast), lineWidth: 0.5)
-                    )
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
                     .accessibilityLabel("Remove \(feed.title)")
             }
         } else {
             Button("Subscribe") { feedManager.addCatalogFeeds([feed]) }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.bordered)
                 .controlSize(.small)
                 .accessibilityLabel("Subscribe, \(feed.title)")
         }

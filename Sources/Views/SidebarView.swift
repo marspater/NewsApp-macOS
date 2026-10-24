@@ -61,7 +61,6 @@ struct SidebarView: View {
             if showsTensionReading {
                 VStack(spacing: 0) {
                     Divider()
-                        .opacity(0.4)
                     TensionSidebarButton(reading: tensionReading, open: openTension, status: tensionStatus)
                         .padding(.horizontal, AppLayout.sidebarInset)
                         .padding(.vertical, AppSpacing.xs)
@@ -70,17 +69,16 @@ struct SidebarView: View {
         }
         .focusedSceneValue(\.addFeedSubscription, { isSubscribePopoverPresented = true })
         .listStyle(.sidebar)
-        .scrollContentBackground(.visible)
         .navigationSplitViewColumnWidth(min: 220, ideal: 240, max: 300)
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button {
                     isSubscribePopoverPresented = true
                 } label: {
-                    Label("Add Feed Subscription", systemImage: "plus")
+                    Label("Add Feed", systemImage: "plus")
                 }
-                .help("Add feed subscription")
-                .accessibilityLabel("Add Feed Subscription")
+                .help("Add a feed")
+                .accessibilityLabel("Add Feed")
                 .popover(isPresented: $isSubscribePopoverPresented) {
                     subscribePopover
                 }
@@ -102,12 +100,12 @@ struct SidebarView: View {
     /// A native sidebar row (DESIGN.md 6): the list's selection handles clicks and arrow keys, the system draws
     /// the badge, and row size follows the person's sidebar size setting.
     @ViewBuilder
-    private func topicRow(
-        title: String, icon: String, badge: Int? = nil, isLoading: Bool = false, accessibility: String? = nil
-    ) -> some View {
+    private func topicRow(title: String, icon: String, badge: Int? = nil, isLoading: Bool = false) -> some View {
         let count = badge ?? 0
         let badgeValue = count > 0 ? String(count) : ""
-        Label(title, systemImage: icon)
+        // The filled variant marks the selected row only, as Mail and Notes do.
+        Label(title, systemImage: icon.replacingOccurrences(of: ".fill", with: ""))
+            .symbolVariant((selectedTopic ?? "Today") == title ? .fill : .none)
             .badge(badge ?? 0)
             .overlay(alignment: .trailing) {
                 if isLoading { ProgressView().controlSize(.mini) }
@@ -115,17 +113,14 @@ struct SidebarView: View {
             .symbolRenderingMode(.monochrome)
             .transaction { $0.animation = nil }
             .tag(title)
-            .accessibilityLabel(accessibility ?? title)
             .accessibilityValue(isLoading ? "Refreshing" : badgeValue)
     }
 
     private var inboxSection: some View {
         Section("Inbox") {
-            topicRow(
-                title: "Today", icon: "newspaper.fill", isLoading: feedManager.isAnyFeedLoading,
-                accessibility: "Today's Stories")
-            topicRow(title: "Unread", icon: "circle.circle.fill", badge: unreadBadge, accessibility: "Unread Stories")
-            topicRow(title: "Briefing", icon: "text.book.closed", accessibility: "Finite Briefing")
+            topicRow(title: "Today", icon: "newspaper", isLoading: feedManager.isAnyFeedLoading)
+            topicRow(title: "Unread", icon: "circle.circle", badge: unreadBadge)
+            topicRow(title: "Briefing", icon: "text.book.closed")
         }
     }
 
@@ -138,16 +133,15 @@ struct SidebarView: View {
     private var librarySection: some View {
         Section("Library") {
             topicRow(
-                title: "Saved Stories", icon: "bookmark.fill", badge: savedStories.savedArticles.count,
-                accessibility: "Saved Stories")
-            topicRow(title: "History", icon: "clock.fill", accessibility: "Reading History")
+                title: "Saved Stories", icon: "bookmark", badge: savedStories.savedArticles.count)
+            topicRow(title: "History", icon: "clock")
         }
     }
 
     private var userSectionsSection: some View {
         Section("Sections") {
             ForEach(feedManager.userSections, id: \.self) { section in
-                topicRow(title: section, icon: iconForSection(section), accessibility: "Section \(section)")
+                topicRow(title: section, icon: iconForSection(section))
                     .contextMenu {
                         Button(role: .destructive) {
                             pendingSectionRemoval = section
@@ -173,10 +167,10 @@ struct SidebarView: View {
 
     private var subscribePopover: some View {
         VStack(alignment: .leading, spacing: AppSpacing.sm) {
-            Text("Subscribe to RSS Feed")
+            Text("Add Feed")
                 .font(AppTypography.sectionTitle)
 
-            TextField("https://example.com/feed.xml", text: $newFeedURL)
+            TextField("Feed URL", text: $newFeedURL)
                 .textFieldStyle(.roundedBorder)
                 .frame(width: 280)
                 .onSubmit(addFromPopover)

@@ -31,7 +31,7 @@ struct TensionIndexView: View {
     @EnvironmentObject var appSettings: AppSettings
     @Environment(\.dismiss) private var dismiss
     @Environment(\.effectiveReduceMotion) private var reduceMotion
-    @Environment(\.colorSchemeContrast) private var contrast
+    @Environment(\.effectiveContrast) private var contrast
     @State private var history: [WorldTensionReading]
     @State private var loading = false
     @State private var errorMessage: String?
@@ -57,14 +57,12 @@ struct TensionIndexView: View {
             HStack {
                 Text(Self.navigationTitleText).font(AppTypography.sectionTitle).accessibilityAddTraits(.isHeader)
                 Spacer()
-                Button {
-                    dismiss()
-                } label: {
-                    Label("Close", systemImage: "xmark").labelStyle(.iconOnly)
-                }
-                .buttonStyle(.borderless).keyboardShortcut(.cancelAction).help("Close (Esc)")
+                // The same header as the feed catalog: title and Done.
+                Button("Done") { dismiss() }
+                    .keyboardShortcut(.defaultAction)
             }
             .padding(AppLayout.pageInset)
+            .onExitCommand { dismiss() }
             Divider()
             ScrollView {
                 VStack(alignment: .leading, spacing: AppSpacing.lg) {
@@ -124,9 +122,13 @@ struct TensionIndexView: View {
                     HStack(alignment: .firstTextBaseline, spacing: AppSpacing.sm) {
                         Text("\(reading.assessment.score)").font(AppTypography.tensionReading).monospacedDigit()
                             .contentTransition(.numericText())
-                        Text("/ 100").font(AppTypography.headline).foregroundStyle(AppColor.secondaryText)
-                        Text(reading.level.rawValue).font(AppTypography.sectionTitle)
-                            .foregroundStyle(AppColor.tension(reading.level))
+                        Text("°").font(AppTypography.headline).foregroundStyle(AppColor.secondaryText)
+                        Label {
+                            Text(reading.level.rawValue).font(AppTypography.sectionTitle)
+                                .foregroundStyle(AppColor.primaryText)
+                        } icon: {
+                            Image(systemName: "circle.fill").foregroundStyle(AppColor.tension(reading.level))
+                        }
                     }
                     if let comparison = comparison(reading) {
                         Text(comparison).font(AppTypography.callout).foregroundStyle(AppColor.secondaryText)
@@ -138,7 +140,7 @@ struct TensionIndexView: View {
                 TensionGlyph(level: reading.level)
             }
             .accessibilityElement(children: .combine)
-            .accessibilityLabel("World tension \(reading.assessment.score) of 100, \(reading.level.rawValue)")
+            .accessibilityLabel("World tension \(reading.assessment.score) degrees, \(reading.level.rawValue)")
             TensionScaleBar(score: reading.assessment.score)
         }
     }
@@ -265,7 +267,7 @@ struct TensionIndexView: View {
                     PointMark(x: .value("Day", reading.id), y: .value("Assessment", reading.assessment.score))
                         .foregroundStyle(AppColor.tension(reading.level))
                         .accessibilityLabel(reading.evaluatedAt.formatted(date: .abbreviated, time: .omitted))
-                        .accessibilityValue("\(reading.assessment.score) of 100")
+                        .accessibilityValue("\(reading.assessment.score) degrees")
                 }
             }
             .chartYScale(domain: 0...100).chartXSelection(value: $selectedDay)
@@ -300,7 +302,7 @@ struct TensionIndexView: View {
                 if loading { ProgressView().controlSize(.small) }
                 Button("Reassess") { reassessment += 1 }.disabled(loading)
             }.font(AppTypography.callout)
-            Text("On-device AI · methodology v2 · last 24 hours · 12 international panel feeds")
+            Text("Assessed on this Mac · last 24 hours · 12 international panel feeds")
                 .font(AppTypography.caption).foregroundStyle(AppColor.tertiaryText)
         }
     }
@@ -337,7 +339,8 @@ struct TensionIndexView: View {
                     unscoredHeadlines = WorldTensionService.headlines(rows, prefix: "C", limit: 12)
                 }
             }
-            errorMessage = error.localizedDescription
+            // The cause is for the log; the sheet says what to do.
+            errorMessage = "The assessment could not be completed. Try again."
         }
     }
 }
@@ -345,7 +348,7 @@ struct TensionIndexView: View {
 /// The full 0–100 scale with the band colours and a marker at the current score.
 struct TensionScaleBar: View {
     let score: Int
-    @Environment(\.colorSchemeContrast) private var contrast
+    @Environment(\.effectiveContrast) private var contrast
 
     var body: some View {
         VStack(spacing: AppSpacing.xs) {
@@ -370,17 +373,17 @@ struct TensionScaleBar: View {
             .frame(height: AppLayout.tensionScaleHeight)
             .padding(.vertical, (AppLayout.tensionScaleMarkerHeight - AppLayout.tensionScaleHeight) / 2)
             HStack {
-                Text("0")
+                Text("0°")
                 Spacer()
-                Text("50")
+                Text("50°")
                 Spacer()
-                Text("100")
+                Text("100°")
             }
             .font(AppTypography.caption).foregroundStyle(AppColor.tertiaryText(for: contrast)).monospacedDigit()
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("World Tension scale")
-        .accessibilityValue("\(score) of 100")
+        .accessibilityValue("\(score) degrees")
     }
 }
 
@@ -627,8 +630,7 @@ struct TensionSidebarButton: View {
     let reading: WorldTensionReading?
     let open: () -> Void
     var status = "Not assessed"
-    @Environment(\.colorSchemeContrast) private var contrast
-    @State private var isHovered = false
+    @Environment(\.effectiveContrast) private var contrast
 
     private var readingHeadline: String {
         if let reading {
@@ -673,7 +675,6 @@ struct TensionSidebarButton: View {
         Image(systemName: "chevron.right")
             .font(AppTypography.eyebrow)
             .foregroundStyle(AppColor.tertiaryText(for: contrast))
-            .opacity(isHovered ? 0.8 : 0.35)
             .accessibilityHidden(true)
     }
 
@@ -686,10 +687,6 @@ struct TensionSidebarButton: View {
         }
         .padding(.horizontal, AppSpacing.sm)
         .padding(.vertical, AppSpacing.xs)
-        .background(
-            RoundedRectangle(cornerRadius: AppRadius.control, style: .continuous)
-                .fill(isHovered ? Color.primary.opacity(0.06) : Color.clear)
-        )
         .contentShape(RoundedRectangle(cornerRadius: AppRadius.control, style: .continuous))
     }
 
@@ -697,10 +694,8 @@ struct TensionSidebarButton: View {
         Button(action: open) {
             buttonContent
         }
-        .buttonStyle(.plain)
-        .onHover { hovering in
-            isHovered = hovering
-        }
+        // The system accessory-bar style draws the hover highlight.
+        .buttonStyle(.accessoryBar)
         .help("Show the World Tension assessment")
         .accessibilityLabel(
             reading.map { "World tension, \($0.assessment.score) degrees, \($0.level.rawValue)" }
