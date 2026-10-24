@@ -51,6 +51,8 @@ enum AppColor {
     static let separator = Color(NSColor.separatorColor)
     static let badgeBackground = Color(NSColor.quaternaryLabelColor).opacity(0.12)
     static let unreadDot = Color.accentColor
+    /// The block a citation jumped to, until the reader dismisses the citation.
+    static let passageHighlight = Color.accentColor.opacity(0.12)
 
     /// Card and container strokes: the separator, or a stronger stroke with Increase Contrast (DESIGN.md 11).
     static func border(for contrast: ColorSchemeContrast) -> Color {
