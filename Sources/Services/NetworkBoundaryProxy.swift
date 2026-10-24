@@ -19,24 +19,35 @@ actor NetworkBoundaryProxy {
     }
 
     func port() async throws -> UInt16 {
-        if startup == nil {
-            let resolver = resolver
-            let connector = connector
-            startup = Task {
-                let server = try SOCKSListener(resolver: ProxyResolver(body: resolver), connector: connector)
-                try await server.start()
-                return server
+        // A listener that stopped or failed after startup (for example across sleep) is replaced once.
+        for _ in 0..<2 {
+            if startup == nil {
+                let resolver = resolver
+                let connector = connector
+                startup = Task {
+                    let server = try SOCKSListener(resolver: ProxyResolver(body: resolver), connector: connector)
+                    try await server.start()
+                    return server
+                }
+            }
+            guard let task = startup else { throw FeedError.network("Network gateway unavailable") }
+            do {
+                let server = try await task.value
+                if let port = server.runningPort { return port }
+                if startup == task { startup = nil }
+            } catch {
+                if startup == task { startup = nil }
+                throw error
             }
         }
-        guard let task = startup else { throw FeedError.network("Network gateway unavailable") }
-        do { return try await task.value.port } catch {
-            if startup == task { startup = nil }
-            throw error
-        }
+        throw FeedError.network("Network gateway unavailable")
     }
 
     func configuration() async throws -> ProxyConfiguration {
-        let port = try await port()
+        Self.configuration(port: try await port())
+    }
+
+    static func configuration(port: UInt16) -> ProxyConfiguration {
         var configuration = ProxyConfiguration(
             socksv5Proxy: .hostPort(host: "127.0.0.1", port: NWEndpoint.Port(rawValue: port)!))
         configuration.allowFailover = false
@@ -45,21 +56,37 @@ actor NetworkBoundaryProxy {
         return configuration
     }
 
+    /// The next `port()` call starts a new listener.
     func stop() async {
         let task = startup
-        startup = nil
         task?.cancel()
         if let server = try? await task?.value { server.stop() }
     }
 }
 
-// Bound blocking native DNS work independently of the number of queued/expired clients.
-private actor ProxyResolver {
+/// Runs blocking native DNS work off the cooperative pool and off callers' actors, a few lookups at a time,
+/// so one hung lookup cannot stall the others. Lookups cancelled while queued are skipped.
+final class ProxyResolver: @unchecked Sendable {
     let body: NetworkBoundaryProxy.Resolver
+    // ponytail: fixed width matching feed refresh concurrency; raise it if image-heavy screens queue on DNS.
+    private let queue: OperationQueue = {
+        let queue = OperationQueue()
+        queue.maxConcurrentOperationCount = 6
+        queue.qualityOfService = .utility
+        return queue
+    }()
     init(body: @escaping NetworkBoundaryProxy.Resolver) { self.body = body }
-    func resolve(_ host: String) -> IPAddressValidator.ValidationResult {
-        guard !Task.isCancelled else { return .unresolvable(reason: "Cancelled") }
-        return body(host)
+    func resolve(_ host: String) async -> IPAddressValidator.ValidationResult {
+        let pending = CompletionOnce()
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                queue.addOperation { [body] in
+                    continuation.resume(returning: pending.claim() ? body(host) : .unresolvable(reason: "Cancelled"))
+                }
+            }
+        } onCancel: {
+            _ = pending.claim()
+        }
     }
 }
 
@@ -70,7 +97,8 @@ private final class SOCKSListener: @unchecked Sendable {
     private let connector: NetworkBoundaryProxy.Connector
     private var tunnels: [UUID: SOCKSTunnel] = [:]  // Accessed only on queue.
     private var isStopped = false  // Accessed only on queue.
-    var port: UInt16 { listener.port!.rawValue }
+    /// Nil once the listener has stopped or failed.
+    var runningPort: UInt16? { queue.sync { isStopped ? nil : listener.port?.rawValue } }
 
     init(resolver: ProxyResolver, connector: @escaping NetworkBoundaryProxy.Connector) throws {
         self.resolver = resolver
