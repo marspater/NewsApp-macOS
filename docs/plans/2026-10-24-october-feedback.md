@@ -134,3 +134,21 @@ Issues #579–#608 created the same day: epics #607 (Q) and #608 (R), milestones
 - `gh issue list` shows the new sub-issues under their epics (sub-issue progress bars); `gh project item-list 2` shows Status and Priority.
 - Audit and plan docs render; PR opened; `./test.sh` via pre-commit on the docs commit.
 - R1 artifact link delivered.
+
+## 5. Epic ownership (24 October, after the first logging pass)
+
+Different agents work different epics in parallel, so each file family has exactly one owning epic; an epic edits only the files it owns and asks on the other epic's issue for anything else. The "Owns" section of every epic lists the files. Moves made to get there: #534, #540, #541, #542 → M (matching and embedding code); #584 → Q (`MainView`); #548 → R (`FiniteBriefing`, Reading tab). #549 hands the `EventJudge` remnants to #580.
+
+| Epic | Owns | Hands off |
+|---|---|---|
+| J #571 | `DatabaseEngine.swift` core, migrations, prune, `EnrichmentQueue`, migration fixtures | `DatabaseEngine+Events` and `Event*` (M); views (Q, R); CI (P) |
+| K #572 | `ArticleRemoteImage`, `CacheManager`, the prefetch block of `ArticleListView`, benchmarks | clustering performance (M); click handling and launch transition (Q) |
+| L #573 | `Overview*`, `WorldTension`, `TensionMethodology`, `ArticleIntelligence`, teaser rules in `ContentExtractionPipeline`, `NotificationService` and the notification branch of `FeedManager`, `MuteRules`, Muting and Notifications tabs | `Event*` (M); `TensionIndexView` layout (Q); Briefing rank (R); Dock badge (Q) |
+| M #574 | `EventMatcher`, `EventClustering`, `EventCandidates`, `ActClass`, `EventJudge` removal, `SentenceEmbedder`, `PairScorer`, `DatabaseEngine+Events`, clustering launch in `FeedManager`, `StoryCorpus`, training and evaluation scripts, shipped models | cards and overview views (Q); Briefing (R); storage core (J); notifications (L) |
+| N #575 | `NewsApp.swift` URL handling, intents, menu bar extra; `UpdateChecker`; Spotlight; `CFBundleURLTypes` after #566 | version stamping (P); permission timing (O); menus tables (Q) |
+| O #576 | onboarding view, permission timing in `NewsApp.swift`, Storage tab backup/restore, diagnostics export, exporters | `FeedCatalogView` (Q #600 first); URL scheme and intents (N) |
+| P #577 | build scripts (versions), CI configs, `format.sh`, runner scripts, `NewsTests.swift` harness and split, README/ARCHITECTURE/CONTRIBUTING, CHANGELOG cut | feature code; #570 after #549; #557 after #566 |
+| Q #607 | `ArticleCardView`, `EventCardView`, `ArticleListView` (clicks, toolbar copy, launch transition), `MainView`, `SidebarView`, summary panel of `ArticleDetailView`, `EventOverviewReaderView`, `TensionIndexView`, `FeedCatalogView`, `DesignSystem`, design lint, `DESIGN.md` general (before #604) | matching data (M); Briefing views (R); notification and tension logic (L) |
+| R #608 | `BriefingView` (new), Briefing branch of `ArticleListView`, `FiniteBriefing`, Reading tab, `DESIGN.md` §8.4 | story grouping (M #581); card components (Q); tension logic (L #585) |
+
+Schema versions are reserved in order: #536 v26 (J), #545 v27 (L), #581 v28 (M).
