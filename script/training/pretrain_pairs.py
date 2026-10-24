@@ -3,24 +3,26 @@
 CSV format plus a `weight` column, outside the checkout.
 
     pretrain_pairs.py wcep OUT_DIR [--split train] [--clusters N]
-        WCEP-10 (Hugging Face `ccdv/WCEP-10`; Ghalandari et al. 2020): positives are pairs of articles inside one
-        event cluster (cap 15 per cluster), negatives are pairs across clusters whose synthetic headlines share a
-        capitalized name (cap twice the positives). Headline = first sentence, lead = the next 600 characters.
+        WCEP-10 (Hugging Face `ccdv/WCEP-10`, pinned revision; Ghalandari et al. 2020): positives are pairs of
+        articles inside one event cluster (cap 15 per cluster), negatives are pairs across clusters whose synthetic
+        headlines share a capitalized name (cap twice the positives). Headline = first sentence, lead = the next 600
+        characters.
     pretrain_pairs.py gdelt OUT_DIR --from YYYYMMDD --to YYYYMMDD [--slots-per-day 8] [--cap 100000]
         GDELT 2.1 Events, Mentions and GKG files of the range (downloaded into OUT_DIR/gdelt, resumable): hard
         negatives with real headlines: two events with the same Actor1 and Actor2 names and action country, different
-        event ids, one to seven days apart. Shared event ids are never used as positives.
+        event ids, one to seven days apart, whose headlines share a capitalized name. Shared event ids are never used
+        as positives.
     pretrain_pairs.py semeval OUT_DIR
         SemEval-2022 Task 8 (Zenodo 6507872): English-English pairs; overall similarity 1 is label 1, 3 and 4 are
         label 0, 2 is dropped; page text from the Internet Archive (cached under OUT_DIR/semeval), weight 2.
     pretrain_pairs.py --self-check
-        Synthetic clusters and events through the same code, no downloads.
+        Synthetic clusters, events and pages through the same code, no downloads.
 
-Everything is written with 0600 permissions and never overwrites; a path inside a Git checkout is refused.
+Everything is written with 0600 permissions and never overwrites; a path inside a Git checkout is refused. Only
+https URLs of the three sources are opened.
 """
 import argparse
 import csv
-import gzip
 import hashlib
 import html
 import io
@@ -29,12 +31,15 @@ import os
 import pathlib
 import re
 import sys
+import time
+import urllib.error
 import urllib.request
 import zipfile
-from datetime import datetime, timedelta
+from concurrent.futures import ThreadPoolExecutor
+from datetime import date, timedelta
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
-from wordpiece import Tokenizer, require  # noqa: E402
+from wordpiece import Tokenizer, require
 
 HEADER = ['label', 'group', 'text_a', 'text_b', 'pieces_a', 'pieces_b', 'weight']
 LEAD = 600
@@ -42,16 +47,35 @@ SENTENCE_END = re.compile(r'(?<=[.!?])\s+(?=[A-Z"\'“‘])')
 CAPITALIZED = re.compile(r"\b[A-Z][a-zA-Z'’-]{3,}\b")
 TAG = re.compile(r'<[^>]+>')
 WHITESPACE = re.compile(r'\s+')
+TITLE = re.compile(r'<title[^>]*>(.*?)</title>', re.DOTALL | re.IGNORECASE)
+PARAGRAPH = re.compile(r'<p[^>]*>(.*?)</p>', re.DOTALL | re.IGNORECASE)
+PAGE_TITLE = re.compile(r'<PAGE_TITLE>(.*?)</PAGE_TITLE>')
 GDELT = 'https://data.gdeltproject.org/gdeltv2/'
 ZENODO = 'https://zenodo.org/api/records/6507872/files/'
+ARCHIVE = 'https://web.archive.org/'
+# The dataset repository's commit read on 24 October 2026 (`HfApi().list_repo_commits`); bump deliberately.
+WCEP_REVISION = 'e231ece6b9131ef38a8eff15c5ec40f3fa211289'
+WCEP_POSITIVES_PER_CLUSTER = 15
+GDELT_SAMPLE = 30
+FETCH_WORKERS = 3
 
 
 def private_directory(value):
     path = pathlib.Path(value).expanduser().resolve()
-    require(not any((parent / '.git').exists() for parent in [path, *path.parents]), 'Keep the pairs outside Git checkouts')
+    require(not any((parent / '.git').exists() for parent in [path, *path.parents]),
+            'Keep the pairs outside Git checkouts')
     path.mkdir(parents=True, exist_ok=True)
     os.chmod(path, 0o700)
     return path
+
+
+def fetch(url, timeout=120, limit=None):
+    """Bytes of one https resource of the three sources; anything else is refused before a socket is opened."""
+    require(url.startswith((GDELT, ZENODO, ARCHIVE)), f'Refusing to open {url}')
+    # The scheme and host are checked above, so S310's custom-scheme concern does not apply.
+    request = urllib.request.Request(url, headers={'User-Agent': 'NewsApp-pretrain/1.0 (research; see #623)'})  # noqa: S310
+    with urllib.request.urlopen(request, timeout=timeout) as response:  # noqa: S310
+        return response.read(limit) if limit else response.read()
 
 
 def order(a, b):
@@ -60,6 +84,14 @@ def order(a, b):
     for byte in (a + b).encode():
         value = ((value ^ byte) * 1_099_511_628_211) & 0xFFFFFFFFFFFFFFFF
     return value
+
+
+def yyyymmdd(value):
+    """A calendar day from an eight-digit GDELT day; None when it is not one."""
+    try:
+        return date(int(value[:4]), int(value[4:6]), int(value[6:8]))
+    except ValueError:
+        return None
 
 
 def headline_and_lead(text):
@@ -75,6 +107,10 @@ def headline_and_lead(text):
 
 def pair_text(headline, lead):
     return headline + '\n' + lead
+
+
+def names_in(headline):
+    return {name.lower() for name in CAPITALIZED.findall(headline)}
 
 
 class Writer:
@@ -93,7 +129,7 @@ class Writer:
         if text_a == text_b or key in self.seen:
             return False
         self.seen.add(key)
-        pieces = ' '.join(map(str, self.tokenizer.pieces(text_a))), ' '.join(map(str, self.tokenizer.pieces(text_b)))
+        pieces = [' '.join(map(str, self.tokenizer.pieces(text))) for text in (text_a, text_b)]
         self.csv.writerow([label, group, text_a, text_b, pieces[0], pieces[1], f'{weight:g}'])
         self.rows += 1
         return True
@@ -107,7 +143,8 @@ class Writer:
 def wcep_clusters(split, limit, cache):
     """Clusters of article texts from the WCEP-10 split (`train.zip` holds `train.txt`, one JSON object per line)."""
     from huggingface_hub import hf_hub_download
-    archive = hf_hub_download('ccdv/WCEP-10', f'{split}.zip', repo_type='dataset', local_dir=str(cache))
+    archive = hf_hub_download('ccdv/WCEP-10', f'{split}.zip', repo_type='dataset', revision=WCEP_REVISION,
+                              local_dir=str(cache))
     with zipfile.ZipFile(archive) as z:
         name = next(n for n in z.namelist() if n.endswith('.txt'))
         with z.open(name) as handle:
@@ -118,30 +155,30 @@ def wcep_clusters(split, limit, cache):
                 yield f'{split}-{index}', [d for d in row['document'] if isinstance(d, str)]
 
 
-def build_wcep(clusters, writer, positives_per_cluster=15):
-    """Pairs inside a cluster are one event; pairs across clusters that share a capitalized headline name are not."""
-    headlines = {}
-    positives = 0
-    for cluster, documents in clusters:
-        texts = []
-        for document in documents:
-            parsed = headline_and_lead(document)
-            if parsed and len(parsed[0].split()) >= 4:
-                texts.append(parsed)
-        texts = texts[:10]
-        for index, (headline, _) in enumerate(texts):
-            headlines[(cluster, index)] = headline
-        pairs = [(i, j) for i in range(len(texts)) for j in range(i + 1, len(texts))]
-        pairs.sort(key=lambda p: order(f'{cluster}:{p[0]}', f'{cluster}:{p[1]}'))
-        for i, j in pairs[:positives_per_cluster]:
-            if writer.write(1, 'w:' + cluster, pair_text(*texts[i]), pair_text(*texts[j])):
-                positives += 1
-        for index, text in enumerate(texts):
-            headlines[(cluster, index)] = text
+def cluster_texts(documents):
+    """Up to ten (headline, lead) pairs of a cluster; a headline under four words is skipped."""
+    texts = []
+    for document in documents:
+        parsed = headline_and_lead(document)
+        if parsed and len(parsed[0].split()) >= 4:
+            texts.append(parsed)
+    return texts[:10]
+
+
+def wcep_positives(cluster, texts, writer):
+    """Pairs inside one cluster, capped, in the fixed order."""
+    pairs = [(i, j) for i in range(len(texts)) for j in range(i + 1, len(texts))]
+    pairs.sort(key=lambda p, cluster=cluster: order(f'{cluster}:{p[0]}', f'{cluster}:{p[1]}'))
+    return sum(1 for i, j in pairs[:WCEP_POSITIVES_PER_CLUSTER]
+               if writer.write(1, 'w:' + cluster, pair_text(*texts[i]), pair_text(*texts[j])))
+
+
+def wcep_negative_candidates(headlines):
+    """Pairs of texts from different clusters whose headlines share a capitalized name."""
     by_name = {}
     for key, (headline, _) in headlines.items():
-        for name in set(CAPITALIZED.findall(headline)):
-            by_name.setdefault(name.lower(), []).append(key)
+        for name in names_in(headline):
+            by_name.setdefault(name, []).append(key)
     candidates = set()
     for keys in by_name.values():
         sample = keys[:40]
@@ -149,8 +186,20 @@ def build_wcep(clusters, writer, positives_per_cluster=15):
             for b in sample[n + 1:]:
                 if a[0] != b[0]:
                     candidates.add((a, b) if a < b else (b, a))
+    return sorted(candidates, key=lambda c: order(f'{c[0][0]}:{c[0][1]}', f'{c[1][0]}:{c[1][1]}'))
+
+
+def build_wcep(clusters, writer):
+    """Pairs inside a cluster are one event; pairs across clusters that share a capitalized headline name are not."""
+    headlines = {}
+    positives = 0
+    for cluster, documents in clusters:
+        texts = cluster_texts(documents)
+        positives += wcep_positives(cluster, texts, writer)
+        for index, text in enumerate(texts):
+            headlines[(cluster, index)] = text
     negatives = 0
-    for a, b in sorted(candidates, key=lambda c: order(f'{c[0][0]}:{c[0][1]}', f'{c[1][0]}:{c[1][1]}')):
+    for a, b in wcep_negative_candidates(headlines):
         if negatives >= 2 * positives:
             break
         if writer.write(0, 'wn:' + a[0], pair_text(*headlines[a]), pair_text(*headlines[b])):
@@ -161,25 +210,26 @@ def build_wcep(clusters, writer, positives_per_cluster=15):
 # --- GDELT ------------------------------------------------------------------------------------------------------------
 
 def gdelt_slots(start, end, per_day):
+    """Fifteen-minute file stamps, `per_day` of them a day, from `start` to `end` inclusive."""
     step = 24 // per_day
-    day = datetime.strptime(start, '%Y%m%d')
-    last = datetime.strptime(end, '%Y%m%d')
+    day = yyyymmdd(start)
+    last = yyyymmdd(end)
+    require(day and last and day <= last, 'Give --from and --to as YYYYMMDD, from first')
     while day <= last:
         for hour in range(0, 24, step):
-            yield (day + timedelta(hours=hour)).strftime('%Y%m%d%H%M%S')
+            yield f'{day:%Y%m%d}{hour:02d}0000'
         day += timedelta(days=1)
 
 
 def gdelt_download(slot, kind, cache):
-    """One GDELT file, cached; `kind` is export, mentions or gkg."""
+    """One GDELT file, cached; `kind` is export, mentions or gkg. A missing 15-minute file is normal and skipped."""
     suffix = {'export': 'export.CSV.zip', 'mentions': 'mentions.CSV.zip', 'gkg': 'gkg.csv.zip'}[kind]
     target = cache / f'{slot}.{suffix}'
     if not target.exists():
         try:
-            with urllib.request.urlopen(GDELT + target.name, timeout=120) as response:
-                target.write_bytes(response.read())
+            target.write_bytes(fetch(GDELT + target.name))
             os.chmod(target, 0o600)
-        except Exception as error:  # a missing 15-minute file is normal; the slot is skipped
+        except (urllib.error.URLError, OSError, TimeoutError) as error:
             print(f'    skip {target.name}: {error}', file=sys.stderr)
             return None
     return target
@@ -193,60 +243,60 @@ def read_zip_tsv(path):
                     yield line.rstrip('\n').split('\t')
 
 
+def gdelt_file_rows(slot, kind, cache, width):
+    """Rows of one cached GDELT file that have at least `width` columns; none when the file is missing."""
+    path = gdelt_download(slot, kind, cache)
+    return (row for row in read_zip_tsv(path) if len(row) >= width) if path else ()
+
+
 def gdelt_rows(slots, cache):
     """Events (id → day, actors, country), mentions (id → urls) and page titles (url → title) of the slots."""
     events, mentions, titles = {}, {}, {}
     for slot in slots:
-        export = gdelt_download(slot, 'export', cache)
-        if export:
-            for row in read_zip_tsv(export):
-                if len(row) >= 61 and row[6] and row[16]:
-                    events[row[0]] = (row[1], row[6], row[16], row[53])
-        mention = gdelt_download(slot, 'mentions', cache)
-        if mention:
-            for row in read_zip_tsv(mention):
-                if len(row) >= 6 and row[3] == '1':
-                    mentions.setdefault(row[0], []).append(row[5])
-        gkg = gdelt_download(slot, 'gkg', cache)
-        if gkg:
-            for row in read_zip_tsv(gkg):
-                if len(row) >= 27:
-                    match = re.search(r'<PAGE_TITLE>(.*?)</PAGE_TITLE>', row[26])
-                    if match:
-                        titles[row[4]] = html.unescape(match.group(1)).strip()
+        for row in gdelt_file_rows(slot, 'export', cache, 61):
+            if row[6] and row[16]:
+                events[row[0]] = (row[1], row[6], row[16], row[53])
+        for row in gdelt_file_rows(slot, 'mentions', cache, 6):
+            if row[3] == '1':
+                mentions.setdefault(row[0], []).append(row[5])
+        for row in gdelt_file_rows(slot, 'gkg', cache, 27):
+            if match := PAGE_TITLE.search(row[26]):
+                titles[row[4]] = html.unescape(match.group(1)).strip()
     return events, mentions, titles
+
+
+def gdelt_title(event_id, mentions, titles):
+    """A usable headline of one event: four words or more and not a site's front page."""
+    for url in mentions.get(event_id, []):
+        title = titles.get(url)
+        if title and len(title.split()) >= 4 and not title.lower().startswith(('home', 'news')):
+            return title
+    return None
+
+
+def gdelt_candidates(events, mentions, titles):
+    """Same coded actors and country is coarse ("POLICE", "UNITED STATES"); the headlines must also share a name, so
+    the pair is the same-topic-different-story case the model confuses, not two unrelated reports."""
+    groups = {}
+    for event_id, (day, actor1, actor2, country) in events.items():
+        title = gdelt_title(event_id, mentions, titles)
+        if title and (when := yyyymmdd(day)):
+            groups.setdefault((actor1, actor2, country), []).append((event_id, when, title, names_in(title)))
+    candidates = []
+    for members in groups.values():
+        members = sorted(members)[:GDELT_SAMPLE]
+        for n, (a_id, a_day, a_title, a_names) in enumerate(members):
+            for b_id, b_day, b_title, b_names in members[n + 1:]:
+                gap = abs((a_day - b_day).days)
+                if 1 <= gap <= 7 and a_title.lower() != b_title.lower() and a_names & b_names:
+                    candidates.append((a_id, b_id, a_title, b_title))
+    return sorted(candidates, key=lambda c: order(c[0], c[1]))
 
 
 def build_gdelt(events, mentions, titles, writer, cap):
     """Same actors and country, different event and day, one to seven days apart: a hard negative."""
-    def title_of(event_id):
-        for url in mentions.get(event_id, []):
-            title = titles.get(url)
-            if title and len(title.split()) >= 4 and not title.lower().startswith(('home', 'news')):
-                return title
-        return None
-    groups = {}
-    for event_id, (day, actor1, actor2, country) in events.items():
-        title = title_of(event_id)
-        if title:
-            groups.setdefault((actor1, actor2, country), []).append((event_id, day, title))
-    candidates = []
-    for members in groups.values():
-        members = sorted(members)[:30]
-        for n, (a_id, a_day, a_title) in enumerate(members):
-            for b_id, b_day, b_title in members[n + 1:]:
-                try:
-                    gap = abs((datetime.strptime(a_day, '%Y%m%d') - datetime.strptime(b_day, '%Y%m%d')).days)
-                except ValueError:
-                    continue
-                # Same coded actors is coarse ("POLICE", "UNITED STATES"); the headlines must also share a name, so the
-                # pair is the same-topic-different-story case the model confuses, not two unrelated reports.
-                shared = {n.lower() for n in CAPITALIZED.findall(a_title)} & {n.lower() for n in CAPITALIZED.findall(b_title)}
-                if 1 <= gap <= 7 and a_title.lower() != b_title.lower() and shared:
-                    candidates.append((a_id, b_id, a_title, b_title))
-    candidates.sort(key=lambda c: order(c[0], c[1]))
     written = 0
-    for a_id, b_id, a_title, b_title in candidates:
+    for a_id, _, a_title, b_title in gdelt_candidates(events, mentions, titles):
         if written >= cap:
             break
         if writer.write(0, 'g:' + a_id, pair_text(a_title, ''), pair_text(b_title, '')):
@@ -261,55 +311,69 @@ def semeval_pairs(cache):
     for name in ('semeval-2022_task8_train-data_batch.csv', 'final_eval_data.csv'):
         target = cache / name
         if not target.exists():
-            with urllib.request.urlopen(ZENODO + name + '/content', timeout=120) as response:
-                target.write_bytes(response.read())
+            target.write_bytes(fetch(ZENODO + name + '/content'))
             os.chmod(target, 0o600)
         with target.open(newline='', encoding='utf-8') as handle:
             for row in csv.DictReader(handle):
                 if row.get('url1_lang') == 'en' and row.get('url2_lang') == 'en':
-                    yield row['pair_id'], row.get('ia_link1') or row['link1'], row.get('ia_link2') or row['link2'], float(row.get('Overall') or row.get('OVERALL'))
+                    yield (row['pair_id'], row.get('ia_link1') or row['link1'], row.get('ia_link2') or row['link2'],
+                           float(row.get('Overall') or row.get('OVERALL')))
 
 
-def archived_page(url, cache):
-    """Title and first paragraph of a page from the Internet Archive, cached by URL hash; None when unavailable."""
+def page_fields(body):
+    """Title and lead of an HTML page, or None when it has no title or under 200 characters of paragraphs."""
+    title = TITLE.search(body)
+    text = ' '.join(WHITESPACE.sub(' ', TAG.sub(' ', html.unescape(p))).strip() for p in PARAGRAPH.findall(body))
+    if not title or len(text) < 200:
+        return None
+    headline = WHITESPACE.sub(' ', html.unescape(TAG.sub(' ', title.group(1)))).strip()[:200]
+    return {'title': headline, 'lead': text[:LEAD]}
+
+
+def archived_page(url, cache, attempts=3):
+    """Title and first paragraphs of a page from the Internet Archive, cached by URL hash. A page the archive does
+    not have (404, 403) is cached as None; a rate limit, server error or timeout is retried with a pause and never
+    cached, so a later run fetches it again."""
     key = hashlib.sha256(url.encode()).hexdigest()
     target = cache / 'pages' / (key + '.json')
     if target.exists():
         return json.loads(target.read_text())
-    result = None
-    try:
-        with urllib.request.urlopen(url if url.startswith('https://web.archive.org/') else 'https://web.archive.org/web/2020id_/' + url, timeout=60) as response:
-            body = response.read(400_000).decode('utf-8', errors='replace')
-        title = re.search(r'<title[^>]*>(.*?)</title>', body, re.S | re.I)
-        paragraphs = re.findall(r'<p[^>]*>(.*?)</p>', body, re.S | re.I)
-        text = ' '.join(WHITESPACE.sub(' ', TAG.sub(' ', html.unescape(p))).strip() for p in paragraphs)
-        if title and len(text) >= 200:
-            result = {'title': WHITESPACE.sub(' ', html.unescape(TAG.sub(' ', title.group(1)))).strip()[:200],
-                      'lead': text[:LEAD]}
-    except Exception:
-        result = None
+    archived = url if url.startswith(ARCHIVE) else ARCHIVE + 'web/2020id_/' + url
+    for attempt in range(attempts):
+        try:
+            result = page_fields(fetch(archived, timeout=60, limit=400_000).decode('utf-8', errors='replace'))
+            break
+        except urllib.error.HTTPError as error:
+            if error.code in (403, 404, 410):
+                result = None
+                break
+            time.sleep(15 * (attempt + 1))
+        except (urllib.error.URLError, OSError, TimeoutError, ValueError):
+            time.sleep(15 * (attempt + 1))
+    else:
+        return None
     target.parent.mkdir(exist_ok=True)
     target.write_text(json.dumps(result))
     os.chmod(target, 0o600)
     return result
 
 
-def build_semeval(pairs, writer, fetch, workers=6):
-    """Overall similarity 1 (most similar) is one story, 3 and 4 are not, 2 is ambiguous and dropped. Pages are
-    fetched a few at a time (the Internet Archive tolerates about that many)."""
-    from concurrent.futures import ThreadPoolExecutor
-    pairs = [(pair_id, link1, link2, overall) for pair_id, link1, link2, overall in pairs
-             if overall < 1.5 or overall >= 2.5]
+def semeval_label(overall):
+    """Overall similarity 1 (most similar) is one story, 3 and 4 are not, 2 is ambiguous and dropped."""
+    return 1 if overall < 1.5 else 0 if overall >= 2.5 else None
+
+
+def build_semeval(pairs, writer, page, workers=FETCH_WORKERS):
+    """Labelled pairs whose two pages are available; pages are fetched a few at a time."""
+    pairs = [pair for pair in pairs if semeval_label(pair[3]) is not None]
+    urls = [url for pair in pairs for url in pair[1:3]]
     with ThreadPoolExecutor(max_workers=workers) as pool:
-        pages = dict(zip((url for pair in pairs for url in pair[1:3]),
-                         pool.map(fetch, (url for pair in pairs for url in pair[1:3]))))
+        pages = dict(zip(urls, pool.map(page, urls), strict=True))
     written = 0
     for pair_id, link1, link2, overall in pairs:
-        label = 1 if overall < 1.5 else 0
         a, b = pages.get(link1), pages.get(link2)
-        if not a or not b:
-            continue
-        if writer.write(label, 's:' + pair_id, pair_text(a['title'], a['lead']), pair_text(b['title'], b['lead']), 2):
+        if a and b and writer.write(semeval_label(overall), 's:' + pair_id, pair_text(a['title'], a['lead']),
+                                    pair_text(b['title'], b['lead']), 2):
             written += 1
     return written
 
@@ -321,12 +385,13 @@ def summarize(path):
     with path.open(newline='', encoding='utf-8') as handle:
         rows = list(csv.DictReader(handle))
     positives = sum(1 for r in rows if r['label'] == '1')
-    print(f'    {path.name}: {len(rows)} pairs, {positives} same event, {len(rows) - positives} different; sha256 {digest}')
+    print(f'    {path.name}: {len(rows)} pairs, {positives} same event, {len(rows) - positives} different; '
+          f'sha256 {digest}')
 
 
 def self_check():
-    tokenizer = Tokenizer()
     import tempfile
+    tokenizer = Tokenizer()
     with tempfile.TemporaryDirectory() as directory:
         out = pathlib.Path(directory)
         clusters = [
@@ -340,29 +405,38 @@ def self_check():
         positives, negatives = build_wcep(clusters, writer)
         writer.close()
         require(positives == 4 and negatives >= 1, f'WCEP self-check: {positives} positives, {negatives} negatives')
-        events = {'1': ('20260101', 'GOVERNMENT', 'PROTESTER', 'FR'), '2': ('20260103', 'GOVERNMENT', 'PROTESTER', 'FR'),
-                  '3': ('20260101', 'GOVERNMENT', 'PROTESTER', 'FR'), '4': ('20260120', 'GOVERNMENT', 'PROTESTER', 'FR')}
-        mentions = {'1': ['u1'], '2': ['u2'], '3': ['u3'], '4': ['u4']}
-        titles = {'u1': 'Police clear protest camp in Paris after night of clashes', 'u2': 'Paris court fines protest leaders',
-                  'u3': 'Police clear protest camp in Paris after night of clashes', 'u4': 'Protest season ends in Paris'}
+        actors = ('GOVERNMENT', 'PROTESTER', 'FR')
+        events = {'1': ('20260101', *actors), '2': ('20260103', *actors), '3': ('20260101', *actors),
+                  '4': ('20260120', *actors), '5': ('20260102', *actors)}
+        mentions = {'1': ['u1'], '2': ['u2'], '3': ['u3'], '4': ['u4'], '5': ['u5']}
+        titles = {'u1': 'Police clear protest camp in Paris after night of clashes',
+                  'u2': 'Paris court fines protest leaders over camp',
+                  'u3': 'Police clear protest camp in Paris after night of clashes',
+                  'u4': 'Protest season ends in Paris', 'u5': 'Lyon bakery wins national prize'}
         writer = Writer(out / 'gdelt.csv', tokenizer)
         written = build_gdelt(events, mentions, titles, writer, cap=10)
         writer.close()
-        # 1–2 and 3–2 qualify but carry the same two texts, so one row; 1–3 share a day; 4 is too far away.
-        require(written == 1, f'GDELT self-check: {written} negatives (same day, far apart and repeated texts excluded)')
-        pages = {'a': {'title': 'Storm hits coast', 'lead': 'x' * 300}, 'b': {'title': 'Coastal storm batters towns', 'lead': 'y' * 300},
+        # 1–2 and 3–2 qualify but carry the same two texts, so one row; 1–3 share a day; 4 is too far away; 5 shares
+        # no headline name.
+        require(written == 1, f'GDELT self-check: {written} negatives')
+        pages = {'a': {'title': 'Storm hits coast', 'lead': 'x' * 300},
+                 'b': {'title': 'Coastal storm batters towns', 'lead': 'y' * 300},
                  'c': {'title': 'Budget vote delayed', 'lead': 'z' * 300}}
         writer = Writer(out / 'semeval.csv', tokenizer)
-        written = build_semeval([('p1', 'a', 'b', 1.0), ('p2', 'a', 'c', 3.7), ('p3', 'b', 'c', 2.0)], writer, pages.get)
+        written = build_semeval([('p1', 'a', 'b', 1.0), ('p2', 'a', 'c', 3.7), ('p3', 'b', 'c', 2.0)], writer,
+                                pages.get, workers=1)
         writer.close()
         require(written == 2, f'SemEval self-check: {written} pairs (the ambiguous 2 dropped)')
         with (out / 'semeval.csv').open(newline='') as handle:
             rows = list(csv.DictReader(handle))
-        require(rows[0]['weight'] == '2' and rows[0]['label'] == '1' and rows[1]['label'] == '0', 'SemEval labels and weight')
+        require(rows[0]['weight'] == '2' and rows[0]['label'] == '1' and rows[1]['label'] == '0',
+                'SemEval labels and weight')
+        require(list(gdelt_slots('20260101', '20260102', 2)) == ['20260101000000', '20260101120000', '20260102000000',
+                                                                 '20260102120000'], 'GDELT slots')
     print('pretrain_pairs self-check passed')
 
 
-def main(argv=None):
+def parse(argv):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument('--self-check', action='store_true')
     sub = parser.add_subparsers(dest='command')
@@ -378,39 +452,48 @@ def main(argv=None):
     gdelt.add_argument('--cap', type=int, default=100_000)
     semeval = sub.add_parser('semeval')
     semeval.add_argument('out')
-    args = parser.parse_args(argv)
+    return parser.parse_args(argv)
+
+
+def run_wcep(args, out, tokenizer):
+    writer = Writer(out / 'wcep-pairs.csv', tokenizer)
+    positives, negatives = build_wcep(wcep_clusters(args.split, args.clusters, out / 'wcep'), writer)
+    writer.close()
+    print(f'    WCEP-10 {args.split} (revision {WCEP_REVISION[:12]}): {positives} positives, {negatives} negatives')
+    summarize(out / 'wcep-pairs.csv')
+
+
+def run_gdelt(args, out, tokenizer):
+    cache = out / 'gdelt'
+    cache.mkdir(exist_ok=True)
+    events, mentions, titles = gdelt_rows(gdelt_slots(args.start, args.end, args.slots_per_day), cache)
+    print(f'    GDELT {args.start}-{args.end}: {len(events)} events with two actors, {len(titles)} titled pages')
+    writer = Writer(out / 'gdelt-negatives.csv', tokenizer)
+    written = build_gdelt(events, mentions, titles, writer, args.cap)
+    writer.close()
+    print(f'    {written} hard negatives')
+    summarize(out / 'gdelt-negatives.csv')
+
+
+def run_semeval(args, out, tokenizer):
+    cache = out / 'semeval'
+    cache.mkdir(exist_ok=True)
+    writer = Writer(out / 'semeval-pairs.csv', tokenizer)
+    written = build_semeval(semeval_pairs(cache), writer, lambda url: archived_page(url, cache))
+    writer.close()
+    print(f'    SemEval-2022 Task 8: {written} English pairs')
+    summarize(out / 'semeval-pairs.csv')
+
+
+def main(argv=None):
+    args = parse(argv)
     if args.self_check:
         self_check()
-        return 0
+        return
     require(args.command, 'wcep, gdelt or semeval')
-    out = private_directory(args.out)
-    tokenizer = Tokenizer()
-    if args.command == 'wcep':
-        writer = Writer(out / 'wcep-pairs.csv', tokenizer)
-        positives, negatives = build_wcep(wcep_clusters(args.split, args.clusters, out / 'wcep'), writer)
-        writer.close()
-        print(f'    WCEP-10 {args.split}: {positives} positives, {negatives} negatives')
-        summarize(out / 'wcep-pairs.csv')
-    elif args.command == 'gdelt':
-        cache = out / 'gdelt'
-        cache.mkdir(exist_ok=True)
-        events, mentions, titles = gdelt_rows(gdelt_slots(args.start, args.end, args.slots_per_day), cache)
-        print(f'    GDELT {args.start}-{args.end}: {len(events)} events with two actors, {len(titles)} titled pages')
-        writer = Writer(out / 'gdelt-negatives.csv', tokenizer)
-        written = build_gdelt(events, mentions, titles, writer, args.cap)
-        writer.close()
-        print(f'    {written} hard negatives')
-        summarize(out / 'gdelt-negatives.csv')
-    else:
-        cache = out / 'semeval'
-        cache.mkdir(exist_ok=True)
-        writer = Writer(out / 'semeval-pairs.csv', tokenizer)
-        written = build_semeval(semeval_pairs(cache), writer, lambda url: archived_page(url, cache))
-        writer.close()
-        print(f'    SemEval-2022 Task 8: {written} English pairs')
-        summarize(out / 'semeval-pairs.csv')
-    return 0
+    {'wcep': run_wcep, 'gdelt': run_gdelt, 'semeval': run_semeval}[args.command](args, private_directory(args.out),
+                                                                                  Tokenizer())
 
 
 if __name__ == '__main__':
-    sys.exit(main())
+    main()

@@ -18,13 +18,12 @@ import pathlib
 import re
 import struct
 import sys
-import unicodedata
 import zlib
 
 import coremltools as ct
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
-from wordpiece import MAX_LENGTH, VOCAB, Tokenizer, require  # noqa: E402
+from wordpiece import MAX_LENGTH, Tokenizer, require
 import numpy as np
 import torch
 from transformers import (
@@ -127,13 +126,15 @@ def auc(scores, labels):
         i = j + 1
     positives = sum(labels)
     negatives = len(labels) - positives
-    return (sum(r for r, y in zip(ranks, labels) if y) - positives * (positives + 1) / 2) / (positives * negatives)
+    return (sum(r for r, y in zip(ranks, labels, strict=True) if y) - positives * (positives + 1) / 2) / (
+        positives * negatives)
 
 
 def at_threshold(scores, labels, cutoff):
-    tp = sum(1 for s, y in zip(scores, labels) if s >= cutoff and y)
-    fp = sum(1 for s, y in zip(scores, labels) if s >= cutoff and not y)
-    fn = sum(1 for s, y in zip(scores, labels) if s < cutoff and y)
+    pairs = list(zip(scores, labels, strict=True))
+    tp = sum(1 for s, y in pairs if s >= cutoff and y)
+    fp = sum(1 for s, y in pairs if s >= cutoff and not y)
+    fn = sum(1 for s, y in pairs if s < cutoff and y)
     return f'precision {tp / max(1, tp + fp):.3f} recall {tp / max(1, tp + fn):.3f} (TP {tp}, FP {fp}, FN {fn})'
 
 
@@ -176,7 +177,8 @@ def train(rows, epochs=3, batch=32, rate=3e-5):
     load_shipped(model.bert)
     model.to(device)
     positives = float(train_data[3].sum())
-    loss_function = torch.nn.BCEWithLogitsLoss(pos_weight=torch.tensor((len(fit) - positives) / positives, device=device))
+    loss_function = torch.nn.BCEWithLogitsLoss(
+        pos_weight=torch.tensor((len(fit) - positives) / positives, device=device))
     optimizer = torch.optim.AdamW(model.parameters(), lr=rate, weight_decay=0.01)
     steps = epochs * math.ceil(len(fit) / batch)
     schedule = get_linear_schedule_with_warmup(optimizer, int(0.1 * steps), steps)
