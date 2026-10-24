@@ -40,15 +40,13 @@ struct EventClusteringReport: Equatable, Sendable {
     var merged = 0
     /// Rows left for a pass with energy because a model they needed did not run (#534).
     var deferred = 0
-    /// Legacy audit metric; deterministic clustering always reports zero.
-    var judged = 0
     var changedEvents: Set<String> = []
 }
 
 /// Incremental event clustering. Each pass handles only articles that are new, whose title or description changed
 /// since they were last matched, or that an older matcher version processed, within the active lifetime; then it
-/// merges active events that report one story. Decisions are deterministic. Legacy judge arguments are retained
-/// for audit callers but never invoked. Matcher upgrades revalidate active memberships, never the archive.
+/// merges active events that report one story. Decisions are the deterministic rules plus the pair model for
+/// borderline pairs. Matcher upgrades revalidate active memberships, never the archive.
 enum EventClusterer {
     static let batchSize = 100
     private static let maximumAttempts = 2
@@ -56,8 +54,6 @@ enum EventClusterer {
         in database: DatabaseEngine,
         candidatePolicy: EventCandidatePolicy = .standard,
         matchPolicy: EventMatchPolicy = .standard,
-        judge _: EventJudge = .unavailable,
-        judgeBudget _: Int = 150,
         now: Date = Date(),
         limit: Int = 2_000,
         allowsEnergy: Bool = IntelligencePolicy.allowsEnergy(),
@@ -542,19 +538,5 @@ enum EventClusterer {
 
     private static func closestGap(_ lhs: [EventMatchRow], _ rhs: [EventMatchRow]) -> TimeInterval? {
         lhs.flatMap { a in rhs.map { abs(a.date.timeIntervalSince($0.date)) } }.min()
-    }
-
-    /// An event as one report for the judge: its first headline, with the other headlines as the summary.
-    static func coverage(_ members: [EventMatchRow]) -> EventJudgeReport {
-        let ordered = members.sorted { $0.date < $1.date }
-        let others = ordered.dropFirst().prefix(4).map(\.title)
-        return EventJudgeReport(
-            id: "event:" + ordered.map(\.id).joined(separator: ","), title: ordered.first?.title ?? "",
-            summary: others.isEmpty
-                ? (ordered.first?.description ?? "") : "Further coverage: " + others.joined(separator: "; "))
-    }
-
-    static func report(_ row: EventMatchRow) -> EventJudgeReport {
-        EventJudgeReport(id: row.id, title: row.title, summary: row.description)
     }
 }
