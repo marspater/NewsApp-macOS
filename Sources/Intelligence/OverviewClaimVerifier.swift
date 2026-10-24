@@ -638,9 +638,8 @@ public struct OverviewClaimVerifier: Sendable {
             .joined(separator: " ")
     }
 
+    /// Folded words, so a claim matches its passage across case and accents. `words` above keeps case on purpose.
     private static func tokenize(_ text: String) -> [String] {
-        return text.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
-            .components(separatedBy: CharacterSet.alphanumerics.inverted)
-            .filter { !$0.isEmpty }
+        MuteRules.foldedWords(text)
     }
 }

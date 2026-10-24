@@ -3438,6 +3438,12 @@ struct NewsTests {
     @MainActor
     static func testUserMuting() async throws {
         print("  - Testing user-controlled source and topic muting...")
+        assertEqual(
+            MuteRules.words("Art's covid-19 Zürich").map(String.init), ["art", "s", "covid", "19", "zürich"],
+            "Topic words keep diacritics and split on everything but letters and digits")
+        assertEqual(
+            MuteRules.foldedWords("Art's covid-19 Zürich ZURICH"), ["art", "s", "covid", "19", "zurich", "zurich"],
+            "Folded words drop case and diacritics for text-to-text matching")
         var rules = MuteRules()
         assertEqual(
             rules.addSource("https://www.Example.com/world?id=1"), "example.com", "A URL mutes its publisher host")
