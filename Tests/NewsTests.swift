@@ -10405,6 +10405,8 @@ struct NewsTests {
         assertTrue(ActClass.vote.conflicts(with: .protest), "Two acts conflict")
         assertFalse(ActClass.vote.conflicts(with: .unknown), "Unknown never conflicts")
         assertFalse(ActClass.disaster.conflicts(with: .rescue), "A rescue follows a disaster")
+        assertFalse(ActClass.attack.conflicts(with: .crash), "A deliberate crash is an attack")
+        assertFalse(ActClass.crash.conflicts(with: .attack), "… in either order")
         assertFalse(ActClass.casualties.conflicts(with: .rescue), "Two consequence reports agree")
         assertTrue(ActClass.casualties.conflicts(with: .personnel), "A resignation leaves no casualties")
         assertTrue(ActClass.personnel.conflicts(with: .casualties), "… in either order")

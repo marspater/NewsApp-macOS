@@ -14,13 +14,16 @@ enum ActClass: String, Codable, CaseIterable, Sendable {
 
     /// Acts that leave no casualties or rescues of their own, so a consequence report is never coverage of them.
     private static let bloodless: Set<ActClass> = [.vote, .agreement, .personnel, .ruling, .sanction]
+    /// A deliberate crash is an attack and an attack can bring a plane or vehicle down, so reports of one hijacking
+    /// read as either ("copilot who tried to crash flight", "cockpit attack").
+    private static let overlapping: Set<Set<ActClass>> = [[.attack, .crash]]
 
     /// Two known classes name two different acts. A consequence report stays compatible with the incident that could
     /// have caused it ("Three dead after …" with the shooting) and with another consequence report.
     func conflicts(with other: ActClass) -> Bool {
         guard self != .unknown, other != .unknown, self != other else { return false }
         switch (isConsequence, other.isConsequence) {
-        case (false, false): return true
+        case (false, false): return !Self.overlapping.contains([self, other])
         case (true, true): return false
         case (true, false): return Self.bloodless.contains(other)
         case (false, true): return Self.bloodless.contains(self)
