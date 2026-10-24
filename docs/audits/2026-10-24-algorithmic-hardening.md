@@ -137,4 +137,4 @@ The 58 v8 misses by the gate that holds them out (`NEWS_EVENT_DIAGNOSE=1`): sema
 ### Still open
 
 - Place conflicts inside one multi-city event (15 tune misses) and veto'd pairs with weak rule evidence (25) are the remaining recall; both need a boundary decision on labeled cases, not a threshold.
-- The authored corpus floors stay at TP ≥ 21, FP ≤ 2 (unchanged by v9).
+- The authored corpus floors stay at TP ≥ 21, FP ≤ 2 (unchanged by v9). The act-class veto (#522, matcher v10) raised them to TP ≥ 22, FP ≤ 0 ([unified intelligence audit](2026-10-24-unified-intelligence.md)).
