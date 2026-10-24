@@ -549,7 +549,7 @@ struct ArticleListView: View {
         guard buffer.pending != nil else { return }
         showPendingUpdates()
         if let first = entries.first {
-            withAnimation(reduceMotion ? nil : AppMotion.quick) {
+            withAnimation(reduceMotion ? nil : AppMotion.hover) {
                 proxy.scrollTo(first.id, anchor: .top)
             }
         }
@@ -1037,7 +1037,7 @@ struct ArticleListView: View {
         let targetIndex = max(0, min(listed.count - 1, currentIndex + offset))
         let target = listed[targetIndex]
         focusedArticleID = target.id
-        withAnimation(reduceMotion ? nil : AppMotion.quick) {
+        withAnimation(reduceMotion ? nil : AppMotion.hover) {
             proxy.scrollTo(target.id, anchor: .center)
         }
     }

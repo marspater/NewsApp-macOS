@@ -1003,13 +1003,13 @@ struct SettingsView: View {
     }
 
     private func showActionMessage(_ msg: String, failed: Bool = false) {
-        withAnimation(reduceMotion ? nil : AppMotion.responsive) {
+        withAnimation(reduceMotion ? nil : AppMotion.state) {
             cacheActionFailed = failed
             cacheActionMessage = msg
         }
         // The same five seconds as the masthead notice.
         DispatchQueue.main.asyncAfter(deadline: .now() + 5) {
-            withAnimation(reduceMotion ? nil : AppMotion.responsive) {
+            withAnimation(reduceMotion ? nil : AppMotion.state) {
                 if cacheActionMessage == msg {
                     cacheActionMessage = nil
                 }

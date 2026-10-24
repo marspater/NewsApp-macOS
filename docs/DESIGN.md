@@ -262,6 +262,7 @@ Copy into the PR description for UI changes and tick only what was checked.
 - [ ] Light, dark, Increase Contrast, Reduce Motion and Reduce Transparency checked, plus macOS 15 when the change gates an API; macOS 27 glass checked at clear and tinted when glass is involved.
 - [ ] Narrow (900 pt) and wide windows checked; keyboard path works.
 - [ ] Copy follows section 17.
+- [ ] `script/design_lint.sh` passes: literal fonts, colours, uppercasing and labels on AppKit-backed views stay at zero; literal spacing, frames, opacity and strokes, raw `colorSchemeContrast`/`accessibilityReduceMotion`, `foregroundColor`, legacy aliases and "article" copy only go down (lower the baseline with `--update` when they do).
 
 ## 20. Changing this document
 

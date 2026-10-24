@@ -2,7 +2,7 @@
 # Design-language ratchet for docs/DESIGN.md.
 #
 # Counts known deviations per file under Sources/Views (DesignSystem.swift owns the
-# tokens and is exempt) and compares
+# tokens and is exempt) and in Sources/App/NewsApp.swift (menus and commands) and compares
 # them with script/design_lint_baseline.txt. A rising count fails; a falling count
 # also fails until the baseline is lowered with `script/design_lint.sh --update`,
 # so the baseline only moves down. Shell only, so it runs without a Swift toolchain.
@@ -23,6 +23,15 @@ RULES=(
     "uppercased|\.uppercased\(\)"
     "platform-label|(see platform_labels)"
     "material|\.(ultraThin|thin|regular|thick|ultraThick)Material"
+    # Ratchets added 24 October 2026 (finish-pass slice 9): counts only go down.
+    "literal-spacing|(spacing|padding)(\([^()]*)?[:(,] ?[1-9][0-9]*(\.[0-9]+)?[,)]"
+    "literal-frame|\.frame\([^()]*(idealWidth|idealHeight|minWidth|minHeight|maxWidth|maxHeight|width|height): ?[0-9]+(\.[0-9]+)?[,)]"
+    "literal-opacity|\.opacity\(0?\.[0-9]+\)"
+    "literal-stroke|lineWidth: ?[0-9]+(\.[0-9]+)?"
+    "raw-environment|\\\.(colorSchemeContrast|accessibilityReduceMotion|accessibilityReduceTransparency)"
+    "foregroundColor|\.foregroundColor\("
+    "legacy-alias|AppMotion\.(quick|responsive)|AppColor\.(label|tertiaryLabel|separator)[^A-Za-z]"
+    "article-copy|(Text|Label|Button|help|accessibilityLabel|accessibilityHint)\(\"([^\"]*[^A-Za-z])?[Aa]rticle"
 )
 ALLOWED_COLORS='Color\.(clear|primary|secondary|accentColor)$'
 
@@ -119,7 +128,7 @@ count() {
 current="$(mktemp)"
 trap 'rm -f "$current"' EXIT
 
-find Sources/Views -name '*.swift' ! -name DesignSystem.swift | sort | while read -r file; do
+{ find Sources/Views -name '*.swift' ! -name DesignSystem.swift; echo Sources/App/NewsApp.swift; } | sort | while read -r file; do
     for entry in "${RULES[@]}"; do
         rule="${entry%%|*}"
         pattern="${entry#*|}"
