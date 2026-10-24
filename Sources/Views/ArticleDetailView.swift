@@ -204,14 +204,15 @@ struct ArticleDetailView: View {
                     theme: themeManager.articleTheme,
                     relatedEvents: Self.relatedEventsToShow(relatedStories, overviewEventID: overview.eventID),
                     onSelectArticle: { article in
-                        activeArticle = article
+                        selectSourceArticle(article)
                         highlightedPassage = nil
                         experienceMode = .sourcePublication
                     },
                     onSelectCitation: { citation, article in
                         if let article = article {
-                            activeArticle = article
+                            selectSourceArticle(article)
                         }
+                        // After the reset, which clears the passage.
                         highlightedPassage = citation.quote
                         experienceMode = .sourcePublication
                     },
@@ -1634,6 +1635,14 @@ struct ArticleDetailView: View {
         let related = (try? await articleStore.relatedStoryEvents(eventID: eventID)) ?? []
         guard !Task.isCancelled, activeArticle.id == articleID else { return }
         relatedStories = (eventID, related)
+    }
+
+    /// Opens another source story with fresh reader state; the current story keeps its loaded content,
+    /// because an unchanged content task would not run again after the reset.
+    private func selectSourceArticle(_ article: FeedArticle) {
+        guard article.id != activeArticle.id else { return }
+        resetReaderState()
+        activeArticle = article
     }
 
     private func resetReaderState() {
