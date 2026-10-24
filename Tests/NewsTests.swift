@@ -12195,6 +12195,17 @@ struct NewsTests {
         assertEqual(settingsB.notificationMode, AppSettings.NotificationMode.minimal, "Mode should update to .minimal")
         assertEqual(
             tempDefaultsB.string(forKey: AppSettings.notificationModeKey), "minimal", "Key should update to minimal")
+
+        // Starred feeds persist and go with an unsubscribed feed (#588).
+        settingsB.feedURLs = ["https://example.com/feed"]
+        settingsB.setFeedStarred("https://example.com/feed", true)
+        assertEqual(
+            AppSettings(defaults: tempDefaultsB).starredFeedURLs, ["https://example.com/feed"], "A star is stored")
+        settingsB.setFeedStarred("https://example.com/feed", false)
+        assertTrue(AppSettings(defaults: tempDefaultsB).starredFeedURLs.isEmpty, "Unstarring is stored")
+        settingsB.setFeedStarred("https://example.com/feed", true)
+        settingsB.removeFeed(url: "https://example.com/feed")
+        assertTrue(settingsB.starredFeedURLs.isEmpty, "Unsubscribing removes the star")
     }
 
     actor FeedDeliveryGate {
@@ -14423,6 +14434,45 @@ struct NewsTests {
         assertEqual(
             (await minimalRecorder.posted).first?.body, "2 new articles across 2 sources",
             "Summary modes count one report per event too")
+
+        // 6. Triage by interest and importance (#588): of 100 new stories, three are breaking, every fourth is
+        // Technology (a top interest) and every tenth event has three publishers; one story comes from a starred feed.
+        var seeded: [(article: FeedArticle, score: Double)] = []
+        var seededEvents: [String: String] = [:]
+        var publishers: [String: Int] = [:]
+        let starredFeed = "https://starred.invalid/feed"
+        for index in 0..<100 {
+            var article = report(100 + index, "Story \(index)")
+            article.category = ["Technology", "Food", "Travel", "Sports"][index % 4]
+            article.identityFeedURL = index == 50 ? starredFeed : "https://other.invalid/feed"
+            seededEvents[article.id] = "seeded-\(index)"
+            publishers["seeded-\(index)"] = index % 10 == 0 ? 3 : 1
+            seeded.append((article, index < 3 ? 0.7 : 0.3))
+        }
+        var delivery = NotificationDelivery(mode: .full, events: seededEvents)
+        delivery.publishers = publishers
+        delivery.interests = NotificationService.topInterests(["technology": 9, "politics": 4, "world": 2, "food": 1])
+        assertEqual(
+            NotificationService.rankedInterests(["technology": 9, "politics": 4, "world": 2, "food": 1]),
+            ["technology", "politics", "world"], "The top three interests by weight")
+        delivery.starredFeedURLs = [starredFeed]
+        let triaged = NotificationService.triage(seeded, delivery: delivery)
+        let starredChosen = triaged.filter { $0.article.identityFeedURL == starredFeed }
+        assertEqual(starredChosen.map(\.article.title), ["Story 50"], "A starred feed's story always notifies")
+        assertTrue(
+            triaged.count - starredChosen.count <= NotificationService.bannerLimit,
+            "At most five banners besides starred feeds: \(triaged.count)")
+        assertEqual(
+            triaged.map(\.article.title), ["Story 0", "Story 1", "Story 2", "Story 20", "Story 40", "Story 50"],
+            "Breaking stories and top-interest stories with three publishers notify, in order, up to the limit")
+        delivery.starredFeedURLs = []
+        assertFalse(
+            NotificationService.triage(seeded, delivery: delivery).contains { $0.article.title == "Story 50" },
+            "Unstarring stops the feed's stories")
+        delivery.interests = []
+        assertEqual(
+            NotificationService.triage(seeded, delivery: delivery).map(\.article.title),
+            ["Story 0", "Story 1", "Story 2"], "Without interests only breaking stories notify")
     }
 
     @MainActor

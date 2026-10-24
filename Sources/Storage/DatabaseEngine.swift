@@ -3060,6 +3060,25 @@ actor DatabaseEngine {
         return eligible
     }
 
+    /// Distinct publishers among the members of each event, for notification triage (#588).
+    func eventPublisherCounts(_ eventIDs: Set<String>) throws -> [String: Int] {
+        var counts: [String: Int] = [:]
+        let ids = eventIDs.sorted()
+        for start in stride(from: 0, to: ids.count, by: 400) {
+            let slice = Array(ids[start..<min(start + 400, ids.count)])
+            let placeholders = Array(repeating: "?", count: slice.count).joined(separator: ",")
+            for row in try eventRows(
+                """
+                SELECT m.event_id, count(DISTINCT a.source) FROM event_members m JOIN articles a ON a.id = m.article_id
+                WHERE m.event_id IN (\(placeholders)) GROUP BY m.event_id;
+                """, slice.map { .text($0) })
+            {
+                if let event = row[0], let count = row[1].flatMap({ Int($0) }) { counts[event] = count }
+            }
+        }
+        return counts
+    }
+
     /// Compatibility for historical audit callers. Only ordinary user-configured retention deletes stories.
     @discardableResult
     func expireWaitingStories(now: Date = Date(), keepingFeedURLs: [String] = []) throws -> Int {

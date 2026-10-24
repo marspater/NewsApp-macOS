@@ -20,6 +20,7 @@ final class AppSettings: ObservableObject {
     static let allowInsecureHTTPKey = "allow_insecure_http"
     static let mutedSourcesKey = "muted_sources"
     static let mutedTopicsKey = "muted_topics"
+    static let starredFeedURLsKey = "starred_feed_urls"
     static let tensionCollectionOptInKey = "tension_collection_opt_in"
     static let retiredFeedsVersionKey = "retired_feeds_version"
     static let dismissedAdvisoriesKey = "dismissed_advisories"
@@ -93,6 +94,8 @@ final class AppSettings: ObservableObject {
     @Published var tensionCollectionOptIn: Bool
     /// The reader's muted publisher hosts and topics; empty unless the reader adds rules.
     @Published private(set) var muteRules: MuteRules
+    /// Feeds whose every new story notifies, whatever the triage says (#588).
+    @Published private(set) var starredFeedURLs: Set<String>
     /// Mapping of normalized feed URL to the latest advisory date dismissed by the reader.
     @Published private(set) var dismissedAdvisories: [String: String]
 
@@ -171,6 +174,7 @@ final class AppSettings: ObservableObject {
         self.muteRules = MuteRules(
             sources: defaults.stringArray(forKey: Self.mutedSourcesKey) ?? [],
             topics: defaults.stringArray(forKey: Self.mutedTopicsKey) ?? [])
+        self.starredFeedURLs = Set(defaults.stringArray(forKey: Self.starredFeedURLsKey) ?? [])
         self.dismissedAdvisories =
             (defaults.dictionary(forKey: Self.dismissedAdvisoriesKey) as? [String: String]) ?? [:]
     }
@@ -251,6 +255,13 @@ final class AppSettings: ObservableObject {
     func removeFeed(url: String) {
         feedURLs.removeAll { $0 == url }
         saveFeeds()
+        if starredFeedURLs.contains(url) { setFeedStarred(url, false) }
+    }
+
+    /// Stars or unstars a feed; a starred feed notifies about every new story.
+    func setFeedStarred(_ url: String, _ starred: Bool) {
+        if starred { starredFeedURLs.insert(url) } else { starredFeedURLs.remove(url) }
+        defaults.set(starredFeedURLs.sorted(), forKey: Self.starredFeedURLsKey)
     }
 
     // MARK: - Catalog
