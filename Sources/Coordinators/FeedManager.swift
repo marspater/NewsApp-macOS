@@ -481,6 +481,20 @@ class FeedManager: NSObject, ObservableObject {
                 delivery.interests = NotificationService.topInterests(
                     (try? await database.briefingInterests(now: now())) ?? [:])
                 delivery.starredFeedURLs = appSettings.starredFeedURLs
+                // An event announced in the last day stays quiet unless its lead headline changed (#545).
+                let posted = now()
+                delivery.notifiedEvents =
+                    (try? await database.notifiedEvents(since: posted.addingTimeInterval(-86400))) ?? [:]
+                let leadTitles = (try? await database.eventLeadTitles(Set(events.values))) ?? [:]
+                delivery.leadTitles = leadTitles
+                delivery.recordPosted = { [events, leadTitles] articles in
+                    var keys: [String: String] = [:]
+                    for article in articles {
+                        guard let event = events[article.id] else { continue }
+                        keys[event] = EventFeedSummary.titleKey(leadTitles[event] ?? article.title)
+                    }
+                    try? await database.recordNotifiedEvents(keys, at: posted)
+                }
             }
             await notifyBatch(notifiable, delivery)
         }

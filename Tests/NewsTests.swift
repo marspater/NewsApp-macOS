@@ -14341,11 +14341,14 @@ struct NewsTests {
 
         // 3. Importance computation range [0.0, 1.0]
         assertEqual(
-            NotificationService.breakingSignalCount(in: "Studies show diesel bodies replacement"), 0,
+            NotificationService.breakingSignalWeight(in: "Studies show diesel bodies replacement"), 0,
             "Signal words match whole words only")
         assertEqual(
-            NotificationService.breakingSignalCount(in: "Man dies in attack, police say"), 2,
-            "Whole-word signals still count")
+            NotificationService.breakingSignalWeight(in: "Man dies in attack, police say"), 2,
+            "Whole-word breaking signals weigh a point each")
+        assertEqual(
+            NotificationService.breakingSignalWeight(in: "President announces the company launches a fund"), 1.5,
+            "Announcement and office-holder words weigh half (#545)")
         let score = service.computeImportance(
             title: "Breaking News: Major Crisis Declared", description: "Officials announce emergency response.")
         assertTrue(score >= 0.0 && score <= 1.0, "Score must be bounded between 0.0 and 1.0")
@@ -14473,6 +14476,44 @@ struct NewsTests {
         assertEqual(
             NotificationService.triage(seeded, delivery: delivery).map(\.article.title),
             ["Story 0", "Story 1", "Story 2"], "Without interests only breaking stories notify")
+
+        // 7. Cross-refresh dedupe (#545): an event announced in the last day stays quiet while its lead headline is
+        // the one announced; a new lead headline notifies again. The stored rows survive a week.
+        delivery.leadTitles = ["seeded-1": "Story 1 lead", "seeded-2": "Story 2 lead"]
+        delivery.notifiedEvents = ["seeded-1": EventFeedSummary.titleKey("Story 1 lead")]
+        assertEqual(
+            NotificationService.triage(seeded, delivery: delivery).map(\.article.title), ["Story 0", "Story 2"],
+            "A second report of an announced event does not notify again")
+        delivery.notifiedEvents = ["seeded-1": EventFeedSummary.titleKey("An earlier lead")]
+        assertEqual(
+            NotificationService.triage(seeded, delivery: delivery).map(\.article.title),
+            ["Story 0", "Story 1", "Story 2"], "A changed lead headline notifies again")
+        do {
+            let db = DatabaseEngine(path: ":memory:")
+            try await db.open()
+            let first = report(300, "Lead report opens the event")
+            let second = report(301, "Later report joins the event")
+            try await db.upsertArticles([first, second])
+            let event = try await db.createEvent(memberArticleIDs: [first.id])
+            _ = try await db.addArticles([second.id], toEvent: event.id)
+            assertEqual(
+                try await db.eventLeadTitles([event.id]), [event.id: first.title],
+                "The lead story is the one that opened the event, not the newest member")
+            let now = Date(timeIntervalSince1970: 1_700_000_000)
+            try await db.recordNotifiedEvents([event.id: EventFeedSummary.titleKey(first.title)], at: now)
+            assertEqual(
+                try await db.notifiedEvents(since: now.addingTimeInterval(-86400)),
+                [event.id: EventFeedSummary.titleKey(first.title)], "A posted event is recorded with its lead key")
+            assertTrue(
+                try await db.notifiedEvents(since: now.addingTimeInterval(60)).isEmpty,
+                "Only events notified since the given time are returned")
+            try await db.recordNotifiedEvents(["other": "x"], at: now.addingTimeInterval(8 * 86400))
+            assertEqual(
+                try await db.notifiedEvents(since: .distantPast), ["other": "x"], "Rows older than a week are pruned")
+            await db.close()
+        } catch {
+            assertTrue(false, "Notification dedupe storage failed: \(error)")
+        }
     }
 
     @MainActor
