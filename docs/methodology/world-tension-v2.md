@@ -1,5 +1,7 @@
 # World Tension v2 — on-device headline assessment
 
+Version 3 ([world-tension-v3.md](world-tension-v3.md)) blends the day's assessment below with the week's history for the reading the sheet shows; the assessment itself is unchanged.
+
 v2 replaces the displayed v1 formula with an AI judgment of global stability from current international headlines. The AI chooses a 0–100 reading through reasoning; factor scores are not multiplied or summed. Bands are Zen (0–19), Mild (20–39), Warm (40–59), Hot (60–79) and Boiling (80–100). These labels describe an interpretation of the supplied news, not a measured probability of catastrophe.
 
 ## Evidence and factors
