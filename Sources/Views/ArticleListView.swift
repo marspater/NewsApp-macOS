@@ -284,6 +284,9 @@ struct ArticleListView: View {
             .onReceive(NotificationCenter.default.publisher(for: .toggleReadCommand)) { _ in
                 handleToggleRead()
             }
+            .onReceive(NotificationCenter.default.publisher(for: .markAllReadCommand)) { _ in
+                handleMarkAllAsRead()
+            }
             .onReceive(NotificationCenter.default.publisher(for: .toggleSaveCommand)) { _ in
                 handleToggleSave()
             }
@@ -305,6 +308,16 @@ struct ArticleListView: View {
         if articlePath.isEmpty, let id = focusedArticleID {
             readManager.toggleRead(id)
         }
+    }
+
+    /// Story › Mark All as Read: every story loaded in the current list, not stories still to page in.
+    private func handleMarkAllAsRead() {
+        guard articlePath.isEmpty else { return }
+        let unread = filteredArticles.map(\.id).filter { !readManager.isRead($0) }
+        guard !unread.isEmpty else { return }
+        readManager.markAsRead(ids: unread)
+        mastheadNotice = MastheadNotice(
+            message: unread.count == 1 ? "1 story marked as read" : "\(unread.count) stories marked as read")
     }
 
     private func handleToggleSave() {
@@ -1141,7 +1154,11 @@ struct KeyboardShortcutsView: View {
                 ("E", "Show or hide event coverage"),
                 ("W", "Next reading mode: Overview, Story, Web"),
                 ("⇧⌘R", "Switch between Story and Web"),
+                ("⇧⌘U", "Mark as read or unread (menu)"),
+                ("⌘S", "Save or remove from Saved Stories (menu)"),
+                ("⌘O", "Open in browser (menu)"),
                 ("C", "Copy link"),
+                ("⌘[ / ⌘]", "Web back and forward"),
                 ("⌘+ / ⌘− / ⌘0", "Bigger text, smaller text, actual size"),
             ]
         ),
@@ -1151,7 +1168,18 @@ struct KeyboardShortcutsView: View {
                 ("G", "Group stories by event"),
                 ("U", "Show queued updates"),
                 ("R or ⌘R", "Refresh feeds"),
+                ("⌥⌘U", "Mark all loaded stories as read"),
+                ("⌘J / ⌘K", "Next and previous story (menu)"),
                 ("⌘1 – ⌘4", "Today, Unread, Saved Stories, History"),
+                ("⌘F", "Search the archive"),
+                ("⇧⌘T", "World Tension"),
+            ]
+        ),
+        (
+            "Subscriptions",
+            [
+                ("⇧⌘I", "Import subscriptions (OPML)"),
+                ("⇧⌘E", "Export subscriptions (OPML)"),
             ]
         ),
     ]

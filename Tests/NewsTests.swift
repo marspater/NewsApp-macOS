@@ -12358,6 +12358,13 @@ struct NewsTests {
     static func testAppSettingsIsolationAndURLNormalization() async {
         print("  - Testing AppSettings UserDefaults Isolation & URLComponents Normalization...")
 
+        let badgeSuite = testDefaultsSuite("test.dock-badge")
+        let badgeDefaults = UserDefaults(suiteName: badgeSuite)!
+        defer { removeTestDefaults(badgeSuite) }
+        assertTrue(AppSettings(defaults: badgeDefaults).showsDockBadge, "The Dock badge is on by default")
+        AppSettings(defaults: badgeDefaults).setShowsDockBadge(false)
+        assertFalse(AppSettings(defaults: badgeDefaults).showsDockBadge, "Turning the Dock badge off persists")
+
         // 1. URLComponents Normalization
         let httpFeed = "http://feeds.arstechnica.com/arstechnica/index"
         let normalizedHTTPS = AppSettings.normalizeFeedURL(httpFeed, allowInsecureHTTP: false)
@@ -14363,6 +14370,19 @@ struct NewsTests {
             try? await Task.sleep(for: .milliseconds(10))
         }
         assertTrue(store.isRead(ArticleIdentity.reconcileLegacyId(rawId)), "Read writes use the injected store")
+
+        // Mark All as Read: one batch write, already-read stories untouched, the cache answers at once.
+        let batch = ["batch-a", "batch-b", "batch-c"].map {
+            FeedArticle(
+                title: $0, link: "https://example.com/\($0)", guid: $0, description: "Text", pubDate: Date(),
+                source: "Test")
+        }
+        await store.batchUpsert(articles: batch)
+        rm.markAsRead(ids: batch.map(\.id) + [rawId])
+        assertTrue(batch.allSatisfy { rm.isRead($0.id) }, "A batch marks every listed story read immediately")
+        await rm.waitForPendingChanges()
+        assertTrue(batch.allSatisfy { store.isRead($0.id) }, "The batch is persisted through the injected store")
+        assertTrue(store.isRead(ArticleIdentity.reconcileLegacyId(rawId)), "Stories already read stay read")
 
         let article = FeedArticle(
             title: "Saved", link: "https://example.com/saved", guid: "isolated-save", description: "Text",

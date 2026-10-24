@@ -5,6 +5,7 @@ import UserNotifications
 /// Notification posted when the user clicks a notification banner or uses keyboard navigation.
 extension Notification.Name {
     static let refreshFeedsCommand = Notification.Name("refreshFeedsCommand")
+    static let markAllReadCommand = Notification.Name("markAllReadCommand")
     static let nextArticleCommand = Notification.Name("nextArticleCommand")
     static let prevArticleCommand = Notification.Name("prevArticleCommand")
     static let toggleReadCommand = Notification.Name("toggleReadCommand")
@@ -148,6 +149,12 @@ struct NewsApp: App {
                 .keyboardShortcut("u", modifiers: [.command, .shift])
                 .disabled(selectedStory == nil)
 
+                Button("Mark All as Read") {
+                    NotificationCenter.default.post(name: .markAllReadCommand, object: nil)
+                }
+                .keyboardShortcut("u", modifiers: [.command, .option])
+                .disabled(listActions == nil)
+
                 Button("Save or Remove from Saved") {
                     NotificationCenter.default.post(name: .toggleSaveCommand, object: nil)
                 }
@@ -184,8 +191,12 @@ struct NewsApp: App {
                     Button("Reload Reader Content") { actions.reload?() }
                         .disabled(actions.reload == nil)
                     Button("Copy Link", action: actions.copyLink)
-                    Button("Web Back") { actions.webBack?() }.disabled(actions.webBack == nil)
-                    Button("Web Forward") { actions.webForward?() }.disabled(actions.webForward == nil)
+                    Button("Web Back") { actions.webBack?() }
+                        .keyboardShortcut("[", modifiers: .command)
+                        .disabled(actions.webBack == nil)
+                    Button("Web Forward") { actions.webForward?() }
+                        .keyboardShortcut("]", modifiers: .command)
+                        .disabled(actions.webForward == nil)
                 }
             }
         }
@@ -230,6 +241,11 @@ struct ListViewCommands: Commands {
 
             Toggle("Group Stories by Event", isOn: $groupsEvents)
                 .disabled(listActions?.canGroupStories != true)
+
+            Button("World Tension…") {
+                NotificationCenter.default.post(name: .showNewsTensionCommand, object: nil)
+            }
+            .keyboardShortcut("t", modifiers: [.command, .shift])
 
             Button("Make Text Bigger") {
                 if let actions = readerActions {

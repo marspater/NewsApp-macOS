@@ -13,6 +13,7 @@ final class AppSettings: ObservableObject {
     static let fetchIntervalKey = "feed_fetch_interval_minutes"
     static let articleRetentionDaysKey = "article_retention_days"
     static let notificationsEnabledKey = "notifications_enabled"
+    static let showsDockBadgeKey = "shows_dock_badge"
     static let aiEnabledKey = "ai_enabled"
     static let privateNotificationsEnabledKey = "private_notifications_enabled"
     static let notificationModeKey = "notification_mode"
@@ -84,6 +85,8 @@ final class AppSettings: ObservableObject {
     /// Days a read, unsaved story stays before retention deletes it; 0 keeps every story.
     @Published private(set) var articleRetentionDays: Int
     @Published var notificationsEnabled: Bool
+    /// The Dock icon shows the unread count.
+    @Published private(set) var showsDockBadge: Bool
     @Published var aiEnabled: Bool
     @Published var notificationMode: NotificationMode
     @Published var allowInsecureHTTP: Bool
@@ -161,6 +164,8 @@ final class AppSettings: ObservableObject {
             defaults.set(NotificationMode.full.rawValue, forKey: Self.notificationModeKey)
         }
 
+        self.showsDockBadge =
+            defaults.object(forKey: Self.showsDockBadgeKey) == nil || defaults.bool(forKey: Self.showsDockBadgeKey)
         self.allowInsecureHTTP = defaults.bool(forKey: Self.allowInsecureHTTPKey)
         self.tensionCollectionOptIn = defaults.bool(forKey: Self.tensionCollectionOptInKey)
         self.muteRules = MuteRules(
@@ -317,6 +322,11 @@ final class AppSettings: ObservableObject {
     func setNotificationsEnabled(_ enabled: Bool) {
         notificationsEnabled = enabled
         defaults.set(enabled, forKey: Self.notificationsEnabledKey)
+    }
+
+    func setShowsDockBadge(_ shows: Bool) {
+        showsDockBadge = shows
+        defaults.set(shows, forKey: Self.showsDockBadgeKey)
     }
 
     func setAIEnabled(_ enabled: Bool) {

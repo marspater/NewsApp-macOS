@@ -12,6 +12,7 @@ jobs:
           name: "Design lint, evaluation and testsuite self-checks"
           command: |
             script/design_lint.sh
+            script/format.sh --check
             for check in evaluate publisher_review publisher_dates overview_review importance_review relation_review catalog_review; do
               python3 "script/evaluation/$check.py"
             done
