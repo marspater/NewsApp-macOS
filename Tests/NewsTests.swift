@@ -6362,6 +6362,7 @@ struct NewsTests {
                 try await db.searchArticles(query: "qubit quantum is:unread").map(\.id), [artA.id],
                 "Same words match with an operator")
             assertTrue(try await db.searchArticles(query: "qubit shares").isEmpty, "Every word must match")
+            assertTrue(ArticleFilterQuery.parse("\"").terms.isEmpty, "A quote-only token is not a search term")
             assertEqual(
                 try await db.searchArticles(query: "\"").count, 2,
                 "A quote-only term is ignored instead of becoming an empty FTS5 phrase")

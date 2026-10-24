@@ -286,7 +286,10 @@ struct ArticleFilterQuery: Equatable, Sendable {
             } else if lowerToken == "ft" {
                 query.terms += ["financial", "times"]
             } else if !token.isEmpty {
-                query.terms.append(lowerToken)
+                // Quotes never reach FTS5 (each term is quoted there); a token that is only quotes is no term at all,
+                // and every consumer (ranking, the FTS join, in-memory matching) must agree on that.
+                let term = lowerToken.replacingOccurrences(of: "\"", with: "")
+                if !term.isEmpty { query.terms.append(term) }
             }
         }
 
