@@ -25,12 +25,32 @@ enum AppColor {
 
     // Semantic Accents & Status (90% Neutral, 7% Accent, 3% Intelligence)
     static var accent: Color { Color.accentColor }
-    static let intelligence = Color(.displayP3, red: 0.85, green: 0.65, blue: 0.20, opacity: 1.0)  // Subtle warm gold
+    /// Subtle warm gold for generated-content marks: darker on light, brighter on dark, saturated with Increase Contrast.
+    static let intelligence = Color(
+        nsColor: NSColor(name: "intelligence") { appearance in
+            let dark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            let contrast = appearance.name.rawValue.contains("HighContrast")
+            if contrast {
+                return dark
+                    ? NSColor(displayP3Red: 1.0, green: 0.84, blue: 0.40, alpha: 1)
+                    : NSColor(displayP3Red: 0.55, green: 0.38, blue: 0.0, alpha: 1)
+            }
+            return dark
+                ? NSColor(displayP3Red: 0.93, green: 0.75, blue: 0.32, alpha: 1)
+                : NSColor(displayP3Red: 0.72, green: 0.52, blue: 0.10, alpha: 1)
+        })
     static let success = Color(NSColor.systemGreen)
     static let warning = Color(NSColor.systemYellow)
     static let danger = Color(NSColor.systemRed)
     static let caution = Color(NSColor.systemOrange)
-    static let flameCore = Color(.displayP3, red: 1, green: 0.97, blue: 0.72)
+    /// The bright centre of the tension flame; a touch deeper on light backgrounds and with Increase Contrast.
+    static let flameCore = Color(
+        nsColor: NSColor(name: "flameCore") { appearance in
+            let dark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            let contrast = appearance.name.rawValue.contains("HighContrast")
+            if dark && !contrast { return NSColor(displayP3Red: 1, green: 0.97, blue: 0.72, alpha: 1) }
+            return NSColor(displayP3Red: 1, green: contrast ? 0.85 : 0.92, blue: contrast ? 0.35 : 0.55, alpha: 1)
+        })
     static let critical = Color(NSColor.systemPurple)
 
     /// The World Tension scale from Zen to Boiling, for the gauge, glyph and trend points.
@@ -48,7 +68,6 @@ enum AppColor {
 
     // Borders, Focus Rings & Badges
     static let borderSubtle = Color(NSColor.separatorColor)
-    static let separator = Color(NSColor.separatorColor)
     static let badgeBackground = Color(NSColor.quaternaryLabelColor).opacity(0.12)
     static let unreadDot = Color.accentColor
     /// The block a citation jumped to, until the reader dismisses the citation.
@@ -344,10 +363,6 @@ enum AppMotion {
     static let hover = Animation.easeOut(duration: 0.12)
     static let state = Animation.smooth(duration: 0.24)
     static let navigation = Animation.smooth(duration: 0.3)
-
-    // Aliases for backward compatibility
-    static let quick = hover
-    static let responsive = state
 }
 
 // MARK: - Components (DESIGN.md 18)
@@ -396,7 +411,13 @@ struct TagView: View {
         .foregroundStyle(tint)
         .padding(.horizontal, AppSpacing.eyebrowGap)
         .padding(.vertical, AppSpacing.textStack)
-        .background(tint.opacity(contrast == .increased ? 0.22 : 0.12), in: Capsule())
+        .background(fill, in: Capsule())
+    }
+
+    /// Neutral tags share the badge background; tinted tags take a wash of their tint.
+    private var fill: Color {
+        if tint == AppColor.secondaryText { return AppColor.badgeBackground }
+        return tint.opacity(contrast == .increased ? 0.22 : 0.12)
     }
 }
 
