@@ -30,6 +30,12 @@ struct NewsApp: App {
     @StateObject private var readManager = AppContainer.shared.readManager
     @StateObject private var savedStories = AppContainer.shared.savedStories
 
+    @MainActor private static func showAlert(_ message: String) {
+        let alert = NSAlert()
+        alert.messageText = message
+        alert.runModal()
+    }
+
     var body: some Scene {
         Window("News", id: "main") {
             MainView()
@@ -58,6 +64,8 @@ struct NewsApp: App {
                         await UpdateChecker.shared.checkForUpdates(userInitiated: true)
                         if UpdateChecker.shared.updateAvailable {
                             UpdateChecker.shared.openReleasePage()
+                        } else if let message = UpdateChecker.shared.statusMessage {
+                            Self.showAlert(message)
                         }
                     }
                 }
@@ -68,7 +76,12 @@ struct NewsApp: App {
                 Divider()
                 Button("Import Subscriptions (OPML)…") {
                     OPMLDialogs.importOPML { data in
-                        feedManager.importFeeds(from: data)
+                        let count = feedManager.importFeeds(from: data)
+                        // A malformed file already surfaces its own error through operationError.
+                        if count > 0 || (try? OPMLParser.parseValidated(data: data)) != nil {
+                            let noun = count == 1 ? "feed" : "feeds"
+                            Self.showAlert(count > 0 ? "Imported \(count) \(noun)" : "No new feeds")
+                        }
                     }
                 }
                 .keyboardShortcut("i", modifiers: [.command, .shift])

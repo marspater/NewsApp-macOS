@@ -934,9 +934,9 @@ final class LiveVoiceOverInspector {
         assert(hasSearchField, "Sidebar exposes search field")
 
         // 2. Toolbar controls
-        let hasCoverageToggle = order1.contains { $0.spokenText.contains("Group Coverage") }
+        let hasCoverageToggle = order1.contains { $0.spokenText.contains("Group Stories") }
         let hasRefresh = order1.contains { $0.spokenText.contains("Refresh") }
-        assert(hasCoverageToggle, "Feed toolbar exposes 'Group Coverage by Event' toggle")
+        assert(hasCoverageToggle, "Feed toolbar exposes 'Group Stories by Event' toggle")
         assert(hasRefresh, "Feed toolbar exposes 'Refresh Feeds' action")
 
         // 3. Event Card & Single Card
