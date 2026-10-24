@@ -111,11 +111,12 @@ struct ReaderFigureView: View {
     var textScale: CGFloat = 1
     @Environment(\.effectiveContrast) private var contrast
 
+    /// The spoken description: the publisher's alt text, else the caption; empty means the image is decorative.
     static func effectiveImageAlt(for block: ReaderBlock) -> String {
         if let alt = block.imageAlt?.trimmingCharacters(in: .whitespacesAndNewlines), !alt.isEmpty {
             return alt
         }
-        return "Article image"
+        return block.text.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     var body: some View {
@@ -124,8 +125,11 @@ struct ReaderFigureView: View {
                 ZStack {
                     switch phase {
                     case .success(let image):
+                        let alt = Self.effectiveImageAlt(for: block)
                         image.resizable().aspectRatio(contentMode: .fit)
-                            .accessibilityLabel(Self.effectiveImageAlt(for: block))
+                            .frame(maxHeight: AppLayout.readerFigureMaxHeight)
+                            .accessibilityLabel(alt)
+                            .accessibilityHidden(alt.isEmpty)
                     case .failure:
                         AppColor.surface
                             .aspectRatio(aspectRatio, contentMode: .fit)
@@ -146,15 +150,14 @@ struct ReaderFigureView: View {
                     @unknown default: EmptyView()
                     }
                 }
-                .frame(
-                    maxWidth: DecodedImageCache.images.object(forKey: url as NSURL).map { CGFloat($0.width) }
-                        ?? .infinity
-                )
+                // Fill the measure; only a small decoded image keeps its own width.
+                .frame(maxWidth: Self.figureMaxWidth(for: url))
                 .clipShape(RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous))
                 .overlay(
                     RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous)
-                        .strokeBorder(AppColor.borderSubtle, lineWidth: 0.5)
+                        .strokeBorder(AppColor.border(for: contrast), lineWidth: 0.5)
                 )
+                .frame(maxWidth: .infinity)
             }
             if !block.text.isEmpty && block.text.lowercased() != "article image" {
                 Text(block.text).font(AppTypography.readerCaptionFont(scale: textScale)).foregroundStyle(
@@ -174,6 +177,12 @@ struct ReaderFigureView: View {
                 .accessibilityLabel("Image credit: " + credit)
             }
         }
+    }
+
+    private static func figureMaxWidth(for url: URL) -> CGFloat {
+        guard let decoded = DecodedImageCache.images.object(forKey: url as NSURL) else { return .infinity }
+        let width = CGFloat(decoded.width)
+        return width < AppLayout.readerSmallImageWidth ? width : .infinity
     }
 
     private var aspectRatio: CGFloat {
@@ -199,7 +208,8 @@ struct ArticleNavigationCommands: ViewModifier {
     }
 }
 
-func readerText(_ block: ReaderBlock) -> AttributedString {
+/// Inline runs as attributed text. `baseURL` resolves relative links from documents stored before links were absolute.
+func readerText(_ block: ReaderBlock, baseURL: URL? = nil) -> AttributedString {
     guard let runs = block.inlineRuns, runs.map(\.text).joined() == block.text else {
         return AttributedString(block.text)
     }
@@ -209,7 +219,12 @@ func readerText(_ block: ReaderBlock) -> AttributedString {
         if run.strong { part.inlinePresentationIntent = .stronglyEmphasized }
         if run.emphasis { part.inlinePresentationIntent = (part.inlinePresentationIntent ?? []).union(.emphasized) }
         if run.code { part.inlinePresentationIntent = (part.inlinePresentationIntent ?? []).union(.code) }
-        if let link = ContentExtractionPipeline.readerImageURL(run.link, baseURL: nil) { part.link = URL(string: link) }
+        if let link = ContentExtractionPipeline.readerImageURL(run.link, baseURL: baseURL?.absoluteString),
+            let url = URL(string: link)
+        {
+            part.link = url
+            part.underlineStyle = .single
+        }
         if let shift = run.baselineShift, shift != 0 {
             part.baselineOffset = shift > 0 ? AppTypography.superscriptOffset : -AppTypography.subscriptOffset
         }
@@ -261,7 +276,6 @@ struct ToolbarLoadingBubble: View {
                 .foregroundColor(AppColor.secondaryText)
                 .accessibilityLabel("Loading event overview")
         }
-        .frame(height: 24)
         .padding(.horizontal, AppSpacing.sm)
         .padding(.vertical, AppSpacing.xxs)
         .transition(.opacity.animation(reduceMotion ? nil : AppMotion.state))

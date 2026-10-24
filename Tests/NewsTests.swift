@@ -4662,6 +4662,15 @@ struct NewsTests {
         let post = quoted.first { $0.kind == .embed }
         assertEqual(post?.text, "twitter.com", "An embedded post names its host")
         assertEqual(post?.imageURL, "https://twitter.com/user/status/1", "An embedded post keeps its address")
+        let players = blocks(
+            "<figure><iframe src=\"https://www.youtube.com/embed/abc123\" width=\"560\" height=\"315\"></iframe></figure>"
+                + "<video controls><source src=\"https://cdn.example.org/clip.mp4\" type=\"video/mp4\"></video>")
+        let embeds = players.filter { $0.kind == .embed }
+        assertEqual(
+            embeds.map(\.text), ["youtube.com", "cdn.example.org"],
+            "An embedded player or video is a placeholder naming its host instead of vanishing")
+        assertEqual(
+            embeds.first?.imageURL, "https://www.youtube.com/embed/abc123", "The placeholder keeps the player address")
 
         let table = blocks(
             "<table><tr><th>Team</th><th>Wins</th></tr><tr><td>Team A</td><td>3</td></tr><tr><td>Team B</td><td>2</td></tr></table>"

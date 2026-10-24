@@ -296,7 +296,7 @@ final class DOMElementNode: Sendable {
     func readingBlocks(allowDivFallback: Bool = true) -> [DOMElementNode] {
         guard !isReaderExcluded else { return [] }
         if tag == "noscript" { return children.flatMap { $0.readingBlocks(allowDivFallback: false) } }
-        if tag == "figure" || tag == "img" || tag == "picture" || tag == "hr" { return [self] }
+        if ["figure", "img", "picture", "hr", "iframe", "video"].contains(tag) { return [self] }
         // An article header holds the title and byline; only its standfirst is story text.
         if tag == "header" && !HTMLDOMBuilder.isEditorial(attributes) {
             func editorial(_ node: DOMElementNode) -> [DOMElementNode] {
@@ -450,7 +450,13 @@ final class DOMElementNode: Sendable {
             guard let image = visibleReaderImage(),
                 let source = image.readerImageSource,
                 image.attributes["alt"]?.range(of: #"\blogo\b"#, options: [.regularExpression, .caseInsensitive]) == nil
-            else { return nil }
+            else {
+                // A figure that wraps a player and no image is the player's placeholder.
+                if let player = findNodes(tag: "iframe").first ?? findNodes(tag: "video").first {
+                    return player.mediaEmbed()
+                }
+                return nil
+            }
             // Responsive layouts (The Guardian) repeat one figcaption per breakpoint; each distinct caption appears once.
             var seenCaptions = Set<String>()
             let caption = findNodes(tag: "figcaption").map { node in
@@ -493,6 +499,7 @@ final class DOMElementNode: Sendable {
                 ordinal: findNodes(tag: "tr").first?.children.contains { $0.tag == "th" } == true ? 1 : nil)
         }
         if tag == "blockquote", let embed = socialEmbed() { return embed }
+        if tag == "iframe" || tag == "video" { return mediaEmbed() }
         let plain = Self.readerWhitespace(combinedText(lineBreak: Self.lineBreak))
         // Checks read the text as one line, as they did before line breaks were kept.
         let flat = plain.replacingOccurrences(of: "\n", with: " ")
@@ -602,6 +609,16 @@ final class DOMElementNode: Sendable {
         return ReaderBlock(kind: .embed, text: host ?? "Social post", imageURL: link)
     }
 
+    /// An embedded player (video, map, chart) is a placeholder for the publisher's page; the reader cannot run it.
+    func mediaEmbed() -> ReaderBlock {
+        let source =
+            [attributes["src"], attributes["data-src"]].compactMap { $0 }.first
+            ?? findNodes(tag: "source").compactMap { $0.attributes["src"] }.first
+        let link = source.flatMap { ContentExtractionPipeline.readerImageURL($0, baseURL: nil) }
+        let host = link.flatMap { URL(string: $0)?.host?.replacingOccurrences(of: "www.", with: "") }
+        return ReaderBlock(kind: .embed, text: host ?? "Embedded media", imageURL: link)
+    }
+
     var readerImageSource: String? {
         // ponytail: bounded responsive candidates for a 1200 px reader; no media-query engine.
         for key in ["data-srcset", "srcset"] {
@@ -707,7 +724,7 @@ enum HTMLDOMBuilder {
     ]
 
     fileprivate static let ignoredTags: Set<String> = [
-        "script", "style", "iframe", "svg", "nav", "footer",
+        "script", "style", "svg", "nav", "footer",
         "header", "form", "aside", "dialog", "button", "select", "textarea",
     ]
 

@@ -510,15 +510,15 @@ struct NativeUIQAChecks {
             kind: .figure, text: "Caption", imageURL: "https://example.com/2.jpg", imageAlt: nil, imageCredit: nil,
             imageWidth: 400, imageHeight: 300)
         assertEqual(
-            ReaderFigureView.effectiveImageAlt(for: figureNil), "Article image",
-            "Nil alt text falls back to 'Article image'")
+            ReaderFigureView.effectiveImageAlt(for: figureNil), "Caption",
+            "Nil alt text falls back to the caption")
 
         let figureBlank = ReaderBlock(
             kind: .figure, text: "Caption", imageURL: "https://example.com/3.jpg", imageAlt: "   \t", imageCredit: nil,
             imageWidth: 400, imageHeight: 300)
         assertEqual(
-            ReaderFigureView.effectiveImageAlt(for: figureBlank), "Article image",
-            "Whitespace alt text falls back to 'Article image'")
+            ReaderFigureView.effectiveImageAlt(for: figureBlank), "Caption",
+            "Whitespace alt text falls back to the caption")
 
         assertEqual(
             MastheadNotice(message: "Subscribed to example.com")
