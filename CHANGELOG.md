@@ -2,6 +2,7 @@
 
 ## Unreleased — 21 October 2026
 
+- Developer tooling: reviewed pair labels and same-day cross-event negatives join the pair model's training set, so each retrain learns from the previous model's reviewed mistakes.
 - Developer tooling: the reader's "Same Event" and "Not the Same Event" verdicts become training rows for the pair model and a gate that no matcher or model change may violate.
 - Developer tooling: the pair model can be pretrained on public event-clustered news (WCEP-10 clusters, GDELT same-actor hard negatives, SemEval-2022 human-rated pairs) built locally by `pretrain_pairs.py`; the app's WordPiece tokenizer in Python moved to its own torch-free module.
 - Stories: two events the matcher keeps apart as different acts of one story (a fire and the arrest after it, an attack and the closure it caused) now show as one card with all their reports; opening it shows the lead act's overview with the other acts under "Earlier in This Story". The card's new-coverage mark and "Not the Same Event" work across the whole story. Library schema v26.
