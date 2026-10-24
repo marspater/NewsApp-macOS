@@ -549,6 +549,22 @@ extension DatabaseEngine {
         return try eventRows("SELECT event_id FROM event_members WHERE article_id = ?;", [.text(member)]).first?[0]
     }
 
+    /// The events currently holding the given stored article IDs; articles outside any event are absent.
+    func eventIDs(forArticles articleIDs: [String]) throws -> [String: String] {
+        var result: [String: String] = [:]
+        for start in stride(from: 0, to: articleIDs.count, by: 400) {
+            let slice = Array(articleIDs[start..<min(start + 400, articleIDs.count)])
+            let placeholders = Array(repeating: "?", count: slice.count).joined(separator: ",")
+            for row in try eventRows(
+                "SELECT article_id, event_id FROM event_members WHERE article_id IN (\(placeholders));",
+                slice.map { .text($0) })
+            {
+                if let article = row[0], let event = row[1] { result[article] = event }
+            }
+        }
+        return result
+    }
+
     /// Creates an event with a new stable ID. Articles already in another event move here.
     @discardableResult
     func createEvent(memberArticleIDs articleIDs: [String], at date: Date = Date()) throws -> StoryEvent {
@@ -1182,6 +1198,164 @@ extension DatabaseEngine {
                     AND NOT EXISTS (SELECT 1 FROM event_overviews o WHERE o.event_id = events.id);
                 """)
         }
+    }
+
+    // MARK: - Article Features and Pair Decisions (#522)
+
+    /// Stored matcher signals of the given version, decoded; articles without a current record are absent.
+    func fetchArticleFeatures(articleIDs: [String], version: Int) throws -> [String: EventFeatures] {
+        var result: [String: EventFeatures] = [:]
+        let decoder = JSONDecoder()
+        for start in stride(from: 0, to: articleIDs.count, by: 400) {
+            try Task.checkCancellation()
+            let slice = Array(articleIDs[start..<min(start + 400, articleIDs.count)])
+            let placeholders = Array(repeating: "?", count: slice.count).joined(separator: ",")
+            let rows = try eventRows(
+                "SELECT article_id, features FROM article_features WHERE version = ? AND article_id IN (\(placeholders))",
+                [.integer(version)] + slice.map { .text($0) })
+            for row in rows {
+                guard let id = row[0], let json = row[1],
+                    let features = try? decoder.decode(EventFeatures.self, from: Data(json.utf8))
+                else { continue }
+                result[id] = features
+            }
+        }
+        return result
+    }
+
+    /// Stores matcher signals as JSON in one transaction; a deleted article has nothing to store.
+    func upsertArticleFeatures(_ features: [String: EventFeatures], version: Int, at date: Date = Date()) throws {
+        guard !features.isEmpty else { return }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        try inEventTransaction { () throws -> Void in
+            for (articleID, value) in features {
+                guard let json = String(bytes: try encoder.encode(value), encoding: .utf8) else { continue }
+                try eventRows(
+                    """
+                    INSERT INTO article_features(article_id, version, features, computed_at)
+                    SELECT ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM articles WHERE id = ?)
+                    ON CONFLICT(article_id) DO UPDATE SET version = excluded.version, features = excluded.features,
+                        computed_at = excluded.computed_at;
+                    """,
+                    [
+                        .text(articleID), .integer(version), .text(json), .real(date.timeIntervalSince1970),
+                        .text(articleID),
+                    ])
+            }
+        }
+    }
+
+    /// What a clustering pass computed, stored together by `storeClusteringPass` (#522).
+    struct ClusteringPassWrites: Sendable {
+        var features: [String: EventFeatures] = [:]
+        var embeddings: [String: [Float]] = [:]
+        var decisions: [PairDecision] = []
+        /// Pairs, low ID first, whose stored row no longer applies.
+        var cleared: [(String, String)] = []
+        /// Each article's title and description as the pass read them, joined by a newline.
+        var readTexts: [String: String] = [:]
+    }
+
+    /// Stores a clustering pass's signals, vectors and pair decisions under the current versions and drops the rows
+    /// of pairs that no longer qualify, in one actor turn. Values of an article that is gone or reads differently
+    /// from `readTexts` now are skipped: the rematch trigger dropped what was stored for the old text, and the next
+    /// pass computes the new one.
+    func storeClusteringPass(_ writes: ClusteringPassWrites, at date: Date = Date()) throws {
+        var current: [String: String] = [:]
+        let ids = Array(writes.readTexts.keys)
+        for start in stride(from: 0, to: ids.count, by: 500) {
+            let chunk = ids[start..<min(start + 500, ids.count)]
+            let marks = Array(repeating: "?", count: chunk.count).joined(separator: ", ")
+            for row in try eventRows(
+                "SELECT id, title, coalesce(description, '') FROM articles WHERE id IN (\(marks));",
+                chunk.map { .text($0) })
+            {
+                if let id = row[0] { current[id] = (row[1] ?? "") + "\n" + (row[2] ?? "") }
+            }
+        }
+        let changed = Set(writes.readTexts.filter { current[$0.key] != $0.value }.keys)
+        try upsertArticleFeatures(
+            writes.features.filter { !changed.contains($0.key) }, version: EventFeatures.storageVersion, at: date)
+        try upsertArticleEmbeddings(
+            writes.embeddings.filter { !changed.contains($0.key) }, modelVersion: SentenceEmbedder.modelVersion)
+        try upsertPairDecisions(
+            writes.decisions.filter { !changed.contains($0.articleID) && !changed.contains($0.otherArticleID) },
+            matcherVersion: EventMatcher.version, at: date)
+        guard !writes.cleared.isEmpty else { return }
+        try inEventTransaction { () throws -> Void in
+            for (low, high) in writes.cleared {
+                try eventRows(
+                    "DELETE FROM pair_assessments WHERE article_id = ? AND other_article_id = ?;",
+                    [.text(low), .text(high)])
+            }
+        }
+    }
+
+    /// A clusterer decision about one pair, keyed low ID first.
+    struct PairDecision: Hashable, Sendable {
+        let articleID: String
+        let otherArticleID: String
+        /// "match", "related-act" or "borderline".
+        let decision: String
+        let reason: String
+        let score: Double
+    }
+
+    func upsertPairDecisions(_ decisions: [PairDecision], matcherVersion: Int, at date: Date = Date()) throws {
+        guard !decisions.isEmpty else { return }
+        try inEventTransaction { () throws -> Void in
+            for pair in decisions where pair.articleID < pair.otherArticleID {
+                try eventRows(
+                    """
+                    INSERT INTO pair_assessments(article_id, other_article_id, matcher_version, decision, reason, score,
+                        assessed_at)
+                    SELECT ?, ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM articles WHERE id = ?)
+                        AND EXISTS (SELECT 1 FROM articles WHERE id = ?)
+                    ON CONFLICT(article_id, other_article_id) DO UPDATE SET matcher_version = excluded.matcher_version,
+                        decision = excluded.decision, reason = excluded.reason, score = excluded.score,
+                        assessed_at = excluded.assessed_at;
+                    """,
+                    [
+                        .text(pair.articleID), .text(pair.otherArticleID), .integer(matcherVersion),
+                        .text(pair.decision), .text(pair.reason), .real(pair.score), .real(date.timeIntervalSince1970),
+                        .text(pair.articleID), .text(pair.otherArticleID),
+                    ])
+            }
+        }
+    }
+
+    /// Live events whose members the matcher judged a different act of the same story as this event's members
+    /// (decision "related-act"), each by its earliest member, newest event first.
+    func relatedActEvents(eventID: String, limit: Int = EventStoryRelation.linkLimit) throws -> [RelatedStoryEvent] {
+        guard let live = try resolvedEventID(eventID) else { return [] }
+        let rows = try eventRows(
+            """
+            SELECT other.event_id, a.id, a.title, a.published_at
+            FROM event_members m
+            JOIN pair_assessments p
+                ON (p.article_id = m.article_id OR p.other_article_id = m.article_id) AND p.decision = 'related-act'
+            JOIN event_members other
+                ON other.article_id = CASE WHEN p.article_id = m.article_id THEN p.other_article_id ELSE p.article_id END
+            JOIN events e ON e.id = other.event_id AND e.merged_into IS NULL
+            JOIN articles a ON a.id = other.article_id
+            WHERE m.event_id = ? AND other.event_id != ? AND \(Self.visibleArticle)
+            ORDER BY a.published_at, a.id;
+            """, [.text(live), .text(live)])
+        var earliest: [String: RelatedStoryEvent] = [:]
+        for row in rows {
+            guard let id = row[0], earliest[id] == nil, let articleID = row[1], let title = row[2],
+                let published = row[3].flatMap({ Double($0) })
+            else { continue }
+            earliest[id] = RelatedStoryEvent(
+                eventID: id, articleID: articleID, title: title,
+                firstPublishedAt: Date(timeIntervalSince1970: published))
+        }
+        return Array(
+            earliest.values.sorted {
+                $0.firstPublishedAt == $1.firstPublishedAt
+                    ? $0.eventID < $1.eventID : $0.firstPublishedAt > $1.firstPublishedAt
+            }.prefix(limit))
     }
 
     // MARK: - Article Embeddings (#127, #307)

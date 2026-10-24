@@ -239,9 +239,11 @@ struct WorldTensionReading: Codable, Equatable, Sendable, Identifiable {
 }
 
 enum WorldTensionError: LocalizedError {
-    case disabled, deferred, insufficientCoverage, unavailable, generationFailed, unsupported
+    case disabled, deferred, insufficientCoverage, unavailable, generationFailed, unsupported, rejected
     var errorDescription: String? {
         switch self {
+        case .rejected:
+            return "The on-device model declined these headlines. A keyword estimate stands in until they change."
         case .disabled: return "Enable on-device AI and panel collection to assess World Tension."
         case .deferred: return "Assessment is paused while Low Power Mode or thermal limits are active."
         case .insufficientCoverage:
@@ -257,13 +259,24 @@ enum WorldTensionError: LocalizedError {
 }
 
 /// v2 is a reasoned AI judgment, never the v1 calibrated formula. All requests use the existing on-device model seam.
-/// Its prose is checked lexically against the headlines; a keyword estimate is shown, never saved, when no reading exists.
+/// Its prose is checked lexically against the headlines. When no reading exists, a keyword estimate is shown: unsaved
+/// while the model is merely unavailable, saved as the day's reading when the model declined the headlines, so the
+/// same input is final and only new headlines ask again (#523).
 actor WorldTensionService {
     static let shared = WorldTensionService()
     private let model: NewsTextModel
+    private let allowsEnergy: @Sendable () -> Bool
     private var pending: [String: Task<WorldTensionAssessment, Error>] = [:]
+    /// Inputs the model declined while a reading for the day already existed; not asked again this session.
+    private var rejectedHashes = Set<String>()
 
-    init(model: NewsTextModel = .onDevice) { self.model = model }
+    init(
+        model: NewsTextModel = .onDevice,
+        allowsEnergy: @escaping @Sendable () -> Bool = { IntelligencePolicy.allowsEnergy() }
+    ) {
+        self.model = model
+        self.allowsEnergy = allowsEnergy
+    }
 
     /// Soft news that general world feeds also publish: royals, celebrities, sport, entertainment and lifestyle.
     /// Matched as whole words, so "Prince" alone (a place, a minister's name) does not count.
@@ -380,10 +393,7 @@ actor WorldTensionService {
     {
         // Policy precedes every cache access, including after an AI-on assessment warmed it.
         guard aiEnabled, collectionEnabled else { throw WorldTensionError.disabled }
-        let info = ProcessInfo.processInfo
-        guard !info.isLowPowerModeEnabled, info.thermalState.rawValue < ProcessInfo.ThermalState.serious.rawValue else {
-            throw WorldTensionError.deferred
-        }
+        guard allowsEnergy() else { throw WorldTensionError.deferred }
         try Task.checkCancellation()
         let urls = TensionMethodology.v1.panel.map(\.url)
         let start = now.addingTimeInterval(-86400)
@@ -406,6 +416,12 @@ actor WorldTensionService {
             description: NewsTextModel.generation, content: prompt)
         let history = try await database.worldTensionHistory()
         if !force, history.last?.inputHash == hash { return history }
+        let today = TensionMethodology.day(containing: now).start
+        /// A saved estimate is the day's stand-in, not an assessment: only a model reading blocks the fallback.
+        func hasAssessment(_ readings: [WorldTensionReading]) -> Bool {
+            readings.contains { $0.id == today && $0.assessment.isEstimate != true }
+        }
+        if !force, rejectedHashes.contains(hash), hasAssessment(history) { throw WorldTensionError.rejected }
         let storageKey = await database.worldTensionStorageKey()
         let key = storageKey + hash
         let task: Task<WorldTensionAssessment, Error>
@@ -421,21 +437,28 @@ actor WorldTensionService {
         do {
             assessment = try await task.value
         } catch let error as WorldTensionError
-            where [.unavailable, .generationFailed, .unsupported].contains(error)
+            where [.unavailable, .generationFailed, .unsupported, .rejected].contains(error)
         {
-            // Without a reading for today, show a labelled keyword estimate rather than an empty sheet. It is never
-            // saved, so the model is asked again next time and an accepted reading is never replaced by it.
+            // Without an assessment for today, show a labelled keyword estimate of the current headlines rather than
+            // an empty sheet or an earlier estimate. An accepted reading is never replaced by it. While the model is
+            // only unavailable the estimate is not saved, so the model is asked again next time; when it declined the
+            // headlines, the estimate is saved under the real input hash, so the same headlines are final and only a
+            // new set asks again. History is read again: another assessment may have been saved while the model ran.
             try Task.checkCancellation()
-            let today = TensionMethodology.day(containing: now).start
-            guard !history.contains(where: { $0.id == today }),
-                let estimate = WorldTensionAssessment.estimate(current: current)
-            else { throw error }
-            return history
-                + [
-                    WorldTensionReading(
-                        evaluatedAt: now, inputHash: hash + ":estimate", modelGeneration: NewsTextModel.generation,
-                        headlines: current + previous, assessment: estimate)
-                ]
+            let latest = try await database.worldTensionHistory()
+            guard !hasAssessment(latest), let estimate = WorldTensionAssessment.estimate(current: current) else {
+                if error == .rejected { rejectedHashes.insert(hash) }
+                throw error
+            }
+            let reading = WorldTensionReading(
+                evaluatedAt: now, inputHash: error == .rejected ? hash : hash + ":estimate",
+                modelGeneration: NewsTextModel.generation, headlines: current + previous, assessment: estimate)
+            guard error == .rejected else { return latest.filter { $0.id != today } + [reading] }
+            if try await !database.saveWorldTensionReading(reading, keepingAssessment: true) {
+                rejectedHashes.insert(hash)
+                throw error
+            }
+            return try await database.worldTensionHistory()
         }
         try Task.checkCancellation()
         let reading = WorldTensionReading(
@@ -463,6 +486,8 @@ actor WorldTensionService {
             let draft: String
             do { draft = try await model.respond(instruction, 650) } catch is CancellationError {
                 throw CancellationError()
+            } catch is NewsTextModel.Rejected {
+                throw WorldTensionError.rejected
             } catch is NewsTextModel.TemporarilyUnavailable { throw WorldTensionError.unavailable } catch let error
                 as URLError where error.code == .resourceUnavailable
             { throw WorldTensionError.unavailable } catch { throw WorldTensionError.generationFailed }

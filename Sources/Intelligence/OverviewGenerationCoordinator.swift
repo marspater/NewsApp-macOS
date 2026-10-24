@@ -74,12 +74,7 @@ actor OverviewGenerationCoordinator {
     ) {
         self.store = store
         self.queue = queue
-        self.allowsEnergy =
-            allowsEnergy ?? {
-                let info = ProcessInfo.processInfo
-                return !info.isLowPowerModeEnabled
-                    && info.thermalState.rawValue < ProcessInfo.ThermalState.serious.rawValue
-            }
+        self.allowsEnergy = allowsEnergy ?? { IntelligencePolicy.allowsEnergy() }
         self.extractText = extractText
         self.extractionDeadline = extractionDeadline
     }

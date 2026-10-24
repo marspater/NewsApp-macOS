@@ -438,15 +438,12 @@ public struct ReaderImageCandidate: Codable, Hashable, Sendable {
 
     /// Publisher association, never a guarantee of semantic relevance.
     static func select(from candidates: [Self], title: String) -> Self? {
-        let words = Set(
-            title.lowercased().split(whereSeparator: { !$0.isLetter && !$0.isNumber }).filter { $0.count > 3 })
+        let words = Set(MuteRules.words(title).filter { $0.count > 3 })
         return candidates.filter { usable(url: $0.url, width: $0.width, height: $0.height) }
             .enumerated().max { lhs, rhs in
                 func score(_ image: Self) -> Int {
                     let text = (image.alt ?? "") + " " + (image.caption ?? "")
-                    let overlap = words.intersection(
-                        text.lowercased().split(whereSeparator: { !$0.isLetter && !$0.isNumber })
-                    ).count
+                    let overlap = words.intersection(MuteRules.words(text)).count
                     return overlap * 10 + (image.origin == .body ? 3 : image.origin == .openGraph ? 2 : 1)
                 }
                 let a = score(lhs.element)

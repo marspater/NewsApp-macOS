@@ -898,6 +898,55 @@ actor DatabaseEngine {
                 throw error
             }
         }
+        if version < 24 {
+            try beginTransaction()
+            do {
+                try Task.checkCancellation()
+                // Stored matcher signals and pair decisions (#522). Features are the JSON of `EventFeatures` under its
+                // storage version; a pair row is kept only for decisions the clusterer made (match, related act,
+                // borderline). Both follow their articles, and a changed title or description drops them with the
+                // match state and the embedding, which until now survived text changes.
+                try executeSimple(
+                    """
+                    CREATE TABLE IF NOT EXISTS article_features (
+                        article_id TEXT PRIMARY KEY REFERENCES articles(id) ON DELETE CASCADE,
+                        version INTEGER NOT NULL,
+                        features TEXT NOT NULL,
+                        computed_at REAL NOT NULL
+                    );
+                    CREATE TABLE IF NOT EXISTS pair_assessments (
+                        article_id TEXT NOT NULL REFERENCES articles(id) ON DELETE CASCADE,
+                        other_article_id TEXT NOT NULL REFERENCES articles(id) ON DELETE CASCADE,
+                        matcher_version INTEGER NOT NULL,
+                        decision TEXT NOT NULL,
+                        reason TEXT NOT NULL,
+                        score REAL NOT NULL,
+                        features TEXT,
+                        assessed_at REAL NOT NULL,
+                        PRIMARY KEY (article_id, other_article_id),
+                        CHECK (article_id < other_article_id)
+                    );
+                    CREATE INDEX IF NOT EXISTS idx_pair_assessments_other ON pair_assessments(other_article_id);
+                    CREATE INDEX IF NOT EXISTS idx_pair_assessments_decision ON pair_assessments(decision);
+                    DROP TRIGGER IF EXISTS trg_articles_event_rematch;
+                    CREATE TRIGGER trg_articles_event_rematch AFTER UPDATE OF title, description ON articles
+                    WHEN old.title IS NOT new.title OR old.description IS NOT new.description
+                    BEGIN
+                        DELETE FROM event_match_state WHERE article_id = old.id;
+                        DELETE FROM article_features WHERE article_id = old.id;
+                        DELETE FROM article_embeddings WHERE article_id = old.id;
+                        DELETE FROM pair_assessments WHERE article_id = old.id OR other_article_id = old.id;
+                    END;
+                    """
+                )
+                try Task.checkCancellation()
+                try setUserVersion(24)
+                try commitTransaction()
+            } catch {
+                try? rollbackTransaction()
+                throw error
+            }
+        }
     }
 
     /// Muting predicates for list queries (`MuteRules`); both are pure functions of their arguments.
@@ -2737,8 +2786,8 @@ actor DatabaseEngine {
 
     // MARK: - Granular Cache Purging
 
-    /// Clears all AI analysis data: summaries, key points, entities, event overviews, story embeddings and the
-    /// World Tension history. Articles, events and subscriptions remain completely intact.
+    /// Clears all AI analysis data: summaries, key points, entities, event overviews, story embeddings, stored matcher
+    /// signals and the World Tension history. Articles, events, pair decisions and subscriptions remain intact.
     func clearArticleEnrichment() throws {
         guard db != nil else { return }
         try beginTransaction()
@@ -2747,6 +2796,7 @@ actor DatabaseEngine {
             try executeSimple("DELETE FROM article_enrichment;")
             try clearEventOverviews()
             try executeSimple("DELETE FROM article_embeddings;")
+            try executeSimple("DELETE FROM article_features;")
             try commitTransaction()
         } catch {
             try? rollbackTransaction()
@@ -3273,20 +3323,28 @@ actor DatabaseEngine {
         return history.sorted { $0.evaluatedAt < $1.evaluatedAt }
     }
 
-    func saveWorldTensionReading(_ reading: WorldTensionReading) throws {
+    /// Replaces the day's reading. With `keepingAssessment`, a model assessment already saved for that day stays and
+    /// nothing is written (false), so a keyword estimate never replaces one (#523).
+    @discardableResult
+    func saveWorldTensionReading(_ reading: WorldTensionReading, keepingAssessment: Bool = false) throws -> Bool {
         try Task.checkCancellation()
         guard reading.assessment.isValid(headlines: reading.headlines),
             reading.evaluatedAt.timeIntervalSince1970.isFinite
         else { throw CocoaError(.fileWriteInvalidFileName) }
-        var history = try worldTensionHistory().filter { $0.id != reading.id }
+        var history = try worldTensionHistory()
+        if keepingAssessment, history.contains(where: { $0.id == reading.id && $0.assessment.isEstimate != true }) {
+            return false
+        }
+        history.removeAll { $0.id == reading.id }
         history.append(reading)
         history.sort { $0.evaluatedAt < $1.evaluatedAt }
         history = Array(history.suffix(30))
         if dbPath == ":memory:" {
             inMemoryWorldTension = history
-            return
+            return true
         }
         try JSONEncoder().encode(history).write(to: worldTensionURL, options: .atomic)
+        return true
     }
 
     private func parseArticleRow(_ stmt: OpaquePointer?) -> FeedArticle? {

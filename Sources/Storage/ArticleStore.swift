@@ -385,9 +385,20 @@ final class ArticleStore: ObservableObject {
         try await database.fetchArticles(limit: nil, eventID: eventID)
     }
 
-    /// Earlier events of the same developing story (#314), shown in the event overview.
+    /// Earlier events of the same developing story (#314), shown in the event overview: the lexical relation's links
+    /// first, then earlier events the matcher kept apart as a different act of the story (#522).
     func relatedStoryEvents(eventID: String) async throws -> [RelatedStoryEvent] {
-        try await EventStoryRelation.find(eventID: eventID, in: database)
+        var links = try await EventStoryRelation.find(eventID: eventID, in: database)
+        let members = try await database.fetchArticles(limit: nil, eventID: eventID)
+        guard let start = members.map(\.pubDate).min() else { return links }
+        var seen = Set(links.map(\.eventID))
+        // Every related act, earlier and later: the cap applies after the earlier-only filter.
+        for event in try await database.relatedActEvents(eventID: eventID, limit: .max)
+        where event.firstPublishedAt < start && seen.insert(event.eventID).inserted {
+            guard links.count < EventStoryRelation.linkLimit else { break }
+            links.append(event)
+        }
+        return links
     }
 
     /// Records the event version the reader has seen. Article read and saved state stay as they are.

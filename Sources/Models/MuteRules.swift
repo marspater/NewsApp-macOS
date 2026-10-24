@@ -112,6 +112,13 @@ struct MuteRules: Equatable, Hashable, Sendable {
         return lowered.split(whereSeparator: { !$0.isLetter && !$0.isNumber })
     }
 
+    /// The same words with case and diacritics folded ("Zürich" and "ZURICH" both give "zurich"), for matching text
+    /// against text. Never for stored mute rules, which keep `words` so saved topics match as they were saved.
+    static func foldedWords(_ text: String) -> [String] {
+        text.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
+            .split(whereSeparator: { !$0.isLetter && !$0.isNumber }).map(String.init)
+    }
+
     static func phrase(_ text: String) -> String {
         words(text).joined(separator: " ")
     }

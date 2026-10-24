@@ -247,9 +247,9 @@ actor SentenceEmbedder {
         return pooled
     }
 
-    /// Embeds a batch of texts sequentially.
-    func embedBatch(_ texts: [String]) -> [[Float]] {
-        texts.compactMap { embed($0) }
+    /// Embeds a batch of texts sequentially; a text the model cannot embed keeps its position as nil.
+    func embedBatch(_ texts: [String]) -> [[Float]?] {
+        texts.map { embed($0) }
     }
 
     /// Computes cosine similarity between two L2-normalized float vectors in < 0.1 microseconds using vDSP.
