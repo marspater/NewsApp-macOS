@@ -205,6 +205,9 @@ enum EventClusterer {
                     pair = EventMatcher.modelConfirmed(pair, policy: matchPolicy)
                 }
             }
+            if matchPolicy.samePublisherRequiresMatch, !pair.isMatch, !a.source.isEmpty, a.source == b.source {
+                pair.isCompatible = false
+            }
             // The matcher's own verdict is recorded; a reader's inclusion only overrides it here.
             let key = a.id < b.id ? a.id + "\n" + b.id : b.id + "\n" + a.id
             record(a, b, pair, probability: modelScores[key] ?? nil)

@@ -143,11 +143,7 @@ enum StoryCorpus {
                 if !batch.isEmpty {
                     try await db.upsertArticles(batch)
                     // Keep production's per-pass article limit in evaluation too.
-                    // NEWS_PAIR_THRESHOLD sweeps the pair model's cutoff on tune (#525); NEWS_PAIR_MODEL=0 turns it off.
-                    var policy = EventMatchPolicy.standard
-                    if let value = ProcessInfo.processInfo.environment["NEWS_PAIR_THRESHOLD"].flatMap({ Double($0) }) {
-                        policy.pairModelThreshold = value
-                    }
+                    let policy = policyFromEnvironment()
                     let modelOff = ProcessInfo.processInfo.environment["NEWS_PAIR_MODEL"] == "0"
                     // NEWS_ENERGY=0 replays the rules-only pass of Low Power Mode (#534).
                     let energy = ProcessInfo.processInfo.environment["NEWS_ENERGY"] != "0"
@@ -171,6 +167,25 @@ enum StoryCorpus {
             await db.close()
             throw error
         }
+    }
+
+    /// The matcher policy with the sweep overrides of the evaluation flags (#525, #582): NEWS_PAIR_THRESHOLD,
+    /// NEWS_RESCUE_TWO_ANCHORS (cosine), NEWS_MODEL_ANCHORLESS (cosine), NEWS_COMPATIBLE_REQUIRES_MATCH=1,
+    /// NEWS_COMPATIBLE_SHARE, NEWS_SAME_PUBLISHER=1. NEWS_PAIR_MODEL=0 turns the model off at the call site.
+    static func policyFromEnvironment() -> EventMatchPolicy {
+        let environment = ProcessInfo.processInfo.environment
+        var policy = EventMatchPolicy.standard
+        if let value = environment["NEWS_PAIR_THRESHOLD"].flatMap(Double.init) { policy.pairModelThreshold = value }
+        if let value = environment["NEWS_RESCUE_TWO_ANCHORS"].flatMap(Double.init) {
+            policy.twoAnchorRescueThreshold = value
+        }
+        if let value = environment["NEWS_MODEL_ANCHORLESS"].flatMap(Double.init) {
+            policy.anchorlessModelCosine = value
+        }
+        if environment["NEWS_COMPATIBLE_REQUIRES_MATCH"] == "1" { policy.compatibleRequiresMatch = true }
+        if let value = environment["NEWS_COMPATIBLE_SHARE"].flatMap(Double.init) { policy.compatibleShare = value }
+        if environment["NEWS_SAME_PUBLISHER"] == "1" { policy.samePublisherRequiresMatch = true }
+        return policy
     }
 
     static func checkReplay() async throws {
