@@ -543,6 +543,73 @@ extension DatabaseEngine {
         )
     }
 
+    // MARK: - Stories (#581)
+
+    /// The story an event belongs to: its `story_id`, else itself.
+    func storyID(forEvent eventID: String) throws -> String? {
+        guard let live = try resolvedEventID(eventID) else { return nil }
+        return try eventRows("SELECT coalesce(story_id, id) FROM events WHERE id = ?;", [.text(live)]).first?[0]
+    }
+
+    /// Live events of a story, the lead first.
+    func storyEventIDs(_ storyID: String) throws -> [String] {
+        try eventRows(
+            "SELECT id FROM events WHERE merged_into IS NULL AND (id = ? OR story_id = ?) ORDER BY id = ? DESC, created_at, id;",
+            [.text(storyID), .text(storyID), .text(storyID)]
+        ).compactMap { $0[0] }
+    }
+
+    /// Related-act decisions between members of two different live events updated since `activeSince`, with the
+    /// decision's features, for the clusterer's story pass.
+    func storyLinkRows(since activeSince: Date) throws -> [(event: String, other: String, features: String?)] {
+        let since = activeSince.timeIntervalSince1970
+        return try eventRows(
+            """
+            SELECT ma.event_id, mb.event_id, p.features
+            FROM pair_assessments p
+            JOIN event_members ma ON ma.article_id = p.article_id
+            JOIN event_members mb ON mb.article_id = p.other_article_id
+            JOIN events ea ON ea.id = ma.event_id AND ea.merged_into IS NULL AND ea.updated_at >= ?
+            JOIN events eb ON eb.id = mb.event_id AND eb.merged_into IS NULL AND eb.updated_at >= ?
+            WHERE p.decision = 'related-act' AND ma.event_id != mb.event_id;
+            """, [.real(since), .real(since)]
+        ).compactMap { row in
+            guard let a = row[0], let b = row[1] else { return nil }
+            return (a, b, row[2])
+        }
+    }
+
+    /// Writes the story of every live event updated since `activeSince`: the earliest event of each group names the
+    /// story, an event in no group is a story of its own. Returns the events whose story changed.
+    func assignStories(_ groups: [[String]], since activeSince: Date, at date: Date = Date()) throws -> Set<String> {
+        try inEventTransaction { () throws -> Set<String> in
+            var current: [String: (story: String?, created: Double)] = [:]
+            for row in try eventRows(
+                "SELECT id, story_id, created_at FROM events WHERE merged_into IS NULL AND updated_at >= ?;",
+                [.real(activeSince.timeIntervalSince1970)])
+            {
+                if let id = row[0] { current[id] = (row[1], row[2].flatMap(Double.init) ?? 0) }
+            }
+            var desired: [String: String?] = current.mapValues { _ in nil }
+            for group in groups {
+                let members = group.filter { current[$0] != nil }
+                guard members.count >= 2,
+                    let lead = members.min(by: {
+                        (current[$0]?.created ?? 0, $0) < (current[$1]?.created ?? 0, $1)
+                    })
+                else { continue }
+                for member in members { desired[member] = lead }
+            }
+            var changed = Set<String>()
+            for (id, story) in desired where current[id]?.story != story {
+                try eventRows(
+                    "UPDATE events SET story_id = ? WHERE id = ?;", [story.map { .text($0) } ?? .null, .text(id)])
+                changed.insert(id)
+            }
+            return changed
+        }
+    }
+
     /// The event that currently holds an article; old article IDs resolve to the stored document.
     func eventID(forArticle articleID: String) throws -> String? {
         guard let member = try memberArticleID(articleID) else { return nil }
@@ -1135,12 +1202,21 @@ extension DatabaseEngine {
     @discardableResult
     func separateArticle(_ articleID: String, fromEvent eventID: String, at date: Date = Date()) throws -> StoryEvent {
         let id = try inEventTransaction { () throws -> String in
-            let target = try liveEvent(eventID)
+            var target = try liveEvent(eventID)
             guard let member = try memberArticleID(articleID) else {
                 throw Self.eventError("Unknown event member article")
             }
-            let members = try eventRows("SELECT article_id FROM event_members WHERE event_id = ?;", [.text(target.id)])
-                .compactMap { $0[0] }
+            // Given a story's lead event (#581), the article leaves its own event and is excluded from every member
+            // of the story, so the story link cannot bring it back.
+            let storyEvents = try storyEventIDs(target.id)
+            if let own = try self.eventID(forArticle: member), own != target.id, storyEvents.contains(own) {
+                target = try liveEvent(own)
+            }
+            let placeholders = Array(repeating: "?", count: storyEvents.count).joined(separator: ", ")
+            let members = try eventRows(
+                "SELECT article_id FROM event_members WHERE event_id IN (\(placeholders));",
+                storyEvents.map { .text($0) }
+            ).compactMap { $0[0] }
             guard members.contains(member) else { throw Self.eventError("The article is not part of this event") }
             let now = date.timeIntervalSince1970
             try eventRows(
@@ -1170,18 +1246,27 @@ extension DatabaseEngine {
 
     /// Records that the reader has seen the event up to `version` (the current version by default,
     /// never beyond it). Seen versions only grow. Article read and saved state is not touched.
+    /// Given a story's lead event, every event of the story is marked seen at its own current version (#581) and the
+    /// sum is returned, matching `eventFeedSummaries`.
     @discardableResult
     func markEventSeen(_ eventID: String, version: Int? = nil, at date: Date = Date()) throws -> Int {
         try inEventTransaction { () throws -> Int in
             let live = try liveEvent(eventID)
-            let seen = max(1, min(version ?? live.version, live.version))
-            try eventRows(
-                """
-                INSERT INTO event_state(event_id, seen_version, seen_at) VALUES (?, ?, ?)
-                ON CONFLICT(event_id) DO UPDATE SET seen_version = max(seen_version, excluded.seen_version), seen_at = excluded.seen_at;
-                """, [.text(live.id), .integer(seen), .real(date.timeIntervalSince1970)])
-            return try eventRows("SELECT seen_version FROM event_state WHERE event_id = ?;", [.text(live.id)]).first?[0]
-                .flatMap { Int($0) } ?? seen
+            let events = try storyEventIDs(live.id)
+            var total = 0
+            for id in events {
+                let event = try liveEvent(id)
+                let seen = max(1, min(events.count == 1 ? (version ?? event.version) : event.version, event.version))
+                try eventRows(
+                    """
+                    INSERT INTO event_state(event_id, seen_version, seen_at) VALUES (?, ?, ?)
+                    ON CONFLICT(event_id) DO UPDATE SET seen_version = max(seen_version, excluded.seen_version), seen_at = excluded.seen_at;
+                    """, [.text(id), .integer(seen), .real(date.timeIntervalSince1970)])
+                total +=
+                    try eventRows("SELECT seen_version FROM event_state WHERE event_id = ?;", [.text(id)]).first?[0]
+                    .flatMap { Int($0) } ?? seen
+            }
+            return total
         }
     }
 
@@ -1191,63 +1276,84 @@ extension DatabaseEngine {
             .flatMap { Int($0) }
     }
 
-    /// Every visible member of the events that hold any of `articleIDs`, newest first, with the
-    /// state a feed card needs. No article text beyond the title is read.
+    /// Every visible member of the stories that hold any of `articleIDs`, newest first, with the state a feed card
+    /// needs: one summary per story (#581), named by its lead event. A story's version is the sum of its events'
+    /// membership versions and its seen version the sum of their seen versions, so "updated since seen" holds exactly
+    /// when some event of the story has versions the reader has not seen; a member's joined version is shifted by the
+    /// other events' seen versions for the same comparison. No article text beyond the title is read.
     func eventFeedSummaries(forArticles articleIDs: [String]) throws -> [EventFeedSummary] {
-        var eventIDs: [String] = []
+        var storyIDs: [String] = []
         var seen = Set<String>()
         for start in stride(from: 0, to: articleIDs.count, by: 400) {
             let slice = Array(articleIDs[start..<min(start + 400, articleIDs.count)])
             let placeholders = Array(repeating: "?", count: slice.count).joined(separator: ", ")
             for row in try eventRows(
-                "SELECT DISTINCT event_id FROM event_members WHERE article_id IN (\(placeholders));",
-                slice.map { .text($0) })
+                """
+                SELECT DISTINCT coalesce(e.story_id, e.id) FROM event_members m
+                JOIN events e ON e.id = m.event_id WHERE m.article_id IN (\(placeholders));
+                """, slice.map { .text($0) })
             {
-                if let id = row[0], seen.insert(id).inserted { eventIDs.append(id) }
+                if let id = row[0], seen.insert(id).inserted { storyIDs.append(id) }
             }
         }
+        struct Row {
+            let event: String, version: Int, seen: Int?, member: EventFeedMember
+        }
         var summaries: [EventFeedSummary] = []
-        for start in stride(from: 0, to: eventIDs.count, by: 400) {
-            let slice = Array(eventIDs[start..<min(start + 400, eventIDs.count)])
+        for start in stride(from: 0, to: storyIDs.count, by: 400) {
+            let slice = Array(storyIDs[start..<min(start + 400, storyIDs.count)])
             let placeholders = Array(repeating: "?", count: slice.count).joined(separator: ", ")
             let rows = try eventRows(
                 """
-                SELECT m.event_id, e.membership_version, st.seen_version, a.id, a.source, a.title,
-                       \(Self.articleDateOrder), m.joined_version, s.is_read, s.is_saved, a.canonical_url
+                SELECT coalesce(e.story_id, e.id), m.event_id, e.membership_version, st.seen_version, a.id, a.source,
+                       a.title, \(Self.articleDateOrder), m.joined_version, s.is_read, s.is_saved, a.canonical_url
                 FROM event_members m
                 JOIN events e ON e.id = m.event_id
                 JOIN articles a ON a.id = m.article_id
                 JOIN article_state s ON s.article_id = a.id
                 LEFT JOIN event_state st ON st.event_id = m.event_id
-                WHERE m.event_id IN (\(placeholders)) AND \(Self.visibleArticle)
-                ORDER BY m.event_id, \(Self.articleDateOrder) DESC, a.id;
+                WHERE coalesce(e.story_id, e.id) IN (\(placeholders)) AND \(Self.visibleArticle)
+                ORDER BY coalesce(e.story_id, e.id), \(Self.articleDateOrder) DESC, a.id;
                 """, slice.map { .text($0) })
-            var current: (id: String, version: Int, seen: Int?, members: [EventFeedMember])?
-            for row in rows {
-                guard let eventID = row[0], let articleID = row[3] else { continue }
-                if current?.id != eventID {
-                    if let current {
-                        summaries.append(
-                            EventFeedSummary(
-                                eventID: current.id, membershipVersion: current.version, seenVersion: current.seen,
-                                members: current.members))
-                    }
-                    current = (eventID, row[1].flatMap { Int($0) } ?? 1, row[2].flatMap { Int($0) }, [])
+            var current: (id: String, rows: [Row])?
+            func flush() {
+                guard let story = current, !story.rows.isEmpty else { return }
+                var versions: [String: (version: Int, seen: Int?)] = [:]
+                for row in story.rows { versions[row.event] = (row.version, row.seen) }
+                let membershipVersion = versions.values.reduce(0) { $0 + $1.version }
+                let seenVersion =
+                    versions.values.allSatisfy { $0.seen == nil }
+                    ? nil : versions.values.reduce(0) { $0 + ($1.seen ?? 0) }
+                let members = story.rows.map { row -> EventFeedMember in
+                    let others = versions.filter { $0.key != row.event }.values.reduce(0) { $0 + ($1.seen ?? 0) }
+                    let member = row.member
+                    return EventFeedMember(
+                        articleID: member.articleID, source: member.source, title: member.title, date: member.date,
+                        joinedVersion: member.joinedVersion + others, isRead: member.isRead, isSaved: member.isSaved)
                 }
-                current?.members.append(
-                    EventFeedMember(
-                        articleID: articleID, source: FeedCatalog.publisher(forLink: row[10] ?? "") ?? row[4] ?? "",
-                        title: row[5] ?? "",
-                        date: Date(timeIntervalSince1970: row[6].flatMap { Double($0) } ?? 0),
-                        joinedVersion: row[7].flatMap { Int($0) } ?? 1,
-                        isRead: row[8] == "1", isSaved: row[9] == "1"))
-            }
-            if let current {
                 summaries.append(
                     EventFeedSummary(
-                        eventID: current.id, membershipVersion: current.version, seenVersion: current.seen,
-                        members: current.members))
+                        eventID: story.id, membershipVersion: membershipVersion, seenVersion: seenVersion,
+                        members: members))
             }
+            for row in rows {
+                guard let storyID = row[0], let eventID = row[1], let articleID = row[4] else { continue }
+                if current?.id != storyID {
+                    flush()
+                    current = (storyID, [])
+                }
+                current?.rows.append(
+                    Row(
+                        event: eventID, version: row[2].flatMap { Int($0) } ?? 1, seen: row[3].flatMap { Int($0) },
+                        member: EventFeedMember(
+                            articleID: articleID,
+                            source: FeedCatalog.publisher(forLink: row[11] ?? "") ?? row[5] ?? "",
+                            title: row[6] ?? "",
+                            date: Date(timeIntervalSince1970: row[7].flatMap { Double($0) } ?? 0),
+                            joinedVersion: row[8].flatMap { Int($0) } ?? 1,
+                            isRead: row[9] == "1", isSaved: row[10] == "1")))
+            }
+            flush()
         }
         return summaries
     }

@@ -417,6 +417,78 @@ enum EventClusterer {
                 deferred = []
             }
         }
+        /// The story pass (#581): two active events sharing at least `storyLinkAnchors` specific names that are not
+        /// common actors of the week (a head of state, a government: `EventStoryRelation.commonActorShare`) are one
+        /// story when two thirds of the cross pairs between their earliest members agree by the rules alone: no conflict
+        /// other than a different act, the shared names, a shared keyword, no semantic divergence. A reader's exclusion
+        /// across the two events vetoes the link. Stories are connected components named by the earliest event; pair
+        /// decisions and memberships are untouched.
+        func linkStories() async throws -> Set<String> {
+            let activeSince = now.addingTimeInterval(-candidatePolicy.activeEventLifetime)
+            let events = try await database.activeEventMembers(since: activeSince)
+            await prefetch(events.flatMap { $0.members })
+            let exclusions = try await database.eventExclusions(for: events.flatMap { $0.members.map(\.id) })
+            var anchorsOf: [String: Set<String>] = [:]
+            for event in events {
+                anchorsOf[event.id] = event.members.reduce(into: Set<String>()) {
+                    $0.formUnion(features($1).specificAnchors)
+                }
+            }
+            let common = try await database.commonStoryTerms(
+                anchorsOf.values.reduce(into: Set<String>()) { $0.formUnion($1) }, before: now,
+                share: EventStoryRelation.commonActorShare)
+            var eventsByAnchor: [String: Set<String>] = [:]
+            for (id, anchors) in anchorsOf {
+                anchorsOf[id] = anchors.subtracting(common)
+                for anchor in anchors.subtracting(common) { eventsByAnchor[anchor, default: []].insert(id) }
+            }
+            let membersOf = Dictionary(
+                events.map { ($0.id, $0.members.sorted { ($0.date, $0.id) < ($1.date, $1.id) }) },
+                uniquingKeysWith: { a, _ in a })
+            var parent: [String: String] = [:]
+            func find(_ id: String) -> String {
+                var root = id
+                while let next = parent[root], next != root { root = next }
+                return root
+            }
+            for event in events {
+                try Task.checkCancellation()
+                var shared: [String: Int] = [:]
+                for anchor in anchorsOf[event.id] ?? [] {
+                    for other in eventsByAnchor[anchor] ?? [] where other > event.id { shared[other, default: 0] += 1 }
+                }
+                for (other, count) in shared where count >= matchPolicy.storyLinkAnchors {
+                    guard let a = membersOf[event.id], let b = membersOf[other],
+                        !a.contains(where: { member in exclusions[member.id]?.isDisjoint(with: b.map(\.id)) == false }),
+                        let gap = Self.closestGap(a, b), gap <= candidatePolicy.activeEventLifetime
+                    else { continue }
+                    var agreeing = 0
+                    var total = 0
+                    for left in a.prefix(Self.storySampleSize) {
+                        for right in b.prefix(Self.storySampleSize) {
+                            total += 1
+                            let pair = await ruled(left, right)
+                            let names = features(left).specificAnchors.intersection(features(right).specificAnchors)
+                                .subtracting(common).count
+                            if (pair.conflict == nil || pair.conflict == .differentAct)
+                                && names >= matchPolicy.storyLinkAnchors && pair.sharedKeywords >= 1
+                            {
+                                agreeing += 1
+                            }
+                        }
+                    }
+                    guard total > 0, agreeing * 3 >= total * 2 else { continue }
+                    let (left, right) = (find(event.id), find(other))
+                    parent[left] = parent[left] ?? left
+                    parent[right] = parent[right] ?? right
+                    if left != right { parent[max(left, right)] = min(left, right) }
+                }
+            }
+            var groups: [String: [String]] = [:]
+            for id in parent.keys { groups[find(id), default: []].append(id) }
+            return try await database.assignStories(
+                groups.values.filter { $0.count >= 2 }.map { $0.sorted() }, since: activeSince, at: now)
+        }
         /// Every cross-pair needs specific shared evidence; a contradiction or exclusion always vetoes a merge.
         var fragmentExclusions: [String: Set<String>] = [:]
         func compatibleFragments(_ first: [EventMatchRow], _ second: [EventMatchRow]) async throws -> Bool {
@@ -536,8 +608,12 @@ enum EventClusterer {
         report.merged = merges.merged
         report.changedEvents.formUnion(merges.changedEvents)
         await store()
+        report.changedEvents.formUnion(try await linkStories())
         return report
     }
+
+    /// Earliest members of each event compared by the story pass; at most 25 cross pairs per candidate.
+    static let storySampleSize = 5
 
     private static func closestGap(_ lhs: [EventMatchRow], _ rhs: [EventMatchRow]) -> TimeInterval? {
         lhs.flatMap { a in rhs.map { abs(a.date.timeIntervalSince($0.date)) } }.min()

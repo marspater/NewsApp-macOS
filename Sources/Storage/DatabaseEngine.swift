@@ -973,6 +973,25 @@ actor DatabaseEngine {
                 throw error
             }
         }
+        if version < 26 {
+            try beginTransaction()
+            do {
+                try Task.checkCancellation()
+                // The story layer (#581): a live event may belong to a story, named by the id of its earliest event.
+                // The clusterer's story pass rewrites it for active events; NULL means the event is a story of its own.
+                // A fixture that re-runs the migrations from an older version may already carry the column.
+                if !(try columnNames(of: "events")).contains("story_id") {
+                    try executeSimple("ALTER TABLE events ADD COLUMN story_id TEXT;")
+                }
+                try executeSimple("CREATE INDEX IF NOT EXISTS idx_events_story ON events(story_id);")
+                try Task.checkCancellation()
+                try setUserVersion(26)
+                try commitTransaction()
+            } catch {
+                try? rollbackTransaction()
+                throw error
+            }
+        }
     }
 
     /// Muting predicates for list queries (`MuteRules`); both are pure functions of their arguments.
