@@ -491,6 +491,7 @@ struct NewsTests {
         }
         if CommandLine.arguments.contains("--story-regressions") {
             try await testReaderPhaseC(fixtureRoot: fixtureRoot)
+            testReaderPassageMatcher()
             try await testReaderFigures(fixtureRoot: fixtureRoot)
             testReaderExtractionFidelity(fixtureRoot: fixtureRoot)
             try await testCanonicalArticleIngestion(fixtureRoot: fixtureRoot)
@@ -672,6 +673,7 @@ struct NewsTests {
         await testArticleContentRedactionAndTypography()
         await testArticleDetailReadingExperienceOverhaul()
         try await testReaderPhaseC(fixtureRoot: fixtureRoot)
+        testReaderPassageMatcher()
         await testBBCExtractionFixture()
         await testMultiPublisherExtractionFixtures()
         await testReaderFurnitureRemoval()
@@ -4596,6 +4598,36 @@ struct NewsTests {
         // Legacy reconciliation
         let reconciled = ArticleIdentity.reconcileLegacyId("http://test.com/path/?utm_source=newsletter")
         assertEqual(reconciled, "https://test.com/path", "Should reconcile legacy URL")
+    }
+
+    static func testReaderPassageMatcher() {
+        print(
+            "  - Testing the citation jump: a quote finds its reader block exactly, by word overlap, or not at all...")
+        let blocks = [
+            ReaderBlock(kind: .heading, text: "Council approves the harbour plan"),
+            ReaderBlock(
+                kind: .paragraph,
+                text: "The council approved the harbour redevelopment plan on Tuesday after a four-hour debate."),
+            ReaderBlock(kind: .figure, text: "The harbour at dusk", imageURL: "https://example.com/harbour.jpg"),
+            ReaderBlock(kind: .paragraph, text: "Opponents said the budget leaves nothing for the ferry terminal."),
+        ]
+        assertEqual(
+            ReaderPassageMatcher.index(of: "approved the harbour redevelopment plan on Tuesday", in: blocks), 1,
+            "An exact quote finds its paragraph")
+        assertEqual(
+            ReaderPassageMatcher.index(
+                of: "“Opponents said the budget leaves nothing for the ferry terminal.”", in: blocks),
+            3, "Quotation marks and punctuation do not matter")
+        assertEqual(
+            ReaderPassageMatcher.index(
+                of: "the budget leaves nothing at all for the ferry terminal, opponents said", in: blocks),
+            3, "A lightly reworded quote finds the block sharing most of its words")
+        assertEqual(
+            ReaderPassageMatcher.index(of: "The harbour at dusk", in: blocks), nil,
+            "A figure caption is never a cited passage")
+        assertEqual(
+            ReaderPassageMatcher.index(of: "Completely unrelated sentence about elections abroad", in: blocks), nil,
+            "An unrelated quote matches nothing")
     }
 
     static func testReaderExtractionFidelity(fixtureRoot: URL) {

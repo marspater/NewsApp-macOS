@@ -500,3 +500,32 @@ struct PublisherContentRevision: Equatable, Sendable, Identifiable {
         ArticleIdentity.sha256Hex([title, description, content ?? ""].map { "\($0.utf8.count):\($0)" }.joined())
     }
 }
+
+/// Finds the reader block an overview citation quotes: the block whose normalized text contains the quote (or that
+/// the quote contains, for a long block), else the block sharing most of the quote's longer words.
+enum ReaderPassageMatcher {
+    static let minimumOverlap = 0.6
+
+    static func index(of quote: String, in blocks: [ReaderBlock]) -> Int? {
+        let key = EventFeedSummary.titleKey(quote)
+        guard !key.isEmpty else { return nil }
+        let textKinds: Set<ReaderBlock.Kind> = [
+            .paragraph, .quote, .listItem, .standfirst, .pullQuote, .heading, .subheading,
+        ]
+        let keys = blocks.map { textKinds.contains($0.kind) ? EventFeedSummary.titleKey($0.text) : "" }
+        if let exact = keys.firstIndex(where: {
+            !$0.isEmpty && ($0.contains(key) || ($0.count >= 40 && key.contains($0)))
+        }) {
+            return exact
+        }
+        let words = Set(key.split(separator: " ").map(String.init).filter { $0.count > 3 })
+        guard words.count >= 3 else { return nil }
+        var best: (index: Int, overlap: Double)?
+        for (index, blockKey) in keys.enumerated() where !blockKey.isEmpty {
+            let shared = words.intersection(blockKey.split(separator: " ").map(String.init)).count
+            let overlap = Double(shared) / Double(words.count)
+            if overlap >= minimumOverlap, overlap > (best?.overlap ?? 0) { best = (index, overlap) }
+        }
+        return best?.index
+    }
+}

@@ -263,7 +263,31 @@ struct ArticleDetailView: View {
 
     // MARK: - Reader View
 
+    /// The rendered block the cited passage matches, once the story is ready.
+    private var highlightedBlockIndex: Int? {
+        guard case .ready = contentState, let passage = highlightedPassage else { return nil }
+        return ReaderPassageMatcher.index(of: passage, in: renderedBlocks)
+    }
+
+    private static func readerBlockID(_ index: Int) -> String { "reader-block-\(index)" }
+
     private var readerView: some View {
+        ScrollViewReader { proxy in
+            readerScrollView
+                .onChange(of: highlightedBlockIndex, initial: true) { _, index in
+                    guard let index else { return }
+                    if reduceMotion {
+                        proxy.scrollTo(Self.readerBlockID(index), anchor: .center)
+                    } else {
+                        withAnimation(AppMotion.navigation) {
+                            proxy.scrollTo(Self.readerBlockID(index), anchor: .center)
+                        }
+                    }
+                }
+        }
+    }
+
+    private var readerScrollView: some View {
         ScrollView {
             VStack(spacing: 0) {
                 // 2. Editorial Content Hierarchy: Eyebrow -> Title -> AI Summary -> Body -> Terminal Affordance
@@ -661,8 +685,16 @@ struct ArticleDetailView: View {
             ? blocks.firstIndex { $0.kind == .paragraph } : nil
         return VStack(alignment: .leading, spacing: 0) {
             // Positions are stable within the immutable, article-keyed reader document.
+            let highlighted = highlightedBlockIndex
             ForEach(Array(blocks.enumerated()), id: \.offset) { index, block in
                 readerBlock(block, isLead: index == leadIndex)
+                    .padding(.horizontal, index == highlighted ? AppSpacing.xs : 0)
+                    .padding(.vertical, index == highlighted ? AppSpacing.xxs : 0)
+                    .background(
+                        index == highlighted ? AppColor.passageHighlight : .clear,
+                        in: RoundedRectangle(cornerRadius: AppRadius.control, style: .continuous)
+                    )
+                    .id(Self.readerBlockID(index))
                     .padding(
                         .bottom,
                         Self.blockSpacing(
