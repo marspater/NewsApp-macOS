@@ -21,7 +21,7 @@ Program #520, implemented from a cloud session without a Swift toolchain; every 
 | `pair_assessments` rows for match, related-act and borderline decisions | `EventClustering.record` | Audit trail per pair; related acts shown as earlier events in the overview |
 | `--export-features` | `NewsTests.exportPairFeatures` | CSV of candidate-pair features and labels for the PR 4 fit; corpus ids only |
 
-Authored corpus on v9 (gate 1): CI numbers added from the first run on this PR; the expected block is tightened to the measured result in the follow-up commit.
+Authored corpus on v9 (gate 1, hosted CI run 40081886073): precision 1.000 (TP 22, FP 0), recall 0.917 (FN 2). Against v8 (TP 21 / FP 2 / FN 3): both false pairs (f08-a+f08-d, f08-b+f08-d) are gone, the resignation pair f08-c+f08-d is recovered, and the two f03 misses (the rescue report 20 h after the quake) remain. The fixture ratchet is TP ≥ 22 / FP ≤ 0.
 
 Holdout (local, Mars, #526): before/after lines added when run.
 

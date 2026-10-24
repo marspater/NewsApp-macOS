@@ -1,9 +1,9 @@
 {
   "version": 1,
-  "note": "Authored English regression corpus for EventClusterer (#506). Not acceptance evidence: the private holdout (#509) is the gate. Families sit five days apart so the candidate window isolates them; negatives are deliberately inside the window. 'expected' is the CI ratchet. Recorded on matcher v8 by hosted CI run 40068841897: TP 21 / FP 2 / FN 3; false pairs f08-a+f08-d and f08-b+f08-d (resignation report joins the execution aftermath), missed pairs f03-a+f03-c, f03-b+f03-c (a 20 h later 'Rescuers search rubble after …' report; its primary clause names an act) and f08-c+f08-d.",
+  "note": "Authored English regression corpus for EventClusterer (#506). Not acceptance evidence: the private holdout (#509) is the gate. Families sit five days apart so the candidate window isolates them; negatives are deliberately inside the window. 'expected' is the CI ratchet. Recorded on matcher v8 by hosted CI run 40068841897: TP 21 / FP 2 / FN 3 (false pairs f08-a+f08-d and f08-b+f08-d, the resignation joining the execution aftermath). Recorded on matcher v9 by hosted CI run 40081886073 (#522, act-class veto): TP 22 / FP 0 / FN 2; no false pairs, f08-c+f08-d recovered; missed pairs f03-a+f03-c and f03-b+f03-c (a 20 h later 'Rescuers search rubble after …' report whose primary clause names an act).",
   "expected": {
-    "minimumTruePositives": 21,
-    "maximumFalsePositives": 2
+    "minimumTruePositives": 22,
+    "maximumFalsePositives": 0
   },
   "articles": [
     {

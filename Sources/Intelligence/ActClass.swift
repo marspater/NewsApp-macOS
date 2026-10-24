@@ -62,7 +62,8 @@ enum ActClass: String, Codable, CaseIterable, Sendable {
         add(.vote, "vote votes voted voter election referendum ballot elect elects elected reelect runoff")
         add(
             .protest,
-            "protest protests protested protester protestor rally rallies demonstration demonstrator riot rioter unrest")
+            "protest protests protested protester protestor rally rallies demonstration demonstrator riot rioter"
+                + " unrest")
         add(
             .attack,
             "attack attacks attacked attacker airstrike shelling bombing bomber bombardment bombard missile shooting"
