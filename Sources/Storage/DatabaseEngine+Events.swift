@@ -1298,17 +1298,24 @@ extension DatabaseEngine {
         }
     }
 
-    /// Stores a clustering pass's signals, vectors and pair decisions and drops the rows of pairs that no longer
-    /// qualify, in one actor turn. `readTexts` holds each article's title and description as the pass read them;
-    /// values of an article that is gone or reads differently now are skipped: the rematch trigger dropped what was
-    /// stored for the old text, and the next pass computes the new one (#522).
-    func storeClusteringPass(
-        features: [String: EventFeatures], embeddings: [String: [Float]], decisions: [PairDecision],
-        cleared: [(String, String)], readTexts: [String: String], featureVersion: Int, embeddingVersion: Int,
-        matcherVersion: Int, at date: Date = Date()
-    ) throws {
+    /// What a clustering pass computed, stored together by `storeClusteringPass` (#522).
+    struct ClusteringPassWrites: Sendable {
+        var features: [String: EventFeatures] = [:]
+        var embeddings: [String: [Float]] = [:]
+        var decisions: [PairDecision] = []
+        /// Pairs, low ID first, whose stored row no longer applies.
+        var cleared: [(String, String)] = []
+        /// Each article's title and description as the pass read them, joined by a newline.
+        var readTexts: [String: String] = [:]
+    }
+
+    /// Stores a clustering pass's signals, vectors and pair decisions under the current versions and drops the rows
+    /// of pairs that no longer qualify, in one actor turn. Values of an article that is gone or reads differently
+    /// from `readTexts` now are skipped: the rematch trigger dropped what was stored for the old text, and the next
+    /// pass computes the new one.
+    func storeClusteringPass(_ writes: ClusteringPassWrites, at date: Date = Date()) throws {
         var current: [String: String] = [:]
-        let ids = Array(readTexts.keys)
+        let ids = Array(writes.readTexts.keys)
         for start in stride(from: 0, to: ids.count, by: 500) {
             let chunk = ids[start..<min(start + 500, ids.count)]
             let marks = Array(repeating: "?", count: chunk.count).joined(separator: ", ")
@@ -1319,15 +1326,17 @@ extension DatabaseEngine {
                 if let id = row[0] { current[id] = (row[1] ?? "") + "\n" + (row[2] ?? "") }
             }
         }
-        let changed = Set(readTexts.filter { current[$0.key] != $0.value }.keys)
-        try upsertArticleFeatures(features.filter { !changed.contains($0.key) }, version: featureVersion, at: date)
-        try upsertArticleEmbeddings(embeddings.filter { !changed.contains($0.key) }, modelVersion: embeddingVersion)
+        let changed = Set(writes.readTexts.filter { current[$0.key] != $0.value }.keys)
+        try upsertArticleFeatures(
+            writes.features.filter { !changed.contains($0.key) }, version: EventFeatures.storageVersion, at: date)
+        try upsertArticleEmbeddings(
+            writes.embeddings.filter { !changed.contains($0.key) }, modelVersion: SentenceEmbedder.modelVersion)
         try upsertPairDecisions(
-            decisions.filter { !changed.contains($0.articleID) && !changed.contains($0.otherArticleID) },
-            matcherVersion: matcherVersion, at: date)
-        guard !cleared.isEmpty else { return }
+            writes.decisions.filter { !changed.contains($0.articleID) && !changed.contains($0.otherArticleID) },
+            matcherVersion: EventMatcher.version, at: date)
+        guard !writes.cleared.isEmpty else { return }
         try inEventTransaction { () throws -> Void in
-            for (low, high) in cleared {
+            for (low, high) in writes.cleared {
                 try eventRows(
                     "DELETE FROM pair_assessments WHERE article_id = ? AND other_article_id = ?;",
                     [.text(low), .text(high)])

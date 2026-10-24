@@ -141,9 +141,9 @@ enum EventClusterer {
         }
         func store() async {
             try? await database.storeClusteringPass(
-                features: newFeatures, embeddings: newEmbeddings, decisions: Array(decisions.values),
-                cleared: Array(cleared.values), readTexts: readTexts, featureVersion: EventFeatures.storageVersion,
-                embeddingVersion: SentenceEmbedder.modelVersion, matcherVersion: EventMatcher.version, at: now)
+                DatabaseEngine.ClusteringPassWrites(
+                    features: newFeatures, embeddings: newEmbeddings, decisions: Array(decisions.values),
+                    cleared: Array(cleared.values), readTexts: readTexts), at: now)
             newFeatures = [:]
             newEmbeddings = [:]
             decisions = [:]
