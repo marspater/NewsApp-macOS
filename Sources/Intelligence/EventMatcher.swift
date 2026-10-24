@@ -153,6 +153,14 @@ extension EventFeatures {
             .replacingOccurrences(of: "&nbsp;", with: " ").replacingOccurrences(of: "&amp;", with: "&")
     }
 
+    /// The exact text the deterministic features and the sentence embedding both read: the plain headline and the
+    /// first `descriptionPrefix` plain description characters. One definition keeps the two signals aligned.
+    static func matchingText(title: String, description: String) -> String {
+        let headline = plain(title).trimmingCharacters(in: .whitespacesAndNewlines)
+            .components(separatedBy: .newlines).joined(separator: " ")
+        return headline + "\n" + String(plain(description).prefix(descriptionPrefix))
+    }
+
     private static func primaryClauseRange(in text: String, titleEnd: String.Index) -> Range<String.Index>? {
         guard text.startIndex <= titleEnd, titleEnd <= text.endIndex else { return nil }
         let nsRange = NSRange(text.startIndex..<titleEnd, in: text)
@@ -180,6 +188,8 @@ extension EventFeatures {
         let usesCapitalization: Bool
         var features: EventFeatures
         var nameTokens: Set<String> = []
+        /// Words of typed person names: "Jordan" in "Michael Jordan" is never the country.
+        var personTokens: Set<String> = []
         var lemmas: [String.Index: String] = [:]
 
         mutating func collectEntities(from tagger: NLTagger) {
@@ -196,7 +206,9 @@ extension EventFeatures {
                     if let surname = name.split(separator: " ").last, surname.count >= 3, String(surname) != name {
                         features.people.insert(String(surname))
                     }
-                    nameTokens.formUnion(name.split(separator: " ").map(String.init))
+                    let words = name.split(separator: " ").map(String.init)
+                    nameTokens.formUnion(words)
+                    personTokens.formUnion(words)
                 } else if tag == .placeName || tag == .organizationName {
                     let canonicalPlace = EventPlaces.canonical(name)
                     if tag == .placeName || canonicalPlace.hasPrefix("@") { features.places.insert(canonicalPlace) }
@@ -252,7 +264,7 @@ extension EventFeatures {
                 return true
             }
             let canonicalWordPlace = EventPlaces.canonical(word)
-            if canonicalWordPlace.hasPrefix("@"), token.first?.isUppercase == true {
+            if canonicalWordPlace.hasPrefix("@"), token.first?.isUppercase == true, !personTokens.contains(word) {
                 features.places.insert(canonicalWordPlace)
                 return true
             }
@@ -329,9 +341,8 @@ extension EventFeatures {
     /// Extracts features with on-device NaturalLanguage only. Results depend on the OS models for the
     /// language; when they are missing, the article simply has fewer signals and matches less.
     init(title rawTitle: String, description rawDescription: String, date: Date) {
-        let title = Self.plain(rawTitle).trimmingCharacters(in: .whitespacesAndNewlines)
-        let description = String(Self.plain(rawDescription).prefix(Self.descriptionPrefix))
-        let text = title + "\n" + description
+        let text = Self.matchingText(title: rawTitle, description: rawDescription)
+        let title = String(text.prefix { !$0.isNewline })
         let language = EventMatchKey.language(of: text)
         let whole = text.startIndex..<text.endIndex
         let titleEnd = text.index(text.startIndex, offsetBy: title.count, limitedBy: text.endIndex) ?? text.endIndex
@@ -356,8 +367,22 @@ extension EventFeatures {
         let tollNumbers = Self.tolls(in: title.lowercased()).intersection(collector.features.titleNumbers)
         collector.features.titleNumbers.subtract(tollNumbers)
         collector.features.tollNumbers = tollNumbers
+        // "Three dead after mall shooting": a primary clause that only counts consequences names no act of its own,
+        // so it cannot separate the report from coverage that leads with the shooting itself.
+        if collector.features.primaryTitleTerms.allSatisfy({
+            Self.consequenceTerms.contains($0) || !$0.contains(where: \.isLetter)
+        }) {
+            collector.features.primaryTitleTerms = []
+        }
         self = collector.features
     }
+
+    /// Lemmas and words that report the outcome of an occurrence rather than an occurrence: tolls and their changes.
+    private static let consequenceTerms: Set<String> = [
+        "kill", "killed", "dead", "death", "deaths", "die", "died", "dying", "injure", "injured", "injury", "injuries",
+        "wound", "wounded", "hurt", "casualty", "casualties", "missing", "victim", "victims", "toll", "rise", "rises",
+        "climb", "climbs", "reach", "reaches", "mount", "mounts", "survivor", "survivors", "least",
+    ]
 
     private static let casualtyWords =
         "killed|kills?|killing|dead|deaths?|die[sd]?|dying|injured|injures?|wounded|wounds|hurt|casualties|missing|lives|victims"
@@ -446,7 +471,7 @@ struct EventPairAssessment: Sendable, Equatable {
 enum EventMatcher {
     /// Bump when matching changes; recent articles and active memberships are revalidated.
     /// Unchanged archived memberships remain intact.
-    static let version = 7
+    static let version = 8
 
     private static func pairConflict(
         _ a: EventFeatures, _ b: EventFeatures, gap: TimeInterval, maximumTimeGap: TimeInterval

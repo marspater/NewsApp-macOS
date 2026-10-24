@@ -50,7 +50,7 @@ enum EventClusterer {
                 return stored
             }
             guard await SentenceEmbedder.shared.isAvailable else { return nil }
-            let text = "\(row.title)\n\(String(row.description.prefix(EventFeatures.descriptionPrefix)))"
+            let text = EventFeatures.matchingText(title: row.title, description: row.description)
             if let computed = await SentenceEmbedder.shared.embed(text) {
                 embeddingCache[row.id] = computed
                 try? await database.upsertArticleEmbeddings(

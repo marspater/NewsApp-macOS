@@ -38,7 +38,7 @@ flowchart LR
     subgraph Intel["Intelligence · on device"]
         EQ["<b>EnrichmentQueue</b><br/>bounded classification"]
         EC["<b>EventClusterer</b>"]
-        EM["<b>EventMatcher v7</b><br/>MiniLM embeddings"]
+        EM["<b>EventMatcher v8</b><br/>MiniLM embeddings"]
         CEP["<b>ContentExtraction<br/>Pipeline</b><br/>reader v11 · SwiftSoup"]
         OV["<b>Overview builders</b><br/>cited sentences"]
         WT["<b>WorldTension</b>"]
@@ -261,9 +261,10 @@ Open a section before changing that area. Each rule is load-bearing; tests cover
 
 - Merges forward the absorbed ID one hop; splits give moved members a new ID. Neither touches article rows or read/save state. Events cap at 100 members.
 
-- Candidates (`EventCandidateFinder`): ≤8 terms per article as FTS5 phrases, ≤2× `EventCandidatePolicy.limit` rows, ±48 h window, 72 h active lifetime. Candidates are not matches.
+- Candidates (`EventCandidateFinder`): ≤8 terms per article as FTS5 phrases (headline names, then headline words, then names from the description), ≤2× `EventCandidatePolicy.limit` rows, ±48 h window, 72 h active lifetime. Candidates are not matches.
 
-- `EventMatcher` v7: headline + first 600 description characters. A pair needs dates within 36 h, a shared specific anchor (a country alone is not enough) and no conflict in language, period, year, weekday, distinguishing figure or place. Grey-zone pairs use MiniLM cosine (`SentenceEmbedder`, v21 embeddings). Admission: one matching pair, ⅔ compatible members (rounded up), the mean-score threshold.
+- `EventMatcher` v8: `EventFeatures.matchingText` (plain headline + first 600 plain description characters) is the one text both the deterministic features and the sentence embedding read. A pair needs dates within 36 h, a shared specific anchor (a country alone is not enough) and no conflict in language, period, year, weekday, distinguishing figure or place. A headline's primary clause before "after"/"following" guards against background-clause merges only when it names an act; a clause that only counts consequences ("Three dead after …") does not. A word of a typed person name is never canonicalized to a country. Grey-zone pairs use MiniLM cosine (`SentenceEmbedder` model version 2: uncased, accent-stripped WordPiece; v21 embeddings recompute per version). Admission: one matching pair, ⅔ compatible members (rounded up), the mean-score threshold.
+- `Tests/Fixtures/story-corpus/matcher-regressions-v1.json` is an authored English corpus replayed through the real clusterer on every test run with a true-positive floor and a false-pair ceiling; it is regression evidence, not the acceptance gate (the private holdout is).
 
 - Clustering is fully on device; no external LLM. Legacy judge types stay only for audit callers.
 
