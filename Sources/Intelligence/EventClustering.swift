@@ -32,18 +32,26 @@ enum EventClusterer {
         var report = EventClusteringReport()
         var cache: [String: EventFeatures] = [:]
         var embeddingCache: [String: [Float]] = [:]
-        /// Signals and vectors computed this pass; stored once at the end (#522).
+        /// Signals and vectors computed this pass; stored after each batch and at the end (#522).
         var newFeatures: [String: EventFeatures] = [:]
         var newEmbeddings: [String: [Float]] = [:]
+        /// Title and description each row had when this pass first read it; nothing computed from a text a refresh
+        /// has since replaced is stored.
+        var readTexts: [String: String] = [:]
         /// Rows whose vector storage was already consulted; a missing model is not asked again per pair.
         var embeddingLookups = Set<String>()
-        /// Decisions worth keeping, keyed low ID first; stored once at the end.
+        /// Decisions worth keeping, keyed low ID first, and pairs that no longer qualify for the row they may have.
         var decisions: [String: DatabaseEngine.PairDecision] = [:]
+        var cleared: [String: (String, String)] = [:]
         var attempts: [String: Int] = [:]
         /// Partners placed earlier in this pass; their rows in the current batch are stale.
         var handled = Set<String>()
+        func read(_ row: EventMatchRow) {
+            if readTexts[row.id] == nil { readTexts[row.id] = row.title + "\n" + row.description }
+        }
         func features(_ row: EventMatchRow) -> EventFeatures {
             if let cached = cache[row.id] { return cached }
+            read(row)
             let value = EventFeatures(title: row.title, description: row.description, date: row.date)
             cache[row.id] = value
             newFeatures[row.id] = value
@@ -52,6 +60,7 @@ enum EventClusterer {
         /// Warms both caches for the rows from storage in two queries, computing what is missing. Only a warm cache
         /// is read while matching, so the greedy order of decisions does not depend on storage.
         func prefetch(_ rows: [EventMatchRow]) async {
+            rows.forEach(read)
             let missing = rows.filter { cache[$0.id] == nil }
             if !missing.isEmpty {
                 let stored =
@@ -87,18 +96,24 @@ enum EventClusterer {
             }
         }
         func record(_ a: EventMatchRow, _ b: EventMatchRow, _ pair: EventPairAssessment) {
+            let (low, high) = a.id < b.id ? (a.id, b.id) : (b.id, a.id)
+            let key = low + "\n" + high
             let decision: String
             if pair.isMatch {
                 decision = "match"
-            } else if pair.conflict == .differentAct, pair.sharedSpecificAnchors >= 1 {
+            } else if pair.conflict == .differentAct, pair.sharedSpecificAnchors >= 1, pair.sharedKeywords >= 2 {
+                // A shared actor alone is no story (#462): a related act also shares what the story is about.
+                // ponytail: no common-actor discount here; add #462's if reviewed related-act links need it.
                 decision = "related-act"
             } else if pair.isBorderline {
                 decision = "borderline"
             } else {
+                decisions[key] = nil
+                cleared[key] = (low, high)
                 return
             }
-            let (low, high) = a.id < b.id ? (a.id, b.id) : (b.id, a.id)
-            decisions[low + "\n" + high] = DatabaseEngine.PairDecision(
+            cleared[key] = nil
+            decisions[key] = DatabaseEngine.PairDecision(
                 articleID: low, otherArticleID: high, decision: decision,
                 reason: pair.conflict?.rawValue ?? decision, score: pair.score)
         }
@@ -115,13 +130,14 @@ enum EventClusterer {
             return pair
         }
         func store() async {
-            try? await database.upsertArticleFeatures(newFeatures, version: EventFeatures.storageVersion, at: now)
-            try? await database.upsertArticleEmbeddings(newEmbeddings, modelVersion: SentenceEmbedder.modelVersion)
-            try? await database.upsertPairDecisions(
-                Array(decisions.values), matcherVersion: EventMatcher.version, at: now)
+            try? await database.storeClusteringPass(
+                features: newFeatures, embeddings: newEmbeddings, decisions: Array(decisions.values),
+                cleared: Array(cleared.values), readTexts: readTexts, featureVersion: EventFeatures.storageVersion,
+                embeddingVersion: SentenceEmbedder.modelVersion, matcherVersion: EventMatcher.version, at: now)
             newFeatures = [:]
             newEmbeddings = [:]
             decisions = [:]
+            cleared = [:]
         }
         var remaining = limit
         matching: while remaining > 0 {
@@ -291,6 +307,8 @@ enum EventClusterer {
                     }
                 }
             }
+            // Match state is already committed per article; a later throw or cancellation keeps this batch's work.
+            await store()
         }
         /// Every cross-pair needs specific shared evidence; a contradiction or exclusion always vetoes a merge.
         var fragmentExclusions: [String: Set<String>] = [:]

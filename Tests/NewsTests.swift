@@ -7198,8 +7198,20 @@ struct NewsTests {
         assertEqual(EventMatcher.assess(vote, unknownAct).conflict, nil, "An unclassified headline never vetoes")
         var casualtyReport = protest
         casualtyReport.actClass = .casualties
+        var resignation = vote
+        resignation.actClass = .personnel
         assertEqual(
-            EventMatcher.assess(vote, casualtyReport).conflict, .differentAct, "A toll is no consequence of a vote")
+            EventMatcher.assess(resignation, casualtyReport).conflict, .differentAct,
+            "A toll is no consequence of a resignation")
+        assertEqual(
+            EventMatcher.assess(vote, casualtyReport).conflict, nil,
+            "Vote headlines use casualty words politically (\"survives no-confidence motion\"), so no veto")
+        var protestElsewhere = features(
+            ["novak"], ["protest", "oust", "parliament", "vote"], hours: 4, places: ["maribor"])
+        protestElsewhere.actClass = .protest
+        assertEqual(
+            EventMatcher.assess(vote, protestElsewhere).conflict, .places,
+            "Other contradictions come first: a related act is only one where nothing else conflicts")
         var shooting = vote
         shooting.actClass = .attack
         assertEqual(
@@ -10418,6 +10430,13 @@ struct NewsTests {
         assertEqual(act("Trump says Fed chair should resign at Ohio rally"), .unknown, "Two acts named: unknown")
         assertEqual(act("Siemens to cut 5,000 jobs in energy division"), .unknown, "No cue: unknown")
         assertEqual(act("Hungarian novelist wins 2026 Nobel Prize in Literature"), .unknown, "No cue: unknown")
+        assertEqual(act("Zelensky attacks Trump over peace plan"), .unknown, "A verbal attack is no attack")
+        assertEqual(act("Israeli troops storm hospital in Gaza City"), .unknown, "Storm is no cue")
+        assertEqual(act("Supreme Court dismisses former prime minister's appeal"), .unknown, "Dismiss is no cue")
+        assertEqual(act("United States quits Paris climate accord"), .unknown, "Quit is no cue")
+        assertEqual(act("Bayrou survives no-confidence motion"), .casualties, "Survives reads as a consequence …")
+        assertFalse(ActClass.casualties.conflicts(with: .vote), "… which never vetoes a vote")
+        assertFalse(ActClass.ruling.conflicts(with: .casualties), "… or a ruling (\"law survives challenge\")")
         assertTrue(ActClass.vote.conflicts(with: .protest), "Two acts conflict")
         assertFalse(ActClass.vote.conflicts(with: .unknown), "Unknown never conflicts")
         assertFalse(ActClass.disaster.conflicts(with: .rescue), "A rescue follows a disaster")
@@ -10475,6 +10494,24 @@ struct NewsTests {
         assertEqual(
             try await db.fetchArticleEmbeddings(articleIDs: ids, modelVersion: 1).count, 0, "Its embedding too")
         assertEqual(try await count("pair_assessments"), "0", "And its pair decisions")
+        // A pass that read the old headline stores nothing computed from it once a refresh has replaced it.
+        try await db.storeClusteringPass(
+            features: features, embeddings: [ids[0]: Array(repeating: 0.05, count: 384)], decisions: [pair],
+            cleared: [], readTexts: [ids[0]: first.title + "\n", ids[1]: second.title + "\n"],
+            featureVersion: EventFeatures.storageVersion, embeddingVersion: 1, matcherVersion: EventMatcher.version)
+        assertEqual(
+            try await db.fetchArticleFeatures(articleIDs: ids, version: EventFeatures.storageVersion).keys.sorted(),
+            [ids[1]], "Only the unchanged story's signals are stored")
+        assertEqual(
+            try await db.fetchArticleEmbeddings(articleIDs: ids, modelVersion: 1).count, 0,
+            "No vector of the old headline")
+        assertEqual(try await count("pair_assessments"), "0", "No decision about it either")
+        try await db.upsertPairDecisions([pair], matcherVersion: EventMatcher.version)
+        try await db.storeClusteringPass(
+            features: [:], embeddings: [:], decisions: [], cleared: [(pair.articleID, pair.otherArticleID)],
+            readTexts: [:], featureVersion: EventFeatures.storageVersion, embeddingVersion: 1,
+            matcherVersion: EventMatcher.version)
+        assertEqual(try await count("pair_assessments"), "0", "A pair that no longer qualifies loses its row")
 
         try await db.upsertArticleFeatures(features, version: EventFeatures.storageVersion)
         try await db.upsertPairDecisions([pair], matcherVersion: EventMatcher.version)

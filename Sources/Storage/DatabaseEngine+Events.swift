@@ -1246,6 +1246,43 @@ extension DatabaseEngine {
         }
     }
 
+    /// Stores a clustering pass's signals, vectors and pair decisions and drops the rows of pairs that no longer
+    /// qualify, in one actor turn. `readTexts` holds each article's title and description as the pass read them;
+    /// values of an article that is gone or reads differently now are skipped: the rematch trigger dropped what was
+    /// stored for the old text, and the next pass computes the new one (#522).
+    func storeClusteringPass(
+        features: [String: EventFeatures], embeddings: [String: [Float]], decisions: [PairDecision],
+        cleared: [(String, String)], readTexts: [String: String], featureVersion: Int, embeddingVersion: Int,
+        matcherVersion: Int, at date: Date = Date()
+    ) throws {
+        var current: [String: String] = [:]
+        let ids = Array(readTexts.keys)
+        for start in stride(from: 0, to: ids.count, by: 500) {
+            let chunk = ids[start..<min(start + 500, ids.count)]
+            let marks = Array(repeating: "?", count: chunk.count).joined(separator: ", ")
+            for row in try eventRows(
+                "SELECT id, title, coalesce(description, '') FROM articles WHERE id IN (\(marks));",
+                chunk.map { .text($0) })
+            {
+                if let id = row[0] { current[id] = (row[1] ?? "") + "\n" + (row[2] ?? "") }
+            }
+        }
+        let changed = Set(readTexts.filter { current[$0.key] != $0.value }.keys)
+        try upsertArticleFeatures(features.filter { !changed.contains($0.key) }, version: featureVersion, at: date)
+        try upsertArticleEmbeddings(embeddings.filter { !changed.contains($0.key) }, modelVersion: embeddingVersion)
+        try upsertPairDecisions(
+            decisions.filter { !changed.contains($0.articleID) && !changed.contains($0.otherArticleID) },
+            matcherVersion: matcherVersion, at: date)
+        guard !cleared.isEmpty else { return }
+        try inEventTransaction { () throws -> Void in
+            for (low, high) in cleared {
+                try eventRows(
+                    "DELETE FROM pair_assessments WHERE article_id = ? AND other_article_id = ?;",
+                    [.text(low), .text(high)])
+            }
+        }
+    }
+
     /// A clusterer decision about one pair, keyed low ID first.
     struct PairDecision: Hashable, Sendable {
         let articleID: String

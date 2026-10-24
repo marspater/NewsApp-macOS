@@ -316,7 +316,9 @@ extension EventFeatures {
                 if keyword.count >= 3, !EventFeatures.stopwords.contains(keyword) {
                     features.keywords.insert(keyword)
                     if inPrimaryClause { features.primaryTitleTerms.insert(keyword) }
-                    if actRange.overlaps(range) { features.actLemmas.insert(keyword) }
+                    if actRange.overlaps(range), tag != .verb || !ActClass.nounOnlyCues.contains(keyword) {
+                        features.actLemmas.insert(keyword)
+                    }
                 }
             } else if word.count >= 4 {
                 features.keywords.insert(word)
@@ -521,11 +523,12 @@ enum EventMatcher {
         if disjoint(a.periods, b.periods) { return .period }
         if disjoint(a.years, b.years) { return .year }
         if disjoint(a.weekdays, b.weekdays) { return .weekday }
-        if a.actClass.conflicts(with: b.actClass) { return .differentAct }
         if disjoint(a.titleNumbers, b.titleNumbers) { return .titleNumbers }
         if !sharesPlace && (disjoint(a.countries, b.countries) || disjoint(a.localPlaces, b.localPlaces)) {
             return .places
         }
+        // Last, so a different act is only reported when nothing else contradicts: it is a related-act candidate.
+        if a.actClass.conflicts(with: b.actClass) { return .differentAct }
         return nil
     }
 

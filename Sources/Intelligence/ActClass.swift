@@ -4,6 +4,7 @@ import Foundation
 /// the act differently ("resigns", "steps down"), so a class groups lemmas; two reports whose primary clauses name
 /// different acts are two events even when they share every actor, place and day (a vote and the protest after it).
 /// Cues are deliberately few and unambiguous: a headline no cue fits is `unknown`, and `unknown` never vetoes.
+/// The class is stored with the article's signals, so a cue edit bumps `EventFeatures.storageVersion`.
 enum ActClass: String, Codable, CaseIterable, Sendable {
     case vote, protest, attack, agreement, personnel, ruling, sanction, disaster, crash
     /// Consequence classes report what an incident left behind rather than naming an act of their own.
@@ -13,7 +14,9 @@ enum ActClass: String, Codable, CaseIterable, Sendable {
     var isConsequence: Bool { self == .casualties || self == .rescue }
 
     /// Acts that leave no casualties or rescues of their own, so a consequence report is never coverage of them.
-    private static let bloodless: Set<ActClass> = [.vote, .agreement, .personnel, .ruling, .sanction]
+    /// Votes and rulings are left out: their headlines use the casualty words politically ("survives no-confidence
+    /// motion", "kills the bill", "assisted dying law", "law survives challenge").
+    private static let bloodless: Set<ActClass> = [.agreement, .personnel, .sanction]
     /// A deliberate crash is an attack and an attack can bring a plane or vehicle down, so reports of one hijacking
     /// read as either ("copilot who tried to crash flight", "cockpit attack").
     private static let overlapping: Set<Set<ActClass>> = [[.attack, .crash]]
@@ -41,6 +44,9 @@ enum ActClass: String, Codable, CaseIterable, Sendable {
         return .unknown
     }
 
+    /// Cues that name the act only as nouns: as a verb they are mostly words ("Zelensky attacks Trump over …").
+    static let nounOnlyCues: Set<String> = ["attack", "attacks", "attacked"]
+
     /// Multi-word cues whose single words mean something else ("steps down", "opens fire", "strikes down").
     static func phraseLemmas(in clause: String) -> Set<String> {
         let lowered = clause.lowercased()
@@ -61,7 +67,8 @@ enum ActClass: String, Codable, CaseIterable, Sendable {
             for word in words.split(separator: " ") { cues[String(word)] = act }
         }
         // Inflections are listed where the lemma tagger may leave the surface form. Outcomes a vote, a court or a coup
-        // can produce ("oust", "ban") are no cues: "votes to oust" names one act, the vote.
+        // can produce ("oust", "ban") are no cues: "votes to oust" names one act, the vote. "Storm" is no cue
+        // (troops storm a building).
         add(.vote, "vote votes voted voter election referendum ballot elect elects elected reelect runoff")
         add(
             .protest,
@@ -71,11 +78,13 @@ enum ActClass: String, Codable, CaseIterable, Sendable {
             .attack,
             "attack attacks attacked attacker airstrike shelling bombing bomber bombardment bombard missile shooting"
                 + " shooter gunman gunmen gunfire stabbing ambush assault raid massacre")
-        add(.agreement, "agreement agree agrees agreed accord pact treaty ceasefire truce deal")
+        // "Accord" is a stopword ("according"), so it never reaches the classifier.
+        add(.agreement, "agreement agree agrees agreed pact treaty ceasefire truce deal")
+        // "Dismiss" (a court dismisses an appeal) and "quit" (quits a treaty) are no cues.
         add(
             .personnel,
-            "resign resigns resigned resignation appoint appoints appointed appointment dismiss dismissal sack sacked"
-                + " reshuffle nominate nomination quit quits")
+            "resign resigns resigned resignation appoint appoints appointed appointment sack sacked reshuffle nominate"
+                + " nomination")
         add(
             .ruling,
             "ruling verdict convict convicted conviction sentence sentenced acquit acquitted acquittal indict indicted"
@@ -84,7 +93,7 @@ enum ActClass: String, Codable, CaseIterable, Sendable {
         add(.sanction, "sanction sanctions sanctioned embargo blacklist")
         add(
             .disaster,
-            "earthquake quake tremor flood floods flooding hurricane typhoon cyclone storm tornado wildfire eruption"
+            "earthquake quake tremor flood floods flooding hurricane typhoon cyclone tornado wildfire eruption"
                 + " erupt erupts erupted landslide mudslide tsunami avalanche blizzard heatwave")
         add(
             .crash,

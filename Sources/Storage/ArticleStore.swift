@@ -392,7 +392,8 @@ final class ArticleStore: ObservableObject {
         let members = try await database.fetchArticles(limit: nil, eventID: eventID)
         guard let start = members.map(\.pubDate).min() else { return links }
         var seen = Set(links.map(\.eventID))
-        for event in try await database.relatedActEvents(eventID: eventID)
+        // Every related act, earlier and later: the cap applies after the earlier-only filter.
+        for event in try await database.relatedActEvents(eventID: eventID, limit: .max)
         where event.firstPublishedAt < start && seen.insert(event.eventID).inserted {
             guard links.count < EventStoryRelation.linkLimit else { break }
             links.append(event)
