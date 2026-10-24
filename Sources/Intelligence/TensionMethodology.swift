@@ -263,8 +263,9 @@ enum TensionEventClassifier {
         )
     }
 
+    /// Ordered words; `containsCue` reads negations and reversals by position.
     static func words(_ text: String) -> [String] {
-        text.lowercased().split(whereSeparator: { !$0.isLetter && !$0.isNumber }).map(String.init)
+        MuteRules.words(text).map(String.init)
     }
 
     /// Whether any cue occurs as whole words without a negation before it (or, for reversible cues, a reversal after).

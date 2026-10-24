@@ -85,10 +85,7 @@ class FeedManager: NSObject, ObservableObject {
         enrichmentQueue: EnrichmentQueue? = nil,
         importanceJudge _: StoryImportanceJudge = .unavailable,
         imageFinder: StoryImageFinder = .publisherPages,
-        allowsBackgroundWork: @escaping @MainActor () -> Bool = {
-            let info = ProcessInfo.processInfo
-            return !info.isLowPowerModeEnabled && info.thermalState.rawValue < ProcessInfo.ThermalState.serious.rawValue
-        },
+        allowsBackgroundWork: @escaping @MainActor () -> Bool = { IntelligencePolicy.allowsEnergy() },
         powerEvents: NotificationCenter? = nil,
         wakeRefreshDelay: Duration = .seconds(10),
         now: @escaping () -> Date = { Date() }
@@ -472,7 +469,15 @@ class FeedManager: NSObject, ObservableObject {
         let muting = appSettings.muteRules
         let notifiable = newArticles.filter { eligible.contains($0.id) && !muting.mutes($0) }
         if appSettings.notificationsEnabled && !notifiable.isEmpty {
-            await notifyBatch(notifiable, appSettings.notificationMode)
+            let mode = appSettings.notificationMode
+            var batch = notifiable
+            // Clustering has run: in full mode, which posts a banner per story, reports of one event notify once, by
+            // their strongest report (#523). The summary modes count every new story and source, so they get all.
+            if mode == .full {
+                let events = (try? await articleStore.database.eventIDs(forArticles: notifiable.map(\.id))) ?? [:]
+                batch = await NotificationService.representatives(of: notifiable, events: events)
+            }
+            await notifyBatch(batch, mode)
         }
         guard !Task.isCancelled, !isStopped else { return }
         enrichArticlesInBackground()

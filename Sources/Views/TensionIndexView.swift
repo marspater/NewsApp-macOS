@@ -149,7 +149,7 @@ struct TensionIndexView: View {
     private func comparison(_ reading: WorldTensionReading) -> String? {
         let others = history.filter {
             $0.id < reading.id && $0.id > reading.id.addingTimeInterval(-30 * 86400)
-                && $0.modelGeneration == reading.modelGeneration
+                && $0.modelGeneration == reading.modelGeneration && $0.assessment.isEstimate != true
         }
         if others.count >= 3 {
             let below = others.filter { $0.assessment.score < reading.assessment.score }.count
@@ -293,7 +293,7 @@ struct TensionIndexView: View {
             .font(AppTypography.caption).foregroundStyle(AppColor.secondaryText)
             DisclosureGroup("How World Tension Is Assessed") {
                 Text(
-                    "The on-device model reasons about novelty, proximity to worst case, reversibility and scope of impact. Nuclear and WMD situations carry outsized weight when supported by headlines. Current international headlines are compared with earlier coverage; no fixed formula sets the score. Before an assessment is saved, every place, person and figure it names is checked against the supplied headlines. Royal, celebrity, sport and lifestyle stories are left out. When the model is unavailable and no assessment exists for the day, a labelled keyword estimate is shown instead and not saved."
+                    "The on-device model reasons about novelty, proximity to worst case, reversibility and scope of impact. Nuclear and WMD situations carry outsized weight when supported by headlines. Current international headlines are compared with earlier coverage; no fixed formula sets the score. Before an assessment is saved, every place, person and figure it names is checked against the supplied headlines. Royal, celebrity, sport and lifestyle stories are left out. When no assessment exists for the day, a labelled keyword estimate of the current headlines is shown instead. It is not saved while the model is unavailable; when the model declines the headlines, it is kept as the day's reading until new headlines or Reassess bring an assessment."
                 )
                 .font(AppTypography.caption).foregroundStyle(AppColor.secondaryText)
             }

@@ -88,7 +88,7 @@ struct EventFeedSummary: Hashable, Sendable {
     }
 
     static func titleKey(_ title: String) -> String {
-        title.lowercased().split(whereSeparator: { !$0.isLetter && !$0.isNumber }).joined(separator: " ")
+        MuteRules.phrase(title)
     }
 }
 
