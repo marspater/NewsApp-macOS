@@ -14,13 +14,16 @@ struct MuteRules: Equatable, Hashable, Sendable {
     private(set) var sources: [String] = []
     /// Topics as the reader typed them, with whitespace collapsed.
     private(set) var topics: [String] = []
+    /// Identifiers of the fixed topic sets the reader switched on (`MuteTopicSet.all`), in the order switched on.
+    private(set) var topicSets: [String] = []
 
-    init(sources: [String] = [], topics: [String] = []) {
+    init(sources: [String] = [], topics: [String] = [], topicSets: [String] = []) {
         for source in sources { addSource(source) }
         for topic in topics { addTopic(topic) }
+        for set in topicSets { addTopicSet(set) }
     }
 
-    var isEmpty: Bool { sources.isEmpty && topics.isEmpty }
+    var isEmpty: Bool { sources.isEmpty && topics.isEmpty && topicSets.isEmpty }
 
     // MARK: - Editing
 
@@ -54,6 +57,18 @@ struct MuteRules: Equatable, Hashable, Sendable {
         topics.removeAll { $0 == topic }
     }
 
+    /// Switches a fixed topic set on. Returns false for an unknown set or one already on.
+    @discardableResult
+    mutating func addTopicSet(_ id: String) -> Bool {
+        guard MuteTopicSet.named(id) != nil, !topicSets.contains(id) else { return false }
+        topicSets.append(id)
+        return true
+    }
+
+    mutating func removeTopicSet(_ id: String) {
+        topicSets.removeAll { $0 == id }
+    }
+
     // MARK: - Matching
 
     func mutes(_ article: FeedArticle) -> Bool {
@@ -80,10 +95,22 @@ struct MuteRules: Equatable, Hashable, Sendable {
         return topics.filter { text.contains(Self.paddedPhrase($0)) }
     }
 
+    /// The switched-on topic sets with a phrase found as whole words in a headline or summary.
+    func matchedTopicSets(title: String, description: String) -> [String] {
+        let text = Self.paddedPhrase(title + "\n" + description)
+        return topicSets.filter { id in
+            MuteTopicSet.named(id)?.phrases.contains { text.contains(Self.paddedPhrase($0)) } == true
+        }
+    }
+
     /// Hosts, one per line, as bound to `news_muted_source` in SQLite.
     var sourceParameter: String { sources.joined(separator: "\n") }
-    /// Normalized topic phrases, one per line, as bound to `news_muted_topic` in SQLite.
-    var topicParameter: String { topics.map(Self.phrase).joined(separator: "\n") }
+    /// Normalized topic phrases, typed topics then the phrases of each switched-on set, one per line, as bound to
+    /// `news_muted_topic` in SQLite. The SQLite path and `mutesTopic` read the same list.
+    var topicParameter: String {
+        (topics + topicSets.flatMap { MuteTopicSet.named($0)?.phrases ?? [] }).map(Self.phrase)
+            .joined(separator: "\n")
+    }
 
     /// Whether a host list (one per line) covers the host of `link`.
     static func sourceList(_ list: String, mutes link: String) -> Bool {
@@ -149,8 +176,30 @@ struct MuteRules: Equatable, Hashable, Sendable {
     }
 }
 
+/// A fixed set of topic phrases the reader mutes with one switch (#590). Sets ship with the app and are not editable;
+/// their phrases match as whole words like typed topics, so "AI" never hides "Dubai" or "aid".
+struct MuteTopicSet: Identifiable, Equatable, Sendable {
+    let id: String
+    let title: String
+    let phrases: [String]
+
+    static let artificialIntelligence = MuteTopicSet(
+        id: "artificial-intelligence", title: "Artificial Intelligence",
+        phrases: [
+            "AI", "A.I.", "artificial intelligence", "AGI", "generative AI", "AI agent", "AI agents", "LLM", "LLMs",
+            "large language model", "large language models", "machine learning", "deep learning", "neural network",
+            "neural networks", "chatbot", "chatbots", "ChatGPT", "GPT", "OpenAI", "Anthropic", "Claude", "Gemini",
+            "Copilot", "DeepSeek", "Grok", "Midjourney", "Perplexity", "xAI",
+        ])
+
+    static let all = [artificialIntelligence]
+
+    static func named(_ id: String) -> MuteTopicSet? { all.first { $0.id == id } }
+}
+
 /// Stories each rule covers in the stored library, for the muting settings.
 struct MuteRuleCounts: Equatable, Sendable {
     var sources: [String: Int] = [:]
     var topics: [String: Int] = [:]
+    var topicSets: [String: Int] = [:]
 }
