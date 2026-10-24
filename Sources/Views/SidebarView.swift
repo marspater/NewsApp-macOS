@@ -34,6 +34,7 @@ struct SidebarView: View {
     @State private var isSubscribePopoverPresented = false
     @State private var newFeedURL: String = ""
     @State private var isDropTargeted = false
+    @State private var pendingSectionRemoval: String?
     /// On macOS 27 a row click does not keep keyboard focus in the sidebar once the window title and toolbar
     /// search update for the new section, so arrow keys reached the story list instead.
     @FocusState private var isListFocused: Bool
@@ -149,12 +150,22 @@ struct SidebarView: View {
                 topicRow(title: section, icon: iconForSection(section), accessibility: "Section \(section)")
                     .contextMenu {
                         Button(role: .destructive) {
-                            feedManager.removeSection(section)
+                            pendingSectionRemoval = section
                         } label: {
                             Label("Remove Section", systemImage: "minus.circle")
                         }
                     }
             }
+        }
+        .confirmationDialog(
+            "Remove the section “\(pendingSectionRemoval ?? "")”?",
+            isPresented: Binding(
+                get: { pendingSectionRemoval != nil }, set: { if !$0 { pendingSectionRemoval = nil } }),
+            presenting: pendingSectionRemoval
+        ) { section in
+            Button("Remove Section", role: .destructive) { feedManager.removeSection(section) }
+        } message: { _ in
+            Text("Stories stay in your library; only the sidebar entry goes.")
         }
     }
 

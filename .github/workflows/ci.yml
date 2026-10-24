@@ -44,6 +44,9 @@ jobs:
       - name: Run Unit Tests
         run: ./test.sh
 
+      - name: Check Swift Formatting
+        run: script/format.sh --check
+
       - name: Verify Publisher Excerpts
         run: NEWS_NATIVE_HARNESS=Tests/PublisherExcerptTests.swift ./script/native_performance_baseline.sh
 

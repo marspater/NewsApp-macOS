@@ -41,6 +41,11 @@ struct MainView: View {
     @State private var tensionDayStart = TensionMethodology.day(containing: Date()).start
     @State private var isWindowDropTargeted = false
 
+    /// The Dock icon carries the unread count while the setting is on; clearing it removes the badge.
+    private func updateDockBadge(_ unread: Int) {
+        NSApp.dockTile.badgeLabel = appSettings.showsDockBadge && unread > 0 ? String(unread) : nil
+    }
+
     var body: some View {
         splitView
             .alert(
@@ -54,6 +59,8 @@ struct MainView: View {
             .navigationSplitViewStyle(.balanced)
             // A sheet, so the rest of the window waits until the reader closes it.
             .sheet(isPresented: $showsTension, content: tensionSheetContent)
+            .onChange(of: articleStore.unreadCount, initial: true) { _, count in updateDockBadge(count) }
+            .onChange(of: appSettings.showsDockBadge) { _, _ in updateDockBadge(articleStore.unreadCount) }
             .onReceive(NotificationCenter.default.publisher(for: .showNewsTensionCommand)) { _ in
                 handleNewsTensionCommand()
             }

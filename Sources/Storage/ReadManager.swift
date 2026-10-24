@@ -45,6 +45,24 @@ final class ReadManager: ObservableObject {
         persistRead(canonicalId, isRead: true)
     }
 
+    /// Marks every listed story read in one write; stories already read are left alone.
+    func markAsRead(ids: [String]) {
+        let unread = Set(ids.map(getCanonicalId)).subtracting(readArticles)
+        guard !unread.isEmpty else { return }
+        readArticles.formUnion(unread)
+        let previous = mutationTask
+        pendingMutations += 1
+        mutationTask = Task {
+            await previous?.value
+            await articleStore.markAsRead(ids: Array(unread))
+            pendingMutations -= 1
+            if pendingMutations == 0 {
+                readArticles = articleStore.readArticleIDs
+                mutationTask = nil
+            }
+        }
+    }
+
     func isRead(_ id: String) -> Bool {
         let canonicalId = getCanonicalId(id)
         return readArticles.contains(canonicalId)

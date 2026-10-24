@@ -195,6 +195,16 @@ final class ArticleStore: ObservableObject {
         }
     }
 
+    func markAsRead(ids: [String]) async {
+        do {
+            try await database.markReadBatch(articleIds: ids, isRead: true)
+            await refreshState()
+        } catch {
+            operationError = "Could not mark stories as read. Please try again."
+            logger.error("Failed to mark \(ids.count) stories as read: \(error.localizedDescription)")
+        }
+    }
+
     func markAllAsRead(feedUrl: String? = nil) async {
         do {
             try await database.markAllRead(feedUrl: feedUrl)

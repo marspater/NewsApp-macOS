@@ -53,6 +53,7 @@ struct SettingsView: View {
     @State private var cacheActionMessage: String? = nil
     @State private var cacheActionFailed = false
     @State private var pendingClear: StorageClear?
+    @State private var pendingUnsubscribe: String?
     @State private var showsCatalog = false
     @State private var newMutedSource = ""
     @State private var newMutedTopic = ""
@@ -317,7 +318,7 @@ struct SettingsView: View {
                         }
                         Spacer()
                         Button(role: .destructive) {
-                            feedManager.removeFeed(url: urlString)
+                            pendingUnsubscribe = urlString
                         } label: {
                             Image(systemName: "trash")
                                 .font(AppTypography.label)
@@ -332,6 +333,15 @@ struct SettingsView: View {
                 }
             }
             .formStyle(.grouped)
+            .confirmationDialog(
+                "Unsubscribe from “\(pendingUnsubscribe ?? "")”?",
+                isPresented: Binding(get: { pendingUnsubscribe != nil }, set: { if !$0 { pendingUnsubscribe = nil } }),
+                presenting: pendingUnsubscribe
+            ) { url in
+                Button("Unsubscribe", role: .destructive) { feedManager.removeFeed(url: url) }
+            } message: { _ in
+                Text("Stories already in your library stay; no new stories arrive from this feed.")
+            }
 
             Text(FeedHealth.disclaimer)
                 .font(AppTypography.caption)
@@ -456,6 +466,12 @@ struct SettingsView: View {
                 Text("Receive native macOS notification alerts when high-importance news arrives.")
                     .font(AppTypography.caption)
                     .foregroundStyle(AppColor.secondaryText)
+                Toggle(
+                    "Show Unread Count on Dock Icon",
+                    isOn: Binding(
+                        get: { appSettings.showsDockBadge },
+                        set: { appSettings.setShowsDockBadge($0) }
+                    ))
             }
 
             if appSettings.notificationsEnabled {
