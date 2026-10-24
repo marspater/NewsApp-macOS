@@ -575,23 +575,27 @@ struct EventOverviewReaderView: View {
             .lineSpacing(bodyLineSpacing)
             .fixedSize(horizontal: false, vertical: true)
             .textSelection(.enabled)
-            .environment(
-                \.openURL,
-                OpenURLAction { url in
-                    guard url.scheme == Self.citationScheme, let index = url.host.flatMap(Int.init),
-                        let source = sources.first(where: { $0.index == index })
-                    else { return .systemAction }
-                    onSelectCitation(source.citation, matchingArticle(for: source.citation))
-                    return .handled
-                }
-            )
-            .accessibilityActions {
-                ForEach(sources, id: \.index) { source in
-                    Button("Open source \(source.index), \(source.citation.sourceName ?? "source")") {
-                        onSelectCitation(source.citation, matchingArticle(for: source.citation))
-                    }
-                }
+            .environment(\.openURL, citationOpenURLAction(sources))
+            .accessibilityActions { citationAccessibilityActions(sources) }
+    }
+
+    /// Opens the source a `news-citation://<index>` link names; every other link keeps the system behaviour.
+    private func citationOpenURLAction(_ sources: [(index: Int, citation: OverviewCitation)]) -> OpenURLAction {
+        OpenURLAction { url in
+            guard url.scheme == Self.citationScheme, let index = url.host.flatMap(Int.init),
+                let source = sources.first(where: { $0.index == index })
+            else { return .systemAction }
+            onSelectCitation(source.citation, matchingArticle(for: source.citation))
+            return .handled
+        }
+    }
+
+    private func citationAccessibilityActions(_ sources: [(index: Int, citation: OverviewCitation)]) -> some View {
+        ForEach(sources, id: \.index) { source in
+            Button("Open source \(source.index), \(source.citation.sourceName ?? "source")") {
+                onSelectCitation(source.citation, matchingArticle(for: source.citation))
             }
+        }
     }
 
     static let citationScheme = "news-citation"
