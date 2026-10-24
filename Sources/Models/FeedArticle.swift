@@ -361,11 +361,11 @@ enum ArticleSection {
             "netflix", "disney", "actor", "actress", "box office", "concert", "album", "grammy", "oscar", "emmy",
         ],
         "Politics": [
-            "politic", "congress", "senate", "democrat", "republican", "election", "vote", "legislation", "government",
+            "politics", "political", "congress", "senate", "democrat", "republican", "election", "vote", "legislation", "government",
             "white house", "parliament", "policy", "campaign", "liberal", "conservative",
         ],
         "U.S. Politics": [
-            "politic", "congress", "senate", "democrat", "republican", "election", "vote", "legislation", "white house",
+            "politics", "political", "congress", "senate", "democrat", "republican", "election", "vote", "legislation", "white house",
             "biden", "trump", "campaign",
         ],
         "Business": [
@@ -399,7 +399,7 @@ enum ArticleSection {
             "travel", "flight", "airline", "hotel", "tourism", "destination", "vacation", "trip", "airport", "cruise",
         ],
         "Sports": [
-            "sport", "football", "basketball", "soccer", "baseball", "nfl", "nba", "mlb", "athlete", "championship",
+            "sport", "sports", "football", "basketball", "soccer", "baseball", "nfl", "nba", "mlb", "athlete", "championship",
             "match", "team", "league", "coach", "score", "olympic", "tennis", "golf",
         ],
         "World": [

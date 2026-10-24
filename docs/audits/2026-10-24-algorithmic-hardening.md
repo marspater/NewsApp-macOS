@@ -61,12 +61,13 @@ Only the outcome label is logged (`NewsTextModel` category). The prompt now stat
 
 Publisher category hints (`NewsCategory.match`) matched substrings ("Wildlife" → Lifestyle, "Stockholm" → Business, "Homeland" → Lifestyle, "Archipelago" → Technology); they now match whole words with explicit inflections.
 
-## Second pass (PR C, #513–#515, #517)
+## Second pass (PR C, #513–#515, #517, #518)
 
 | # | Defect | Change | Test |
 | --- | --- | --- | --- |
 | #513 | A quote-only search term became an empty FTS5 phrase (`""*`), which FTS5 rejects, so the whole search failed. | Terms empty after quote stripping are dropped; no FTS join when none remain. | `testFTS5SearchAndOperators` |
 | #514 | The extractive summarizer compared whitespace-split words, so "Westfield:" never matched "westfield"; ties broke on an unstable sort. | `MuteRules.words` on both sides; position tie-break. | `testArticleAnalyzerStructuredOutputAndFallbacks` |
+| #518 | Section keyword stems "politic" and "sport" never matched under whole-word matching. | "politics", "political", "sports" added. | `testCanonicalClassificationDisambiguation` |
 | #517 | Notification triage counted breaking-news signals by substring ("dies" in "studies", "diesel", "bodies"). | Whole-word counting in `breakingSignalCount(in:)`. | `testNotificationModeTriageAndGrammar` |
 | #515 | `DateParser` rejected `yyyy-MM-dd` and zone-less `yyyy-MM-dd'T'HH:mm:ss`, leaving such stories undated and unclusterable. | Both forms accepted, UTC assumed, after the existing formats. | `testDateParsing` |
 

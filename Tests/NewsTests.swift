@@ -14488,6 +14488,12 @@ struct NewsTests {
         assertTrue(
             ArticleSection.matches("Tech", title: "AI hardware launches", description: "", category: nil),
             "Standalone AI remains a technology cue")
+        assertTrue(
+            ArticleSection.matches("Politics", title: "Political row over the budget", description: "", category: nil),
+            "Section cues are whole words, so the stem 'politic' had to become 'politics' and 'political'")
+        assertTrue(
+            ArticleSection.matches("Sports", title: "Sports roundup: weekend results", description: "", category: nil),
+            "'sports' is a Sports cue in its own right")
 
         // Overlap 1: Health + Technology (AI scanner for hospital patients)
         assertEqual(
