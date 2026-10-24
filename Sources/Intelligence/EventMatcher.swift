@@ -619,6 +619,20 @@ enum EventMatcher {
         return pair
     }
 
+    /// A pair the reader put in one event ("Same Event", #524): a match whatever its signals say.
+    static func forced(_ pair: EventPairAssessment, policy: EventMatchPolicy = .standard) -> EventPairAssessment {
+        var pair = pair
+        pair.conflict = nil
+        pair.softConflict = false
+        pair.isBorderline = false
+        pair.needsConfirmation = false
+        pair.isMatch = true
+        pair.isCompatible = true
+        pair.sharedSpecificAnchors = max(pair.sharedSpecificAnchors, 1)
+        pair.score = max(pair.score, policy.matchScore)
+        return pair
+    }
+
     static func eventScore(
         for article: EventFeatures, members: [EventFeatures], excluded: Bool = false,
         policy: EventMatchPolicy = .standard

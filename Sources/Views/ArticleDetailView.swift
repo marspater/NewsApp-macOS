@@ -233,6 +233,15 @@ struct ArticleDetailView: View {
                             // Opening an event from here counts as seeing it, as it does from the feed.
                             await articleStore.markEventSeen(related.eventID)
                         }
+                    },
+                    onCombineRelatedEvent: { related in
+                        Task {
+                            guard await articleStore.includeEvent(related.eventID, inEvent: overview.eventID) else {
+                                return
+                            }
+                            relatedStories = nil
+                            await loadEventOverviewForActiveArticle()
+                        }
                     }
                 )
                 .id(overview.id)
