@@ -947,6 +947,32 @@ actor DatabaseEngine {
                 throw error
             }
         }
+        if version < 25 {
+            try beginTransaction()
+            do {
+                try Task.checkCancellation()
+                // "Same event" corrections (#524), the mirror of event_exclusions: pairs the reader put together, which
+                // every later pass keeps together. The newer of an inclusion and an exclusion of one pair wins.
+                try executeSimple(
+                    """
+                    CREATE TABLE IF NOT EXISTS event_inclusions (
+                        article_id TEXT NOT NULL REFERENCES articles(id) ON DELETE CASCADE,
+                        other_article_id TEXT NOT NULL REFERENCES articles(id) ON DELETE CASCADE,
+                        created_at REAL NOT NULL,
+                        PRIMARY KEY (article_id, other_article_id),
+                        CHECK (article_id < other_article_id)
+                    );
+                    CREATE INDEX IF NOT EXISTS idx_event_inclusions_other ON event_inclusions(other_article_id);
+                    """
+                )
+                try Task.checkCancellation()
+                try setUserVersion(25)
+                try commitTransaction()
+            } catch {
+                try? rollbackTransaction()
+                throw error
+            }
+        }
     }
 
     /// Muting predicates for list queries (`MuteRules`); both are pure functions of their arguments.

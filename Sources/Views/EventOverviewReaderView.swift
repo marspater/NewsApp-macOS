@@ -22,9 +22,11 @@ struct EventOverviewReaderView: View {
     let theme: ArticleThemeType
     let onSelectArticle: (FeedArticle) -> Void
     let onSelectCitation: (OverviewCitation, FeedArticle?) -> Void
-    /// Earlier events of the same developing story; never merged into this one.
+    /// Earlier events of the same developing story; merged into this one only when the reader says so.
     let relatedEvents: [RelatedStoryEvent]
     let onSelectRelatedEvent: (RelatedStoryEvent) -> Void
+    /// "Same Event": the reader says a related event reports this one (#524); nil hides the action.
+    let onCombineRelatedEvent: ((RelatedStoryEvent) -> Void)?
 
     init(
         overview: EventOverviewDocument,
@@ -36,7 +38,8 @@ struct EventOverviewReaderView: View {
         onSelectCitation: @escaping (OverviewCitation, FeedArticle?) -> Void,
         onSelectRelatedEvent: @escaping (RelatedStoryEvent) -> Void = { _ in
             // Callers without navigation (harnesses, previews) pass no related events, so nothing calls this.
-        }
+        },
+        onCombineRelatedEvent: ((RelatedStoryEvent) -> Void)? = nil
     ) {
         self.overview = overview
         self.memberArticles = memberArticles
@@ -46,6 +49,7 @@ struct EventOverviewReaderView: View {
         self.onSelectArticle = onSelectArticle
         self.onSelectCitation = onSelectCitation
         self.onSelectRelatedEvent = onSelectRelatedEvent
+        self.onCombineRelatedEvent = onCombineRelatedEvent
     }
 
     @Environment(\.effectiveContrast) private var contrast
@@ -773,8 +777,26 @@ struct EventOverviewReaderView: View {
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    .help("Open the overview of this earlier event")
+                    .contextMenu {
+                        if let onCombineRelatedEvent {
+                            Button {
+                                onCombineRelatedEvent(event)
+                            } label: {
+                                Label("Same Event", systemImage: "arrow.triangle.merge")
+                            }
+                        }
+                    }
+                    .help(
+                        onCombineRelatedEvent == nil
+                            ? "Open the overview of this earlier event"
+                            : "Open the overview of this earlier event. Use the context menu if it reports this event."
+                    )
                     .accessibilityHint("Opens this earlier event")
+                    .accessibilityActions {
+                        if let onCombineRelatedEvent {
+                            Button("Same Event") { onCombineRelatedEvent(event) }
+                        }
+                    }
 
                     if event.eventID != relatedEvents.last?.eventID {
                         Divider().opacity(Self.dividerOpacity(for: contrast))

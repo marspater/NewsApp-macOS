@@ -425,6 +425,20 @@ final class ArticleStore: ObservableObject {
         }
     }
 
+    /// "Same event": the related event joins this one, and later passes keep them together (#524).
+    @discardableResult
+    func includeEvent(_ relatedEventID: String, inEvent eventID: String) async -> Bool {
+        do {
+            try await database.includeEvent(relatedEventID, inEvent: eventID)
+            eventRevision &+= 1
+            return true
+        } catch {
+            operationError = "These events could not be combined. Please try again."
+            logger.error("Failed to combine events: \(error.localizedDescription)")
+            return false
+        }
+    }
+
     // MARK: - Event Overviews
 
     @discardableResult

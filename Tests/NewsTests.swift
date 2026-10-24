@@ -540,6 +540,7 @@ struct NewsTests {
             try await testEventClustering(fixtureRoot: fixtureRoot)
             try await testArticleSignalsRoundTrip()
             try await testPairAssessmentsRecorded()
+            try await testEventInclusions()
             try await testEventEmbeddingIntegration()
             try await testEventFragmentMergingAndJudge(fixtureRoot: fixtureRoot)
             try await testStoryVisibility(fixtureRoot: fixtureRoot)
@@ -642,6 +643,7 @@ struct NewsTests {
         try await testEventClustering(fixtureRoot: fixtureRoot)
         try await testArticleSignalsRoundTrip()
         try await testPairAssessmentsRecorded()
+        try await testEventInclusions()
         try await testEventEmbeddingIntegration()
         try await testEventFragmentMergingAndJudge(fixtureRoot: fixtureRoot)
         try await testStoryVisibility(fixtureRoot: fixtureRoot)
@@ -908,7 +910,7 @@ struct NewsTests {
         execute(copy, "DROP VIEW article_fts_rows;")
         try await db.open()
         assertEqual(
-            value(copy, "PRAGMA user_version;"), "24", "Copied v14 library upgrades through v15 to the current schema")
+            value(copy, "PRAGMA user_version;"), "25", "Copied v14 library upgrades through v15 to the current schema")
         assertEqual(value(path, "PRAGMA user_version;"), "14", "Original library stays untouched")
         assertEqual(
             try await db.searchArticles(query: "Research").map(\.id), originalOrder,
@@ -5126,7 +5128,7 @@ struct NewsTests {
         await cancelledDB.close()
         let db = DatabaseEngine(path: copyPath)
         try await db.open()
-        assertEqual(value(copyPath, "PRAGMA user_version;"), "24", "Copied v4 library upgrades to the current schema")
+        assertEqual(value(copyPath, "PRAGMA user_version;"), "25", "Copied v4 library upgrades to the current schema")
         assertEqual(value(originalPath, "PRAGMA user_version;"), "4", "Original fixture stays untouched")
         assertEqual(try await db.fetchArticles(limit: nil).count, 3, "Migration keeps historical rows")
         assertEqual(
@@ -5379,7 +5381,7 @@ struct NewsTests {
             value(failure, "SELECT article_id FROM article_aliases WHERE value='observed-variant-b';"), "historical-b",
             "Injected failure preserves old aliases")
         try await migrated.open()
-        assertEqual(value(copy, "PRAGMA user_version;"), "24", "Copied library upgrades to the current schema")
+        assertEqual(value(copy, "PRAGMA user_version;"), "25", "Copied library upgrades to the current schema")
         assertEqual(value(path, "PRAGMA user_version;"), "8", "Original fixture remains untouched")
         assertEqual(
             try await migrated.fetchArticles(limit: nil).count, 6, "Only confident same-URL text copies are hidden")
@@ -6708,7 +6710,7 @@ struct NewsTests {
 
         let db = DatabaseEngine(path: copy)
         try await db.open()
-        assertEqual(value(copy, "PRAGMA user_version;"), "24", "Copied v11 library upgrades to the current schema")
+        assertEqual(value(copy, "PRAGMA user_version;"), "25", "Copied v11 library upgrades to the current schema")
         assertEqual(value(path, "PRAGMA user_version;"), "11", "Original v11 fixture stays untouched")
         assertEqual(try await db.fetchArticles(limit: nil).count, 5, "Event migration keeps every article")
         assertTrue(try await db.isRead(articleId: "event-a"), "Event migration keeps read state")
@@ -8995,7 +8997,7 @@ struct NewsTests {
             value("SELECT count(*) FROM sqlite_master WHERE name='idx_story_images_url';"), "0",
             "Cancellation leaves no partial index")
         try await db.open()
-        assertEqual(value("PRAGMA user_version;"), "24", "Existing v18 libraries receive the image index migration")
+        assertEqual(value("PRAGMA user_version;"), "25", "Existing v18 libraries receive the image index migration")
         assertEqual(
             sqlite3_exec(handle, "ANALYZE story_images;", nil, nil, nil), SQLITE_OK,
             "Use current fixture cardinality for the query planner")
@@ -9728,7 +9730,7 @@ struct NewsTests {
             ), "0", "Cancelled v14 migration rolls back its tables")
         let migrated = DatabaseEngine(path: copy)
         try await migrated.open()
-        assertEqual(value(copy, "PRAGMA user_version;"), "24", "Copied v13 library upgrades to the current schema")
+        assertEqual(value(copy, "PRAGMA user_version;"), "25", "Copied v13 library upgrades to the current schema")
         assertEqual(value(path, "PRAGMA user_version;"), "13", "Original v13 fixture stays untouched")
         assertEqual(
             try await migrated.fetchEvent(id: event.id)?.memberArticleIDs.count, 5, "Migration keeps events and members"
@@ -10398,7 +10400,7 @@ struct NewsTests {
             guard sqlite3_step(statement) == SQLITE_ROW else { return nil }
             return sqlite3_column_text(statement, 0).map { String(cString: $0) }
         }
-        assertEqual(value(copy, "PRAGMA user_version;"), "24", "Provenance schema upgrades to the current schema")
+        assertEqual(value(copy, "PRAGMA user_version;"), "25", "Provenance schema upgrades to the current schema")
         assertEqual(value(original, "PRAGMA user_version;"), "15", "Original v15 fixture remains untouched")
         assertEqual(value(copy, "PRAGMA quick_check;"), "ok", "Upgraded provenance library passes quick_check")
         assertEqual(value(copy, "PRAGMA foreign_key_check;"), nil, "Provenance has no dangling article references")
@@ -10569,6 +10571,62 @@ struct NewsTests {
         assertEqual(
             try await db.fetchArticleFeatures(articleIDs: resolved, version: EventFeatures.storageVersion).count, 4,
             "The pass stored every story's signals")
+        await db.close()
+    }
+
+    /// "Same Event" (#524): the reader's inclusion merges two events, survives a pass that re-matches a member the
+    /// rules would split off, and the newer of an inclusion and a separation of one pair wins.
+    static func testEventInclusions() async throws {
+        print("  - Testing Same Event inclusions (#524)...")
+        let db = DatabaseEngine(path: ":memory:")
+        try await db.open()
+        let start = Date(timeIntervalSince1970: 1_700_000_000)
+        func story(_ id: Int, _ title: String, hours: Double) -> FeedArticle {
+            FeedArticle(
+                title: title, link: "https://same.invalid/\(id)", guid: "same-\(id)", description: "",
+                pubDate: start.addingTimeInterval(hours * 3600), source: "Publisher \(id)")
+        }
+        let stories = [
+            story(1, "Parliament votes to oust Prime Minister Novak in Ljubljana", hours: 0),
+            story(2, "Parliament in Ljubljana votes to oust Prime Minister Novak", hours: 1),
+            story(3, "Thousands protest in Ljubljana after parliament votes to oust Novak", hours: 5),
+            story(4, "Thousands protest in Ljubljana streets after parliament votes to oust Novak", hours: 6),
+        ]
+        try await db.upsertArticles(stories)
+        let now = start.addingTimeInterval(7 * 3600)
+        _ = try await EventClusterer.run(in: db, now: now)
+        var ids: [String] = []
+        for article in stories { ids.append(try await db.resolvedArticleID(for: article)) }
+        func event(_ index: Int) async throws -> String? { try await db.eventID(forArticle: ids[index]) }
+        guard let vote = try await event(0), let protest = try await event(2), vote != protest else {
+            assertTrue(false, "The rules keep the vote and the protest apart")
+            return
+        }
+        try await db.includeEvent(vote, inEvent: protest)
+        assertEqual(try await event(0), protest, "Same Event moves the related event's reports into this one")
+        assertEqual(try await db.resolvedEventID(vote), protest, "The absorbed event forwards to the survivor")
+        assertEqual(
+            try await db.eventInclusions(for: [ids[0]])[ids[0]], Set([ids[2], ids[3]]),
+            "Every pair across the two events is recorded")
+
+        // A retitled vote report is matched again; the rules alone would split it off, the inclusion keeps it.
+        try await db.upsertArticles([story(1, "Parliament votes to oust Prime Minister Novak in Ljubljana late at night", hours: 0)])
+        _ = try await EventClusterer.run(in: db, now: now.addingTimeInterval(60))
+        assertEqual(try await event(0), protest, "The included report stays after the next pass")
+
+        // Separating it later wins over the inclusion, and including it again wins over the separation.
+        try await db.separateArticle(ids[0], fromEvent: protest)
+        assertEqual(try await db.eventInclusions(for: [ids[0]])[ids[0]] ?? [], [], "Separation drops its inclusions")
+        assertTrue(
+            try await db.eventExclusions(of: ids[0]).isSuperset(of: [ids[2], ids[3]]), "… and records exclusions")
+        _ = try await EventClusterer.run(in: db, now: now.addingTimeInterval(120))
+        assertTrue(try await event(0) != protest, "A separated report never rejoins the event by itself")
+        let alone = try await db.createEvent(memberArticleIDs: [ids[0]])
+        try await db.includeEvent(alone.id, inEvent: protest)
+        assertEqual(
+            try await db.eventExclusions(of: ids[0]).intersection([ids[2], ids[3]]), [],
+            "Including it again drops the exclusions")
+        assertEqual(try await event(0), protest, "… and the report is back in the event")
         await db.close()
     }
 

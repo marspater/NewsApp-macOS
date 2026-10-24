@@ -40,6 +40,9 @@ enum EventClusterer {
         var readTexts: [String: String] = [:]
         /// Rows whose vector storage was already consulted; a missing model is not asked again per pair.
         var embeddingLookups = Set<String>()
+        /// Pairs the reader put in one event (#524), by row, and the rows already looked up.
+        var inclusions: [String: Set<String>] = [:]
+        var inclusionLookups = Set<String>()
         /// Decisions worth keeping, keyed low ID first, and pairs that no longer qualify for the row they may have.
         var decisions: [String: DatabaseEngine.PairDecision] = [:]
         var cleared: [String: (String, String)] = [:]
@@ -61,6 +64,12 @@ enum EventClusterer {
         /// is read while matching, so the greedy order of decisions does not depend on storage.
         func prefetch(_ rows: [EventMatchRow]) async {
             rows.forEach(read)
+            let unlooked = rows.map(\.id).filter { !inclusionLookups.contains($0) }
+            if !unlooked.isEmpty {
+                inclusionLookups.formUnion(unlooked)
+                let found = (try? await database.eventInclusions(for: unlooked)) ?? [:]
+                inclusions.merge(found) { $0.union($1) }
+            }
             let missing = rows.filter { cache[$0.id] == nil }
             if !missing.isEmpty {
                 let stored =
@@ -125,7 +134,8 @@ enum EventClusterer {
             } else {
                 sim = nil
             }
-            let pair = EventMatcher.assess(features(a), features(b), policy: matchPolicy, embeddingSimilarity: sim)
+            var pair = EventMatcher.assess(features(a), features(b), policy: matchPolicy, embeddingSimilarity: sim)
+            if inclusions[a.id]?.contains(b.id) == true { pair = EventMatcher.forced(pair, policy: matchPolicy) }
             record(a, b, pair)
             return pair
         }
