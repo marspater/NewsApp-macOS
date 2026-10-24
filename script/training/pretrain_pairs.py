@@ -72,9 +72,9 @@ def private_directory(value):
 def fetch(url, timeout=120, limit=None):
     """Bytes of one https resource of the three sources; anything else is refused before a socket is opened."""
     require(url.startswith((GDELT, ZENODO, ARCHIVE)), f'Refusing to open {url}')
-    # The scheme and host are checked above, so S310's custom-scheme concern does not apply.
-    request = urllib.request.Request(url, headers={'User-Agent': 'NewsApp-pretrain/1.0 (research; see #623)'})  # noqa: S310
-    with urllib.request.urlopen(request, timeout=timeout) as response:  # noqa: S310
+    # The scheme and host are checked above, so the custom-scheme concern of B310 does not apply.
+    request = urllib.request.Request(url, headers={'User-Agent': 'NewsApp-pretrain/1.0 (research; see #623)'})
+    with urllib.request.urlopen(request, timeout=timeout) as response:  # nosec B310
         return response.read(limit) if limit else response.read()
 
 
@@ -173,19 +173,25 @@ def wcep_positives(cluster, texts, writer):
                if writer.write(1, 'w:' + cluster, pair_text(*texts[i]), pair_text(*texts[j])))
 
 
-def wcep_negative_candidates(headlines):
-    """Pairs of texts from different clusters whose headlines share a capitalized name."""
+def texts_by_name(headlines):
+    """Text keys grouped by each capitalized name their headline carries, at most 40 per name."""
     by_name = {}
     for key, (headline, _) in headlines.items():
         for name in names_in(headline):
             by_name.setdefault(name, []).append(key)
+    return [keys[:40] for keys in by_name.values()]
+
+
+def cross_cluster_pairs(sample):
+    """Unordered pairs of keys from different clusters."""
+    return {(a, b) if a < b else (b, a) for n, a in enumerate(sample) for b in sample[n + 1:] if a[0] != b[0]}
+
+
+def wcep_negative_candidates(headlines):
+    """Pairs of texts from different clusters whose headlines share a capitalized name, in the fixed order."""
     candidates = set()
-    for keys in by_name.values():
-        sample = keys[:40]
-        for n, a in enumerate(sample):
-            for b in sample[n + 1:]:
-                if a[0] != b[0]:
-                    candidates.add((a, b) if a < b else (b, a))
+    for sample in texts_by_name(headlines):
+        candidates |= cross_cluster_pairs(sample)
     return sorted(candidates, key=lambda c: order(f'{c[0][0]}:{c[0][1]}', f'{c[1][0]}:{c[1][1]}'))
 
 
@@ -229,7 +235,7 @@ def gdelt_download(slot, kind, cache):
         try:
             target.write_bytes(fetch(GDELT + target.name))
             os.chmod(target, 0o600)
-        except (urllib.error.URLError, OSError, TimeoutError) as error:
+        except OSError as error:  # URLError and TimeoutError are OSErrors
             print(f'    skip {target.name}: {error}', file=sys.stderr)
             return None
     return target
@@ -249,19 +255,34 @@ def gdelt_file_rows(slot, kind, cache, width):
     return (row for row in read_zip_tsv(path) if len(row) >= width) if path else ()
 
 
+def gdelt_events(rows, events):
+    """Events with both actors: id → (day, Actor1Name, Actor2Name, ActionGeo country)."""
+    for row in rows:
+        if row[6] and row[16]:
+            events[row[0]] = (row[1], row[6], row[16], row[53])
+
+
+def gdelt_mentions(rows, mentions):
+    """Web mentions (type 1): event id → article URLs."""
+    for row in rows:
+        if row[3] == '1':
+            mentions.setdefault(row[0], []).append(row[5])
+
+
+def gdelt_titles(rows, titles):
+    """Page titles from the GKG extras: article URL → decoded title."""
+    for row in rows:
+        if match := PAGE_TITLE.search(row[26]):
+            titles[row[4]] = html.unescape(match.group(1)).strip()
+
+
 def gdelt_rows(slots, cache):
     """Events (id → day, actors, country), mentions (id → urls) and page titles (url → title) of the slots."""
     events, mentions, titles = {}, {}, {}
     for slot in slots:
-        for row in gdelt_file_rows(slot, 'export', cache, 61):
-            if row[6] and row[16]:
-                events[row[0]] = (row[1], row[6], row[16], row[53])
-        for row in gdelt_file_rows(slot, 'mentions', cache, 6):
-            if row[3] == '1':
-                mentions.setdefault(row[0], []).append(row[5])
-        for row in gdelt_file_rows(slot, 'gkg', cache, 27):
-            if match := PAGE_TITLE.search(row[26]):
-                titles[row[4]] = html.unescape(match.group(1)).strip()
+        gdelt_events(gdelt_file_rows(slot, 'export', cache, 61), events)
+        gdelt_mentions(gdelt_file_rows(slot, 'mentions', cache, 6), mentions)
+        gdelt_titles(gdelt_file_rows(slot, 'gkg', cache, 27), titles)
     return events, mentions, titles
 
 
@@ -348,7 +369,7 @@ def archived_page(url, cache, attempts=3):
                 result = None
                 break
             time.sleep(15 * (attempt + 1))
-        except (urllib.error.URLError, OSError, TimeoutError, ValueError):
+        except (OSError, ValueError):  # URLError and TimeoutError are OSErrors
             time.sleep(15 * (attempt + 1))
     else:
         return None
@@ -360,7 +381,11 @@ def archived_page(url, cache, attempts=3):
 
 def semeval_label(overall):
     """Overall similarity 1 (most similar) is one story, 3 and 4 are not, 2 is ambiguous and dropped."""
-    return 1 if overall < 1.5 else 0 if overall >= 2.5 else None
+    if overall < 1.5:
+        return 1
+    if overall >= 2.5:
+        return 0
+    return None
 
 
 def build_semeval(pairs, writer, page, workers=FETCH_WORKERS):
@@ -475,7 +500,7 @@ def run_gdelt(args, out, tokenizer):
     summarize(out / 'gdelt-negatives.csv')
 
 
-def run_semeval(args, out, tokenizer):
+def run_semeval(_args, out, tokenizer):
     cache = out / 'semeval'
     cache.mkdir(exist_ok=True)
     writer = Writer(out / 'semeval-pairs.csv', tokenizer)
