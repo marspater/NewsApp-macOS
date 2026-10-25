@@ -51,6 +51,11 @@ NEWS_READING_FULL_APP=1 ./script/native_performance_baseline.sh # Live: sandboxe
 NEWS_EVENT_CORPUS=corpus.json ./test.sh --event-corpus # Event clustering precision/recall on a local labeled corpus (#102)
 NEWS_EMBEDDING_THRESHOLD=0.4 NEWS_EVENT_CORPUS=corpus.json ./test.sh --event-corpus --corpus-holdout # Holdout, embeddings at the cutoff chosen on tune (#127)
 NEWS_EVENT_DIAGNOSE=1 NEWS_EVENT_CORPUS=corpus.json ./test.sh --event-corpus # Adds one line per labeled or linked pair (ids only): conflict, gates, what, score, cosine (#509)
+NEWS_SNAPSHOT_DB=copy.sqlite3 NEWS_EVENT_OUTPUT=DIR ./test.sh --review-pairs # Local: every stored pair decision of a library copy with headlines, events and corrections, as pairs-review.csv (#551)
+NEWS_SNAPSHOT_DB=copy.sqlite3 NEWS_EVENT_OUTPUT=DIR ./test.sh --review-pairs --holdout-candidates # Local: candidate pairs for the library holdout (borderline ≥ 0.6, singletons beside an event, fragment pairs), as holdout-candidates.csv (#579)
+NEWS_SNAPSHOT_DB=copy.sqlite3 NEWS_LIBRARY_HOLDOUT=holdout.json ./test.sh --library-holdout # Local: re-clusters a temporary copy from scratch and scores the labelled pairs; the gate for matcher changes (#579). NEWS_PAIR_THRESHOLD and NEWS_PAIR_MODEL=0 apply
+NEWS_SNAPSHOT_DB=copy.sqlite3 ./test.sh --fragment-merge-timing # Local: one fragment-merge pass over a temporary copy of a library, timed, with the merge count (#541, #582)
+NEWS_ENERGY=0 ./test.sh --matcher-regressions # The rules-only pass of Low Power Mode (#534): no embedding, no pair model; deferred rows counted, not re-read
 ./test.sh --corpus-capture DIR    # Opt-in, live: capture catalog feed items into a private directory (#102)
 ./test.sh --corpus-review DIR     # Fingerprint match review sheet and precision against private labels (#102)
 ./test.sh --corpus-readiness DIR --corpus-holdout # Eligible held-out document counts only; no scores, labels or review-file writes
@@ -69,6 +74,8 @@ NEWS_LIVE_CATALOG_CHECK=1 ./test.sh # Optional: fetch every catalog feed through
 Further opt-in variables: `NEWS_SNAPSHOT_DB=path` makes the default run open a copied library after the suite and check that it lists stories; `NEWS_OVERVIEWS_MAX_EVENTS=N` (default 120) and `NEWS_OVERVIEWS_RUN_NAME=name` bound and label an `--overviews-live` run; `NEWS_WORLD_TENSION_INTERACTIVE=1` keeps the World Tension harness window open for ten minutes; `NEWS_SETTLE_SECONDS=N` (default 5) is the wait before `launch_baseline.sh` samples settled memory.
 
 SwiftSoup and FeedKit are resolved by `Package.swift` and the committed `Package.resolved`. Native app and QA scripts source `script/swiftpm_dependencies.sh`, which builds one static dependency archive with SwiftPM and supplies its module and link paths to the existing compiler commands. No separate dependency installation or system library search path is needed. Bundles include `Sources/ThirdPartyNotices.txt`.
+
+Releases: pushing a `vX.Y.Z` tag runs `.github/workflows/release.yml`, which builds with `build_release.sh`, checks the bundle version equals the tag and publishes the arm64 zip with its sha256 as a GitHub release (ad-hoc signed, no notarization). Tag only after the version stamping (#566) is on `main`.
 
 `make build` and `make release` compile SwiftPM executables; `make app` and `make run` use the app-bundle workflow. Packaging helpers live under `script/distribution/` and are inactive in development CI. Do not run notarization or build Intel slices in the current scope.
 
@@ -89,6 +96,17 @@ Before publication, fetch `origin/main`, review the diff and run checks affected
 The VoiceOver harness is parked (#268) and is not part of release verification; the notes below apply when it is resumed. It builds a separate `com.marspater.news.voiceoverqa` bundle and uses temporary SQLite and preferences. Its view environment supplies an in-memory image; the installed app and its protected image loader remain unchanged. Output goes to the printed temporary directory or `NEWS_VOICEOVER_OUTPUT`. Compilation has a 300-second deadline and automated runs a 120-second process-group deadline; commands and AX inspection have shorter internal deadlines. Missing Accessibility access or unsupported announcement observation is a reported prerequisite failure, not a crash or passing check.
 
 `--live` checks rendered AX nodes while scrolling, invokes card actions and verifies SQLite state, opens/dismisses a real citation and observes the production feed-buffer notification after inserting three fixture stories. Missing numeric heading metadata is reported as unverified and requires the manual rotor pass. AX tree order and observed notifications do not establish VoiceOver cursor order, rotor traversal, pronunciation or speech. Use `--manual`, enable VoiceOver yourself, and record that separate pass in #268. The Fixtures menu switches between Feed, Source Reader and Event Overview. On Feed, Queue New Stories holds the list through its production navigation command and inserts three stories. Close the fixture window to clean up. The harness does not change system accessibility settings.
+
+## Pair review protocol (#551)
+
+Pair decisions are reviewed on a copy of a library, never the live file. `--review-pairs` exports every stored decision with both headlines; the reviewer labels a sample and the numbers go into a dated file under `docs/audits/`. Mars delegates bulk review to Claude and spot-checks; the audit says who labelled.
+
+- **Labels.** `same` (one occurrence reported twice: paraphrases, updates, a toll that changed, a verbal reaction or direct consequence folded into its event), `related` (another act of the same story: the arrest after the fire, the condemnation after the attack, the protest after the vote), `different` (another story, or the same kind of occurrence elsewhere or at another time).
+- **Tie rules.** A headline that names two acts follows the act it leads with. A live blog or explainer joins the event it covers. When the two headlines could be one occurrence or two and the leads do not settle it, the label is `different`: a missed link costs less than a wrong card.
+- **Samples.** 200 `match` rows with reason `match`, 100 with reason `pairModel`, every `related-act` row, and 100 `vetoed` rows, drawn in a fixed pseudo-random order (sort by the SHA-256 of the two ids) so a rerun draws the same rows. A match or pair-model row labelled `different` is a false merge; the ceiling is 2% per sample.
+- **Disagreements.** A spot-check that overturns a label is recorded in the audit with both labels and the reason; the overturned label is replaced and the sample is re-counted. Three overturned labels in twenty mean the whole sample is relabelled.
+- **Receipts.** The CSV and the labelled copy stay outside the repository (`0700` directory, `0600` files); the audit records the copy's date, article count, matcher version and the SHA-256 of the labelled file.
+- **Library holdout (#579).** `--review-pairs --holdout-candidates` draws the hard pairs of a library copy (borderline decisions scored ≥ 0.6, singletons sharing a specific anchor and a keyword with an event member within 36 h, pairs of active events sharing two terms); they are labelled the same way and saved as a JSON array of `{"a", "b", "label"}` beside the copy. `--library-holdout` re-clusters a temporary copy from scratch and reports precision (`same` among linked pairs; `related` counts as wrong), recall on `same`, and the share of recent stories in a multi-publisher event. A matcher change ships when precision is ≥ 0.97 and the authored corpus is unchanged; the result and the file's SHA-256 go into the slice's PR. The old 49-article holdout stays sealed.
 
 ## Remove legacy test preferences (#311)
 

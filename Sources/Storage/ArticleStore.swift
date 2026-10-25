@@ -24,6 +24,7 @@ final class ArticleStore: ObservableObject {
     /// Bumped when clustering or the reader changes events; the feed regroups on it.
     @Published private(set) var eventRevision: UInt64 = 0
     @Published var operationError: String?
+    @Published private(set) var databaseHealthNotice: String?
 
     init(database: DatabaseEngine? = nil, migrationCoordinator: MigrationCoordinator? = nil) {
         let db = database ?? DatabaseEngine.shared
@@ -38,23 +39,27 @@ final class ArticleStore: ObservableObject {
     func initialize() async {
         do {
             try await database.open()
-            _ = try await migrationCoordinator?.migrateIfNeeded()
-            // Overviews and summaries from an earlier macOS model regenerate with the current one when next requested.
-            // Only the app's own library tracks this; stores over other databases (tests, audits) are left as they are.
-            if database === DatabaseEngine.shared {
-                do {
-                    try await database.reconcileModelGeneration(NewsTextModel.generation)
-                } catch {
-                    logger.error("Model generation check failed: \(error.localizedDescription)")
+            self.databaseHealthNotice = await database.databaseHealthNotice()
+            if self.databaseHealthNotice == nil {
+                _ = try await migrationCoordinator?.migrateIfNeeded()
+                // Overviews and summaries from an earlier macOS model regenerate with the current one when next requested.
+                // Only the app's own library tracks this; stores over other databases (tests, audits) are left as they are.
+                if database === DatabaseEngine.shared {
+                    do {
+                        try await database.reconcileModelGeneration(NewsTextModel.generation)
+                    } catch {
+                        logger.error("Model generation check failed: \(error.localizedDescription)")
+                    }
+                    // The first snapshot already leaves out World Tension panel feeds the reader has not subscribed to;
+                    // FeedManager keeps this current afterwards.
+                    let hidden = Set(TensionMethodology.v1.panel.map(\.url)).subtracting(AppSettings.shared.feedURLs)
+                    await database.setCollectionOnlyFeedURLs(Array(hidden))
                 }
-                // The first snapshot already leaves out World Tension panel feeds the reader has not subscribed to;
-                // FeedManager keeps this current afterwards.
-                let hidden = Set(TensionMethodology.v1.panel.map(\.url)).subtracting(AppSettings.shared.feedURLs)
-                await database.setCollectionOnlyFeedURLs(Array(hidden))
             }
             self.isReady = await refreshState()
             if !isReady { operationError = "Stored articles could not be loaded. Please try again." }
         } catch {
+            self.databaseHealthNotice = await database.databaseHealthNotice()
             isReady = false
             operationError = "Article storage could not be opened. Please try again."
             logger.error("Failed to initialize ArticleStore: \(error.localizedDescription)")
