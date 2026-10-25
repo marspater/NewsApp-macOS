@@ -151,4 +151,4 @@ Different agents work different epics in parallel, so each file family has exact
 | Q #607 | `ArticleCardView`, `EventCardView`, `ArticleListView` (clicks, toolbar copy, launch transition), `MainView`, `SidebarView`, summary panel of `ArticleDetailView`, `EventOverviewReaderView`, `TensionIndexView`, `FeedCatalogView`, `DesignSystem`, design lint, `DESIGN.md` general (before #604) | matching data (M); Briefing views (R); notification and tension logic (L) |
 | R #608 | `BriefingView` (new), Briefing branch of `ArticleListView`, `FiniteBriefing`, Reading tab, `DESIGN.md` §8.4 | story grouping (M #581); card components (Q); tension logic (L #585) |
 
-Schema versions are reserved in order of landing: #581 took v26 (M, story layer, landed first); #536 takes v27 (J), #545 v28 (L).
+Schema versions are reserved in order of landing: #536 took v26 (J, incremental auto-vacuum, landed first), #581 takes v27 (M, story layer), #545 v28 (L).
