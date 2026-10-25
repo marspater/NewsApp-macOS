@@ -115,7 +115,8 @@ def read_pairs(path, cap=None):
 def describe(path, rows):
     """What `metadata.json` records about one input CSV."""
     file = pathlib.Path(path)
-    digest = hashlib.sha256(file.read_bytes()).hexdigest()  # NOSONAR: read_pairs already checked this path
+    # read_pairs checked this path already: a CSV outside Git checkouts.
+    digest = hashlib.sha256(file.read_bytes()).hexdigest()  # NOSONAR
     return {'file': file.name, 'sha256': digest, 'rows': len(rows),
             'positives': sum(r[0] for r in rows), 'weight_sum': round(sum(r[4] for r in rows), 1)}
 
@@ -342,7 +343,8 @@ def main(argv):
                      'transformers': __import__('transformers').__version__, 'coremltools': ct.__version__},
     }
     text = json.dumps(metadata, indent=1, sort_keys=True) + '\n'
-    (out / 'metadata.json').write_text(text)  # NOSONAR: OUT_DIR is the operator's own directory
+    # OUT_DIR is the operator's own output directory, named on the command line.
+    (out / 'metadata.json').write_text(text)  # NOSONAR
     print(f'wrote {out / "metadata.json"}')
 
 
