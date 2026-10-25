@@ -429,24 +429,38 @@ enum EventClusterer {
             .sorted { $0.members.count != $1.members.count ? $0.members.count > $1.members.count : $0.id < $1.id }
             fragmentExclusions = try await database.eventExclusions(for: events.flatMap { $0.members.map(\.id) })
             await prefetch(events.flatMap { $0.members })
+            // Names and action words together: a name the tagger types in one report can be a plain word in another.
+            // Each event's terms once, and an index from term to event (#541): only events sharing two terms are
+            // compared, the same candidates the pairwise intersection found.
+            var terms: [String: Set<String>] = [:]
+            var eventsByTerm: [String: Set<String>] = [:]
+            for event in events {
+                let value = event.members.reduce(into: Set<String>()) {
+                    $0.formUnion(features($1).specificAnchors.union(features($1).keywords))
+                }
+                terms[event.id] = value
+                for term in value { eventsByTerm[term, default: []].insert(event.id) }
+            }
             var index = 0
             while index < events.count {
                 try Task.checkCancellation()
                 var survivor = events[index]
-                // Names and action words together: a name the tagger types in one report can be a plain word in another.
-                var survivorTerms = survivor.members.reduce(into: Set<String>()) {
-                    $0.formUnion(features($1).specificAnchors.union(features($1).keywords))
+                var survivorTerms = terms[survivor.id] ?? []
+                var sharedCounts: [String: Int] = [:]
+                for term in survivorTerms {
+                    for id in eventsByTerm[term] ?? [] where id != survivor.id { sharedCounts[id, default: 0] += 1 }
                 }
                 var other = index + 1
                 while other < events.count {
                     // Cross pairs are checked by the rules first and the model only after; cancellation stops both.
                     try Task.checkCancellation()
                     let candidate = events[other]
-                    let candidateTerms = candidate.members.reduce(into: Set<String>()) {
-                        $0.formUnion(features($1).specificAnchors.union(features($1).keywords))
+                    guard sharedCounts[candidate.id, default: 0] >= 2 else {
+                        other += 1
+                        continue
                     }
+                    let candidateTerms = terms[candidate.id] ?? []
                     guard survivor.members.count + candidate.members.count <= matchPolicy.maximumEventSize,
-                        survivorTerms.intersection(candidateTerms).count >= 2,
                         let gap = Self.closestGap(survivor.members, candidate.members),
                         gap <= matchPolicy.maximumTimeGap
                     else {
@@ -465,7 +479,14 @@ enum EventClusterer {
                         merges.changedEvents.insert(survivor.id)
                         merges.changedEvents.insert(candidate.id)
                         survivor = (survivor.id, merged.membershipVersion, survivor.members + candidate.members)
+                        // The merged members' terms can reach a third fragment the survivor's alone did not.
+                        for term in candidateTerms.subtracting(survivorTerms) {
+                            for id in eventsByTerm[term] ?? [] where id != survivor.id {
+                                sharedCounts[id, default: 0] += 1
+                            }
+                        }
                         survivorTerms.formUnion(candidateTerms)
+                        terms[survivor.id] = survivorTerms
                         events[index] = survivor
                         events.remove(at: other)
                     } catch {
