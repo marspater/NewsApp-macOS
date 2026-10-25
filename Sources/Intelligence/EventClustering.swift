@@ -1,5 +1,35 @@
 import Foundation
 
+/// What one pair decision rested on, stored as JSON in `pair_assessments.features` (#551): the cosine, the pair model's
+/// probability when it was asked, the conflict and the shared-evidence counts. Numbers only, no text.
+struct EventPairFeatures: Codable, Equatable, Sendable {
+    var cosine: Double?
+    var pairModel: Double?
+    var conflict: String?
+    var what: Double
+    var entity: Double
+    var sharedAnchors: Int
+    var sharedSpecific: Int
+    var sharedKeywords: Int
+
+    init(_ pair: EventPairAssessment, probability: Double?) {
+        cosine = pair.embeddingCosine
+        pairModel = probability
+        conflict = pair.conflict?.rawValue
+        what = pair.what
+        entity = pair.entity
+        sharedAnchors = pair.sharedAnchors
+        sharedSpecific = pair.sharedSpecificAnchors
+        sharedKeywords = pair.sharedKeywords
+    }
+
+    var json: String? {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        return (try? encoder.encode(self)).flatMap { String(data: $0, encoding: .utf8) }
+    }
+}
+
 struct EventClusteringReport: Equatable, Sendable {
     var processed = 0
     var joined = 0
@@ -8,15 +38,15 @@ struct EventClusteringReport: Equatable, Sendable {
     var conflicts = 0
     /// Event fragments of one story joined by the merge pass.
     var merged = 0
-    /// Legacy audit metric; deterministic clustering always reports zero.
-    var judged = 0
+    /// Rows left for a pass with energy because a model they needed did not run (#534).
+    var deferred = 0
     var changedEvents: Set<String> = []
 }
 
 /// Incremental event clustering. Each pass handles only articles that are new, whose title or description changed
 /// since they were last matched, or that an older matcher version processed, within the active lifetime; then it
-/// merges active events that report one story. Decisions are deterministic. Legacy judge arguments are retained
-/// for audit callers but never invoked. Matcher upgrades revalidate active memberships, never the archive.
+/// merges active events that report one story. Decisions are the deterministic rules plus the pair model for
+/// borderline pairs. Matcher upgrades revalidate active memberships, never the archive.
 enum EventClusterer {
     static let batchSize = 100
     private static let maximumAttempts = 2
@@ -24,14 +54,17 @@ enum EventClusterer {
         in database: DatabaseEngine,
         candidatePolicy: EventCandidatePolicy = .standard,
         matchPolicy: EventMatchPolicy = .standard,
-        judge _: EventJudge = .unavailable,
-        judgeBudget _: Int = 150,
         now: Date = Date(),
         limit: Int = 2_000,
+        allowsEnergy: Bool = IntelligencePolicy.allowsEnergy(),
         pairProbability: (@Sendable (String, String) async -> Double?)? = nil
     ) async throws -> EventClusteringReport {
         let pairProbability = pairProbability ?? { a, b in await PairScorer.shared.probability(a, b) }
         var report = EventClusteringReport()
+        /// Under the energy rule (#534) neither model runs: pairs they might have settled stay as the rules left them
+        /// and the rows involved are marked one matcher version behind, so the next pass with energy reads them again.
+        var deferred = Set<String>()
+        var deferredCurrentRow = false
         /// Pair-model probabilities this pass, keyed low ID first (#525).
         var modelScores: [String: Double?] = [:]
         var cache: [String: EventFeatures] = [:]
@@ -89,7 +122,11 @@ enum EventClusterer {
                     }
                 }
             }
-            let unembedded = rows.filter { embeddingCache[$0.id] == nil && !embeddingLookups.contains($0.id) }
+            // Reports recognized as another language never use the embedding (#553), so none is computed for them.
+            let unembedded = rows.filter {
+                embeddingCache[$0.id] == nil && !embeddingLookups.contains($0.id)
+                    && (features($0).language ?? "en") == "en"
+            }
             guard !unembedded.isEmpty else { return }
             embeddingLookups.formUnion(unembedded.map(\.id))
             let stored =
@@ -99,7 +136,7 @@ enum EventClusterer {
             for row in unembedded {
                 if let vector = stored[row.id] { embeddingCache[row.id] = vector } else { pending.append(row) }
             }
-            guard !pending.isEmpty, await SentenceEmbedder.shared.isAvailable else { return }
+            guard !pending.isEmpty, allowsEnergy, await SentenceEmbedder.shared.isAvailable else { return }
             let vectors = await SentenceEmbedder.shared.embedBatch(
                 pending.map { EventFeatures.matchingText(title: $0.title, description: $0.description) })
             for (row, vector) in zip(pending, vectors) {
@@ -108,7 +145,7 @@ enum EventClusterer {
                 newEmbeddings[row.id] = vector
             }
         }
-        func record(_ a: EventMatchRow, _ b: EventMatchRow, _ pair: EventPairAssessment) {
+        func record(_ a: EventMatchRow, _ b: EventMatchRow, _ pair: EventPairAssessment, probability: Double? = nil) {
             let (low, high) = a.id < b.id ? (a.id, b.id) : (b.id, a.id)
             let key = low + "\n" + high
             let decision: String
@@ -120,6 +157,9 @@ enum EventClusterer {
                 decision = "related-act"
             } else if pair.isBorderline {
                 decision = "borderline"
+            } else if pair.conflict != nil, pair.sharedAnchors >= 1 || pair.sharedKeywords >= 2 {
+                // A veto of a pair with shared evidence is reviewable (#551); pairs sharing nothing are not kept.
+                decision = "vetoed"
             } else {
                 decisions[key] = nil
                 cleared[key] = (low, high)
@@ -128,7 +168,8 @@ enum EventClusterer {
             cleared[key] = nil
             decisions[key] = DatabaseEngine.PairDecision(
                 articleID: low, otherArticleID: high, decision: decision,
-                reason: pair.modelConfirmed ? "pairModel" : (pair.conflict?.rawValue ?? decision), score: pair.score)
+                reason: pair.modelConfirmed ? "pairModel" : (pair.conflict?.rawValue ?? decision), score: pair.score,
+                features: EventPairFeatures(pair, probability: probability).json)
         }
         /// The rules alone: no pair model and no audit row.
         func ruled(_ a: EventMatchRow, _ b: EventMatchRow) async -> EventPairAssessment {
@@ -143,7 +184,17 @@ enum EventClusterer {
         }
         func assessed(_ a: EventMatchRow, _ b: EventMatchRow) async -> EventPairAssessment {
             var pair = await ruled(a, b)
-            if EventMatcher.needsPairModel(pair) {
+            if !allowsEnergy {
+                // Without a vector the semantic veto has not cleared a rule match, a rescue may be missing and the
+                // model may have confirmed a borderline pair: such pairs stay open and are decided again later.
+                let unvetted =
+                    pair.embeddingCosine == nil && pair.neuralEligible && pair.conflict == nil
+                    && pair.sharedSpecificAnchors >= 1
+                if unvetted || EventMatcher.needsPairModel(pair) {
+                    deferredCurrentRow = true
+                    if pair.isMatch { pair = EventMatcher.unvetted(pair) }
+                }
+            } else if EventMatcher.needsPairModel(pair) {
                 let key = a.id < b.id ? a.id + "\n" + b.id : b.id + "\n" + a.id
                 if modelScores[key] == nil {
                     modelScores[key] = await pairProbability(
@@ -155,7 +206,8 @@ enum EventClusterer {
                 }
             }
             // The matcher's own verdict is recorded; a reader's inclusion only overrides it here.
-            record(a, b, pair)
+            let key = a.id < b.id ? a.id + "\n" + b.id : b.id + "\n" + a.id
+            record(a, b, pair, probability: modelScores[key] ?? nil)
             return inclusions[a.id]?.contains(b.id) == true ? EventMatcher.forced(pair, policy: matchPolicy) : pair
         }
         /// The row against each member. "Same Event" is transitive: a member the reader put in one event with a member
@@ -190,14 +242,18 @@ enum EventClusterer {
         var remaining = limit
         matching: while remaining > 0 {
             try Task.checkCancellation()
+            // Without energy, members already matched are not revalidated: the rules alone could split what the
+            // model joined. They wait, pending, for a pass with energy.
             let pending = try await database.pendingEventMatchRows(
                 activeSince: now.addingTimeInterval(-candidatePolicy.activeEventLifetime),
-                matcherVersion: EventMatcher.version, limit: min(batchSize, remaining))
+                matcherVersion: EventMatcher.version, limit: min(batchSize, remaining), revalidating: allowsEnergy)
             guard !pending.isEmpty else { break }
             await prefetch(pending)
             for row in pending where !handled.contains(row.id) {
                 guard remaining > 0 else { break matching }
                 try Task.checkCancellation()
+                deferredCurrentRow = false
+                defer { if deferredCurrentRow { deferred.insert(row.id) } }
                 if row.previouslyMatched, let eventID = row.eventID,
                     let event = try await database.fetchEvent(id: eventID),
                     event.updatedAt >= now.addingTimeInterval(-candidatePolicy.activeEventLifetime),
@@ -254,7 +310,7 @@ enum EventClusterer {
                         let fits =
                             row.previouslyMatched
                             || (!isExcluded && EventMatcher.eventScore(pairs: pairs, policy: matchPolicy) != nil)
-                        if fits {
+                        if fits || (!allowsEnergy && deferredCurrentRow) {
                             try await database.markEventMatchProcessed(
                                 [row.id], matcherVersion: EventMatcher.version, at: now)
                             continue
@@ -337,6 +393,7 @@ enum EventClusterer {
                         handled.formUnion(partners)
                         report.processed += partners.count
                         remaining -= partners.count
+                        if deferredCurrentRow { deferred.formUnion(partners) }
                     }
                 case .conflict:
                     // Membership changed underneath the decision; the next batch decides again.
@@ -350,6 +407,12 @@ enum EventClusterer {
             }
             // Match state is already committed per article; a later throw or cancellation keeps this batch's work.
             await store()
+            if !deferred.isEmpty {
+                try await database.markEventMatchProcessed(
+                    Array(deferred), matcherVersion: EventMatcher.version - 1, at: now)
+                report.deferred += deferred.count
+                deferred = []
+            }
         }
         /// Every cross-pair needs specific shared evidence; a contradiction or exclusion always vetoes a merge.
         var fragmentExclusions: [String: Set<String>] = [:]
@@ -397,24 +460,38 @@ enum EventClusterer {
             .sorted { $0.members.count != $1.members.count ? $0.members.count > $1.members.count : $0.id < $1.id }
             fragmentExclusions = try await database.eventExclusions(for: events.flatMap { $0.members.map(\.id) })
             await prefetch(events.flatMap { $0.members })
+            // Names and action words together: a name the tagger types in one report can be a plain word in another.
+            // Each event's terms once, and an index from term to event (#541): only events sharing two terms are
+            // compared, the same candidates the pairwise intersection found.
+            var terms: [String: Set<String>] = [:]
+            var eventsByTerm: [String: Set<String>] = [:]
+            for event in events {
+                let value = event.members.reduce(into: Set<String>()) {
+                    $0.formUnion(features($1).specificAnchors.union(features($1).keywords))
+                }
+                terms[event.id] = value
+                for term in value { eventsByTerm[term, default: []].insert(event.id) }
+            }
             var index = 0
             while index < events.count {
                 try Task.checkCancellation()
                 var survivor = events[index]
-                // Names and action words together: a name the tagger types in one report can be a plain word in another.
-                var survivorTerms = survivor.members.reduce(into: Set<String>()) {
-                    $0.formUnion(features($1).specificAnchors.union(features($1).keywords))
+                var survivorTerms = terms[survivor.id] ?? []
+                var sharedCounts: [String: Int] = [:]
+                for term in survivorTerms {
+                    for id in eventsByTerm[term] ?? [] where id != survivor.id { sharedCounts[id, default: 0] += 1 }
                 }
                 var other = index + 1
                 while other < events.count {
                     // Cross pairs are checked by the rules first and the model only after; cancellation stops both.
                     try Task.checkCancellation()
                     let candidate = events[other]
-                    let candidateTerms = candidate.members.reduce(into: Set<String>()) {
-                        $0.formUnion(features($1).specificAnchors.union(features($1).keywords))
+                    guard sharedCounts[candidate.id, default: 0] >= 2 else {
+                        other += 1
+                        continue
                     }
+                    let candidateTerms = terms[candidate.id] ?? []
                     guard survivor.members.count + candidate.members.count <= matchPolicy.maximumEventSize,
-                        survivorTerms.intersection(candidateTerms).count >= 2,
                         let gap = Self.closestGap(survivor.members, candidate.members),
                         gap <= matchPolicy.maximumTimeGap
                     else {
@@ -433,7 +510,14 @@ enum EventClusterer {
                         merges.changedEvents.insert(survivor.id)
                         merges.changedEvents.insert(candidate.id)
                         survivor = (survivor.id, merged.membershipVersion, survivor.members + candidate.members)
+                        // The merged members' terms can reach a third fragment the survivor's alone did not.
+                        for term in candidateTerms.subtracting(survivorTerms) {
+                            for id in eventsByTerm[term] ?? [] where id != survivor.id {
+                                sharedCounts[id, default: 0] += 1
+                            }
+                        }
                         survivorTerms.formUnion(candidateTerms)
+                        terms[survivor.id] = survivorTerms
                         events[index] = survivor
                         events.remove(at: other)
                     } catch {
@@ -454,19 +538,5 @@ enum EventClusterer {
 
     private static func closestGap(_ lhs: [EventMatchRow], _ rhs: [EventMatchRow]) -> TimeInterval? {
         lhs.flatMap { a in rhs.map { abs(a.date.timeIntervalSince($0.date)) } }.min()
-    }
-
-    /// An event as one report for the judge: its first headline, with the other headlines as the summary.
-    static func coverage(_ members: [EventMatchRow]) -> EventJudgeReport {
-        let ordered = members.sorted { $0.date < $1.date }
-        let others = ordered.dropFirst().prefix(4).map(\.title)
-        return EventJudgeReport(
-            id: "event:" + ordered.map(\.id).joined(separator: ","), title: ordered.first?.title ?? "",
-            summary: others.isEmpty
-                ? (ordered.first?.description ?? "") : "Further coverage: " + others.joined(separator: "; "))
-    }
-
-    static func report(_ row: EventMatchRow) -> EventJudgeReport {
-        EventJudgeReport(id: row.id, title: row.title, summary: row.description)
     }
 }
