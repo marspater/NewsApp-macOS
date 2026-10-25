@@ -57,7 +57,7 @@ Release and engineering hygiene
 
 ## 2. Plan — programs and issues
 
-The original seven programs (J–P) each have a GitHub epic with sub-issues and a milestone. **Program Q was added on 25 October 2026 as a separately parked, future-facing Epic**; it is not a release gate. Every implementation issue lands as one PR with `./test.sh`, `script/format.sh --check`, a staged `./build.sh`, a CHANGELOG line and board move; UI PRs carry the DESIGN.md checklist. No AI attribution lines in commits or PRs. Effort S < 1 day, M 1–3 days, L > 3 days.
+The original seven programs (J–P) each have a GitHub epic with sub-issues and a milestone. **Program S was added on 25 October 2026 as a separately parked, future-facing Epic**; it is not a release gate. Every implementation issue lands as one PR with `./test.sh`, `script/format.sh --check`, a staged `./build.sh`, a CHANGELOG line and board move; UI PRs carry the DESIGN.md checklist. No AI attribution lines in commits or PRs. Effort S < 1 day, M 1–3 days, L > 3 days.
 
 ### J · Robustness and data safety (epic #571, milestone J)
 
@@ -131,7 +131,7 @@ The original seven programs (J–P) each have a GitHub epic with sub-issues and 
 | P4 (#569) | Docs truth | README (v11, current date, 65 feeds verified 8 Oct, release/install section), ARCHITECTURE (v25, `build_release.sh` role, energy rule covers clustering after J1), CONTRIBUTING (program issue → the new epics; board conventions), PRIVACY (Spotlight/diagnostics after N4/O3). | Each drift line in section 1 closed; link check. | S | P1 |
 | P5 (#570) | Test harness and suite split | Asserts record failures and continue; summary with per-test timing and non-zero exit at the end; `Tests/NewsTests.swift` split into atoms by existing suite groups (storage, parsing, matching, overview, UI logic); `build_test_runner.sh` file list from globs; CircleCI `test-suites.yml` lists the new atoms. | Same test count runs; a deliberately failing test no longer hides later tests; CircleCI impact analysis selects by atom. | L | P1 |
 
-### Q · App Store monetization via StoreKit 2 (epic #651, **PARKED**; added 25 October 2026)
+### S · App Store monetization via StoreKit 2 (epic #651, milestone S, **PARKED**; added 25 October 2026)
 
 **Intentional deferral:** this was approved for a future App Store distribution phase, not for current implementation. Keep #651 and #652–#656 in Backlog with the `parked` label, Priority P2 / low, no cycle and no due date. Do not move any item to Ready or In progress until Mars explicitly reopens this Epic.
 
@@ -139,11 +139,11 @@ The original seven programs (J–P) each have a GitHub epic with sub-issues and 
 
 | # | Issue | Scope | Acceptance | Priority |
 |---|---|---|---|---|
-| Q1 (#652) | Define premium feature matrix and App Store product catalog | Decide free/premium boundaries, product IDs/types, introductory offer, pricing approach and localization | Decisions approved before code gates or final product setup | P2 |
-| Q2 (#653) | Implement native StoreKit 2 commerce service | Product loading, purchases, transaction verification/updates, subscription status and restore | No access granted from unverified transactions; lifecycle paths tested | P2 |
-| Q3 (#654) | Entitlement manager and premium feature gates | One access-control source of truth for subscriptions/lifetime; expiry and revocation | Entitlements are correct across relaunch/update/refund; user library data is never deleted at expiry | P2 |
-| Q4 (#655) | Native paywall and purchase settings | Localized prices, seven-day offer and renewal disclosures, lifetime option, restore/manage subscription | Native purchase flow and recoverable states pass accessibility and UI checks | P2 |
-| Q5 (#656) | App Store Connect setup and purchase lifecycle QA | Product setup, metadata, TestFlight purchase testing and distribution signing | StoreKit/TestFlight matrix passes; App Store submission checklist complete | P2 |
+| S1 (#652) | Define premium feature matrix and App Store product catalog | Decide free/premium boundaries, product IDs/types, introductory offer, pricing approach and localization | Decisions approved before code gates or final product setup | P2 |
+| S2 (#653) | Implement native StoreKit 2 commerce service | Product loading, purchases, transaction verification/updates, subscription status and restore | No access granted from unverified transactions; lifecycle paths tested | P2 |
+| S3 (#654) | Entitlement manager and premium feature gates | One access-control source of truth for subscriptions/lifetime; expiry and revocation | Entitlements are correct across relaunch/update/refund; user library data is never deleted at expiry | P2 |
+| S4 (#655) | Native paywall and purchase settings | Localized prices, seven-day offer and renewal disclosures, lifetime option, restore/manage subscription | Native purchase flow and recoverable states pass accessibility and UI checks | P2 |
+| S5 (#656) | App Store Connect setup and purchase lifecycle QA | Product setup, metadata, TestFlight purchase testing and distribution signing | StoreKit/TestFlight matrix passes; App Store submission checklist complete | P2 |
 
 **Architecture boundaries**
 - Keep SwiftUI, SQLite and on-device intelligence local-first. No WorkOS, RevenueCat, accounts, cloud AI, telemetry or billing backend solely for purchases.
@@ -152,9 +152,9 @@ The original seven programs (J–P) each have a GitHub epic with sub-issues and 
 - App Store distribution signing is a separate future release step; leave the current ad-hoc verification workflow unchanged while parked.
 
 **Board setup checklist**
-- [ ] Create milestone Q.
-- [ ] Add #651–#656 to GitHub Project #2.
-- [ ] Set Status = Backlog and Priority = P2 for every card; keep the `parked` label.
+- [x] Create milestone S (Q and R were already taken by #607 and #608).
+- [x] Add #651–#656 to GitHub Project #2.
+- [x] Set Status = Backlog and Priority = P2 for every card; keep the `parked` label.
 
 ## 3. Order
 
