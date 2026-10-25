@@ -1,6 +1,15 @@
 #!/bin/bash
 set -e
 
+# Docs-only commits (Markdown anywhere, or anything under docs/) need no build or tests.
+if [ -z "$(git diff --cached --name-only | grep -vE '(\.md$|^docs/)')" ]; then
+    echo "📝 Docs-only commit; skipping format and tests."
+    exit 0
+fi
+
+# Git exports these to hooks; SwiftPM's dependency checkout in a fresh worktree then reads the wrong repository.
+unset GIT_DIR GIT_INDEX_FILE GIT_WORK_TREE
+
 echo "🔍 Running pre-commit validation..."
 
 # 1. Format staged Swift files incrementally with swift-format
