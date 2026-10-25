@@ -216,64 +216,98 @@ actor SentenceEmbedder {
 
     /// Generates a 384-dimensional L2-normalized float vector for input text.
     func embed(_ text: String) -> [Float]? {
-        guard let model, let tokenizer else { return nil }
-        let (inputIDs, attentionMask) = tokenizer.encode(text, maxSequenceLength: Self.maxSequenceLength)
-        let seqLen = inputIDs.count
-
-        guard let inMultiArray = try? MLMultiArray(shape: [1, NSNumber(value: seqLen)], dataType: .int32),
-            let maskMultiArray = try? MLMultiArray(shape: [1, NSNumber(value: seqLen)], dataType: .int32)
-        else {
-            return nil
-        }
-
-        for i in 0..<seqLen {
-            inMultiArray[i] = NSNumber(value: inputIDs[i])
-            maskMultiArray[i] = NSNumber(value: attentionMask[i])
-        }
-
-        guard
-            let featureProvider = try? MLDictionaryFeatureProvider(dictionary: [
-                "input_ids": MLFeatureValue(multiArray: inMultiArray),
-                "attention_mask": MLFeatureValue(multiArray: maskMultiArray),
-            ])
-        else {
-            return nil
-        }
-
-        guard let output = try? model.prediction(from: featureProvider),
-            let lastHidden = output.featureValue(for: "last_hidden_state")?.multiArrayValue
-        else {
-            return nil
-        }
-
-        // Mean pooling over valid (non-padding) tokens
-        let validTokens = max(1, attentionMask.filter { $0 == 1 }.count)
-        var pooled = [Float](repeating: 0, count: Self.vectorDimension)
-
-        for t in 0..<validTokens {
-            for d in 0..<Self.vectorDimension {
-                pooled[d] += lastHidden[[0, NSNumber(value: t), NSNumber(value: d)]].floatValue
-            }
-        }
-
-        var scale = 1.0 / Float(validTokens)
-        vDSP_vsmul(pooled, 1, &scale, &pooled, 1, vDSP_Length(Self.vectorDimension))
-
-        // L2 Normalization using Accelerate
-        var sumSquares: Float = 0
-        vDSP_svesq(pooled, 1, &sumSquares, vDSP_Length(Self.vectorDimension))
-        let norm = sqrt(sumSquares)
-        if norm > 0 {
-            var invNorm = 1.0 / norm
-            vDSP_vsmul(pooled, 1, &invNorm, &pooled, 1, vDSP_Length(Self.vectorDimension))
-        }
-
-        return pooled
+        guard let model, let tokenizer, let input = Self.input(tokenizer, text),
+            let output = try? model.prediction(from: input.provider),
+            let hidden = output.featureValue(for: "last_hidden_state")?.multiArrayValue
+        else { return nil }
+        return Self.pooled(hidden, tokens: input.tokens)
     }
 
-    /// Embeds a batch of texts sequentially; a text the model cannot embed keeps its position as nil.
+    /// Embeds texts in one Core ML batch (#540); a text the model cannot embed keeps its position as nil. When the
+    /// batch is refused, each text runs alone.
     func embedBatch(_ texts: [String]) -> [[Float]?] {
-        texts.map { embed($0) }
+        guard let model, let tokenizer, !texts.isEmpty else { return texts.map { _ in nil } }
+        let inputs = texts.map { Self.input(tokenizer, $0) }
+        let providers = inputs.compactMap { $0?.provider }
+        guard let batch = try? model.predictions(fromBatch: MLArrayBatchProvider(array: providers)) else {
+            return texts.map { embed($0) }
+        }
+        var vectors: [[Float]?] = []
+        var index = 0
+        for input in inputs {
+            guard let input else {
+                vectors.append(nil)
+                continue
+            }
+            let hidden = batch.features(at: index).featureValue(for: "last_hidden_state")?.multiArrayValue
+            vectors.append(hidden.flatMap { Self.pooled($0, tokens: input.tokens) })
+            index += 1
+        }
+        return vectors
+    }
+
+    private struct Input {
+        let provider: MLDictionaryFeatureProvider
+        let tokens: Int
+    }
+
+    /// The model's two inputs, trimmed to the tokens present (#540): the model reads 1 to 128 tokens, and padding to
+    /// 128 cost attention over 128 positions for a 30-token headline. Values are written through the arrays' buffers.
+    private static func input(_ tokenizer: BertWordPieceTokenizer, _ text: String) -> Input? {
+        let encoded = tokenizer.encode(text, maxSequenceLength: maxSequenceLength)
+        let tokens = encoded.attentionMask.lastIndex(of: 1).map { $0 + 1 } ?? 0
+        guard tokens > 0, let ids = try? MLMultiArray(shape: [1, NSNumber(value: tokens)], dataType: .int32),
+            let mask = try? MLMultiArray(shape: [1, NSNumber(value: tokens)], dataType: .int32)
+        else { return nil }
+        ids.withUnsafeMutableBufferPointer(ofType: Int32.self) { buffer, _ in
+            _ = buffer.initialize(from: encoded.inputIDs.prefix(tokens))
+        }
+        mask.withUnsafeMutableBufferPointer(ofType: Int32.self) { buffer, _ in
+            _ = buffer.initialize(from: encoded.attentionMask.prefix(tokens))
+        }
+        guard
+            let provider = try? MLDictionaryFeatureProvider(dictionary: [
+                "input_ids": MLFeatureValue(multiArray: ids), "attention_mask": MLFeatureValue(multiArray: mask),
+            ])
+        else { return nil }
+        return Input(provider: provider, tokens: tokens)
+    }
+
+    /// Mean over the tokens present, L2-normalized, summed through the array's buffer (#540): the boxed subscript cost
+    /// one `NSNumber` per element, 49,000 per text.
+    private static func pooled(_ hidden: MLMultiArray, tokens: Int) -> [Float]? {
+        guard hidden.shape.count == 3, hidden.shape[2].intValue == vectorDimension, hidden.shape[1].intValue >= tokens,
+            tokens > 0
+        else { return nil }
+        var pooled = [Float](repeating: 0, count: vectorDimension)
+        let tokenStride = hidden.strides[1].intValue
+        let dimensionStride = Int32(hidden.strides[2].intValue)
+        if hidden.dataType == .float32 {
+            hidden.withUnsafeBufferPointer(ofType: Float.self) { buffer in
+                pooled.withUnsafeMutableBufferPointer { sum in
+                    for token in 0..<tokens {
+                        cblas_saxpy(
+                            Int32(vectorDimension), 1, buffer.baseAddress! + token * tokenStride, dimensionStride,
+                            sum.baseAddress!, 1)
+                    }
+                }
+            }
+        } else {
+            for token in 0..<tokens {
+                for dimension in 0..<vectorDimension {
+                    pooled[dimension] += hidden[[0, NSNumber(value: token), NSNumber(value: dimension)]].floatValue
+                }
+            }
+        }
+        var scale = 1 / Float(tokens)
+        vDSP_vsmul(pooled, 1, &scale, &pooled, 1, vDSP_Length(vectorDimension))
+        var sumSquares: Float = 0
+        vDSP_svesq(pooled, 1, &sumSquares, vDSP_Length(vectorDimension))
+        if sumSquares > 0 {
+            var inverse = 1 / sqrt(sumSquares)
+            vDSP_vsmul(pooled, 1, &inverse, &pooled, 1, vDSP_Length(vectorDimension))
+        }
+        return pooled
     }
 
     /// Computes cosine similarity between two L2-normalized float vectors in < 0.1 microseconds using vDSP.

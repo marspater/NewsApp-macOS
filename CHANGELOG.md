@@ -2,6 +2,7 @@
 
 ## Unreleased — 21 October 2026
 
+- Story matching runs its sentence embeddings about ten times faster: the encoder reads only the tokens a text has instead of 128 padded positions, pools through the output buffer instead of boxed numbers, and takes a batch at a time; the vectors are unchanged (cosine at least 0.99999 against the previous ones on the authored corpus), so stored embeddings stay valid (#540).
 - Developer tooling: the sentence encoder's Core ML conversion is in the repository again (`convert_minilm.py`, pinned base revision, parity report against the shipped model), both shipped models carry a metadata file naming their base, versions and check, and the Python training pins are watched by Dependabot (#555).
 - Story matching: the pair model is told how far apart two reports are and whether one publisher wrote both, so it can weigh a repost against fresh coverage; the retrained model that uses it ships when it passes the library holdout.
 - Developer tooling: reviewed pair labels and same-day cross-event negatives join the pair model's training set, so each retrain learns from the previous model's reviewed mistakes.

@@ -424,6 +424,13 @@ struct NewsTests {
             try await testMatcherRegressionCorpus()
             return
         }
+        if CommandLine.arguments.contains("--embedding-vectors") {
+            guard let output = ProcessInfo.processInfo.environment["NEWS_EVENT_OUTPUT"] else {
+                throw StoryCorpus.Failure.invalid("--embedding-vectors needs NEWS_EVENT_OUTPUT")
+            }
+            try await exportEmbeddingVectors(output: output)
+            return
+        }
         if CommandLine.arguments.contains("--fragment-merge-timing") {
             try await timeFragmentMerge()
             return
@@ -1093,6 +1100,34 @@ struct NewsTests {
         print("Seeded \(archive.count) stories at \(path)")
     }
 
+    /// Writes the sentence embedding of every authored-corpus article to `embedding-vectors.json` (#540), so a change
+    /// to `SentenceEmbedder` can be compared vector by vector with the implementation before it.
+    static func exportEmbeddingVectors(output: String) async throws {
+        struct Item: Decodable { let id: String, title: String, description: String? }
+        struct Fixture: Decodable { let articles: [Item] }
+        let fixture = try JSONDecoder().decode(
+            Fixture.self,
+            from: Data(contentsOf: URL(fileURLWithPath: "Tests/Fixtures/story-corpus/matcher-regressions-v1.json")))
+        let texts = fixture.articles.map {
+            EventFeatures.matchingText(title: $0.title, description: $0.description ?? "")
+        }
+        let start = ProcessInfo.processInfo.systemUptime
+        let vectors = await SentenceEmbedder.shared.embedBatch(texts)
+        let elapsed = ProcessInfo.processInfo.systemUptime - start
+        var byID: [String: [Float]] = [:]
+        for (item, vector) in zip(fixture.articles, vectors) {
+            if let vector { byID[item.id] = vector }
+        }
+        let file = try StoryCorpus.privateDirectory(output).appendingPathComponent("embedding-vectors.json")
+        let data = try JSONSerialization.data(
+            withJSONObject: byID.mapValues { $0.map(Double.init) }, options: [.sortedKeys])
+        try StoryCorpus.writePrivate(data, to: file, replacing: true)
+        print(
+            String(
+                format: "    embedded %d of %d texts in %.0f ms -> %@", byID.count, texts.count, elapsed * 1000,
+                file.path))
+    }
+
     /// Opt-in controlled service timings; not a rendered UI or network benchmark.
     @MainActor
     static func runPerformanceBaseline() async throws {
@@ -1319,6 +1354,16 @@ struct NewsTests {
             cancelledManager.stopBackgroundWork()
             await refresh.value
             record("refresh_cancel_mock_wait_ms", from: start)
+        }
+        // Embedding throughput (#540): a fresh embedder, model load included, over 2,000 archive texts.
+        if await SentenceEmbedder.shared.isAvailable {
+            let texts = archive.prefix(2_000).map {
+                EventFeatures.matchingText(title: $0.title, description: $0.description)
+            }
+            let start = ProcessInfo.processInfo.systemUptime
+            let vectors = await SentenceEmbedder().embedBatch(texts)
+            record("embedding_cold_2000_ms", from: start)
+            guard vectors.allSatisfy({ $0 != nil }) else { fatalError("Every archive text embeds") }
         }
         var usage = rusage()
         guard getrusage(RUSAGE_SELF, &usage) == 0 else { fatalError("Cannot obtain process memory high-water mark") }
