@@ -929,11 +929,14 @@ extension DatabaseEngine {
 
     /// Pending recent articles and members of still-active events, oldest first. This also upgrades
     /// active events whose last publication is older than the window; inactive archived groups stay untouched.
-    func pendingEventMatchRows(activeSince: Date, matcherVersion: Int, limit: Int) throws -> [EventMatchRow] {
+    /// `revalidating: false` returns only rows never matched (#534).
+    func pendingEventMatchRows(activeSince: Date, matcherVersion: Int, limit: Int, revalidating: Bool = true) throws
+        -> [EventMatchRow]
+    {
         try eventMatchRows(
             """
             \(Self.eventMatchColumns)
-            WHERE (ms.article_id IS NULL OR ms.matcher_version < ?)
+            WHERE (ms.article_id IS NULL OR (\(revalidating ? "1" : "0") AND ms.matcher_version < ?))
                 AND (\(Self.articleDateOrder) >= ? OR EXISTS (
                     SELECT 1 FROM events active WHERE active.id = m.event_id AND active.updated_at >= ?))
                 AND \(Self.visibleArticle)
