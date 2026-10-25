@@ -71,9 +71,18 @@ actor EnrichmentQueue {
         var task: Task<Void, Never>?
     }
 
+    private struct QueuedEntry: Equatable {
+        let id: String
+        let generation: UUID
+        let priority: EnrichmentPriority
+        let queuedAt: Date
+    }
+
     private let maxConcurrency: Int = 3
     private var activeCount: Int = 0
-    private var jobs: [String: Job] = [:]  // Indexed by articleId
+    private var jobs: [String: Job] = [:]  // Indexed by articleId (active/queued/cancelled/failed; completed removed)
+    private var completedArticleIDs: Set<String> = []
+    private var queuedHeap: [QueuedEntry] = []
 
     private let store: ArticleStore?
 
@@ -104,7 +113,10 @@ actor EnrichmentQueue {
         for article in articles {
             let articleId = article.id
 
-            // 1. Check for existing job (Duplicate-Job Prevention)
+            // 1. Check for existing or completed job (Duplicate-Job Prevention)
+            if completedArticleIDs.contains(articleId) {
+                continue
+            }
             if var existing = jobs[articleId] {
                 switch existing.state {
                 case .queued(let currentPriority):
@@ -114,6 +126,14 @@ actor EnrichmentQueue {
                         existing.priority = priority
                         existing.state = .queued(priority)
                         jobs[articleId] = existing
+                        pushHeap(
+                            QueuedEntry(
+                                id: articleId,
+                                generation: existing.generation,
+                                priority: priority,
+                                queuedAt: existing.queuedAt
+                            )
+                        )
                     }
                     continue
                 case .running, .completed:
@@ -124,16 +144,25 @@ actor EnrichmentQueue {
             }
 
             // 2. Create new job
+            let now = Date()
             let job = Job(
                 id: articleId,
                 article: article,
                 allowHTTP: allowHTTP,
                 priority: priority,
-                queuedAt: Date(),
+                queuedAt: now,
                 state: .queued(priority),
                 task: nil
             )
             jobs[articleId] = job
+            pushHeap(
+                QueuedEntry(
+                    id: articleId,
+                    generation: job.generation,
+                    priority: priority,
+                    queuedAt: now
+                )
+            )
         }
 
         processNextJobs()
@@ -159,6 +188,7 @@ actor EnrichmentQueue {
             job.state = .cancelled(reason)
             jobs[id] = job
         }
+        queuedHeap.removeAll()
         for (eventID, task) in overviewTasks {
             task.cancel()
             logger.debug("Cancelled overview generation for '\(eventID)': \(reason.rawValue)")
@@ -216,38 +246,82 @@ actor EnrichmentQueue {
     // MARK: - Queue State Queries
 
     func state(for articleId: String) -> EnrichmentJobState? {
-        jobs[articleId]?.state
+        if completedArticleIDs.contains(articleId) {
+            return .completed
+        }
+        return jobs[articleId]?.state
     }
 
     func activeJobCount() -> Int {
         activeCount
     }
 
+    func retainsJob(for articleId: String) -> Bool {
+        jobs[articleId] != nil
+    }
+
     // MARK: - Scheduler Execution
 
-    private func processNextJobs() {
-        guard activeCount < maxConcurrency else { return }
-
-        // Find highest-priority queued jobs
-        let queuedJobs = jobs.values.filter {
-            if case .queued = $0.state { return true }
-            return false
+    private static func isHigherPriority(_ lhs: QueuedEntry, _ rhs: QueuedEntry) -> Bool {
+        if lhs.priority != rhs.priority {
+            return lhs.priority > rhs.priority
         }
+        if lhs.queuedAt != rhs.queuedAt {
+            return lhs.queuedAt < rhs.queuedAt
+        }
+        return lhs.id < rhs.id
+    }
 
-        guard !queuedJobs.isEmpty else { return }
-
-        // Sort by priority DESC, then by queuedAt ASC
-        let sorted = queuedJobs.sorted {
-            if $0.priority != $1.priority {
-                return $0.priority > $1.priority
+    private func pushHeap(_ entry: QueuedEntry) {
+        queuedHeap.append(entry)
+        var child = queuedHeap.count - 1
+        while child > 0 {
+            let parent = (child - 1) / 2
+            if Self.isHigherPriority(queuedHeap[child], queuedHeap[parent]) {
+                queuedHeap.swapAt(child, parent)
+                child = parent
+            } else {
+                break
             }
-            return $0.queuedAt < $1.queuedAt
         }
+    }
 
-        let capacity = maxConcurrency - activeCount
-        let toRun = sorted.prefix(capacity)
+    private func popHeap() -> QueuedEntry? {
+        guard !queuedHeap.isEmpty else { return nil }
+        if queuedHeap.count == 1 {
+            return queuedHeap.removeLast()
+        }
+        let top = queuedHeap[0]
+        queuedHeap[0] = queuedHeap.removeLast()
+        var parent = 0
+        let count = queuedHeap.count
+        while true {
+            let left = 2 * parent + 1
+            let right = left + 1
+            var candidate = parent
+            if left < count && Self.isHigherPriority(queuedHeap[left], queuedHeap[candidate]) {
+                candidate = left
+            }
+            if right < count && Self.isHigherPriority(queuedHeap[right], queuedHeap[candidate]) {
+                candidate = right
+            }
+            if candidate == parent { break }
+            queuedHeap.swapAt(parent, candidate)
+            parent = candidate
+        }
+        return top
+    }
 
-        for var job in toRun {
+    private func processNextJobs() {
+        while activeCount < maxConcurrency, let entry = popHeap() {
+            guard var job = jobs[entry.id],
+                job.generation == entry.generation,
+                case .queued(let currentPriority) = job.state,
+                currentPriority == entry.priority
+            else {
+                continue
+            }
+
             activeCount += 1
             job.state = .running
             let id = job.id
@@ -340,6 +414,11 @@ actor EnrichmentQueue {
     }
 
     private func markJobState(articleId: String, state: EnrichmentJobState) {
+        if case .completed = state {
+            jobs.removeValue(forKey: articleId)
+            completedArticleIDs.insert(articleId)
+            return
+        }
         if var job = jobs[articleId] {
             job.state = state
             jobs[articleId] = job

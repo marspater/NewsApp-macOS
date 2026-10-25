@@ -1,0 +1,64 @@
+name: Release
+
+# A pushed v<major>.<minor>.<patch> tag builds the ad-hoc signed arm64 app and publishes a GitHub release.
+# No Developer ID signing, notarization, DMG or Sparkle (decision of 24 October 2026).
+on:
+  push:
+    tags: [ 'v[0-9]+.[0-9]+.[0-9]+' ]
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    name: Release (Apple Silicon)
+    runs-on: xcode-27
+    timeout-minutes: 25
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0  # the bundle version comes from tags and the commit count
+
+      - name: Build Ad-hoc arm64 Bundle
+        run: |
+          chmod +x build_release.sh
+          ./build_release.sh
+
+      - name: Verify Bundle
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          plutil -lint News.app/Contents/Info.plist
+          [[ "$(plutil -extract CFBundleShortVersionString raw News.app/Contents/Info.plist)" == "$VERSION" ]]
+          [[ "$(lipo -archs News.app/Contents/MacOS/News)" == arm64 ]]
+          codesign --verify --deep --strict --verbose=2 News.app
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+
+      - name: Archive
+        run: |
+          ditto -c -k --sequesterRsrc --keepParent News.app "News-${VERSION}-arm64.zip"
+          shasum -a 256 "News-${VERSION}-arm64.zip" > "News-${VERSION}-arm64.zip.sha256"
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cat > notes.md <<NOTES
+          News ${VERSION}: a native, local-first RSS, Atom and JSON Feed reader for macOS 15 or later on Apple silicon. English-language feeds only in this release.
+
+          ## Install
+
+          1. Download \`News-${VERSION}-arm64.zip\`, check it against the \`.sha256\` file and unzip it.
+          2. The app is ad-hoc signed, not notarized. Right-click News.app and choose Open, or run \`xattr -d com.apple.quarantine News.app\`.
+
+          ## Privacy
+
+          No cloud AI services and no telemetry. Article intelligence runs on the device with Apple frameworks and models this project ships itself. See PRIVACY.md and SECURITY.md in the repository.
+
+          See CHANGELOG.md for what changed.
+          NOTES
+          gh release create "$GITHUB_REF_NAME" "News-${VERSION}-arm64.zip" "News-${VERSION}-arm64.zip.sha256" \
+            --title "News ${VERSION}" --notes-file notes.md --verify-tag

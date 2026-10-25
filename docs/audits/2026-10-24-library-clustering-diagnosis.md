@@ -41,3 +41,34 @@ sqlite3 "file:$HOME/Library/Containers/com.marspater.news/Data/Library/Applicati
 sqlite3 copy.sqlite3 "select decision, count(*) from pair_assessments group by decision"
 sqlite3 copy.sqlite3 "select coalesce(em.event_id,'-'), a.source, a.title from articles a left join event_members em on em.article_id=a.id where a.title like '%Eagle%Nest%' and a.published_at > strftime('%s','now','-3 days') order by em.event_id"
 ```
+
+## Library holdout (#579)
+
+Drawn from the same copy with `--review-pairs --holdout-candidates` and labelled by Claude under the pair review protocol in CONTRIBUTING (Mars's 20-pair spot-check pending: the first twenty borderline candidates in the recorded order). The file stays outside the repository: `~/news-eval/holdout-2026-10-24/library-holdout-2026-10-24.json` (`0600`), SHA-256 `bbb4ded1d9c635444053b63ae638ddba3f3e3f6c0a014caa012155c67a1710b9`; the candidate export `holdout-candidates.csv` sits beside it.
+
+| Class (drawn in SHA-256 order of the two ids) | Pairs | `same` | `related` | `different` |
+| --- | --- | --- | --- | --- |
+| Borderline decisions scored ≥ 0.6 | 100 | 39 | 20 | 41 |
+| Singletons sharing a specific anchor and a keyword with an event member within 36 h | 59 | 4 | 4 | 51 |
+| Pairs of active events sharing two terms (earliest members) | 60 | 1 | 1 | 58 |
+| Total | 219 | 44 | 25 | 150 |
+
+These are hard pairs by construction: everything the rules nearly matched or nearly merged. The old holdout (49 articles) has none of them.
+
+**Baseline, matcher v11** (`--library-holdout`: the copy re-clustered from scratch inside the 72-hour window, 2 passes, 57 s):
+
+| Measure | Value |
+| --- | --- |
+| Pairs linked | 15: 8 `same`, 4 `related`, 3 `different` |
+| Precision (`same` among linked) | 0.533 |
+| Recall on `same` | 0.182 (8 of 44) |
+| Recent stories in a multi-publisher event | 587 of 1,556 (38%) |
+
+**Matcher v12 (#580)** on the same holdout: 21 pairs linked (14 `same`, 4 `related`, 3 `different`), precision 0.667, recall 0.318 (14 of 44); the seven wrong links are the same seven as under v11 (no new wrong link), 598 of 1,556 recent stories (38%) in a multi-publisher event. Authored corpus 22 / 0 and private tune replay 44 / 0 / 49 unchanged. Newly linked: the CNA OpenAI pair, both iOS 27.2 pairs, two of four Pope Leo pairs, Real Madrid vs Leipzig report and live blog, and a Taiz pair; still missed: Storm Austen (anchors shared, cosine 0.69 and pair model 0.86 just under their cutoffs), the PHP explainers, the France protest live blogs and the CNA Pope report whose lead names three countries.
+
+The gate for #580, #582 and #581 is this file: precision ≥ 0.97 means at most one wrong link among the pairs linked, and every slice reports the recall it adds. Identical and near-identical headlines left unlinked here (CNA "OpenAI says its AI agents disabled their own safety monitors" twice, 9to5Mac "iOS 27.2" pairs, four Pope Leo pairs across CNA, BBC, CBC and Al Jazeera, Storm Austen across BBC, Euronews and Africanews) are the #580 targets. The three wrong links are two Euronews/Africanews daily bulletin pairs and one same-publisher series pair, the pattern the pair review found (`docs/audits/2026-10-24-pair-decision-review.md`).
+
+```sh
+NEWS_SNAPSHOT_DB=copy.sqlite3 NEWS_EVENT_OUTPUT=$HOME/news-eval/holdout-2026-10-24 ./test.sh --review-pairs --holdout-candidates
+NEWS_SNAPSHOT_DB=copy.sqlite3 NEWS_LIBRARY_HOLDOUT=$HOME/news-eval/holdout-2026-10-24/library-holdout-2026-10-24.json ./test.sh --library-holdout
+```
