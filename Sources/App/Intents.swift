@@ -207,8 +207,9 @@ public struct NewBriefingIntent: AppIntent {
             resetAction()
         } else {
             _ = appSettings ?? IntentDependencyResolver.resolveAppSettings()
-            UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: "briefingEditionSelectedAt")
-            UserDefaults.standard.set("", forKey: "briefingEditionArticleIDs")
+            let standardDefaults = UserDefaults.standard
+            standardDefaults.setValue(Date().timeIntervalSince1970, forKey: "briefingEditionSelectedAt")
+            standardDefaults.setValue("", forKey: "briefingEditionArticleIDs")
             NotificationCenter.default.post(name: Notification.Name("jumpToBriefingCommand"), object: nil)
         }
         return .result(dialog: "New briefing generated.")
