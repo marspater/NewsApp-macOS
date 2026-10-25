@@ -2,6 +2,7 @@
 // NewsApp Main Window Orchestrator & Split View Coordinator
 
 import AppKit
+import CoreSpotlight
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -13,6 +14,7 @@ extension Notification.Name {
     static let jumpToUnreadCommand = Notification.Name("jumpToUnreadCommand")
     static let jumpToSavedCommand = Notification.Name("jumpToSavedCommand")
     static let jumpToHistoryCommand = Notification.Name("jumpToHistoryCommand")
+    static let jumpToBriefingCommand = Notification.Name("jumpToBriefingCommand")
 }
 
 // MARK: - Main View
@@ -24,6 +26,7 @@ struct MainView: View {
     @State private var searchPresented = false
     @State private var mastheadNotice: MastheadNotice?
     @State private var articlePath = NavigationPath()
+    @State private var pendingFeedConfirmationURL: URL?
 
     @EnvironmentObject private var appSettings: AppSettings
     @EnvironmentObject private var articleStore: ArticleStore
@@ -108,8 +111,37 @@ struct MainView: View {
             .onReceive(NotificationCenter.default.publisher(for: .jumpToHistoryCommand)) { _ in
                 selectedTopic = "History"
             }
+            .onReceive(NotificationCenter.default.publisher(for: .jumpToBriefingCommand)) { _ in
+                selectedTopic = "Briefing"
+            }
             .task(id: pendingNavigationToken) {
                 await handlePendingNavigation()
+            }
+            .onOpenURL { url in
+                handleIncomingURL(url)
+            }
+            .onContinueUserActivity(CSSearchableItemActionType) { activity in
+                handleSpotlightContinuation(activity)
+            }
+            .alert(
+                "Subscribe to Feed?",
+                isPresented: Binding(
+                    get: { pendingFeedConfirmationURL != nil },
+                    set: { if !$0 { pendingFeedConfirmationURL = nil } }
+                ),
+                presenting: pendingFeedConfirmationURL
+            ) { targetURL in
+                Button("Subscribe") {
+                    confirmAddFeed(targetURL)
+                    pendingFeedConfirmationURL = nil
+                }
+                Button("Cancel", role: .cancel) {
+                    pendingFeedConfirmationURL = nil
+                }
+            } message: { targetURL in
+                Text(
+                    "Would you like to subscribe to stories from \(targetURL.host ?? "this feed")?\n\n\(targetURL.absoluteString)"
+                )
             }
     }
 
@@ -318,6 +350,55 @@ struct MainView: View {
         } catch {
             guard !Task.isCancelled else { return }
             articleStore.operationError = "The notification story could not be loaded. Please try again."
+        }
+    }
+
+    private func handleIncomingURL(_ url: URL) {
+        NSApp.activate()
+
+        guard
+            let destination = NewsURLParser.parse(
+                url: url,
+                allowInsecureHTTP: appSettings.allowInsecureHTTP
+            )
+        else {
+            return
+        }
+
+        switch destination {
+        case .story(let storyID):
+            articleStore.pendingNavigation = .init(articleID: storyID, link: "")
+        case .addFeed(let feedURL):
+            if appSettings.hasFeed(feedURL.absoluteString) {
+                articleStore.operationError = "You are already subscribed to this feed."
+                return
+            }
+            pendingFeedConfirmationURL = feedURL
+        }
+    }
+
+    private func handleSpotlightContinuation(_ activity: NSUserActivity) {
+        guard
+            let identifier = activity.userInfo?[CSSearchableItemActivityIdentifier] as? String,
+            !identifier.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        else {
+            return
+        }
+        let encoded = identifier.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? identifier
+        if let url = URL(string: "news://story/\(encoded)") {
+            handleIncomingURL(url)
+        } else {
+            NSApp.activate()
+            articleStore.pendingNavigation = .init(articleID: identifier, link: "")
+        }
+    }
+
+    private func confirmAddFeed(_ url: URL) {
+        let urlString = url.absoluteString
+        if feedManager.addFeed(url: urlString) {
+            mastheadNotice = MastheadNotice(message: "Subscribed to \(url.host ?? "feed")")
+        } else {
+            articleStore.operationError = "Feed not added. Check the URL or whether you already subscribe."
         }
     }
 

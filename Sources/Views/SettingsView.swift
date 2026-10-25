@@ -472,6 +472,12 @@ struct SettingsView: View {
                         get: { appSettings.showsDockBadge },
                         set: { appSettings.setShowsDockBadge($0) }
                     ))
+                Toggle(
+                    "Show in Menu Bar",
+                    isOn: Binding(
+                        get: { appSettings.showsMenuBarExtra },
+                        set: { appSettings.setShowsMenuBarExtra($0) }
+                    ))
             }
 
             if appSettings.notificationsEnabled {
@@ -879,6 +885,43 @@ struct SettingsView: View {
 
     // MARK: - 8. Updates Tab
 
+    @ViewBuilder
+    private var updateNoticeBanner: some View {
+        NoticeView(tint: AppColor.accent) {
+            HStack(spacing: AppSpacing.sm) {
+                Image(systemName: "arrow.triangle.2.circlepath.circle.fill")
+                    .foregroundStyle(AppColor.accent)
+                    .imageScale(.large)
+                    .accessibilityHidden(true)
+
+                VStack(alignment: .leading, spacing: AppSpacing.textStack) {
+                    Text("Update Available")
+                        .font(AppTypography.headline)
+                        .foregroundStyle(AppColor.primaryText)
+
+                    if let latest = updateChecker.latestVersionString {
+                        let formatted = latest.hasPrefix("v") || latest.hasPrefix("V") ? latest : "v\(latest)"
+                        Text("Version \(formatted) is available on GitHub.")
+                            .font(AppTypography.caption)
+                            .foregroundStyle(AppColor.secondaryText)
+                    } else {
+                        Text("A new version of News is available on GitHub.")
+                            .font(AppTypography.caption)
+                            .foregroundStyle(AppColor.secondaryText)
+                    }
+                }
+
+                Spacer()
+
+                Button("View Release on GitHub") {
+                    updateChecker.openReleasePage()
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+            }
+        }
+    }
+
     private var updatesTab: some View {
         Form {
             Section(header: sectionHeader("News for macOS")) {
@@ -889,6 +932,10 @@ struct SettingsView: View {
                 }
             }
             Section {
+                if updateChecker.updateAvailable {
+                    updateNoticeBanner
+                }
+
                 if let status = updateChecker.statusMessage {
                     Text(status)
                         .font(AppTypography.callout)
@@ -903,9 +950,6 @@ struct SettingsView: View {
                     } else {
                         Button("Check for Updates") {
                             Task { await updateChecker.checkForUpdates(userInitiated: true) }
-                        }
-                        if updateChecker.updateAvailable {
-                            Button("View Release on GitHub") { updateChecker.openReleasePage() }
                         }
                     }
                 }
