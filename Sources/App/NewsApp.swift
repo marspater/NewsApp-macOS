@@ -304,6 +304,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
         UNUserNotificationCenter.current().delegate = self
     }
 
+    func applicationWillTerminate(_ _: Notification) {
+        let semaphore = DispatchSemaphore(value: 0)
+        Task.detached(priority: .userInitiated) {
+            await DatabaseEngine.shared.checkpointAndOptimize()
+            semaphore.signal()
+        }
+        _ = semaphore.wait(timeout: .now() + .seconds(2))
+    }
+
     // Force macOS to show alert even if app is focused
     nonisolated func userNotificationCenter(
         _ _: UNUserNotificationCenter, willPresent _: UNNotification,

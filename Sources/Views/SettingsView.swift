@@ -784,7 +784,23 @@ struct SettingsView: View {
                     "Library Database", detail: databaseSize,
                     description: "Subscriptions, read history, saved stories and the search index."
                 ) {
-                    TagView(title: "Active")
+                    TagView(
+                        title: articleStore.databaseHealthNotice == nil ? "Active" : "Read-Only",
+                        tint: articleStore.databaseHealthNotice == nil ? AppColor.secondaryText : AppColor.warning
+                    )
+                }
+                if let healthNotice = articleStore.databaseHealthNotice {
+                    NoticeView(tint: AppColor.warning) {
+                        Label {
+                            Text(healthNotice)
+                                .font(AppTypography.callout)
+                                .foregroundStyle(AppColor.primaryText)
+                                .fixedSize(horizontal: false, vertical: true)
+                        } icon: {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundStyle(AppColor.warning)
+                        }
+                    }
                 }
             }
 
