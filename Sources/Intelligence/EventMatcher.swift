@@ -505,6 +505,8 @@ struct EventPairAssessment: Sendable, Equatable {
     var embeddingCosine: Double?
     /// The pair model judged this borderline pair one event (#525).
     var modelConfirmed = false
+    /// Both reports are English or of unknown language, so the embedding and the pair model may be consulted (#553).
+    var neuralEligible = true
 }
 
 enum EventMatcher {
@@ -552,6 +554,8 @@ enum EventMatcher {
         _ a: EventFeatures, _ b: EventFeatures, policy: EventMatchPolicy = .standard,
         embeddingSimilarity: Double? = nil
     ) -> EventPairAssessment {
+        let neuralEligible = usesNeuralPaths(a, b)
+        let embeddingSimilarity = neuralEligible ? embeddingSimilarity : nil
         let gap = abs(a.date.timeIntervalSince(b.date))
         let crossSpecific = a.specificAnchors.intersection(b.keywords).union(b.specificAnchors.intersection(a.keywords))
         let sharedAnchors = a.anchors.intersection(b.anchors).union(crossSpecific).count
@@ -598,7 +602,15 @@ enum EventMatcher {
             conflict: conflict, isBorderline: isBorderline, needsConfirmation: needsConfirmation,
             score: max(score, embeddingSimilarity ?? 0.0), what: what, entity: entity, sharedAnchors: sharedAnchors,
             sharedSpecificAnchors: sharedSpecific, sharedKeywords: sharedKeywords,
-            isMatch: isMatch, isCompatible: isCompatible, embeddingCosine: embeddingSimilarity)
+            isMatch: isMatch, isCompatible: isCompatible, embeddingCosine: embeddingSimilarity,
+            neuralEligible: neuralEligible)
+    }
+
+    /// Both models are English-only (MiniLM vocabulary, pair model trained on English pairs), so the semantic veto,
+    /// the semantic rescue and the pair model run only when neither report is recognized as another language (#553).
+    /// An unrecognized language is treated like English, as the rules already do.
+    static func usesNeuralPaths(_ a: EventFeatures, _ b: EventFeatures) -> Bool {
+        [a.language, b.language].allSatisfy { $0 == nil || $0 == "en" }
     }
 
     static func rejected(_ pair: EventPairAssessment) -> EventPairAssessment {
@@ -629,7 +641,7 @@ enum EventMatcher {
     /// name, place or country. Without any anchor two generic reports ("Central bank holds interest rates") can be
     /// about different places, so the model never stands in for all of them.
     static func needsPairModel(_ pair: EventPairAssessment) -> Bool {
-        pair.conflict == nil && !pair.isMatch && pair.isBorderline && pair.sharedAnchors >= 1
+        pair.neuralEligible && pair.conflict == nil && !pair.isMatch && pair.isBorderline && pair.sharedAnchors >= 1
     }
 
     /// The pair model judged a borderline pair one event; it stands in for the shared specific anchor (#525).

@@ -7257,6 +7257,49 @@ struct NewsTests {
             EventMatcher.assess(quake, features(["afad"], followUpTerms, hours: 20, places: ["malatya"])).isMatch,
             "Reports half a day apart need stronger agreement on what happened")
 
+        // Both models are English-only (#553): a pair in another language is decided by the rules alone.
+        let frenchStrike = features(["macron"], ["greve", "reforme"], language: "fr")
+        let frenchStrikeLater = features(["macron"], ["greve", "retraite"], hours: 1, language: "fr")
+        let frenchPair = EventMatcher.assess(frenchStrike, frenchStrikeLater, embeddingSimilarity: 0.95)
+        assertTrue(frenchPair.isBorderline && !frenchPair.isMatch, "A French pair the rules leave open stays open")
+        assertTrue(frenchPair.embeddingCosine == nil, "The embedding is not read for a French pair")
+        assertFalse(frenchPair.neuralEligible, "A French pair is not eligible for the neural paths")
+        assertFalse(EventMatcher.needsPairModel(frenchPair), "The pair model is never asked about a French pair")
+        let englishStrike = features(["macron"], ["greve", "reforme"], language: "en")
+        let englishStrikeLater = features(["macron"], ["greve", "retraite"], hours: 1, language: "en")
+        let englishPair = EventMatcher.assess(englishStrike, englishStrikeLater, embeddingSimilarity: 0.95)
+        assertTrue(englishPair.isMatch, "The same signals in English are rescued by the embedding")
+        assertTrue(
+            EventMatcher.needsPairModel(EventMatcher.assess(englishStrike, englishStrikeLater)),
+            "Without an embedding the English pair goes to the pair model")
+        assertTrue(
+            EventMatcher.assess(englishStrike, features(["macron"], ["greve", "retraite"], hours: 1, language: nil))
+                .neuralEligible,
+            "An unrecognized language is treated like English")
+        let french = DatabaseEngine(path: ":memory:")
+        try await french.open()
+        try await french.upsertArticles([
+            FeedArticle(
+                storedID: "fr1", title: "Emmanuel Macron défend la réforme des retraites devant les députés",
+                link: "https://corpus.invalid/fr1", guid: "fr1",
+                description:
+                    "Le président Emmanuel Macron a défendu mardi sa réforme des retraites devant les députés à Paris, "
+                    + "alors que les syndicats appellent à une nouvelle journée de grève dans tout le pays.",
+                pubDate: now.addingTimeInterval(-7200), source: "Journal Un"),
+            FeedArticle(
+                storedID: "fr2", title: "Retraites : Macron maintient sa réforme malgré la grève",
+                link: "https://corpus.invalid/fr2", guid: "fr2",
+                description:
+                    "Emmanuel Macron maintient la réforme des retraites malgré la grève des syndicats, a indiqué "
+                    + "l'Élysée mardi à Paris, tandis que les députés débattent du texte.",
+                pubDate: now.addingTimeInterval(-3600), source: "Gazette Deux"),
+        ])
+        _ = try await EventClusterer.run(in: french, now: now) { _, _ in
+            assertTrue(false, "The pair model is never called for French reports")
+            return 1.0
+        }
+        await french.close()
+
         // A≈B and B≈C while A contradicts C: C cannot join an event that holds A and B.
         let a = features(
             ["afad"], ["earthquake", "magnitude", "damage", "building"], places: ["malatya"], weekdays: ["monday"])
