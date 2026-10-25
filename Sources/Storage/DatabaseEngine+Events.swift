@@ -927,17 +927,21 @@ extension DatabaseEngine {
         }
     }
 
-    /// Pending recent articles and members of still-active events, oldest first. This also upgrades
-    /// active events whose last publication is older than the window; inactive archived groups stay untouched.
-    func pendingEventMatchRows(activeSince: Date, matcherVersion: Int, limit: Int) throws -> [EventMatchRow] {
+    /// Pending recent articles and members of still-active events, newest first (#541), so the stories a reader sees
+    /// first are grouped first after a matcher bump or a large import. This also upgrades active events whose last
+    /// publication is older than the window; inactive archived groups stay untouched. `revalidating: false` returns
+    /// only rows never matched (#534).
+    func pendingEventMatchRows(activeSince: Date, matcherVersion: Int, limit: Int, revalidating: Bool = true) throws
+        -> [EventMatchRow]
+    {
         try eventMatchRows(
             """
             \(Self.eventMatchColumns)
-            WHERE (ms.article_id IS NULL OR ms.matcher_version < ?)
+            WHERE (ms.article_id IS NULL OR (\(revalidating ? "1" : "0") AND ms.matcher_version < ?))
                 AND (\(Self.articleDateOrder) >= ? OR EXISTS (
                     SELECT 1 FROM events active WHERE active.id = m.event_id AND active.updated_at >= ?))
                 AND \(Self.visibleArticle)
-            ORDER BY \(Self.articleDateOrder), a.id
+            ORDER BY \(Self.articleDateOrder) DESC, a.id
             LIMIT ?;
             """,
             [
@@ -1357,10 +1361,12 @@ extension DatabaseEngine {
     struct PairDecision: Hashable, Sendable {
         let articleID: String
         let otherArticleID: String
-        /// "match", "related-act" or "borderline".
+        /// "match", "related-act", "borderline" or "vetoed" (#551).
         let decision: String
         let reason: String
         let score: Double
+        /// `EventPairFeatures` as JSON (#551); nil for rows written before it was recorded.
+        var features: String? = nil
     }
 
     func upsertPairDecisions(_ decisions: [PairDecision], matcherVersion: Int, at date: Date = Date()) throws {
@@ -1370,16 +1376,17 @@ extension DatabaseEngine {
                 try eventRows(
                     """
                     INSERT INTO pair_assessments(article_id, other_article_id, matcher_version, decision, reason, score,
-                        assessed_at)
-                    SELECT ?, ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM articles WHERE id = ?)
+                        features, assessed_at)
+                    SELECT ?, ?, ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM articles WHERE id = ?)
                         AND EXISTS (SELECT 1 FROM articles WHERE id = ?)
                     ON CONFLICT(article_id, other_article_id) DO UPDATE SET matcher_version = excluded.matcher_version,
                         decision = excluded.decision, reason = excluded.reason, score = excluded.score,
-                        assessed_at = excluded.assessed_at;
+                        features = excluded.features, assessed_at = excluded.assessed_at;
                     """,
                     [
                         .text(pair.articleID), .text(pair.otherArticleID), .integer(matcherVersion),
-                        .text(pair.decision), .text(pair.reason), .real(pair.score), .real(date.timeIntervalSince1970),
+                        .text(pair.decision), .text(pair.reason), .real(pair.score),
+                        pair.features.map { .text($0) } ?? .null, .real(date.timeIntervalSince1970),
                         .text(pair.articleID), .text(pair.otherArticleID),
                     ])
             }
