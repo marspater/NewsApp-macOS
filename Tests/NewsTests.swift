@@ -9428,6 +9428,10 @@ struct NewsTests {
             source: original.source, fullContent: "Rolledbackbodytoken")
         let body = String(
             repeating: "Controlled publisher prose describes research and independent observations. ", count: 110)
+        // The measured run keeps the audited workload. The regression run clusters 150 rows (one batch of 100 commits,
+        // 50 stay pending at cancel) and parses 100 items, which still cancel mid-work. Ingestion keeps 20,000 rows:
+        // the wait is for the page cache to spill, which takes the same time at any batch size; 4,000 rows commit first.
+        let measuring = CommandLine.arguments.contains("--active-work-cancellation")
         // Exceed the native page-cache spill threshold so WAL growth occurs before COMMIT.
         let batch =
             [changed]
@@ -9438,7 +9442,7 @@ struct NewsTests {
                     guid: "cancel-insert-\(index)", description: "Controlled report \(index)", pubDate: now,
                     source: "Publisher", fullContent: body)
             }
-        let sampleCount = CommandLine.arguments.contains("--active-work-cancellation") ? 5 : 1
+        let sampleCount = measuring ? 5 : 1
         var samples: [String: [Double]] = [:]
         for _ in 0..<sampleCount {
             assertEqual(
@@ -9492,7 +9496,7 @@ struct NewsTests {
 
         let clustering = DatabaseEngine(path: directory.appendingPathComponent("clustering.sqlite3").path)
         try await clustering.open()
-        let articles = (0..<400).map { index in
+        let articles = (0..<(measuring ? 400 : 150)).map { index in
             FeedArticle(
                 storedID: "cancel-cluster-\(index)", title: "Research observatory reports measurement \(index)",
                 link: "https://cancel.example/cluster/\(index)", guid: "cancel-cluster-\(index)",
@@ -9522,16 +9526,17 @@ struct NewsTests {
             await eventually("Clustering commits real progress before cancellation") {
                 let count = try? await clustering.pendingEventMatchRows(
                     activeSince: now.addingTimeInterval(-72 * 3600),
-                    matcherVersion: EventMatcher.version, limit: 400
+                    matcherVersion: EventMatcher.version, limit: articles.count
                 ).count
-                return count.map { $0 < 400 } ?? false
+                return count.map { $0 < articles.count } ?? false
             }
             let remaining = try await clustering.pendingEventMatchRows(
                 activeSince: now.addingTimeInterval(-72 * 3600),
-                matcherVersion: EventMatcher.version, limit: 400
+                matcherVersion: EventMatcher.version, limit: articles.count
             ).count
             assertTrue(
-                remaining > 0 && remaining < 400, "Clustering has completed some work and still has pending rows")
+                remaining > 0 && remaining < articles.count,
+                "Clustering has completed some work and still has pending rows")
             assertEqual(done.count, 0, "Clustering is active when cancelled")
             pendingAtCancel.append(remaining)
             let start = ProcessInfo.processInfo.systemUptime
@@ -9540,7 +9545,8 @@ struct NewsTests {
             let (cancelled, end) = await work.value
             assertTrue(cancelled, "Active clustering reports CancellationError")
             samples["clustering", default: []].append((end - start) * 1000)
-            assertEqual(try await clustering.counts().total, 400, "Cancellation never deletes source articles")
+            assertEqual(
+                try await clustering.counts().total, articles.count, "Cancellation never deletes source articles")
             assertTrue(
                 try await clustering.isRead(articleId: articles[0].id), "Clustering cancellation preserves read state")
             assertTrue(
@@ -9562,7 +9568,8 @@ struct NewsTests {
         // Feed parsing extracts every item's HTML; a cancelled refresh must not finish that work or keep its result.
         let paragraph =
             "<p>Controlled publisher prose describes <em>research</em> and independent observations in detail.</p>"
-        let items = (0..<500).map { index in
+        let itemCount = measuring ? 500 : 100
+        let items = (0..<itemCount).map { index in
             "<item><title>Parsed report \(index)</title><link>https://cancel.example/parse/\(index)</link><guid>parse-\(index)</guid>"
                 + "<description>Report \(index)</description><content:encoded><![CDATA[<h2>Section</h2>"
                 + String(repeating: paragraph, count: 15) + "]]></content:encoded></item>"
@@ -9572,7 +9579,8 @@ struct NewsTests {
                 + "<channel><title>Publisher</title>" + items + "</channel></rss>").utf8)
         let fullStart = ProcessInfo.processInfo.systemUptime
         assertEqual(
-            FeedXMLParser(data: feedData, feedURL: feed).parse().count, 500, "The uncancelled fixture parses every item"
+            FeedXMLParser(data: feedData, feedURL: feed).parse().count, itemCount,
+            "The uncancelled fixture parses every item"
         )
         let fullParse = ProcessInfo.processInfo.systemUptime - fullStart
         assertTrue(fullParse > 0.1, "The parsing fixture runs long enough to cancel mid-feed")
@@ -9612,7 +9620,8 @@ struct NewsTests {
             "samples_ms": samples, "samples_per_operation": sampleCount, "ingestion_batch_rows": batch.count,
             "ingestion_body_characters": body.count, "wal_spill_threshold_bytes": 1_048_576,
             "clustering_library_rows": articles.count, "clustering_pending_at_cancel": pendingAtCancel,
-            "parsing_feed_items": 500, "parsing_feed_bytes": feedData.count, "parsing_uncancelled_ms": fullParse * 1000,
+            "parsing_feed_items": itemCount, "parsing_feed_bytes": feedData.count,
+            "parsing_uncancelled_ms": fullParse * 1000,
             "sqlite_version": String(cString: sqlite3_libversion()),
         ]
         print(
