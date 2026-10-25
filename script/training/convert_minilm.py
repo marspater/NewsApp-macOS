@@ -140,7 +140,8 @@ def main(argv):
         'versions': {'python': platform.python_version(), 'torch': torch.__version__,
                      'transformers': __import__('transformers').__version__, 'coremltools': ct.__version__},
     }
-    (out / 'metadata.json').write_text(json.dumps(metadata, indent=1, sort_keys=True) + '\n')  # NOSONAR: OUT_DIR
+    # OUT_DIR is the operator's own output directory, named on the command line.
+    (out / 'metadata.json').write_text(json.dumps(metadata, indent=1, sort_keys=True) + '\n')  # NOSONAR
     print(f'wrote {path}; Core ML matches PyTorch within {torch_difference:.5f}; against the shipped model: '
           f'hidden states within {shipped_difference:.5f}, pooled cosine at least {shipped_cosine:.6f}')
 
