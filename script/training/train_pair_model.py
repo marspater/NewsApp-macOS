@@ -40,6 +40,7 @@ from transformers import (
 )
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
+BATCH = 32  # training batch size, both stages
 SHIPPED = ROOT / 'Sources/Resources/Models/minilm.mlmodelc'
 CONFIG = BertConfig(
     vocab_size=30522, hidden_size=384, num_hidden_layers=6, num_attention_heads=12, intermediate_size=1536,
@@ -114,7 +115,8 @@ def read_pairs(path, cap=None):
 def describe(path, rows):
     """What `metadata.json` records about one input CSV."""
     file = pathlib.Path(path)
-    return {'file': file.name, 'sha256': hashlib.sha256(file.read_bytes()).hexdigest(), 'rows': len(rows),
+    digest = hashlib.sha256(file.read_bytes()).hexdigest()  # NOSONAR: read_pairs already checked this path
+    return {'file': file.name, 'sha256': digest, 'rows': len(rows),
             'positives': sum(r[0] for r in rows), 'weight_sum': round(sum(r[4] for r in rows), 1)}
 
 
@@ -201,7 +203,7 @@ def run_epoch(model, data, device, optimization, batch):
         optimizer.zero_grad()
 
 
-def fit_stage(model, tokenizer, rows, device, epochs, batch, rate, name, report):
+def fit_stage(model, tokenizer, rows, device, epochs, rate, name, report):
     """One training stage on `rows`; per-epoch held-out numbers are printed and the last ones recorded."""
     fit, held = split(rows)
     print(f'{name}: {len(fit)} training ({sum(r[0] for r in fit)} same event), {len(held)} held out '
@@ -212,13 +214,13 @@ def fit_stage(model, tokenizer, rows, device, epochs, batch, rate, name, report)
     pos_weight = torch.tensor(max(1.0, (len(fit) - positives) / max(1.0, positives)), device=device)
     loss_function = torch.nn.BCEWithLogitsLoss(reduction='none', pos_weight=pos_weight)
     optimizer = torch.optim.AdamW(model.parameters(), lr=rate, weight_decay=0.01)
-    steps = epochs * math.ceil(len(fit) / batch)
+    steps = epochs * math.ceil(len(fit) / BATCH)
     schedule = get_linear_schedule_with_warmup(optimizer, int(0.1 * steps), steps)
     # The final epoch of the decayed schedule is kept: picking the best held-out AUC chose an early, overconfident
     # model that merged four tune pairs below a 0.95 cutoff (24 October 2026).
     labels = [bool(r[0]) for r in held]
     for epoch in range(epochs):
-        run_epoch(model, train_data, device, (loss_function, optimizer, schedule), batch)
+        run_epoch(model, train_data, device, (loss_function, optimizer, schedule), BATCH)
         scores = predict(model, held_data, device)
         line = (f'{name} epoch {epoch + 1}: held-out AUC {auc(scores, labels):.4f}; at 0.5 '
                 f'{at_threshold(scores, labels, 0.5)}; at 0.9 {at_threshold(scores, labels, 0.9)}')
@@ -228,7 +230,7 @@ def fit_stage(model, tokenizer, rows, device, epochs, batch, rate, name, report)
     return held
 
 
-def train(rows, epochs=3, batch=32, rate=3e-5, pretrain=None, pretrain_epochs=2, pretrain_rate=3e-5):
+def train(rows, epochs=3, rate=3e-5, pretrain=None, pretrain_epochs=2, pretrain_rate=3e-5):
     """Stage 1 on the public pretraining pairs when given (#624), stage 2 on the library pairs."""
     torch.manual_seed(525)
     tokenizer = Tokenizer()
@@ -238,8 +240,8 @@ def train(rows, epochs=3, batch=32, rate=3e-5, pretrain=None, pretrain_epochs=2,
     model.to(device)
     report = {}
     if pretrain:
-        fit_stage(model, tokenizer, pretrain, device, pretrain_epochs, batch, pretrain_rate, 'pretrain', report)
-    held = fit_stage(model, tokenizer, rows, device, epochs, batch, rate, 'library', report)
+        fit_stage(model, tokenizer, pretrain, device, pretrain_epochs, pretrain_rate, 'pretrain', report)
+    held = fit_stage(model, tokenizer, rows, device, epochs, rate, 'library', report)
     return model.cpu().eval(), tokenizer, held, report
 
 
@@ -335,11 +337,12 @@ def main(argv):
         'inputs': {'library': describe(args.pairs, rows),
                    'pretrain': [describe(path, read_pairs(path, cap=args.pretrain_cap)) for path in args.pretrain]},
         'pretrain_cap': args.pretrain_cap,
-        'stages': report, 'batch': 32,
+        'stages': report, 'batch': BATCH,
         'versions': {'python': platform.python_version(), 'torch': torch.__version__,
                      'transformers': __import__('transformers').__version__, 'coremltools': ct.__version__},
     }
-    (out / 'metadata.json').write_text(json.dumps(metadata, indent=1, sort_keys=True) + '\n')
+    text = json.dumps(metadata, indent=1, sort_keys=True) + '\n'
+    (out / 'metadata.json').write_text(text)  # NOSONAR: OUT_DIR is the operator's own directory
     print(f'wrote {out / "metadata.json"}')
 
 
