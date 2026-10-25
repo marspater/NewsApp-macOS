@@ -534,6 +534,8 @@ struct NewsTests {
         if CommandLine.arguments.contains("--fts-refresh-regression") {
             try await testUnchangedFTSRefresh()
             try await testFTSRowIDMigration()
+            try await testDatabaseHealthAndDerivedRetention()
+            try await testRealLibraryMigrationFixture()
             return
         }
         if CommandLine.arguments.contains("--export-pairs") {
@@ -668,6 +670,8 @@ struct NewsTests {
             await testFTS5SearchAndOperators()
             try await testUnchangedFTSRefresh()
             try await testFTSRowIDMigration()
+            try await testDatabaseHealthAndDerivedRetention()
+            try await testRealLibraryMigrationFixture()
             await testReaderParsingRegressions()
             await testStructuredReaderAndTags()
             await testReaderStoreUpdates()
@@ -773,6 +777,8 @@ struct NewsTests {
         await testFTS5SearchAndOperators()
         try await testUnchangedFTSRefresh()
         try await testFTSRowIDMigration()
+        try await testDatabaseHealthAndDerivedRetention()
+        try await testRealLibraryMigrationFixture()
         try await testMigrationCoordinatorAtomicity()
         await testArticleRetentionPolicy()
         await testContentExtractionPipelineDeep()
@@ -1021,7 +1027,7 @@ struct NewsTests {
         execute(copy, "DROP VIEW article_fts_rows;")
         try await db.open()
         assertEqual(
-            value(copy, "PRAGMA user_version;"), "26", "Copied v14 library upgrades through v15 to the current schema")
+            value(copy, "PRAGMA user_version;"), "27", "Copied v14 library upgrades through v15 to the current schema")
         assertEqual(value(path, "PRAGMA user_version;"), "14", "Original library stays untouched")
         assertEqual(
             try await db.searchArticles(query: "Research").map(\.id), originalOrder,
@@ -1065,6 +1071,251 @@ struct NewsTests {
         assertEqual(value(copy, "PRAGMA quick_check;"), "ok", "Migrated database passes quick_check")
         assertEqual(value(copy, "PRAGMA foreign_key_check;"), nil, "Migrated database has no dangling references")
         execute(copy, "INSERT INTO articles_fts(articles_fts) VALUES('integrity-check');")
+    }
+
+    @MainActor
+    static func testDatabaseHealthAndDerivedRetention() async throws {
+        print(
+            "  - Testing database health (v26 auto_vacuum, quick_check, checkpoint, derived retention) (#536, #537)...")
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "news-db-health-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        func value(_ file: String, _ sql: String) -> String? {
+            var handle: OpaquePointer?
+            var statement: OpaquePointer?
+            assertEqual(sqlite3_open(file, &handle), SQLITE_OK, "Open SQLite file for inspection")
+            defer { sqlite3_close(handle) }
+            guard sqlite3_prepare_v2(handle, sql, -1, &statement, nil) == SQLITE_OK else { return nil }
+            defer { sqlite3_finalize(statement) }
+            guard sqlite3_step(statement) == SQLITE_ROW else { return nil }
+            return sqlite3_column_text(statement, 0).map { String(cString: $0) }
+        }
+
+        // 1. Fresh DB starts at v26 with incremental auto_vacuum (2), and shrinks after pruneOldArticles (#536).
+        let shrinkPath = directory.appendingPathComponent("shrink.sqlite3").path
+        let shrinkDB = DatabaseEngine(path: shrinkPath)
+        try await shrinkDB.open()
+        assertEqual(value(shrinkPath, "PRAGMA user_version;"), "27", "New database opens at schema v26")
+        assertEqual(value(shrinkPath, "PRAGMA auto_vacuum;"), "2", "New database uses incremental auto_vacuum (2)")
+
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let expiredDate = now.addingTimeInterval(-45 * 86_400)
+        let paddingBody = String(repeating: "Detailed archival paragraph text for vacuum verification. ", count: 120)
+        let bulkyArticles = (0..<250).map { idx in
+            FeedArticle(
+                storedID: "bulky-\(idx)",
+                title: "Bulky archival report \(idx)",
+                link: "https://example.com/bulky/\(idx)",
+                guid: "bulky-\(idx)",
+                description: "Archival summary \(idx)",
+                pubDate: expiredDate,
+                source: "Archival Press",
+                fullContent: paddingBody
+            )
+        }
+        try await shrinkDB.upsertArticles(bulkyArticles)
+        try await shrinkDB.markReadBatch(articleIds: bulkyArticles.map(\.id), isRead: true)
+        await shrinkDB.checkpointAndOptimize()
+        let sizeBeforePrune =
+            (try? FileManager.default.attributesOfItem(atPath: shrinkPath)[.size] as? Int64) ?? 0
+        let prunedCount = try await shrinkDB.pruneOldArticles(keepReadDays: 30, now: now)
+        assertEqual(prunedCount, 250, "Prunes all 250 expired read articles")
+        await shrinkDB.checkpointAndOptimize()
+        await shrinkDB.close()
+        let sizeAfterPrune =
+            (try? FileManager.default.attributesOfItem(atPath: shrinkPath)[.size] as? Int64) ?? 0
+        assertTrue(
+            sizeAfterPrune < sizeBeforePrune,
+            "Incremental vacuum + checkpoint shrinks the SQLite file on disk (\(sizeBeforePrune) -> \(sizeAfterPrune))"
+        )
+
+        // 2. Derived intelligence row retention (#537):
+        //    - 40-day-old singleton's pair_assessments, article_features, and article_embeddings are removed on prune.
+        //    - Event member's features and embeddings stay even when older than 72h.
+        //    - Re-clustering recomputes features deterministically if needed.
+        let retentionPath = directory.appendingPathComponent("derived-retention.sqlite3").path
+        let retentionDB = DatabaseEngine(path: retentionPath)
+        try await retentionDB.open()
+        let singletonOld = FeedArticle(
+            storedID: "singleton-40d",
+            title: "Central Bank Holds Rates Steady in Frankfurt Meeting",
+            link: "https://example.com/singleton-40d",
+            guid: "singleton-40d",
+            description: "Policymakers left benchmark interest rates unchanged on Thursday.",
+            pubDate: now.addingTimeInterval(-40 * 86_400),
+            source: "Finance Wire"
+        )
+        let eventMemberA = FeedArticle(
+            storedID: "event-member-a",
+            title: "Volcano Erupts Near Reykjanes Peninsula in Iceland",
+            link: "https://example.com/event-member-a",
+            guid: "event-member-a",
+            description: "Lava fountains opened along a four-kilometer fissure overnight.",
+            pubDate: now.addingTimeInterval(-10 * 86_400),
+            source: "Nordic News"
+        )
+        let eventMemberB = FeedArticle(
+            storedID: "event-member-b",
+            title: "Iceland Evacuates Grindavik After New Volcanic Fissure Opens",
+            link: "https://example.com/event-member-b",
+            guid: "event-member-b",
+            description: "Emergency crews evacuated residents near the Reykjanes eruption.",
+            pubDate: now.addingTimeInterval(-10 * 86_400 + 600),
+            source: "Atlantic Dispatch"
+        )
+        try await retentionDB.upsertArticles([singletonOld, eventMemberA, eventMemberB])
+        _ = try await retentionDB.createEvent(
+            memberArticleIDs: [eventMemberA.id, eventMemberB.id], at: now.addingTimeInterval(-10 * 86_400))
+
+        let singletonFeatures = EventFeatures(
+            title: singletonOld.title, description: singletonOld.description, date: singletonOld.pubDate)
+        let memberFeatures = EventFeatures(
+            title: eventMemberA.title, description: eventMemberA.description, date: eventMemberA.pubDate)
+        try await retentionDB.upsertArticleFeatures(
+            [singletonOld.id: singletonFeatures, eventMemberA.id: memberFeatures],
+            version: EventFeatures.storageVersion,
+            at: now.addingTimeInterval(-40 * 86_400)
+        )
+        let syntheticVector = Array(repeating: Float(0.1), count: 384)
+        try await retentionDB.upsertArticleEmbeddings(
+            [singletonOld.id: syntheticVector, eventMemberA.id: syntheticVector],
+            modelVersion: SentenceEmbedder.modelVersion
+        )
+        try await retentionDB.upsertPairDecisions(
+            [
+                DatabaseEngine.PairDecision(
+                    articleID: eventMemberA.id,
+                    otherArticleID: singletonOld.id,
+                    decision: "borderline",
+                    reason: "test-old-pair",
+                    score: 0.42
+                )
+            ],
+            matcherVersion: EventMatcher.version,
+            at: now.addingTimeInterval(-40 * 86_400)
+        )
+        try await retentionDB.upsertPairDecisions(
+            [
+                DatabaseEngine.PairDecision(
+                    articleID: eventMemberA.id,
+                    otherArticleID: eventMemberB.id,
+                    decision: "match",
+                    reason: "test-recent-pair",
+                    score: 0.88
+                )
+            ],
+            matcherVersion: EventMatcher.version,
+            at: now.addingTimeInterval(-5 * 86_400)
+        )
+
+        _ = try await retentionDB.pruneOldArticles(keepReadDays: 30, now: now)
+        let remainingFeatures = try await retentionDB.fetchArticleFeatures(
+            articleIDs: [singletonOld.id, eventMemberA.id], version: EventFeatures.storageVersion)
+        assertTrue(
+            remainingFeatures[singletonOld.id] == nil,
+            "40-day-old singleton's article_features row is pruned (#537)"
+        )
+        assertEqual(
+            remainingFeatures[eventMemberA.id], memberFeatures,
+            "Event member's article_features row is retained outside 72h window (#537)"
+        )
+        let remainingEmbeddings = try await retentionDB.fetchArticleEmbeddings(
+            articleIDs: [singletonOld.id, eventMemberA.id], modelVersion: SentenceEmbedder.modelVersion)
+        assertTrue(
+            remainingEmbeddings[singletonOld.id] == nil,
+            "40-day-old singleton's article_embeddings row is pruned (#537)"
+        )
+        assertTrue(
+            remainingEmbeddings[eventMemberA.id] != nil,
+            "Event member's article_embeddings row is retained (#537)"
+        )
+        await retentionDB.close()
+        assertEqual(
+            value(retentionPath, "SELECT count(*) FROM pair_assessments;"), "1",
+            "Pair assessment older than 30 days is pruned while recent pair assessment stays (#537)"
+        )
+        let recomputedFeatures = EventFeatures(
+            title: singletonOld.title, description: singletonOld.description, date: singletonOld.pubDate)
+        assertEqual(
+            recomputedFeatures, singletonFeatures,
+            "Recomputing pruned EventFeatures produces identical deterministic signals (#537)"
+        )
+
+        // 3. Corrupted SQLite fixture surfaces databaseHealthNotice without crashing (#536).
+        let corruptPath = directory.appendingPathComponent("corrupt.sqlite3").path
+        try Data("not a valid sqlite3 header at all - corrupted payload bytes".utf8).write(
+            to: URL(fileURLWithPath: corruptPath))
+        let corruptDB = DatabaseEngine(path: corruptPath)
+        let corruptStore = ArticleStore(database: corruptDB)
+        await corruptStore.initialize()
+        assertTrue(
+            corruptStore.databaseHealthNotice != nil,
+            "Corrupted database surfaces a user-visible health notice on ArticleStore (#536)"
+        )
+        await corruptDB.close()
+    }
+
+    static func testRealLibraryMigrationFixture() async throws {
+        print("  - Testing real-library v14 migration fixture in CI (#539)...")
+        let fixtureSource = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+            .appendingPathComponent("Tests/Fixtures/legacy-library-v14.sqlite3")
+        assertTrue(
+            FileManager.default.fileExists(atPath: fixtureSource.path),
+            "Sanitized legacy library fixture must exist at Tests/Fixtures/legacy-library-v14.sqlite3"
+        )
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "news-real-fixture-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let workingCopy = directory.appendingPathComponent("library.sqlite3")
+        try FileManager.default.copyItem(at: fixtureSource, to: workingCopy)
+
+        func value(_ file: String, _ sql: String) -> String? {
+            var handle: OpaquePointer?
+            var statement: OpaquePointer?
+            assertEqual(sqlite3_open(file, &handle), SQLITE_OK, "Open migrated fixture for inspection")
+            defer { sqlite3_close(handle) }
+            guard sqlite3_prepare_v2(handle, sql, -1, &statement, nil) == SQLITE_OK else { return nil }
+            defer { sqlite3_finalize(statement) }
+            guard sqlite3_step(statement) == SQLITE_ROW else { return nil }
+            return sqlite3_column_text(statement, 0).map { String(cString: $0) }
+        }
+
+        assertEqual(value(workingCopy.path, "PRAGMA user_version;"), "14", "Fixture starts at schema v14")
+        let db = DatabaseEngine(path: workingCopy.path)
+        try await db.open()
+        assertEqual(
+            value(workingCopy.path, "PRAGMA user_version;"), "27",
+            "Fixture migrates cleanly to current schema v26 (#539)"
+        )
+        assertEqual(
+            value(workingCopy.path, "PRAGMA auto_vacuum;"), "2",
+            "Migrated fixture enables incremental auto_vacuum (#536)"
+        )
+        assertEqual(
+            value(workingCopy.path, "PRAGMA quick_check;"), "ok",
+            "Migrated fixture passes PRAGMA quick_check (#539)"
+        )
+        assertEqual(
+            value(workingCopy.path, "PRAGMA foreign_key_check;"), nil,
+            "Migrated fixture passes PRAGMA foreign_key_check (#539)"
+        )
+
+        let counts = try await db.counts()
+        assertEqual(counts.total, 200, "Migrated fixture preserves all 200 articles")
+        assertEqual(counts.unread, 150, "Migrated fixture preserves unread count (150)")
+        assertEqual(counts.saved, 20, "Migrated fixture preserves saved count (20)")
+
+        let fetched = try await db.fetchArticles(limit: 500)
+        assertEqual(fetched.count, 200, "fetchArticles(limit: 500) returns all 200 migrated stories")
+        let searchResults = try await db.searchArticles(query: "Observatory", limit: 500)
+        assertEqual(searchResults.count, 200, "Migrated FTS5 index searches all 200 stories")
+        let event = try await db.fetchEvent(id: "legacy-event-00")
+        assertEqual(event?.memberArticleIDs.count, 3, "Migrated fixture preserves event memberships")
+        await db.close()
     }
 
     /// Writes a new 10,000-story library for `script/launch_baseline.sh`: unread, recent and already clustered,
@@ -5285,7 +5536,7 @@ struct NewsTests {
         await cancelledDB.close()
         let db = DatabaseEngine(path: copyPath)
         try await db.open()
-        assertEqual(value(copyPath, "PRAGMA user_version;"), "26", "Copied v4 library upgrades to the current schema")
+        assertEqual(value(copyPath, "PRAGMA user_version;"), "27", "Copied v4 library upgrades to the current schema")
         assertEqual(value(originalPath, "PRAGMA user_version;"), "4", "Original fixture stays untouched")
         assertEqual(try await db.fetchArticles(limit: nil).count, 3, "Migration keeps historical rows")
         assertEqual(
@@ -5538,7 +5789,7 @@ struct NewsTests {
             value(failure, "SELECT article_id FROM article_aliases WHERE value='observed-variant-b';"), "historical-b",
             "Injected failure preserves old aliases")
         try await migrated.open()
-        assertEqual(value(copy, "PRAGMA user_version;"), "26", "Copied library upgrades to the current schema")
+        assertEqual(value(copy, "PRAGMA user_version;"), "27", "Copied library upgrades to the current schema")
         assertEqual(value(path, "PRAGMA user_version;"), "8", "Original fixture remains untouched")
         assertEqual(
             try await migrated.fetchArticles(limit: nil).count, 6, "Only confident same-URL text copies are hidden")
@@ -6867,7 +7118,7 @@ struct NewsTests {
 
         let db = DatabaseEngine(path: copy)
         try await db.open()
-        assertEqual(value(copy, "PRAGMA user_version;"), "26", "Copied v11 library upgrades to the current schema")
+        assertEqual(value(copy, "PRAGMA user_version;"), "27", "Copied v11 library upgrades to the current schema")
         assertEqual(value(path, "PRAGMA user_version;"), "11", "Original v11 fixture stays untouched")
         assertEqual(try await db.fetchArticles(limit: nil).count, 5, "Event migration keeps every article")
         assertTrue(try await db.isRead(articleId: "event-a"), "Event migration keeps read state")
@@ -9246,7 +9497,7 @@ struct NewsTests {
             value("SELECT count(*) FROM sqlite_master WHERE name='idx_story_images_url';"), "0",
             "Cancellation leaves no partial index")
         try await db.open()
-        assertEqual(value("PRAGMA user_version;"), "26", "Existing v18 libraries receive the image index migration")
+        assertEqual(value("PRAGMA user_version;"), "27", "Existing v18 libraries receive the image index migration")
         assertEqual(
             sqlite3_exec(handle, "ANALYZE story_images;", nil, nil, nil), SQLITE_OK,
             "Use current fixture cardinality for the query planner")
@@ -9979,7 +10230,7 @@ struct NewsTests {
             ), "0", "Cancelled v14 migration rolls back its tables")
         let migrated = DatabaseEngine(path: copy)
         try await migrated.open()
-        assertEqual(value(copy, "PRAGMA user_version;"), "26", "Copied v13 library upgrades to the current schema")
+        assertEqual(value(copy, "PRAGMA user_version;"), "27", "Copied v13 library upgrades to the current schema")
         assertEqual(value(path, "PRAGMA user_version;"), "13", "Original v13 fixture stays untouched")
         assertEqual(
             try await migrated.fetchEvent(id: event.id)?.memberArticleIDs.count, 5, "Migration keeps events and members"
@@ -10649,7 +10900,7 @@ struct NewsTests {
             guard sqlite3_step(statement) == SQLITE_ROW else { return nil }
             return sqlite3_column_text(statement, 0).map { String(cString: $0) }
         }
-        assertEqual(value(copy, "PRAGMA user_version;"), "26", "Provenance schema upgrades to the current schema")
+        assertEqual(value(copy, "PRAGMA user_version;"), "27", "Provenance schema upgrades to the current schema")
         assertEqual(value(original, "PRAGMA user_version;"), "15", "Original v15 fixture remains untouched")
         assertEqual(value(copy, "PRAGMA quick_check;"), "ok", "Upgraded provenance library passes quick_check")
         assertEqual(value(copy, "PRAGMA foreign_key_check;"), nil, "Provenance has no dangling article references")
@@ -12771,16 +13022,24 @@ struct NewsTests {
             assertTrue(active <= 3, "Rapid replacement cannot exceed the concurrency bound")
         }
 
-        // Finished work is not superseded or repeated by the next refresh.
+        // Finished work is not superseded or repeated by the next refresh, and its full FeedArticle job is released (#535).
         let articleC = FeedArticle(
             title: "Quarterly Earnings Beat Expectations", link: "https://example.com/earnings", guid: "eq-3",
             description: "Revenue and profit exceed analyst forecasts", pubDate: Date(), source: "Markets")
         await queue.enqueue(article: articleC, priority: .interactive)
         await eventually("Article C finishes classification") { await queue.state(for: articleC.id) == .completed }
+        assertFalse(
+            await queue.retainsJob(for: articleC.id),
+            "Completed job is removed from EnrichmentQueue.jobs so full FeedArticle payloads are not retained (#535)"
+        )
         await queue.cancelAll(reason: .superseded)
         assertEqual(await queue.state(for: articleC.id), .completed, "Superseding the backlog keeps finished work")
         await queue.enqueue(article: articleC, priority: .background)
         assertEqual(await queue.state(for: articleC.id), .completed, "A finished article is not classified again")
+        assertFalse(
+            await queue.retainsJob(for: articleC.id),
+            "Re-enqueuing a completed article stays deduplicated without re-inserting a Job entry (#535)"
+        )
 
         // 6. Batch enqueue articles in a single operation
         let batchArticles = (0..<10).map { i in
