@@ -591,8 +591,9 @@ class FeedManager: NSObject, ObservableObject {
         clusteringTask = Task { [weak self] in
             repeat {
                 self?.needsClusteringPass = false
+                let allowsEnergy = self?.allowsBackgroundWork() ?? true
                 let work = Task.detached(priority: .utility) { () throws -> Bool in
-                    let clustering = try await EventClusterer.run(in: database)
+                    let clustering = try await EventClusterer.run(in: database, allowsEnergy: allowsEnergy)
                     return !clustering.changedEvents.isEmpty
                 }
                 let result = await withTaskCancellationHandler {
