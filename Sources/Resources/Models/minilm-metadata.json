@@ -1,0 +1,11 @@
+{
+ "model": "minilm",
+ "base": "sentence-transformers/all-MiniLM-L6-v2 (Apache License 2.0)",
+ "converted_with": {"coremltools": "6.3.0", "torch": "1.13.1", "transformers": "4.8.2"},
+ "inputs": {"input_ids": "int32 [1, 1...128]", "attention_mask": "int32 [1, 1...128]"},
+ "outputs": ["last_hidden_state", "pooler_output"],
+ "precision": "float16",
+ "model_version": 2,
+ "reproduce": "script/training/convert_minilm.py OUT --source hub (pinned revision) or --source shipped; parity numbers in docs/audits/2026-10-25-reproducible-models.md",
+ "note": "The original conversion script was not kept; #555 added convert_minilm.py and its parity check."
+}
