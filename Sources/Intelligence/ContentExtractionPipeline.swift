@@ -778,17 +778,14 @@ enum HTMLDOMBuilder {
         return !isEditorial(attributes)
     }
 
-    private static let commentRegex = loggedExtraction("compileCommentRegex") {
-        try NSRegularExpression(pattern: "<!--.*?-->", options: .dotMatchesLineSeparators)
-    }
-
     /// Parses clean HTML into a DOM tree while filtering non-content containers.
     static func parse(html: String) -> DOMElementNode {
         var cleanHTML = html
-        // Remove HTML comments
-        if let commentRegex = Self.commentRegex {
-            cleanHTML = commentRegex.stringByReplacingMatches(
-                in: cleanHTML, range: NSRange(cleanHTML.startIndex..., in: cleanHTML), withTemplate: "")
+        // Remove HTML comments using a DOM parser to avoid fragile regex-based filtering.
+        _ = loggedExtraction("removeHtmlComments") {
+            let document = try SwiftSoup.parseBodyFragment(cleanHTML)
+            try document.select("#comment").remove()
+            cleanHTML = try document.body()?.html() ?? cleanHTML
         }
 
         let root = DOMElementNode(tag: "root")
