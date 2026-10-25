@@ -433,8 +433,22 @@ struct NewsTests {
             guard let snapshot = environment["NEWS_SNAPSHOT_DB"], let output = environment["NEWS_EVENT_OUTPUT"] else {
                 throw StoryCorpus.Failure.invalid("--review-pairs needs NEWS_SNAPSHOT_DB and NEWS_EVENT_OUTPUT")
             }
+            if CommandLine.arguments.contains("--holdout-candidates") {
+                let rows = try await exportHoldoutCandidates(snapshot: snapshot, outputDirectory: output)
+                print("    exported \(rows) library holdout candidate pairs (#579)")
+                return
+            }
             let rows = try await exportPairReview(snapshot: snapshot, outputDirectory: output)
             print("    exported \(rows) pair decisions for review (#551)")
+            return
+        }
+        if CommandLine.arguments.contains("--library-holdout") {
+            let environment = ProcessInfo.processInfo.environment
+            guard let snapshot = environment["NEWS_SNAPSHOT_DB"], let holdout = environment["NEWS_LIBRARY_HOLDOUT"]
+            else {
+                throw StoryCorpus.Failure.invalid("--library-holdout needs NEWS_SNAPSHOT_DB and NEWS_LIBRARY_HOLDOUT")
+            }
+            try await evaluateLibraryHoldout(snapshot: snapshot, holdout: holdout)
             return
         }
         if CommandLine.arguments.contains("--model-outcome-check") {
@@ -11513,6 +11527,213 @@ struct NewsTests {
         }
         try StoryCorpus.writePrivate(Data(lines.joined(separator: "\n").utf8), to: file, replacing: false)
         return rows.count
+    }
+
+    /// A story of a library copy as the holdout tools read it.
+    struct LibraryRow {
+        let id: String, title: String, description: String, source: String, date: Date, event: String?
+    }
+
+    /// Stories published in the last three days of a library copy (relative to its newest story), with their live event.
+    static func recentLibraryRows(_ db: DatabaseEngine) async throws -> (rows: [LibraryRow], newest: Date) {
+        let newest =
+            try await db.eventRows(
+                "SELECT max(published_at) FROM articles WHERE published_at < ?;",
+                [.real(Date().timeIntervalSince1970 + 86_400)]
+            ).first?.first.flatMap { $0 }.flatMap(Double.init) ?? Date().timeIntervalSince1970
+        let rows = try await db.eventRows(
+            """
+            SELECT a.id, a.title, coalesce(a.description, ''), a.source, a.published_at, e.id
+            FROM articles a
+            LEFT JOIN event_members m ON m.article_id = a.id
+            LEFT JOIN events e ON e.id = m.event_id AND e.merged_into IS NULL
+            WHERE a.published_at >= ? AND \(DatabaseEngine.visibleArticle)
+            ORDER BY a.published_at, a.id;
+            """, [.real(newest - 3 * 86_400)]
+        ).compactMap { row -> LibraryRow? in
+            guard let id = row[0], let title = row[1], let published = row[4].flatMap(Double.init) else { return nil }
+            return LibraryRow(
+                id: id, title: title, description: row[2] ?? "", source: row[3] ?? "",
+                date: Date(timeIntervalSince1970: published), event: row[5])
+        }
+        return (rows, Date(timeIntervalSince1970: newest))
+    }
+
+    /// Candidate pairs for the library holdout (#579), as `holdout-candidates.csv` in the private directory: borderline
+    /// decisions scored ≥ 0.6, singleton headlines sharing a specific anchor and a keyword with an event member within
+    /// 36 h, and pairs of active events sharing two terms (one representative pair each). Each class is drawn in SHA-256
+    /// order of the two ids, so a rerun draws the same pairs. Headlines travel with the rows; never written in the checkout.
+    static func exportHoldoutCandidates(snapshot: String, outputDirectory: String) async throws -> Int {
+        guard !snapshot.contains("/Library/Containers/") else {
+            throw StoryCorpus.Failure.invalid("Export from a copy of the library, never the live file")
+        }
+        let file = try StoryCorpus.privateDirectory(outputDirectory).appendingPathComponent("holdout-candidates.csv")
+        func quoted(_ value: String) -> String { "\"" + value.replacingOccurrences(of: "\"", with: "\"\"") + "\"" }
+        func order(_ a: String, _ b: String) -> String {
+            SHA256.hash(data: Data((a + b).utf8)).map { String(format: "%02x", $0) }.joined()
+        }
+        let db = DatabaseEngine(path: snapshot)
+        try await db.open()
+        let (rows, _) = try await recentLibraryRows(db)
+        let byID = Dictionary(rows.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        var lines = [
+            "kind,article_id,other_article_id,evidence,source_a,title_a,published_a,source_b,title_b,published_b"
+        ]
+        var seen = Set<String>()
+        func append(_ kind: String, _ a: LibraryRow, _ b: LibraryRow, _ evidence: String) {
+            let (low, high) = a.id < b.id ? (a, b) : (b, a)
+            guard seen.insert(low.id + "\n" + high.id).inserted else { return }
+            lines.append(
+                [
+                    kind, low.id, high.id, evidence, quoted(low.source), quoted(low.title),
+                    String(low.date.timeIntervalSince1970), quoted(high.source), quoted(high.title),
+                    String(high.date.timeIntervalSince1970),
+                ].joined(separator: ","))
+        }
+        // 1. Borderline decisions with a high score, the pairs the rules nearly matched.
+        var borderline = try await db.eventRows(
+            "SELECT article_id, other_article_id, score FROM pair_assessments WHERE decision = 'borderline' AND score >= 0.6;"
+        ).compactMap { row -> (LibraryRow, LibraryRow, String)? in
+            guard let a = row[0].flatMap({ byID[$0] }), let b = row[1].flatMap({ byID[$0] }) else { return nil }
+            return (a, b, String(format: "borderline %.2f", Double(row[2] ?? "") ?? 0))
+        }
+        borderline.sort { order($0.0.id, $0.1.id) < order($1.0.id, $1.1.id) }
+        for (a, b, evidence) in borderline.prefix(100) { append("borderline", a, b, evidence) }
+        // 2. Singletons next to an event they share a specific anchor and a keyword with.
+        let features = Dictionary(
+            uniqueKeysWithValues: rows.map {
+                ($0.id, EventFeatures(title: $0.title, description: $0.description, date: $0.date))
+            })
+        let members = rows.filter { $0.event != nil }
+        var singles: [(LibraryRow, LibraryRow, String)] = []
+        for single in rows where single.event == nil {
+            guard let features1 = features[single.id] else { continue }
+            var best: (LibraryRow, Int)?
+            for member in members where abs(member.date.timeIntervalSince(single.date)) <= 36 * 3600 {
+                guard let features2 = features[member.id],
+                    !features1.specificAnchors.isDisjoint(with: features2.specificAnchors)
+                else { continue }
+                let shared = features1.keywords.intersection(features2.keywords).count
+                if shared >= 1, shared > (best?.1 ?? 0) { best = (member, shared) }
+            }
+            if let best { singles.append((single, best.0, "singleton shares \(best.1) keywords")) }
+        }
+        singles.sort { order($0.0.id, $0.1.id) < order($1.0.id, $1.1.id) }
+        for (a, b, evidence) in singles.prefix(60) { append("singleton", a, b, evidence) }
+        // 3. Fragments: two active events sharing two terms, represented by their earliest members.
+        let events = Dictionary(grouping: members) { $0.event ?? "" }
+        let terms = events.mapValues { group in
+            group.reduce(into: Set<String>()) { set, row in
+                if let value = features[row.id] { set.formUnion(value.specificAnchors.union(value.keywords)) }
+            }
+        }
+        var fragments: [(LibraryRow, LibraryRow, String)] = []
+        let ids = events.keys.sorted()
+        for (n, first) in ids.enumerated() {
+            for second in ids[(n + 1)...] {
+                let shared = (terms[first] ?? []).intersection(terms[second] ?? []).count
+                guard shared >= 2, let a = events[first]?.min(by: { $0.date < $1.date }),
+                    let b = events[second]?.min(by: { $0.date < $1.date }),
+                    abs(a.date.timeIntervalSince(b.date)) <= 36 * 3600
+                else { continue }
+                fragments.append((a, b, "fragments share \(shared) terms"))
+            }
+        }
+        fragments.sort { order($0.0.id, $0.1.id) < order($1.0.id, $1.1.id) }
+        for (a, b, evidence) in fragments.prefix(60) { append("fragments", a, b, evidence) }
+        await db.close()
+        try StoryCorpus.writePrivate(Data(lines.joined(separator: "\n").utf8), to: file, replacing: false)
+        return lines.count - 1
+    }
+
+    /// The library holdout (#579): `NEWS_LIBRARY_HOLDOUT` is a JSON array of `{"a", "b", "label"}` with article ids of
+    /// `NEWS_SNAPSHOT_DB` and labels `same`, `related` or `different`. A temporary copy of the library is re-clustered
+    /// from scratch inside the active window (events, memberships, match state, pair decisions and corrections removed;
+    /// stored signals and vectors kept), then every labelled pair is scored by whether both stories share an event. `same`
+    /// predicted is a true pair; `related` or `different` predicted is a false pair. Also prints the share of recent
+    /// stories shown in a multi-publisher event. The copy is deleted afterwards.
+    static func evaluateLibraryHoldout(snapshot: String, holdout: String) async throws {
+        guard !snapshot.contains("/Library/Containers/") else {
+            throw StoryCorpus.Failure.invalid("Evaluate on a copy of the library, never the live file")
+        }
+        struct Pair: Decodable {
+            let a: String, b: String, label: String
+        }
+        let pairs = try JSONDecoder().decode([Pair].self, from: Data(contentsOf: URL(fileURLWithPath: holdout)))
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let copy = directory.appendingPathComponent("library.sqlite3").path
+        try FileManager.default.copyItem(atPath: snapshot, toPath: copy)
+        let db = DatabaseEngine(path: copy)
+        try await db.open()
+        for table in [
+            "event_overview_citations", "event_overviews", "event_state", "event_members", "event_match_state",
+            "pair_assessments", "event_exclusions", "event_inclusions", "events",
+        ] {
+            try await db.eventRows("DELETE FROM \(table);")
+        }
+        let newest = try await recentLibraryRows(db).newest
+        var policy = EventMatchPolicy.standard
+        if let value = ProcessInfo.processInfo.environment["NEWS_PAIR_THRESHOLD"].flatMap({ Double($0) }) {
+            policy.pairModelThreshold = value
+        }
+        let modelOff = ProcessInfo.processInfo.environment["NEWS_PAIR_MODEL"] == "0"
+        let started = Date()
+        var passes = 0
+        var total = EventClusteringReport()
+        repeat {
+            let report = try await EventClusterer.run(
+                in: db, matchPolicy: policy, now: newest, allowsEnergy: true,
+                pairProbability: modelOff ? { @Sendable _, _ in nil } : nil)
+            passes += 1
+            total.processed += report.processed
+            total.joined += report.joined
+            total.created += report.created
+            total.merged += report.merged
+            if report.processed == 0 || passes >= 20 { break }
+        } while true
+        let elapsed = Date().timeIntervalSince(started)
+        let memberships = try await db.eventIDs(forArticles: pairs.flatMap { [$0.a, $0.b] })
+        var truePairs = 0
+        var falsePairs = 0
+        var missed = 0
+        var keptApart = 0
+        var byLabel: [String: (linked: Int, total: Int)] = [:]
+        for pair in pairs {
+            let linked = memberships[pair.a] != nil && memberships[pair.a] == memberships[pair.b]
+            byLabel[pair.label, default: (0, 0)].total += 1
+            if linked { byLabel[pair.label, default: (0, 0)].linked += 1 }
+            switch (pair.label == "same", linked) {
+            case (true, true): truePairs += 1
+            case (true, false): missed += 1
+            case (false, true): falsePairs += 1
+            case (false, false): keptApart += 1
+            }
+        }
+        let precision = truePairs + falsePairs == 0 ? 0 : Double(truePairs) / Double(truePairs + falsePairs)
+        let recall = truePairs + missed == 0 ? 0 : Double(truePairs) / Double(truePairs + missed)
+        // Story-level view: recent stories shown in an event with two or more publishers.
+        let recent = try await recentLibraryRows(db).rows
+        let sources = Dictionary(grouping: recent.filter { $0.event != nil }) { $0.event ?? "" }
+            .mapValues { Set($0.map(\.source)).count }
+        let multi = recent.filter { ($0.event.flatMap { sources[$0] } ?? 0) >= 2 }.count
+        await db.close()
+        print(
+            String(
+                format:
+                    "    library holdout: %d pairs, precision %.3f (TP %d, FP %d), recall %.3f (FN %d), kept apart %d",
+                pairs.count, precision, truePairs, falsePairs, recall, missed, keptApart))
+        for (label, counts) in byLabel.sorted(by: { $0.key < $1.key }) {
+            print("      \(label): \(counts.linked) of \(counts.total) linked")
+        }
+        print(
+            String(
+                format: "    library: %d recent stories, %d (%.0f%%) in a multi-publisher event; %d passes, "
+                    + "processed %d, joined %d, created %d, merged %d, %.1f s; matcher v%d, pair cutoff %.2f%@",
+                recent.count, multi, recent.isEmpty ? 0 : 100 * Double(multi) / Double(recent.count), passes,
+                total.processed, total.joined, total.created, total.merged, elapsed, EventMatcher.version,
+                policy.pairModelThreshold, modelOff ? ", pair model off" : ""))
     }
 
     /// Opt-in, local: times one fragment-merge pass (`limit: 0`) over a temporary copy of `NEWS_SNAPSHOT_DB`, with

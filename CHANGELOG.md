@@ -2,6 +2,7 @@
 
 ## Unreleased — 21 October 2026
 
+- Developer tooling: a library holdout drawn from a copy of a real library (hard pairs the rules nearly matched) replaces the saturated 49-article holdout as the gate for story-matching changes; the diagnosis of why one story still appears as several cards is recorded under docs/audits.
 - Story matching keeps a reviewable record of each pair decision: what it rested on (embedding similarity, pair-model probability, the conflict and the shared evidence) is stored with the decision, pairs the rules vetoed despite shared evidence are recorded with their conflict, and a local export lists every decision of a library copy for review.
 - Story matching works through new stories newest first, so after an update or a large import the latest stories are grouped before older ones; merging fragments of one story compares only events that share terms, which makes that pass about three times faster on a large library with the same result.
 - Story matching in Low Power Mode or under thermal pressure now uses the deterministic rules alone: no embedding is computed and the pair model is not asked. Reports whose decision needed a model wait and are matched again on the next pass with energy, so nothing is merged unchecked, nothing is lost and no event is split by a rules-only pass.

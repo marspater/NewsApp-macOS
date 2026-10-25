@@ -52,6 +52,8 @@ NEWS_EVENT_CORPUS=corpus.json ./test.sh --event-corpus # Event clustering precis
 NEWS_EMBEDDING_THRESHOLD=0.4 NEWS_EVENT_CORPUS=corpus.json ./test.sh --event-corpus --corpus-holdout # Holdout, embeddings at the cutoff chosen on tune (#127)
 NEWS_EVENT_DIAGNOSE=1 NEWS_EVENT_CORPUS=corpus.json ./test.sh --event-corpus # Adds one line per labeled or linked pair (ids only): conflict, gates, what, score, cosine (#509)
 NEWS_SNAPSHOT_DB=copy.sqlite3 NEWS_EVENT_OUTPUT=DIR ./test.sh --review-pairs # Local: every stored pair decision of a library copy with headlines, events and corrections, as pairs-review.csv (#551)
+NEWS_SNAPSHOT_DB=copy.sqlite3 NEWS_EVENT_OUTPUT=DIR ./test.sh --review-pairs --holdout-candidates # Local: candidate pairs for the library holdout (borderline ≥ 0.6, singletons beside an event, fragment pairs), as holdout-candidates.csv (#579)
+NEWS_SNAPSHOT_DB=copy.sqlite3 NEWS_LIBRARY_HOLDOUT=holdout.json ./test.sh --library-holdout # Local: re-clusters a temporary copy from scratch and scores the labelled pairs; the gate for matcher changes (#579). NEWS_PAIR_THRESHOLD and NEWS_PAIR_MODEL=0 apply
 NEWS_SNAPSHOT_DB=copy.sqlite3 ./test.sh --fragment-merge-timing # Local: one fragment-merge pass over a temporary copy of a library, timed, with the merge count (#541, #582)
 NEWS_ENERGY=0 ./test.sh --matcher-regressions # The rules-only pass of Low Power Mode (#534): no embedding, no pair model; deferred rows counted, not re-read
 ./test.sh --corpus-capture DIR    # Opt-in, live: capture catalog feed items into a private directory (#102)
@@ -104,6 +106,7 @@ Pair decisions are reviewed on a copy of a library, never the live file. `--revi
 - **Samples.** 200 `match` rows with reason `match`, 100 with reason `pairModel`, every `related-act` row, and 100 `vetoed` rows, drawn in a fixed pseudo-random order (sort by the SHA-256 of the two ids) so a rerun draws the same rows. A match or pair-model row labelled `different` is a false merge; the ceiling is 2% per sample.
 - **Disagreements.** A spot-check that overturns a label is recorded in the audit with both labels and the reason; the overturned label is replaced and the sample is re-counted. Three overturned labels in twenty mean the whole sample is relabelled.
 - **Receipts.** The CSV and the labelled copy stay outside the repository (`0700` directory, `0600` files); the audit records the copy's date, article count, matcher version and the SHA-256 of the labelled file.
+- **Library holdout (#579).** `--review-pairs --holdout-candidates` draws the hard pairs of a library copy (borderline decisions scored ≥ 0.6, singletons sharing a specific anchor and a keyword with an event member within 36 h, pairs of active events sharing two terms); they are labelled the same way and saved as a JSON array of `{"a", "b", "label"}` beside the copy. `--library-holdout` re-clusters a temporary copy from scratch and reports precision (`same` among linked pairs; `related` counts as wrong), recall on `same`, and the share of recent stories in a multi-publisher event. A matcher change ships when precision is ≥ 0.97 and the authored corpus is unchanged; the result and the file's SHA-256 go into the slice's PR. The old 49-article holdout stays sealed.
 
 ## Remove legacy test preferences (#311)
 
