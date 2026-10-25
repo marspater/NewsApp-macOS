@@ -6,7 +6,7 @@ import NaturalLanguage
 /// `storageVersion` and recomputes them when the version changes or the title or description does (#522).
 struct EventFeatures: Hashable, Sendable, Codable {
     /// Bump when extraction changes; stored records of older versions are recomputed on first use.
-    static let storageVersion = 1
+    static let storageVersion = 2
     /// Dominant language when the recognizer is reasonably sure; nil otherwise.
     var language: String?
     // Who
@@ -124,7 +124,7 @@ extension EventFeatures {
         "the", "and", "for", "with", "from", "that", "this", "after", "over", "into", "about", "what", "how", "why",
         "when",
         "mr", "mrs", "ms", "dr", "sir", "president", "prime", "minister", "chancellor", "governor", "mayor", "king",
-        "queen", "pope", "ceo", "chief", "spokesperson", "spokesman", "spokeswoman", "via", "per",
+        "queen", "ceo", "chief", "spokesperson", "spokesman", "spokeswoman", "via", "per",
     ]
     /// Languages where capitalization does not mark proper nouns.
     private static let capitalizedNounLanguages: Set<String> = ["de", "lb"]
@@ -215,6 +215,18 @@ extension EventFeatures {
         /// Words of typed person names: "Jordan" in "Michael Jordan" is never the country.
         var personTokens: Set<String> = []
         var lemmas: [String.Index: String] = [:]
+        /// Words written with a capital inside a sentence anywhere in the text (#580): a capitalized word at a sentence
+        /// start, or in a Title Case headline, is a name when the text also writes it capitalized mid-sentence.
+        var midSentenceCapitalized: Set<String> = []
+        /// The previous headline token, for product versions ("iOS 27.2", #580).
+        var previousTitleName: String?
+
+        /// "OpenAI", "iPhone", "SpaceX": a capital after the first letter next to lowercase letters marks a brand or
+        /// product name wherever it stands and however the headline is cased (#580).
+        static func isCamelCase(_ token: String) -> Bool {
+            token.dropFirst().contains(where: \.isUppercase) && token.contains(where: \.isLowercase)
+                && token.allSatisfy { $0.isLetter || $0.isNumber }
+        }
 
         mutating func collectEntities(from tagger: NLTagger) {
             tagger.enumerateTags(
@@ -230,6 +242,8 @@ extension EventFeatures {
                     if let surname = name.split(separator: " ").last, surname.count >= 3, String(surname) != name {
                         features.people.insert(String(surname))
                     }
+                    // One office, one holder: "Pope Leo" and "the Pope" are the same anchor (#580).
+                    if name.hasPrefix("pope ") { features.people.insert("pope") }
                     let words = name.split(separator: " ").map(String.init)
                     nameTokens.formUnion(words)
                     personTokens.formUnion(words)
@@ -243,7 +257,9 @@ extension EventFeatures {
             }
         }
 
-        mutating func classifyNumberToken(_ word: String, token: String, inTitle: Bool, inPrimaryClause: Bool) {
+        mutating func classifyNumberToken(
+            _ word: String, token: String, inTitle: Bool, inPrimaryClause: Bool, previousName: String?
+        ) {
             if token.first?.isUppercase == true, word.first?.isLetter == true {
                 features.organizations.insert(word)
                 return
@@ -255,11 +271,13 @@ extension EventFeatures {
             } else if inTitle, !digits.isEmpty {
                 features.titleNumbers.insert(digits)
                 if inPrimaryClause { features.primaryTitleTerms.insert(digits) }
+                // A version after a product name is one anchor ("ios 27.2", "gpt 5"; #580).
+                if let previousName, word == digits { features.organizations.insert(previousName + " " + digits) }
             }
         }
 
         mutating func classifySpecialToken(
-            _ word: inout String, token: String, range: Range<String.Index>
+            _ word: inout String, token: String, range: Range<String.Index>, previousName: String? = nil
         ) -> Bool {
             let inTitle = range.lowerBound < titleEnd
             let inPrimaryClause = primaryRange.map { $0.overlaps(range) } ?? false
@@ -275,7 +293,8 @@ extension EventFeatures {
                 return true
             }
             if word.contains(where: \.isNumber) {
-                classifyNumberToken(word, token: token, inTitle: inTitle, inPrimaryClause: inPrimaryClause)
+                classifyNumberToken(
+                    word, token: token, inTitle: inTitle, inPrimaryClause: inPrimaryClause, previousName: previousName)
                 return true
             }
             if EventFeatures.weekdayNames.contains(word) {
@@ -303,10 +322,15 @@ extension EventFeatures {
             let inPrimaryClause = primaryRange.map { $0.overlaps(range) } ?? false
             let startsAtSentence = EventFeatures.startsSentence(range.lowerBound, in: text)
             let isUntypedInitialName = startsAtSentence && lemmas[range.lowerBound] == nil && !word.contains("-")
-            if usesCapitalization, token.first?.isUppercase == true, !(inTitle && titleCase),
-                !startsAtSentence || isUntypedInitialName
-            {
+            // A capitalized word is a name mid-sentence; at a sentence start or in a Title Case headline only when the
+            // lemmatizer does not know it, the text also capitalizes it mid-sentence, or it is written like a brand (#580).
+            let corroborated = midSentenceCapitalized.contains(word) || Self.isCamelCase(token)
+            let capitalizedName =
+                usesCapitalization && token.first?.isUppercase == true
+                && ((!(inTitle && titleCase) && (!startsAtSentence || isUntypedInitialName)) || corroborated)
+            if capitalizedName || Self.isCamelCase(token) {
                 if !nameTokens.contains(word) { features.names.insert(word) }
+                if inTitle { previousTitleName = word }
                 return
             }
             guard !nameTokens.contains(word) else { return }
@@ -333,10 +357,25 @@ extension EventFeatures {
                 if let tag { lemmas[range.lowerBound] = EventFeatures.normalized(tag.rawValue) }
                 return true
             }
+            if usesCapitalization {
+                tagger.enumerateTags(in: whole, unit: .word, scheme: .lexicalClass, options: wordOptions) { _, range in
+                    let token = String(text[range])
+                    if token.first?.isUppercase == true, token.count >= 3,
+                        !EventFeatures.startsSentence(range.lowerBound, in: text),
+                        !(range.lowerBound < titleEnd && titleCase)
+                    {
+                        midSentenceCapitalized.insert(EventFeatures.normalized(token))
+                    }
+                    return true
+                }
+            }
             tagger.enumerateTags(in: whole, unit: .word, scheme: .lexicalClass, options: wordOptions) { tag, range in
                 let token = String(text[range])
                 var word = EventFeatures.normalized(token)
-                guard !word.isEmpty, !classifySpecialToken(&word, token: token, range: range) else { return true }
+                let previousName = range.lowerBound < titleEnd ? previousTitleName : nil
+                previousTitleName = nil
+                guard !word.isEmpty else { return true }
+                if classifySpecialToken(&word, token: token, range: range, previousName: previousName) { return true }
                 classifyLexicalTerm(word, token: token, tag: tag, range: range)
                 return true
             }
@@ -485,15 +524,12 @@ struct EventMatchPolicy: Sendable, Equatable {
 /// Facts that rule a pair out regardless of how similar the rest of the text is.
 enum EventConflict: String, Sendable, Equatable {
     case language, unknownDate, timeGap, period, year, weekday, differentAct, titleNumbers, places, excluded,
-        differentEvent, semanticDivergence
+        semanticDivergence
 }
 
 struct EventPairAssessment: Sendable, Equatable {
     var conflict: EventConflict?
-    var softConflict = false
-    var hasHardConflict: Bool { conflict != nil && !softConflict }
     var isBorderline = false
-    var needsConfirmation = false
     var score: Double
     var what: Double
     var entity: Double
@@ -505,12 +541,14 @@ struct EventPairAssessment: Sendable, Equatable {
     var embeddingCosine: Double?
     /// The pair model judged this borderline pair one event (#525).
     var modelConfirmed = false
+    /// Both reports are English or of unknown language, so the embedding and the pair model may be consulted (#553).
+    var neuralEligible = true
 }
 
 enum EventMatcher {
     /// Bump when matching changes, a retrained pair model included; recent articles and active memberships are
     /// revalidated. Unchanged archived memberships remain intact.
-    static let version = 11
+    static let version = 12
 
     private static func pairConflict(
         _ a: EventFeatures, _ b: EventFeatures, gap: TimeInterval, maximumTimeGap: TimeInterval
@@ -530,7 +568,10 @@ enum EventMatcher {
         if disjoint(a.years, b.years) { return .year }
         if disjoint(a.weekdays, b.weekdays) { return .weekday }
         if disjoint(a.titleNumbers, b.titleNumbers) { return .titleNumbers }
-        if !sharesPlace && (disjoint(a.countries, b.countries) || disjoint(a.localPlaces, b.localPlaces)) {
+        // Three shared specific names outweigh one place the tagger mistyped ("Bellingham" as a place, #580).
+        if !sharesPlace && a.specificAnchors.intersection(b.specificAnchors).count < 3
+            && (disjoint(a.countries, b.countries) || disjoint(a.localPlaces, b.localPlaces))
+        {
             return .places
         }
         // Last, so a different act is only reported when nothing else contradicts: it is a related-act candidate.
@@ -552,6 +593,8 @@ enum EventMatcher {
         _ a: EventFeatures, _ b: EventFeatures, policy: EventMatchPolicy = .standard,
         embeddingSimilarity: Double? = nil
     ) -> EventPairAssessment {
+        let neuralEligible = usesNeuralPaths(a, b)
+        let embeddingSimilarity = neuralEligible ? embeddingSimilarity : nil
         let gap = abs(a.date.timeIntervalSince(b.date))
         let crossSpecific = a.specificAnchors.intersection(b.keywords).union(b.specificAnchors.intersection(a.keywords))
         let sharedAnchors = a.anchors.intersection(b.anchors).union(crossSpecific).count
@@ -593,43 +636,26 @@ enum EventMatcher {
             && ((sharedAnchors >= 1 && sharedEvidence >= 1 && score >= policy.borderlineScore)
                 || (sharedEvidence >= 3 && what >= policy.minimumWhat)
                 || ((embeddingSimilarity ?? 0) >= policy.semanticFragmentThreshold && sharedSpecific >= 1))
-        let needsConfirmation = isMatch && (sharedSpecific == 0 || what < policy.strictWhat)
         return EventPairAssessment(
-            conflict: conflict, isBorderline: isBorderline, needsConfirmation: needsConfirmation,
+            conflict: conflict, isBorderline: isBorderline,
             score: max(score, embeddingSimilarity ?? 0.0), what: what, entity: entity, sharedAnchors: sharedAnchors,
             sharedSpecificAnchors: sharedSpecific, sharedKeywords: sharedKeywords,
-            isMatch: isMatch, isCompatible: isCompatible, embeddingCosine: embeddingSimilarity)
+            isMatch: isMatch, isCompatible: isCompatible, embeddingCosine: embeddingSimilarity,
+            neuralEligible: neuralEligible)
     }
 
-    static func rejected(_ pair: EventPairAssessment) -> EventPairAssessment {
-        var pair = pair
-        pair.conflict = .differentEvent
-        pair.softConflict = false
-        pair.isMatch = false
-        pair.isCompatible = false
-        pair.needsConfirmation = false
-        pair.isBorderline = false
-        return pair
-    }
-
-    static func confirmed(_ pair: EventPairAssessment, policy: EventMatchPolicy = .standard) -> EventPairAssessment {
-        guard pair.conflict == nil, pair.sharedSpecificAnchors >= 1 else { return pair }
-        var pair = pair
-        pair.conflict = nil
-        pair.softConflict = false
-        pair.isBorderline = false
-        pair.needsConfirmation = false
-        pair.isMatch = true
-        pair.isCompatible = true
-        pair.score = max(pair.score, policy.matchScore)
-        return pair
+    /// Both models are English-only (MiniLM vocabulary, pair model trained on English pairs), so the semantic veto,
+    /// the semantic rescue and the pair model run only when neither report is recognized as another language (#553).
+    /// An unrecognized language is treated like English, as the rules already do.
+    static func usesNeuralPaths(_ a: EventFeatures, _ b: EventFeatures) -> Bool {
+        [a.language, b.language].allSatisfy { $0 == nil || $0 == "en" }
     }
 
     /// A pair left to the pair model (#525): no conflict, no rule match, borderline evidence and at least one shared
     /// name, place or country. Without any anchor two generic reports ("Central bank holds interest rates") can be
     /// about different places, so the model never stands in for all of them.
     static func needsPairModel(_ pair: EventPairAssessment) -> Bool {
-        pair.conflict == nil && !pair.isMatch && pair.isBorderline && pair.sharedAnchors >= 1
+        pair.neuralEligible && pair.conflict == nil && !pair.isMatch && pair.isBorderline && pair.sharedAnchors >= 1
     }
 
     /// The pair model judged a borderline pair one event; it stands in for the shared specific anchor (#525).
@@ -639,9 +665,17 @@ enum EventMatcher {
         pair.isMatch = true
         pair.isCompatible = true
         pair.isBorderline = false
-        pair.needsConfirmation = false
         pair.modelConfirmed = true
         pair.score = max(pair.score, policy.matchScore)
+        return pair
+    }
+
+    /// A rule match without the vector the semantic veto needs (#534): it stays open until a pass with energy.
+    static func unvetted(_ pair: EventPairAssessment) -> EventPairAssessment {
+        var pair = pair
+        pair.isMatch = false
+        pair.isCompatible = false
+        pair.isBorderline = true
         return pair
     }
 
@@ -649,9 +683,7 @@ enum EventMatcher {
     static func forced(_ pair: EventPairAssessment, policy: EventMatchPolicy = .standard) -> EventPairAssessment {
         var pair = pair
         pair.conflict = nil
-        pair.softConflict = false
         pair.isBorderline = false
-        pair.needsConfirmation = false
         pair.isMatch = true
         pair.isCompatible = true
         pair.sharedSpecificAnchors = max(pair.sharedSpecificAnchors, 1)
