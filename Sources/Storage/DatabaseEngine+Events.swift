@@ -1361,10 +1361,12 @@ extension DatabaseEngine {
     struct PairDecision: Hashable, Sendable {
         let articleID: String
         let otherArticleID: String
-        /// "match", "related-act" or "borderline".
+        /// "match", "related-act", "borderline" or "vetoed" (#551).
         let decision: String
         let reason: String
         let score: Double
+        /// `EventPairFeatures` as JSON (#551); nil for rows written before it was recorded.
+        var features: String? = nil
     }
 
     func upsertPairDecisions(_ decisions: [PairDecision], matcherVersion: Int, at date: Date = Date()) throws {
@@ -1374,16 +1376,17 @@ extension DatabaseEngine {
                 try eventRows(
                     """
                     INSERT INTO pair_assessments(article_id, other_article_id, matcher_version, decision, reason, score,
-                        assessed_at)
-                    SELECT ?, ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM articles WHERE id = ?)
+                        features, assessed_at)
+                    SELECT ?, ?, ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM articles WHERE id = ?)
                         AND EXISTS (SELECT 1 FROM articles WHERE id = ?)
                     ON CONFLICT(article_id, other_article_id) DO UPDATE SET matcher_version = excluded.matcher_version,
                         decision = excluded.decision, reason = excluded.reason, score = excluded.score,
-                        assessed_at = excluded.assessed_at;
+                        features = excluded.features, assessed_at = excluded.assessed_at;
                     """,
                     [
                         .text(pair.articleID), .text(pair.otherArticleID), .integer(matcherVersion),
-                        .text(pair.decision), .text(pair.reason), .real(pair.score), .real(date.timeIntervalSince1970),
+                        .text(pair.decision), .text(pair.reason), .real(pair.score),
+                        pair.features.map { .text($0) } ?? .null, .real(date.timeIntervalSince1970),
                         .text(pair.articleID), .text(pair.otherArticleID),
                     ])
             }

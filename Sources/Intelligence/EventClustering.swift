@@ -1,5 +1,35 @@
 import Foundation
 
+/// What one pair decision rested on, stored as JSON in `pair_assessments.features` (#551): the cosine, the pair model's
+/// probability when it was asked, the conflict and the shared-evidence counts. Numbers only, no text.
+struct EventPairFeatures: Codable, Equatable, Sendable {
+    var cosine: Double?
+    var pairModel: Double?
+    var conflict: String?
+    var what: Double
+    var entity: Double
+    var sharedAnchors: Int
+    var sharedSpecific: Int
+    var sharedKeywords: Int
+
+    init(_ pair: EventPairAssessment, probability: Double?) {
+        cosine = pair.embeddingCosine
+        pairModel = probability
+        conflict = pair.conflict?.rawValue
+        what = pair.what
+        entity = pair.entity
+        sharedAnchors = pair.sharedAnchors
+        sharedSpecific = pair.sharedSpecificAnchors
+        sharedKeywords = pair.sharedKeywords
+    }
+
+    var json: String? {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        return (try? encoder.encode(self)).flatMap { String(data: $0, encoding: .utf8) }
+    }
+}
+
 struct EventClusteringReport: Equatable, Sendable {
     var processed = 0
     var joined = 0
@@ -119,7 +149,7 @@ enum EventClusterer {
                 newEmbeddings[row.id] = vector
             }
         }
-        func record(_ a: EventMatchRow, _ b: EventMatchRow, _ pair: EventPairAssessment) {
+        func record(_ a: EventMatchRow, _ b: EventMatchRow, _ pair: EventPairAssessment, probability: Double? = nil) {
             let (low, high) = a.id < b.id ? (a.id, b.id) : (b.id, a.id)
             let key = low + "\n" + high
             let decision: String
@@ -131,6 +161,9 @@ enum EventClusterer {
                 decision = "related-act"
             } else if pair.isBorderline {
                 decision = "borderline"
+            } else if pair.conflict != nil, pair.sharedAnchors >= 1 || pair.sharedKeywords >= 2 {
+                // A veto of a pair with shared evidence is reviewable (#551); pairs sharing nothing are not kept.
+                decision = "vetoed"
             } else {
                 decisions[key] = nil
                 cleared[key] = (low, high)
@@ -139,7 +172,8 @@ enum EventClusterer {
             cleared[key] = nil
             decisions[key] = DatabaseEngine.PairDecision(
                 articleID: low, otherArticleID: high, decision: decision,
-                reason: pair.modelConfirmed ? "pairModel" : (pair.conflict?.rawValue ?? decision), score: pair.score)
+                reason: pair.modelConfirmed ? "pairModel" : (pair.conflict?.rawValue ?? decision), score: pair.score,
+                features: EventPairFeatures(pair, probability: probability).json)
         }
         /// The rules alone: no pair model and no audit row.
         func ruled(_ a: EventMatchRow, _ b: EventMatchRow) async -> EventPairAssessment {
@@ -176,7 +210,8 @@ enum EventClusterer {
                 }
             }
             // The matcher's own verdict is recorded; a reader's inclusion only overrides it here.
-            record(a, b, pair)
+            let key = a.id < b.id ? a.id + "\n" + b.id : b.id + "\n" + a.id
+            record(a, b, pair, probability: modelScores[key] ?? nil)
             return inclusions[a.id]?.contains(b.id) == true ? EventMatcher.forced(pair, policy: matchPolicy) : pair
         }
         /// The row against each member. "Same Event" is transitive: a member the reader put in one event with a member
