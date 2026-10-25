@@ -11,7 +11,7 @@ The single design language for News on macOS. It applies to every change that ad
 3. **Glass is for controls, not content.** Liquid Glass belongs to the floating control layer. Cards, rows, reader text, summaries and tags never use it.
 4. **Hierarchy through type, space and grouping.** Express importance with typographic scale, spacing and grouping, not borders, gradients, shadows or color.
 5. **One way to do each thing.** Every color, font, spacing, radius and motion value comes from `Sources/Views/DesignSystem.swift`; every repeated pattern has one component (section 18).
-6. **Calm and honest.** Motion confirms an action and never decorates. Generated content is always labeled; publisher text is never restyled into something it is not.
+6. **Calm and honest.** Motion confirms an action and never decorates. Generated content is labeled once per page, in plain words that say how it was made; publisher text is never restyled into something it is not.
 7. **Accessible and adaptive by default.** Every view works in light and dark, with Increase Contrast, Reduce Transparency, Reduce Motion, keyboard-only use and narrow windows, and on macOS 15 without Liquid Glass.
 
 ## 2. Platform baseline
@@ -28,7 +28,7 @@ The single design language for News on macOS. It applies to every change that ad
 
 | Layer | Contains | Surface |
 | --- | --- | --- |
-| Content | Masthead, story lists and grids, cards, event coverage, reader, overview, empty states, settings forms | Window background, `AppColor.surface`, system materials only where the HIG asks for them |
+| Content | Masthead, story lists and grids, cards, event coverage, Briefing board, reader, overview, grouped sheet content, empty states, settings forms | Window background, `AppColor.surface`, system materials only where the HIG asks for them |
 | Controls | Toolbar, sidebar, search field, floating controls over scrolling content | Liquid Glass (system or section 3.2) |
 | Presentation | Menus, popovers, sheets, alerts, dialogs | System presentation styles, unmodified |
 
@@ -62,7 +62,7 @@ The single design language for News on macOS. It applies to every change that ad
 - Main window: `NavigationSplitView` with the sidebar column and a detail `NavigationStack` (list, then reader). Do not add a third column or nested split view without updating this document.
 - The system sidebar toggle is the only sidebar toggle. Never draw a second one in content.
 - Each window sets `navigationTitle` to the current location ("Today", "Saved Stories", the story's publisher in the reader), never the app name. Where the content already shows that title (the list masthead, the reader eyebrow), hide the duplicate toolbar title with `toolbar(removing: .title)`; the window title still names the window in Mission Control and the Window menu.
-- Secondary windows (Keyboard Shortcuts) and sheets (Feed Catalog, World Tension) follow the same rules. Sheets use system sizing and background; no custom `presentationBackground`. A sheet is modal to its window and closes with a close button and Esc.
+- Secondary windows (Keyboard Shortcuts) and sheets (Feed Catalog, World Tension) follow the same rules. Sheets use system sizing and background; no custom `presentationBackground`. A sheet is modal to its window and closes with a close button and Esc. A sheet keeps one width while it is open: content that recomputes (suggested topics after subscribing) never resizes it. A filter with more than five options inside a sheet is a scrolling `TagView` row or a menu `Picker`, never a segmented control that has to fit the width.
 - In full screen the reader shows the toolbar on hover: `windowToolbarFullScreenVisibility(.onHover)`.
 - Do not put critical controls or information at the bottom of a window or sidebar.
 - Minimum main window size: 900 × 600. Layouts must work from that size to a full-screen 6K display; wide windows widen margins, never the reading measure.
@@ -119,36 +119,59 @@ One card component for list, grid, Briefing, search, Saved Stories and History.
 
 | Part | Rule |
 | --- | --- |
-| Lead image | Publisher image or the editorial placeholder; fixed aspect per layout; decorative for accessibility |
+| Lead image | The story's publisher image or, on an event card, the image of any report in the event (hidden panel-feed reports included); otherwise the editorial placeholder. Fixed aspect per layout, clipped to its frame and never a click target outside it; fetched before the card scrolls into view where possible, and the placeholder fades into the image with `AppMotion.state` (`nil` under Reduce Motion); decorative for accessibility |
 | Eyebrow | Publisher name, `AppTypography.eyebrow`, uppercase by `.textCase(.uppercase)`, secondary color |
 | Headline | `AppTypography.cardHeadline` for the layout; at most two lines; keeps priority over the dek |
 | Dek | Feed summary, two lines, secondary color |
-| Footer | Relative or short date in `caption`; state glyphs (saved, AI summary available) |
+| Footer | Relative or short date in `caption`; state glyphs (saved; the small intelligence tag when a summary exists, the only `sparkles` a list shows) |
 | Unread | Accent dot plus primary-color headline; read stories use the secondary color, never opacity alone |
 | Hover | Accent border at 40 % and the hover shadow token |
 | Keyboard focus | Accent ring (1.5 pt) and focus shadow token |
+| Click | The whole card is one `Button`: a single click opens the story and selects it, also as the first click on an inactive window. The coverage disclosure (section 8.3) and the context menu are the only other targets |
 
-Cards use `AppColor.surface`, the card radius, a separator-color hairline and the resting shadow token. No gradients, glass or extra tinting. Every action on a card is also in its context menu and in its accessibility actions.
+Cards use `AppColor.surface`, the card radius, a separator-color hairline and the resting shadow token. No gradients, glass or extra tinting. Every action on a card is also in its context menu and in its accessibility actions. Cards never overlap in hit testing: a clipped figure takes `contentShape(Rectangle())` after `clipped()` (or `allowsHitTesting(false)`), so an image that overflows its frame cannot take the click meant for the card above it.
 
 ### 8.3 Event coverage
 
 An event card is a story card followed by a coverage disclosure row (`AppTypography.label`, `square.stack.3d.up` symbol, coverage text, last update, "Updated" tag) and, when expanded, the member list in one content surface. Members are rows with an unread dot, eyebrow, title and date. Coverage never claims more than the stored sources show.
 
-### 8.4 States
+A single click on the card opens the event overview, with the lead report one more click away (its source row or the Story mode), never two. The disclosure chevron is the only control that expands the member list, and every event card can be expanded. A click on a member row opens that report.
+
+### 8.4 Briefing
+
+Briefing is a situation board, not a second Today list (decision of 24 October 2026): a hero carousel of the day's most covered stories with their images, a World Tension strip with its drivers, then dense story tiles with one cited key fact and a publisher count, grouped by region or topic. Its tokens, tile anatomy, copy and the carousel rules (the only auto-advancing motion in the app) are specified by #604 once the mock from #603 is approved, and replace this paragraph. Already decided and binding for the mock: the carousel shows the three to five most covered stories, rotates about every 45 s with a slow cross-fade, pauses on hover and focus, offers arrows and dots, shows only the first story under Reduce Motion and never runs while a story is open; a tile's key fact is cited from the overview highlights, its image comes from any report (section 8.2) and one click opens it. Until then the Briefing list uses the story card and the rules of this section, and nothing in it auto-advances.
+
+### 8.5 States
 
 - Empty, error and no-results states use `ContentUnavailableView` with a symbol, title, description and at most two actions. Diagnostic detail goes in a `DisclosureGroup` under it.
 - Loading a list or a story body shows `ProgressView` with a visible label; small inline indicators (event sources, a sidebar row) carry an accessibility label instead.
 - Queued updates appear in the leading toolbar as a system-styled button, announced to VoiceOver; the list never moves under the reader.
 - Inline notices (citation highlight, extraction fallback) are content callouts: `AppColor.surface` or a 10–12 % semantic tint, the card radius, symbol plus text. Not glass.
 
+### 8.6 Grouped content in sheets
+
+A sheet that presents several kinds of information (World Tension: the reading, what drives it, the panel headlines, the past 30 days) groups them into titled cards, never a flat stack of headings. Each group has a title in `AppTypography.sectionTitle` with the header trait, `AppSpacing.md` inside and `AppSpacing.lg` between groups, on the story card surface (`AppColor.surface`, card radius, separator hairline) or in a native `GroupBox`; no literal strokes or opacities. Rows that repeat (drivers, panel headlines) align their columns in a `Grid`: badge (`TagView`), publisher, headline. The sheet title carries the page's one intelligence glyph (section 9); "Assessed on this Mac" is a plain caption under it.
+
+### 8.7 Notification banners
+
+- One banner per story: reports of one event share a thread, so a second publisher joins the first banner instead of stacking a second one beside it, and banners post one at a time. The interruption level follows the triage score.
+- Copy: the headline is the title, the publisher the subtitle, the feed summary the body, in sentence case, with no label the data does not support (section 17).
+- The Dock badge counts stories worth attention (unread stories of today's Briefing and breaking stories since the last launch), never the whole unread library; zero hides it.
+- Image: the app renders the attachment itself. It is a tall crop (portrait, 2:3) of the story image with an alpha fade and a progressive blur toward the trailing edge, so the system thumbnail reads as a photograph fading into the banner rather than a cropped square. A source smaller than the crop falls back to the plain square. PNG, at most 10 MB. macOS still places and may crop the thumbnail; the change that adds the fade (#589) records how macOS 26 and 27 show it.
+
 ## 9. Reader
 
 - One reading column of `AppLayout.readingMeasure` points, scaled by `min(textScale, 1.3)`, centered, with `AppLayout.pageInset` margins. The article reader and the event overview share it.
-- Order: cited-passage notice, eyebrow (publisher · date · reading time), headline, publisher updates, lead figure, on-device summary disclosure, divider, body, terminal affordance.
+- Order: cited-passage notice, eyebrow (publisher · date · reading time), headline, publisher updates, lead figure, summary panel (a closed disclosure), divider, body, terminal affordance.
 - Typography comes from the reading style (Casper serif, Edition sans, Alto mono) through `AppTypography` functions; headings, quotes, lists, captions and code all have reader tokens. Body text is selectable.
 - Text size is one persisted preference applied to every story, adjustable from the View menu (Make Text Bigger ⌘+, Make Text Smaller ⌘−, Actual Size ⌘0) and the Reading options control.
 - Figures fill the measure, never crop, and carry caption and credit in `readerCaption`.
-- Generated content (summary, overview introduction, highlights) is labeled with the intelligence label, collapsible where it precedes publisher text, and never styled as publisher text.
+- Generated content (the summary panel, the event overview, the World Tension reading) follows four rules:
+  - **One glyph per page.** The `sparkles` glyph appears once, in the intelligence label that heads the generated content: the summary panel's label in the reader, the "Event overview" eyebrow in the overview, the sheet title in World Tension. Every other line about that content (how it was assembled, what it cites) is a plain `caption` in the secondary color, or the label's tooltip where space is short. No second label, no gold text.
+  - **Say how it was made.** The label reads "Generated summary" when the on-device model wrote it and "Extractive summary" when sentences were selected from the story; the heading inside is "Key points". Never "AI-generated", "automated estimate" or a tone or sentiment line: sentiment stays in the data for Briefing interests and is not shown.
+  - **Collapsed where it precedes publisher text.** The summary panel is a closed disclosure; the overview's sources list is collapsed by default and keeps the person's choice for the session. Expanding is the person's action, never a default.
+  - **Never styled as publisher text**, and never in the intelligence color as body text (section 11).
+- Text in the reader and overview never drops below `caption` (11 pt) or below the secondary color: attribution, dates and "Reported" lines use `secondaryText`; `tertiaryText` is for placeholders and disabled controls only. Quoted publisher positions (perspectives) use `primaryText`. Every text reaches 4.5:1 against its surface in light and dark.
 - The terminal affordance uses standard bordered buttons: Open Web View, and Open in Browser.
 - Web mode keeps the protected-preview status line in content and the navigation controls in the toolbar.
 
@@ -196,14 +219,15 @@ macOS has no Dynamic Type. Chrome uses system text styles so it matches system c
 
 ## 13. Motion
 
-- Use `AppMotion` (hover, state, navigation, modal) or the system's own animation. Every explicit animation is `nil` when `effectiveReduceMotion` is true; symbol effects stop too.
+- Use `AppMotion` (hover, state, navigation) or the system's own animation. Every explicit animation is `nil` when `effectiveReduceMotion` is true; symbol effects stop too.
 - Animate state the person caused (expand, save, mode switch, applying queued updates). Never animate content arriving from a refresh while the person is reading.
-- Glass morphs only between related controls in one container. No parallax, auto-playing motion, confetti or attention-seeking pulses.
+- Launch is one settle transition: the cached snapshot appears with `AppMotion.navigation` once its first page and that page's card images are ready (`nil` under Reduce Motion), and nothing moves again until the person acts. No per-card pop-in and no progress animation over the list; fetching, clustering and image lookup start after that first frame.
+- Glass morphs only between related controls in one container. No parallax, auto-playing motion, confetti or attention-seeking pulses; a card never cycles through an event's images on hover. The Briefing hero carousel is the one planned exception: section 8.4 (#604) defines it, and nothing else auto-advances.
 
 ## 14. Symbols and menus
 
 - SF Symbols only, monochrome by default; `.fill` variants mark the selected or active state (filled bookmark when saved, filled stack when grouping is on).
-- One symbol per concept everywhere: bookmark (save), `square.and.arrow.up` (share), `safari` (open in browser), `globe` (Web view), `doc.richtext` (reader), `sparkles` (generated content), `square.stack.3d.up` (event coverage), `speaker.slash` (mute), `arrow.clockwise` (refresh). Don't reuse a symbol for a different meaning.
+- One symbol per concept everywhere: bookmark (save), `square.and.arrow.up` (share), `safari` (open in browser), `globe` (Web view), `doc.richtext` (reader), `sparkles` (generated content, once per page, section 9), `square.stack.3d.up` (event coverage), `speaker.slash` (mute), `arrow.clockwise` (refresh). Don't reuse a symbol for a different meaning.
 - Context menus order: read state, save, mute, divider, copy link, open in browser, share, then corrective actions ("Not the Same Event") in their own section. Within a section, give every item a symbol or none. On macOS 27 the menu bar shows icons only for key actions by default; use `labelStyle(.titleAndIcon)` only to surface a key feature.
 
 ## 15. Commands, keyboard and pointer
@@ -211,6 +235,8 @@ macOS has no Dynamic Type. Chrome uses system text styles so it matches system c
 - Every toolbar action has a menu bar command; every frequent command has a keyboard shortcut shown in its menu item. Never reuse a standard window or app shortcut (close, minimize, hide, quit, settings, full screen) for anything else; a standard document shortcut whose action does not exist here (⌘O, ⌘J) may carry a close meaning, such as Open in Browser or the next story (HIG keyboards).
 - Menus: View holds layout (as List, as Grid), Group Stories by Event, text size and the sidebar; Navigate holds sections, story movement and queued updates; a Story menu holds actions on the focused or open story (read state, save, open in browser, share, Reader or Web), as Mail's Message menu does; Help lists keyboard shortcuts.
 - Single-key shortcuts (J, K, M, S, O and the others in the shortcuts list) work only while the list or reader has focus and never with ⌘, ⌃ or ⌥ held.
+- One click opens. A single click on a card, a member row or a search result opens it and selects it; the first click on an inactive window performs the action as well as activating the window (`acceptsFirstMouse`). Double-click carries no extra meaning on cards. An event card opens its overview; the lead report is one more click away, never two.
+- A sidebar row and its shortcut (⌘1–⌘4) always return to that section's list, also when the section is already selected while a story is open; they take the same path as Back and Esc.
 - Every icon-only control has `.help`. Hover and focus states come from the system or the card tokens; never remove the focus ring without providing the card focus state.
 - Drag and drop: OPML files and feed URLs onto the window or sidebar; feedback through the drop-target highlight and the result notice rules in section 6.
 
@@ -230,6 +256,9 @@ macOS has no Dynamic Type. Chrome uses system text styles so it matches system c
 - Title Case for buttons, menu items, toolbar labels and window titles; sentence case for descriptions, help tooltips and status lines.
 - "Story" is the user-facing word for an item; "publisher" for its source; "event" and "coverage" for grouped reports. Avoid "article" in new UI text.
 - Never claim more than the data shows: feed health is operational, not a quality rating; publisher updates are not verified corrections; overviews are generated and cite sources.
+- Generated content: "Generated summary", "Extractive summary", "Key points", "Event overview", "Assembled on this Mac from the cited passages" (caption or tooltip), "Assessed on this Mac". Never "AI-generated", "automated estimate" or a tone label.
+- Toolbar: Refresh's tooltip is "Check feeds for new stories"; the queued-updates button reads "Show N New Stories" with the tooltip "Stories that arrived in the background". Both are listed in Help › Keyboard Shortcuts.
+- The story layer (#581) groups related events into one card; "story" stays the word for what the person opens, and the wording for its acts and timeline is settled with that change.
 - No exclamation marks, no marketing adjectives, no "AI magic".
 
 ## 18. Components
@@ -241,9 +270,10 @@ Each pattern has one implementation; new code reuses it and extends it rather th
 | Tokens | `DesignSystem.swift` | Color, typography, spacing, radius, layout, shadow, motion |
 | Story card | `ArticleCardView.swift` | All story cards and their context menus |
 | Event coverage | `EventCardView.swift` | Coverage disclosure and member rows |
-| Tag | `TagView` in `DesignSystem.swift` | Category, entity, Updated, Plan, AI, Verified Excerpts and citation pills |
+| Tag | `TagView` in `DesignSystem.swift` | Category, entity, Updated, Plan, the card's intelligence state tag and citation pills |
 | Eyebrow | `EyebrowText` in `DesignSystem.swift` | Publisher and kicker lines in cards, reader and overview |
-| Intelligence label | `IntelligenceLabel`, `TagView.intelligence` in `DesignSystem.swift` | Every generated-content heading and badge |
+| Intelligence label | `IntelligenceLabel` in `DesignSystem.swift` | The one generated-content label of a page; takes its font from the caller (headline in the summary panel, eyebrow in the overview, title in a sheet) |
+| Grouped sheet content | `TensionIndexView.swift` until a second sheet needs it | Titled groups and aligned rows in sheets (section 8.6) |
 | Masthead | `ArticleListView.swift` | List title and status line |
 | Updates button | `ArticleListView.swift` | Leading toolbar queued-update control |
 | Notice | `NoticeView` in `DesignSystem.swift` | Inline callouts in content |
@@ -261,7 +291,9 @@ Copy into the PR description for UI changes and tick only what was checked.
 - [ ] Sidebar, search and empty states use the system components in sections 6–8.
 - [ ] Light, dark, Increase Contrast, Reduce Motion and Reduce Transparency checked, plus macOS 15 when the change gates an API; macOS 27 glass checked at clear and tinted when glass is involved.
 - [ ] Narrow (900 pt) and wide windows checked; keyboard path works.
-- [ ] Copy follows section 17.
+- [ ] Copy follows section 17; one `sparkles` glyph per page, with the generated-content labels and captions of section 9.
+- [ ] A single click opens; clipped images take no clicks outside their frame; every event card expands.
+- [ ] Nothing moves at launch or on refresh beyond section 13; no auto-advancing motion outside section 8.4.
 - [ ] `script/design_lint.sh` passes: literal fonts, colours, uppercasing and labels on AppKit-backed views stay at zero; literal spacing, frames, opacity and strokes, raw `colorSchemeContrast`/`accessibilityReduceMotion`, `foregroundColor`, legacy aliases and "article" copy only go down (lower the baseline with `--update` when they do).
 
 ## 20. Changing this document

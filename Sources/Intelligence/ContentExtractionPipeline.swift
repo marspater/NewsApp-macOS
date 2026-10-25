@@ -2,6 +2,18 @@ import Foundation
 import SwiftSoup
 import os
 
+private let extractionLogger = Logger(subsystem: "com.marspater.news", category: "extraction")
+
+@discardableResult
+private func loggedExtraction<T>(_ operation: StaticString, _ body: () throws -> T) -> T? {
+    do {
+        return try body()
+    } catch {
+        extractionLogger.error("\(operation, privacy: .public) failed: \(error.localizedDescription)")
+        return nil
+    }
+}
+
 /// Constructed only after protected fetching and document-equivalence checks.
 struct DocumentIdentityEvidence: Equatable, Sendable {
     let requestedURL: String
@@ -284,14 +296,18 @@ final class DOMElementNode: Sendable {
     }
 
     private static let paywallPattern =
-        (try? NSRegularExpression(pattern: #"(?i)(?:^|[^a-z0-9])paywall(?:$|[^a-z0-9])"#)) ?? NSRegularExpression()
+        loggedExtraction("compilePaywallRegex") {
+            try NSRegularExpression(pattern: #"(?i)(?:^|[^a-z0-9])paywall(?:$|[^a-z0-9])"#)
+        } ?? NSRegularExpression()
 
     // Token boundaries keep editorial "commentary" distinct from comment widgets.
     private static let auxiliaryPattern =
-        (try? NSRegularExpression(
-            pattern:
-                #"(?i)(?:^|[^a-z0-9])(?:comments?|comment-thread|disqus|also-read|read-more|more-on|most-?viewed|most-?popular|most-?read|top-?stories|onward|onwards|submeta|subscription|related(?:-content|-stories|-articles)?|links-block|newsletter|byline|timestamp(?:-block)?|recommendations?|recommended-(?:stories|articles|content)|social-share|share-tools|promo|advertisement|native-?ad|outbrain|taboola|eventpromo|promolist|topiclist|uploaderembed|author-?bio|mini-bio|follow-(?:authors?|topics?))(?:$|[^a-z0-9])"#
-        )) ?? NSRegularExpression()
+        loggedExtraction("compileAuxiliaryRegex") {
+            try NSRegularExpression(
+                pattern:
+                    #"(?i)(?:^|[^a-z0-9])(?:comments?|comment-thread|disqus|also-read|read-more|more-on|most-?viewed|most-?popular|most-?read|top-?stories|onward|onwards|submeta|subscription|related(?:-content|-stories|-articles)?|links-block|newsletter|byline|timestamp(?:-block)?|recommendations?|recommended-(?:stories|articles|content)|social-share|share-tools|promo|advertisement|native-?ad|outbrain|taboola|eventpromo|promolist|topiclist|uploaderembed|author-?bio|mini-bio|follow-(?:authors?|topics?))(?:$|[^a-z0-9])"#
+            )
+        } ?? NSRegularExpression()
 
     func readingBlocks(allowDivFallback: Bool = true) -> [DOMElementNode] {
         guard !isReaderExcluded else { return [] }
@@ -715,9 +731,11 @@ final class DOMElementNode: Sendable {
 
 enum HTMLDOMBuilder {
     private static let attrRegex =
-        (try? NSRegularExpression(
-            pattern: #"([a-zA-Z0-9_-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))"#
-        )) ?? NSRegularExpression()
+        loggedExtraction("compileAttrRegex") {
+            try NSRegularExpression(
+                pattern: #"([a-zA-Z0-9_-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))"#
+            )
+        } ?? NSRegularExpression()
     private static let voidTags: Set<String> = [
         "area", "base", "br", "col", "embed", "hr", "img", "input",
         "link", "meta", "param", "source", "track", "wbr",
@@ -730,10 +748,12 @@ enum HTMLDOMBuilder {
 
     /// Pull quotes and standfirsts that publishers wrap in otherwise ignored `<aside>` and `<header>` elements.
     static let editorialPattern =
-        (try? NSRegularExpression(
-            pattern:
-                #"(?i)pull-?quote|standfirst|(?:^|[-_ ])dek(?:$|[-_ ])|subtitle|sub-?headline|article-summary|intro-text"#
-        )) ?? NSRegularExpression()
+        loggedExtraction("compileEditorialRegex") {
+            try NSRegularExpression(
+                pattern:
+                    #"(?i)pull-?quote|standfirst|(?:^|[-_ ])dek(?:$|[-_ ])|subtitle|sub-?headline|article-summary|intro-text"#
+            )
+        } ?? NSRegularExpression()
 
     /// The reader kind an editorial element's class names: a pull quote, or a standfirst (standfirst, dek, subtitle,
     /// sub-headline, summary or intro text).
@@ -758,30 +778,24 @@ enum HTMLDOMBuilder {
         return !isEditorial(attributes)
     }
 
-    private static let commentRegex = try? NSRegularExpression(
-        pattern: "<!--.*?-->", options: .dotMatchesLineSeparators)
-
     /// Parses clean HTML into a DOM tree while filtering non-content containers.
     static func parse(html: String) -> DOMElementNode {
-        var cleanHTML = html
-        // Remove HTML comments
-        if let commentRegex = Self.commentRegex {
-            cleanHTML = commentRegex.stringByReplacingMatches(
-                in: cleanHTML, range: NSRange(cleanHTML.startIndex..., in: cleanHTML), withTemplate: "")
-        }
-
         let root = DOMElementNode(tag: "root")
         var stack: [DOMElementBuilder] = [DOMElementBuilder(tag: "root")]
 
-        let scanner = Scanner(string: cleanHTML)
+        let scanner = Scanner(string: html)
         scanner.charactersToBeSkipped = nil
 
         while !scanner.isAtEnd {
             if scanner.scanString("<") != nil {
                 if scanner.scanString("/") != nil {
                     handleClosingTag(scanner: scanner, stack: &stack)
+                } else if scanner.scanString("!--") != nil {
+                    // HTML comment; skip to -->
+                    _ = scanner.scanUpToString("-->")
+                    _ = scanner.scanString("-->")
                 } else if scanner.scanString("!") != nil {
-                    // DOCTYPE or comment; skip to >
+                    // DOCTYPE or declaration; skip to >
                     _ = scanner.scanUpToString(">")
                     _ = scanner.scanString(">")
                 } else {
@@ -1095,9 +1109,13 @@ final class ContentExtractionPipeline: Sendable {
         var urls = [finalURL.absoluteString]
         let dom = HTMLDOMBuilder.parse(html: html)
         let title = Self.normalizedEvidenceText(dom.findNodes(tag: "title").map { $0.combinedText() }.joined())
-        let links = ((try? SwiftSoup.parse(html).select("head link[rel][href]").array()) ?? []).filter {
-            ((try? $0.attr("rel")) ?? "").lowercased().split(whereSeparator: { $0.isWhitespace }).contains("canonical")
-        }
+        let links =
+            (loggedExtraction("parseCanonicalLinks") {
+                try SwiftSoup.parse(html).select("head link[rel][href]").array()
+            } ?? []).filter {
+                ((try? $0.attr("rel")) ?? "").lowercased().split(whereSeparator: { $0.isWhitespace }).contains(
+                    "canonical")
+            }
         // ponytail: one same-origin canonical probe on demand; no canonical chains.
         if links.count == 1, let href = try? links.first?.attr("href"), href.utf8.count <= 8192,
             let candidate = URL(string: href, relativeTo: finalURL)?.absoluteURL,
@@ -1172,21 +1190,25 @@ final class ContentExtractionPipeline: Sendable {
         guard html.utf8.count <= SecureHTTPClient.defaultArticleLimit else {
             return .contentParsingFailed(reason: "Article exceeds extraction limit")
         }
-        let soup = try? SwiftSoup.parse(html)
+        let soup = loggedExtraction("parseArticleHTML") { try SwiftSoup.parse(html) }
         // Structured data and barrier markers are read before scripts and furniture are removed.
         let structured = soup.map { Self.structuredArticle(in: $0) } ?? StructuredArticle()
         let hasBarrier =
             structured.isAccessibleForFree == false
-            || ((try? soup?.select(Self.barrierSelector).isEmpty()) == false)
+            || (soup.flatMap { doc in
+                loggedExtraction("selectBarrierElements") { try doc.select(Self.barrierSelector).isEmpty() }
+            } == false)
         let discoveredLeadImage = leadImage ?? soup.flatMap { leadImages(in: $0).first }
         if let soup {
-            _ = try? soup.select(
-                "script, style, noscript, iframe, svg, canvas, form, button, input, select, textarea, dialog, template, "
-                    + "[role=navigation], [role=complementary], [role=banner], [role=search], [aria-hidden=true], "
-                    + ".visually-hidden, .sr-only, "
-                    + "[data-component=byline-block], [data-component=tag-list], [data-component=links-block], [data-component=topic-list], "
-                    + ".video-player-error, .media-player__error, .share-tools, .social-share, .newsletter-signup, .advertisement, .ad-slot"
-            ).remove()
+            loggedExtraction("stripFurnitureElements") {
+                try soup.select(
+                    "script, style, noscript, iframe, svg, canvas, form, button, input, select, textarea, dialog, template, "
+                        + "[role=navigation], [role=complementary], [role=banner], [role=search], [aria-hidden=true], "
+                        + ".visually-hidden, .sr-only, "
+                        + "[data-component=byline-block], [data-component=tag-list], [data-component=links-block], [data-component=topic-list], "
+                        + ".video-player-error, .media-player__error, .share-tools, .social-share, .newsletter-signup, .advertisement, .ad-slot"
+                ).remove()
+            }
         }
         let effectiveImage = Self.readerImageURL(discoveredLeadImage, baseURL: baseUrl)
 
@@ -1208,9 +1230,13 @@ final class ContentExtractionPipeline: Sendable {
 
         // Explicit publisher bodies beat page-wide scoring: recommendation furniture must not enlarge the story.
         if let soup,
-            let explicit = try? soup.select(
-                "[itemprop~=articleBody], [data-component=text-block], .article__body, .article-body, .article-body-commercial-selector, .wysiwyg, .story-body, .rich-text, .caas-body, .articlebodycontent, .entry-content, .body-description"
-            ).array()
+            let explicit = loggedExtraction(
+                "selectExplicitArticleBodies",
+                {
+                    try soup.select(
+                        "[itemprop~=articleBody], [data-component=text-block], .article__body, .article-body, .article-body-commercial-selector, .wysiwyg, .story-body, .rich-text, .caas-body, .articlebodycontent, .entry-content, .body-description"
+                    ).array()
+                })
         {
             // ponytail: a fixed share of the scored body; an explicit class on a small sponsor box (BleepingComputer's
             // .article-body) must not replace the story. Tune with the catalog reader-access run if it misfires.
@@ -1695,7 +1721,11 @@ final class ContentExtractionPipeline: Sendable {
             return converted.isReaderExcluded ? nil : converted
         }
         // ponytail: bounded repair of explicit article containers; no second readability scoring engine.
-        let containers = explicit ?? ((try? document.select("[itemprop~=articleBody], article, main").array()) ?? [])
+        let containers =
+            explicit
+            ?? (loggedExtraction("selectFallbackArticleContainers") {
+                try document.select("[itemprop~=articleBody], article, main").array()
+            } ?? [])
         for element in containers.prefix(32) {
             guard !element.parents().array().contains(where: excluded) else { continue }
             let insideArticle = element.parents().array().contains { $0.tagName() == "article" }
@@ -1850,8 +1880,9 @@ final class ContentExtractionPipeline: Sendable {
         return String(decoding: data, as: UTF8.self)
     }
 
-    private static let headerCharsetRegex = try? NSRegularExpression(
-        pattern: "charset=[\"']?([a-zA-Z0-9_-]+)", options: .caseInsensitive)
+    private static let headerCharsetRegex = loggedExtraction("compileHeaderCharsetRegex") {
+        try NSRegularExpression(pattern: "charset=[\"']?([a-zA-Z0-9_-]+)", options: .caseInsensitive)
+    }
 
     private func extractCharset(from header: String) -> String? {
         guard let regex = Self.headerCharsetRegex,
@@ -1864,7 +1895,11 @@ final class ContentExtractionPipeline: Sendable {
     private static let metaCharsetRegexes = [
         "<meta[^>]+charset=[\"']?([a-zA-Z0-9_-]+)",
         "<meta[^>]+content=[\"'][^\"']*charset=([a-zA-Z0-9_-]+)",
-    ].compactMap { try? NSRegularExpression(pattern: $0, options: .caseInsensitive) }
+    ].compactMap { pattern in
+        loggedExtraction("compileMetaCharsetRegex") {
+            try NSRegularExpression(pattern: pattern, options: .caseInsensitive)
+        }
+    }
 
     private func extractCharsetFromMeta(_ htmlSnippet: String) -> String? {
         for regex in Self.metaCharsetRegexes {
@@ -1902,14 +1937,17 @@ final class ContentExtractionPipeline: Sendable {
     /// Declared article media only; Organization and WebSite images are usually logos.
     func extractLeadImages(from html: String) -> [String] {
         guard !Task.isCancelled, html.utf8.count <= SecureHTTPClient.defaultArticleLimit,
-            let document = try? SwiftSoup.parse(html)
+            let document = loggedExtraction("parseLeadImageHTML", { try SwiftSoup.parse(html) })
         else { return [] }
         return leadImages(in: document)
     }
 
     private func leadImages(in document: SwiftSoup.Document) -> [String] {
         var images: [String] = []
-        let metadata = (try? document.select("meta[property], meta[name]").array()) ?? []
+        let metadata =
+            loggedExtraction("selectLeadImageMeta") {
+                try document.select("meta[property], meta[name]").array()
+            } ?? []
         for key in ["og:image", "twitter:image"] {
             for element in metadata.filter({
                 ((try? $0.attr(key == "og:image" ? "property" : "name")) ?? "").lowercased() == key
@@ -1939,10 +1977,13 @@ final class ContentExtractionPipeline: Sendable {
             }
             return object["@graph"].map { articleImages($0, depth: depth + 1) } ?? []
         }
-        let scripts = ((try? document.select("script[type]").array()) ?? []).filter {
-            ((try? $0.attr("type")) ?? "").lowercased().split(separator: ";").first?.trimmingCharacters(
-                in: .whitespaces) == "application/ld+json"
-        }
+        let scripts =
+            (loggedExtraction("selectLeadImageScripts") {
+                try document.select("script[type]").array()
+            } ?? []).filter {
+                ((try? $0.attr("type")) ?? "").lowercased().split(separator: ";").first?.trimmingCharacters(
+                    in: .whitespaces) == "application/ld+json"
+            }
         for script in scripts.prefix(20) {
             guard !Task.isCancelled,
                 let json = try? JSONSerialization.jsonObject(with: Data(script.data().utf8))
@@ -1954,9 +1995,14 @@ final class ContentExtractionPipeline: Sendable {
 
     // MARK: - HTML Entity Decoding
 
-    private static let decEntityRegex = (try? NSRegularExpression(pattern: "&#([0-9]{2,7});")) ?? NSRegularExpression()
+    private static let decEntityRegex =
+        loggedExtraction("compileDecEntityRegex") {
+            try NSRegularExpression(pattern: "&#([0-9]{2,7});")
+        } ?? NSRegularExpression()
     private static let hexEntityRegex =
-        (try? NSRegularExpression(pattern: "&#x([0-9a-fA-F]{2,6});")) ?? NSRegularExpression()
+        loggedExtraction("compileHexEntityRegex") {
+            try NSRegularExpression(pattern: "&#x([0-9a-fA-F]{2,6});")
+        } ?? NSRegularExpression()
 
     func decodeHTMLEntities(_ text: String) -> String {
         var result = text
