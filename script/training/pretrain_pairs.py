@@ -14,7 +14,8 @@ CSV format plus a `weight` column, outside the checkout.
         as positives.
     pretrain_pairs.py semeval OUT_DIR
         SemEval-2022 Task 8 (Zenodo 6507872): English-English pairs; overall similarity 1 is label 1, 3 and 4 are
-        label 0, 2 is dropped; page text from the Internet Archive (cached under OUT_DIR/semeval), weight 2.
+        label 0, 2 is dropped; page text from the Internet Archive (cached under OUT_DIR/semeval), weight 2;
+        `--cached-only` writes the pairs whose pages the cache already holds and fetches nothing.
     pretrain_pairs.py --self-check
         Synthetic clusters, events and pages through the same code, no downloads.
 
@@ -503,6 +504,8 @@ def parse(argv):
     gdelt.add_argument('--cap', type=int, default=100_000)
     semeval = sub.add_parser('semeval')
     semeval.add_argument('out')
+    semeval.add_argument('--cached-only', action='store_true',
+                         help='write the pairs whose pages are cached already; fetch nothing')
     return parser.parse_args(argv)
 
 
@@ -526,11 +529,12 @@ def run_gdelt(args, out, tokenizer):
     summarize(out / 'gdelt-negatives.csv')
 
 
-def run_semeval(_args, out, tokenizer):
+def run_semeval(args, out, tokenizer):
     cache = out / 'semeval'
     cache.mkdir(exist_ok=True)
     writer = Writer(out / 'semeval-pairs.csv', tokenizer)
-    written = build_semeval(semeval_pairs(cache), writer, lambda url: archived_page(url, cache))
+    attempts = 0 if args.cached_only else 3  # --cached-only: a stopped fetch's pages are used, nothing is fetched
+    written = build_semeval(semeval_pairs(cache), writer, lambda url: archived_page(url, cache, attempts))
     writer.close()
     print(f'    SemEval-2022 Task 8: {written} English pairs')
     summarize(out / 'semeval-pairs.csv')
