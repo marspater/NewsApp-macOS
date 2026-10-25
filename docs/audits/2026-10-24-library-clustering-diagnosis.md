@@ -64,6 +64,8 @@ These are hard pairs by construction: everything the rules nearly matched or nea
 | Recall on `same` | 0.182 (8 of 44) |
 | Recent stories in a multi-publisher event | 587 of 1,556 (38%) |
 
+**Matcher v12 (#580)** on the same holdout: 21 pairs linked (14 `same`, 4 `related`, 3 `different`), precision 0.667, recall 0.318 (14 of 44); the seven wrong links are the same seven as under v11 (no new wrong link), 598 of 1,556 recent stories (38%) in a multi-publisher event. Authored corpus 22 / 0 and private tune replay 44 / 0 / 49 unchanged. Newly linked: the CNA OpenAI pair, both iOS 27.2 pairs, two of four Pope Leo pairs, Real Madrid vs Leipzig report and live blog, and a Taiz pair; still missed: Storm Austen (anchors shared, cosine 0.69 and pair model 0.86 just under their cutoffs), the PHP explainers, the France protest live blogs and the CNA Pope report whose lead names three countries.
+
 The gate for #580, #582 and #581 is this file: precision ≥ 0.97 means at most one wrong link among the pairs linked, and every slice reports the recall it adds. Identical and near-identical headlines left unlinked here (CNA "OpenAI says its AI agents disabled their own safety monitors" twice, 9to5Mac "iOS 27.2" pairs, four Pope Leo pairs across CNA, BBC, CBC and Al Jazeera, Storm Austen across BBC, Euronews and Africanews) are the #580 targets. The three wrong links are two Euronews/Africanews daily bulletin pairs and one same-publisher series pair, the pattern the pair review found (`docs/audits/2026-10-24-pair-decision-review.md`).
 
 ```sh

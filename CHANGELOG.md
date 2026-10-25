@@ -2,6 +2,7 @@
 
 ## Unreleased — 21 October 2026
 
+- Story matching (matcher v12): headline names the matcher used to miss now count: brands and products written with an inner capital ("OpenAI", "iOS 27.2"), a name that opens the headline when the lead repeats it, names in headlines written in Title Case, and "Pope". Identical CNA headlines, the iOS 27.2 reports and the Pope Leo reports now form one story each; a sports report and its live blog are no longer kept apart by a player's name read as a place. Stored headline signals recompute once. The unused on-device event judge is removed.
 - Developer tooling: a library holdout drawn from a copy of a real library (hard pairs the rules nearly matched) replaces the saturated 49-article holdout as the gate for story-matching changes; the diagnosis of why one story still appears as several cards is recorded under docs/audits.
 - Story matching keeps a reviewable record of each pair decision: what it rested on (embedding similarity, pair-model probability, the conflict and the shared evidence) is stored with the decision, pairs the rules vetoed despite shared evidence are recorded with their conflict, and a local export lists every decision of a library copy for review.
 - Story matching works through new stories newest first, so after an update or a large import the latest stories are grouped before older ones; merging fragments of one story compares only events that share terms, which makes that pass about three times faster on a large library with the same result.

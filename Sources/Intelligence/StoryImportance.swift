@@ -74,6 +74,10 @@ actor OnDeviceImportanceJudge {
         }
     }
 
+    static func report(_ row: EventMatchRow) -> EventJudgeReport {
+        EventJudgeReport(id: row.id, title: row.title, summary: row.description)
+    }
+
     static func prompt(_ report: EventJudgeReport) -> String {
         """
         \(GenerationPromptDefense.untrustedDataSystemGuard)
@@ -124,7 +128,7 @@ enum StoryCurator {
                 activeSince: now.addingTimeInterval(-activeLifetime), limit: budget)
             {
                 try Task.checkCancellation()
-                guard let level = await judge.rate(EventClusterer.report(row)) else { continue }
+                guard let level = await judge.rate(OnDeviceImportanceJudge.report(row)) else { continue }
                 try Task.checkCancellation()
                 if try await database.recordImportance(
                     row.id, level, at: now, expectedTitle: row.title, expectedDescription: row.description)
