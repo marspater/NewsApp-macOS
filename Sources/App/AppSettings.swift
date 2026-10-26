@@ -21,6 +21,7 @@ final class AppSettings: ObservableObject {
     static let allowInsecureHTTPKey = "allow_insecure_http"
     static let mutedSourcesKey = "muted_sources"
     static let mutedTopicsKey = "muted_topics"
+    static let mutedTopicSetsKey = "muted_topic_sets"
     static let starredFeedURLsKey = "starred_feed_urls"
     static let starredFeedTimesKey = "starred_feed_times"
     static let tensionCollectionOptInKey = "tension_collection_opt_in"
@@ -180,7 +181,8 @@ final class AppSettings: ObservableObject {
         self.tensionCollectionOptIn = defaults.bool(forKey: Self.tensionCollectionOptInKey)
         self.muteRules = MuteRules(
             sources: defaults.stringArray(forKey: Self.mutedSourcesKey) ?? [],
-            topics: defaults.stringArray(forKey: Self.mutedTopicsKey) ?? [])
+            topics: defaults.stringArray(forKey: Self.mutedTopicsKey) ?? [],
+            topicSets: defaults.stringArray(forKey: Self.mutedTopicSetsKey) ?? [])
         let starred = Set(defaults.stringArray(forKey: Self.starredFeedURLsKey) ?? [])
         self.starredFeedURLs = starred
         // A star from before star times were kept counts from now.
@@ -426,6 +428,13 @@ final class AppSettings: ObservableObject {
         setMuteRules(rules)
     }
 
+    /// Switches a fixed topic set (`MuteTopicSet.all`) on or off.
+    func setTopicSet(_ id: String, muted: Bool) {
+        var rules = muteRules
+        if muted { rules.addTopicSet(id) } else { rules.removeTopicSet(id) }
+        setMuteRules(rules)
+    }
+
     /// The muting action for a story link's publisher host: unmute the rules covering it, or mute the host.
     func sourceMuting(for link: String) -> (title: String, apply: () -> Void)? {
         let covering = muteRules.matchedSources(link: link)
@@ -456,6 +465,7 @@ final class AppSettings: ObservableObject {
         muteRules = rules
         defaults.set(rules.sources, forKey: Self.mutedSourcesKey)
         defaults.set(rules.topics, forKey: Self.mutedTopicsKey)
+        defaults.set(rules.topicSets, forKey: Self.mutedTopicSetsKey)
     }
 
     // MARK: - OPML Portability

@@ -3831,6 +3831,24 @@ struct NewsTests {
             "Each covering topic is reported")
         assertEqual(MuteRules(sources: rules.sources, topics: rules.topics), rules, "Stored rules restore unchanged")
 
+        // A topic set mutes its fixed phrases with one switch (#590); whole words keep "Dubai" and "aid" visible.
+        let aiSet = MuteTopicSet.artificialIntelligence.id
+        var sets = MuteRules()
+        assertTrue(sets.addTopicSet(aiSet), "A known topic set switches on")
+        assertFalse(sets.addTopicSet(aiSet), "A topic set switches on once")
+        assertFalse(sets.addTopicSet("unknown-set"), "Unknown sets are ignored")
+        assertFalse(sets.isEmpty, "A switched-on set is a muting rule")
+        assertTrue(
+            sets.mutesTopic(title: "OpenAI says its agents disabled their own safety monitors", description: ""),
+            "A set phrase matches as a whole word in the headline")
+        assertTrue(sets.mutesTopic(title: "Firms rush to adopt A.I. tools", description: ""), "A.I. matches")
+        assertFalse(sets.mutesTopic(title: "Dubai aid flight lands in Gaza", description: ""), "Dubai and aid stay")
+        assertFalse(sets.mutesTopic(title: "Claudette reopens", description: "Said the mayor"), "Longer words stay")
+        assertEqual(sets.matchedTopicSets(title: "AI startup raises funds", description: ""), [aiSet], "Sets report")
+        assertEqual(MuteRules(topicSets: sets.topicSets), sets, "Stored sets restore unchanged")
+        sets.removeTopicSet(aiSet)
+        assertTrue(sets.isEmpty, "Switching a set off removes every phrase")
+
         // SQLite applies muting before LIMIT and reports what it hid.
         let db = DatabaseEngine(path: ":memory:")
         try await db.open()
@@ -3881,6 +3899,17 @@ struct NewsTests {
         assertEqual(ruleCounts.sources, ["example.com": 2], "Settings count the stories each source rule covers")
         assertEqual(
             ruleCounts.topics, ["Climate change": 1, "art": 1], "Settings count the stories each topic rule covers")
+        try await db.upsertArticles([
+            story(7, "https://other.org/7", "OpenAI agents disabled monitors"),
+            story(8, "https://other.org/8", "Dubai aid flight lands", "AIDS research funded"),
+        ])
+        let aiMuting = MuteRules(topicSets: [aiSet])
+        assertEqual(
+            try await db.mutedArticleCount(muting: aiMuting), 1, "SQLite hides a set's stories by whole words only")
+        assertEqual(
+            try await db.fetchArticles(limit: nil, muting: aiMuting).count, stories.count + 1,
+            "The SQLite and Swift paths agree on what a set hides")
+        assertEqual(try await db.mutedRuleCounts(aiMuting).topicSets, [aiSet: 1], "Settings count a set's stories")
         await db.close()
 
         // Rules persist with the reader's settings; Unmute All clears them.
@@ -3896,6 +3925,11 @@ struct NewsTests {
         assertEqual(AppSettings(defaults: defaults).muteRules, settings.muteRules, "Muting persists across launches")
         settings.unmuteTopic("Election")
         assertEqual(AppSettings(defaults: defaults).muteRules.topics, [], "Unmuting a topic is stored")
+        settings.setTopicSet(aiSet, muted: true)
+        assertEqual(AppSettings(defaults: defaults).muteRules.topicSets, [aiSet], "A switched-on set is stored")
+        settings.setTopicSet(aiSet, muted: false)
+        assertEqual(AppSettings(defaults: defaults).muteRules.topicSets, [], "Switching a set off is stored")
+        settings.setTopicSet(aiSet, muted: true)
         settings.clearMuting()
         assertTrue(AppSettings(defaults: defaults).muteRules.isEmpty, "Unmute All clears the stored rules")
 
