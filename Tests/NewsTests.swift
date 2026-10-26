@@ -14939,7 +14939,21 @@ struct NewsTests {
     {
         let endpoint = try await proxy.port()
         let client = NWConnection(host: "127.0.0.1", port: NWEndpoint.Port(rawValue: endpoint)!, using: .tcp)
-        client.start(queue: .global())
+        // A loopback connect can fail with EADDRINUSE when parallel runs churn ephemeral ports. NWConnection
+        // then parks in .waiting and never completes a send, so surface that state instead of hanging.
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            let once = SocketObservation()
+            client.stateUpdateHandler = { state in
+                switch state {
+                case .ready: if once.claim() { continuation.resume() }
+                case .waiting(let error), .failed(let error): if once.claim() { continuation.resume(throwing: error) }
+                case .cancelled: if once.claim() { continuation.resume(throwing: CancellationError()) }
+                default: break
+                }
+            }
+            client.start(queue: .global())
+        }
+        client.stateUpdateHandler = nil
         try await socketSend(client, Data([5, 1, 0]))
         assertEqual(try await socketRead(client, count: 2), Data([5, 0]), "SOCKS greeting succeeds")
         let hostBytes = Data(host.utf8)
