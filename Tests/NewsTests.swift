@@ -9298,6 +9298,19 @@ struct NewsTests {
         assertTrue(
             try await db.storyImages(for: ["e1", "e2", "down", "plain"]).isEmpty,
             "Site defaults stay cleared regardless of lookup order")
+
+        // #595: a pictured member only on a World Tension panel feed is hidden from lists, so the listed member of
+        // its event is still looked up.
+        let panelURL = TensionMethodology.v1.panel[8].url
+        _ = try await db.upsertArticles([story("g1", "One")], feedUrl: "https://example.com/subscribed.xml")
+        _ = try await db.upsertArticles([story("g2", "Panel", image: "https://cdn.example/g.jpg")], feedUrl: panelURL)
+        _ = try await db.createEvent(memberArticleIDs: ["g1", "g2"], at: now)
+        let unscoped = try await db.imagelessStoryRows(activeSince: now.addingTimeInterval(-86_400), limit: 20)
+        assertFalse(unscoped.contains { $0.id == "g1" }, "Without collection feeds every member counts")
+        await db.setCollectionOnlyFeedURLs([panelURL])
+        let scoped = try await db.imagelessStoryRows(activeSince: now.addingTimeInterval(-86_400), limit: 20)
+        assertTrue(scoped.contains { $0.id == "g1" }, "A hidden member's image does not skip the listed story")
+        assertFalse(scoped.contains { $0.id == "g2" }, "The hidden member itself is never looked up")
         await db.close()
         try await testStoryImageIndexMigration(fixtureRoot: fixtureRoot)
     }

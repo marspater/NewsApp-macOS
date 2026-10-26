@@ -120,7 +120,7 @@ struct ArticleDetailView: View {
         ReaderCommandActions(
             mode: readerModeBinding, textScale: readerTextScaleBinding,
             showReadingOptions: { showsReadingOptions = true }, hasOverview: currentOverview != nil,
-            back: { if !path.isEmpty { path.removeLast() } },
+            back: { Self.stepBack(&path) },
             reload: contentState == .loading ? nil : { reloadReaderContent() },
             copyLink: copyStoryLink,
             webBack: readerModeBinding.wrappedValue == .web && webCanGoBack ? { webAction = .goBack } : nil,
@@ -402,7 +402,8 @@ struct ArticleDetailView: View {
                         DisclosureGroup(isExpanded: summaryExpandedBinding) {
                             aiAnalysisSection.padding(.top, AppSpacing.sm)
                         } label: {
-                            IntelligenceLabel("Summary & Key Points")
+                            IntelligenceLabel(Self.summaryLabel(modelIdentifier: analysis?.modelIdentifier))
+                                .font(AppTypography.headline)
                         }
                         .font(AppTypography.body)
                         .foregroundStyle(AppColor.secondaryText)
@@ -931,7 +932,7 @@ struct ArticleDetailView: View {
     private var readerToolbar: some ToolbarContent {
         ToolbarItemGroup(placement: .navigation) {
             Button {
-                if !path.isEmpty { path.removeLast() }
+                Self.stepBack(&path)
             } label: {
                 Label("Back to Stories", systemImage: "chevron.left")
             }
@@ -1135,6 +1136,22 @@ struct ArticleDetailView: View {
         }
     }
 
+    /// Esc, B, ← and Back to Stories step back one reader; a sidebar section click or ⌘1–⌘4 returns to the list
+    /// even when that section is already selected (#594).
+    static func stepBack(_ path: inout NavigationPath, toList: Bool = false) {
+        if toList {
+            path = NavigationPath()
+        } else if !path.isEmpty {
+            path.removeLast()
+        }
+    }
+
+    /// The summary panel's one generated-content label (DESIGN.md 9, #597): extractive when sentences were selected
+    /// from the story, generated when the on-device model wrote it or has yet to.
+    static func summaryLabel(modelIdentifier: String?) -> String {
+        modelIdentifier == "apple.natural-language.fallback" ? "Extractive summary" : "Generated summary"
+    }
+
     static func shouldPassThroughToSystem(modifiers: EventModifiers) -> Bool {
         !modifiers.intersection([.command, .control, .option]).isEmpty
     }
@@ -1146,11 +1163,11 @@ struct ArticleDetailView: View {
                 showsReadingOptions = false
                 return .handled
             }
-            if !path.isEmpty { path.removeLast() }
+            Self.stepBack(&path)
             return .handled
         }
         if press.key == .leftArrow || press.characters == "b" || press.characters == "h" {
-            if !path.isEmpty { path.removeLast() }
+            Self.stepBack(&path)
             return .handled
         } else if press.characters == "j" {
             nextArticle()
@@ -1296,23 +1313,16 @@ struct ArticleDetailView: View {
             .modifier(ContentPanel())
         } else if let analysis = analysis {
             VStack(alignment: .leading, spacing: AppSpacing.sm) {
-                // Section Header: Restrained Summary
-                IntelligenceLabel(
-                    analysis.modelIdentifier == "apple.natural-language.fallback"
-                        ? "Extractive summary" : "AI-generated summary"
-                )
-
                 Text(analysis.summary)
                     .font(AppTypography.overviewFont(.body, scale: readerTextScale))
                     .foregroundStyle(AppColor.primaryText)
                     .lineSpacing(AppTypography.bodyLineSpacing(for: themeManager.articleTheme) * readerTextScale)
                     .textSelection(.enabled)
 
-                // Key Takeaways
                 if !analysis.keyPoints.isEmpty {
                     Divider().padding(.vertical, AppSpacing.xs)
                     VStack(alignment: .leading, spacing: AppSpacing.sm) {
-                        Text("Key Takeaways")
+                        Text("Key points")
                             .font(AppTypography.label)
                             .foregroundStyle(AppColor.secondaryText)
                             .padding(.top, AppSpacing.textStack)
@@ -1338,11 +1348,6 @@ struct ArticleDetailView: View {
                     ForEach(EntityResult.readerTags(from: analysis.entities).prefix(6), id: \.name) { entity in
                         summaryTag(entity.name)
                     }
-                }
-                if let sentiment = analysis.sentiment {
-                    Label("\(sentiment.label) language · automated estimate", systemImage: "text.magnifyingglass")
-                        .font(AppTypography.caption)
-                        .foregroundStyle(AppColor.secondaryText)
                 }
             }
             .modifier(ContentPanel())
@@ -1370,8 +1375,6 @@ struct ArticleDetailView: View {
             }
         } else if let ai = currentArticle.aiSummary {
             VStack(alignment: .leading, spacing: AppSpacing.xs) {
-                IntelligenceLabel("AI-generated summary")
-
                 Text(ai)
                     .font(AppTypography.overviewFont(.body, scale: readerTextScale))
                     .foregroundStyle(AppColor.primaryText)

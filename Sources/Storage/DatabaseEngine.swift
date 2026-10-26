@@ -3313,7 +3313,17 @@ actor DatabaseEngine {
             if let cached = picturedEvents[key] {
                 pictured = cached
             } else {
-                let members = try fetchArticles(limit: nil, id: row[2] == nil ? id : nil, eventID: row[2])
+                var members = try fetchArticles(limit: nil, id: row[2] == nil ? id : nil, eventID: row[2])
+                // A member only on a collection feed (World Tension panel) is hidden from lists: its image does not
+                // spare the listed stories a lookup (#595).
+                if let eventID = row[2], !scope.sql.isEmpty {
+                    let listed = Set(
+                        try eventRows(
+                            "SELECT a.id FROM event_members m JOIN articles a ON a.id = m.article_id WHERE m.event_id = ? \(scope.sql);",
+                            [.text(eventID)] + scope.params.map { .text($0.val as? String ?? "") }
+                        ).compactMap { $0[0] })
+                    members = members.filter { listed.contains($0.id) }
+                }
                 pictured = FeedArticle.bestCardImage(in: members) != nil
                 picturedEvents[key] = pictured
             }
