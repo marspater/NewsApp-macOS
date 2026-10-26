@@ -663,14 +663,14 @@ struct SettingsView: View {
         }
     }
 
-    /// The full-mode rule in one sentence, with the interests it currently reads (#588).
+    /// The full-mode rule in one sentence, with the interests it currently reads (#588, #665).
     private var fullNotificationRule: String {
         let interests =
             notificationInterests.isEmpty
             ? "your top reading interests (none yet; they come from the stories you open and save)"
             : "your top reading interests (\(notificationInterests.joined(separator: ", ")))"
         return
-            "Banners arrive for breaking stories, for stories in \(interests) when three or more publishers cover them, and for every story from a feed starred in Subscriptions."
+            "Major news covered by four or more publishers always notifies; starred feeds arrive grouped, one banner per feed every 20 minutes at most; other breaking stories, and stories in \(interests) that three or more publishers cover, notify at most five times an hour."
     }
 
     // MARK: - 4. Intelligence Tab

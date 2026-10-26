@@ -37,11 +37,25 @@ A key is priority when its representative story has all three:
 
 1. score ≥ **0.75** (breaking is 0.6);
 2. a full-weight signal word in its **headline**;
-3. an event with **≥ 3 distinct publishers**.
+3. an event with **≥ 4 distinct publishers** (counted when the story arrives).
 
 A story outside any event is never priority: one outlet's report is not yet exceptional. The on-device importance
 model is not used: it is unavailable on some Macs and refuses harsh news (`FoundationModels` guardrails), and this
 rule must behave the same everywhere.
+
+Measured on a read-only copy of the reader's library, 11–25 October 2026. The app ingested on 6 of those days. Run it
+again with `test_runner --notification-priority-live <backup> <output>`.
+
+- With ≥ 3 publishers the rule fired 14 times: 5 times on 18 October and 6 on 24 October. That included a fire at
+  the Eagle's Nest and a politician praising a bystander, which are not exceptional.
+- With ≥ 4 publishers it fires 5 times, at most 3 a day:
+  - 18 Oct: Ukrainian drone attack on Saint Petersburg kills one, sets refinery ablaze (4 publishers); Masked settlers
+    attack European diplomats in occupied West Bank (5).
+  - 24 Oct: West Bank attack wounds 5 Israelis as Netanyahu cancels events (5); Pakistan denounces 'heinous' church
+    attack in Jordan (5); China: Panic as 7.0-magnitude earthquake rocks Tibet (4).
+  - 20, 21, 22 and 25 Oct: none.
+- It no longer catches the Pakistan school collapse (32 pupils killed) or the Houthi attack that killed 58, which had
+  3 publishers on arrival. They still notify in the normal lane as breaking stories.
 
 Banner: the headline, active interruption level, with sound. Thread: the dedupe key.
 
@@ -51,17 +65,29 @@ A key is starred when it is not priority and any of its new stories comes from a
 eligible, and a feed never gets a banner per story:
 
 - **Coalescing window: 20 minutes per feed.** A feed gets at most one starred banner per 20 minutes.
-- **Pending stories**: the feed's visible, unmuted stories with `created_at` after its last starred banner (at most
-  24 h back), minus stories whose key is announced (see "Repeated events") or taken by the priority lane.
-- When a pass runs and the feed's window has passed: one pending story gives an individual banner (its headline,
-  thread = its dedupe key). Two or more give **one grouped banner**:
+- **Pending stories**: the feed's visible, unmuted stories with `created_at` after the latest of three times:
+  - its last starred banner;
+  - the time the feed was starred (`starred_feed_times` in `AppSettings`, next to the starred set), so starring a
+    feed never dumps its backlog;
+  - now − 24 h.
+
+  Every pending story counts, including stories whose event is already announced or that the priority lane takes in
+  the same pass. N is the feed's true count of new stories.
+- A pending story is **fresh** when its key could post an individual banner now (see "Repeated events"): not
+  announced, or announced only in a lower lane. A starred feed's report of an event announced only in the normal lane
+  is fresh (normal → starred). One announced in the starred or priority lane is not.
+- When a pass runs, the feed's window has passed and at least one pending story is fresh:
+  - **one pending story**: an individual banner (its headline, thread = its dedupe key);
+  - **two or more**: one grouped banner, with:
   - title: the feed's name (the stories' publisher name);
-  - body: `N new stories`, a line break, then the two highest-scoring headlines, each on its own line;
+  - body: `N new stories`, a line break, then two headlines, each on its own line: fresh stories first, highest
+    score first;
   - thread: `starred-` + the feed URL; identifier: `starred-` + feed URL + delivery time, so groups do not replace
     each other;
   - passive interruption level, no sound.
-- When the window has not passed, nothing is posted for that feed. Its stories stay pending and are counted in the
-  feed's next starred banner, at the first pass after the window ends.
+- When the window has not passed, or no pending story is fresh, nothing is posted for that feed. Its stories stay
+  pending and count in the feed's next starred banner.
+- A starred banner announces the events of its fresh stories in the starred lane.
 
 Starred banners do not count against the normal limit.
 
@@ -93,8 +119,9 @@ An event is **announced** when any banner (individual or grouped, any lane) has 
 - it now qualifies for a **higher lane** than the highest lane it was announced in (normal → starred or priority,
   starred → priority): one banner in the new lane.
 
-This replaces #649's rule that a starred feed bypasses the 24 h dedupe. A starred report of an announced event stays
-in the app and is not counted in a later grouped banner.
+This replaces #649's rule that a starred feed bypasses the 24 h dedupe. A starred report of an event announced in the
+starred or priority lane posts no individual banner. It still counts in the feed's next grouped banner's N (see
+"Starred").
 
 ## Priority bursts
 
@@ -106,36 +133,53 @@ Several exceptional events within minutes:
   - Body: `N more major stories`, a line break, then the two highest-scoring headlines.
   - Thread: `priority`; identifier: `priority-` + delivery time.
   - Active, with sound.
-- At most one grouped priority banner per 30 minutes. Priority keys beyond that are announced silently: they are
-  recorded in `event_notifications`, so later reports do not notify, and they stay in the app.
+- At most one grouped priority banner per 30 minutes. Priority keys that arrive while both limits are reached are
+  never silenced:
+  - they stay **pending** in `notification_priority_queue`;
+  - they go into the next grouped priority banner, at the first pass after its 30-minute window passes;
+  - they count as announced only once a banner covers them;
+  - a pending key expires after 24 h, and the story stays in the app.
+- A pending key whose event a banner covers in the meantime (for example a starred banner) leaves the queue.
 
 ## Over the limit
 
 | Lane | What happens to a candidate over its limit |
 |---|---|
-| Priority | Goes into the pass's grouped priority banner. Past that, recorded as announced, no banner. |
+| Priority | Goes into the pass's grouped priority banner. Past that, stays pending for the next grouped banner (24 h). |
 | Starred | Stays pending and counts in the feed's next starred banner after the 20-minute window. |
 | Normal | No banner, not queued, never summarized later. It stays in the feed and the Briefing. |
 
 Nothing is deleted or hidden in any case.
+
+## Worst case per hour
+
+| Lane | Most banners in one hour |
+|---|---|
+| Priority | 6 individual + 2 grouped (3 + 1 per 30 minutes) |
+| Starred | 3 per feed (one per 20 minutes), so 9 for three feeds |
+| Normal | 5 |
+| Total | 22, in an hour with several exceptional events and three busy starred feeds |
 
 ## Storage
 
 Two side tables, created with `CREATE TABLE IF NOT EXISTS` on open, with no `user_version` (the side-table approach
 Mars approved for #545 on 26 Oct):
 
-- `event_notifications(event_id PRIMARY KEY, notified_at, lead_key)`: exists (#545). Written for every event a banner
-  covers, including each event in a grouped banner and priority keys announced silently.
-- `notification_deliveries(id INTEGER PRIMARY KEY, lane TEXT NOT NULL, dedupe_key TEXT, feed_url TEXT,
-  story_count INTEGER NOT NULL, delivered_at REAL NOT NULL)`: one row per posted banner. `dedupe_key` is set for
-  individual banners, `feed_url` for starred banners. Rows older than 7 days are pruned on write.
+- `event_notifications(event_id PRIMARY KEY, notified_at, lead_key, lane)`: exists (#545). Gains `lane`: 0 normal,
+  1 starred, 2 priority. A database from an earlier build gets the column through one guarded `ALTER TABLE`. Written
+  for every event a banner covers, including each event in a grouped banner. Within 24 h it keeps the highest lane.
+- `notification_deliveries(id INTEGER PRIMARY KEY, lane INTEGER NOT NULL, grouped INTEGER NOT NULL, feed_url TEXT,
+  story_count INTEGER NOT NULL, delivered_at REAL NOT NULL)`: one row per posted banner. `feed_url` is set for starred
+  banners. Rows older than 7 days are pruned on write.
+- `notification_priority_queue(event_id PRIMARY KEY, title, score, lead_key, queued_at)`: pending priority keys
+  (section "Priority bursts"). Rows older than 24 h are dropped on read.
 
 Reads:
 
-- the normal limit counts rows with `lane = 'normal'` in the last 60 minutes;
-- the priority limit counts `lane = 'priority'` rows (individual or grouped) in the last 30 minutes;
-- a starred window reads the feed's latest `lane = 'starred'` row;
-- the highest announced lane of an event reads its rows in the last 24 h.
+- the normal limit counts normal rows in the last 60 minutes;
+- the priority limits count individual and grouped priority rows in the last 30 minutes;
+- a starred window reads the feed's latest starred row;
+- an event's announced lane and lead key come from `event_notifications` in the last 24 h.
 
 A banner is recorded **immediately after it posts**, before the 2-second pause of #587, so quitting mid-pass loses no
 count. A banner whose post fails is not recorded and counts toward nothing.
@@ -172,15 +216,17 @@ as before quitting.
 
 Windows use the wall clock (`Date`), because they must survive relaunch and reboot.
 
-- **Clock set back**: a recorded time later than now is treated as now when read and rewritten as now. The window
+- **Clock set back**: a recorded time later than now, in any of the three tables or in a star time, is rewritten as
+  now when read. The window
   then lasts at most its normal length from the change (60 minutes for normal), never until the clock catches up.
 - **Clock set forward**: windows end early. That is accepted: it only lets banners through sooner, and loses
   nothing.
 
 ## Settings copy
 
-Settings › Notifications (Full mode) states the rule in one sentence: exceptional news always notifies; starred feeds
-are grouped; other breaking or top-interest stories notify at most five times an hour. The sentence follows DESIGN.md
+Settings › Notifications (Full mode) states the rule in one sentence: major news covered by four or more publishers
+always notifies, starred feeds are grouped, and other breaking or top-interest stories notify at most five times an
+hour. The sentence follows DESIGN.md
 section 17, and the PR carries the DESIGN.md checklist.
 
 ## What this supersedes
@@ -188,3 +234,45 @@ section 17, and the PR carries the DESIGN.md checklist.
 - #588's five-banner budget per refresh. It becomes the rolling 60-minute normal limit.
 - #588's uncapped starred path and #649's starred bypass of the 24 h dedupe. They become the starred lane above.
 - The three-starred-feed cap (#588) stays.
+
+## Appendix: priority measurement, 11–25 October 2026
+
+Every visible clustered story created in the window, each event counted on its first qualifying story, with the
+publishers its event had when that story arrived. 1,573 stories; the app ingested on the dates listed.
+
+With ≥ 3 publishers (rejected; 14 keys):
+
+- 2026-10-18: 5
+  - 0.80, 3 publishers: Trump says armed bystander who killed US school shooter a 'great hero'
+  - 0.80, 4 publishers: Ukrainian drone attack on Saint Petersburg kills one, sets refinery ablaze
+  - 0.75, 5 publishers: Masked settlers attack European diplomats in occupied West Bank
+  - 0.75, 3 publishers: Pakistan: Classrooms reduced to rubble in deadly school disaster, at leat 32 pupils killed
+  - 0.75, 3 publishers: Israeli settlers attack European diplomats, beat up French mayor
+- 2026-10-20: 1
+  - 0.75, 3 publishers: Houthi attack on Yemeni government forces kills 58: officials
+- 2026-10-21: 1
+  - 0.80, 3 publishers: Police arrest French suspect in Limoges after town hall arson attack
+- 2026-10-22: 0
+- 2026-10-24: 6
+  - 0.90, 3 publishers: Jordan king orders 'iron fist' response to deadly church attack
+  - 0.85, 5 publishers: Pakistan denounces ‘heinous’ church attack in Jordan, reiterates condemnation of terrorism
+  - 0.80, 4 publishers: China: Panic as 7.0-magnitude earthquake rocks Tibet
+  - 0.80, 3 publishers: Romania blames Russia for new deadly attack on ship
+  - 0.75, 3 publishers: Man arrested after fire at Hitler's mountaintop Eagle's Nest retreat
+  - 0.75, 3 publishers: Netanyahu orders West Bank closure, warns of major military operation after attack kills Israeli soldiers
+- 2026-10-25: 1
+  - 0.80, 3 publishers: Israeli strike on Gaza university kills 3; another 4 Palestinians killed in other attacks
+
+With ≥ 4 publishers (adopted; 5 keys):
+
+- 2026-10-18: 2
+  - 0.80, 4 publishers: Ukrainian drone attack on Saint Petersburg kills one, sets refinery ablaze
+  - 0.75, 5 publishers: Masked settlers attack European diplomats in occupied West Bank
+- 2026-10-20: 0
+- 2026-10-21: 0
+- 2026-10-22: 0
+- 2026-10-24: 3
+  - 1.00, 5 publishers: West Bank attack wounds 5 Israelis as Netanyahu cancels events
+  - 0.85, 5 publishers: Pakistan denounces ‘heinous’ church attack in Jordan, reiterates condemnation of terrorism
+  - 0.80, 4 publishers: China: Panic as 7.0-magnitude earthquake rocks Tibet
+- 2026-10-25: 0

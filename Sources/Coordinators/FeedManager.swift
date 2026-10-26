@@ -61,6 +61,8 @@ class FeedManager: NSObject, ObservableObject {
     private var refreshInterruptedBySleep = false
     /// Stories a cancelled refresh had already committed; the next completed refresh notifies them.
     private var pendingNotificationArticles: [FeedArticle] = []
+    /// The latest notification pass; the next one waits for it.
+    private var notificationPass: Task<Void, Never>?
     /// Retention runs at most once a day per launch, after a completed refresh.
     private var lastPruneAt: Date?
     /// When the latest refresh published its stories; shown in the list header.
@@ -468,37 +470,64 @@ class FeedManager: NSObject, ObservableObject {
         let muting = appSettings.muteRules
         let notifiable = newArticles.filter { eligible.contains($0.id) && !muting.mutes($0) }
         if appSettings.notificationsEnabled && !notifiable.isEmpty {
-            // Clustering has run: reports of one event notify once, by their strongest report, in every mode (#523,
-            // #587); the service picks them from the events handed over.
-            let database = articleStore.database
-            let events = (try? await database.eventIDs(forArticles: notifiable.map(\.id))) ?? [:]
-            var delivery = NotificationDelivery(mode: appSettings.notificationMode, events: events)
-            if delivery.mode == .full {
-                // Full mode notifies about breaking stories, top-interest stories with enough publishers and starred
-                // feeds (#588); the interests are the Briefing's, read from the reader's own history.
-                delivery.publishers = (try? await database.eventPublisherCounts(Set(events.values))) ?? [:]
-                delivery.interests = NotificationService.topInterests(
-                    (try? await database.briefingInterests(now: now())) ?? [:])
-                delivery.starredFeedURLs = appSettings.starredFeedURLs
-                // An event announced in the last day stays quiet unless its lead headline changed (#545).
-                let posted = now()
-                delivery.notifiedEvents =
-                    (try? await database.notifiedEvents(since: posted.addingTimeInterval(-86400))) ?? [:]
-                let leadTitles = (try? await database.eventLeadTitles(Set(events.values))) ?? [:]
-                delivery.leadTitles = leadTitles
-                delivery.recordPosted = { [events, leadTitles] articles in
-                    var keys: [String: String] = [:]
-                    for article in articles {
-                        guard let event = events[article.id] else { continue }
-                        keys[event] = EventFeedSummary.titleKey(leadTitles[event] ?? article.title)
-                    }
-                    try? await database.recordNotifiedEvents(keys, at: posted)
-                }
+            // Passes run one at a time: each reads the delivery tables only after the previous one has recorded its
+            // banners (#665).
+            let previous = notificationPass
+            let pass = Task { [weak self] in
+                await previous?.value
+                await self?.deliverNotifications(notifiable)
             }
-            await notifyBatch(notifiable, delivery)
+            notificationPass = pass
+            await withTaskCancellationHandler {
+                await pass.value
+            } onCancel: {
+                pass.cancel()
+            }
         }
         guard !Task.isCancelled, !isStopped else { return }
         enrichArticlesInBackground()
+    }
+
+    /// One notification pass. Clustering has run: reports of one event notify once, by their strongest report, in
+    /// every mode (#523, #587). Full mode reads what the lanes need (#665, docs/notifications.md); delivery only reads
+    /// stories, and writes nothing but its own tables.
+    private func deliverNotifications(_ notifiable: [FeedArticle]) async {
+        let database = articleStore.database
+        var delivery = NotificationDelivery(mode: appSettings.notificationMode)
+        var storyIDs = notifiable.map(\.id)
+        if delivery.mode == .full {
+            let posted = now()
+            delivery.now = posted
+            delivery.ledger = (try? await database.notificationLedger(now: posted)) ?? NotificationLedger()
+            delivery.starredFeedURLs = appSettings.starredFeedURLs
+            // Pending starred stories start at the latest of the feed's last starred banner, its star time and a day
+            // ago, so starring a feed never brings up its backlog.
+            var since: [String: Date] = [:]
+            for feed in delivery.starredFeedURLs {
+                since[feed] = max(
+                    delivery.ledger.lastStarred[feed] ?? .distantPast,
+                    min(appSettings.starredFeedTimes[feed] ?? posted, posted), posted.addingTimeInterval(-86400))
+            }
+            delivery.starredPending =
+                (try? await database.feedStories(since: since, muting: appSettings.muteRules)) ?? [:]
+            storyIDs += delivery.starredPending.values.flatMap { $0.map(\.id) }
+            delivery.interests = NotificationService.topInterests(
+                (try? await database.briefingInterests(now: posted)) ?? [:])
+            delivery.record = { banner in
+                try? await database.recordNotification(banner, at: posted)
+            }
+            delivery.queue = { waiting in
+                try? await database.queuePriority(waiting, at: posted)
+            }
+        }
+        delivery.events = (try? await database.eventIDs(forArticles: storyIDs)) ?? [:]
+        if delivery.mode == .full {
+            let events = Set(delivery.events.values)
+            delivery.publishers = (try? await database.eventPublisherCounts(events)) ?? [:]
+            delivery.leadTitles = (try? await database.eventLeadTitles(events)) ?? [:]
+        }
+        guard !Task.isCancelled, !isStopped else { return }
+        await notifyBatch(notifiable, delivery)
     }
 
     /// Deletes read, unsaved stories older than the retention setting, once a day after a completed refresh.
