@@ -278,8 +278,7 @@ class FeedManager: NSObject, ObservableObject {
                 let loaded = try await self.articleStore.fetchArticles()
                 self.articles = loaded
                 await self.reloadFeedHealth()
-                // Catch up on articles a previous session collected but did not cluster.
-                self.clusterEventsInBackground()
+                // Catch-up clustering of what a previous session left waits for the list's first frame (#602).
             } catch {
                 self.logger.error("Failed to load cached articles: \(error.localizedDescription)")
             }
