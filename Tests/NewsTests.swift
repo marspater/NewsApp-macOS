@@ -14440,6 +14440,18 @@ struct NewsTests {
         settingsB.setFeedStarred("https://example.com/feed", true)
         settingsB.removeFeed(url: "https://example.com/feed")
         assertTrue(settingsB.starredFeedURLs.isEmpty, "Unsubscribing removes the star")
+
+        // At most three feeds are starred: a fourth star is refused, not swapped in (#588).
+        let capped = (1...4).map { "https://cap\($0).invalid/feed" }
+        for url in capped.prefix(3) { assertTrue(settingsB.setFeedStarred(url, true), "Stars up to the limit") }
+        assertFalse(settingsB.setFeedStarred(capped[3], true), "A fourth star is refused")
+        assertEqual(settingsB.starredFeedURLs, Set(capped.prefix(3)), "The three stars stay; none is replaced")
+        assertEqual(
+            AppSettings(defaults: tempDefaultsB).starredFeedURLs, Set(capped.prefix(3)),
+            "The refused star is not stored")
+        assertTrue(settingsB.setFeedStarred(capped[0], true), "Re-starring a starred feed at the limit is fine")
+        settingsB.setFeedStarred(capped[0], false)
+        assertTrue(settingsB.setFeedStarred(capped[3], true), "Unstarring frees a place")
     }
 
     actor FeedDeliveryGate {
