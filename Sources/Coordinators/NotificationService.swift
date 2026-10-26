@@ -5,10 +5,38 @@ import UniformTypeIdentifiers
 import UserNotifications
 import os
 
+/// What a refresh hands the notification service besides the new stories: the mode and the event of each story,
+/// so one event notifies once and later reports of it thread under the first banner (#587).
+struct NotificationDelivery: Sendable {
+    var mode: AppSettings.NotificationMode
+    /// Story id → event id, for stories clustering has grouped; a story outside any event is absent.
+    var events: [String: String] = [:]
+}
+
 /// Manages NLP-based notification triage, rich image attachments, and alert scheduling.
 final class NotificationService: Sendable {
     static let shared = NotificationService()
     private let logger = Logger(subsystem: "com.marspater.news", category: "NotificationService")
+    /// Posts one request; the default goes to the user notification center and skips unbundled test processes.
+    private let post: @Sendable (UNNotificationRequest) async throws -> Void
+    /// Pause between two banners of one refresh: posted at once, macOS stacks them and one hides behind the other.
+    private let spacing: Duration
+
+    /// A story this strong is breaking news: its banner sounds and interrupts like any alert; the rest are passive.
+    static let breakingScore = 0.6
+    /// Full-mode threshold below which a story does not notify.
+    static let notifyScore = 0.45
+
+    init(
+        post: (@Sendable (UNNotificationRequest) async throws -> Void)? = nil, spacing: Duration = .seconds(2)
+    ) {
+        self.post =
+            post ?? { request in
+                guard Bundle.main.bundleIdentifier != nil else { return }
+                try await UNUserNotificationCenter.current().add(request)
+            }
+        self.spacing = spacing
+    }
 
     /// Scores article importance using NLP sentiment intensity + named entity density + breaking news signals.
     /// Returns a 0.0–1.0 score.
@@ -63,11 +91,11 @@ final class NotificationService: Sendable {
         return breakingSignals.filter { padded.contains(MuteRules.paddedPhrase($0)) }.count
     }
 
-    /// One report per event, the one that scores highest, in first-seen order; stories outside any event stand alone.
-    /// Several publishers covering one story then notify once instead of once each (#523). Scoring tags every article,
-    /// so it runs off the main actor.
+    /// One report per event, the one that scores highest, in first-seen order, with its score; stories outside any
+    /// event stand alone. Several publishers covering one story then notify once instead of once each (#523), in
+    /// every mode (#587). Scoring tags every article once, so it runs off the main actor.
     @concurrent nonisolated static func representatives(of articles: [FeedArticle], events: [String: String]) async
-        -> [FeedArticle]
+        -> [(article: FeedArticle, score: Double)]
     {
         var order: [String] = []
         var best: [String: (article: FeedArticle, score: Double)] = [:]
@@ -78,39 +106,33 @@ final class NotificationService: Sendable {
             if best[key] == nil { order.append(key) }
             best[key] = (article, score)
         }
-        return order.compactMap { best[$0]?.article }
+        return order.compactMap { best[$0] }
     }
 
-    /// NLP-driven triage: dispatches notifications according to the active NotificationMode.
-    func triageAndNotify(
-        newArticles: [FeedArticle],
-        mode: AppSettings.NotificationMode,
-        maxNotifications: Int = 3
-    ) async {
+    /// NLP-driven triage: dispatches notifications according to the active NotificationMode. Full mode posts the
+    /// strongest reports one at a time, a pause apart, each threaded under its story.
+    func triageAndNotify(newArticles: [FeedArticle], delivery: NotificationDelivery, maxNotifications: Int = 3) async {
         guard !newArticles.isEmpty else { return }
+        let ranked = await Self.representatives(of: newArticles, events: delivery.events)
 
-        switch mode {
+        switch delivery.mode {
         case .minimal:
             // ALWAYS exactly one coalesced notification with singular/plural grammar
-            await triggerMinimalNotification(for: newArticles)
+            await triggerMinimalNotification(for: ranked.map(\.article))
 
         case .privacy:
             // Exactly one generic notification with ZERO identifying source or headline details
             await triggerPrivateNotification()
 
         case .full:
-            var scored: [(article: FeedArticle, score: Double)] = []
-            for article in newArticles {
-                let importance = computeImportance(title: article.title, description: article.description)
-                scored.append((article, importance))
-            }
-
-            scored.sort { $0.score > $1.score }
-            let threshold: Double = 0.45
-            let toNotify = scored.filter { $0.score >= threshold }.prefix(maxNotifications)
-
-            for item in toNotify {
-                await triggerFullNotification(for: item.article)
+            let toNotify = ranked.sorted { $0.score > $1.score }.filter { $0.score >= Self.notifyScore }
+                .prefix(maxNotifications)
+            for (index, item) in toNotify.enumerated() {
+                if index > 0 { try? await Task.sleep(for: spacing) }
+                guard !Task.isCancelled else { return }
+                await triggerFullNotification(
+                    for: item.article, thread: delivery.events[item.article.id] ?? item.article.id,
+                    breaking: item.score >= Self.breakingScore)
             }
         }
     }
@@ -147,15 +169,10 @@ final class NotificationService: Sendable {
             articleCount: articles.count, uniqueSourcesCount: max(1, sources.count))
         content.sound = .default
 
-        guard Bundle.main.bundleIdentifier != nil else {
-            logger.debug("Skipping notification dispatch in non-bundled environment")
-            return
-        }
-
         let identifier = "news-minimal-summary"
         let request = UNNotificationRequest(identifier: identifier, content: content, trigger: nil)
         do {
-            try await UNUserNotificationCenter.current().add(request)
+            try await post(request)
             logger.debug("Successfully scheduled minimal notification: \(identifier)")
         } catch {
             logger.error("Failed to schedule minimal notification '\(identifier)': \(error.localizedDescription)")
@@ -163,11 +180,6 @@ final class NotificationService: Sendable {
     }
 
     private func triggerPrivateNotification() async {
-        guard Bundle.main.bundleIdentifier != nil else {
-            logger.debug("Skipping notification dispatch in non-bundled environment")
-            return
-        }
-
         let content = UNMutableNotificationContent()
         content.title = "News Update"
         content.body = "You have new articles available. Open to read."
@@ -176,19 +188,16 @@ final class NotificationService: Sendable {
         let identifier = "news-generic-update"
         let request = UNNotificationRequest(identifier: identifier, content: content, trigger: nil)
         do {
-            try await UNUserNotificationCenter.current().add(request)
+            try await post(request)
             logger.debug("Successfully scheduled private notification: \(identifier)")
         } catch {
             logger.error("Failed to schedule private notification '\(identifier)': \(error.localizedDescription)")
         }
     }
 
-    private func triggerFullNotification(for article: FeedArticle) async {
-        guard Bundle.main.bundleIdentifier != nil else {
-            logger.debug("Skipping notification dispatch in non-bundled environment")
-            return
-        }
-
+    /// Posts one banner. The thread groups later reports of the same story under it in Notification Center; a
+    /// breaking story sounds and interrupts like any alert, a lesser one is passive (listed, no sound, no wake).
+    private func triggerFullNotification(for article: FeedArticle, thread: String, breaking: Bool) async {
         let content = UNMutableNotificationContent()
 
         let sourceName = (article.source.components(separatedBy: "\n").first ?? article.source)
@@ -197,7 +206,9 @@ final class NotificationService: Sendable {
         content.title = sourceName
         content.subtitle = article.title
         content.body = article.description.isEmpty ? "" : String(article.description.prefix(200))
-        content.sound = .default
+        content.sound = breaking ? .default : nil
+        content.threadIdentifier = thread
+        content.interruptionLevel = breaking ? .active : .passive
         content.userInfo = ["articleLink": article.link, "articleID": article.id]
 
         if let imageUrl = FeedArticle.bestCardImage(in: [article]),
@@ -209,7 +220,7 @@ final class NotificationService: Sendable {
         let identifier = Self.notificationIdentifier(for: article)
         let request = UNNotificationRequest(identifier: identifier, content: content, trigger: nil)
         do {
-            try await UNUserNotificationCenter.current().add(request)
+            try await post(request)
             logger.debug(
                 "Successfully scheduled full notification: \(identifier); attachments=\(content.attachments.count)")
         } catch {

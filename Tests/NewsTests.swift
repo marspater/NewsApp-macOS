@@ -16614,22 +16614,83 @@ struct NewsTests {
                 pubDate: Date(timeIntervalSince1970: 1_700_000_000), source: "Publisher \(id)")
         }
         let quiet = report(1, "Council meets on Tuesday")
-        let loud = report(2, "Breaking: explosion kills dozens, president declares emergency")
+        let loud = report(
+            2,
+            "Breaking: explosion kills dozens in Paris, London, Berlin, Madrid, Rome, Vienna, Lisbon and Dublin; emergency declared"
+        )
         let third = report(3, "Explosion reported downtown")
         let single = report(4, "Local library extends opening hours")
         let events = [quiet.id: "event-a", loud.id: "event-a", third.id: "event-a"]
         let chosen = await NotificationService.representatives(of: [quiet, loud, third, single], events: events)
-        assertEqual(chosen.map(\.id), [loud.id, single.id], "One report per event, the strongest, then the single")
+        assertEqual(
+            chosen.map(\.article.id), [loud.id, single.id], "One report per event, the strongest, then the single")
         let alone = await NotificationService.representatives(of: [quiet, single], events: [:])
-        assertEqual(alone.map(\.id), [quiet.id, single.id], "Without events every story stands alone in order")
+        assertEqual(alone.map(\.article.id), [quiet.id, single.id], "Without events every story stands alone in order")
 
         // 4. Robust dispatching (no crashes across all 3 notification tiers)
         let sampleArticle = FeedArticle(
             title: "Urgent Update", link: "https://example.com/urgent", guid: "sample-guid",
             description: "Details follow", pubDate: Date(), source: "Wire Service")
-        await service.triageAndNotify(newArticles: [sampleArticle], mode: .minimal)
-        await service.triageAndNotify(newArticles: [sampleArticle], mode: .privacy)
-        await service.triageAndNotify(newArticles: [sampleArticle], mode: .full)
+        await service.triageAndNotify(newArticles: [sampleArticle], delivery: .init(mode: .minimal))
+        await service.triageAndNotify(newArticles: [sampleArticle], delivery: .init(mode: .privacy))
+        await service.triageAndNotify(newArticles: [sampleArticle], delivery: .init(mode: .full))
+
+        // 5. Banners arrive one at a time, a pause apart, threaded per story (#587): two new reports of one event are
+        // one banner; three events are three spaced banners with their own threads. A breaking story is an active
+        // alert with sound; a lesser one is passive and silent.
+        struct Posted: Sendable {
+            let at = ContinuousClock.now
+            let thread: String
+            let active: Bool
+            let sound: Bool
+            let body: String
+            init(_ request: UNNotificationRequest) {
+                thread = request.content.threadIdentifier
+                active = request.content.interruptionLevel == .active
+                sound = request.content.sound != nil
+                body = request.content.body
+            }
+        }
+        actor Recorder {
+            var posted: [Posted] = []
+            func record(_ item: Posted) { posted.append(item) }
+        }
+        let recorder = Recorder()
+        let spaced = NotificationService(post: { await recorder.record(Posted($0)) }, spacing: .milliseconds(60))
+        // Three signal words and six named places put a score at 0.75 before sentiment, so these are breaking
+        // whatever the sentiment tagger says.
+        let fourth = report(
+            5,
+            "Earthquake kills hundreds in Tokyo, Osaka, Kyoto, Nagoya, Sapporo, Kobe and Sendai; emergency declared as crisis deepens"
+        )
+        let fifth = report(
+            6,
+            "Explosion at a refinery in Houston, Dallas, Austin, Denver, Phoenix, Tucson and Boise, dozens killed; urgent evacuation"
+        )
+        let pairEvents = [quiet.id: "event-a", loud.id: "event-a", fourth.id: "event-b", fifth.id: "event-c"]
+        await spaced.triageAndNotify(
+            newArticles: [quiet, loud, fourth, fifth], delivery: .init(mode: .full, events: pairEvents))
+        let posted = await recorder.posted
+        assertEqual(posted.count, 3, "Two reports of one event and two other events are three banners")
+        assertEqual(
+            Set(posted.map(\.thread)), ["event-a", "event-b", "event-c"], "Each banner is threaded under its event")
+        assertTrue(
+            zip(posted, posted.dropFirst()).allSatisfy { $1.at - $0.at >= .milliseconds(60) },
+            "Banners of one refresh are posted at least the spacing apart")
+        assertTrue(posted.allSatisfy { $0.active && $0.sound }, "Breaking stories are active alerts with sound")
+        let quietRecorder = Recorder()
+        let quietService = NotificationService(post: { await quietRecorder.record(Posted($0)) }, spacing: .zero)
+        await quietService.triageAndNotify(newArticles: [quiet], delivery: .init(mode: .full))
+        assertTrue(
+            (await quietRecorder.posted).allSatisfy { !$0.active && !$0.sound },
+            "A story below the breaking score is passive and silent when it notifies")
+        let minimalRecorder = Recorder()
+        let minimal = NotificationService(post: { await minimalRecorder.record(Posted($0)) }, spacing: .zero)
+        await minimal.triageAndNotify(
+            newArticles: [quiet, loud, third, single], delivery: .init(mode: .minimal, events: events))
+        assertEqual(
+            (await minimalRecorder.posted).first?.body, "2 new articles across 2 sources",
+            "Summary modes count one report per event too")
     }
 
     @MainActor
