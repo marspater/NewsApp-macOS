@@ -16603,6 +16603,14 @@ struct NewsTests {
             chosen.map(\.article.id), [loud.id, single.id], "One report per event, the strongest, then the single")
         let alone = await NotificationService.representatives(of: [quiet, single], events: [:])
         assertEqual(alone.map(\.article.id), [quiet.id, single.id], "Without events every story stands alone in order")
+        var starredQuiet = quiet
+        starredQuiet.identityFeedURL = "https://starred.invalid/feed"
+        let starredPick = await NotificationService.representatives(
+            of: [starredQuiet, loud], events: [starredQuiet.id: "event-a", loud.id: "event-a"],
+            starredFeedURLs: ["https://starred.invalid/feed"])
+        assertEqual(
+            starredPick.map(\.article.id), [starredQuiet.id],
+            "A starred feed's report represents its event over a stronger one, so triage still notifies it")
 
         // 4. Robust dispatching (no crashes across all 3 notification tiers)
         let sampleArticle = FeedArticle(
