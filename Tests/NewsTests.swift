@@ -358,6 +358,12 @@ struct NewsTests {
                 path: CommandLine.arguments[index + 1], output: CommandLine.arguments[index + 2])
             return
         }
+        if let index = CommandLine.arguments.firstIndex(of: "--notification-priority-live"),
+            CommandLine.arguments.count > index + 2
+        {
+            try measureLivePriority(path: CommandLine.arguments[index + 1], output: CommandLine.arguments[index + 2])
+            return
+        }
         if let index = CommandLine.arguments.firstIndex(of: "--images-live"), CommandLine.arguments.count > index + 2 {
             try await measureLiveImages(
                 path: CommandLine.arguments[index + 1], output: CommandLine.arguments[index + 2])
@@ -757,6 +763,7 @@ struct NewsTests {
         try await testGranularCacheClearingAndRetention()
         await testNotificationServiceErrorLogging()
         try await testNotificationDedupeAcrossRefreshes(fixtureRoot: fixtureRoot)
+        try await testNotificationLanesAcrossRefreshes(fixtureRoot: fixtureRoot)
         await testArticleStoreErrorResilience()
         await testSystemErrorHardeningAndResilience()
         await testFeedArticleWrapContextNavigation()
@@ -3425,12 +3432,13 @@ struct NewsTests {
         assertEqual(manager.articles.count, 1, "Collected articles are published while triage is still running")
         assertEqual(manager.feedStatuses[feed], .idle, "The feed reports a finished refresh")
         let second = Task { await manager.fetchFeedsAsync() }  // Cmd-R during triage
-        await eventually("A refresh requested during triage collects again") { await gate.arrivals == 2 }
-        assertEqual(await counter.value, 2, "Cmd-R is not coalesced onto follow-up work")
-        assertEqual(manager.articles.count, 2, "Cmd-R publishes new articles immediately")
+        await eventually("A refresh requested during triage collects again") { await counter.value == 2 }
+        await eventually("Cmd-R publishes new articles immediately") { manager.articles.count == 2 }
+        assertEqual(await gate.arrivals, 1, "Its notification pass waits for the one in progress (#665)")
         await gate.open()
         await first.value
         await second.value
+        assertEqual(await gate.arrivals, 2, "Then its notification pass runs")
         manager.stopBackgroundWork()
 
         // Background classification stops under Low Power Mode or thermal pressure, and otherwise runs through the shared queue.
@@ -8242,6 +8250,75 @@ struct NewsTests {
     }
 
     /// Opt-in protected publisher requests on an already rated, temporary library backup.
+    /// How often the priority rule (#665) fires on a library backup: for each event, the first visible story, created in
+    /// the last 14 days, that qualifies with the publishers its event had when that story arrived. Read-only.
+    static func measureLivePriority(path: String, output: String) throws {
+        let url = URL(fileURLWithPath: path).resolvingSymlinksInPath()
+        guard url.path.hasPrefix("/private/tmp/") || url.path.hasPrefix("/tmp/"), output.hasPrefix("/private/tmp/")
+        else {
+            throw NSError(
+                domain: "LivePriority", code: 1, userInfo: [NSLocalizedDescriptionKey: "Use a temporary library backup"]
+            )
+        }
+        var connection: OpaquePointer?
+        guard sqlite3_open_v2(url.path, &connection, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
+            throw NSError(domain: "LivePriority", code: 2, userInfo: [NSLocalizedDescriptionKey: "Cannot open \(path)"])
+        }
+        defer { sqlite3_close(connection) }
+        let now =
+            ProcessInfo.processInfo.environment["NEWS_PRIORITY_NOW"].flatMap(TimeInterval.init)
+            ?? Date().timeIntervalSince1970
+        let query = """
+            SELECT a.id, a.title, coalesce(a.description, ''), a.created_at, m.event_id,
+                (SELECT count(DISTINCT b.source) FROM event_members n JOIN articles b ON b.id = n.article_id
+                 WHERE n.event_id = m.event_id AND b.created_at <= a.created_at)
+            FROM articles a JOIN event_members m ON m.article_id = a.id
+            WHERE a.created_at >= ? AND a.created_at <= ?
+                AND NOT EXISTS (SELECT 1 FROM article_reconciliations r WHERE r.duplicate_id = a.id)
+            ORDER BY a.created_at;
+            """
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(connection, query, -1, &statement, nil) == SQLITE_OK else {
+            throw NSError(domain: "LivePriority", code: 3, userInfo: [NSLocalizedDescriptionKey: "Query failed"])
+        }
+        defer { sqlite3_finalize(statement) }
+        sqlite3_bind_double(statement, 1, now - 14 * 86400)
+        sqlite3_bind_double(statement, 2, now)
+        func text(_ column: Int32) -> String {
+            sqlite3_column_text(statement, column).map { String(cString: $0) } ?? ""
+        }
+        var first: [String: (day: String, title: String, score: Double, publishers: Int)] = [:]
+        var stories = 0
+        var days = Set<String>()
+        let dayFormat = DateFormatter()
+        dayFormat.dateFormat = "yyyy-MM-dd"
+        while sqlite3_step(statement) == SQLITE_ROW {
+            stories += 1
+            let created = Date(timeIntervalSince1970: sqlite3_column_double(statement, 3))
+            days.insert(dayFormat.string(from: created))
+            let event = text(4)
+            guard first[event] == nil else { continue }
+            let title = text(1)
+            let publishers = Int(sqlite3_column_int(statement, 5))
+            let score = NotificationService.shared.computeImportance(title: title, description: text(2))
+            if NotificationService.isPriority(title: title, score: score, publishers: publishers) {
+                first[event] = (dayFormat.string(from: created), title, score, publishers)
+            }
+        }
+        var lines = [
+            "Priority keys (#665) over 14 days: \(first.count), from \(stories) clustered stories on \(days.count) days with ingestion"
+        ]
+        for day in days.sorted() {
+            let keys = first.values.filter { $0.day == day }.sorted { $0.score > $1.score }
+            lines.append("\(day): \(keys.count)")
+            for key in keys {
+                lines.append("  - \(String(format: "%.2f", key.score)), \(key.publishers) publishers: \(key.title)")
+            }
+        }
+        try (lines.joined(separator: "\n") + "\n").write(toFile: output, atomically: true, encoding: .utf8)
+        print(lines.joined(separator: "\n"))
+    }
+
     static func measureLiveImages(path: String, output: String) async throws {
         let url = URL(fileURLWithPath: path).resolvingSymlinksInPath()
         guard url.path.hasPrefix("/private/tmp/") || url.path.hasPrefix("/tmp/"), output.hasPrefix("/private/tmp/")
@@ -16653,14 +16730,6 @@ struct NewsTests {
             chosen.map(\.article.id), [loud.id, single.id], "One report per event, the strongest, then the single")
         let alone = await NotificationService.representatives(of: [quiet, single], events: [:])
         assertEqual(alone.map(\.article.id), [quiet.id, single.id], "Without events every story stands alone in order")
-        var starredQuiet = quiet
-        starredQuiet.identityFeedURL = "https://starred.invalid/feed"
-        let starredPick = await NotificationService.representatives(
-            of: [starredQuiet, loud], events: [starredQuiet.id: "event-a", loud.id: "event-a"],
-            starredFeedURLs: ["https://starred.invalid/feed"])
-        assertEqual(
-            starredPick.map(\.article.id), [starredQuiet.id],
-            "A starred feed's report represents its event over a stronger one, so triage still notifies it")
 
         // 4. Robust dispatching (no crashes across all 3 notification tiers)
         let sampleArticle = FeedArticle(
@@ -16727,16 +16796,15 @@ struct NewsTests {
             (await minimalRecorder.posted).first?.body, "2 new articles across 2 sources",
             "Summary modes count one report per event too")
 
-        // 6. Triage by interest and importance (#588): of 100 new stories, three are breaking, every fourth is
-        // Technology (a top interest) and every tenth event has three publishers; one story comes from a starred feed.
+        // 6. Normal lane (#588, #665): of 100 new stories, three are breaking, every fourth is Technology (a top
+        // interest) and every tenth event has three publishers. At most five normal banners in the rolling hour.
         var seeded: [(article: FeedArticle, score: Double)] = []
         var seededEvents: [String: String] = [:]
         var publishers: [String: Int] = [:]
-        let starredFeed = "https://starred.invalid/feed"
         for index in 0..<100 {
             var article = report(100 + index, "Story \(index)")
             article.category = ["Technology", "Food", "Travel", "Sports"][index % 4]
-            article.identityFeedURL = index == 50 ? starredFeed : "https://other.invalid/feed"
+            article.identityFeedURL = "https://other.invalid/feed"
             seededEvents[article.id] = "seeded-\(index)"
             publishers["seeded-\(index)"] = index % 10 == 0 ? 3 : 1
             seeded.append((article, index < 3 ? 0.7 : 0.3))
@@ -16747,67 +16815,317 @@ struct NewsTests {
         assertEqual(
             NotificationService.rankedInterests(["technology": 9, "politics": 4, "world": 2, "food": 1]),
             ["technology", "politics", "world"], "The top three interests by weight")
-        delivery.starredFeedURLs = [starredFeed]
-        let triaged = NotificationService.triage(seeded, delivery: delivery)
-        let starredChosen = triaged.filter { $0.article.identityFeedURL == starredFeed }
-        assertEqual(starredChosen.map(\.article.title), ["Story 50"], "A starred feed's story always notifies")
-        assertTrue(
-            triaged.count - starredChosen.count <= NotificationService.bannerLimit,
-            "At most five banners besides starred feeds: \(triaged.count)")
+        func planned(_ delivery: NotificationDelivery, pending: [String: [(article: FeedArticle, score: Double)]] = [:])
+            -> [String]
+        {
+            NotificationService.plan(new: seeded, pending: pending, delivery: delivery).banners.map {
+                $0.article?.title ?? NotificationService.groupedBody($0)
+            }
+        }
         assertEqual(
-            triaged.map(\.article.title), ["Story 0", "Story 1", "Story 2", "Story 20", "Story 40", "Story 50"],
-            "Breaking stories and top-interest stories with three publishers notify, in order, up to the limit")
-        delivery.starredFeedURLs = []
-        assertFalse(
-            NotificationService.triage(seeded, delivery: delivery).contains { $0.article.title == "Story 50" },
-            "Unstarring stops the feed's stories")
+            planned(delivery), ["Story 0", "Story 1", "Story 2", "Story 20", "Story 40"],
+            "Breaking stories and top-interest stories with three publishers notify, strongest first, five at most")
+        delivery.ledger.normalLastHour = 3
+        assertEqual(planned(delivery), ["Story 0", "Story 1"], "The rolling hour's earlier banners use the allowance")
+        delivery.ledger.normalLastHour = 5
+        assertTrue(planned(delivery).isEmpty, "A full hour posts no normal banner")
+        delivery.ledger.normalLastHour = 0
         delivery.interests = []
         assertEqual(
-            NotificationService.triage(seeded, delivery: delivery).map(\.article.title),
-            ["Story 0", "Story 1", "Story 2"], "Without interests only breaking stories notify")
+            planned(delivery), ["Story 0", "Story 1", "Story 2"], "Without interests only breaking stories notify")
 
-        // 7. Cross-refresh dedupe (#545): an event announced in the last day stays quiet while its lead headline is
-        // the one announced; a new lead headline notifies again. The stored rows survive a week.
-        delivery.leadTitles = ["seeded-1": "Story 1 lead", "seeded-2": "Story 2 lead"]
-        delivery.notifiedEvents = ["seeded-1": EventFeedSummary.titleKey("Story 1 lead")]
-        assertEqual(
-            NotificationService.triage(seeded, delivery: delivery).map(\.article.title), ["Story 0", "Story 2"],
-            "A second report of an announced event does not notify again")
-        delivery.notifiedEvents = ["seeded-1": EventFeedSummary.titleKey("An earlier lead")]
-        assertEqual(
-            NotificationService.triage(seeded, delivery: delivery).map(\.article.title),
-            ["Story 0", "Story 1", "Story 2"], "A changed lead headline notifies again")
+        // 7. Repeated events (#545, #665): an event announced today stays quiet while its lead headline is the one
+        // announced, unless it rises to a higher lane; a new lead headline notifies again.
+        delivery.leadTitles = ["seeded-1": "Story 1 lead"]
+        delivery.ledger.announced = [
+            "seeded-1": .init(leadKey: EventFeedSummary.titleKey("Story 1 lead"), lane: .normal)
+        ]
+        assertEqual(planned(delivery), ["Story 0", "Story 2"], "A second report of an announced event does not notify")
+        delivery.ledger.announced["seeded-1"]?.leadKey = EventFeedSummary.titleKey("An earlier lead")
+        assertEqual(planned(delivery), ["Story 0", "Story 1", "Story 2"], "A changed lead headline notifies again")
+
+        // 8. Starred lane: one banner per feed and 20 minutes, standing for every pending story (#665).
+        let starredFeed = "https://starred.invalid/feed"
+        func starredStory(_ index: Int, event: String? = nil) -> (article: FeedArticle, score: Double) {
+            var article = FeedArticle(
+                title: "Starred \(index)", link: "https://notify.invalid/\(500 + index)", guid: "notify-\(500 + index)",
+                description: "", pubDate: Date(timeIntervalSince1970: 1_700_000_000), source: "Starred Daily")
+            article.identityFeedURL = starredFeed
+            if let event { delivery.events[article.id] = event }
+            return (article, 0.3)
+        }
         delivery.starredFeedURLs = [starredFeed]
-        delivery.notifiedEvents = ["seeded-50": EventFeedSummary.titleKey("Story 50")]
+        delivery.ledger.announced = [:]
+        let one = [starredFeed: [starredStory(1)]]
+        assertTrue(planned(delivery, pending: one).contains("Starred 1"), "One pending story is an individual banner")
+        let burst = (0..<20).map { starredStory($0) }
+        let grouped = NotificationService.plan(new: seeded, pending: [starredFeed: burst], delivery: delivery).banners
+            .filter { $0.lane == .starred }
+        assertEqual(grouped.count, 1, "Twenty stories from a starred feed are one banner, not twenty")
+        assertEqual(grouped.first?.title, "Starred Daily", "A grouped starred banner is titled with the feed")
+        assertEqual(grouped.first?.thread, "starred-\(starredFeed)", "Grouped starred banners share a feed thread")
         assertTrue(
-            NotificationService.triage(seeded, delivery: delivery).contains { $0.article.title == "Story 50" },
-            "A starred feed notifies about every story, even in an event announced today")
+            grouped.first.map(NotificationService.groupedBody)?.hasPrefix("20 new stories\nStarred ") == true,
+            "The grouped body counts the stories, then two headlines")
+        delivery.ledger.lastStarred[starredFeed] = delivery.now.addingTimeInterval(-10 * 60)
+        assertFalse(planned(delivery, pending: one).contains("Starred 1"), "Within 20 minutes the feed stays pending")
+        delivery.ledger.lastStarred[starredFeed] = delivery.now.addingTimeInterval(-21 * 60)
+        assertTrue(planned(delivery, pending: one).contains("Starred 1"), "After 20 minutes its pending stories post")
+        delivery.starredFeedURLs = []
+        assertFalse(planned(delivery, pending: one).contains("Starred 1"), "Unstarring stops the feed's banners")
+        delivery.starredFeedURLs = [starredFeed]
+
+        // B: an event announced only as normal rises to starred; one announced as starred posts no individual banner,
+        // but its story still counts in the feed's next group.
+        let risen = [starredFeed: [starredStory(30, event: "known")]]
+        delivery.ledger.announced = ["known": .init(leadKey: EventFeedSummary.titleKey("Starred 30"), lane: .normal)]
+        assertTrue(planned(delivery, pending: risen).contains("Starred 30"), "Normal → starred notifies")
+        delivery.ledger.announced["known"]?.lane = .starred
+        assertFalse(planned(delivery, pending: risen).contains("Starred 30"), "A starred event does not repeat")
+        let mixed = NotificationService.plan(
+            new: seeded, pending: [starredFeed: [starredStory(30, event: "known"), starredStory(31)]],
+            delivery: delivery
+        ).banners.filter { $0.lane == .starred }
+        assertEqual(mixed.first?.count, 2, "N counts the announced event's story as well")
+        assertEqual(mixed.first?.headlines.first, "Starred 31", "Headlines prefer the unannounced story")
+        delivery.ledger.announced = [:]
+
+        // 9. Priority lane: exceptional news, the highest lane, coalesced in bursts and never silenced.
+        assertTrue(
+            NotificationService.isPriority(title: "Earthquake kills hundreds", score: 0.8, publishers: 4),
+            "A full-weight signal, a high score and four publishers are priority")
+        assertFalse(
+            NotificationService.isPriority(title: "Earthquake kills hundreds", score: 0.8, publishers: 3),
+            "Three publishers are not enough")
+        assertFalse(
+            NotificationService.isPriority(title: "President announces a fund", score: 0.9, publishers: 6),
+            "Half-weight words never make priority")
+        var majors: [(article: FeedArticle, score: Double)] = []
+        for index in 0..<5 {
+            let article = report(700 + index, "Explosion \(index)")
+            delivery.events[article.id] = "major-\(index)"
+            delivery.publishers["major-\(index)"] = 5
+            majors.append((article, 0.9 - Double(index) / 100))
+        }
+        var priority = NotificationService.plan(new: majors, pending: [:], delivery: delivery)
+        assertEqual(
+            priority.banners.map { $0.article?.title ?? NotificationService.groupedBody($0) },
+            ["Explosion 0", "Explosion 1", "Explosion 2", "2 more major stories\nExplosion 3\nExplosion 4"],
+            "A priority burst posts three banners, then one grouped banner")
+        assertTrue(priority.banners.allSatisfy { $0.lane == .priority && $0.sound }, "Priority banners sound")
+        delivery.ledger.priorityLastHalfHour = 3
+        delivery.ledger.priorityGroupLastHalfHour = true
+        priority = NotificationService.plan(new: majors, pending: [:], delivery: delivery)
+        assertTrue(priority.banners.isEmpty, "Past both limits nothing posts now")
+        assertEqual(priority.queued.map(\.event), (0..<5).map { "major-\($0)" }, "Every key waits; none is silenced")
+        delivery.ledger.priorityGroupLastHalfHour = false
+        delivery.ledger.priorityQueue = priority.queued
+        priority = NotificationService.plan(new: [], pending: [:], delivery: delivery)
+        assertEqual(priority.banners.map(\.count), [5], "The waiting keys arrive in the next grouped banner")
+        assertEqual(
+            Set(priority.banners.first.map { Array($0.announces.keys) } ?? []), Set((0..<5).map { "major-\($0)" }),
+            "The grouped banner announces every waiting key")
+        delivery.ledger.priorityLastHalfHour = 0
+        delivery.ledger.priorityQueue = []
+
+        // A higher lane wins: an event that is priority and has a starred report posts one priority banner.
+        var starredMajor = majors[0].article
+        starredMajor.identityFeedURL = starredFeed
+        delivery.events[starredMajor.id] = "major-0"
+        let both = NotificationService.plan(
+            new: [majors[0], (starredMajor, 0.3)], pending: [starredFeed: [(starredMajor, 0.3)]], delivery: delivery)
+        assertEqual(
+            both.banners.map(\.lane), [.priority], "The same event qualifying twice posts once, in the higher lane")
+        let together = NotificationService.plan(
+            new: seeded + [majors[1]], pending: [starredFeed: [starredStory(40), starredStory(41)]], delivery: delivery)
+        assertEqual(
+            together.banners.map(\.lane), [.priority, .starred, .normal, .normal, .normal],
+            "Simultaneous arrivals post priority, then the starred group, then normal stories")
+
+        // Three publishers on arrival give a normal banner; a fourth makes it priority once, and never a third time.
+        let rising = report(800, "Explosion levels block")
+        delivery.events[rising.id] = "rising"
+        delivery.publishers["rising"] = 3
+        delivery.leadTitles["rising"] = rising.title
+        let first = NotificationService.plan(new: [(rising, 0.9)], pending: [:], delivery: delivery).banners
+        assertEqual(first.map(\.lane), [.normal], "Three publishers: a normal banner")
+        let lead = EventFeedSummary.titleKey(rising.title)
+        delivery.ledger.announced["rising"] = .init(leadKey: lead, lane: .normal)
+        delivery.publishers["rising"] = 4
+        let follow = report(801, "Explosion toll rises")
+        delivery.events[follow.id] = "rising"
+        assertEqual(
+            NotificationService.plan(new: [(follow, 0.9)], pending: [:], delivery: delivery).banners.map(\.lane),
+            [.priority], "The fourth publisher raises the event to one priority banner")
+        delivery.ledger.announced["rising"]?.lane = .priority
+        let later = report(802, "Explosion inquiry")
+        delivery.events[later.id] = "rising"
+        assertTrue(
+            NotificationService.plan(new: [(later, 0.9)], pending: [:], delivery: delivery).banners.isEmpty,
+            "An event announced as priority never posts a third banner")
+
+        // Storage (#545, #665): the ledger reads what was recorded, keeps the highest lane, clamps a clock set back and
+        // prunes old rows.
         do {
             let db = DatabaseEngine(path: ":memory:")
             try await db.open()
-            let first = report(300, "Lead report opens the event")
-            let second = report(301, "Later report joins the event")
-            try await db.upsertArticles([first, second])
-            let event = try await db.createEvent(memberArticleIDs: [first.id])
-            _ = try await db.addArticles([second.id], toEvent: event.id)
+            let opener = report(300, "Lead report opens the event")
+            let joiner = report(301, "Later report joins the event")
+            try await db.upsertArticles([opener, joiner])
+            let event = try await db.createEvent(memberArticleIDs: [opener.id])
+            _ = try await db.addArticles([joiner.id], toEvent: event.id)
             assertEqual(
-                try await db.eventLeadTitles([event.id]), [event.id: first.title],
+                try await db.eventLeadTitles([event.id]), [event.id: opener.title],
                 "The lead story is the one that opened the event, not the newest member")
             let now = Date(timeIntervalSince1970: 1_700_000_000)
-            try await db.recordNotifiedEvents([event.id: EventFeedSummary.titleKey(first.title)], at: now)
-            assertEqual(
-                try await db.notifiedEvents(since: now.addingTimeInterval(-86400)),
-                [event.id: EventFeedSummary.titleKey(first.title)], "A posted event is recorded with its lead key")
+            let key = EventFeedSummary.titleKey(opener.title)
+            try await db.recordNotification(
+                PlannedBanner(
+                    lane: .priority, grouped: false, thread: event.id, sound: true, announces: [event.id: key]),
+                at: now)
+            try await db.recordNotification(
+                PlannedBanner(
+                    lane: .normal, grouped: false, thread: event.id, sound: false, announces: [event.id: key]),
+                at: now)
+            try await db.recordNotification(
+                PlannedBanner(lane: .starred, grouped: true, count: 4, feedURL: starredFeed, thread: "s", sound: false),
+                at: now)
+            try await db.queuePriority(
+                [QueuedPriority(event: "waiting", title: "W", score: 0.8, leadKey: "w")], at: now)
+            var ledger = try await db.notificationLedger(now: now.addingTimeInterval(60))
+            assertEqual(ledger.announced[event.id], .init(leadKey: key, lane: .priority), "The highest lane is kept")
+            assertEqual(ledger.normalLastHour, 1, "Normal banners count in the rolling hour")
+            assertEqual(ledger.priorityLastHalfHour, 1, "Individual priority banners count in the half hour")
+            assertEqual(ledger.lastStarred[starredFeed], now, "The feed's last starred banner is kept")
+            assertEqual(ledger.priorityQueue.map(\.event), ["waiting"], "Waiting priority keys are read back")
+            ledger = try await db.notificationLedger(now: now.addingTimeInterval(3601))
+            assertEqual(ledger.normalLastHour, 0, "The hour rolls")
+            ledger = try await db.notificationLedger(now: now.addingTimeInterval(-7200))
+            assertEqual(ledger.normalLastHour, 1, "A clock set back clamps the later rows to now")
+            ledger = try await db.notificationLedger(now: now.addingTimeInterval(-7200 + 3601))
+            assertEqual(ledger.normalLastHour, 0, "So the window lasts at most its length from the change")
+            ledger = try await db.notificationLedger(now: now.addingTimeInterval(2 * 86400))
             assertTrue(
-                try await db.notifiedEvents(since: now.addingTimeInterval(60)).isEmpty,
-                "Only events notified since the given time are returned")
-            try await db.recordNotifiedEvents(["other": "x"], at: now.addingTimeInterval(8 * 86400))
-            assertEqual(
-                try await db.notifiedEvents(since: .distantPast), ["other": "x"], "Rows older than a week are pruned")
+                ledger.announced.isEmpty && ledger.priorityQueue.isEmpty, "A day later nothing is announced or waiting")
+            try await db.recordNotification(
+                PlannedBanner(lane: .normal, grouped: false, thread: "x", sound: false),
+                at: now.addingTimeInterval(8 * 86400))
+            ledger = try await db.notificationLedger(now: now.addingTimeInterval(8 * 86400))
+            assertTrue(ledger.lastStarred.isEmpty, "Rows older than a week are pruned")
             await db.close()
         } catch {
-            assertTrue(false, "Notification dedupe storage failed: \(error)")
+            assertTrue(false, "Notification delivery storage failed: \(error)")
         }
+    }
+
+    /// Notification lanes through `FeedManager` (#665): the normal limit rolls across refreshes and a relaunch, delivery
+    /// never removes a story, starring a feed brings up no backlog, and a starred burst is one banner.
+    @MainActor
+    static func testNotificationLanesAcrossRefreshes(fixtureRoot: URL) async throws {
+        print("  - Testing notification lanes across refreshes and relaunch...")
+        // Three full-weight signal words and six named places: each is breaking, and alone it is never priority.
+        let headlines = [
+            "Breaking: earthquake in Tokyo, Osaka, Kyoto, Nagoya, Sapporo and Kobe; emergency declared",
+            "Breaking: explosion in Houston, Dallas, Austin, Denver, Phoenix and Tucson; emergency declared",
+            "Breaking: attack in Paris, Lyon, Marseille, Nice, Lille and Bordeaux; emergency declared",
+            "Breaking: crisis in Lagos, Abuja, Kano, Ibadan, Accra and Lome; emergency declared",
+            "Breaking: mayors arrested in Madrid, Seville, Valencia, Bilbao, Malaga and Zaragoza; emergency session",
+            "Breaking: dozens killed in Lima, Quito, Bogota, Caracas, Santiago and Montevideo; emergency declared",
+            "Breaking: minister resigns in Cairo, Alexandria, Giza, Luxor, Aswan and Suez; emergency session",
+            "Breaking: cars recalled in Berlin, Munich, Hamburg, Cologne, Frankfurt and Stuttgart; emergency checks",
+            "Breaking: governors indicted in Sydney, Melbourne, Brisbane, Perth, Adelaide and Hobart; emergency sitting",
+        ]
+        let start = Date()
+        func story(_ id: String, _ title: String, source: String) -> FeedArticle {
+            FeedArticle(
+                title: title, link: fixtureRoot.appendingPathComponent("lanes/\(id)").absoluteString, guid: id,
+                description: "", pubDate: start, source: source)
+        }
+        let loud = headlines.indices.map { story("loud-\($0)", headlines[$0], source: "Wire \($0)") }
+        let plainFeed = fixtureRoot.appendingPathComponent("lanes-plain").absoluteString
+        let starredFeed = fixtureRoot.appendingPathComponent("lanes-starred").absoluteString
+        let suite = testDefaultsSuite("test.notification.lanes")
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { removeTestDefaults(suite) }
+        let settings = AppSettings(defaults: defaults)
+        settings.feedURLs = [plainFeed, starredFeed]
+        settings.aiEnabled = false
+        settings.notificationsEnabled = true
+        settings.notificationMode = .full
+        struct Posted: Sendable {
+            let title: String
+            let body: String
+            let thread: String
+        }
+        actor Recorder {
+            var posted: [Posted] = []
+            func record(_ request: UNNotificationRequest) {
+                posted.append(
+                    Posted(
+                        title: request.content.title, body: request.content.body,
+                        thread: request.content.threadIdentifier))
+            }
+        }
+        let recorder = Recorder()
+        let service = NotificationService(post: { await recorder.record($0) }, spacing: .zero)
+        let path = FileManager.default.temporaryDirectory.appendingPathComponent("lanes-\(UUID().uuidString).sqlite3")
+            .path
+        defer {
+            for suffix in ["", "-wal", "-shm"] { try? FileManager.default.removeItem(atPath: path + suffix) }
+        }
+        var store = ArticleStore(database: DatabaseEngine(path: path))
+        await store.initialize()
+        // A refresh without a clock reads the real one at the pass, as the app does, after its stories are stored.
+        func refresh(plain: [FeedArticle] = [], starred: [FeedArticle] = [], at clock: Date? = nil) async {
+            let manager = FeedManager(
+                settings: settings, store: store, schedulesRefresh: false,
+                fetchBatch: { urls, _ in urls.map { ($0, $0 == starredFeed ? starred : plain, nil, nil) } },
+                notifyBatch: { articles, delivery in
+                    await service.triageAndNotify(newArticles: articles, delivery: delivery)
+                }, imageFinder: .unavailable, now: { clock ?? Date() })
+            await manager.fetchFeedsAsync()
+            manager.stopBackgroundWork()
+        }
+
+        // The normal limit rolls: five of six post, a refresh 30 minutes later after a relaunch posts none, and one 61
+        // minutes after the first posts again.
+        await refresh(plain: Array(loud.prefix(6)), at: start)
+        assertEqual(await recorder.posted.count, 5, "Five normal banners in the first hour")
+        await store.database.close()
+        store = ArticleStore(database: DatabaseEngine(path: path))
+        await store.initialize()
+        await refresh(plain: Array(loud[6...7]), at: start.addingTimeInterval(30 * 60))
+        assertEqual(await recorder.posted.count, 5, "Thirty minutes later, after a relaunch, the hour is still full")
+        await refresh(plain: [loud[8]], at: start.addingTimeInterval(61 * 60))
+        assertEqual(await recorder.posted.count, 6, "Sixty-one minutes after the first banners, one posts again")
+        let stored = Set(try await store.database.fetchArticles(limit: nil).map(\.title))
+        assertTrue(Set(headlines).isSubset(of: stored), "Every story is stored, notified or not")
+        assertTrue(
+            Set(headlines).isSubset(of: Set(store.articles.map(\.title))), "Every story stays in the reader's feed")
+
+        // Starring a feed brings up none of its backlog; its next new story notifies, and a burst 21 minutes later is
+        // one grouped banner.
+        let backlog = (0..<5).map {
+            story("backlog-\($0)", "Starred column \($0) on garden design", source: "Starred Daily")
+        }
+        await refresh(starred: backlog)
+        let before = await recorder.posted.count
+        assertTrue(settings.setFeedStarred(starredFeed, true), "The feed is starred")
+        await refresh(plain: [story("quiet", "Library extends opening hours", source: "Town Paper")])
+        assertEqual(await recorder.posted.count, before, "Starring a feed posts nothing for its backlog")
+        await refresh(
+            starred: backlog + [story("fresh", "Starred column on winter bulbs", source: "Starred Daily")])
+        let single = await recorder.posted.dropFirst(before)
+        assertEqual(single.map(\.title), ["Starred Daily"], "The feed's first new story is one starred banner")
+        let burst = (0..<20).map { story("burst-\($0)", "Starred note \($0) about orchards", source: "Starred Daily") }
+        await refresh(starred: burst, at: Date().addingTimeInterval(21 * 60))
+        let grouped = await recorder.posted.dropFirst(before + 1)
+        assertEqual(grouped.count, 1, "Twenty new starred stories are one banner: \(grouped.map(\.body))")
+        assertEqual(grouped.first?.thread, "starred-\(starredFeed)", "The burst is threaded under the feed")
+        assertTrue(
+            grouped.first?.body.hasPrefix("20 new stories\n") == true,
+            "The burst counts every story: \(grouped.first?.body ?? "")")
+        await store.database.close()
     }
 
     /// Cross-refresh dedupe through `FeedManager` (#545): the first refresh announces an event; a report that joins it
@@ -16887,8 +17205,10 @@ struct NewsTests {
         assertEqual(await recorder.threads, first, "A report joining an event announced today posts no second banner")
 
         guard let announced = joined.values.first else { return }
-        try await store.database.recordNotifiedEvents(
-            [announced: EventFeedSummary.titleKey("An earlier lead headline")], at: Date())
+        try await store.database.recordNotification(
+            PlannedBanner(
+                lane: .normal, grouped: false, thread: announced, sound: false,
+                announces: [announced: EventFeedSummary.titleKey("An earlier lead headline")]), at: Date())
         await refresh(4)
         assertEqual(
             await recorder.threads, first + [announced], "A new report notifies once the lead headline changed")

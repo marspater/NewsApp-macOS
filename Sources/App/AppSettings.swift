@@ -23,6 +23,7 @@ final class AppSettings: ObservableObject {
     static let mutedTopicsKey = "muted_topics"
     static let mutedTopicSetsKey = "muted_topic_sets"
     static let starredFeedURLsKey = "starred_feed_urls"
+    static let starredFeedTimesKey = "starred_feed_times"
     static let tensionCollectionOptInKey = "tension_collection_opt_in"
     static let retiredFeedsVersionKey = "retired_feeds_version"
     static let dismissedAdvisoriesKey = "dismissed_advisories"
@@ -100,6 +101,8 @@ final class AppSettings: ObservableObject {
     @Published private(set) var muteRules: MuteRules
     /// Feeds whose every new story notifies, whatever the triage says (#588).
     @Published private(set) var starredFeedURLs: Set<String>
+    /// When each starred feed was starred: its notifications start then, never with its backlog (#665).
+    private(set) var starredFeedTimes: [String: Date]
     /// Mapping of normalized feed URL to the latest advisory date dismissed by the reader.
     @Published private(set) var dismissedAdvisories: [String: String]
 
@@ -180,7 +183,15 @@ final class AppSettings: ObservableObject {
             sources: defaults.stringArray(forKey: Self.mutedSourcesKey) ?? [],
             topics: defaults.stringArray(forKey: Self.mutedTopicsKey) ?? [],
             topicSets: defaults.stringArray(forKey: Self.mutedTopicSetsKey) ?? [])
-        self.starredFeedURLs = Set(defaults.stringArray(forKey: Self.starredFeedURLsKey) ?? [])
+        let starred = Set(defaults.stringArray(forKey: Self.starredFeedURLsKey) ?? [])
+        self.starredFeedURLs = starred
+        // A star from before star times were kept counts from now.
+        var times = (defaults.dictionary(forKey: Self.starredFeedTimesKey) as? [String: Double] ?? [:]).filter {
+            starred.contains($0.key)
+        }
+        for url in starred where times[url] == nil { times[url] = Date().timeIntervalSince1970 }
+        defaults.set(times, forKey: Self.starredFeedTimesKey)
+        self.starredFeedTimes = times.mapValues { Date(timeIntervalSince1970: $0) }
         self.dismissedAdvisories =
             (defaults.dictionary(forKey: Self.dismissedAdvisoriesKey) as? [String: String]) ?? [:]
     }
@@ -270,14 +281,16 @@ final class AppSettings: ObservableObject {
     /// Stars or unstars a feed; a starred feed notifies about every new story. A star beyond the limit is refused
     /// and nothing changes; returns whether the feed now has the requested state.
     @discardableResult
-    func setFeedStarred(_ url: String, _ starred: Bool) -> Bool {
+    func setFeedStarred(_ url: String, _ starred: Bool, at date: Date = Date()) -> Bool {
         if starred {
             guard starredFeedURLs.contains(url) || starredFeedURLs.count < Self.starredFeedLimit else { return false }
-            starredFeedURLs.insert(url)
+            if starredFeedURLs.insert(url).inserted { starredFeedTimes[url] = date }
         } else {
             starredFeedURLs.remove(url)
+            starredFeedTimes[url] = nil
         }
         defaults.set(starredFeedURLs.sorted(), forKey: Self.starredFeedURLsKey)
+        defaults.set(starredFeedTimes.mapValues(\.timeIntervalSince1970), forKey: Self.starredFeedTimesKey)
         return true
     }
 
