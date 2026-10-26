@@ -18,14 +18,77 @@ struct NotificationDelivery: Sendable {
     var publishers: [String: Int] = [:]
     /// The reader's top interest categories, lowercased `NewsCategory` raw values.
     var interests: Set<String> = []
-    /// Feeds whose every story notifies.
+    /// Feeds whose every story is eligible for the starred lane (at most three, #588).
     var starredFeedURLs: Set<String> = []
-    /// Events notified in the last day → the headline key (`EventFeedSummary.titleKey`) of their lead story then.
-    var notifiedEvents: [String: String] = [:]
     /// Event id → the title of its lead story now (the story that opened the event).
     var leadTitles: [String: String] = [:]
-    /// Called with the stories posted as banners, so the refresh can record their events.
-    var recordPosted: @Sendable ([FeedArticle]) async -> Void = { _ in }
+    /// When the pass runs; every window in docs/notifications.md is measured from it.
+    var now = Date()
+    /// What earlier banners left in the delivery tables (#665).
+    var ledger = NotificationLedger()
+    /// Starred feed → its pending stories: visible, unmuted, created since its last starred banner, its star time or
+    /// 24 h ago, whichever is latest. Includes this pass's new stories from the feed.
+    var starredPending: [String: [FeedArticle]] = [:]
+    /// Called after each banner posts, so the pass records it before the next.
+    var record: @Sendable (PlannedBanner) async -> Void = { _ in }
+    /// Called with priority keys over both priority limits, which wait for the next grouped priority banner.
+    var queue: @Sendable ([QueuedPriority]) async -> Void = { _ in }
+}
+
+/// Notification lanes (#665, docs/notifications.md). The raw value is stored; a higher lane wins.
+enum NotificationLane: Int, Comparable, Sendable {
+    case normal = 0
+    case starred = 1
+    case priority = 2
+
+    static func < (lhs: Self, rhs: Self) -> Bool { lhs.rawValue < rhs.rawValue }
+}
+
+/// A priority key waiting for the next grouped priority banner.
+struct QueuedPriority: Sendable, Equatable {
+    var event: String
+    var title: String
+    var score: Double
+    var leadKey: String
+}
+
+/// The delivery tables as a pass reads them, with every time clamped to the pass's clock.
+struct NotificationLedger: Sendable {
+    /// Normal banners in the last 60 minutes.
+    var normalLastHour = 0
+    /// Individual priority banners in the last 30 minutes.
+    var priorityLastHalfHour = 0
+    /// Whether a grouped priority banner posted in the last 30 minutes.
+    var priorityGroupLastHalfHour = false
+    /// Starred feed → its latest starred banner.
+    var lastStarred: [String: Date] = [:]
+    /// Events announced in the last 24 h → their lead headline key then and the highest lane that covered them.
+    var announced: [String: Announcement] = [:]
+    /// Priority keys still waiting, at most 24 h old.
+    var priorityQueue: [QueuedPriority] = []
+
+    struct Announcement: Sendable, Equatable {
+        var leadKey: String
+        var lane: NotificationLane
+    }
+}
+
+/// One banner a pass will post, in posting order.
+struct PlannedBanner: Sendable {
+    var lane: NotificationLane
+    var grouped: Bool
+    /// The story an individual banner shows; nil for a grouped banner.
+    var article: FeedArticle?
+    /// A grouped banner's title and headlines (two at most).
+    var title = ""
+    var headlines: [String] = []
+    /// Stories (starred) or keys (priority) a grouped banner stands for.
+    var count = 1
+    var feedURL: String?
+    var thread: String
+    var sound: Bool
+    /// Event id → lead headline key, for each event the banner announces.
+    var announces: [String: String] = [:]
 }
 
 /// Manages NLP-based notification triage, rich image attachments, and alert scheduling.
@@ -42,8 +105,13 @@ final class NotificationService: Sendable {
     static let breakingScore = 0.6
     /// An interest story needs this many publishers on its event before it notifies.
     static let interestPublishers = 3
-    /// Banners per refresh in full mode; starred feeds are not counted.
-    static let bannerLimit = 5
+    /// Normal banners in any rolling 60 minutes (#665).
+    static let normalLimit = 5
+    /// Individual priority banners in any rolling 30 minutes, plus one grouped banner.
+    static let priorityLimit = 3
+    static let priorityWindow: TimeInterval = 30 * 60
+    /// A starred feed gets at most one banner per window.
+    static let starredWindow: TimeInterval = 20 * 60
 
     init(
         post: (@Sendable (UNNotificationRequest) async throws -> Void)? = nil, spacing: Duration = .seconds(2)
@@ -111,57 +179,58 @@ final class NotificationService: Sendable {
         return breakingSignals.filter { padded.contains(MuteRules.paddedPhrase($0.key)) }.map(\.value).reduce(0, +)
     }
 
+    /// Exceptional news (#665, docs/notifications.md): a score this high, a full-weight signal word in the headline and
+    /// this many publishers on the story's event. Stricter than breaking; a story outside any event never qualifies.
+    static let priorityScore = 0.75
+    static let priorityPublishers = 4
+
+    static func isPriority(title: String, score: Double, publishers: Int) -> Bool {
+        guard score >= priorityScore, publishers >= priorityPublishers else { return false }
+        let padded = MuteRules.paddedPhrase(title)
+        return breakingSignals.contains { $0.value >= 1 && padded.contains(MuteRules.paddedPhrase($0.key)) }
+    }
+
     /// One report per event, the one that scores highest, in first-seen order, with its score; stories outside any
-    /// event stand alone. Several publishers covering one story then notify once instead of once each (#523), in
-    /// every mode (#587). A starred feed's report outranks any other, so triage still sees it as starred (#588).
-    /// Scoring tags every article once, so it runs off the main actor.
-    @concurrent nonisolated static func representatives(
-        of articles: [FeedArticle], events: [String: String], starredFeedURLs: Set<String> = []
-    ) async -> [(article: FeedArticle, score: Double)] {
-        func rank(_ article: FeedArticle, _ score: Double) -> (Int, Double) {
-            (article.identityFeedURL.map(starredFeedURLs.contains) == true ? 1 : 0, score)
-        }
+    /// event stand alone. Several publishers covering one story then count once in a summary instead of once each
+    /// (#523, #587). Scoring tags every article once, so it runs off the main actor.
+    @concurrent nonisolated static func representatives(of articles: [FeedArticle], events: [String: String]) async
+        -> [(article: FeedArticle, score: Double)]
+    {
         var order: [String] = []
         var best: [String: (article: FeedArticle, score: Double)] = [:]
-        for article in articles {
+        for (article, score) in await scored(articles) {
             let key = events[article.id] ?? article.id
-            let score = shared.computeImportance(title: article.title, description: article.description)
-            if let current = best[key], rank(current.article, current.score) >= rank(article, score) { continue }
+            if let current = best[key], current.score >= score { continue }
             if best[key] == nil { order.append(key) }
             best[key] = (article, score)
         }
         return order.compactMap { best[$0] }
     }
 
-    /// Full-mode triage (#588): a story notifies when its feed is starred, when it is breaking (score ≥ 0.6), or when
-    /// it is in one of the reader's top interest categories and three or more publishers cover its event. Everything
-    /// else is silent. Starred feeds are not counted against the banner limit. Otherwise an event notified in the last
-    /// day stays quiet while its lead headline is the one notified; a new lead headline notifies again (#545).
-    static func triage(_ ranked: [(article: FeedArticle, score: Double)], delivery: NotificationDelivery)
-        -> [(article: FeedArticle, score: Double)]
-    {
-        var chosen: [(article: FeedArticle, score: Double)] = []
-        var budget = bannerLimit
-        for item in ranked {
-            let article = item.article
-            if let feed = article.identityFeedURL, delivery.starredFeedURLs.contains(feed) {
-                chosen.append(item)
-                continue
-            }
-            if let event = delivery.events[article.id], let notified = delivery.notifiedEvents[event],
-                notified == leadKey(of: article, event: event, delivery: delivery)
-            {
-                continue
-            }
-            guard budget > 0 else { continue }
-            let category = article.category.flatMap(NewsCategory.match(from:))?.rawValue.lowercased()
-            let publishers = delivery.events[article.id].flatMap { delivery.publishers[$0] } ?? 1
-            let interest = category.map(delivery.interests.contains) == true && publishers >= interestPublishers
-            guard item.score >= breakingScore || interest else { continue }
-            chosen.append(item)
-            budget -= 1
-        }
-        return chosen
+    /// Scores each story once, off the main actor (#545).
+    @concurrent nonisolated static func scored(_ articles: [FeedArticle]) async -> [(
+        article: FeedArticle, score: Double
+    )] {
+        articles.map { ($0, shared.computeImportance(title: $0.title, description: $0.description)) }
+    }
+
+    /// Full-mode delivery (#665): the banners of one pass, in posting order, and the priority keys left waiting. The
+    /// rules, with their reasons, are docs/notifications.md; this reads only the delivery and the scored stories.
+    static func plan(
+        new: [(article: FeedArticle, score: Double)], pending: [String: [(article: FeedArticle, score: Double)]],
+        delivery: NotificationDelivery
+    ) -> (banners: [PlannedBanner], queued: [QueuedPriority]) {
+        var planner = LanePlanner(delivery: delivery)
+        let (priorityKeys, normalKeys) = planner.classify(new)
+        let queued = planner.planPriority(priorityKeys)
+        planner.planStarred(pending)
+        planner.planNormal(normalKeys)
+        return (planner.banners, queued)
+    }
+
+    static func sourceName(_ article: FeedArticle) -> String {
+        (article.source.components(separatedBy: "\n").first ?? article.source).trimmingCharacters(
+            in: .whitespacesAndNewlines)
     }
 
     /// The headline key recorded for an event when a banner is posted: its lead story's, else the posted report's.
@@ -179,16 +248,15 @@ final class NotificationService: Sendable {
         Set(rankedInterests(weights, limit: limit))
     }
 
-    /// NLP-driven triage: dispatches notifications according to the active NotificationMode. Full mode posts the
-    /// triaged reports one at a time, a pause apart, each threaded under its story.
+    /// Dispatches notifications according to the active NotificationMode. Full mode posts the planned banners one at
+    /// a time, a pause apart (#587), and records each as soon as it posts (#665).
     func triageAndNotify(newArticles: [FeedArticle], delivery: NotificationDelivery) async {
         guard !newArticles.isEmpty else { return }
-        let ranked = await Self.representatives(
-            of: newArticles, events: delivery.events, starredFeedURLs: delivery.starredFeedURLs)
 
         switch delivery.mode {
         case .minimal:
             // ALWAYS exactly one coalesced notification with singular/plural grammar
+            let ranked = await Self.representatives(of: newArticles, events: delivery.events)
             await triggerMinimalNotification(for: ranked.map(\.article))
 
         case .privacy:
@@ -196,19 +264,15 @@ final class NotificationService: Sendable {
             await triggerPrivateNotification()
 
         case .full:
-            let toNotify = Self.triage(ranked.sorted { $0.score > $1.score }, delivery: delivery)
-            var posted: [FeedArticle] = []
-            for (index, item) in toNotify.enumerated() {
+            var pending: [String: [(article: FeedArticle, score: Double)]] = [:]
+            for (feed, articles) in delivery.starredPending { pending[feed] = await Self.scored(articles) }
+            let plan = Self.plan(new: await Self.scored(newArticles), pending: pending, delivery: delivery)
+            if !plan.queued.isEmpty { await delivery.queue(plan.queued) }
+            for (index, banner) in plan.banners.enumerated() {
                 if index > 0 { try? await Task.sleep(for: spacing) }
                 guard !Task.isCancelled else { break }
-                if await triggerFullNotification(
-                    for: item.article, thread: delivery.events[item.article.id] ?? item.article.id,
-                    breaking: item.score >= Self.breakingScore)
-                {
-                    posted.append(item.article)
-                }
+                if await triggerFullNotification(banner, at: delivery.now) { await delivery.record(banner) }
             }
-            if !posted.isEmpty { await delivery.recordPosted(posted) }
         }
     }
 
@@ -270,29 +334,40 @@ final class NotificationService: Sendable {
         }
     }
 
-    /// Posts one banner. The thread groups later reports of the same story under it in Notification Center; a
-    /// breaking story sounds and interrupts like any alert, a lesser one is passive (listed, no sound, no wake).
-    private func triggerFullNotification(for article: FeedArticle, thread: String, breaking: Bool) async -> Bool {
+    /// The body of a grouped banner: the count, then up to two headlines on their own lines.
+    static func groupedBody(_ banner: PlannedBanner) -> String {
+        let count =
+            banner.lane == .priority
+            ? (banner.count == 1 ? "1 more major story" : "\(banner.count) more major stories")
+            : (banner.count == 1 ? "1 new story" : "\(banner.count) new stories")
+        return ([count] + banner.headlines.prefix(2)).joined(separator: "\n")
+    }
+
+    /// Posts one banner. The thread groups later reports of the same story under it in Notification Center; a banner
+    /// with sound interrupts like any alert, one without is passive (listed, no sound, no wake).
+    private func triggerFullNotification(_ banner: PlannedBanner, at now: Date) async -> Bool {
         let content = UNMutableNotificationContent()
-
-        let sourceName = (article.source.components(separatedBy: "\n").first ?? article.source)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-
-        content.title = sourceName
-        content.subtitle = article.title
-        content.body = article.description.isEmpty ? "" : String(article.description.prefix(200))
-        content.sound = breaking ? .default : nil
-        content.threadIdentifier = thread
-        content.interruptionLevel = breaking ? .active : .passive
-        content.userInfo = ["articleLink": article.link, "articleID": article.id]
-
-        if let imageUrl = FeedArticle.bestCardImage(in: [article]),
-            let attachment = await downloadNotificationAttachment(from: imageUrl)
-        {
-            content.attachments = [attachment]
+        content.sound = banner.sound ? .default : nil
+        content.threadIdentifier = banner.thread
+        content.interruptionLevel = banner.sound ? .active : .passive
+        let identifier: String
+        if let article = banner.article {
+            content.title = Self.sourceName(article)
+            content.subtitle = article.title
+            content.body = article.description.isEmpty ? "" : String(article.description.prefix(200))
+            content.userInfo = ["articleLink": article.link, "articleID": article.id]
+            if let imageUrl = FeedArticle.bestCardImage(in: [article]),
+                let attachment = await downloadNotificationAttachment(from: imageUrl)
+            {
+                content.attachments = [attachment]
+            }
+            identifier = Self.notificationIdentifier(for: article)
+        } else {
+            content.title = banner.title
+            content.body = Self.groupedBody(banner)
+            // Each group is its own banner; a later group must not replace an earlier one.
+            identifier = "\(banner.thread)-\(Int(now.timeIntervalSince1970))"
         }
-
-        let identifier = Self.notificationIdentifier(for: article)
         let request = UNNotificationRequest(identifier: identifier, content: content, trigger: nil)
         do {
             try await post(request)
@@ -385,5 +460,157 @@ final class NotificationService: Sendable {
         let context = CIContext(options: [.useSoftwareRenderer: true, .cacheIntermediates: false])
         return context.createCGImage(
             output, from: extent, format: .RGBA8, colorSpace: CGColorSpace(name: CGColorSpace.sRGB))
+    }
+}
+
+typealias ScoredStory = (article: FeedArticle, score: Double)
+
+/// One full-mode pass's lane decisions (#665, docs/notifications.md), filled lane by lane in posting order.
+private struct LanePlanner {
+    let delivery: NotificationDelivery
+    var banners: [PlannedBanner] = []
+    /// Keys a banner of this pass already covers.
+    var taken = Set<String>()
+
+    init(delivery: NotificationDelivery) { self.delivery = delivery }
+
+    func key(_ article: FeedArticle) -> String { delivery.events[article.id] ?? article.id }
+
+    func lead(_ article: FeedArticle) -> String {
+        NotificationService.leadKey(of: article, event: key(article), delivery: delivery)
+    }
+
+    func announces(_ article: FeedArticle) -> [String: String] {
+        delivery.events[article.id].map { [$0: lead(article)] } ?? [:]
+    }
+
+    func publishers(_ article: FeedArticle) -> Int {
+        delivery.events[article.id].flatMap { delivery.publishers[$0] } ?? 1
+    }
+
+    /// Whether the story's key may post in `lane`: not announced, a new lead headline, or a higher lane.
+    func fresh(_ article: FeedArticle, in lane: NotificationLane) -> Bool {
+        guard let event = delivery.events[article.id], let seen = delivery.ledger.announced[event] else { return true }
+        return seen.leadKey != lead(article) || lane > seen.lane
+    }
+
+    func isPriority(_ item: ScoredStory) -> Bool {
+        delivery.events[item.article.id] != nil
+            && NotificationService.isPriority(
+                title: item.article.title, score: item.score, publishers: publishers(item.article))
+    }
+
+    func isNormal(_ item: ScoredStory) -> Bool {
+        let category = item.article.category.flatMap(NewsCategory.match(from:))?.rawValue.lowercased()
+        let interest =
+            category.map(delivery.interests.contains) == true
+            && publishers(item.article) >= NotificationService.interestPublishers
+        return item.score >= NotificationService.breakingScore || interest
+    }
+
+    func isStarred(_ article: FeedArticle) -> Bool {
+        article.identityFeedURL.map(delivery.starredFeedURLs.contains) == true
+    }
+
+    /// Each key takes its highest lane; its representative is the strongest story that qualifies for that lane. Keys
+    /// with a starred story belong to the starred lane, which works from the feeds' pending stories.
+    func classify(_ new: [ScoredStory]) -> (priority: [ScoredStory], normal: [ScoredStory]) {
+        var order: [String] = []
+        var members: [String: [ScoredStory]] = [:]
+        for item in new {
+            if members[key(item.article)] == nil { order.append(key(item.article)) }
+            members[key(item.article), default: []].append(item)
+        }
+        var priority: [ScoredStory] = []
+        var normal: [ScoredStory] = []
+        for id in order {
+            let items = members[id, default: []].sorted { $0.score > $1.score }
+            if let best = items.first(where: isPriority) {
+                if fresh(best.article, in: .priority) { priority.append(best) }
+            } else if !items.contains(where: { isStarred($0.article) }), let best = items.first(where: isNormal),
+                fresh(best.article, in: .normal)
+            {
+                normal.append(best)
+            }
+        }
+        return (priority.sorted { $0.score > $1.score }, normal)
+    }
+
+    /// Individual banners up to the limit, then one grouped banner for the rest and any waiting keys. Returns the keys
+    /// that must wait because the grouped banner's window is still running.
+    mutating func planPriority(_ keys: [ScoredStory]) -> [QueuedPriority] {
+        let ledger = delivery.ledger
+        let individual = keys.prefix(max(0, NotificationService.priorityLimit - ledger.priorityLastHalfHour))
+        for item in individual {
+            banners.append(
+                PlannedBanner(
+                    lane: .priority, grouped: false, article: item.article, thread: key(item.article), sound: true,
+                    announces: announces(item.article)))
+            taken.insert(key(item.article))
+        }
+        let newOverflow = keys.dropFirst(individual.count).map {
+            QueuedPriority(event: key($0.article), title: $0.article.title, score: $0.score, leadKey: lead($0.article))
+        }
+        let waiting = ledger.priorityQueue.filter { item in
+            !newOverflow.contains { $0.event == item.event } && ledger.announced[item.event]?.lane != .priority
+        }
+        let overflow = (newOverflow + waiting).sorted { $0.score > $1.score }
+        guard !overflow.isEmpty else { return [] }
+        if ledger.priorityGroupLastHalfHour { return newOverflow }
+        banners.append(
+            PlannedBanner(
+                lane: .priority, grouped: true, title: "Major news", headlines: overflow.prefix(2).map(\.title),
+                count: overflow.count, thread: "priority", sound: true,
+                announces: Dictionary(overflow.map { ($0.event, $0.leadKey) }) { first, _ in first }))
+        taken.formUnion(overflow.map(\.event))
+        return []
+    }
+
+    /// One banner per feed and window, standing for every pending story, once one of them is fresh.
+    mutating func planStarred(_ pending: [String: [ScoredStory]]) {
+        for feed in delivery.starredFeedURLs.sorted() {
+            if let last = delivery.ledger.lastStarred[feed],
+                delivery.now.timeIntervalSince(last) < NotificationService.starredWindow
+            {
+                continue
+            }
+            planStarredFeed(feed, items: (pending[feed] ?? []).sorted { $0.score > $1.score })
+        }
+    }
+
+    private mutating func planStarredFeed(_ feed: String, items: [ScoredStory]) {
+        var seen = Set<String>()
+        let freshItems = items.filter {
+            !taken.contains(key($0.article)) && fresh($0.article, in: .starred) && seen.insert(key($0.article)).inserted
+        }
+        guard let top = freshItems.first else { return }
+        let covered = freshItems.reduce(into: [String: String]()) { $0.merge(announces($1.article)) { a, _ in a } }
+        if items.count == 1 {
+            banners.append(
+                PlannedBanner(
+                    lane: .starred, grouped: false, article: top.article, feedURL: feed, thread: key(top.article),
+                    sound: top.score >= NotificationService.breakingScore, announces: covered))
+        } else {
+            let rest = items.filter { item in !freshItems.contains { $0.article.id == item.article.id } }
+            banners.append(
+                PlannedBanner(
+                    lane: .starred, grouped: true, title: NotificationService.sourceName(top.article),
+                    headlines: (freshItems + rest).prefix(2).map(\.article.title), count: items.count, feedURL: feed,
+                    thread: "starred-\(feed)", sound: false, announces: covered))
+        }
+        taken.formUnion(freshItems.map { key($0.article) })
+    }
+
+    /// Today's qualification, up to the rolling hour's remaining allowance.
+    mutating func planNormal(_ keys: [ScoredStory]) {
+        let allowance = max(0, NotificationService.normalLimit - delivery.ledger.normalLastHour)
+        for item in keys.filter({ !taken.contains(key($0.article)) }).sorted(by: { $0.score > $1.score })
+            .prefix(allowance)
+        {
+            banners.append(
+                PlannedBanner(
+                    lane: .normal, grouped: false, article: item.article, thread: key(item.article),
+                    sound: item.score >= NotificationService.breakingScore, announces: announces(item.article)))
+        }
     }
 }
