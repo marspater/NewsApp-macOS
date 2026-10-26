@@ -111,16 +111,20 @@ final class NotificationService: Sendable {
 
     /// One report per event, the one that scores highest, in first-seen order, with its score; stories outside any
     /// event stand alone. Several publishers covering one story then notify once instead of once each (#523), in
-    /// every mode (#587). Scoring tags every article once, so it runs off the main actor.
-    @concurrent nonisolated static func representatives(of articles: [FeedArticle], events: [String: String]) async
-        -> [(article: FeedArticle, score: Double)]
-    {
+    /// every mode (#587). A starred feed's report outranks any other, so triage still sees it as starred (#588).
+    /// Scoring tags every article once, so it runs off the main actor.
+    @concurrent nonisolated static func representatives(
+        of articles: [FeedArticle], events: [String: String], starredFeedURLs: Set<String> = []
+    ) async -> [(article: FeedArticle, score: Double)] {
+        func rank(_ article: FeedArticle, _ score: Double) -> (Int, Double) {
+            (article.identityFeedURL.map(starredFeedURLs.contains) == true ? 1 : 0, score)
+        }
         var order: [String] = []
         var best: [String: (article: FeedArticle, score: Double)] = [:]
         for article in articles {
             let key = events[article.id] ?? article.id
             let score = shared.computeImportance(title: article.title, description: article.description)
-            if let current = best[key], current.score >= score { continue }
+            if let current = best[key], rank(current.article, current.score) >= rank(article, score) { continue }
             if best[key] == nil { order.append(key) }
             best[key] = (article, score)
         }
@@ -177,7 +181,8 @@ final class NotificationService: Sendable {
     /// triaged reports one at a time, a pause apart, each threaded under its story.
     func triageAndNotify(newArticles: [FeedArticle], delivery: NotificationDelivery) async {
         guard !newArticles.isEmpty else { return }
-        let ranked = await Self.representatives(of: newArticles, events: delivery.events)
+        let ranked = await Self.representatives(
+            of: newArticles, events: delivery.events, starredFeedURLs: delivery.starredFeedURLs)
 
         switch delivery.mode {
         case .minimal:
