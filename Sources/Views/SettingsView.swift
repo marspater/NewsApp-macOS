@@ -442,6 +442,13 @@ struct SettingsView: View {
                 }
             }
 
+            Section(header: sectionHeader("Topic Sets")) {
+                Text("Each set mutes a fixed list of words and phrases together, as whole words, with one switch.")
+                    .font(AppTypography.caption)
+                    .foregroundStyle(AppColor.secondaryText)
+                ForEach(MuteTopicSet.all, content: topicSetRow)
+            }
+
             Section {
                 Button("Unmute All…", role: .destructive) { confirmsUnmuteAll = true }
                     .disabled(appSettings.muteRules.isEmpty)
@@ -457,7 +464,29 @@ struct SettingsView: View {
         .confirmationDialog("Unmute every source and topic?", isPresented: $confirmsUnmuteAll) {
             Button("Unmute All", role: .destructive) { appSettings.clearMuting() }
         } message: {
-            Text("Muted stories return to every list.")
+            Text("Muted stories return to every list, and every topic set is switched off.")
+        }
+    }
+
+    /// One switch per fixed topic set, with its phrases and, when on, how many stored stories it hides.
+    private func topicSetRow(_ topicSet: MuteTopicSet) -> some View {
+        let isOn = appSettings.muteRules.topicSets.contains(topicSet.id)
+        let count = muteCounts.topicSets[topicSet.id] ?? 0
+        let binding = Binding(get: { isOn }, set: { appSettings.setTopicSet(topicSet.id, muted: $0) })
+        return Toggle(isOn: binding) {
+            VStack(alignment: .leading, spacing: AppSpacing.textStack) {
+                Text(topicSet.title)
+                    .foregroundStyle(AppColor.primaryText)
+                Text(topicSet.phrases.joined(separator: ", "))
+                    .font(AppTypography.caption)
+                    .foregroundStyle(AppColor.secondaryText)
+                    .lineLimit(2)
+                if isOn {
+                    Text(count == 1 ? "Hides 1 stored story" : "Hides \(count) stored stories")
+                        .font(AppTypography.caption)
+                        .foregroundStyle(AppColor.secondaryText)
+                }
+            }
         }
     }
 
