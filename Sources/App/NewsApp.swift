@@ -1,3 +1,4 @@
+import AppIntents
 import AppKit
 import SwiftUI
 import UserNotifications
@@ -21,6 +22,7 @@ struct NewsApp: App {
     @FocusedValue(\.readerActions) private var readerActions
     @FocusedValue(\.listActions) private var listActions
     @FocusedValue(\.addFeedSubscription) private var addFeedSubscription
+    @Environment(\.openWindow) private var openWindow
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @StateObject private var appContainer = AppContainer.shared
     @StateObject private var appSettings = AppSettings.shared
@@ -219,6 +221,49 @@ struct NewsApp: App {
                 .preferredColorScheme(themeManager.appearance.colorScheme)
                 .modifier(SystemSettingsOverrideModifier())
         }
+
+        MenuBarExtra(
+            isInserted: Binding(
+                get: { appSettings.showsMenuBarExtra },
+                set: { appSettings.setShowsMenuBarExtra($0) }
+            )
+        ) {
+            Text(menuBarStatusCopy)
+                .monospacedDigit()
+
+            Divider()
+
+            Button("Refresh") {
+                NotificationCenter.default.post(name: .refreshFeedsCommand, object: nil)
+            }
+            .keyboardShortcut("r", modifiers: .command)
+
+            Button("Open News") {
+                NSApp.activate()
+                openWindow(id: "main")
+            }
+        } label: {
+            Label {
+                if let badgeText = menuBarBadgeCopy {
+                    Text(badgeText).monospacedDigit()
+                } else {
+                    Text("News")
+                }
+            } icon: {
+                Image(systemName: "newspaper")
+            }
+        }
+    }
+
+    private var menuBarBadgeCopy: String? {
+        let unread = articleStore.unreadCount
+        return unread > 0 ? "\(unread)" : nil
+    }
+
+    private var menuBarStatusCopy: String {
+        let unread = articleStore.unreadCount
+        guard unread > 0 else { return "No Unread Stories" }
+        return "\(unread) Unread \(unread == 1 ? "Story" : "Stories")"
     }
 }
 
@@ -283,13 +328,28 @@ struct ListViewCommands: Commands {
 struct KeyboardShortcutsCommands: Commands {
     static let windowID = "keyboard-shortcuts"
     @Environment(\.openWindow) private var openWindow
+    @ObservedObject private var updateChecker = UpdateChecker.shared
 
     var body: some Commands {
         CommandGroup(after: .help) {
             Button("Keyboard Shortcuts") {
                 openWindow(id: Self.windowID)
             }
+            if updateChecker.updateAvailable {
+                Divider()
+                Button(updateMenuItemTitle) {
+                    updateChecker.openReleasePage()
+                }
+            }
         }
+    }
+
+    private var updateMenuItemTitle: String {
+        if let version = updateChecker.latestVersionString {
+            let formatted = version.hasPrefix("v") || version.hasPrefix("V") ? version : "v\(version)"
+            return "Update Available (\(formatted))…"
+        }
+        return "Update Available…"
     }
 }
 
@@ -297,11 +357,24 @@ struct KeyboardShortcutsCommands: Commands {
 class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
     func applicationDidFinishLaunching(_ _: Notification) {
         CacheManager.shared.configureOfflineCache()
+        NotificationActionIdentifier.registerCategories()
         // Request Notification Permissions on App Launch
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { _, _ in
             // Notification authorization handled silently
         }
         UNUserNotificationCenter.current().delegate = self
+
+        NewsShortcuts.updateAppShortcutParameters()
+
+        Task { @MainActor in
+            await UpdateChecker.shared.checkForUpdates(userInitiated: false)
+        }
+    }
+
+    func applicationDidBecomeActive(_ _: Notification) {
+        Task { @MainActor in
+            await UpdateChecker.shared.checkForUpdates(userInitiated: false)
+        }
     }
 
     func applicationWillTerminate(_ _: Notification) {
@@ -321,22 +394,28 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
         completionHandler([.banner, .sound])
     }
 
-    // Handle notification click — deep link to the article
+    // Handle notification actions and default click (#560)
     nonisolated func userNotificationCenter(
         _ _: UNUserNotificationCenter, didReceive response: UNNotificationResponse,
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
+        let actionIdentifier = response.actionIdentifier
         let userInfo = response.notification.request.content.userInfo
-        let articleID = userInfo["articleID"] as? String
-        if let articleLink = userInfo["articleLink"] as? String {
-            Task { @MainActor in
-                // Bring app to front
-                NSApp.activate()
-                ArticleStore.shared.pendingNavigation = .init(
-                    articleID: articleID,
-                    link: articleLink
-                )
-            }
+        var sendableUserInfo: [String: String] = [:]
+        if let id = userInfo["articleID"] as? String {
+            sendableUserInfo["articleID"] = id
+        }
+        if let link = userInfo["articleLink"] as? String {
+            sendableUserInfo["articleLink"] = link
+        }
+        Task { @MainActor in
+            await NotificationActionRouter.route(
+                actionIdentifier: actionIdentifier,
+                userInfo: sendableUserInfo,
+                articleStore: ArticleStore.shared,
+                readManager: AppContainer.shared.readManager,
+                savedStories: AppContainer.shared.savedStories
+            )
         }
         completionHandler()
     }

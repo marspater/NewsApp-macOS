@@ -45,6 +45,7 @@ SWIFT_SOURCES=(
     Sources/Storage/DatabaseEngine.swift
     Sources/Storage/DatabaseEngine+Events.swift
     Sources/Storage/MigrationCoordinator.swift
+    Sources/Storage/SpotlightIndexer.swift
     Sources/Storage/ArticleStore.swift
     Sources/Intelligence/ArticleIntelligence.swift
     Sources/Intelligence/OverviewPassageSelector.swift
@@ -105,6 +106,9 @@ SWIFT_SOURCES=(
     Sources/Views/ArticleWebView.swift
     Sources/App/NewsSignposts.swift
     Sources/App/UpdateChecker.swift
+    Sources/App/NewsURLParser.swift
+    Sources/App/Intents.swift
+    Sources/App/NotificationActionRouter.swift
     Sources/App/NewsApp.swift
 )
 
@@ -150,9 +154,33 @@ cat > "${CONTENTS_DIR}/Info.plist" << PLIST_EOF
     <true/>
     <key>NSHighResolutionCapable</key>
     <true/>
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleTypeRole</key>
+            <string>Viewer</string>
+            <key>CFBundleURLName</key>
+            <string>com.marspater.news.feed</string>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>feed</string>
+            </array>
+        </dict>
+        <dict>
+            <key>CFBundleTypeRole</key>
+            <string>Viewer</string>
+            <key>CFBundleURLName</key>
+            <string>com.marspater.news.story</string>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>news</string>
+            </array>
+        </dict>
+    </array>
 </dict>
 </plist>
 PLIST_EOF
+plutil -lint "${CONTENTS_DIR}/Info.plist" >/dev/null
 
 # Code signing with Hardened Runtime
 echo "🔐 Signing binary with Hardened Runtime..."
