@@ -65,6 +65,7 @@ NEWS_ENERGY=0 ./test.sh --matcher-regressions # The rules-only pass of Low Power
 ./build.sh                        # arm64 app with ad-hoc verification signing
 NEWS_LIVE_READER_CHECK=1 ./test.sh # Optional controlled-network and publisher checks
 ./test.sh --model-outcome-check   # Opt-in, local: the real on-device model over authored violent reports; outcome labels in the NewsTextModel log category (#508)
+NEWS_SNAPSHOT_DB=copy.sqlite3 NEWS_EVENT_OUTPUT=DIR ./test.sh --export-categories # Local: 200-story sample with publisher and assigned categories for the topic-classifier audit (#546); NEWS_CATEGORY_IDS=file re-exports a labelled sample
 NEWS_SNAPSHOT_DB=copy.sqlite3 NEWS_EVENT_OUTPUT=DIR NEWS_EVENT_CORPUS=corpus.json ./test.sh --export-pairs # Local: mine pair-model training pairs from library copies, corpus left out (#525)
 ~/news-eval/venv/bin/python script/training/train_pair_model.py DIR/pairs.csv OUT # Local only: retrain the pair model (script/training/requirements.txt); a new model bumps EventMatcher.version
 NEWS_LIVE_CATALOG_CHECK=1 ./test.sh # Optional: fetch every catalog feed through the app's own networking and parsers

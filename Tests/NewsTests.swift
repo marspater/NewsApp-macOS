@@ -502,6 +502,10 @@ struct NewsTests {
             try await exportTrainingPairs()
             return
         }
+        if CommandLine.arguments.contains("--export-categories") {
+            try await exportCategorySample()
+            return
+        }
         if CommandLine.arguments.contains("--event-corpus") {
             guard let path = ProcessInfo.processInfo.environment["NEWS_EVENT_CORPUS"] else {
                 print("❌ Set NEWS_EVENT_CORPUS to a labeled event corpus JSON file")
@@ -1834,7 +1838,7 @@ struct NewsTests {
                 node.isReaderExcluded, excluded, "Cached exclusion regex preserves token boundaries and case matching")
         }
         let topic = await ArticleClassifier.shared.classify(
-            title: "NASA launches space telescope", description: "Astronomy mission", allowFoundationModels: false)
+            title: "NASA launches space telescope", description: "Astronomy mission")
         assertEqual(topic.category, "Science", "Cheap ingestion classification works without generative inference")
         let pipeline = ContentExtractionPipeline.shared
         assertEqual(
@@ -8957,11 +8961,8 @@ struct NewsTests {
                 evidence: evidence)
         }
         if let harsh = active.first(where: { ($0.title + $0.description).lowercased().contains("killed") }) {
-            let classification = await ArticleClassifier(textModel: measuredModel).classify(
-                title: harsh.title, description: harsh.description)
             let analysis = try await ArticleAnalyzer(textModel: measuredModel).analyze(
                 title: harsh.title, content: harsh.fullContent ?? harsh.description)
-            report["sensitiveClassificationUsedModel"] = classification.evidence.contains("foundation_model") ? 1 : 0
             report["sensitiveAnalysisUsedModel"] = analysis.modelIdentifier == "apple.foundation-model" ? 1 : 0
             try encoder.encode(analysis).write(to: directory.appendingPathComponent("analysis-private.json"))
         }
@@ -12647,6 +12648,69 @@ struct NewsTests {
         return lines.count - 1
     }
 
+    /// Writes a sample of stored stories for the topic-classifier audit (#546) to `NEWS_EVENT_OUTPUT/categories.csv`:
+    /// id, headline, summary, publisher, the publisher's own category, the category the deterministic classifier
+    /// assigns now and the one stored in the library. `NEWS_SNAPSHOT_DB` is a library copy (a file inside an app
+    /// container is refused). `NEWS_CATEGORY_SAMPLE` sets the size (default 200) and `NEWS_CATEGORY_SEED` the fixed
+    /// pseudo-random order, so the same sample is drawn before and after a rule change; `NEWS_CATEGORY_IDS`, a file
+    /// with one story id per line, exports exactly those stories instead, whatever their age. The file carries
+    /// headlines, so it goes to the private directory only and is never overwritten; labels are kept beside it, never
+    /// in the repository.
+    static func exportCategorySample() async throws {
+        let environment = ProcessInfo.processInfo.environment
+        guard let snapshot = environment["NEWS_SNAPSHOT_DB"], let output = environment["NEWS_EVENT_OUTPUT"] else {
+            throw StoryCorpus.Failure.invalid("--export-categories needs NEWS_SNAPSHOT_DB and NEWS_EVENT_OUTPUT")
+        }
+        guard !snapshot.contains("/Library/Containers/") else {
+            throw StoryCorpus.Failure.invalid("Export from a copy of the library, never the live file")
+        }
+        let size = Int(environment["NEWS_CATEGORY_SAMPLE"] ?? "") ?? 200
+        let seed = environment["NEWS_CATEGORY_SEED"] ?? "546"
+        let wanted = try environment["NEWS_CATEGORY_IDS"].map {
+            try String(contentsOfFile: $0, encoding: .utf8).split(whereSeparator: \.isNewline).map(String.init)
+        }
+        let file = try StoryCorpus.privateDirectory(output).appendingPathComponent("categories.csv")
+        let db = DatabaseEngine(path: snapshot)
+        try await db.open()
+        let rows = try await db.eventRows(
+            """
+            SELECT a.id, a.title, coalesce(a.description, ''), a.source, coalesce(a.category, ''), a.content,
+                coalesce(e.category, '')
+            FROM articles a LEFT JOIN article_enrichment e ON e.article_id = a.id
+            WHERE a.published_at >= ? ORDER BY a.id;
+            """,
+            // A listed sample is exported whatever its age, so it can be measured again on a later day.
+            [.real(wanted == nil ? Date().addingTimeInterval(-14 * 86400).timeIntervalSince1970 : 0)])
+        await db.close()
+        // A fixed pseudo-random order (FNV-1a of the seed and the id), then the first `size` rows.
+        func order(_ id: String) -> UInt64 {
+            (seed + id).utf8.reduce(14_695_981_039_346_656_037) { ($0 ^ UInt64($1)) &* 1_099_511_628_211 }
+        }
+        func quoted(_ value: String) -> String { "\"" + value.replacingOccurrences(of: "\"", with: "\"\"") + "\"" }
+        let selected: [[String?]]
+        if let wanted {
+            let byID = Dictionary(rows.compactMap { row in row[0].map { ($0, row) } }, uniquingKeysWith: { a, _ in a })
+            selected = wanted.compactMap { byID[$0] }
+        } else {
+            selected = Array(rows.sorted { order($0[0] ?? "") < order($1[0] ?? "") }.prefix(size))
+        }
+        var lines = ["id,title,summary,publisher,publisher_category,assigned,stored"]
+        for row in selected {
+            let title = row[1] ?? ""
+            let description = row[2] ?? ""
+            let assigned =
+                NaturalLanguageTopicClassifier.classifyContent(title: title, description: description, text: row[5])?
+                .category ?? NewsCategory.world.rawValue
+            lines.append(
+                [row[0] ?? "", title, description, row[3] ?? "", row[4] ?? "", assigned, row[6] ?? ""].map(quoted)
+                    .joined(separator: ","))
+        }
+        try StoryCorpus.writePrivate(Data(lines.joined(separator: "\n").utf8), to: file, replacing: false)
+        print(
+            "    exported \(selected.count) of \(rows.count) stories \(wanted == nil ? "from the last 14 days" : "listed") for the category audit (#546)"
+        )
+    }
+
     /// Mines labelled pairs for the pair model (#525) from copies of real libraries into `NEWS_EVENT_OUTPUT/pairs.csv`.
     /// `NEWS_SNAPSHOT_DB` lists the copies, colon-separated; a file inside an app container is refused, so the live
     /// library is never opened. Positives: two English reports from different publishers in one stored event that the
@@ -15838,8 +15902,7 @@ struct NewsTests {
         let rssResult = await classifier.classify(
             title: "Generic Headline With No Clues",
             description: "Some description here",
-            rssCategory: "Technology",
-            allowFoundationModels: false
+            rssCategory: "Technology"
         )
         assertEqual(rssResult.category, "Technology", "RSS hint should determine category")
         assertTrue(rssResult.confidence >= 0.90, "RSS hint should provide >= 0.90 confidence")
@@ -15849,8 +15912,7 @@ struct NewsTests {
         let techResult = await classifier.classify(
             title: "Apple Announces M-Series Silicon Processor With Neural Acceleration",
             description: "Novel semiconductor architecture speeds machine learning and developer workflows",
-            rssCategory: nil,
-            allowFoundationModels: false
+            rssCategory: nil
         )
         assertEqual(techResult.category, "Technology", "Strong tech keywords must classify as Technology")
         assertTrue(techResult.confidence >= 0.70, "Confidence should exceed 0.70")
@@ -15860,8 +15922,7 @@ struct NewsTests {
         let genericResult = await classifier.classify(
             title: "Unspecified Developments Reported",
             description: "Updates will follow as events occur",
-            rssCategory: nil,
-            allowFoundationModels: false
+            rssCategory: nil
         )
         assertTrue(!genericResult.category.isEmpty, "Default category must be assigned")
     }
@@ -15949,8 +16010,7 @@ struct NewsTests {
             let result = await ArticleClassifier.shared.classify(
                 title: item.title,
                 description: item.description,
-                rssCategory: nil,
-                allowFoundationModels: false
+                rssCategory: nil
             )
             if result.category == item.expectedCategory.rawValue {
                 correctCount += 1
@@ -16225,14 +16285,9 @@ struct NewsTests {
     static func testPlainTextGeneration(fixtureHost: String) async throws {
         print("  - Testing Plain Text Generation, Support Gates and Refusal Fallbacks...")
         testModelErrorMapping()
-        assertTrue(ArticleTextAnswer.classification("World|0.91") != nil, "Fixed category text parses")
-        for bad in ["World|NaN", "World|1.1", "Unknown|0.9", "World|0.9|extra", "I refuse"] {
-            assertEqual(ArticleTextAnswer.classification(bad)?.category, nil, "Malformed classification is rejected")
-        }
-        let model = NewsTextModel { _, _ in "World|0.91" }
-        let classified = await ArticleClassifier(textModel: model).classify(
-            title: "A developing report", description: "Reported developments")
-        assertEqual(classified.evidence, ["foundation_model"], "Classifier uses the plain-text model answer")
+        let classified = await ArticleClassifier().classify(
+            title: "Airstrikes hit the port", description: "Reported developments")
+        assertEqual(classified.category, "World", "Ingestion classification is deterministic; no model stage remains")
         let text =
             "The bridge reopened after engineers completed repairs. Traffic resumed | during the morning. The council approved the repairs."
         let analysisModel = NewsTextModel { _, _ in
@@ -18234,6 +18289,107 @@ struct NewsTests {
         assertEqual(
             NewsCategory.match(from: "International global foreign diplomat summit"), .world,
             "Diplomacy resolves to world")
+
+        // Misfiles measured on a labelled 200-story library sample (#546, audit of 24 October 2026).
+        // No result is World, as every caller reads it (`news_topic`, `ArticleClassifier`).
+        func content(_ title: String, _ description: String = "", text: String? = nil) -> String {
+            NaturalLanguageTopicClassifier.classifyContent(title: title, description: description, text: text)?
+                .category ?? NewsCategory.world.rawValue
+        }
+        assertEqual(
+            content("Drone strike on Abyei market near Sudan-South Sudan border kills 150"), "World",
+            "A marketplace is not the stock market")
+        assertEqual(content("Half a million Palestinians lose food aid"), "World", "Food aid is not Food")
+        assertEqual(content("Toulouse v Troyes Ligue 1 game postponed"), "Sports", "A league name is a Sports cue")
+        assertEqual(
+            content("Watkins-inspired Al-Hilal end Al-Ittihad's unbeaten run in Saudi Clasico"), "Sports",
+            "World loses a tie: a Saudi derby is Sports")
+        assertEqual(
+            content("Macron takes aim at Trump for using France riots for election gain"), "World",
+            "A foreign place in the headline outranks election cues")
+        assertEqual(
+            content("Trump praises man who punched protester at rally in South Carolina"), "Politics",
+            "National politics stays Politics")
+        assertEqual(
+            content("New White House press secretary says China lacked proper toilets"), "Politics",
+            "A domestic cue keeps Politics despite a foreign name")
+        assertEqual(content("Kenya confirms four new Ebola cases, bringing total to seven"), "Health", "Ebola")
+        assertEqual(
+            content("Comcast loses more customers, claims other ISPs' cheap prices are irrational"), "Business",
+            "Customers and prices are Business")
+        assertEqual(content("Pikmin 4 is $20 off ahead of its Nintendo Switch 2 update"), "Technology", "Games")
+        assertEqual(content("Deforestation in Brazil's Amazon falls to all-time low"), "Science", "Environment")
+        assertEqual(content("Apple Music has a new logo"), "Technology", "Apple stays a technology cue")
+        assertEqual(content("Grandma's apple pie recipe wins the county bake-off"), "Food", "Apple alone is no cue")
+        assertEqual(content("Apple's iPhone sales rise"), "Technology", "The possessive names the company")
+        // Second pass (#546, 26 October): place and leader names count half, new topic cues; measured on the same
+        // sample and on a fresh 200-story draw.
+        assertEqual(
+            content(
+                "Kenya confirms new Ebola cases as Congo outbreak spreads",
+                "The first infections passed on inside Kenya, officials in Nairobi and Kampala said."), "Health",
+            "A place says where, Ebola says what")
+        assertEqual(
+            content(
+                "Omani label takes its ballerina heels to Paris",
+                "The footwear label showed its new collection during Paris Fashion Week."), "Fashion",
+            "Paris is where, footwear is what")
+        assertEqual(
+            content(
+                "UN warns El Nino could be strongest on record",
+                "The UN's aid chief says the humanitarian system cannot cope alone."), "Science",
+            "An international body is an actor, El Nino the topic")
+        assertEqual(
+            content(
+                "Trump's losing battle with green energy",
+                "The war and the AI boom strengthen the case for clean power, despite the president's efforts."),
+            "Politics", "President is no World cue")
+        assertEqual(
+            content(
+                "Casualties feared as multi-storey building collapses in Nairobi",
+                "The building came down in a densely populated business and residential area."), "World",
+            "A building collapse is world news, not Business")
+        assertEqual(
+            content("Fuel dealers urge consumers to avoid panic buying", "Dealers say pricing remains an issue."),
+            "Business", "Consumers are a Business cue")
+        assertEqual(
+            content(
+                "Lee Chang Dong ponders the ethics of the camera",
+                "His seventh feature film is inspired by true events.",
+                text: "The film follows a factory worker; the director shot the feature film in Seoul."),
+            "Entertainment", "A feature film outweighs the camera")
+        assertEqual(
+            content(
+                "Australian politician who was hit by car has lost both legs",
+                "She is receiving treatment in a Melbourne hospital."), "World",
+            "An attack on a foreign politician is World")
+        assertEqual(
+            content("Canadian diplomats advised to avoid appearing with midterm candidates"), "World",
+            "Foreign diplomats outrank a midterm cue")
+        assertEqual(
+            content("Tangier's timeless trattoria enters a new era", "The reinvention of a much-loved hang-out."),
+            "Food", "A trattoria is Food")
+        assertEqual(
+            content(
+                "Review: Crystal Lake drags at first, then hits a vein", "The prequel series is based on Jason's mom.",
+                text: "Peacock series Crystal Lake doesn't feel like a Friday the 13th movie at first."),
+            "Entertainment", "A prequel series is Entertainment")
+        assertEqual(
+            content(
+                "Why an old role-playing game still has thousands of active players",
+                "The single-player RPG is just OK, but players don't mind."), "Technology", "An RPG is a game")
+        assertEqual(
+            content(
+                "Derron prepares to defend her Dubai title", "She faces a field of 20 professional triathletes.",
+                text: "Derron won the triathlon in Dubai last year."), "Sports", "Triathlon is Sports")
+        assertEqual(
+            content(
+                "Why is the UK at the forefront of AI-driven job cuts?",
+                "AI-linked job losses in the UK run at twice the rate of the US and Germany."), "Technology",
+            "AI job cuts in the UK are Technology")
+        assertEqual(
+            content("DJI's vlogging camera is a good deal at under $400"), "Technology",
+            "A camera deal stays Technology")
     }
 
     @MainActor
