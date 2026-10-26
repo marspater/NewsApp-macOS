@@ -75,7 +75,7 @@ Review of the first pass found 9 stories it had broken (right on main, wrong aft
 asked for general rules plus a check against overfitting: the 83.0 % was measured on the stories the rules were written
 from.
 
-### Rule changes
+### Second-pass rule changes
 
 - Place, leader and international-body names (`worldPlaces`: countries, capitals, "Putin", "Macron", "UN", …) say
   where a story happens, not what it is about, so they count half as much as a topic cue. A story with no other topic
@@ -90,7 +90,7 @@ from.
 - Tried and dropped: "political"/"politics" as Politics cues (they pulled foreign political crises into Politics), and
   a 1.5 score threshold so a single summary cue classifies (176/200 instead of 181/200).
 
-### Result
+### Second-pass result
 
 Sample 2 is a fresh draw from a newer read-only library copy (26 October, 6,400 stories, the 14 days before 26
 October; `NEWS_CATEGORY_SEED=2026-10-26`, the 15 stories already in sample 1 skipped), labelled by Claude with the same
@@ -115,7 +115,7 @@ stories filed as World for lack of any cue (Business 8, Entertainment 7, Technol
 politics stories that name a foreign country or leader (5 Politics as World, 5 World as Politics both ways), and gadget
 deals read as Business (3). These need a broader vocabulary or a different method, not more single cues.
 
-### Remaining limits
+### Second-pass limits
 
 - One labeller (Claude) for both samples; Mars spot-checks. Borderline protocol cases (a US politician's statement
   about a foreign country, royals, energy projects) can be read either way.
