@@ -9,11 +9,17 @@ import SwiftUI
 
 // MARK: - Carousel Clock Protocol & Implementations
 
+/// Injectable timing clock abstraction for the Situation Board hero carousel.
 public protocol CarouselClock: Sendable {
+    /// Suspends the current task for the specified duration in seconds.
+    ///
+    /// - Parameter seconds: The duration to suspend.
     func sleep(seconds: Double) async throws
 }
 
+/// Standard continuous system clock implementation of ``CarouselClock``.
 public struct ContinuousCarouselClock: CarouselClock {
+    /// Initializes a standard continuous clock.
     public init() {}
     public func sleep(seconds: Double) async throws {
         try await Task.sleep(for: .seconds(seconds))
@@ -110,6 +116,7 @@ enum BriefingFactExtractor {
 
 // MARK: - World Tension Strip Component
 
+/// Compact horizontal dashboard strip displaying the World Tension score, 7-day sparkline, and driving headlines.
 struct BriefingTensionStripView: View {
     let reading: WorldTensionReading?
     let history: [WorldTensionReading]
@@ -344,12 +351,17 @@ struct BriefingTensionSparklineView: View {
 
 // MARK: - Dense Story Tile Component
 
+/// Presentation state configuration for a ``BriefingTileView``.
 struct BriefingTileState: Equatable, Sendable {
+    /// Whether the tile currently holds keyboard focus or selection.
     var isSelected: Bool = false
+    /// Whether the story has been marked as read.
     var isRead: Bool = false
+    /// Whether the story is bookmarked in Saved Stories.
     var isSaved: Bool = false
 }
 
+/// Dynamic visual styling properties calculated for a story tile.
 struct BriefingTileAppearance {
     let border: Color
     let width: CGFloat
@@ -358,6 +370,7 @@ struct BriefingTileAppearance {
     let y: CGFloat
 }
 
+/// Dense story card displaying a categorized headline, cited fact highlight, and source badge.
 struct BriefingTileView: View {
     let article: FeedArticle
     let eventSummary: EventFeedSummary?

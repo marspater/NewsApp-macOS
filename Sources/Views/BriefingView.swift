@@ -9,10 +9,15 @@ import SwiftUI
 
 // MARK: - Actions
 
+/// Action callback bundle for user interactions within the Situation Board.
 struct BriefingActions {
+    /// Callback invoked to open a story article.
     let onOpenArticle: (FeedArticle) -> Void
+    /// Callback invoked to open an event overview.
     let onOpenEvent: (EventFeedSummary) -> Void
+    /// Callback invoked to request generation of a fresh daily briefing.
     let onStartNewBriefing: () -> Void
+    /// Callback invoked to navigate back to the Today timeline.
     let onBackToToday: () -> Void
 
     init(
@@ -28,8 +33,9 @@ struct BriefingActions {
     }
 }
 
-// MARK: - Hero Carousel Component (Milestone 3 Stub & Architecture)
+// MARK: - Hero Carousel Component
 
+/// Hero carousel component displaying the top 3 to 5 ranked daily stories with a 45-second auto-advance cycle.
 struct BriefingHeroCarouselView: View {
     let stories: [FeedArticle]
     let clock: any CarouselClock
@@ -133,8 +139,9 @@ struct BriefingHeroCarouselView: View {
     }
 }
 
-// MARK: - Story Tiles Grid Component (Milestone 3 Stub)
+// MARK: - Story Tiles Grid Component
 
+/// Responsive grid component arranging dense story tiles across adaptive columns.
 struct BriefingTileGridView: View {
     let entries: [FeedEntry]
     let onOpenArticle: (FeedArticle) -> Void
@@ -185,8 +192,12 @@ struct BriefingTileGridView: View {
     }
 }
 
-// MARK: - Root Briefing Situation Board Shell (Milestone 3 Stub)
+// MARK: - Root Briefing Situation Board Shell
 
+/// Root Situation Board view presenting the finite daily Briefing (Epic R).
+///
+/// Features a prominent 45-second auto-advancing hero carousel, a live World Tension strip with 7-day
+/// sparkline trend, and dense categorized story tiles with cited highlights.
 struct BriefingView: View {
     let entries: [FeedEntry]
     let briefing: FiniteBriefing?
