@@ -30,9 +30,13 @@ struct NotificationDelivery: Sendable {
     /// 24 h ago, whichever is latest. Includes this pass's new stories from the feed.
     var starredPending: [String: [FeedArticle]] = [:]
     /// Called after each banner posts, so the pass records it before the next.
-    var record: @Sendable (PlannedBanner) async -> Void = { _ in }
+    var record: @Sendable (PlannedBanner) async -> Void = { _ in
+        // Without a library (tests, summary modes) there is nothing to record.
+    }
     /// Called with priority keys over both priority limits, which wait for the next grouped priority banner.
-    var queue: @Sendable ([QueuedPriority]) async -> Void = { _ in }
+    var queue: @Sendable ([QueuedPriority]) async -> Void = { _ in
+        // Without a library there is no queue to keep.
+    }
 }
 
 /// Notification lanes (#665, docs/notifications.md). The raw value is stored; a higher lane wins.
@@ -336,10 +340,8 @@ final class NotificationService: Sendable {
 
     /// The body of a grouped banner: the count, then up to two headlines on their own lines.
     static func groupedBody(_ banner: PlannedBanner) -> String {
-        let count =
-            banner.lane == .priority
-            ? (banner.count == 1 ? "1 more major story" : "\(banner.count) more major stories")
-            : (banner.count == 1 ? "1 new story" : "\(banner.count) new stories")
+        let noun = banner.lane == .priority ? "more major " : "new "
+        let count = "\(banner.count) \(noun)\(banner.count == 1 ? "story" : "stories")"
         return ([count] + banner.headlines.prefix(2)).joined(separator: "\n")
     }
 
