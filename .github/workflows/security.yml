@@ -9,6 +9,8 @@ on:
       - 'LICENSE'
   # `closed` starts a run in the PR's concurrency group, which cancels its in-flight run
   # so merged PRs stop holding macOS runners; every job skips on that run.
+  # The group keys on the PR number: a merged PR's `closed` run has `github.ref` set to
+  # main, so a ref-keyed group would cancel main's run instead of the PR's.
   pull_request:
     types: [opened, synchronize, reopened, closed]
     branches: [main]
@@ -24,7 +26,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: security-${{ github.workflow }}-${{ github.ref }}
+  group: security-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
