@@ -14,6 +14,7 @@ The current release simplification uses existing #102 labeled tune/English holdo
 
 ```sh
 ./test.sh                         # Full regressions, including parser-to-embedding/clustering integration; also run by the commit hook
+NEWS_TEST_FORCE=1 ./test.sh       # A plain ./test.sh skips the Swift runner when the same inputs already passed on this machine; this reruns it
 ./test.sh --parsing-regressions   # Focused offline HTML/feed compatibility and safety checks
 script/format.sh                  # swift-format; automatically formats staged Swift files in pre-commit hook
 script/format.sh --check          # Strict repository-wide Swift formatting lint
@@ -150,8 +151,8 @@ Keep uncommitted implementation In progress, linked PR work In review, and reser
 
 [`codemagic.yaml`](codemagic.yaml) defines `news-arm64-verification`: Apple Silicon M2, pinned Xcode 27.0 and macOS 15 deployment target. It runs the existing full offline regressions, verifies the SwiftPM `News` target, builds with `build_release.sh`, checks arm64, signature, Hardened Runtime and App Sandbox, then retains the app ZIP, SHA-256 checksum and diagnostic logs. No signing credentials are required for this ad-hoc verification artifact.
 
-Connect `marspater/NewsApp-macOS` using the Codemagic GitHub App, select YAML configuration and enable the repository webhook. Start `news-arm64-verification` manually on the configuration branch for the first run. Start later builds manually the same way. Do not make Codemagic a required check.
+Connect `marspater/NewsApp-macOS` using the Codemagic GitHub App, select YAML configuration and enable the repository webhook. Start `news-arm64-verification` manually on the configuration branch for the first run. Thereafter, pushes to `main` and pull requests targeting `main` trigger the workflow (documentation-only changes are skipped); superseded builds are cancelled. GitHub Checks reporting depends on the GitHub App integration. Enable a required Codemagic check only after its first successful hosted run.
 
-Codemagic is manual-dispatch only (no push or pull-request triggers); GitHub Actions is the pipeline of record and CircleCI adds test-impact analysis. Codemagic is an additional build runner; the existing GitHub Security workflow remains responsible for CodeQL, dependency review and secret scanning. The artifact is ad-hoc signed, not notarized or automatically published to testers or GitHub Releases. Live publisher/corpus collection and parked VoiceOver checks are not run. Configuration validation and local script execution do not establish a successful Codemagic-hosted run.
+All three providers stay (Mars, 26 Oct 2026): GitHub Actions is the pipeline of record, CircleCI adds test-impact analysis, and Codemagic runs the full suite, the format check and the release build. Codemagic is an additional build runner; the existing GitHub Security workflow remains responsible for CodeQL, dependency review and secret scanning. The artifact is ad-hoc signed, not notarized or automatically published to testers or GitHub Releases. Live publisher/corpus collection and parked VoiceOver checks are not run. Configuration validation and local script execution do not establish a successful Codemagic-hosted run.
 
 References: [Codemagic YAML](https://docs.codemagic.io/yaml-basic-configuration/yaml-getting-started/), [Xcode 27.0 runner](https://docs.codemagic.io/specs-macos/xcode-27-0/), [GitHub Checks integration](https://docs.codemagic.io/yaml-notification/github-checks/).

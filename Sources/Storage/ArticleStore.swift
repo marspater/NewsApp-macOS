@@ -11,6 +11,7 @@ final class ArticleStore: ObservableObject {
 
     let database: DatabaseEngine
     let migrationCoordinator: MigrationCoordinator?
+    let spotlightIndexer: any SpotlightIndexing
 
     @Published private(set) var articles: [FeedArticle] = []
     @Published private(set) var savedArticles: [FeedArticle] = []
@@ -26,10 +27,15 @@ final class ArticleStore: ObservableObject {
     @Published var operationError: String?
     @Published private(set) var databaseHealthNotice: String?
 
-    init(database: DatabaseEngine? = nil, migrationCoordinator: MigrationCoordinator? = nil) {
+    init(
+        database: DatabaseEngine? = nil,
+        migrationCoordinator: MigrationCoordinator? = nil,
+        spotlightIndexer: any SpotlightIndexing = SystemSpotlightIndexer.shared
+    ) {
         let db = database ?? DatabaseEngine.shared
         self.database = db
         self.migrationCoordinator = migrationCoordinator ?? (database == nil ? MigrationCoordinator(database: db) : nil)
+        self.spotlightIndexer = spotlightIndexer
 
         Task {
             await initialize()
@@ -245,9 +251,11 @@ final class ArticleStore: ObservableObject {
                     savedArticles.insert(storedArticle, at: 0)
                     savedArticleIDs.insert(storedArticle.id)
                 }
+                await spotlightIndexer.indexSavedArticle(storedArticle)
             } else {
                 savedArticles.removeAll { $0.id == storedArticle.id }
                 savedArticleIDs.remove(storedArticle.id)
+                await spotlightIndexer.removeSavedArticle(id: storedArticle.id)
             }
             let counts = try await database.counts()
             self.savedCount = counts.saved
@@ -259,6 +267,16 @@ final class ArticleStore: ObservableObject {
             logger.error("Failed to toggle save: \(error.localizedDescription)")
             return false
         }
+    }
+
+    /// Removes all saved stories from the database and clears the local Spotlight saved-stories domain (#559).
+    func removeAllSavedStories() async {
+        let currentSaved = savedArticles
+        for article in currentSaved {
+            _ = try? await database.setSaved(articleId: article.id, isSaved: false)
+        }
+        await spotlightIndexer.removeAllSavedArticles()
+        await refreshState()
     }
 
     // MARK: - Enrichment

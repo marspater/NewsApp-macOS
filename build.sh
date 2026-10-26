@@ -52,6 +52,7 @@ swiftc "${NEWS_DEPENDENCY_FLAGS[@]}" -swift-version 6 -O -parse-as-library -targ
     Sources/Storage/DatabaseEngine.swift \
     Sources/Storage/DatabaseEngine+Events.swift \
     Sources/Storage/MigrationCoordinator.swift \
+    Sources/Storage/SpotlightIndexer.swift \
     Sources/Storage/ArticleStore.swift \
     Sources/Intelligence/ArticleIntelligence.swift \
     Sources/Intelligence/OverviewPassageSelector.swift \
@@ -98,6 +99,8 @@ swiftc "${NEWS_DEPENDENCY_FLAGS[@]}" -swift-version 6 -O -parse-as-library -targ
     Sources/Views/ArticleCardView.swift \
     Sources/Views/EventCardView.swift \
     Sources/Views/ArticleListView.swift \
+    Sources/Views/BriefingComponents.swift \
+    Sources/Views/BriefingView.swift \
     Sources/Views/ArticleDetailView.swift \
     Sources/Views/ReaderSupportViews.swift \
     Sources/Views/ArticleRemoteImage.swift \
@@ -112,6 +115,9 @@ swiftc "${NEWS_DEPENDENCY_FLAGS[@]}" -swift-version 6 -O -parse-as-library -targ
     Sources/Views/ArticleWebView.swift \
     Sources/App/NewsSignposts.swift \
     Sources/App/UpdateChecker.swift \
+    Sources/App/NewsURLParser.swift \
+    Sources/App/Intents.swift \
+    Sources/App/NotificationActionRouter.swift \
     Sources/App/NewsApp.swift \
     -o "${MACOS_DIR}/${APP_NAME}"
 
@@ -143,9 +149,33 @@ cat > "${CONTENTS_DIR}/Info.plist" <<EOF
     <string>${TARGET_MACOS}</string>
     <key>NSSupportsAutomaticGraphicsSwitching</key>
     <true/>
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleTypeRole</key>
+            <string>Viewer</string>
+            <key>CFBundleURLName</key>
+            <string>com.marspater.news.feed</string>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>feed</string>
+            </array>
+        </dict>
+        <dict>
+            <key>CFBundleTypeRole</key>
+            <string>Viewer</string>
+            <key>CFBundleURLName</key>
+            <string>com.marspater.news.story</string>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>news</string>
+            </array>
+        </dict>
+    </array>
 </dict>
 </plist>
 EOF
+plutil -lint "${CONTENTS_DIR}/Info.plist" >/dev/null
 
 echo "Signing binary..."
 find "${APP_DIR}" -name ".DS_Store" -delete

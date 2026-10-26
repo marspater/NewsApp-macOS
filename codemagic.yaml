@@ -7,6 +7,23 @@ workflows:
       xcode: "27.0"
       vars:
         TARGET_MACOS: "15.0"
+    triggering:
+      events:
+        - push
+        - pull_request
+      branch_patterns:
+        - pattern: main
+          include: true
+          source: false
+      cancel_previous_builds: true
+    # Documentation-only changes need no macOS build (same rule as the GitHub workflow and CircleCI).
+    when:
+      changeset:
+        includes:
+          - '.'
+        excludes:
+          - 'docs/**'
+          - '**/*.md'
     scripts:
       - name: Verify Apple Silicon and toolchain
         script: |

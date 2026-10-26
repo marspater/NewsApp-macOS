@@ -23,6 +23,17 @@ jobs:
     steps:
       - checkout
       - run:
+          name: "Skip documentation-only changes"
+          command: |
+            # Same rule as the pre-commit hook and the GitHub paths-ignore: Markdown anywhere or anything under docs/.
+            git fetch -q origin main || true
+            base=$(git merge-base HEAD FETCH_HEAD 2>/dev/null || true)
+            if [ -z "$base" ] || [ "$base" = "$(git rev-parse HEAD)" ]; then base=HEAD~1; fi
+            if changed=$(git diff --name-only "$base" HEAD) && [ -z "$(echo "$changed" | grep -vE '(\.md$|^docs/)')" ]; then
+              echo "Documentation-only change since $base; skipping macOS tests."
+              circleci-agent step halt
+            fi
+      - run:
           name: "Ensure permissions"
           command: chmod +x test.sh build.sh build_release.sh script/build_test_runner.sh script/ci_testsuite.sh
       - run:
