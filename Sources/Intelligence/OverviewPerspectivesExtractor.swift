@@ -637,6 +637,17 @@ struct OverviewPerspectivesExtractor: Sendable {
         return clause.trimmingCharacters(in: CharacterSet.whitespaces.union(CharacterSet(charactersIn: ",")))
     }
 
+    /// A quoted fragment after its speaker ("White told The Guardian \"the amount of plankton and things\" floating in
+    /// the water would have caused them to cut a shot") runs to the end of its sentence.
+    private static func sentenceAfterShortQuote(_ quote: String, at range: NSRange, in text: NSString) -> String {
+        guard quote.split(separator: " ").count < 7, quote.first?.isLowercase == true else { return quote }
+        let start = range.location - 1
+        let rest = text.substring(from: NSMaxRange(range))
+        guard let stop = rest.range(of: #"[.!?](?=\s|$)"#, options: .regularExpression) else { return quote }
+        return text.substring(with: NSRange(location: start, length: NSMaxRange(range) - start))
+            + String(rest[..<stop.lowerBound])
+    }
+
     private static let asideOpeningRegex = try? NSRegularExpression(pattern: #"[–—]\s+(?:which|that|who|whom)\s+$"#)
 
     private static let reportingWordRegex = try? NSRegularExpression(
@@ -699,6 +710,8 @@ struct OverviewPerspectivesExtractor: Sendable {
                 // "…of democracy.” Another protester, Orgeta Likaj, said…".
                 if statement.hasSuffix(".") { return nil }
                 statement = clauseHoldingShortQuote(statement, at: statementRange, in: nsString)
+            } else if quoted {
+                statement = sentenceAfterShortQuote(statement, at: statementRange, in: nsString)
             } else if let contrast = contrastClauseRegex?.firstMatch(
                 in: statement, range: NSRange(statement.startIndex..., in: statement)),
                 let cut = Range(contrast.range, in: statement)
