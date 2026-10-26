@@ -756,6 +756,7 @@ struct NewsTests {
         await testInteractiveAnalysisCancellation()
         try await testGranularCacheClearingAndRetention()
         await testNotificationServiceErrorLogging()
+        try await testNotificationDedupeAcrossRefreshes(fixtureRoot: fixtureRoot)
         await testArticleStoreErrorResilience()
         await testSystemErrorHardeningAndResilience()
         await testFeedArticleWrapContextNavigation()
@@ -16722,6 +16723,11 @@ struct NewsTests {
         assertEqual(
             NotificationService.triage(seeded, delivery: delivery).map(\.article.title),
             ["Story 0", "Story 1", "Story 2"], "A changed lead headline notifies again")
+        delivery.starredFeedURLs = [starredFeed]
+        delivery.notifiedEvents = ["seeded-50": EventFeedSummary.titleKey("Story 50")]
+        assertTrue(
+            NotificationService.triage(seeded, delivery: delivery).contains { $0.article.title == "Story 50" },
+            "A starred feed notifies about every story, even in an event announced today")
         do {
             let db = DatabaseEngine(path: ":memory:")
             try await db.open()
@@ -16748,6 +16754,91 @@ struct NewsTests {
         } catch {
             assertTrue(false, "Notification dedupe storage failed: \(error)")
         }
+    }
+
+    /// Cross-refresh dedupe through `FeedManager` (#545): the first refresh announces an event; a report that joins it
+    /// in the next refresh posts no second banner; once the recorded lead headline differs, a new report notifies.
+    @MainActor
+    static func testNotificationDedupeAcrossRefreshes(fixtureRoot: URL) async throws {
+        print("  - Testing notification dedupe across refreshes...")
+        let now = Date()
+        func report(_ id: String, _ title: String, hoursAgo: Double, source: String) -> FeedArticle {
+            FeedArticle(
+                title: title, link: fixtureRoot.appendingPathComponent("dedupe/\(id)").absoluteString, guid: id,
+                description:
+                    "The disaster agency AFAD said buildings collapsed in Malatya, Ankara and Istanbul after the earthquake struck eastern Turkey.",
+                pubDate: now.addingTimeInterval(-hoursAgo * 3600), source: source)
+        }
+        // Three signal words and the named places make every report breaking, so only the dedupe keeps one quiet.
+        let quake = [
+            report(
+                "d1", "Breaking: earthquake strikes Malatya in eastern Turkey, emergency declared", hoursAgo: 3,
+                source: "Wire One"),
+            report(
+                "d2", "Breaking: Malatya earthquake, emergency declared as AFAD says buildings collapsed",
+                hoursAgo: 2.5,
+                source: "Daily Two"),
+            report(
+                "d3", "Breaking: rescuers search collapsed buildings after Malatya earthquake, emergency declared",
+                hoursAgo: 2, source: "Herald Three"),
+            report(
+                "d4", "Breaking: eastern Turkey earthquake, emergency declared as buildings collapse in Malatya",
+                hoursAgo: 1.5, source: "Courier Four"),
+        ]
+        let feeds = (1...4).map { fixtureRoot.appendingPathComponent("dedupe-feed-\($0)").absoluteString }
+        let suite = testDefaultsSuite("test.notification.dedupe")
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { removeTestDefaults(suite) }
+        let settings = AppSettings(defaults: defaults)
+        settings.feedURLs = feeds
+        settings.aiEnabled = false
+        settings.notificationsEnabled = true
+        settings.notificationMode = .full
+        let store = ArticleStore(database: DatabaseEngine(path: ":memory:"))
+        await store.initialize()
+        actor Recorder {
+            var threads: [String] = []
+            func record(_ thread: String) { threads.append(thread) }
+        }
+        let recorder = Recorder()
+        let service = NotificationService(
+            post: { await recorder.record($0.content.threadIdentifier) }, spacing: .zero)
+        // Each refresh is a manager over the same library whose feeds carry the first `count` reports, one per feed.
+        func refresh(_ count: Int) async {
+            let manager = FeedManager(
+                settings: settings, store: store, schedulesRefresh: false,
+                fetchBatch: { urls, _ in
+                    urls.map { url in
+                        let index = feeds.firstIndex(of: url) ?? count
+                        return (url, index < count ? [quake[index]] : [], nil, nil)
+                    }
+                },
+                notifyBatch: { articles, delivery in
+                    await service.triageAndNotify(newArticles: articles, delivery: delivery)
+                }, imageFinder: .unavailable)
+            await manager.fetchFeedsAsync()
+            manager.stopBackgroundWork()
+        }
+
+        await refresh(2)
+        let first = await recorder.threads
+        assertEqual(first.count, 1, "Two reports of one new event are one banner: \(first)")
+        let ids = store.articles.map(\.id)
+        let event = try await store.database.eventIDs(forArticles: ids)
+        assertEqual(Set(event.values).count, 1, "The first refresh groups both reports into one event: \(event)")
+
+        await refresh(3)
+        let joined = try await store.database.eventIDs(forArticles: store.articles.map(\.id))
+        assertEqual(Set(joined.values).count, 1, "The third report joins the announced event: \(joined)")
+        assertEqual(await recorder.threads, first, "A report joining an event announced today posts no second banner")
+
+        guard let announced = joined.values.first else { return }
+        try await store.database.recordNotifiedEvents(
+            [announced: EventFeedSummary.titleKey("An earlier lead headline")], at: Date())
+        await refresh(4)
+        assertEqual(
+            await recorder.threads, first + [announced], "A new report notifies once the lead headline changed")
+        await store.database.close()
     }
 
     @MainActor

@@ -129,8 +129,8 @@ final class NotificationService: Sendable {
 
     /// Full-mode triage (#588): a story notifies when its feed is starred, when it is breaking (score ≥ 0.6), or when
     /// it is in one of the reader's top interest categories and three or more publishers cover its event. Everything
-    /// else is silent. Starred feeds are not counted against the banner limit. An event notified in the last day
-    /// stays quiet while its lead headline is the one notified; a new lead headline notifies again (#545).
+    /// else is silent. Starred feeds are not counted against the banner limit. Otherwise an event notified in the last
+    /// day stays quiet while its lead headline is the one notified; a new lead headline notifies again (#545).
     static func triage(_ ranked: [(article: FeedArticle, score: Double)], delivery: NotificationDelivery)
         -> [(article: FeedArticle, score: Double)]
     {
@@ -138,13 +138,13 @@ final class NotificationService: Sendable {
         var budget = bannerLimit
         for item in ranked {
             let article = item.article
+            if let feed = article.identityFeedURL, delivery.starredFeedURLs.contains(feed) {
+                chosen.append(item)
+                continue
+            }
             if let event = delivery.events[article.id], let notified = delivery.notifiedEvents[event],
                 notified == leadKey(of: article, event: event, delivery: delivery)
             {
-                continue
-            }
-            if let feed = article.identityFeedURL, delivery.starredFeedURLs.contains(feed) {
-                chosen.append(item)
                 continue
             }
             guard budget > 0 else { continue }
