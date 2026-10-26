@@ -12128,8 +12128,9 @@ struct NewsTests {
     /// assigns now and the one stored in the library. `NEWS_SNAPSHOT_DB` is a library copy (a file inside an app
     /// container is refused). `NEWS_CATEGORY_SAMPLE` sets the size (default 200) and `NEWS_CATEGORY_SEED` the fixed
     /// pseudo-random order, so the same sample is drawn before and after a rule change; `NEWS_CATEGORY_IDS`, a file
-    /// with one story id per line, exports exactly those stories instead. The file carries headlines, so it goes to the
-    /// private directory only and is never overwritten; labels are kept beside it, never in the repository.
+    /// with one story id per line, exports exactly those stories instead, whatever their age. The file carries
+    /// headlines, so it goes to the private directory only and is never overwritten; labels are kept beside it, never
+    /// in the repository.
     static func exportCategorySample() async throws {
         let environment = ProcessInfo.processInfo.environment
         guard let snapshot = environment["NEWS_SNAPSHOT_DB"], let output = environment["NEWS_EVENT_OUTPUT"] else {
@@ -12152,7 +12153,9 @@ struct NewsTests {
                 coalesce(e.category, '')
             FROM articles a LEFT JOIN article_enrichment e ON e.article_id = a.id
             WHERE a.published_at >= ? ORDER BY a.id;
-            """, [.real(Date().addingTimeInterval(-14 * 86400).timeIntervalSince1970)])
+            """,
+            // A listed sample is exported whatever its age, so it can be measured again on a later day.
+            [.real(wanted == nil ? Date().addingTimeInterval(-14 * 86400).timeIntervalSince1970 : 0)])
         await db.close()
         // A fixed pseudo-random order (FNV-1a of the seed and the id), then the first `size` rows.
         func order(_ id: String) -> UInt64 {
@@ -12179,7 +12182,7 @@ struct NewsTests {
         }
         try StoryCorpus.writePrivate(Data(lines.joined(separator: "\n").utf8), to: file, replacing: false)
         print(
-            "    exported \(selected.count) of \(rows.count) stories from the last 14 days for the category audit (#546)"
+            "    exported \(selected.count) of \(rows.count) stories \(wanted == nil ? "from the last 14 days" : "listed") for the category audit (#546)"
         )
     }
 
@@ -16072,9 +16075,10 @@ struct NewsTests {
             "Diplomacy resolves to world")
 
         // Misfiles measured on a labelled 200-story library sample (#546, audit of 24 October 2026).
-        func content(_ title: String, _ description: String = "") -> String? {
-            NaturalLanguageTopicClassifier.classifyContent(title: title, description: description, text: nil)?
-                .category
+        // No result is World, as every caller reads it (`news_topic`, `ArticleClassifier`).
+        func content(_ title: String, _ description: String = "", text: String? = nil) -> String {
+            NaturalLanguageTopicClassifier.classifyContent(title: title, description: description, text: text)?
+                .category ?? NewsCategory.world.rawValue
         }
         assertEqual(
             content("Drone strike on Abyei market near Sudan-South Sudan border kills 150"), "World",
@@ -16102,6 +16106,74 @@ struct NewsTests {
         assertEqual(content("Apple Music has a new logo"), "Technology", "Apple stays a technology cue")
         assertEqual(content("Grandma's apple pie recipe wins the county bake-off"), "Food", "Apple alone is no cue")
         assertEqual(content("Apple's iPhone sales rise"), "Technology", "The possessive names the company")
+        // Second pass (#546, 26 October): place and leader names count half, new topic cues; measured on the same
+        // sample and on a fresh 200-story draw.
+        assertEqual(
+            content(
+                "Kenya confirms new Ebola cases as Congo outbreak spreads",
+                "The first infections passed on inside Kenya, officials in Nairobi and Kampala said."), "Health",
+            "A place says where, Ebola says what")
+        assertEqual(
+            content(
+                "Omani label takes its ballerina heels to Paris",
+                "The footwear label showed its new collection during Paris Fashion Week."), "Fashion",
+            "Paris is where, footwear is what")
+        assertEqual(
+            content(
+                "UN warns El Nino could be strongest on record",
+                "The UN's aid chief says the humanitarian system cannot cope alone."), "Science",
+            "An international body is an actor, El Nino the topic")
+        assertEqual(
+            content(
+                "Trump's losing battle with green energy",
+                "The war and the AI boom strengthen the case for clean power, despite the president's efforts."),
+            "Politics", "President is no World cue")
+        assertEqual(
+            content(
+                "Casualties feared as multi-storey building collapses in Nairobi",
+                "The building came down in a densely populated business and residential area."), "World",
+            "A building collapse is world news, not Business")
+        assertEqual(
+            content("Fuel dealers urge consumers to avoid panic buying", "Dealers say pricing remains an issue."),
+            "Business", "Consumers are a Business cue")
+        assertEqual(
+            content(
+                "Lee Chang Dong ponders the ethics of the camera",
+                "His seventh feature film is inspired by true events.",
+                text: "The film follows a factory worker; the director shot the feature film in Seoul."),
+            "Entertainment", "A feature film outweighs the camera")
+        assertEqual(
+            content(
+                "Australian politician who was hit by car has lost both legs",
+                "She is receiving treatment in a Melbourne hospital."), "World",
+            "An attack on a foreign politician is World")
+        assertEqual(
+            content("Canadian diplomats advised to avoid appearing with midterm candidates"), "World",
+            "Foreign diplomats outrank a midterm cue")
+        assertEqual(
+            content("Tangier's timeless trattoria enters a new era", "The reinvention of a much-loved hang-out."),
+            "Food", "A trattoria is Food")
+        assertEqual(
+            content(
+                "Review: Crystal Lake drags at first, then hits a vein", "The prequel series is based on Jason's mom.",
+                text: "Peacock series Crystal Lake doesn't feel like a Friday the 13th movie at first."),
+            "Entertainment", "A prequel series is Entertainment")
+        assertEqual(
+            content(
+                "Why an old role-playing game still has thousands of active players",
+                "The single-player RPG is just OK, but players don't mind."), "Technology", "An RPG is a game")
+        assertEqual(
+            content(
+                "Derron prepares to defend her Dubai title", "She faces a field of 20 professional triathletes.",
+                text: "Derron won the triathlon in Dubai last year."), "Sports", "Triathlon is Sports")
+        assertEqual(
+            content(
+                "Why is the UK at the forefront of AI-driven job cuts?",
+                "AI-linked job losses in the UK run at twice the rate of the US and Germany."), "Technology",
+            "AI job cuts in the UK are Technology")
+        assertEqual(
+            content("DJI's vlogging camera is a good deal at under $400"), "Technology",
+            "A camera deal stays Technology")
     }
 
     @MainActor

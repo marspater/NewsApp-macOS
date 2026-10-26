@@ -535,7 +535,8 @@ public final class NaturalLanguageTopicClassifier: TopicClassifying {
                 "linux", "ios", "macos", "android", "iphone", "macbook", "app", "apps", "smartphone", "gadget",
                 "gaming", "video game", "video games", "console", "nintendo", "playstation", "xbox", "tiktok",
                 "instagram", "facebook", "meta", "openai", "chatgpt", "electric vehicle", "ev", "evs", "robot",
-                "robots", "social media", "hack", "hackers", "camera", "cameras", "airship",
+                "robots", "social media", "hack", "hackers", "camera", "cameras", "airship", "rpg", "rpgs",
+                "single player", "multiplayer", "ces",
             ]
         ),
         (
@@ -557,7 +558,7 @@ public final class NaturalLanguageTopicClassifier: TopicClassifying {
                 "debt", "bankruptcy", "chapter 11", "bond", "bonds", "yields", "tariff", "tariffs", "exports",
                 "imports",
                 "layoffs", "job cuts", "ceo", "firm", "petrol", "fuel prices", "oil prices", "fta", "free trade",
-                "spin-off", "megadeal", "billionaire",
+                "spin-off", "megadeal", "billionaire", "consumer", "consumers",
             ]
         ),
         (
@@ -565,26 +566,19 @@ public final class NaturalLanguageTopicClassifier: TopicClassifying {
             [
                 "congress", "senate", "democrat", "republican", "white house", "legislation", "campaign", "electoral",
                 "biden", "trump", "parliament", "vote", "voter", "lawmaker", "governor", "supreme court", "election",
-                "policy", "sanction", "executive order", "midterm", "midterms", "capitol",
+                "policy", "sanction", "executive order", "midterm", "midterms", "capitol", "politician", "politicians",
             ]
         ),
         (
             .world,
             [
-                "international", "global", "europe", "asia", "africa", "middle east", "ukraine", "russia", "china",
-                "foreign", "united nations", "un", "diplomat", "treaty", "conflict", "war", "peace", "nato", "embassy",
-                "border", "refugee", "geopolitics", "president", "prime minister", "foreign minister", "envoy",
+                "international", "global", "foreign", "diplomat", "diplomats", "treaty", "conflict", "war", "peace",
+                "nato",
+                "embassy", "border", "refugee", "geopolitics", "prime minister", "foreign minister", "envoy",
                 "ceasefire", "truce", "militants", "militia", "airstrike", "airstrikes", "missile", "missiles",
-                "troops",
-                "killed", "attack", "attacks", "protest", "protests", "riots", "unrest", "curfew", "migrants", "asylum",
-                "putin", "zelensky", "netanyahu", "macron", "kremlin", "france", "french", "germany", "german",
-                "israel", "israeli", "iran", "iranian", "gaza", "palestinian", "palestinians", "sudan", "pakistan",
-                "india", "indian", "brazil", "australia", "australian", "kenya", "nigeria", "japan", "korea", "taiwan",
-                "turkey", "turkiye", "saudi", "yemen", "syria", "iraq", "lebanon", "mexico", "canada", "canadian",
-                "britain", "uk", "london", "paris", "kyiv", "moscow", "beijing", "ethiopia", "congo", "rwanda",
-                "uganda", "egypt", "jordan", "qatar", "uae", "spain", "italy", "italian", "poland", "hungary", "greece",
-                "cuba", "venezuela", "argentina", "philippines", "indonesia", "afghanistan", "nepal",
-            ]
+                "troops", "killed", "attack", "attacks", "protest", "protests", "riots", "unrest", "curfew", "migrants",
+                "asylum", "casualties", "collapse", "collapses", "earthquake", "floods", "flooding", "hurricane",
+            ] + worldPlaces
         ),
         (
             .sports,
@@ -595,7 +589,8 @@ public final class NaturalLanguageTopicClassifier: TopicClassifying {
                 "bundesliga", "la liga", "champions league", "europa league", "fa cup", "uefa", "afc", "nhl", "wnba",
                 "ipl", "t20", "cricket", "rugby", "wicket", "innings", "test match", "matchday", "fixture", "fixtures",
                 "derby", "clasico", "midfielder", "striker", "goalkeeper", "boxing", "marathon", "medal", "medals",
-                "olympics", "paralympics", "man utd", "pro league", "title race",
+                "olympics", "paralympics", "man utd", "pro league", "title race", "match", "triathlon", "triathlete",
+                "triathletes",
             ]
         ),
         (
@@ -604,7 +599,9 @@ public final class NaturalLanguageTopicClassifier: TopicClassifying {
                 "entertainment", "movie", "film", "celebrity", "music", "television", "hollywood", "streaming",
                 "netflix", "disney", "actor", "actress", "concert", "album", "grammy", "oscar", "cinema", "box office",
                 "pop star", "emmy", "broadway", "documentary", "sitcom", "tv series", "tv channel", "tv channels",
-                "podcast", "gallery", "exhibition", "photography",
+                "podcast", "gallery", "exhibition", "photography", "prequel", "sequel", "episode", "episodes",
+                "trailer",
+                "festival", "feature film", "filmmaker",
             ]
         ),
         (
@@ -627,7 +624,9 @@ public final class NaturalLanguageTopicClassifier: TopicClassifying {
             .food,
             [
                 "food", "restaurant", "recipe", "cooking", "chef", "dining", "cuisine", "wine", "baking", "cocktail",
-                "flavor", "meal", "coffee", "pastry", "culinary", "ingredient", "dish",
+                "flavor", "meal", "coffee", "pastry", "culinary", "ingredient", "dish", "trattoria", "bistro",
+                "brasserie",
+                "eatery", "pizzeria", "bakery",
             ]
         ),
         (
@@ -645,6 +644,20 @@ public final class NaturalLanguageTopicClassifier: TopicClassifying {
                 "etiquette", "politeness", "wedding", "weddings", "commuters",
             ]
         ),
+    ]
+
+    /// Places, leaders and international bodies: they say where a story happens, not what it is about, so they count
+    /// half as much as a topic cue. "Ebola cases in Kenya" is Health and "a photography prize at Bayeux" is
+    /// Entertainment; a story with no other topic still reads as World (#546).
+    static let worldPlaces = [
+        "europe", "asia", "africa", "middle east", "united nations", "un", "ukraine", "russia", "china", "putin",
+        "zelensky", "netanyahu", "macron", "kremlin", "france", "french", "germany", "german", "israel", "israeli",
+        "iran", "iranian", "gaza", "palestinian", "palestinians", "sudan", "pakistan", "india", "indian", "brazil",
+        "australia", "australian", "kenya", "nigeria", "japan", "korea", "taiwan", "turkey", "turkiye", "saudi",
+        "yemen", "syria", "iraq", "lebanon", "mexico", "canada", "canadian", "britain", "uk", "london", "paris", "kyiv",
+        "moscow", "beijing", "ethiopia", "congo", "rwanda", "uganda", "egypt", "jordan", "qatar", "uae", "spain",
+        "italy", "italian", "poland", "hungary", "greece", "cuba", "venezuela", "argentina", "philippines",
+        "indonesia", "afghanistan", "nepal",
     ]
 
     public func classifyTopic(title: String, description: String, text: String?, rssCategory: String?) async
@@ -698,19 +711,21 @@ public final class NaturalLanguageTopicClassifier: TopicClassifying {
             var score = 0.0
             var matched: [String] = []
 
+            let places = item.category == .world ? Set(Self.worldPlaces) : []
             for kw in item.keywords {
                 let phrase = MuteRules.paddedPhrase(kw)
+                let weight = places.contains(kw) ? 0.5 : 1.0
                 if hasTitle && titleLower.contains(phrase) {
-                    score += 3.0
+                    score += 3.0 * weight
                     matched.append(kw)
                     if item.category == .world { worldInTitle = true }
                 }
                 if hasDesc && descLower.contains(phrase) {
-                    score += 1.5
+                    score += 1.5 * weight
                     matched.append(kw)
                 }
                 if hasBody && bodyLower.contains(phrase) {
-                    score += 0.5
+                    score += 0.5 * weight
                 }
             }
 
