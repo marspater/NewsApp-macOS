@@ -255,9 +255,10 @@ struct NativeUIQAChecks {
             do { try VNImageRequestHandler(cgImage: image).perform([request]) } catch { return "" }
             return (request.results ?? []).compactMap { $0.topCandidates(1).first?.string }.joined(separator: "\n")
         }
-        // OCR is slow under load: wait until every expected line is recognised in one pass, then assert on that pass.
+        // OCR is slow under load and on a cold Vision model (10 s missed once on a first run): wait until every expected
+        // line is recognised in one pass, then assert on that pass.
         let expected = ["Previously accepted assessment", "Current Panel Headlines", "Current unscored panel evidence"]
-        let deadline = ContinuousClock.now + .seconds(10)
+        let deadline = ContinuousClock.now + .seconds(30)
         var text = renderedText()
         while !expected.allSatisfy(text.contains), ContinuousClock.now < deadline {
             host.layoutSubtreeIfNeeded()

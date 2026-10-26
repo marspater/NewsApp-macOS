@@ -357,7 +357,7 @@ struct ArticleDetailView: View {
                         EyebrowText(displaySource)
 
                         Text("·")
-                            .foregroundStyle(tertiaryText)
+                            .foregroundStyle(secondaryText)
 
                         Text(currentArticle.publicationDateText)
                             .font(AppTypography.label)
@@ -366,7 +366,7 @@ struct ArticleDetailView: View {
 
                         if let readingTimeEstimate {
                             Text("·")
-                                .foregroundStyle(tertiaryText)
+                                .foregroundStyle(secondaryText)
 
                             Text(readingTimeEstimate)
                                 .font(AppTypography.label)
@@ -560,7 +560,7 @@ struct ArticleDetailView: View {
 
                 EyebrowText(
                     currentArticle.fullContent == nil ? "Feed summary preview" : "Previously saved text",
-                    color: tertiaryText)
+                    color: secondaryText)
 
                 articleDescriptionParagraphs
             }
@@ -1276,8 +1276,8 @@ struct ArticleDetailView: View {
         contrast == .increased ? 0.35 : 0.08
     }
 
-    private var tertiaryText: Color {
-        AppColor.tertiaryText(for: contrast)
+    private var secondaryText: Color {
+        AppColor.secondaryText(for: contrast)
     }
 
     private var displaySource: String { currentArticle.publisherName }
