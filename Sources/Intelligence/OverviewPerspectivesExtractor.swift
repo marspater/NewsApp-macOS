@@ -694,7 +694,10 @@ struct OverviewPerspectivesExtractor: Sendable {
             let quoted =
                 statementRange.location > 0
                 && "\"“".contains(nsString.substring(with: NSRange(location: statementRange.location - 1, length: 1)))
-            if quoted {
+            if quoted, statementGroup < participantGroup {
+                // A quotation closed by a full stop ends its sentence; the speaker after it belongs to the next one:
+                // "…of democracy.” Another protester, Orgeta Likaj, said…".
+                if statement.hasSuffix(".") { return nil }
                 statement = clauseHoldingShortQuote(statement, at: statementRange, in: nsString)
             } else if let contrast = contrastClauseRegex?.firstMatch(
                 in: statement, range: NSRange(statement.startIndex..., in: statement)),

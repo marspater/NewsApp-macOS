@@ -21339,6 +21339,17 @@ struct NewsTests {
         }
         assertFalse(
             reported(
+                "\u{201C}Albanians have woken up,\u{201D} said protester Daniel Tahiri, who called it a \u{201C}dictatorship with the clothes of democracy.\u{201D} Another protester, Orgeta Likaj, said people wanted change."
+            ).contains { $0.participant.contains("Likaj") && $0.position.contains("dictatorship") },
+            "A quotation that ends its sentence is not given to the next sentence's speaker")
+        assertEqual(
+            reported(
+                "Executive Producer Elizabeth White told The Guardian in the past, \"the amount of plankton and things\" would have stopped a shot."
+            )
+            .first?.position, "the amount of plankton and things",
+            "A quoted fragment after its speaker is not widened to the speaker's own words")
+        assertFalse(
+            reported(
                 "\"We have received intelligence that Iran increased its efforts,\" Mr. Clayton said in a memo sent to Secretary of State Marco Rubio, according to a U.S. official."
             ).contains { $0.participant == "U.S. official" }, "A report of a report is not the reporter's position")
         assertFalse(
