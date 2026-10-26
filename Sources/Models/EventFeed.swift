@@ -378,11 +378,11 @@ struct FiniteBriefing: Equatable, Sendable {
     }
 
     /// Higher lexicographic ranks win; negative counts prefer underrepresented publishers and categories.
-    private static func rank(
+    static func rank(
         priority: BriefingPriority, interest: Int, sourceCount: Int, categoryCount: Int
     ) -> [Int] {
         [
-            (priority.importance ?? .notable).rawValue, priority.sourceCount, interest,
+            priority.sourceCount, interest,
             -(sourceCount + categoryCount), -sourceCount,
         ]
     }

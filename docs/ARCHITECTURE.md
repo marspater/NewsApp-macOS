@@ -1,6 +1,6 @@
 # Architecture
 
-Native macOS, local-first RSS reader. This page is the contract for technology and implementation invariants. Workflow lives in [CONTRIBUTING.md](../CONTRIBUTING.md), design in [DESIGN.md](DESIGN.md), security in [SECURITY.md](../SECURITY.md), privacy in [PRIVACY.md](../PRIVACY.md).
+Native macOS, local-first RSS reader. This page is the contract for technology and implementation invariants. Workflow lives in [CONTRIBUTING.md](../CONTRIBUTING.md), design in [DESIGN.md](DESIGN.md), security in [SECURITY.md](../SECURITY.md), privacy in [PRIVACY.md](../PRIVACY.md), and App Store preparation in [XCODE_AND_APP_REVIEW.md](XCODE_AND_APP_REVIEW.md).
 
 > [!IMPORTANT]
 > Nothing leaves the Mac except feed, article and image requests through the protected gateway. No cloud backend, remote AI, telemetry or analytics SDKs, and no custom AI models except CoreML models this project builds, measures and ships itself (#520).
@@ -51,7 +51,7 @@ flowchart LR
         GW["<b>NetworkBoundaryProxy</b><br/>IPAddressValidator"]
     end
 
-    subgraph Store["Storage · SQLite v24"]
+    subgraph Store["Storage · SQLite v25"]
         AS["<b>ArticleStore</b>"]
         DB[("<b>DatabaseEngine</b><br/>+Events<br/>WAL · FTS5")]
     end
@@ -131,7 +131,7 @@ sequenceDiagram
 | `Sources/Services/` | `FeedFetcher`, `SecureHTTPClient` · `FeedXMLParser`, `JSONFeedParser`, `DateParser` · `IPAddressValidator`, `NetworkBoundaryProxy` · `OPMLManager` |
 | `Sources/Intelligence/` | `ContentExtractionPipeline` · `ArticleIntelligence` · `EnrichmentQueue` · `EventCandidates` (+ `EventStoryRelation`) · `EventMatcher`, `EventClustering`, `SentenceEmbedder` · `Overview*`, `PassageFactExtractor`, `CoverageSentimentEvaluator` · `StoryImportance`, `EventJudge`, `PromptDefense` · `WorldTension`, `TensionMethodology` |
 | `Tests/` | `NewsTests` runner and suites · `FeedKitSwiftSoupTests`, `EventEmbeddingTests`, `NotificationAttachmentTests`, `StoryCorpus` · `Native*` and accessibility harnesses (some open windows, opt-in) · `TestDefaults` |
-| Platform | `News.entitlements` · `build.sh`, `test.sh`, `script/build_test_runner.sh` (runner build, `NEWS_TEST_ATOM`), `script/ci_testsuite.sh` (one JUnit case per `Tests/*.swift` atom, `--lcov` for impact analysis) · dormant `build_release.sh`, `script/distribution/` · CI: `.github/workflows/`, `.circleci/config.yml`, `codemagic.yaml` |
+| Platform | `News.entitlements` · `build.sh`, `test.sh` (skips the Swift runner for inputs that already passed; `NEWS_TEST_FORCE=1`), `script/build_test_runner.sh` (runner build, `NEWS_TEST_ATOM`), `script/ci_testsuite.sh` (one JUnit case per `Tests/*.swift` atom, `--lcov` for impact analysis) · `build_release.sh` (runs in every CI build), `script/version.sh` (bundle version from git tags), dormant `script/distribution/` · CI: three providers run on every push and pull request to `main`: GitHub Actions is the pipeline of record, CircleCI adds test-impact analysis, Codemagic runs the full suite, the format check and the release build; `.github/workflows/`, `.circleci/config.yml`, `codemagic.yaml` |
 
 ## Schema history
 
@@ -221,7 +221,7 @@ Open a section before changing that area. Each rule is load-bearing; tests cover
 
 - Background classification skips Low Power Mode and serious thermal state; scheduled refreshes honor `NSBackgroundActivityScheduler.shouldDefer`.
 
-- New-story notifications use IDs inserted by a committed transaction, skip muted stories, and resolve via SQLite by stable ID once storage is ready. Clustering runs first, so the reports of one event notify once, through the report that scores highest.
+- New-story notifications use IDs inserted by a committed transaction, skip muted stories, and resolve via SQLite by stable ID once storage is ready. Clustering runs first, so the reports of one event notify once, through the report that scores highest. Full mode sorts each story or event into a priority, starred or normal lane with its own limits, recorded in side tables so they hold across refreshes and relaunches (`docs/notifications.md`).
 
 - All URLs, feed bodies, HTML, redirects and OPML are untrusted. Remote fetching goes through the protected gateway: public-DNS validation, numeric-IP pinning, response bounds, cancellation. URLSession and WebKit previews share it.
 
