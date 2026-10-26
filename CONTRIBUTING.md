@@ -145,7 +145,7 @@ Keep uncommitted implementation In progress, linked PR work In review, and reser
 
 ## Security checks
 
-[The Security workflow](.github/workflows/security.yml) is the canonical advanced CodeQL configuration for Swift and GitHub Actions. Default CodeQL setup must remain disabled because GitHub rejects advanced uploads while it is enabled. Swift analysis builds the complete SwiftPM app target without optimization on the macOS 26 Apple Silicon runner with Xcode 26.3. Compiler subprocess sandboxing is disabled only for extraction; app sandbox entitlements are unchanged. Normal CI tests and verifies arm64 bundles on Xcode 27. Secret scanning and deterministic security regressions remain separate jobs.
+[The Security workflow](.github/workflows/security.yml) is the canonical advanced CodeQL configuration for Swift and GitHub Actions. Default CodeQL setup must remain disabled because GitHub rejects advanced uploads while it is enabled. Swift analysis builds the complete SwiftPM app target without optimization on the macOS 26 Apple Silicon runner with Xcode 26.3. Compiler subprocess sandboxing is disabled only for extraction; app sandbox entitlements are unchanged. Normal CI verifies arm64 bundles and Swift formatting on Xcode 27, and runs the test suite on the macOS 26 runner with Xcode 26.6 (CircleCI and Codemagic test on macOS 27 with Xcode 27). Secret scanning and deterministic security regressions remain separate jobs.
 
 ## Codemagic macOS runner
 
