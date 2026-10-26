@@ -200,10 +200,8 @@ public struct OverviewClaimVerifier: Sendable {
 
         // 1. Numbers
         let numbers = extractNumbers(from: statement)
-        for num in numbers {
-            if !containsNumber(normalizeText(num), in: normalizedPassage) {
-                reasons.append(.numericMismatch(claimNumber: num, passageID: passage.id))
-            }
+        for num in numbers where !containsNumber(normalizeText(num), in: normalizedPassage) {
+            reasons.append(.numericMismatch(claimNumber: num, passageID: passage.id))
         }
 
         // 2. Currencies
