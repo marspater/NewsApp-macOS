@@ -367,7 +367,8 @@ struct OverviewPerspectivesExtractor: Sendable {
                 id: "persp_\(primary.passageID)_\(abs(primary.participant.hashValue % 10000))",
                 participant: primary.participant,
                 position: primary.position,
-                citationIDs: Array(item.citationIDs).sorted(),
+                // The position's own passage comes first; reprints and repeats follow.
+                citationIDs: [primary.citationID] + item.citationIDs.subtracting([primary.citationID]).sorted(),
                 sourcePublisher: primary.sourcePublisher,
                 originalWireSource: primary.originalWireSource
             )
@@ -612,6 +613,30 @@ struct OverviewPerspectivesExtractor: Sendable {
         "\u{200B}", "\u{200C}", "\u{200D}", "\u{2060}", "\u{FEFF}", "\u{00AD}",
     ]
 
+    /// A contrast clause with another subject: ", while organisers put…", " whereas unions said…", ", but police…".
+    private static let contrastClauseRegex = try? NSRegularExpression(
+        pattern:
+            #",?\s+(?:while|whereas|but)\s+(?:the\s+|[Tt]heir\s+)?(?:\p{Lu}\p{L}+|organi[sz]ers|police|unions?|opposition|critics|officials|authorities|government|protesters|activists|residents|others|prosecutors|lawyers)\b"#
+    )
+
+    /// A quoted fragment of a few words inside a sentence ("…have reached “advanced stages,” an official warned") is not
+    /// a position on its own: the position is the sentence up to the end of the quotation. A quoted sentence stays.
+    private static func clauseHoldingShortQuote(_ quote: String, at range: NSRange, in text: NSString) -> String {
+        guard quote.split(separator: " ").count < 7, quote.first?.isLowercase == true else { return quote }
+        let before = text.substring(to: range.location - 1)
+        let start =
+            before.range(
+                of: #"(?:^|[.!?]\s+)(?:\p{Lu}{2,}(?:\s\p{Lu}{2,})*:\s+)?(?=[^.!?]*$)"#, options: .regularExpression)?
+            .upperBound ?? before.startIndex
+        let lead = before[start...].trimmingCharacters(in: .whitespaces)
+        guard lead.split(separator: " ").count >= 2 else { return quote }
+        let end = min(NSMaxRange(range) + 1, text.length)
+        let clause =
+            String(before[start...])
+            + text.substring(with: NSRange(location: range.location - 1, length: end - range.location + 1))
+        return clause.trimmingCharacters(in: CharacterSet.whitespaces.union(CharacterSet(charactersIn: ",")))
+    }
+
     private static let asideOpeningRegex = try? NSRegularExpression(pattern: #"[–—]\s+(?:which|that|who|whom)\s+$"#)
 
     private static let reportingWordRegex = try? NSRegularExpression(
@@ -664,6 +689,20 @@ struct OverviewPerspectivesExtractor: Sendable {
                 let close = statement.range(of: #"\s[–—]\s"#, options: .regularExpression)
             {
                 statement = String(statement[..<close.lowerBound])
+            }
+            let statementRange = match.range(at: statementGroup)
+            let quoted =
+                statementRange.location > 0
+                && "\"“".contains(nsString.substring(with: NSRange(location: statementRange.location - 1, length: 1)))
+            if quoted {
+                statement = clauseHoldingShortQuote(statement, at: statementRange, in: nsString)
+            } else if let contrast = contrastClauseRegex?.firstMatch(
+                in: statement, range: NSRange(statement.startIndex..., in: statement)),
+                let cut = Range(contrast.range, in: statement)
+            {
+                // "410,000 took part while organisers put the figure at 800,000": the other party's claim is not
+                // the speaker's.
+                statement = String(statement[..<cut.lowerBound])
             }
             guard !participant.isEmpty, statement.count >= minimumStatementLength else { return nil }
             // A statement before its tag that itself reports speech ("Clayton said in a memo…, according to a U.S.

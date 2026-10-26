@@ -21176,6 +21176,82 @@ struct NewsTests {
                 "The 12-year-old girl was seriously wounded but stable, the mayor of La Verrière, Nicolas Dainville, told AFP.",
                 "Nicolas Dainville", "The 12-year-old girl was seriously wounded but stable"
             ),
+            // Second #547 pass: acronyms, appositives, present-tense verbs, quantities, initialisms, decimals, aliases.
+            (
+                "\"Science gives us hope,\" WHO chief Tedros Adhanom Ghebreyesus said on X.",
+                "WHO chief Tedros Adhanom Ghebreyesus", "Science gives us hope,"
+            ),
+            (
+                "\"We found that we needed to include some exotic physics,\" Jorge Hernández-Bernal, a planetary scientist at the Sorbonne, said in a press release.",
+                "Jorge Hernández-Bernal", "We found that we needed to include some exotic physics,"
+            ),
+            (
+                "\"We are not satisfied with the offer,\" says student representative Nathanael Combary.",
+                "student representative Nathanael Combary", "We are not satisfied with the offer,"
+            ),
+            (
+                "Interior Minister Laurent Nuñez said as many as 70,000 officers will be deployed nationwide.",
+                "Interior Minister Laurent Nuñez", "as many as 70,000 officers will be deployed nationwide"
+            ),
+            (
+                "First-time voter Naama Bitterman, 18, said at Saturday's rally that she was confident the bloc would win.",
+                "First-time voter Naama Bitterman", "she was confident the bloc would win"
+            ),
+            ("Golan told me: \"I'm optimistic about the vote.\"", "Golan", "I'm optimistic about the vote."),
+            (
+                "The United States could strike Iran as soon as this weekend, a U.S. envoy said Friday (October 24, 2026), after mounting threats.",
+                "U.S. envoy", "The United States could strike Iran as soon as this weekend"
+            ),
+            (
+                "Melania Trump has secured a ceasefire that will begin on Oct. 29, the White House said on Friday.",
+                "White House", "Melania Trump has secured a ceasefire that will begin on Oct. 29"
+            ),
+            (
+                "The Conservative-Lib Dem coalition government said in 2013 it estimated hosting in London had cost £8.9bn.",
+                "Conservative-Lib Dem coalition government", "it estimated hosting in London had cost £8.9bn"
+            ),
+            (
+                "According to the United Nations Educational, Scientific and Cultural Organization, UNESCO, nearly 95 percent of campuses have been damaged.",
+                "United Nations Educational, Scientific and Cultural Organization, UNESCO",
+                "nearly 95 percent of campuses have been damaged"
+            ),
+            (
+                "The woman did not visit Congo and is believed to have contracted the virus in Uganda, Switzerland's Federal Department of Foreign Affairs, or FDFA, told The Associated Press on Friday.",
+                "Switzerland's Federal Department of Foreign Affairs",
+                "The woman did not visit Congo and is believed to have contracted the virus in Uganda"
+            ),
+            (
+                "The Ebola victim who died on Friday evening was a direct contact of the index patient, the ministry said.",
+                "ministry", "The Ebola victim who died on Friday evening was a direct contact of the index patient"
+            ),
+            (
+                "All schools have been told to close on Friday because of the high winds, the Government of Jersey said.",
+                "Government of Jersey", "All schools have been told to close on Friday because of the high winds"
+            ),
+            (
+                "At the Copacabana rally – which Rio's City Hall said attracted about 1.1 million people – activists unfurled a banner.",
+                "Rio's City Hall", "attracted about 1.1 million people"
+            ),
+            (
+                "Trump said Rubio — who is the son of Cuban immigrants — was \"deep into negotiations with Cuba\" this week.",
+                "Trump",
+                "Rubio — who is the son of Cuban immigrants — was \"deep into negotiations with Cuba\" this week"
+            ),
+            // Orchestrator review of the final rows (#547): another party's figure, a few quoted words.
+            (
+                "The government said 410,000 took place in protests across France while organisers put the figure at nearly 800,000.",
+                "government", "410,000 took place in protests across France"
+            ),
+            (
+                "Lethal plots by Tehran against American citizens have reached “advanced stages,” a senior intelligence official in the Trump administration warned.",
+                "senior intelligence official in the Trump administration",
+                "Lethal plots by Tehran against American citizens have reached “advanced stages,”"
+            ),
+            (
+                "The damage was estimated \"at hundreds of millions euros\", France's Chambers of Commerce and Industry (CCI) said.",
+                "France's Chambers of Commerce and Industry",
+                "The damage was estimated \"at hundreds of millions euros\""
+            ),
             (
                 "Chadema put the death toll at about 2,000, a figure the UN said it could not verify amid the shutdown.",
                 "UN", "it could not verify amid the shutdown"
@@ -21254,11 +21330,43 @@ struct NewsTests {
             "The bridge reopened to traffic after six weeks, he said.",
             "Authorities said 2,500 police officers are patrolling the streets of the capital.",
             "More than 3,700 homes were still without electricity on Saturday morning, according to the National Grid map.",
+            "Many say their anger shows no sign of fading after the protests across the country.",
+            "According to posts on Reddit about the affected units, the issue appears to be happening at a similar spot.",
         ] {
             assertTrue(
                 reported(text).isEmpty,
                 "Nearby places, passive/clause fragments, poll subjects and time phrases are excluded: \(text)")
         }
+        assertFalse(
+            reported(
+                "\"We have received intelligence that Iran increased its efforts,\" Mr. Clayton said in a memo sent to Secretary of State Marco Rubio, according to a U.S. official."
+            ).contains { $0.participant == "U.S. official" }, "A report of a report is not the reporter's position")
+        assertFalse(
+            reported(
+                "A fire alarm went off at the building on Friday, police said in a statement. Firefighters who went to the scene could see the flames."
+            ).contains { $0.position.contains("could see the flames") },
+            "A tag's channel does not reach into the next sentence")
+        // A merged voice cites the passage its position comes from first.
+        let ownPassage = EvidencePassage(
+            id: "pass_own", articleID: "art_persp_1",
+            text: "\"Iran has substantially increased efforts to target US personnel,\" Clayton wrote to the secretary."
+        )
+        let otherPassage = EvidencePassage(
+            id: "pass_other", articleID: "art_persp_1",
+            text: "\"Iran has substantially increased efforts to target U.S. personnel,\" Mr. Clayton said in a memo.")
+        let mergedVoice = OverviewPerspectivesExtractor.extractPerspectives(
+            passages: [ownPassage, otherPassage], articles: [article1],
+            existingCitations: [
+                "c_z": OverviewCitation(
+                    id: "c_z", articleID: "art_persp_1", passageID: ownPassage.id,
+                    passageFingerprint: ownPassage.fingerprint, quote: ownPassage.text),
+                "c_a": OverviewCitation(
+                    id: "c_a", articleID: "art_persp_1", passageID: otherPassage.id,
+                    passageFingerprint: otherPassage.fingerprint, quote: otherPassage.text),
+            ])
+        assertEqual(mergedVoice.count, 1, "A repeated statement of one speaker is one voice")
+        assertEqual(
+            mergedVoice.first?.citationIDs.first, "c_z", "A merged voice cites its position's own passage first")
     }
 
     static func testThematicAngleFromExistingFacts(fixtureHost: String = "example.com") async throws {
