@@ -46,6 +46,16 @@ jobs:
       - name: Ensure Executable Permissions
         run: chmod +x test.sh build.sh build_release.sh
 
+      # Xcode 26.6 build products: a cache of their own, apart from the Xcode 27 build job's.
+      - name: Cache SwiftPM
+        uses: actions/cache@v4
+        with:
+          path: |
+            .build
+            ~/Library/Caches/org.swift.swiftpm
+          key: swiftpm-${{ runner.os }}-xcode26-${{ hashFiles('Package.resolved') }}
+          restore-keys: swiftpm-${{ runner.os }}-xcode26-
+
       - name: Run Unit Tests
         run: ./test.sh
 
@@ -62,6 +72,8 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v7
+        with:
+          fetch-depth: 0  # tags and commit count stamp the bundle version
 
       - name: Ensure Executable Permissions
         run: chmod +x build_release.sh
@@ -69,6 +81,15 @@ jobs:
       # On the shipping toolchain: swift-format output can differ between Xcode versions.
       - name: Check Swift Formatting
         run: script/format.sh --check
+
+      - name: Cache SwiftPM
+        uses: actions/cache@v4
+        with:
+          path: |
+            .build
+            ~/Library/Caches/org.swift.swiftpm
+          key: swiftpm-${{ runner.os }}-xcode27-${{ hashFiles('Package.resolved') }}
+          restore-keys: swiftpm-${{ runner.os }}-xcode27-
 
       - name: Build Ad-hoc arm64 Verification Bundle
         run: ./build_release.sh
@@ -79,6 +100,8 @@ jobs:
           test -d "News.app"
           test -x "News.app/Contents/MacOS/News"
           plutil -lint "News.app/Contents/Info.plist"
+          VERSION=$(plutil -extract CFBundleShortVersionString raw "News.app/Contents/Info.plist")
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
 
           ARCHS=$(lipo -archs "News.app/Contents/MacOS/News")
           echo "Found architectures: $ARCHS"
@@ -91,11 +114,11 @@ jobs:
           spctl -a -vvv "News.app" || true
 
       - name: Archive Verification Bundle
-        run: ditto -c -k --sequesterRsrc --keepParent News.app News-arm64-verification.zip
+        run: ditto -c -k --sequesterRsrc --keepParent News.app "News-${VERSION}-arm64-verification.zip"
 
       - name: Upload Verification Artifact
         uses: actions/upload-artifact@v7
         with:
-          name: News-arm64-verification
-          path: News-arm64-verification.zip
+          name: News-${{ env.VERSION }}-arm64-verification
+          path: News-${{ env.VERSION }}-arm64-verification.zip
           if-no-files-found: error

@@ -13,6 +13,10 @@ elif xcrun --find swift-format >/dev/null 2>&1; then
 elif command -v swift >/dev/null 2>&1; then
     SWIFT_FORMAT="swift format"
 else
+    if [[ -n "${CI:-}" ]]; then
+        echo "❌ swift-format not found; refusing to pass the format check without a toolchain." >&2
+        exit 1
+    fi
     echo "⚠️ swift-format not found in PATH or Xcode toolchain. Skipping format." >&2
     exit 0
 fi
