@@ -137,7 +137,7 @@ struct NewsApp: App {
                 }
                 .keyboardShortcut("k", modifiers: .command)
 
-                Button("Show Queued Updates") {
+                Button("Show New Stories") {
                     NotificationCenter.default.post(name: .showFeedUpdatesCommand, object: nil)
                 }
             }

@@ -100,19 +100,19 @@ struct MainView: View {
             .onChange(of: searchTokens, handleSearchTokensChange)
             // Notification Deep Link & Section Jump Routing
             .onReceive(NotificationCenter.default.publisher(for: .jumpToTodayCommand)) { _ in
-                selectedTopic = "Today"
+                showSection("Today")
             }
             .onReceive(NotificationCenter.default.publisher(for: .jumpToUnreadCommand)) { _ in
-                selectedTopic = "Unread"
+                showSection("Unread")
             }
             .onReceive(NotificationCenter.default.publisher(for: .jumpToSavedCommand)) { _ in
-                selectedTopic = "Saved Stories"
+                showSection("Saved Stories")
             }
             .onReceive(NotificationCenter.default.publisher(for: .jumpToHistoryCommand)) { _ in
-                selectedTopic = "History"
+                showSection("History")
             }
             .onReceive(NotificationCenter.default.publisher(for: .jumpToBriefingCommand)) { _ in
-                selectedTopic = "Briefing"
+                showSection("Briefing")
             }
             .task(id: pendingNavigationToken) {
                 await handlePendingNavigation()
@@ -145,6 +145,13 @@ struct MainView: View {
             }
     }
 
+    /// A section request from the sidebar or ⌘1–⌘4: the section shows its list even when it is already selected
+    /// and a story is open over it (#594).
+    private func showSection(_ topic: String) {
+        selectedTopic = topic
+        ArticleDetailView.stepBack(&articlePath, toList: true)
+    }
+
     // MARK: - Subviews
 
     @ViewBuilder
@@ -159,7 +166,8 @@ struct MainView: View {
     @ViewBuilder
     private var sidebarView: some View {
         SidebarView(
-            selectedTopic: $selectedTopic, mastheadNotice: $mastheadNotice,
+            selectedTopic: Binding(get: { selectedTopic }, set: { showSection($0 ?? "Today") }),
+            mastheadNotice: $mastheadNotice,
             showsTensionReading: appSettings.tensionCollectionOptIn,
             tensionReading: currentTensionReading,
             tensionStatus: tensionStatus,
@@ -252,10 +260,8 @@ struct MainView: View {
 
     // MARK: - Lifecycle & Navigation Handlers
 
+    /// The launch refresh starts once the list has shown the cached snapshot (ArticleListView.settleLaunch, #602).
     private func handleAppear() {
-        if feedManager.articles.isEmpty {
-            feedManager.fetchFeeds()
-        }
         // A window Settings reopened missed the notification; the request is still pending.
         handleNewsTensionCommand()
     }
