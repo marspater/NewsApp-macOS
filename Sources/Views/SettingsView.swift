@@ -60,6 +60,8 @@ struct SettingsView: View {
     @State private var newMutedSource = ""
     @State private var newMutedTopic = ""
     @State private var muteCounts = MuteRuleCounts()
+    /// The reader's current top interest categories, shown with the full-mode notification rule.
+    @State private var notificationInterests: [String] = []
     @State private var confirmsUnmuteAll = false
     @State private var inferredInterests: [String: Int] = [:]
     @State private var confirmsResetInterests = false
@@ -250,6 +252,12 @@ struct SettingsView: View {
 
             // Form keeps subscription actions reachable through system keyboard navigation.
             Form {
+                let starLimitReached = appSettings.starredFeedURLs.count >= AppSettings.starredFeedLimit
+                if starLimitReached {
+                    Text("Up to \(AppSettings.starredFeedLimit) feeds can be starred")
+                        .font(AppTypography.caption)
+                        .foregroundStyle(AppColor.secondaryText)
+                }
                 ForEach(feedManager.feedURLs, id: \.self) { urlString in
                     HStack(spacing: AppSpacing.sm) {
                         let status = feedManager.feedStatuses[urlString]
@@ -325,6 +333,27 @@ struct SettingsView: View {
                             }
                         }
                         Spacer()
+                        let starred = appSettings.starredFeedURLs.contains(urlString)
+                        Button {
+                            appSettings.setFeedStarred(urlString, !starred)
+                        } label: {
+                            Image(systemName: starred ? "star.fill" : "star")
+                                .font(AppTypography.label)
+                                .foregroundStyle(starred ? AppColor.accent : AppColor.secondaryText)
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(!starred && starLimitReached)
+                        .help(
+                            starred
+                                ? "Notifies about every story"
+                                : starLimitReached
+                                    ? "Up to \(AppSettings.starredFeedLimit) feeds can be starred"
+                                    : "Notify about every story"
+                        )
+                        .accessibilityLabel(
+                            starred
+                                ? "Stop notifying about every story from this feed"
+                                : "Notify about every story from this feed")
                         Button(role: .destructive) {
                             pendingUnsubscribe = urlString
                         } label: {
@@ -413,6 +442,13 @@ struct SettingsView: View {
                 }
             }
 
+            Section(header: sectionHeader("Topic Sets")) {
+                Text("Each set mutes a fixed list of words and phrases together, as whole words, with one switch.")
+                    .font(AppTypography.caption)
+                    .foregroundStyle(AppColor.secondaryText)
+                ForEach(MuteTopicSet.all, content: topicSetRow)
+            }
+
             Section {
                 Button("Unmute All…", role: .destructive) { confirmsUnmuteAll = true }
                     .disabled(appSettings.muteRules.isEmpty)
@@ -428,7 +464,29 @@ struct SettingsView: View {
         .confirmationDialog("Unmute every source and topic?", isPresented: $confirmsUnmuteAll) {
             Button("Unmute All", role: .destructive) { appSettings.clearMuting() }
         } message: {
-            Text("Muted stories return to every list.")
+            Text("Muted stories return to every list, and every topic set is switched off.")
+        }
+    }
+
+    /// One switch per fixed topic set, with its phrases and, when on, how many stored stories it hides.
+    private func topicSetRow(_ topicSet: MuteTopicSet) -> some View {
+        let isOn = appSettings.muteRules.topicSets.contains(topicSet.id)
+        let count = muteCounts.topicSets[topicSet.id] ?? 0
+        let binding = Binding(get: { isOn }, set: { appSettings.setTopicSet(topicSet.id, muted: $0) })
+        return Toggle(isOn: binding) {
+            VStack(alignment: .leading, spacing: AppSpacing.textStack) {
+                Text(topicSet.title)
+                    .foregroundStyle(AppColor.primaryText)
+                Text(topicSet.phrases.joined(separator: ", "))
+                    .font(AppTypography.caption)
+                    .foregroundStyle(AppColor.secondaryText)
+                    .lineLimit(2)
+                if isOn {
+                    Text(count == 1 ? "Hides 1 stored story" : "Hides \(count) stored stories")
+                        .font(AppTypography.caption)
+                        .foregroundStyle(AppColor.secondaryText)
+                }
+            }
         }
     }
 
@@ -615,11 +673,33 @@ struct SettingsView: View {
                             .foregroundStyle(AppColor.secondaryText)
                     }
                     .padding(.top, AppSpacing.xxs)
+                    if appSettings.notificationMode == .full {
+                        Text(fullNotificationRule)
+                            .font(AppTypography.caption)
+                            .foregroundStyle(AppColor.secondaryText)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
             }
         }
         .formStyle(.grouped)
         .frame(width: Self.paneWidth)
+        .task {
+            let weights = (try? await articleStore.database.briefingInterests()) ?? [:]
+            notificationInterests = NotificationService.rankedInterests(weights).compactMap { key in
+                NewsCategory.allCases.first { $0.rawValue.lowercased() == key }?.rawValue
+            }
+        }
+    }
+
+    /// The full-mode rule in one sentence, with the interests it currently reads (#588, #665).
+    private var fullNotificationRule: String {
+        let interests =
+            notificationInterests.isEmpty
+            ? "your top reading interests (none yet; they come from the stories you open and save)"
+            : "your top reading interests (\(notificationInterests.joined(separator: ", ")))"
+        return
+            "Major news covered by four or more publishers always notifies; starred feeds arrive grouped, one banner per feed every 20 minutes at most; other breaking stories, and stories in \(interests) that three or more publishers cover, notify at most five times an hour."
     }
 
     // MARK: - 4. Intelligence Tab

@@ -188,6 +188,37 @@ actor DatabaseEngine {
                 "UPDATE article_enrichment SET category = (SELECT news_topic(a.title, coalesce(a.description, ''), a.content) FROM articles a WHERE a.id = article_enrichment.article_id) WHERE category IS NULL;"
             )
 
+            // Notification delivery state (#545, #665, docs/notifications.md): side tables created on open, outside
+            // the numbered migrations, so they need no schema version.
+            try executeSimple(
+                """
+                CREATE TABLE IF NOT EXISTS event_notifications (
+                    event_id TEXT PRIMARY KEY,
+                    notified_at REAL NOT NULL,
+                    lead_key TEXT NOT NULL,
+                    lane INTEGER NOT NULL DEFAULT 0
+                );
+                CREATE TABLE IF NOT EXISTS notification_deliveries (
+                    id INTEGER PRIMARY KEY,
+                    lane INTEGER NOT NULL,
+                    grouped INTEGER NOT NULL,
+                    feed_url TEXT,
+                    story_count INTEGER NOT NULL,
+                    delivered_at REAL NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_notification_deliveries_time ON notification_deliveries(delivered_at);
+                CREATE TABLE IF NOT EXISTS notification_priority_queue (
+                    event_id TEXT PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    score REAL NOT NULL,
+                    lead_key TEXT NOT NULL,
+                    queued_at REAL NOT NULL
+                );
+                """
+            )
+            if try !columnNames(of: "event_notifications").contains("lane") {
+                try executeSimple("ALTER TABLE event_notifications ADD COLUMN lane INTEGER NOT NULL DEFAULT 0;")
+            }
             // Ensure article_embeddings table exists on all databases (including pre-existing v21 databases) (#127, #307)
             try executeSimple(
                 """
@@ -3215,6 +3246,155 @@ actor DatabaseEngine {
         return eligible
     }
 
+    /// The delivery tables as of `now` (#665). A time later than `now`, left by a clock set back, is rewritten as `now`
+    /// first, so no window outlasts its length; rows past their use are dropped.
+    func notificationLedger(now: Date) throws -> NotificationLedger {
+        let clock = now.timeIntervalSince1970
+        try eventRows(
+            "UPDATE notification_deliveries SET delivered_at = ? WHERE delivered_at > ?;", [.real(clock), .real(clock)])
+        try eventRows(
+            "UPDATE event_notifications SET notified_at = ? WHERE notified_at > ?;", [.real(clock), .real(clock)])
+        try eventRows(
+            "UPDATE notification_priority_queue SET queued_at = ? WHERE queued_at > ?;", [.real(clock), .real(clock)])
+        try eventRows("DELETE FROM notification_priority_queue WHERE queued_at < ?;", [.real(clock - 86400)])
+        func count(_ sql: String, since: TimeInterval) throws -> Int {
+            let value = try eventRows(sql, [.real(clock - since)]).first?.first ?? nil
+            return value.flatMap { Int($0) } ?? 0
+        }
+        var ledger = NotificationLedger()
+        ledger.normalLastHour = try count(
+            "SELECT count(*) FROM notification_deliveries WHERE lane = 0 AND delivered_at > ?;", since: 3600)
+        ledger.priorityLastHalfHour = try count(
+            "SELECT count(*) FROM notification_deliveries WHERE lane = 2 AND grouped = 0 AND delivered_at > ?;",
+            since: NotificationService.priorityWindow)
+        ledger.priorityGroupLastHalfHour =
+            try count(
+                "SELECT count(*) FROM notification_deliveries WHERE lane = 2 AND grouped = 1 AND delivered_at > ?;",
+                since: NotificationService.priorityWindow) > 0
+        for row in try eventRows(
+            "SELECT feed_url, max(delivered_at) FROM notification_deliveries WHERE lane = 1 GROUP BY feed_url;")
+        {
+            if let feed = row[0], let time = row[1].flatMap(Double.init) {
+                ledger.lastStarred[feed] = Date(timeIntervalSince1970: time)
+            }
+        }
+        for row in try eventRows(
+            "SELECT event_id, lead_key, lane FROM event_notifications WHERE notified_at >= ?;", [.real(clock - 86400)])
+        {
+            if let event = row[0], let key = row[1], let lane = row[2].flatMap(Int.init).flatMap(NotificationLane.init)
+            {
+                ledger.announced[event] = .init(leadKey: key, lane: lane)
+            }
+        }
+        ledger.priorityQueue = try eventRows(
+            "SELECT event_id, title, score, lead_key FROM notification_priority_queue ORDER BY score DESC;"
+        ).compactMap { row in
+            guard let event = row[0], let title = row[1], let score = row[2].flatMap(Double.init), let key = row[3]
+            else { return nil }
+            return QueuedPriority(event: event, title: title, score: score, leadKey: key)
+        }
+        return ledger
+    }
+
+    /// Records one posted banner (#665): its delivery row, and each event it announces with the highest lane that
+    /// covered it in the last day. Announced events leave the priority queue; rows older than a week go.
+    func recordNotification(_ banner: PlannedBanner, at date: Date) throws {
+        let now = date.timeIntervalSince1970
+        try eventRows(
+            """
+            INSERT INTO notification_deliveries (lane, grouped, feed_url, story_count, delivered_at)
+            VALUES (?, ?, ?, ?, ?);
+            """,
+            [
+                .integer(banner.lane.rawValue), .integer(banner.grouped ? 1 : 0),
+                banner.feedURL.map { .text($0) } ?? .null,
+                .integer(banner.count), .real(now),
+            ])
+        for (event, key) in banner.announces {
+            try eventRows(
+                """
+                INSERT INTO event_notifications (event_id, notified_at, lead_key, lane) VALUES (?, ?, ?, ?)
+                ON CONFLICT(event_id) DO UPDATE SET
+                    lane = CASE WHEN event_notifications.notified_at >= ? THEN max(event_notifications.lane, excluded.lane)
+                        ELSE excluded.lane END,
+                    notified_at = excluded.notified_at, lead_key = excluded.lead_key;
+                """, [.text(event), .real(now), .text(key), .integer(banner.lane.rawValue), .real(now - 86400)])
+            try eventRows("DELETE FROM notification_priority_queue WHERE event_id = ?;", [.text(event)])
+        }
+        try eventRows("DELETE FROM event_notifications WHERE notified_at < ?;", [.real(now - 7 * 86400)])
+        try eventRows("DELETE FROM notification_deliveries WHERE delivered_at < ?;", [.real(now - 7 * 86400)])
+    }
+
+    /// Priority keys over both priority limits wait here for the next grouped priority banner, at most a day.
+    func queuePriority(_ waiting: [QueuedPriority], at date: Date) throws {
+        for item in waiting {
+            try eventRows(
+                """
+                INSERT INTO notification_priority_queue (event_id, title, score, lead_key, queued_at) VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(event_id) DO UPDATE SET title = excluded.title, score = max(score, excluded.score),
+                    lead_key = excluded.lead_key;
+                """,
+                [
+                    .text(item.event), .text(item.title), .real(item.score), .text(item.leadKey),
+                    .real(date.timeIntervalSince1970),
+                ])
+        }
+    }
+
+    /// Visible, unmuted stories each feed brought in (`created_at`) after its given time, oldest first (#665).
+    func feedStories(since: [String: Date], muting: MuteRules) throws -> [String: [FeedArticle]] {
+        var stories: [String: [FeedArticle]] = [:]
+        for (feed, time) in since {
+            let ids = try eventRows(
+                """
+                SELECT a.id FROM article_feeds af JOIN articles a ON a.id = af.article_id
+                WHERE af.feed_url = ? AND a.created_at > ? AND \(Self.visibleArticle) ORDER BY a.created_at, a.id;
+                """, [.text(feed), .real(time.timeIntervalSince1970)]
+            ).compactMap { $0.first ?? nil }
+            stories[feed] = try ids.compactMap { try fetchArticles(limit: 1, id: $0, muting: muting).first }
+        }
+        return stories
+    }
+
+    /// The title of each event's lead story: the one that opened the event (lowest joined version, then earliest
+    /// publication). It stays the same when later reports join, unlike the newest member a card shows.
+    func eventLeadTitles(_ eventIDs: Set<String>) throws -> [String: String] {
+        var titles: [String: String] = [:]
+        let ids = eventIDs.sorted()
+        for start in stride(from: 0, to: ids.count, by: 400) {
+            let slice = Array(ids[start..<min(start + 400, ids.count)])
+            let placeholders = Array(repeating: "?", count: slice.count).joined(separator: ",")
+            for row in try eventRows(
+                """
+                SELECT m.event_id, a.title FROM event_members m JOIN articles a ON a.id = m.article_id
+                WHERE m.event_id IN (\(placeholders)) ORDER BY m.event_id, m.joined_version, a.published_at, a.id;
+                """, slice.map { .text($0) })
+            {
+                if let event = row[0], let title = row[1], titles[event] == nil { titles[event] = title }
+            }
+        }
+        return titles
+    }
+
+    /// Distinct publishers among the members of each event, for notification triage (#588).
+    func eventPublisherCounts(_ eventIDs: Set<String>) throws -> [String: Int] {
+        var counts: [String: Int] = [:]
+        let ids = eventIDs.sorted()
+        for start in stride(from: 0, to: ids.count, by: 400) {
+            let slice = Array(ids[start..<min(start + 400, ids.count)])
+            let placeholders = Array(repeating: "?", count: slice.count).joined(separator: ",")
+            for row in try eventRows(
+                """
+                SELECT m.event_id, count(DISTINCT a.source) FROM event_members m JOIN articles a ON a.id = m.article_id
+                WHERE m.event_id IN (\(placeholders)) GROUP BY m.event_id;
+                """, slice.map { .text($0) })
+            {
+                if let event = row[0], let count = row[1].flatMap({ Int($0) }) { counts[event] = count }
+            }
+        }
+        return counts
+    }
+
     /// Compatibility for historical audit callers. Only ordinary user-configured retention deletes stories.
     @discardableResult
     func expireWaitingStories(now: Date = Date(), keepingFeedURLs: [String] = []) throws -> Int {
@@ -3412,6 +3592,9 @@ actor DatabaseEngine {
             for source in rules.matchedSources(link: text(0)) { counts.sources[source, default: 0] += 1 }
             for topic in rules.matchedTopics(title: text(1), description: text(2)) {
                 counts.topics[topic, default: 0] += 1
+            }
+            for id in rules.matchedTopicSets(title: text(1), description: text(2)) {
+                counts.topicSets[id, default: 0] += 1
             }
             status = sqlite3_step(stmt)
         }
