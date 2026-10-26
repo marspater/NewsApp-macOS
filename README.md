@@ -93,3 +93,7 @@ Standard project, contribution, privacy and security documents stay at the root.
 - `Tests/NewsTests.swift`: parsing, security, persistence, classification and state regression checks.
 
 See the [30 September readiness report](docs/audits/2026-09-30-production-readiness.md), [earlier modernization report](docs/audits/2026-09-27-reader-modernization.md) and [security policy](SECURITY.md).
+
+## License
+
+Licensed under the [Apache License 2.0](LICENSE).
