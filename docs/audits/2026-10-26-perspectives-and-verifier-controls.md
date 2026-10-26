@@ -4,37 +4,49 @@ Refs #547 (epic L, #573). Source: `mars/l-547-perspectives`, stacked on #650. Sa
 
 ## Perspectives
 
-| Run | Code | Events | Two or more | One | None |
-| --- | --- | ---: | ---: | ---: | ---: |
-| A (baseline) | #650 tip (`4d968f2`) | 134 | 67 (50.0 %) | 36 | 31 |
-| E (final perspective code) | this PR | 131 | 80 (61.1 %) | 28 | 23 |
-| F (final code) | this PR | 130 | 63 (48.5 %) | 36 | 31 |
-| **G (final code, `5a21532`)** | this PR | 122 | **75 (61.5 %)** | 26 | 21 |
+Target: at least 60 % of multi-source events with two or more perspectives; Mars raised it on review to clearly above 61 %, on every stored-text replay and on a fresh live run, since run-to-run noise spans about two points. The 10 October figure (25/55, 45 %) came from a different window.
 
-Target: at least 60 % of multi-source events with two or more perspectives. **Run G, on the final code with a clean fetch, reaches 61.5 %: the target is met.** The 10 October figure (25/55, 45 %) came from a different window. Run G was made after the other sessions had gone idle: it stored 217 publisher texts, with 2 fetches cut at the deadline. Its window holds 122 events because the library was last refreshed on 25 October and the 72-hour window moves with each run. Runs E and F share the same perspective code; F changed only the claim verifier. F's publisher fetch was degraded: it stored 168 publisher texts against 222 in the baseline and 234 in run E, with 19 fetches cut at the deadline, while other sessions were loading the Mac. Its coverage reflects the thinner input, not the code; on F's own stored text the baseline code reaches 55/128.
+Live runs (fresh library copy, publisher text fetched):
 
-Each run fetches publisher pages again, so its input differs slightly. To compare code on the same input, the pattern changes were also measured on the publisher text stored by three runs:
+| Run | Code | Events | Two or more | One | None | Publisher texts stored |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| A (baseline) | #650 tip (`4d968f2`) | 134 | 67 (50.0 %) | 36 | 31 | 222 |
+| E | first pass | 131 | 80 (61.1 %) | 28 | 23 | 234 |
+| F | first pass, final verifier | 130 | 63 (48.5 %) | 36 | 31 | 168 (degraded) |
+| G | first pass (`5a21532`) | 122 | 75 (61.5 %) | 26 | 21 | 217 |
+| **H** | **second pass (`428e11e`)** | 120 | **79 (65.8 %)** | 21 | 20 | 182 |
 
-| Stored text from | Before | After |
-| --- | ---: | ---: |
-| A | 66/133 (49.6 %) | 79/132 (59.8 %) |
-| B (intermediate) | — | 82/132 (62.1 %) |
-| C (intermediate) | — | 81/132 (61.4 %) |
-| F (degraded fetch) | 55/128 (43.0 %) | 63/128 (49.2 %) |
-| G (final code) | 63/122 (51.6 %) | 75/122 (61.5 %) |
+Run F's fetch was degraded while other sessions loaded the Mac (19 deadline cuts). Run H fetched less than G (13 deadline cuts) and still reached 65.8 %; on H's own stored text the baseline code reaches 66/120 (55.0 %). The window shrinks from 134 to 120 events because the library was last refreshed on 25 October and the 72-hour window moves with each run.
 
-The change adds 8 to 13 events with two or more perspectives on the same input. Whether a run clears 60 % depends on how much publisher text it fetched: the complete fetches reach 59.8–62.1 % on the stored-text replays and 61.1–61.5 % in runs E and G.
+Same-input replays on the publisher text stored by four runs, measured at one moment (120 events each):
 
-Changes (`OverviewPerspectivesExtractor`):
-- A sentence closed by its attribution, without quotation marks: "…, the Ukrainian air force said.", "…, said Mayor Vitali Klitschko.", "…, according to the Gaza health ministry.", "…, Peskov told reporters on Monday." The tag may carry "in a statement", a weekday or date with an optional "(October 23, 2026)", a platform ("on X"), and may be followed by "…, adding", "…, as" and similar continuations. Full stops inside numbers ("3.48") and initialisms ("U.S.") do not end the sentence. A dateline ("PARIS: ") is not part of the statement.
-- A quotation closed by a described speaker: "…," political scientist Dusan Spasojevic told DW; "…," said student representative Nathanael Combary.
-- "X told those gathered that …": a lowercase audience after "told".
-- Institutional speakers: an institution or office as the head noun of a speaker of at least two words ("interior ministry", "the club's sporting director"). A bare "police" or "the ministry" stays vague, as does "authorities", which is now listed with "officials".
-- Wire copy: zero-width and soft-hyphen characters are removed before matching; they had split words inside the patterns.
-- Speaker cleanup: a speaker after a place ("In Karak, Major General … said") is taken from after the comma instead of being rejected; a clause before the speaker ("Kenya has recorded a second Ebola death, the health ministry") and a trailing "meanwhile" or "on Saturday" are dropped; "a figure the UN" is "UN"; "Mr." alone is not a speaker; a statement made only of capitalized words is a speaker tag, not a statement.
-- Reported speech no longer takes a statement that starts with "and", "but", "as", "late", "earlier" or "a day after".
+| Stored text from | Baseline code | First pass (`5a21532`) | Second pass (`428e11e`) |
+| --- | ---: | ---: | ---: |
+| A | 61 (50.8 %) | 73 (60.8 %) | **85 (70.8 %)** |
+| B | 63 (52.5 %) | 76 (63.3 %) | **90 (75.0 %)** |
+| C | 63 (52.5 %) | 75 (62.5 %) | **91 (75.8 %)** |
+| G | 62 (51.7 %) | 74 (61.7 %) | **90 (75.0 %)** |
 
-Precision: I reviewed the perspectives that the new code added or changed against run A, on the output of runs B and C, as a copilot review pending Mars's acceptance. The criterion follows the 10 October review: the participant identifies the actual speaker (extra descriptive words tolerated), and the position is something that speaker said. The errors the run B review found were fixed before run C and are covered by regression cases: a sentence and speaker swapped by "…, said American tariffs …", clause fragments as speakers, datelines inside statements, "Mr" as a speaker, statements starting mid-clause after a tag, and "figure the UN". On the run C output, 81 perspectives were new or changed against run A, each labelled row by row. 76 are correct (93.8 %, Wilson 95 % 86.3–97.3 %). Five are wrong in speaker or position: a position starting mid-clause ("and about 50 police…"), a speaker fragment ("figure the UN"), a continuation taken as the statement ("as authorities searched…"), a time clause ("a day after…", already shown by the baseline code), and a data source as speaker ("National Grid map"). The final code fixes the first four; the fifth remains. Two more rows are cosmetic, with the speaker still identified ("real name Stephen Yaxley-Lennon", "Visiting Hebron, Netanyahu"). The labels are in the private review notes.
+Every replay and the fresh run are above 61 %.
+
+First pass (`OverviewPerspectivesExtractor`):
+- A sentence closed by its attribution, without quotation marks: "…, the Ukrainian air force said.", "…, said Mayor Vitali Klitschko.", "…, according to the Gaza health ministry.", "…, Peskov told reporters on Monday." The tag may carry "in a statement", a weekday or date with an optional "(October 23, 2026)", a platform ("on X"), and continuations such as "…, adding" or "…, as". Full stops inside numbers ("3.48") and initialisms ("U.S.") do not end the sentence; a dateline ("PARIS: ") is not part of the statement.
+- A quotation closed by a described speaker ("…," political scientist Dusan Spasojevic told DW; "…," said student representative Nathanael Combary), and "X told those gathered that …".
+- Institutional speakers of two or more words ("interior ministry", "the club's sporting director").
+- Wire copy: zero-width and soft-hyphen characters are removed before matching.
+- Speaker cleanup: a speaker after a place ("In Karak, Major General … said"); a clause before the speaker, a trailing "meanwhile" or "on Saturday" and "Mr." alone are dropped; a statement of capitalized words only is a tag; reported speech does not start with "and", "but", "late", "earlier" or "a day after".
+
+Second pass, after the 61 % review (general forms found in the 46 events still below two voices on run G's text, not tuned to particular events):
+- Statements: a quoted phrase inside the sentence ("was “seriously wounded” but stable"), abbreviations ("Oct. 29", "Mr."), decimals in reported speech ("£8.9bn"), up to 300 characters; quotations up to 400 characters.
+- Quotations closed by a named speaker with an appositive ("…," Jorge Hernández-Bernal, a planetary scientist at …, said in a press release), by "says X", "argued", "posted", "wrote", "told me", without requiring the sentence to end at the tag.
+- Tags: a speaker with one appositive ("…, the mayor of La Verrière, Nicolas Dainville, told AFP."), initialisms and acronyms ("a U.S. envoy", "(CCI)"), continuations with "after" or "following", channels such as "in a letter", "in a press release", "in 2013", "said at a rally that"; "as many as" is a quantity, not a clause.
+- Bare institutions name their speaker within the story: "the military said", "police said", "prosecutors said", "the ministry said", "the prefecture said", "the university said". "Officials", "authorities", "many", "some" and "others" stay vague.
+- Not speakers: data sources and documents ("National Grid map", "a memo from…", "posts on Reddit", "the report"), aliases ("…, or FDFA"), ages ("Joao Paulo, 37"), cut-off fillers ("Google has long", "… at the"), a later segment opening with a preposition ("OCHA, in 2019"), a clause spanning "while" ("Police put their number at 13,000 while organisers"). An all-caps acronym is a name, not the relative word ("WHO chief Tedros").
+- Not statements: a statement before its tag that itself reports a named speaker ("Clayton said in a memo…, according to a U.S. official"), a channel phrase reaching into the next sentence, and the rest of a sentence after a dashed aside ("– which Rio's City Hall said attracted about 1.1 million people –").
+
+Precision. All labels are mine, pending Mars; row-by-row verdicts are in the private review notes.
+- First pass: on run C, 81 perspectives were new or changed against run A; 76 correct (93.8 %, Wilson 95 % 86.3–97.3 %). Of the five errors, four are fixed and the fifth ("National Grid map") is fixed in the second pass.
+- Second pass: two review rounds on the rows it added across the A, B, C and G texts. The first round found 10 defects in 70 rows (85.7 %): numbers cut at a decimal, a channel phrase reaching into the next sentence, a nested report, document and post speakers, a split UNESCO name, an alias, "Many", an official shortened to "Trump administration", and a statement running past an aside. All were fixed with regression cases. The final set is **72 rows, 72 with the right speaker and a position that speaker said (100 %, Wilson 95 % 94.9–100 %)**, one borderline (a newspaper as speaker), no new critical kind. Of the 20 rows the second pass removes, 13 are the same voice with a cleaner speaker or position, 6 were defects, and 1 correct row of nested speech is lost.
 
 ## Claim verifier controls
 
