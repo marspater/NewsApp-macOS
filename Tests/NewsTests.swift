@@ -4051,16 +4051,34 @@ struct NewsTests {
         assertTrue(WorldTensionService.isSoftNews("Premier League title race tightens"), "Sport is soft")
         assertFalse(WorldTensionService.isSoftNews("Missile strikes hit port as talks stall"), "Conflict is hard news")
         let estimateInput = [
-            WorldTensionHeadline(id: "C1", title: "Airstrikes intensify along the front line", publisher: "Panel"),
+            WorldTensionHeadline(id: "C1", title: "Airstrikes intensified along the front line", publisher: "Panel"),
             WorldTensionHeadline(id: "C2", title: "Central bank holds rates", publisher: "Panel"),
             WorldTensionHeadline(id: "C3", title: "Floods displace villagers", publisher: "Panel"),
         ]
-        let estimate = WorldTensionAssessment.estimate(current: estimateInput)
+        let estimateNow = Date(timeIntervalSince1970: 1_780_000_000)
+        let estimateWindow = DateInterval(start: estimateNow.addingTimeInterval(-86400), end: estimateNow)
+        // Every panel feed reports, so coverage is sufficient; feeds beyond the three headlines repeat the rates story.
+        let estimateRows = TensionMethodology.v1.panel.enumerated().map { index, member in
+            let own = index < estimateInput.count
+            return TensionCorpusRow(
+                article: FeedArticle(
+                    title: own ? estimateInput[index].title : "Central bank holds rates",
+                    link: "https://example.com/estimate/\(index)", guid: "estimate-\(index)", description: "",
+                    pubDate: estimateNow.addingTimeInterval(-3600), source: "Panel \(index)"),
+                feedURL: member.url, eventID: own ? "estimate-event-\(index)" : "rates")
+        }
+        let estimateDay = TensionDayAssessor.assess(
+            day: estimateWindow, rows: estimateRows, now: estimateNow, includingHeadlines: true)
+        let estimate = WorldTensionAssessment.estimate(current: estimateInput, day: estimateDay, rows: estimateRows)
         assertEqual(estimate?.isEstimate, true, "Keyword estimates are labelled")
         assertEqual(estimate?.drivers, ["C1", "C3"], "Estimate drivers rank conflict above disaster")
         assertTrue(
             estimate?.isValid(headlines: estimateInput) == true, "Keyword estimates satisfy the reading contract")
-        assertTrue((estimate?.score ?? 0) > 20, "Conflict cues raise the estimate above the floor")
+        // Escalating airstrikes 10 × 1.3 × 0.85 plus floods 6 × 0.85: raw 16.15, index 100 × (1 − e^(−16.15 / 25)).
+        assertEqual(estimate?.score, 48, "The estimate is the calibrated v1 day index of the classified events")
+        assertTrue(
+            estimate?.lead.map { $0.contains("armed conflict") && $0.contains("disaster") } ?? false,
+            "The lead names the scoring event types, strongest first")
         let driverHeadlines = [
             WorldTensionHeadline(id: "C1", title: "Peace talks resume", publisher: "Panel"),
             WorldTensionHeadline(id: "C2", title: "Airstrikes hit the port", publisher: "Panel"),
@@ -4134,6 +4152,19 @@ struct NewsTests {
             database: database, now: now, aiEnabled: true, collectionEnabled: true)
         assertEqual(unavailableDay.last?.assessment.isEstimate, true, "An unavailable model shows a keyword estimate")
         assertEqual(try await database.worldTensionHistory(), [], "Keyword estimates are never saved")
+        // The estimate is the calibrated v1 day score over the panel's unique events (#544): peace talks carry no
+        // event type, so the day reads 0.
+        let panelURLs = TensionMethodology.v1.panel.map(\.url)
+        func calibratedDayScore(at date: Date) async throws -> Int {
+            let window = DateInterval(start: date.addingTimeInterval(-86400), end: date)
+            let rows = try await database.tensionCorpus(day: window, feedURLs: panelURLs)
+            let day = TensionDayAssessor.assess(day: window, rows: rows, now: date, includingHeadlines: true)
+            return Int((TensionCalibrator.scoreDay(assessment: day).calibratedIndex ?? 0).rounded())
+        }
+        assertEqual(unavailableDay.last?.assessment.score, 0, "Peace talks alone score 0 under the calibrated weights")
+        assertEqual(
+            unavailableDay.last?.assessment.score, try await calibratedDayScore(at: now),
+            "The estimate equals the calibrated day score the history would compute")
         assertFalse(
             unavailableDay.last?.headlines.contains { $0.title == soft.title } ?? true,
             "Soft news is left out of the panel headlines")
@@ -4164,6 +4195,19 @@ struct NewsTests {
         assertTrue(
             refreshed.last?.headlines.contains { $0.title == escalation.title } ?? false,
             "The refreshed estimate reads the new headlines")
+        // One armed-conflict event from one region: 10 × 0.85 raw, 100 × (1 − e^(−8.5 / 25)) ≈ 29 on the index.
+        assertEqual(
+            refreshed.last?.assessment.score, 29, "A missile strike scores the calibrated armed-conflict weight")
+        assertEqual(
+            refreshed.last?.assessment.score, try await calibratedDayScore(at: now.addingTimeInterval(1800)),
+            "The refreshed estimate still equals the calibrated day score")
+        assertEqual(
+            refreshed.last?.assessment.drivers,
+            refreshed.last?.headlines.filter { $0.title == escalation.title }.map(\.id),
+            "The scoring event's headline is the only driver")
+        assertTrue(
+            refreshed.last?.assessment.reasons.contains { $0.explanation.hasPrefix("1 of ") } ?? false,
+            "The scope reason counts scoring events among the day's unique events")
         let model = NewsTextModel { prompt, _ in
             assertFalse(
                 prompt.contains(unrelated.title), "Unrelated prior events are excluded from the novelty baseline")
