@@ -57,7 +57,7 @@ Release and engineering hygiene
 
 ## 2. Plan — programs and issues
 
-The original seven programs (J–P) each have a GitHub epic with sub-issues and a milestone. **Program S was added on 25 October 2026 as a separately parked, future-facing Epic**; it is not a release gate. Every implementation issue lands as one PR with `./test.sh`, `script/format.sh --check`, a staged `./build.sh`, a CHANGELOG line and board move; UI PRs carry the DESIGN.md checklist. No AI attribution lines in commits or PRs. Effort S < 1 day, M 1–3 days, L > 3 days.
+The original seven programs (J–P) each have a GitHub epic with sub-issues and a milestone. **Program S was added on 25 October 2026 as a separately parked, future-facing Epic**; it is not a release gate. **Program T was added on 26 October 2026 and is blocked by M and L.** Every implementation issue lands as one PR with `./test.sh`, `script/format.sh --check`, a staged `./build.sh`, a CHANGELOG line and board move; UI PRs carry the DESIGN.md checklist. No AI attribution lines in commits or PRs. Effort S < 1 day, M 1–3 days, L > 3 days.
 
 ### J · Robustness and data safety (epic #571, milestone J)
 
@@ -155,6 +155,24 @@ The original seven programs (J–P) each have a GitHub epic with sub-issues and 
 - [x] Create milestone S (Q and R were already taken by #607 and #608).
 - [x] Add #651–#656 to GitHub Project #2.
 - [x] Set Status = Backlog and Priority = P2 for every card; keep the `parked` label.
+
+### T · Story Overview and editorial UX (epic #669, milestone T, **BLOCKED** by M #574 and L #573; added 26 October 2026)
+
+**Dependency:** #669 is blocked by #574 (M · Matching: story-level grouping and measured matcher iteration) and #573 (L · Logic hardening of the deterministic layers), recorded as GitHub issue dependencies. M's story layer (#581) changes what an overview and its timeline span; L owns the `Overview*` logic and perspective attribution (#547). Planning only: no implementation PRs, and every card stays in Backlog until both epics are closed.
+
+| # | Issue | Scope | Acceptance | Effort | Pri |
+|---|---|---|---|---|---|
+| T1 (#670) | Conditional Industry Impact section | Named industries and practical implications, each cited; shown only when a cited passage states the effect; whole section omitted otherwise; fixed industry list; model drafts pass `OverviewClaimVerifier`. | No section on no-impact fixtures; cited entries on impact fixtures; no repeat of introduction or highlights; 30-event library check with 0 unsupported implications. | L | P2 |
+| T2 (#671) | Connected timeline of events | Continuous spine, distinct markers (past, planned, publication-only) by shape plus text, dates and descriptions with citations; native timeline tokens; date above description at 900 pt. | Spine unbroken at 900 pt/wide and text 1.0/1.3; sort-order and missing-data tests; grayscale-distinguishable states; VoiceOver row order. | M | P2 |
+| T3 (#672) | Highlight separation and hierarchy | One marker and row per takeaway (replaces publisher stacking), subordinate context line, larger gap between than within highlights, no per-item cards. | One takeaway per row (test); gap ratio ≥ 2 from tokens; unknown-publisher fallback; VoiceOver one element per highlight. | S | P2 |
+| T4 (#673) | Distinct Perspectives design | Own visual identity; participant first, position second, publisher attribution secondary; positions framed as attributed, never as fact; no false balance or placeholders. | Distinct in captures (Mars approves); empty-participant positions hidden; no highlight/perspective duplicate; one-perspective fixture shows no "other side". | M | P2 |
+
+Shared acceptance for all four (in #669): sections absent without valid data, stated missing-data fallbacks, citations on every line, DESIGN.md §16 accessibility and §9 contrast, 900 pt and wide layouts at text sizes 1.0 and 1.3, tokens and existing components only, DESIGN.md §9/§17 rule per change approved by Mars, appearance-matrix captures. File ownership: overview section code in `EventOverviewReaderView.swift` (hand-off from Q #607), a new `OverviewIndustryImpactExtractor.swift`, the industry-impact field and composition step (after L closes).
+
+**Board setup checklist**
+- [x] Create milestone T.
+- [x] Create #669 with sub-issues #670–#673 and record the blocked-by dependencies on #574 and #573.
+- [x] Add #669–#673 to GitHub Project #2 with Status = Backlog and Priority = P2.
 
 ## 3. Order
 
