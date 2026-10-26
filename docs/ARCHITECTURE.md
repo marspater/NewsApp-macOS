@@ -221,7 +221,7 @@ Open a section before changing that area. Each rule is load-bearing; tests cover
 
 - Background classification skips Low Power Mode and serious thermal state; scheduled refreshes honor `NSBackgroundActivityScheduler.shouldDefer`.
 
-- New-story notifications use IDs inserted by a committed transaction, skip muted stories, and resolve via SQLite by stable ID once storage is ready. Clustering runs first, so the reports of one event notify once, through the report that scores highest.
+- New-story notifications use IDs inserted by a committed transaction, skip muted stories, and resolve via SQLite by stable ID once storage is ready. Clustering runs first, so the reports of one event notify once, through the report that scores highest. Full mode sorts each story or event into a priority, starred or normal lane with its own limits, recorded in side tables so they hold across refreshes and relaunches (`docs/notifications.md`).
 
 - All URLs, feed bodies, HTML, redirects and OPML are untrusted. Remote fetching goes through the protected gateway: public-DNS validation, numeric-IP pinning, response bounds, cancellation. URLSession and WebKit previews share it.
 

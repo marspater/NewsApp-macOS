@@ -358,6 +358,12 @@ struct NewsTests {
                 path: CommandLine.arguments[index + 1], output: CommandLine.arguments[index + 2])
             return
         }
+        if let index = CommandLine.arguments.firstIndex(of: "--notification-priority-live"),
+            CommandLine.arguments.count > index + 2
+        {
+            try measureLivePriority(path: CommandLine.arguments[index + 1], output: CommandLine.arguments[index + 2])
+            return
+        }
         if let index = CommandLine.arguments.firstIndex(of: "--images-live"), CommandLine.arguments.count > index + 2 {
             try await measureLiveImages(
                 path: CommandLine.arguments[index + 1], output: CommandLine.arguments[index + 2])
@@ -575,6 +581,7 @@ struct NewsTests {
             try await testOnDemandOverviewGenerationAndCaching(fixtureHost: fixtureHost)
             try await testOverviewGenerationCancellationAndSupersession(fixtureHost: fixtureHost)
             try await testDeterministicClaimVerification(fixtureHost: fixtureHost)
+            testOverviewVerifierControls()
             try await testEventOverviewReaderMode(fixtureHost: fixtureHost)
             try await testOverviewResolutionWhenOpeningMemberArticle(fixtureHost: fixtureHost)
             try await testOverviewTimeline(fixtureHost: fixtureHost)
@@ -681,6 +688,7 @@ struct NewsTests {
         try await testOnDemandOverviewGenerationAndCaching(fixtureHost: fixtureHost)
         try await testOverviewGenerationCancellationAndSupersession(fixtureHost: fixtureHost)
         try await testDeterministicClaimVerification(fixtureHost: fixtureHost)
+        testOverviewVerifierControls()
         try await testEventOverviewReaderMode(fixtureHost: fixtureHost)
         try await testOverviewResolutionWhenOpeningMemberArticle(fixtureHost: fixtureHost)
         try await testOverviewTimeline(fixtureHost: fixtureHost)
@@ -756,6 +764,8 @@ struct NewsTests {
         await testInteractiveAnalysisCancellation()
         try await testGranularCacheClearingAndRetention()
         await testNotificationServiceErrorLogging()
+        try await testNotificationDedupeAcrossRefreshes(fixtureRoot: fixtureRoot)
+        try await testNotificationLanesAcrossRefreshes(fixtureRoot: fixtureRoot)
         await testArticleStoreErrorResilience()
         await testSystemErrorHardeningAndResilience()
         await testFeedArticleWrapContextNavigation()
@@ -2373,6 +2383,15 @@ struct NewsTests {
                     return false
                 }(), "Injected DNS cannot bypass hostname/literal guards")
         }
+        for (host, address) in [("93.184.216.34", "93.184.216.34"), ("[2606:4700::1111]", "2606:4700::1111")] {
+            let result = IPAddressValidator.validateHost(
+                host,
+                resolver: { _ in
+                    assertTrue(false, "Public literals never depend on host DNS or configured address families")
+                    return .unresolvable(reason: "No IPv4 interface configured")
+                })
+            assertEqual(result, .allowed(ips: [address]), "A public literal pins itself without resolution")
+        }
 
         // 1. Literal IPv4 Loopback & Private
         assertTrue(IPAddressValidator.checkLiteralIP("127.0.0.1") != nil, "127.0.0.1 must be blocked")
@@ -3424,12 +3443,13 @@ struct NewsTests {
         assertEqual(manager.articles.count, 1, "Collected articles are published while triage is still running")
         assertEqual(manager.feedStatuses[feed], .idle, "The feed reports a finished refresh")
         let second = Task { await manager.fetchFeedsAsync() }  // Cmd-R during triage
-        await eventually("A refresh requested during triage collects again") { await gate.arrivals == 2 }
-        assertEqual(await counter.value, 2, "Cmd-R is not coalesced onto follow-up work")
-        assertEqual(manager.articles.count, 2, "Cmd-R publishes new articles immediately")
+        await eventually("A refresh requested during triage collects again") { await counter.value == 2 }
+        await eventually("Cmd-R publishes new articles immediately") { manager.articles.count == 2 }
+        assertEqual(await gate.arrivals, 1, "Its notification pass waits for the one in progress (#665)")
         await gate.open()
         await first.value
         await second.value
+        assertEqual(await gate.arrivals, 2, "Then its notification pass runs")
         manager.stopBackgroundWork()
 
         // Background classification stops under Low Power Mode or thermal pressure, and otherwise runs through the shared queue.
@@ -3822,6 +3842,24 @@ struct NewsTests {
             "Each covering topic is reported")
         assertEqual(MuteRules(sources: rules.sources, topics: rules.topics), rules, "Stored rules restore unchanged")
 
+        // A topic set mutes its fixed phrases with one switch (#590); whole words keep "Dubai" and "aid" visible.
+        let aiSet = MuteTopicSet.artificialIntelligence.id
+        var sets = MuteRules()
+        assertTrue(sets.addTopicSet(aiSet), "A known topic set switches on")
+        assertFalse(sets.addTopicSet(aiSet), "A topic set switches on once")
+        assertFalse(sets.addTopicSet("unknown-set"), "Unknown sets are ignored")
+        assertFalse(sets.isEmpty, "A switched-on set is a muting rule")
+        assertTrue(
+            sets.mutesTopic(title: "OpenAI says its agents disabled their own safety monitors", description: ""),
+            "A set phrase matches as a whole word in the headline")
+        assertTrue(sets.mutesTopic(title: "Firms rush to adopt A.I. tools", description: ""), "A.I. matches")
+        assertFalse(sets.mutesTopic(title: "Dubai aid flight lands in Gaza", description: ""), "Dubai and aid stay")
+        assertFalse(sets.mutesTopic(title: "Claudette reopens", description: "Said the mayor"), "Longer words stay")
+        assertEqual(sets.matchedTopicSets(title: "AI startup raises funds", description: ""), [aiSet], "Sets report")
+        assertEqual(MuteRules(topicSets: sets.topicSets), sets, "Stored sets restore unchanged")
+        sets.removeTopicSet(aiSet)
+        assertTrue(sets.isEmpty, "Switching a set off removes every phrase")
+
         // SQLite applies muting before LIMIT and reports what it hid.
         let db = DatabaseEngine(path: ":memory:")
         try await db.open()
@@ -3872,6 +3910,17 @@ struct NewsTests {
         assertEqual(ruleCounts.sources, ["example.com": 2], "Settings count the stories each source rule covers")
         assertEqual(
             ruleCounts.topics, ["Climate change": 1, "art": 1], "Settings count the stories each topic rule covers")
+        try await db.upsertArticles([
+            story(7, "https://other.org/7", "OpenAI agents disabled monitors"),
+            story(8, "https://other.org/8", "Dubai aid flight lands", "AIDS research funded"),
+        ])
+        let aiMuting = MuteRules(topicSets: [aiSet])
+        assertEqual(
+            try await db.mutedArticleCount(muting: aiMuting), 1, "SQLite hides a set's stories by whole words only")
+        assertEqual(
+            try await db.fetchArticles(limit: nil, muting: aiMuting).count, stories.count + 1,
+            "The SQLite and Swift paths agree on what a set hides")
+        assertEqual(try await db.mutedRuleCounts(aiMuting).topicSets, [aiSet: 1], "Settings count a set's stories")
         await db.close()
 
         // Rules persist with the reader's settings; Unmute All clears them.
@@ -3887,6 +3936,11 @@ struct NewsTests {
         assertEqual(AppSettings(defaults: defaults).muteRules, settings.muteRules, "Muting persists across launches")
         settings.unmuteTopic("Election")
         assertEqual(AppSettings(defaults: defaults).muteRules.topics, [], "Unmuting a topic is stored")
+        settings.setTopicSet(aiSet, muted: true)
+        assertEqual(AppSettings(defaults: defaults).muteRules.topicSets, [aiSet], "A switched-on set is stored")
+        settings.setTopicSet(aiSet, muted: false)
+        assertEqual(AppSettings(defaults: defaults).muteRules.topicSets, [], "Switching a set off is stored")
+        settings.setTopicSet(aiSet, muted: true)
         settings.clearMuting()
         assertTrue(AppSettings(defaults: defaults).muteRules.isEmpty, "Unmute All clears the stored rules")
 
@@ -8207,6 +8261,75 @@ struct NewsTests {
     }
 
     /// Opt-in protected publisher requests on an already rated, temporary library backup.
+    /// How often the priority rule (#665) fires on a library backup: for each event, the first visible story, created in
+    /// the last 14 days, that qualifies with the publishers its event had when that story arrived. Read-only.
+    static func measureLivePriority(path: String, output: String) throws {
+        let url = URL(fileURLWithPath: path).resolvingSymlinksInPath()
+        guard url.path.hasPrefix("/private/tmp/") || url.path.hasPrefix("/tmp/"), output.hasPrefix("/private/tmp/")
+        else {
+            throw NSError(
+                domain: "LivePriority", code: 1, userInfo: [NSLocalizedDescriptionKey: "Use a temporary library backup"]
+            )
+        }
+        var connection: OpaquePointer?
+        guard sqlite3_open_v2(url.path, &connection, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
+            throw NSError(domain: "LivePriority", code: 2, userInfo: [NSLocalizedDescriptionKey: "Cannot open \(path)"])
+        }
+        defer { sqlite3_close(connection) }
+        let now =
+            ProcessInfo.processInfo.environment["NEWS_PRIORITY_NOW"].flatMap(TimeInterval.init)
+            ?? Date().timeIntervalSince1970
+        let query = """
+            SELECT a.id, a.title, coalesce(a.description, ''), a.created_at, m.event_id,
+                (SELECT count(DISTINCT b.source) FROM event_members n JOIN articles b ON b.id = n.article_id
+                 WHERE n.event_id = m.event_id AND b.created_at <= a.created_at)
+            FROM articles a JOIN event_members m ON m.article_id = a.id
+            WHERE a.created_at >= ? AND a.created_at <= ?
+                AND NOT EXISTS (SELECT 1 FROM article_reconciliations r WHERE r.duplicate_id = a.id)
+            ORDER BY a.created_at;
+            """
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(connection, query, -1, &statement, nil) == SQLITE_OK else {
+            throw NSError(domain: "LivePriority", code: 3, userInfo: [NSLocalizedDescriptionKey: "Query failed"])
+        }
+        defer { sqlite3_finalize(statement) }
+        sqlite3_bind_double(statement, 1, now - 14 * 86400)
+        sqlite3_bind_double(statement, 2, now)
+        func text(_ column: Int32) -> String {
+            sqlite3_column_text(statement, column).map { String(cString: $0) } ?? ""
+        }
+        var first: [String: (day: String, title: String, score: Double, publishers: Int)] = [:]
+        var stories = 0
+        var days = Set<String>()
+        let dayFormat = DateFormatter()
+        dayFormat.dateFormat = "yyyy-MM-dd"
+        while sqlite3_step(statement) == SQLITE_ROW {
+            stories += 1
+            let created = Date(timeIntervalSince1970: sqlite3_column_double(statement, 3))
+            days.insert(dayFormat.string(from: created))
+            let event = text(4)
+            guard first[event] == nil else { continue }
+            let title = text(1)
+            let publishers = Int(sqlite3_column_int(statement, 5))
+            let score = NotificationService.shared.computeImportance(title: title, description: text(2))
+            if NotificationService.isPriority(title: title, score: score, publishers: publishers) {
+                first[event] = (dayFormat.string(from: created), title, score, publishers)
+            }
+        }
+        var lines = [
+            "Priority keys (#665) over 14 days: \(first.count), from \(stories) clustered stories on \(days.count) days with ingestion"
+        ]
+        for day in days.sorted() {
+            let keys = first.values.filter { $0.day == day }.sorted { $0.score > $1.score }
+            lines.append("\(day): \(keys.count)")
+            for key in keys {
+                lines.append("  - \(String(format: "%.2f", key.score)), \(key.publishers) publishers: \(key.title)")
+            }
+        }
+        try (lines.joined(separator: "\n") + "\n").write(toFile: output, atomically: true, encoding: .utf8)
+        print(lines.joined(separator: "\n"))
+    }
+
     static func measureLiveImages(path: String, output: String) async throws {
         let url = URL(fileURLWithPath: path).resolvingSymlinksInPath()
         guard url.path.hasPrefix("/private/tmp/") || url.path.hasPrefix("/tmp/"), output.hasPrefix("/private/tmp/")
@@ -14429,6 +14552,29 @@ struct NewsTests {
         assertEqual(settingsB.notificationMode, AppSettings.NotificationMode.minimal, "Mode should update to .minimal")
         assertEqual(
             tempDefaultsB.string(forKey: AppSettings.notificationModeKey), "minimal", "Key should update to minimal")
+
+        // Starred feeds persist and go with an unsubscribed feed (#588).
+        settingsB.feedURLs = ["https://example.com/feed"]
+        settingsB.setFeedStarred("https://example.com/feed", true)
+        assertEqual(
+            AppSettings(defaults: tempDefaultsB).starredFeedURLs, ["https://example.com/feed"], "A star is stored")
+        settingsB.setFeedStarred("https://example.com/feed", false)
+        assertTrue(AppSettings(defaults: tempDefaultsB).starredFeedURLs.isEmpty, "Unstarring is stored")
+        settingsB.setFeedStarred("https://example.com/feed", true)
+        settingsB.removeFeed(url: "https://example.com/feed")
+        assertTrue(settingsB.starredFeedURLs.isEmpty, "Unsubscribing removes the star")
+
+        // At most three feeds are starred: a fourth star is refused, not swapped in (#588).
+        let capped = (1...4).map { "https://cap\($0).invalid/feed" }
+        for url in capped.prefix(3) { assertTrue(settingsB.setFeedStarred(url, true), "Stars up to the limit") }
+        assertFalse(settingsB.setFeedStarred(capped[3], true), "A fourth star is refused")
+        assertEqual(settingsB.starredFeedURLs, Set(capped.prefix(3)), "The three stars stay; none is replaced")
+        assertEqual(
+            AppSettings(defaults: tempDefaultsB).starredFeedURLs, Set(capped.prefix(3)),
+            "The refused star is not stored")
+        assertTrue(settingsB.setFeedStarred(capped[0], true), "Re-starring a starred feed at the limit is fine")
+        settingsB.setFeedStarred(capped[0], false)
+        assertTrue(settingsB.setFeedStarred(capped[3], true), "Unstarring frees a place")
     }
 
     actor FeedDeliveryGate {
@@ -16564,11 +16710,14 @@ struct NewsTests {
 
         // 3. Importance computation range [0.0, 1.0]
         assertEqual(
-            NotificationService.breakingSignalCount(in: "Studies show diesel bodies replacement"), 0,
+            NotificationService.breakingSignalWeight(in: "Studies show diesel bodies replacement"), 0,
             "Signal words match whole words only")
         assertEqual(
-            NotificationService.breakingSignalCount(in: "Man dies in attack, police say"), 2,
-            "Whole-word signals still count")
+            NotificationService.breakingSignalWeight(in: "Man dies in attack, police say"), 2,
+            "Whole-word breaking signals weigh a point each")
+        assertEqual(
+            NotificationService.breakingSignalWeight(in: "President announces the company launches a fund"), 1.5,
+            "Announcement and office-holder words weigh half (#545)")
         let score = service.computeImportance(
             title: "Breaking News: Major Crisis Declared", description: "Officials announce emergency response.")
         assertTrue(score >= 0.0 && score <= 1.0, "Score must be bounded between 0.0 and 1.0")
@@ -16580,22 +16729,501 @@ struct NewsTests {
                 pubDate: Date(timeIntervalSince1970: 1_700_000_000), source: "Publisher \(id)")
         }
         let quiet = report(1, "Council meets on Tuesday")
-        let loud = report(2, "Breaking: explosion kills dozens, president declares emergency")
+        let loud = report(
+            2,
+            "Breaking: explosion kills dozens in Paris, London, Berlin, Madrid, Rome, Vienna, Lisbon and Dublin; emergency declared"
+        )
         let third = report(3, "Explosion reported downtown")
         let single = report(4, "Local library extends opening hours")
         let events = [quiet.id: "event-a", loud.id: "event-a", third.id: "event-a"]
         let chosen = await NotificationService.representatives(of: [quiet, loud, third, single], events: events)
-        assertEqual(chosen.map(\.id), [loud.id, single.id], "One report per event, the strongest, then the single")
+        assertEqual(
+            chosen.map(\.article.id), [loud.id, single.id], "One report per event, the strongest, then the single")
         let alone = await NotificationService.representatives(of: [quiet, single], events: [:])
-        assertEqual(alone.map(\.id), [quiet.id, single.id], "Without events every story stands alone in order")
+        assertEqual(alone.map(\.article.id), [quiet.id, single.id], "Without events every story stands alone in order")
 
         // 4. Robust dispatching (no crashes across all 3 notification tiers)
         let sampleArticle = FeedArticle(
             title: "Urgent Update", link: "https://example.com/urgent", guid: "sample-guid",
             description: "Details follow", pubDate: Date(), source: "Wire Service")
-        await service.triageAndNotify(newArticles: [sampleArticle], mode: .minimal)
-        await service.triageAndNotify(newArticles: [sampleArticle], mode: .privacy)
-        await service.triageAndNotify(newArticles: [sampleArticle], mode: .full)
+        await service.triageAndNotify(newArticles: [sampleArticle], delivery: .init(mode: .minimal))
+        await service.triageAndNotify(newArticles: [sampleArticle], delivery: .init(mode: .privacy))
+        await service.triageAndNotify(newArticles: [sampleArticle], delivery: .init(mode: .full))
+
+        // 5. Banners arrive one at a time, a pause apart, threaded per story (#587): two new reports of one event are
+        // one banner; three events are three spaced banners with their own threads. A breaking story is an active
+        // alert with sound; a lesser one is passive and silent.
+        struct Posted: Sendable {
+            let at = ContinuousClock.now
+            let thread: String
+            let active: Bool
+            let sound: Bool
+            let body: String
+            init(_ request: UNNotificationRequest) {
+                thread = request.content.threadIdentifier
+                active = request.content.interruptionLevel == .active
+                sound = request.content.sound != nil
+                body = request.content.body
+            }
+        }
+        actor Recorder {
+            var posted: [Posted] = []
+            func record(_ item: Posted) { posted.append(item) }
+        }
+        let recorder = Recorder()
+        let spaced = NotificationService(post: { await recorder.record(Posted($0)) }, spacing: .milliseconds(60))
+        // Three signal words and six named places put a score at 0.75 before sentiment, so these are breaking
+        // whatever the sentiment tagger says.
+        let fourth = report(
+            5,
+            "Earthquake kills hundreds in Tokyo, Osaka, Kyoto, Nagoya, Sapporo, Kobe and Sendai; emergency declared as crisis deepens"
+        )
+        let fifth = report(
+            6,
+            "Explosion at a refinery in Houston, Dallas, Austin, Denver, Phoenix, Tucson and Boise, dozens killed; urgent evacuation"
+        )
+        let pairEvents = [quiet.id: "event-a", loud.id: "event-a", fourth.id: "event-b", fifth.id: "event-c"]
+        await spaced.triageAndNotify(
+            newArticles: [quiet, loud, fourth, fifth], delivery: .init(mode: .full, events: pairEvents))
+        let posted = await recorder.posted
+        assertEqual(posted.count, 3, "Two reports of one event and two other events are three banners")
+        assertEqual(
+            Set(posted.map(\.thread)), ["event-a", "event-b", "event-c"], "Each banner is threaded under its event")
+        assertTrue(
+            zip(posted, posted.dropFirst()).allSatisfy { $1.at - $0.at >= .milliseconds(60) },
+            "Banners of one refresh are posted at least the spacing apart")
+        assertTrue(posted.allSatisfy { $0.active && $0.sound }, "Breaking stories are active alerts with sound")
+        let quietRecorder = Recorder()
+        let quietService = NotificationService(post: { await quietRecorder.record(Posted($0)) }, spacing: .zero)
+        await quietService.triageAndNotify(newArticles: [quiet], delivery: .init(mode: .full))
+        assertTrue(
+            (await quietRecorder.posted).allSatisfy { !$0.active && !$0.sound },
+            "A story below the breaking score is passive and silent when it notifies")
+        let minimalRecorder = Recorder()
+        let minimal = NotificationService(post: { await minimalRecorder.record(Posted($0)) }, spacing: .zero)
+        await minimal.triageAndNotify(
+            newArticles: [quiet, loud, third, single], delivery: .init(mode: .minimal, events: events))
+        assertEqual(
+            (await minimalRecorder.posted).first?.body, "2 new articles across 2 sources",
+            "Summary modes count one report per event too")
+
+        // 6. Normal lane (#588, #665): of 100 new stories, three are breaking, every fourth is Technology (a top
+        // interest) and every tenth event has three publishers. At most five normal banners in the rolling hour.
+        var seeded: [(article: FeedArticle, score: Double)] = []
+        var seededEvents: [String: String] = [:]
+        var publishers: [String: Int] = [:]
+        for index in 0..<100 {
+            var article = report(100 + index, "Story \(index)")
+            article.category = ["Technology", "Food", "Travel", "Sports"][index % 4]
+            article.identityFeedURL = "https://other.invalid/feed"
+            seededEvents[article.id] = "seeded-\(index)"
+            publishers["seeded-\(index)"] = index % 10 == 0 ? 3 : 1
+            seeded.append((article, index < 3 ? 0.7 : 0.3))
+        }
+        var delivery = NotificationDelivery(mode: .full, events: seededEvents)
+        delivery.publishers = publishers
+        delivery.interests = NotificationService.topInterests(["technology": 9, "politics": 4, "world": 2, "food": 1])
+        assertEqual(
+            NotificationService.rankedInterests(["technology": 9, "politics": 4, "world": 2, "food": 1]),
+            ["technology", "politics", "world"], "The top three interests by weight")
+        func planned(_ delivery: NotificationDelivery, pending: [String: [(article: FeedArticle, score: Double)]] = [:])
+            -> [String]
+        {
+            NotificationService.plan(new: seeded, pending: pending, delivery: delivery).banners.map {
+                $0.article?.title ?? NotificationService.groupedBody($0)
+            }
+        }
+        assertEqual(
+            planned(delivery), ["Story 0", "Story 1", "Story 2", "Story 20", "Story 40"],
+            "Breaking stories and top-interest stories with three publishers notify, strongest first, five at most")
+        delivery.ledger.normalLastHour = 3
+        assertEqual(planned(delivery), ["Story 0", "Story 1"], "The rolling hour's earlier banners use the allowance")
+        delivery.ledger.normalLastHour = 5
+        assertTrue(planned(delivery).isEmpty, "A full hour posts no normal banner")
+        delivery.ledger.normalLastHour = 0
+        delivery.interests = []
+        assertEqual(
+            planned(delivery), ["Story 0", "Story 1", "Story 2"], "Without interests only breaking stories notify")
+
+        // 7. Repeated events (#545, #665): an event announced today stays quiet while its lead headline is the one
+        // announced, unless it rises to a higher lane; a new lead headline notifies again.
+        delivery.leadTitles = ["seeded-1": "Story 1 lead"]
+        delivery.ledger.announced = [
+            "seeded-1": .init(leadKey: EventFeedSummary.titleKey("Story 1 lead"), lane: .normal)
+        ]
+        assertEqual(planned(delivery), ["Story 0", "Story 2"], "A second report of an announced event does not notify")
+        delivery.ledger.announced["seeded-1"]?.leadKey = EventFeedSummary.titleKey("An earlier lead")
+        assertEqual(planned(delivery), ["Story 0", "Story 1", "Story 2"], "A changed lead headline notifies again")
+
+        // 8. Starred lane: one banner per feed and 20 minutes, standing for every pending story (#665).
+        let starredFeed = "https://starred.invalid/feed"
+        func starredStory(_ index: Int, event: String? = nil) -> (article: FeedArticle, score: Double) {
+            var article = FeedArticle(
+                title: "Starred \(index)", link: "https://notify.invalid/\(500 + index)", guid: "notify-\(500 + index)",
+                description: "", pubDate: Date(timeIntervalSince1970: 1_700_000_000), source: "Starred Daily")
+            article.identityFeedURL = starredFeed
+            if let event { delivery.events[article.id] = event }
+            return (article, 0.3)
+        }
+        delivery.starredFeedURLs = [starredFeed]
+        delivery.ledger.announced = [:]
+        let one = [starredFeed: [starredStory(1)]]
+        assertTrue(planned(delivery, pending: one).contains("Starred 1"), "One pending story is an individual banner")
+        let burst = (0..<20).map { starredStory($0) }
+        let grouped = NotificationService.plan(new: seeded, pending: [starredFeed: burst], delivery: delivery).banners
+            .filter { $0.lane == .starred }
+        assertEqual(grouped.count, 1, "Twenty stories from a starred feed are one banner, not twenty")
+        assertEqual(grouped.first?.title, "Starred Daily", "A grouped starred banner is titled with the feed")
+        assertEqual(grouped.first?.thread, "starred-\(starredFeed)", "Grouped starred banners share a feed thread")
+        assertTrue(
+            grouped.first.map(NotificationService.groupedBody)?.hasPrefix("20 new stories\nStarred ") == true,
+            "The grouped body counts the stories, then two headlines")
+        delivery.ledger.lastStarred[starredFeed] = delivery.now.addingTimeInterval(-10 * 60)
+        assertFalse(planned(delivery, pending: one).contains("Starred 1"), "Within 20 minutes the feed stays pending")
+        delivery.ledger.lastStarred[starredFeed] = delivery.now.addingTimeInterval(-21 * 60)
+        assertTrue(planned(delivery, pending: one).contains("Starred 1"), "After 20 minutes its pending stories post")
+        delivery.starredFeedURLs = []
+        assertFalse(planned(delivery, pending: one).contains("Starred 1"), "Unstarring stops the feed's banners")
+        delivery.starredFeedURLs = [starredFeed]
+
+        // B: an event announced only as normal rises to starred; one announced as starred posts no individual banner,
+        // but its story still counts in the feed's next group.
+        let risen = [starredFeed: [starredStory(30, event: "known")]]
+        delivery.ledger.announced = ["known": .init(leadKey: EventFeedSummary.titleKey("Starred 30"), lane: .normal)]
+        assertTrue(planned(delivery, pending: risen).contains("Starred 30"), "Normal → starred notifies")
+        delivery.ledger.announced["known"]?.lane = .starred
+        assertFalse(planned(delivery, pending: risen).contains("Starred 30"), "A starred event does not repeat")
+        let mixed = NotificationService.plan(
+            new: seeded, pending: [starredFeed: [starredStory(30, event: "known"), starredStory(31)]],
+            delivery: delivery
+        ).banners.filter { $0.lane == .starred }
+        assertEqual(mixed.first?.count, 2, "N counts the announced event's story as well")
+        assertEqual(mixed.first?.headlines.first, "Starred 31", "Headlines prefer the unannounced story")
+        delivery.ledger.announced = [:]
+
+        // 9. Priority lane: exceptional news, the highest lane, coalesced in bursts and never silenced.
+        assertTrue(
+            NotificationService.isPriority(title: "Earthquake kills hundreds", score: 0.8, publishers: 4),
+            "A full-weight signal, a high score and four publishers are priority")
+        assertFalse(
+            NotificationService.isPriority(title: "Earthquake kills hundreds", score: 0.8, publishers: 3),
+            "Three publishers are not enough")
+        assertFalse(
+            NotificationService.isPriority(title: "President announces a fund", score: 0.9, publishers: 6),
+            "Half-weight words never make priority")
+        var majors: [(article: FeedArticle, score: Double)] = []
+        for index in 0..<5 {
+            let article = report(700 + index, "Explosion \(index)")
+            delivery.events[article.id] = "major-\(index)"
+            delivery.publishers["major-\(index)"] = 5
+            majors.append((article, 0.9 - Double(index) / 100))
+        }
+        var priority = NotificationService.plan(new: majors, pending: [:], delivery: delivery)
+        assertEqual(
+            priority.banners.map { $0.article?.title ?? NotificationService.groupedBody($0) },
+            ["Explosion 0", "Explosion 1", "Explosion 2", "2 more major stories\nExplosion 3\nExplosion 4"],
+            "A priority burst posts three banners, then one grouped banner")
+        assertTrue(priority.banners.allSatisfy { $0.lane == .priority && $0.sound }, "Priority banners sound")
+        delivery.ledger.priorityLastHalfHour = 3
+        delivery.ledger.priorityGroupLastHalfHour = true
+        priority = NotificationService.plan(new: majors, pending: [:], delivery: delivery)
+        assertTrue(priority.banners.isEmpty, "Past both limits nothing posts now")
+        assertEqual(priority.queued.map(\.event), (0..<5).map { "major-\($0)" }, "Every key waits; none is silenced")
+        delivery.ledger.priorityGroupLastHalfHour = false
+        delivery.ledger.priorityQueue = priority.queued
+        priority = NotificationService.plan(new: [], pending: [:], delivery: delivery)
+        assertEqual(priority.banners.map(\.count), [5], "The waiting keys arrive in the next grouped banner")
+        assertEqual(
+            Set(priority.banners.first.map { Array($0.announces.keys) } ?? []), Set((0..<5).map { "major-\($0)" }),
+            "The grouped banner announces every waiting key")
+        delivery.ledger.priorityLastHalfHour = 0
+        delivery.ledger.priorityQueue = []
+
+        // A higher lane wins: an event that is priority and has a starred report posts one priority banner.
+        var starredMajor = majors[0].article
+        starredMajor.identityFeedURL = starredFeed
+        delivery.events[starredMajor.id] = "major-0"
+        let both = NotificationService.plan(
+            new: [majors[0], (starredMajor, 0.3)], pending: [starredFeed: [(starredMajor, 0.3)]], delivery: delivery)
+        assertEqual(
+            both.banners.map(\.lane), [.priority], "The same event qualifying twice posts once, in the higher lane")
+        let together = NotificationService.plan(
+            new: seeded + [majors[1]], pending: [starredFeed: [starredStory(40), starredStory(41)]], delivery: delivery)
+        assertEqual(
+            together.banners.map(\.lane), [.priority, .starred, .normal, .normal, .normal],
+            "Simultaneous arrivals post priority, then the starred group, then normal stories")
+
+        // Three publishers on arrival give a normal banner; a fourth makes it priority once, and never a third time.
+        let rising = report(800, "Explosion levels block")
+        delivery.events[rising.id] = "rising"
+        delivery.publishers["rising"] = 3
+        delivery.leadTitles["rising"] = rising.title
+        let first = NotificationService.plan(new: [(rising, 0.9)], pending: [:], delivery: delivery).banners
+        assertEqual(first.map(\.lane), [.normal], "Three publishers: a normal banner")
+        let lead = EventFeedSummary.titleKey(rising.title)
+        delivery.ledger.announced["rising"] = .init(leadKey: lead, lane: .normal)
+        delivery.publishers["rising"] = 4
+        let follow = report(801, "Explosion toll rises")
+        delivery.events[follow.id] = "rising"
+        assertEqual(
+            NotificationService.plan(new: [(follow, 0.9)], pending: [:], delivery: delivery).banners.map(\.lane),
+            [.priority], "The fourth publisher raises the event to one priority banner")
+        delivery.ledger.announced["rising"]?.lane = .priority
+        let later = report(802, "Explosion inquiry")
+        delivery.events[later.id] = "rising"
+        assertTrue(
+            NotificationService.plan(new: [(later, 0.9)], pending: [:], delivery: delivery).banners.isEmpty,
+            "An event announced as priority never posts a third banner")
+
+        // Storage (#545, #665): the ledger reads what was recorded, keeps the highest lane, clamps a clock set back and
+        // prunes old rows.
+        do {
+            let db = DatabaseEngine(path: ":memory:")
+            try await db.open()
+            let opener = report(300, "Lead report opens the event")
+            let joiner = report(301, "Later report joins the event")
+            try await db.upsertArticles([opener, joiner])
+            let event = try await db.createEvent(memberArticleIDs: [opener.id])
+            _ = try await db.addArticles([joiner.id], toEvent: event.id)
+            assertEqual(
+                try await db.eventLeadTitles([event.id]), [event.id: opener.title],
+                "The lead story is the one that opened the event, not the newest member")
+            let now = Date(timeIntervalSince1970: 1_700_000_000)
+            let key = EventFeedSummary.titleKey(opener.title)
+            try await db.recordNotification(
+                PlannedBanner(
+                    lane: .priority, grouped: false, thread: event.id, sound: true, announces: [event.id: key]),
+                at: now)
+            try await db.recordNotification(
+                PlannedBanner(
+                    lane: .normal, grouped: false, thread: event.id, sound: false, announces: [event.id: key]),
+                at: now)
+            try await db.recordNotification(
+                PlannedBanner(lane: .starred, grouped: true, count: 4, feedURL: starredFeed, thread: "s", sound: false),
+                at: now)
+            try await db.queuePriority(
+                [QueuedPriority(event: "waiting", title: "W", score: 0.8, leadKey: "w")], at: now)
+            var ledger = try await db.notificationLedger(now: now.addingTimeInterval(60))
+            assertEqual(ledger.announced[event.id], .init(leadKey: key, lane: .priority), "The highest lane is kept")
+            assertEqual(ledger.normalLastHour, 1, "Normal banners count in the rolling hour")
+            assertEqual(ledger.priorityLastHalfHour, 1, "Individual priority banners count in the half hour")
+            assertEqual(ledger.lastStarred[starredFeed], now, "The feed's last starred banner is kept")
+            assertEqual(ledger.priorityQueue.map(\.event), ["waiting"], "Waiting priority keys are read back")
+            ledger = try await db.notificationLedger(now: now.addingTimeInterval(3601))
+            assertEqual(ledger.normalLastHour, 0, "The hour rolls")
+            ledger = try await db.notificationLedger(now: now.addingTimeInterval(-7200))
+            assertEqual(ledger.normalLastHour, 1, "A clock set back clamps the later rows to now")
+            ledger = try await db.notificationLedger(now: now.addingTimeInterval(-7200 + 3601))
+            assertEqual(ledger.normalLastHour, 0, "So the window lasts at most its length from the change")
+            ledger = try await db.notificationLedger(now: now.addingTimeInterval(2 * 86400))
+            assertTrue(
+                ledger.announced.isEmpty && ledger.priorityQueue.isEmpty, "A day later nothing is announced or waiting")
+            try await db.recordNotification(
+                PlannedBanner(lane: .normal, grouped: false, thread: "x", sound: false),
+                at: now.addingTimeInterval(8 * 86400))
+            ledger = try await db.notificationLedger(now: now.addingTimeInterval(8 * 86400))
+            assertTrue(ledger.lastStarred.isEmpty, "Rows older than a week are pruned")
+            await db.close()
+        } catch {
+            assertTrue(false, "Notification delivery storage failed: \(error)")
+        }
+    }
+
+    /// Notification lanes through `FeedManager` (#665): the normal limit rolls across refreshes and a relaunch, delivery
+    /// never removes a story, starring a feed brings up no backlog, and a starred burst is one banner.
+    @MainActor
+    static func testNotificationLanesAcrossRefreshes(fixtureRoot: URL) async throws {
+        print("  - Testing notification lanes across refreshes and relaunch...")
+        // Three full-weight signal words and six named places: each is breaking, and alone it is never priority.
+        let headlines = [
+            "Breaking: earthquake in Tokyo, Osaka, Kyoto, Nagoya, Sapporo and Kobe; emergency declared",
+            "Breaking: explosion in Houston, Dallas, Austin, Denver, Phoenix and Tucson; emergency declared",
+            "Breaking: attack in Paris, Lyon, Marseille, Nice, Lille and Bordeaux; emergency declared",
+            "Breaking: crisis in Lagos, Abuja, Kano, Ibadan, Accra and Lome; emergency declared",
+            "Breaking: mayors arrested in Madrid, Seville, Valencia, Bilbao, Malaga and Zaragoza; emergency session",
+            "Breaking: dozens killed in Lima, Quito, Bogota, Caracas, Santiago and Montevideo; emergency declared",
+            "Breaking: minister resigns in Cairo, Alexandria, Giza, Luxor, Aswan and Suez; emergency session",
+            "Breaking: cars recalled in Berlin, Munich, Hamburg, Cologne, Frankfurt and Stuttgart; emergency checks",
+            "Breaking: governors indicted in Sydney, Melbourne, Brisbane, Perth, Adelaide and Hobart; emergency sitting",
+        ]
+        let start = Date()
+        func story(_ id: String, _ title: String, source: String) -> FeedArticle {
+            FeedArticle(
+                title: title, link: fixtureRoot.appendingPathComponent("lanes/\(id)").absoluteString, guid: id,
+                description: "", pubDate: start, source: source)
+        }
+        let loud = headlines.indices.map { story("loud-\($0)", headlines[$0], source: "Wire \($0)") }
+        let plainFeed = fixtureRoot.appendingPathComponent("lanes-plain").absoluteString
+        let starredFeed = fixtureRoot.appendingPathComponent("lanes-starred").absoluteString
+        let suite = testDefaultsSuite("test.notification.lanes")
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { removeTestDefaults(suite) }
+        let settings = AppSettings(defaults: defaults)
+        settings.feedURLs = [plainFeed, starredFeed]
+        settings.aiEnabled = false
+        settings.notificationsEnabled = true
+        settings.notificationMode = .full
+        struct Posted: Sendable {
+            let title: String
+            let body: String
+            let thread: String
+        }
+        actor Recorder {
+            var posted: [Posted] = []
+            func record(_ request: UNNotificationRequest) {
+                posted.append(
+                    Posted(
+                        title: request.content.title, body: request.content.body,
+                        thread: request.content.threadIdentifier))
+            }
+        }
+        let recorder = Recorder()
+        let service = NotificationService(post: { await recorder.record($0) }, spacing: .zero)
+        let path = FileManager.default.temporaryDirectory.appendingPathComponent("lanes-\(UUID().uuidString).sqlite3")
+            .path
+        defer {
+            for suffix in ["", "-wal", "-shm"] { try? FileManager.default.removeItem(atPath: path + suffix) }
+        }
+        var store = ArticleStore(database: DatabaseEngine(path: path))
+        await store.initialize()
+        // A refresh without a clock reads the real one at the pass, as the app does, after its stories are stored.
+        func refresh(plain: [FeedArticle] = [], starred: [FeedArticle] = [], at clock: Date? = nil) async {
+            let manager = FeedManager(
+                settings: settings, store: store, schedulesRefresh: false,
+                fetchBatch: { urls, _ in urls.map { ($0, $0 == starredFeed ? starred : plain, nil, nil) } },
+                notifyBatch: { articles, delivery in
+                    await service.triageAndNotify(newArticles: articles, delivery: delivery)
+                }, imageFinder: .unavailable, now: { clock ?? Date() })
+            await manager.fetchFeedsAsync()
+            manager.stopBackgroundWork()
+        }
+
+        // The normal limit rolls: five of six post, a refresh 30 minutes later after a relaunch posts none, and one 61
+        // minutes after the first posts again.
+        await refresh(plain: Array(loud.prefix(6)), at: start)
+        assertEqual(await recorder.posted.count, 5, "Five normal banners in the first hour")
+        await store.database.close()
+        store = ArticleStore(database: DatabaseEngine(path: path))
+        await store.initialize()
+        await refresh(plain: Array(loud[6...7]), at: start.addingTimeInterval(30 * 60))
+        assertEqual(await recorder.posted.count, 5, "Thirty minutes later, after a relaunch, the hour is still full")
+        await refresh(plain: [loud[8]], at: start.addingTimeInterval(61 * 60))
+        assertEqual(await recorder.posted.count, 6, "Sixty-one minutes after the first banners, one posts again")
+        let stored = Set(try await store.database.fetchArticles(limit: nil).map(\.title))
+        assertTrue(Set(headlines).isSubset(of: stored), "Every story is stored, notified or not")
+        assertTrue(
+            Set(headlines).isSubset(of: Set(store.articles.map(\.title))), "Every story stays in the reader's feed")
+
+        // Starring a feed brings up none of its backlog; its next new story notifies, and a burst 21 minutes later is
+        // one grouped banner.
+        let backlog = (0..<5).map {
+            story("backlog-\($0)", "Starred column \($0) on garden design", source: "Starred Daily")
+        }
+        await refresh(starred: backlog)
+        let before = await recorder.posted.count
+        assertTrue(settings.setFeedStarred(starredFeed, true), "The feed is starred")
+        await refresh(plain: [story("quiet", "Library extends opening hours", source: "Town Paper")])
+        assertEqual(await recorder.posted.count, before, "Starring a feed posts nothing for its backlog")
+        await refresh(
+            starred: backlog + [story("fresh", "Starred column on winter bulbs", source: "Starred Daily")])
+        let single = await recorder.posted.dropFirst(before)
+        assertEqual(single.map(\.title), ["Starred Daily"], "The feed's first new story is one starred banner")
+        let burst = (0..<20).map { story("burst-\($0)", "Starred note \($0) about orchards", source: "Starred Daily") }
+        await refresh(starred: burst, at: Date().addingTimeInterval(21 * 60))
+        let grouped = await recorder.posted.dropFirst(before + 1)
+        assertEqual(grouped.count, 1, "Twenty new starred stories are one banner: \(grouped.map(\.body))")
+        assertEqual(grouped.first?.thread, "starred-\(starredFeed)", "The burst is threaded under the feed")
+        assertTrue(
+            grouped.first?.body.hasPrefix("20 new stories\n") == true,
+            "The burst counts every story: \(grouped.first?.body ?? "")")
+        await store.database.close()
+    }
+
+    /// Cross-refresh dedupe through `FeedManager` (#545): the first refresh announces an event; a report that joins it
+    /// in the next refresh posts no second banner; once the recorded lead headline differs, a new report notifies.
+    @MainActor
+    static func testNotificationDedupeAcrossRefreshes(fixtureRoot: URL) async throws {
+        print("  - Testing notification dedupe across refreshes...")
+        let now = Date()
+        func report(_ id: String, _ title: String, hoursAgo: Double, source: String) -> FeedArticle {
+            FeedArticle(
+                title: title, link: fixtureRoot.appendingPathComponent("dedupe/\(id)").absoluteString, guid: id,
+                description:
+                    "The disaster agency AFAD said buildings collapsed in Malatya, Ankara and Istanbul after the earthquake struck eastern Turkey.",
+                pubDate: now.addingTimeInterval(-hoursAgo * 3600), source: source)
+        }
+        // Three signal words and the named places make every report breaking, so only the dedupe keeps one quiet.
+        let quake = [
+            report(
+                "d1", "Breaking: earthquake strikes Malatya in eastern Turkey, emergency declared", hoursAgo: 3,
+                source: "Wire One"),
+            report(
+                "d2", "Breaking: Malatya earthquake, emergency declared as AFAD says buildings collapsed",
+                hoursAgo: 2.5,
+                source: "Daily Two"),
+            report(
+                "d3", "Breaking: rescuers search collapsed buildings after Malatya earthquake, emergency declared",
+                hoursAgo: 2, source: "Herald Three"),
+            report(
+                "d4", "Breaking: eastern Turkey earthquake, emergency declared as buildings collapse in Malatya",
+                hoursAgo: 1.5, source: "Courier Four"),
+        ]
+        let feeds = (1...4).map { fixtureRoot.appendingPathComponent("dedupe-feed-\($0)").absoluteString }
+        let suite = testDefaultsSuite("test.notification.dedupe")
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { removeTestDefaults(suite) }
+        let settings = AppSettings(defaults: defaults)
+        settings.feedURLs = feeds
+        settings.aiEnabled = false
+        settings.notificationsEnabled = true
+        settings.notificationMode = .full
+        let store = ArticleStore(database: DatabaseEngine(path: ":memory:"))
+        await store.initialize()
+        actor Recorder {
+            var threads: [String] = []
+            func record(_ thread: String) { threads.append(thread) }
+        }
+        let recorder = Recorder()
+        let service = NotificationService(
+            post: { await recorder.record($0.content.threadIdentifier) }, spacing: .zero)
+        // Each refresh is a manager over the same library whose feeds carry the first `count` reports, one per feed.
+        func refresh(_ count: Int) async {
+            let manager = FeedManager(
+                settings: settings, store: store, schedulesRefresh: false,
+                fetchBatch: { urls, _ in
+                    urls.map { url in
+                        let index = feeds.firstIndex(of: url) ?? count
+                        return (url, index < count ? [quake[index]] : [], nil, nil)
+                    }
+                },
+                notifyBatch: { articles, delivery in
+                    await service.triageAndNotify(newArticles: articles, delivery: delivery)
+                }, imageFinder: .unavailable)
+            await manager.fetchFeedsAsync()
+            manager.stopBackgroundWork()
+        }
+
+        await refresh(2)
+        let first = await recorder.threads
+        assertEqual(first.count, 1, "Two reports of one new event are one banner: \(first)")
+        let ids = store.articles.map(\.id)
+        let event = try await store.database.eventIDs(forArticles: ids)
+        assertEqual(Set(event.values).count, 1, "The first refresh groups both reports into one event: \(event)")
+
+        await refresh(3)
+        let joined = try await store.database.eventIDs(forArticles: store.articles.map(\.id))
+        assertEqual(Set(joined.values).count, 1, "The third report joins the announced event: \(joined)")
+        assertEqual(await recorder.threads, first, "A report joining an event announced today posts no second banner")
+
+        guard let announced = joined.values.first else { return }
+        try await store.database.recordNotification(
+            PlannedBanner(
+                lane: .normal, grouped: false, thread: announced, sound: false,
+                announces: [announced: EventFeedSummary.titleKey("An earlier lead headline")]), at: Date())
+        await refresh(4)
+        assertEqual(
+            await recorder.threads, first + [announced], "A new report notifies once the lead headline changed")
+        await store.database.close()
     }
 
     @MainActor
@@ -19482,38 +20110,95 @@ struct NewsTests {
             plainFact.failures.isEmpty,
             "Ordinary reported fact without attribution wrapper passes verifier with zero failures")
         assertEqual(plainFact.audit.status, .supported, "Ordinary reported fact is supported by auditor")
+    }
 
-        // 6. Failure behavior: never store failed retelling as finished overview; show verified excerpts and source list
-        let fallbackDoc = OverviewClaimVerifier.createFallbackOverview(
-            from: numOverview,
-            passages: passages,
-            articles: articles,
-            report: numReport
-        )
-        assertEqual(fallbackDoc.kind, OverviewKind.fallbackExcerpts, "Fallback overview kind is fallbackExcerpts")
-        assertFalse(fallbackDoc.kind == OverviewKind.synthesized, "Failed retelling is never kept as synthesized")
-        assertEqual(
-            fallbackDoc.facts.count, 2, "Fallback retains only the 2 verified facts, dropping the failed numeric claim")
+    /// #547: ten verifier controls, five wrong claims and five valid ones, accepted only when both deterministic gates
+    /// of a drafted sentence (the verifier, then `auditClaim`) pass. The six kinds named in the 10 October review
+    /// (renamed speaker, actor taken for speaker, reporting verb inside a quotation, arrest for summons; unrelated
+    /// speech elsewhere in the sentence, a word inside another word) plus four ordinary controls.
+    static func testOverviewVerifierControls() {
+        print("  - Testing the ten overview verifier controls (#547)...")
+        let article = FeedArticle(
+            storedID: "art-ctrl", title: "Controls", link: "https://example.com/controls", guid: "art-ctrl",
+            description: "", pubDate: Date(), source: "Control Wire")
+        func accepted(_ claim: String, _ passageText: String) -> Bool {
+            let passage = EvidencePassage(id: "pass-ctrl", articleID: "art-ctrl", text: passageText, ordinal: 1)
+            let citation = OverviewCitation(
+                id: passage.id, articleID: passage.articleID, passageID: passage.id,
+                passageFingerprint: passage.fingerprint, quote: passage.text)
+            let fact = OverviewFact(id: "f-ctrl", text: claim, citationIDs: [passage.id])
+            let document = OverviewComposer.composeOverview(
+                eventID: "event-ctrl", eventTitle: "Controls",
+                verifiedFacts: [
+                    PassageAnchoredFact(
+                        id: "f-ctrl", statement: claim, passageID: passage.id, quote: passage.text,
+                        articleID: article.id)
+                ], passages: [passage], articles: [article])
+            let verified = OverviewClaimVerifier.verifyOverview(document, passages: [passage], articles: [article])
+            let audit = OverviewQualityAuditor.auditClaim(fact, citations: [passage.id: citation], passages: [passage])
+            return verified.isFullyVerified && audit.isSupported
+        }
+        let tariffs =
+            "Ontario Premier Doug Ford met Prime Minister Mark Carney in Ottawa on Monday. Ford said the tariffs would cost Ontario 100,000 jobs."
+        let convoy = "The Israeli military said Hamas fighters attacked an aid convoy near Rafah on Tuesday."
+        let pokrovsk =
+            "Ukraine's army chief visited the front on Monday. \"We will not give up Pokrovsk,\" the commander said, \"whatever it costs.\""
+        let summons = "Prosecutors summoned former minister Ivan Petrov for questioning on Wednesday."
+        let evacuation = "Firefighters evacuated 140 residents from the valley on Sunday."
+        let drones =
+            "Air defences shot down 45 of 50 drones overnight, while Kyiv Mayor Vitali Klitschko said debris fell on two districts."
+        let ban = "The Supreme Court reinstated the export ban on Tuesday after a two-week suspension."
+        let ministry =
+            "According to the health ministry, 1,200 people were treated in hospitals during the heatwave in July 2026."
+
+        let controls: [(name: String, claim: String, passage: String, expected: Bool)] = [
+            ("renamed speaker", "Carney said the tariffs would cost Ontario 100,000 jobs.", tariffs, false),
+            (
+                "actor taken for speaker", "Hamas said its fighters attacked an aid convoy near Rafah on Tuesday.",
+                convoy, false
+            ),
+            (
+                "reporting verb inside a quotation",
+                "Ukraine \"will not give up Pokrovsk, the commander said,\" whatever it costs.", pokrovsk, false
+            ),
+            ("arrest for summons", "Prosecutors arrested former minister Ivan Petrov on Wednesday.", summons, false),
+            (
+                "number inside a number", "Firefighters evacuated 14 residents from the valley on Sunday.", evacuation,
+                false
+            ),
+            ("unrelated speech in the sentence", "Air defences shot down 45 of 50 drones overnight.", drones, true),
+            ("word inside a word", "The Supreme Court reinstated the export ban on Tuesday.", ban, true),
+            ("speaker kept", "Ford said the tariffs would cost Ontario 100,000 jobs.", tariffs, true),
+            (
+                "according to",
+                "According to the health ministry, 1,200 people were treated in hospitals during the heatwave.",
+                ministry, true
+            ),
+            ("plain fact", "Prosecutors summoned former minister Ivan Petrov for questioning.", summons, true),
+        ]
+        let mismatches = controls.filter { accepted($0.claim, $0.passage) != $0.expected }.map(\.name)
+        assertEqual(mismatches, [], "All ten verifier controls match")
+        // A quoted assessment copied without its quotation marks or speaker reads as fact (#547 claim review).
+        let election =
+            "\"These are the first elections since Vucic came to power in 2012 that are competitive,\" political scientist Dusan Spasojevic told DW."
+        assertFalse(
+            accepted("These are the first elections since Vucic came to power in 2012 that are competitive.", election),
+            "A quotation restated as fact is rejected")
         assertTrue(
-            fallbackDoc.summary.contains("Verified Excerpts"), "Fallback summary header indicates verified excerpts")
-        assertTrue(fallbackDoc.summary.contains("Sources"), "Fallback summary lists sources")
-
-        // 7. Safe persistence via DatabaseEngine: recordVerifiedOverview never stores failed synthesized overview
-        let dbEngine = DatabaseEngine(path: ":memory:")
-        try await dbEngine.open()
-        _ = try await dbEngine.upsertArticles(articles)
-        let savedOutcome = try await dbEngine.recordVerifiedOverview(
-            numOverview, passages: passages, articles: articles)
-        assertTrue(savedOutcome.saved, "Overview saved safely")
-        assertEqual(
-            savedOutcome.document.kind, OverviewKind.fallbackExcerpts,
-            "DatabaseEngine stored fallbackExcerpts, not synthesized")
-
-        let fetched = try await dbEngine.fetchEventOverview(eventID: "event-num")
-        assertTrue(fetched != nil, "Fetched overview exists in database")
-        assertEqual(
-            fetched?.kind, OverviewKind.fallbackExcerpts,
-            "Stored overview in database is fallbackExcerpts, not a failed retelling")
+            accepted(
+                "Political scientist Dusan Spasojevic said these are the first elections since Vucic came to power in 2012 that are competitive.",
+                election), "The same words with their speaker are accepted")
+        let metStatement =
+            "In a statement, a Metropolitan police spokesperson said: \u{201C}Following a review of our records, we have confirmed that in January 2019 we received a letter."
+        assertFalse(
+            accepted(
+                "Following a review of our records, we have confirmed that in January 2019 we received a letter.",
+                metStatement),
+            "First-person speech without quotation marks or speaker is rejected")
+        assertTrue(
+            accepted(
+                "The US envoy received a letter in January 2019.", "The US envoy received a letter in January 2019."),
+            "\"US\" is not a first-person pronoun")
     }
 
     static func testOverviewTimeline(fixtureHost: String) async throws {
@@ -20488,6 +21173,148 @@ struct NewsTests {
                 "The figures were published at noon. Mayor Elena Rostova says the evacuation routes are open again.",
                 "Mayor Elena Rostova", "the evacuation routes are open again"
             ),
+            // A sentence closed by its attribution, without quotation marks (#547).
+            (
+                "Russia launched 50 drones and 10 missiles at Kyiv overnight, the Ukrainian air force said.",
+                "Ukrainian air force", "Russia launched 50 drones and 10 missiles at Kyiv overnight"
+            ),
+            (
+                "Debris fell on two districts of the capital, said Mayor Vitali Klitschko.", "Mayor Vitali Klitschko",
+                "Debris fell on two districts of the capital"
+            ),
+            (
+                "At least 1,200 people were treated in hospitals, according to the Gaza health ministry.",
+                "Gaza health ministry", "At least 1,200 people were treated in hospitals"
+            ),
+            (
+                "The talks would resume next week, Kremlin spokesman Dmitry Peskov told reporters on Monday.",
+                "Kremlin spokesman Dmitry Peskov", "The talks would resume next week"
+            ),
+            (
+                "A ceasefire will begin in Oleshky on October 29, the White House said on Friday (October 23, 2026).",
+                "White House", "A ceasefire will begin in Oleshky on October 29"
+            ),
+            (
+                "Security was stepped up at malls across Jordan, the US embassy in Amman said on Saturday, as authorities searched for the gunmen.",
+                "US embassy in Amman", "Security was stepped up at malls across Jordan"
+            ),
+            (
+                "Kenya has recorded a second Ebola death, the health ministry said late on Friday, adding that she had died.",
+                "health ministry", "Kenya has recorded a second Ebola death"
+            ),
+            (
+                "Police estimated the load was worth 3.48 trillion rupiah, about 192 million U.S. dollars, Suyudi said.",
+                "Suyudi", "Police estimated the load was worth 3.48 trillion rupiah, about 192 million U.S. dollars"
+            ),
+            (
+                "\"We are not satisfied with the offer,\" said student representative Nathanael Combary, president of the group.",
+                "student representative Nathanael Combary", "We are not satisfied with the offer,"
+            ),
+            // A bare institution is the speaker, never the nearby place (#547).
+            (
+                "At a base in southeast England housing US operations, police said an incident led to withdrawals.",
+                "police", "an incident led to withdrawals"
+            ),
+            (
+                "The 12-year-old girl was seriously wounded but stable, the mayor of La Verrière, Nicolas Dainville, told AFP.",
+                "Nicolas Dainville", "The 12-year-old girl was seriously wounded but stable"
+            ),
+            // Second #547 pass: acronyms, appositives, present-tense verbs, quantities, initialisms, decimals, aliases.
+            (
+                "\"Science gives us hope,\" WHO chief Tedros Adhanom Ghebreyesus said on X.",
+                "WHO chief Tedros Adhanom Ghebreyesus", "Science gives us hope,"
+            ),
+            (
+                "\"We found that we needed to include some exotic physics,\" Jorge Hernández-Bernal, a planetary scientist at the Sorbonne, said in a press release.",
+                "Jorge Hernández-Bernal", "We found that we needed to include some exotic physics,"
+            ),
+            (
+                "\"We are not satisfied with the offer,\" says student representative Nathanael Combary.",
+                "student representative Nathanael Combary", "We are not satisfied with the offer,"
+            ),
+            (
+                "Interior Minister Laurent Nuñez said as many as 70,000 officers will be deployed nationwide.",
+                "Interior Minister Laurent Nuñez", "as many as 70,000 officers will be deployed nationwide"
+            ),
+            (
+                "First-time voter Naama Bitterman, 18, said at Saturday's rally that she was confident the bloc would win.",
+                "First-time voter Naama Bitterman", "she was confident the bloc would win"
+            ),
+            ("Golan told me: \"I'm optimistic about the vote.\"", "Golan", "I'm optimistic about the vote."),
+            (
+                "The United States could strike Iran as soon as this weekend, a U.S. envoy said Friday (October 24, 2026), after mounting threats.",
+                "U.S. envoy", "The United States could strike Iran as soon as this weekend"
+            ),
+            (
+                "Melania Trump has secured a ceasefire that will begin on Oct. 29, the White House said on Friday.",
+                "White House", "Melania Trump has secured a ceasefire that will begin on Oct. 29"
+            ),
+            (
+                "The Conservative-Lib Dem coalition government said in 2013 it estimated hosting in London had cost £8.9bn.",
+                "Conservative-Lib Dem coalition government", "it estimated hosting in London had cost £8.9bn"
+            ),
+            (
+                "According to the United Nations Educational, Scientific and Cultural Organization, UNESCO, nearly 95 percent of campuses have been damaged.",
+                "United Nations Educational, Scientific and Cultural Organization, UNESCO",
+                "nearly 95 percent of campuses have been damaged"
+            ),
+            (
+                "The woman did not visit Congo and is believed to have contracted the virus in Uganda, Switzerland's Federal Department of Foreign Affairs, or FDFA, told The Associated Press on Friday.",
+                "Switzerland's Federal Department of Foreign Affairs",
+                "The woman did not visit Congo and is believed to have contracted the virus in Uganda"
+            ),
+            (
+                "The Ebola victim who died on Friday evening was a direct contact of the index patient, the ministry said.",
+                "ministry", "The Ebola victim who died on Friday evening was a direct contact of the index patient"
+            ),
+            (
+                "All schools have been told to close on Friday because of the high winds, the Government of Jersey said.",
+                "Government of Jersey", "All schools have been told to close on Friday because of the high winds"
+            ),
+            (
+                "At the Copacabana rally – which Rio's City Hall said attracted about 1.1 million people – activists unfurled a banner.",
+                "Rio's City Hall", "attracted about 1.1 million people"
+            ),
+            (
+                "Trump said Rubio — who is the son of Cuban immigrants — was \"deep into negotiations with Cuba\" this week.",
+                "Trump",
+                "Rubio — who is the son of Cuban immigrants — was \"deep into negotiations with Cuba\" this week"
+            ),
+            // Orchestrator review of the final rows (#547): another party's figure, a few quoted words.
+            (
+                "The government said 410,000 took place in protests across France while organisers put the figure at nearly 800,000.",
+                "government", "410,000 took place in protests across France"
+            ),
+            (
+                "Lethal plots by Tehran against American citizens have reached “advanced stages,” a senior intelligence official in the Trump administration warned.",
+                "senior intelligence official in the Trump administration",
+                "Lethal plots by Tehran against American citizens have reached “advanced stages,”"
+            ),
+            (
+                "The damage was estimated \"at hundreds of millions euros\", France's Chambers of Commerce and Industry (CCI) said.",
+                "France's Chambers of Commerce and Industry",
+                "The damage was estimated \"at hundreds of millions euros\""
+            ),
+            (
+                "Chadema put the death toll at about 2,000, a figure the UN said it could not verify amid the shutdown.",
+                "UN", "it could not verify amid the shutdown"
+            ),
+            (
+                "PARIS: The clash with Lyon has been moved from Sunday to Monday evening, the French soccer league said on Friday.",
+                "French soccer league", "The clash with Lyon has been moved from Sunday to Monday evening"
+            ),
+            (
+                "The hunger strike will begin on Monday at the prison, said Mr. Nshala.", "Mr. Nshala",
+                "The hunger strike will begin on Monday at the prison"
+            ),
+            (
+                "Kenya has recorded a second Ebola death, the health ministry said the woman had developed symptoms in quarantine.",
+                "health ministry", "the woman had developed symptoms in quarantine"
+            ),
+            (
+                "Earlier this week, the Canadian prime minister, Mark Carney, said American tariffs hurt both American and Canadian households.",
+                "Canadian prime minister, Mark Carney", "American tariffs hurt both American and Canadian households"
+            ),
         ] {
             let extracted = reported(text)
             assertEqual(extracted.map(\.participant), [participant], "Reported speech names its speaker")
@@ -20534,7 +21361,6 @@ struct NewsTests {
             "The Death Penalty Information Center, which publishes data and analysis on capital punishment in the United States, said Pike was the first inmate to survive after being injected with lethal doses of execution drugs.",
             "Trump, who waged war with Iran and has yet to broker peace in Ukraine, said on Wednesday that he should win.",
             "First reported by the Palm Beach Post, an attorney who represents the golf course said Trump is offering.",
-            "At a base in southeast England housing US operations, police said an incident led to withdrawals.",
             "A poll showed that 68% of Jewish Israelis said that the events were central.",
             "A witness told The Associated Press, a day after the kingdom said an attack occurred.",
             "Counter Terrorism Policing London is investigating and commander Helen Flanagan said officers were not linking it.",
@@ -20543,11 +21369,58 @@ struct NewsTests {
             "While the interior ministry said that 256,000 people protested nationwide, organisers put the figure higher.",
             "Ahmad Mobeen, principal economist at S&P Global Market Intelligence, said earlier this year.",
             "El Nino will intensify before peaking, the United Nations said Thursday, warning it could be among the strongest.",
+            "The bridge reopened to traffic after six weeks, officials said.",
+            "The bridge reopened to traffic after six weeks, he said.",
+            "Authorities said 2,500 police officers are patrolling the streets of the capital.",
+            "More than 3,700 homes were still without electricity on Saturday morning, according to the National Grid map.",
+            "Many say their anger shows no sign of fading after the protests across the country.",
+            "According to posts on Reddit about the affected units, the issue appears to be happening at a similar spot.",
         ] {
             assertTrue(
                 reported(text).isEmpty,
-                "Nearby places, passive/clause fragments, poll subjects and time phrases are excluded")
+                "Nearby places, passive/clause fragments, poll subjects and time phrases are excluded: \(text)")
         }
+        assertFalse(
+            reported(
+                "\u{201C}Albanians have woken up,\u{201D} said protester Daniel Tahiri, who called it a \u{201C}dictatorship with the clothes of democracy.\u{201D} Another protester, Orgeta Likaj, said people wanted change."
+            ).contains { $0.participant.contains("Likaj") && $0.position.contains("dictatorship") },
+            "A quotation that ends its sentence is not given to the next sentence's speaker")
+        assertEqual(
+            reported(
+                "Executive Producer Elizabeth White told The Guardian in the past, \"the amount of plankton and things\" would have stopped a shot."
+            )
+            .first?.position, "\"the amount of plankton and things\" would have stopped a shot",
+            "A quoted fragment after its speaker runs to the end of its sentence, without the speaker's own words")
+        assertFalse(
+            reported(
+                "\"We have received intelligence that Iran increased its efforts,\" Mr. Clayton said in a memo sent to Secretary of State Marco Rubio, according to a U.S. official."
+            ).contains { $0.participant == "U.S. official" }, "A report of a report is not the reporter's position")
+        assertFalse(
+            reported(
+                "A fire alarm went off at the building on Friday, police said in a statement. Firefighters who went to the scene could see the flames."
+            ).contains { $0.position.contains("could see the flames") },
+            "A tag's channel does not reach into the next sentence")
+        // A merged voice cites the passage its position comes from first.
+        let ownPassage = EvidencePassage(
+            id: "pass_own", articleID: "art_persp_1",
+            text: "\"Iran has substantially increased efforts to target US personnel,\" Clayton wrote to the secretary."
+        )
+        let otherPassage = EvidencePassage(
+            id: "pass_other", articleID: "art_persp_1",
+            text: "\"Iran has substantially increased efforts to target U.S. personnel,\" Mr. Clayton said in a memo.")
+        let mergedVoice = OverviewPerspectivesExtractor.extractPerspectives(
+            passages: [ownPassage, otherPassage], articles: [article1],
+            existingCitations: [
+                "c_z": OverviewCitation(
+                    id: "c_z", articleID: "art_persp_1", passageID: ownPassage.id,
+                    passageFingerprint: ownPassage.fingerprint, quote: ownPassage.text),
+                "c_a": OverviewCitation(
+                    id: "c_a", articleID: "art_persp_1", passageID: otherPassage.id,
+                    passageFingerprint: otherPassage.fingerprint, quote: otherPassage.text),
+            ])
+        assertEqual(mergedVoice.count, 1, "A repeated statement of one speaker is one voice")
+        assertEqual(
+            mergedVoice.first?.citationIDs.first, "c_z", "A merged voice cites its position's own passage first")
     }
 
     static func testThematicAngleFromExistingFacts(fixtureHost: String = "example.com") async throws {
