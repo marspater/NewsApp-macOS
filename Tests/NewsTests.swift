@@ -581,6 +581,7 @@ struct NewsTests {
             try await testOnDemandOverviewGenerationAndCaching(fixtureHost: fixtureHost)
             try await testOverviewGenerationCancellationAndSupersession(fixtureHost: fixtureHost)
             try await testDeterministicClaimVerification(fixtureHost: fixtureHost)
+            testOverviewVerifierControls()
             try await testEventOverviewReaderMode(fixtureHost: fixtureHost)
             try await testOverviewResolutionWhenOpeningMemberArticle(fixtureHost: fixtureHost)
             try await testOverviewTimeline(fixtureHost: fixtureHost)
@@ -687,6 +688,7 @@ struct NewsTests {
         try await testOnDemandOverviewGenerationAndCaching(fixtureHost: fixtureHost)
         try await testOverviewGenerationCancellationAndSupersession(fixtureHost: fixtureHost)
         try await testDeterministicClaimVerification(fixtureHost: fixtureHost)
+        testOverviewVerifierControls()
         try await testEventOverviewReaderMode(fixtureHost: fixtureHost)
         try await testOverviewResolutionWhenOpeningMemberArticle(fixtureHost: fixtureHost)
         try await testOverviewTimeline(fixtureHost: fixtureHost)
@@ -20099,38 +20101,95 @@ struct NewsTests {
             plainFact.failures.isEmpty,
             "Ordinary reported fact without attribution wrapper passes verifier with zero failures")
         assertEqual(plainFact.audit.status, .supported, "Ordinary reported fact is supported by auditor")
+    }
 
-        // 6. Failure behavior: never store failed retelling as finished overview; show verified excerpts and source list
-        let fallbackDoc = OverviewClaimVerifier.createFallbackOverview(
-            from: numOverview,
-            passages: passages,
-            articles: articles,
-            report: numReport
-        )
-        assertEqual(fallbackDoc.kind, OverviewKind.fallbackExcerpts, "Fallback overview kind is fallbackExcerpts")
-        assertFalse(fallbackDoc.kind == OverviewKind.synthesized, "Failed retelling is never kept as synthesized")
-        assertEqual(
-            fallbackDoc.facts.count, 2, "Fallback retains only the 2 verified facts, dropping the failed numeric claim")
+    /// #547: ten verifier controls, five wrong claims and five valid ones, accepted only when both deterministic gates
+    /// of a drafted sentence (the verifier, then `auditClaim`) pass. The six kinds named in the 10 October review
+    /// (renamed speaker, actor taken for speaker, reporting verb inside a quotation, arrest for summons; unrelated
+    /// speech elsewhere in the sentence, a word inside another word) plus four ordinary controls.
+    static func testOverviewVerifierControls() {
+        print("  - Testing the ten overview verifier controls (#547)...")
+        let article = FeedArticle(
+            storedID: "art-ctrl", title: "Controls", link: "https://example.com/controls", guid: "art-ctrl",
+            description: "", pubDate: Date(), source: "Control Wire")
+        func accepted(_ claim: String, _ passageText: String) -> Bool {
+            let passage = EvidencePassage(id: "pass-ctrl", articleID: "art-ctrl", text: passageText, ordinal: 1)
+            let citation = OverviewCitation(
+                id: passage.id, articleID: passage.articleID, passageID: passage.id,
+                passageFingerprint: passage.fingerprint, quote: passage.text)
+            let fact = OverviewFact(id: "f-ctrl", text: claim, citationIDs: [passage.id])
+            let document = OverviewComposer.composeOverview(
+                eventID: "event-ctrl", eventTitle: "Controls",
+                verifiedFacts: [
+                    PassageAnchoredFact(
+                        id: "f-ctrl", statement: claim, passageID: passage.id, quote: passage.text,
+                        articleID: article.id)
+                ], passages: [passage], articles: [article])
+            let verified = OverviewClaimVerifier.verifyOverview(document, passages: [passage], articles: [article])
+            let audit = OverviewQualityAuditor.auditClaim(fact, citations: [passage.id: citation], passages: [passage])
+            return verified.isFullyVerified && audit.isSupported
+        }
+        let tariffs =
+            "Ontario Premier Doug Ford met Prime Minister Mark Carney in Ottawa on Monday. Ford said the tariffs would cost Ontario 100,000 jobs."
+        let convoy = "The Israeli military said Hamas fighters attacked an aid convoy near Rafah on Tuesday."
+        let pokrovsk =
+            "Ukraine's army chief visited the front on Monday. \"We will not give up Pokrovsk,\" the commander said, \"whatever it costs.\""
+        let summons = "Prosecutors summoned former minister Ivan Petrov for questioning on Wednesday."
+        let evacuation = "Firefighters evacuated 140 residents from the valley on Sunday."
+        let drones =
+            "Air defences shot down 45 of 50 drones overnight, while Kyiv Mayor Vitali Klitschko said debris fell on two districts."
+        let ban = "The Supreme Court reinstated the export ban on Tuesday after a two-week suspension."
+        let ministry =
+            "According to the health ministry, 1,200 people were treated in hospitals during the heatwave in July 2026."
+
+        let controls: [(name: String, claim: String, passage: String, expected: Bool)] = [
+            ("renamed speaker", "Carney said the tariffs would cost Ontario 100,000 jobs.", tariffs, false),
+            (
+                "actor taken for speaker", "Hamas said its fighters attacked an aid convoy near Rafah on Tuesday.",
+                convoy, false
+            ),
+            (
+                "reporting verb inside a quotation",
+                "Ukraine \"will not give up Pokrovsk, the commander said,\" whatever it costs.", pokrovsk, false
+            ),
+            ("arrest for summons", "Prosecutors arrested former minister Ivan Petrov on Wednesday.", summons, false),
+            (
+                "number inside a number", "Firefighters evacuated 14 residents from the valley on Sunday.", evacuation,
+                false
+            ),
+            ("unrelated speech in the sentence", "Air defences shot down 45 of 50 drones overnight.", drones, true),
+            ("word inside a word", "The Supreme Court reinstated the export ban on Tuesday.", ban, true),
+            ("speaker kept", "Ford said the tariffs would cost Ontario 100,000 jobs.", tariffs, true),
+            (
+                "according to",
+                "According to the health ministry, 1,200 people were treated in hospitals during the heatwave.",
+                ministry, true
+            ),
+            ("plain fact", "Prosecutors summoned former minister Ivan Petrov for questioning.", summons, true),
+        ]
+        let mismatches = controls.filter { accepted($0.claim, $0.passage) != $0.expected }.map(\.name)
+        assertEqual(mismatches, [], "All ten verifier controls match")
+        // A quoted assessment copied without its quotation marks or speaker reads as fact (#547 claim review).
+        let election =
+            "\"These are the first elections since Vucic came to power in 2012 that are competitive,\" political scientist Dusan Spasojevic told DW."
+        assertFalse(
+            accepted("These are the first elections since Vucic came to power in 2012 that are competitive.", election),
+            "A quotation restated as fact is rejected")
         assertTrue(
-            fallbackDoc.summary.contains("Verified Excerpts"), "Fallback summary header indicates verified excerpts")
-        assertTrue(fallbackDoc.summary.contains("Sources"), "Fallback summary lists sources")
-
-        // 7. Safe persistence via DatabaseEngine: recordVerifiedOverview never stores failed synthesized overview
-        let dbEngine = DatabaseEngine(path: ":memory:")
-        try await dbEngine.open()
-        _ = try await dbEngine.upsertArticles(articles)
-        let savedOutcome = try await dbEngine.recordVerifiedOverview(
-            numOverview, passages: passages, articles: articles)
-        assertTrue(savedOutcome.saved, "Overview saved safely")
-        assertEqual(
-            savedOutcome.document.kind, OverviewKind.fallbackExcerpts,
-            "DatabaseEngine stored fallbackExcerpts, not synthesized")
-
-        let fetched = try await dbEngine.fetchEventOverview(eventID: "event-num")
-        assertTrue(fetched != nil, "Fetched overview exists in database")
-        assertEqual(
-            fetched?.kind, OverviewKind.fallbackExcerpts,
-            "Stored overview in database is fallbackExcerpts, not a failed retelling")
+            accepted(
+                "Political scientist Dusan Spasojevic said these are the first elections since Vucic came to power in 2012 that are competitive.",
+                election), "The same words with their speaker are accepted")
+        let metStatement =
+            "In a statement, a Metropolitan police spokesperson said: \u{201C}Following a review of our records, we have confirmed that in January 2019 we received a letter."
+        assertFalse(
+            accepted(
+                "Following a review of our records, we have confirmed that in January 2019 we received a letter.",
+                metStatement),
+            "First-person speech without quotation marks or speaker is rejected")
+        assertTrue(
+            accepted(
+                "The US envoy received a letter in January 2019.", "The US envoy received a letter in January 2019."),
+            "\"US\" is not a first-person pronoun")
     }
 
     static func testOverviewTimeline(fixtureHost: String) async throws {
@@ -21105,6 +21164,148 @@ struct NewsTests {
                 "The figures were published at noon. Mayor Elena Rostova says the evacuation routes are open again.",
                 "Mayor Elena Rostova", "the evacuation routes are open again"
             ),
+            // A sentence closed by its attribution, without quotation marks (#547).
+            (
+                "Russia launched 50 drones and 10 missiles at Kyiv overnight, the Ukrainian air force said.",
+                "Ukrainian air force", "Russia launched 50 drones and 10 missiles at Kyiv overnight"
+            ),
+            (
+                "Debris fell on two districts of the capital, said Mayor Vitali Klitschko.", "Mayor Vitali Klitschko",
+                "Debris fell on two districts of the capital"
+            ),
+            (
+                "At least 1,200 people were treated in hospitals, according to the Gaza health ministry.",
+                "Gaza health ministry", "At least 1,200 people were treated in hospitals"
+            ),
+            (
+                "The talks would resume next week, Kremlin spokesman Dmitry Peskov told reporters on Monday.",
+                "Kremlin spokesman Dmitry Peskov", "The talks would resume next week"
+            ),
+            (
+                "A ceasefire will begin in Oleshky on October 29, the White House said on Friday (October 23, 2026).",
+                "White House", "A ceasefire will begin in Oleshky on October 29"
+            ),
+            (
+                "Security was stepped up at malls across Jordan, the US embassy in Amman said on Saturday, as authorities searched for the gunmen.",
+                "US embassy in Amman", "Security was stepped up at malls across Jordan"
+            ),
+            (
+                "Kenya has recorded a second Ebola death, the health ministry said late on Friday, adding that she had died.",
+                "health ministry", "Kenya has recorded a second Ebola death"
+            ),
+            (
+                "Police estimated the load was worth 3.48 trillion rupiah, about 192 million U.S. dollars, Suyudi said.",
+                "Suyudi", "Police estimated the load was worth 3.48 trillion rupiah, about 192 million U.S. dollars"
+            ),
+            (
+                "\"We are not satisfied with the offer,\" said student representative Nathanael Combary, president of the group.",
+                "student representative Nathanael Combary", "We are not satisfied with the offer,"
+            ),
+            // A bare institution is the speaker, never the nearby place (#547).
+            (
+                "At a base in southeast England housing US operations, police said an incident led to withdrawals.",
+                "police", "an incident led to withdrawals"
+            ),
+            (
+                "The 12-year-old girl was seriously wounded but stable, the mayor of La Verrière, Nicolas Dainville, told AFP.",
+                "Nicolas Dainville", "The 12-year-old girl was seriously wounded but stable"
+            ),
+            // Second #547 pass: acronyms, appositives, present-tense verbs, quantities, initialisms, decimals, aliases.
+            (
+                "\"Science gives us hope,\" WHO chief Tedros Adhanom Ghebreyesus said on X.",
+                "WHO chief Tedros Adhanom Ghebreyesus", "Science gives us hope,"
+            ),
+            (
+                "\"We found that we needed to include some exotic physics,\" Jorge Hernández-Bernal, a planetary scientist at the Sorbonne, said in a press release.",
+                "Jorge Hernández-Bernal", "We found that we needed to include some exotic physics,"
+            ),
+            (
+                "\"We are not satisfied with the offer,\" says student representative Nathanael Combary.",
+                "student representative Nathanael Combary", "We are not satisfied with the offer,"
+            ),
+            (
+                "Interior Minister Laurent Nuñez said as many as 70,000 officers will be deployed nationwide.",
+                "Interior Minister Laurent Nuñez", "as many as 70,000 officers will be deployed nationwide"
+            ),
+            (
+                "First-time voter Naama Bitterman, 18, said at Saturday's rally that she was confident the bloc would win.",
+                "First-time voter Naama Bitterman", "she was confident the bloc would win"
+            ),
+            ("Golan told me: \"I'm optimistic about the vote.\"", "Golan", "I'm optimistic about the vote."),
+            (
+                "The United States could strike Iran as soon as this weekend, a U.S. envoy said Friday (October 24, 2026), after mounting threats.",
+                "U.S. envoy", "The United States could strike Iran as soon as this weekend"
+            ),
+            (
+                "Melania Trump has secured a ceasefire that will begin on Oct. 29, the White House said on Friday.",
+                "White House", "Melania Trump has secured a ceasefire that will begin on Oct. 29"
+            ),
+            (
+                "The Conservative-Lib Dem coalition government said in 2013 it estimated hosting in London had cost £8.9bn.",
+                "Conservative-Lib Dem coalition government", "it estimated hosting in London had cost £8.9bn"
+            ),
+            (
+                "According to the United Nations Educational, Scientific and Cultural Organization, UNESCO, nearly 95 percent of campuses have been damaged.",
+                "United Nations Educational, Scientific and Cultural Organization, UNESCO",
+                "nearly 95 percent of campuses have been damaged"
+            ),
+            (
+                "The woman did not visit Congo and is believed to have contracted the virus in Uganda, Switzerland's Federal Department of Foreign Affairs, or FDFA, told The Associated Press on Friday.",
+                "Switzerland's Federal Department of Foreign Affairs",
+                "The woman did not visit Congo and is believed to have contracted the virus in Uganda"
+            ),
+            (
+                "The Ebola victim who died on Friday evening was a direct contact of the index patient, the ministry said.",
+                "ministry", "The Ebola victim who died on Friday evening was a direct contact of the index patient"
+            ),
+            (
+                "All schools have been told to close on Friday because of the high winds, the Government of Jersey said.",
+                "Government of Jersey", "All schools have been told to close on Friday because of the high winds"
+            ),
+            (
+                "At the Copacabana rally – which Rio's City Hall said attracted about 1.1 million people – activists unfurled a banner.",
+                "Rio's City Hall", "attracted about 1.1 million people"
+            ),
+            (
+                "Trump said Rubio — who is the son of Cuban immigrants — was \"deep into negotiations with Cuba\" this week.",
+                "Trump",
+                "Rubio — who is the son of Cuban immigrants — was \"deep into negotiations with Cuba\" this week"
+            ),
+            // Orchestrator review of the final rows (#547): another party's figure, a few quoted words.
+            (
+                "The government said 410,000 took place in protests across France while organisers put the figure at nearly 800,000.",
+                "government", "410,000 took place in protests across France"
+            ),
+            (
+                "Lethal plots by Tehran against American citizens have reached “advanced stages,” a senior intelligence official in the Trump administration warned.",
+                "senior intelligence official in the Trump administration",
+                "Lethal plots by Tehran against American citizens have reached “advanced stages,”"
+            ),
+            (
+                "The damage was estimated \"at hundreds of millions euros\", France's Chambers of Commerce and Industry (CCI) said.",
+                "France's Chambers of Commerce and Industry",
+                "The damage was estimated \"at hundreds of millions euros\""
+            ),
+            (
+                "Chadema put the death toll at about 2,000, a figure the UN said it could not verify amid the shutdown.",
+                "UN", "it could not verify amid the shutdown"
+            ),
+            (
+                "PARIS: The clash with Lyon has been moved from Sunday to Monday evening, the French soccer league said on Friday.",
+                "French soccer league", "The clash with Lyon has been moved from Sunday to Monday evening"
+            ),
+            (
+                "The hunger strike will begin on Monday at the prison, said Mr. Nshala.", "Mr. Nshala",
+                "The hunger strike will begin on Monday at the prison"
+            ),
+            (
+                "Kenya has recorded a second Ebola death, the health ministry said the woman had developed symptoms in quarantine.",
+                "health ministry", "the woman had developed symptoms in quarantine"
+            ),
+            (
+                "Earlier this week, the Canadian prime minister, Mark Carney, said American tariffs hurt both American and Canadian households.",
+                "Canadian prime minister, Mark Carney", "American tariffs hurt both American and Canadian households"
+            ),
         ] {
             let extracted = reported(text)
             assertEqual(extracted.map(\.participant), [participant], "Reported speech names its speaker")
@@ -21151,7 +21352,6 @@ struct NewsTests {
             "The Death Penalty Information Center, which publishes data and analysis on capital punishment in the United States, said Pike was the first inmate to survive after being injected with lethal doses of execution drugs.",
             "Trump, who waged war with Iran and has yet to broker peace in Ukraine, said on Wednesday that he should win.",
             "First reported by the Palm Beach Post, an attorney who represents the golf course said Trump is offering.",
-            "At a base in southeast England housing US operations, police said an incident led to withdrawals.",
             "A poll showed that 68% of Jewish Israelis said that the events were central.",
             "A witness told The Associated Press, a day after the kingdom said an attack occurred.",
             "Counter Terrorism Policing London is investigating and commander Helen Flanagan said officers were not linking it.",
@@ -21160,11 +21360,58 @@ struct NewsTests {
             "While the interior ministry said that 256,000 people protested nationwide, organisers put the figure higher.",
             "Ahmad Mobeen, principal economist at S&P Global Market Intelligence, said earlier this year.",
             "El Nino will intensify before peaking, the United Nations said Thursday, warning it could be among the strongest.",
+            "The bridge reopened to traffic after six weeks, officials said.",
+            "The bridge reopened to traffic after six weeks, he said.",
+            "Authorities said 2,500 police officers are patrolling the streets of the capital.",
+            "More than 3,700 homes were still without electricity on Saturday morning, according to the National Grid map.",
+            "Many say their anger shows no sign of fading after the protests across the country.",
+            "According to posts on Reddit about the affected units, the issue appears to be happening at a similar spot.",
         ] {
             assertTrue(
                 reported(text).isEmpty,
-                "Nearby places, passive/clause fragments, poll subjects and time phrases are excluded")
+                "Nearby places, passive/clause fragments, poll subjects and time phrases are excluded: \(text)")
         }
+        assertFalse(
+            reported(
+                "\u{201C}Albanians have woken up,\u{201D} said protester Daniel Tahiri, who called it a \u{201C}dictatorship with the clothes of democracy.\u{201D} Another protester, Orgeta Likaj, said people wanted change."
+            ).contains { $0.participant.contains("Likaj") && $0.position.contains("dictatorship") },
+            "A quotation that ends its sentence is not given to the next sentence's speaker")
+        assertEqual(
+            reported(
+                "Executive Producer Elizabeth White told The Guardian in the past, \"the amount of plankton and things\" would have stopped a shot."
+            )
+            .first?.position, "\"the amount of plankton and things\" would have stopped a shot",
+            "A quoted fragment after its speaker runs to the end of its sentence, without the speaker's own words")
+        assertFalse(
+            reported(
+                "\"We have received intelligence that Iran increased its efforts,\" Mr. Clayton said in a memo sent to Secretary of State Marco Rubio, according to a U.S. official."
+            ).contains { $0.participant == "U.S. official" }, "A report of a report is not the reporter's position")
+        assertFalse(
+            reported(
+                "A fire alarm went off at the building on Friday, police said in a statement. Firefighters who went to the scene could see the flames."
+            ).contains { $0.position.contains("could see the flames") },
+            "A tag's channel does not reach into the next sentence")
+        // A merged voice cites the passage its position comes from first.
+        let ownPassage = EvidencePassage(
+            id: "pass_own", articleID: "art_persp_1",
+            text: "\"Iran has substantially increased efforts to target US personnel,\" Clayton wrote to the secretary."
+        )
+        let otherPassage = EvidencePassage(
+            id: "pass_other", articleID: "art_persp_1",
+            text: "\"Iran has substantially increased efforts to target U.S. personnel,\" Mr. Clayton said in a memo.")
+        let mergedVoice = OverviewPerspectivesExtractor.extractPerspectives(
+            passages: [ownPassage, otherPassage], articles: [article1],
+            existingCitations: [
+                "c_z": OverviewCitation(
+                    id: "c_z", articleID: "art_persp_1", passageID: ownPassage.id,
+                    passageFingerprint: ownPassage.fingerprint, quote: ownPassage.text),
+                "c_a": OverviewCitation(
+                    id: "c_a", articleID: "art_persp_1", passageID: otherPassage.id,
+                    passageFingerprint: otherPassage.fingerprint, quote: otherPassage.text),
+            ])
+        assertEqual(mergedVoice.count, 1, "A repeated statement of one speaker is one voice")
+        assertEqual(
+            mergedVoice.first?.citationIDs.first, "c_z", "A merged voice cites its position's own passage first")
     }
 
     static func testThematicAngleFromExistingFacts(fixtureHost: String = "example.com") async throws {

@@ -344,8 +344,9 @@ public struct EventOverviewDocument: Codable, Hashable, Sendable, Identifiable {
     /// 5: attributed straight/typographic quotations with both post-quote speaker orders. 7: reported speech
     /// attribution guards (preposition context, verb/relative exclusions, time phrases). 8: publisher-excerpt overviews
     /// with stored publisher headlines, complete publisher sentences, and empty summaries. 9: Highlights ranked by
-    /// word overlap with coverage headlines; fragments under five words excluded.
-    public static let currentAnalysisVersion = 9
+    /// word overlap with coverage headlines; fragments under five words excluded. 10: sentences closed by their
+    /// attribution, described and institutional speakers, and verifier speaker, quotation and action checks (#547).
+    public static let currentAnalysisVersion = 10
 
     public let id: String
     public let eventID: String
