@@ -14,20 +14,25 @@ Live runs (fresh library copy, publisher text fetched):
 | E | first pass | 131 | 80 (61.1 %) | 28 | 23 | 234 |
 | F | first pass, final verifier | 130 | 63 (48.5 %) | 36 | 31 | 168 (degraded) |
 | G | first pass (`5a21532`) | 122 | 75 (61.5 %) | 26 | 21 | 217 |
-| **H** | **second pass (`428e11e`)** | 120 | **79 (65.8 %)** | 21 | 20 | 182 |
+| H | second pass (`428e11e`) | 120 | 79 (65.8 %) | 21 | 20 | 182 |
+| **I** | **final (`68b3295`)** | 115 | **80 (69.6 %)** | 23 | 12 | 191 |
 
-Run F's fetch was degraded while other sessions loaded the Mac (19 deadline cuts). Run H fetched less than G (13 deadline cuts) and still reached 65.8 %; on H's own stored text the baseline code reaches 66/120 (55.0 %). The window shrinks from 134 to 120 events because the library was last refreshed on 25 October and the 72-hour window moves with each run.
+Run F's fetch was degraded while other sessions loaded the Mac (19 deadline cuts). Run H fetched less than G (13 deadline cuts) and still reached 65.8 %. Run I, on the final code, fetched cleanly (5 deadline cuts); on its own stored text the baseline code reaches 57/113 (50.4 %). The window shrinks from 134 to 113 events because the library was last refreshed on 25 October and the 72-hour window moves with each run.
 
-Same-input replays on the publisher text stored by four runs, measured at one moment (120 events each):
+Same-input replays on the publisher text stored by six runs, baseline and final code measured at the same moment (113–114 events):
 
-| Stored text from | Baseline code | First pass (`5a21532`) | Second pass (`428e11e`) |
-| --- | ---: | ---: | ---: |
-| A | 61 (50.8 %) | 73 (60.8 %) | **85 (70.8 %)** |
-| B | 63 (52.5 %) | 76 (63.3 %) | **90 (75.0 %)** |
-| C | 63 (52.5 %) | 75 (62.5 %) | **91 (75.8 %)** |
-| G | 62 (51.7 %) | 74 (61.7 %) | **90 (75.0 %)** |
+| Stored text from | Baseline code | Final code (`68b3295`) |
+| --- | ---: | ---: |
+| A | 59/114 (51.8 %) | **79 (69.3 %)** |
+| B | 60/113 (53.1 %) | **83 (73.5 %)** |
+| C | 60/113 (53.1 %) | **84 (74.3 %)** |
+| G | 59/113 (52.2 %) | **83 (73.5 %)** |
+| H | 54/113 (47.8 %) | **72 (63.7 %)** |
+| I | 57/113 (50.4 %) | **78/112 (69.6 %)** |
 
-Every replay and the fresh run are above 61 %.
+At 120 events, before the last fixes, the first pass (`5a21532`) gave 60.8–63.3 % on A, B, C and G, and the second pass (`428e11e`) gave 70.8–75.8 %.
+
+Every replay and the final live run are above 61 %.
 
 First pass (`OverviewPerspectivesExtractor`):
 - A sentence closed by its attribution, without quotation marks: "…, the Ukrainian air force said.", "…, said Mayor Vitali Klitschko.", "…, according to the Gaza health ministry.", "…, Peskov told reporters on Monday." The tag may carry "in a statement", a weekday or date with an optional "(October 23, 2026)", a platform ("on X"), and continuations such as "…, adding" or "…, as". Full stops inside numbers ("3.48") and initialisms ("U.S.") do not end the sentence; a dateline ("PARIS: ") is not part of the statement.
@@ -42,11 +47,12 @@ Second pass, after the 61 % review (general forms found in the 46 events still b
 - Tags: a speaker with one appositive ("…, the mayor of La Verrière, Nicolas Dainville, told AFP."), initialisms and acronyms ("a U.S. envoy", "(CCI)"), continuations with "after" or "following", channels such as "in a letter", "in a press release", "in 2013", "said at a rally that"; "as many as" is a quantity, not a clause.
 - Bare institutions name their speaker within the story: "the military said", "police said", "prosecutors said", "the ministry said", "the prefecture said", "the university said". "Officials", "authorities", "many", "some" and "others" stay vague.
 - Not speakers: data sources and documents ("National Grid map", "a memo from…", "posts on Reddit", "the report"), aliases ("…, or FDFA"), ages ("Joao Paulo, 37"), cut-off fillers ("Google has long", "… at the"), a later segment opening with a preposition ("OCHA, in 2019"), a clause spanning "while" ("Police put their number at 13,000 while organisers"). An all-caps acronym is a name, not the relative word ("WHO chief Tedros").
+- After the coordinator check: a position ends before a contrast clause with another party (", while organisers put the figure at…", ", whereas the SNS…"). A quoted fragment of a few words takes the clause that holds it: the sentence up to the quotation when the quote precedes its speaker ("The damage was estimated "at hundreds of millions euros", the CCI said"), and the rest of the sentence when it follows the speaker. A quotation ending in a full stop is not given to the speaker of the next sentence. A merged voice cites the passage its position comes from first.
 - Not statements: a statement before its tag that itself reports a named speaker ("Clayton said in a memo…, according to a U.S. official"), a channel phrase reaching into the next sentence, and the rest of a sentence after a dashed aside ("– which Rio's City Hall said attracted about 1.1 million people –").
 
 Precision. All labels are mine, pending Mars; row-by-row verdicts are in the private review notes.
-- First pass: on run C, 81 perspectives were new or changed against run A; 76 correct (93.8 %, Wilson 95 % 86.3–97.3 %). Of the five errors, four are fixed and the fifth ("National Grid map") is fixed in the second pass.
-- Second pass: two review rounds on the rows it added across the A, B, C and G texts. The first round found 10 defects in 70 rows (85.7 %): numbers cut at a decimal, a channel phrase reaching into the next sentence, a nested report, document and post speakers, a split UNESCO name, an alias, "Many", an official shortened to "Trump administration", and a statement running past an aside. All were fixed with regression cases. The final set is **72 rows, 72 with the right speaker and a position that speaker said (100 %, Wilson 95 % 94.9–100 %)**, one borderline (a newspaper as speaker), no new critical kind. Of the 20 rows the second pass removes, 13 are the same voice with a cleaner speaker or position, 6 were defects, and 1 correct row of nested speech is lost.
+- First pass: on run C, 81 perspectives were new or changed against run A. 75 are correct (92.6 %, Wilson 95 % 84.8–96.6 %). The first review counted 76; a sentence-ending quotation given to the next speaker (Orgeta Likaj) was mislabelled correct and is corrected here. All six errors are fixed in the final code.
+- Second pass: two review rounds on the rows it added across the A, B, C and G texts. The first round found 10 defects in 70 rows (85.7 %): numbers cut at a decimal, a channel phrase reaching into the next sentence, a nested report, document and post speakers, a split UNESCO name, an alias, "Many", an official shortened to "Trump administration", and a statement running past an aside. All were fixed with regression cases. A coordinator check of the 72 rows against their full passages found 71 correct: one position carried the organisers' figure after "while", three positions were bare quoted fragments, and one merged voice cited the wrong passage. With the fixes above, the final set is **72 rows, all correct (Wilson 95 % 94.9–100 %)**, one borderline (a newspaper as speaker), no new critical kind. Every row the fixes changed was re-read: the five flagged rows, three contrast cuts, two widened fragments, and two removed defects. Of the 20 rows the second pass removes, 13 are the same voice with a cleaner speaker or position, 6 were defects, and 1 correct row of nested speech is lost.
 
 ## Claim verifier controls
 
