@@ -88,7 +88,7 @@ from.
   "prequel", "sequel", "episode(s)", "trailer", "festival" (Entertainment), "trattoria", "bistro", "brasserie",
   "eatery", "pizzeria", "bakery" (Food), "match", "triathlon", "triathlete(s)" (Sports).
 - Tried and dropped: "political"/"politics" as Politics cues (they pulled foreign political crises into Politics), and
-  a 1.5 score threshold so a single summary cue classifies (176/200 instead of 181/200).
+  a 1.5 score threshold so a single summary cue classifies (176/200 instead of 181/200 on the labels before the spot-check).
 
 ### Second-pass result
 
@@ -99,9 +99,12 @@ from sample 2.
 
 | | Sample 1 (rules written from it) | Sample 2 (fresh, held out) |
 | --- | --- | --- |
-| Before (main `ecc113f`) | 127 / 200 (63.5 %) | 112 / 200 (56.0 %) |
-| First pass (`0ca9252`) | 166 / 200 (83.0 %) | 136 / 200 (68.0 %) |
-| Second pass | 181 / 200 (90.5 %) | 141 / 200 (70.5 %) |
+| Before (main `ecc113f`) | 128 / 200 (64.0 %) | 113 / 200 (56.5 %) |
+| First pass (`0ca9252`) | 167 / 200 (83.5 %) | 137 / 200 (68.5 %) |
+| Second pass | 182 / 200 (91.0 %) | 142 / 200 (71.0 %) |
+
+Scored against the labels after the spot-check below; before it, the same rows read 127, 166 and 181 on sample 1 and
+112, 136 and 141 on sample 2.
 
 Both columns were exported by `--export-categories` with `NEWS_CATEGORY_IDS` (which now ignores the 14-day window, so
 a listed sample can be measured again on a later day).
@@ -115,9 +118,18 @@ stories filed as World for lack of any cue (Business 8, Entertainment 7, Technol
 politics stories that name a foreign country or leader (5 Politics as World, 5 World as Politics both ways), and gadget
 deals read as Business (3). These need a broader vocabulary or a different method, not more single cues.
 
+### Spot-check of the labels
+
+At Mars's request the coordinating session checked the labels on 26 October: every row where the second pass disagrees
+with the label (19 on sample 1, 59 on sample 2) and 10 random agreements per sample. It corrected two labels: "Kompany
+taken to hospital after collapsing at training" is Health (sample 1; the protocol files a public figure's health as
+Health), and "Why is Ukraine so reliant on Starlink and can Europe plug the gap?" is World (sample 2, as sample 1's
+Starlink story). Borderline rows stay as labelled. The check was done by another Claude session, so it is not
+independent of the labeller.
+
 ### Second-pass limits
 
-- One labeller (Claude) for both samples; Mars spot-checks. Borderline protocol cases (a US politician's statement
+- One labeller (Claude) for both samples, spot-checked by another Claude session at Mars's request; no human check. Borderline protocol cases (a US politician's statement
   about a foreign country, royals, energy projects) can be read either way.
 - Club and athlete names carry no cue ("Al-Nassr survive Al-Faisaly scare", "Anderson not offered new Lancashire
   contract"); a gazetteer of clubs was not added.
