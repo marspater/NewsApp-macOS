@@ -64,7 +64,8 @@ struct OverviewPerspectivesValidator: Sendable {
         "some people", "people", "many people", "many believe", "analysts", "analysts say",
         "sources", "sources say", "sources claim", "unnamed sources", "anonymous sources",
         "opponents", "opponents claim", "opponents argue", "skeptics", "the other side",
-        "officials say", "experts", "experts say", "commentators", "officials", "authorities",
+        "officials say", "experts", "experts say", "commentators", "officials", "authorities", "many", "some", "others",
+        "several",
         // A pronoun names no participant on its own.
         "he", "she", "it", "they", "we", "i", "you",
     ]
@@ -468,19 +469,19 @@ struct OverviewPerspectivesExtractor: Sendable {
         // Quote first, with either "said Participant" or "Participant said". Keep paired delimiters and
         // capture the original statement: typographic punctuation must not rewrite the cited evidence.
         let verbs =
-            #"(?:said|stated|announced|noted|argued|warned|confirmed|declared|emphasized|urged|reiterated|cautioned|explained|wrote|posted)"#
+            #"(?:said|stated|announced|noted|argued|warned|confirmed|declared|emphasized|urged|reiterated|cautioned|explained|wrote|posted|says|argues|warns|notes|adds|writes)"#
         let participant = #"([A-Z][A-Za-z0-9\s,\.\-]{2,60})"#
         // When and where the remark was made: "on Thursday night", "Tuesday", "in a statement", "at a news conference".
         let time =
-            #"(?:\s+(?:(?:on|late on|earlier on|late|early)\s+)?(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday|this week|last week|this month|last month|this year|last year|earlier this year|earlier this month|earlier today|earlier|later)(?:\s+(?:night|morning|evening|afternoon))?(?:\s+\([^)]{1,30}\))?)?(?:\s+(?:in a statement|in an interview|in a report|in a post|at a news conference|during a news conference)[^:,]{0,30})?[:,]?"#
+            #"(?:\s+(?:(?:on|late on|earlier on|late|early)\s+)?(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday|this week|last week|this month|last month|this year|last year|earlier this year|earlier this month|earlier today|earlier|later)(?:\s+(?:night|morning|evening|afternoon))?(?:\s+\([^)]{1,30}\))?)?(?:\s+in\s+(?:19|20)\d\d)?(?:\s+(?:in a statement|in an interview|in a report|in a post|in a letter|in a video|in a speech|in a press release|at a news conference|during a news conference|on (?:X|Facebook|Telegram|social media))[^:,.]{0,30})?[:,]?"#
         var quoted: [Attribution?] = []
-        for quote in [#"\"([^\"“”]{10,250})\""#, #"“([^\"“”]{10,250})”"#] {
+        for quote in [#"\"([^\"“”]{10,400})\""#, #"“([^\"“”]{10,400})”"#] {
             let verbFirst = quote + #",?\s*"# + verbs + #"\s+"# + participant
             let speakerFirst = quote + #",?\s*"# + participant + #"\s+"# + verbs + #"\b"#
             let speakerBeforeQuote = participant + #"\s+"# + verbs + time + #"\s*"# + quote
             let speakerToldBeforeQuote =
                 participant
-                + #"\s+told\s+(?:(?:[Tt]he|[Aa]n?)\s+[\p{L}0-9\s]{1,30}?|\p{Lu}[\p{L}0-9\s]{1,30}?|reporters|journalists|broadcasters)\#(time)\s*"#
+                + #"\s+told\s+(?:(?:[Tt]he|[Aa]n?)\s+[\p{L}0-9\s]{1,30}?|\p{Lu}[\p{L}0-9\s]{1,30}?|reporters|journalists|broadcasters|me|us)\#(time)\s*"#
                 + quote
             let accordingToQuoted = #"According to\s+"# + participant + #",\s*"# + quote
             quoted.append(Attribution(verbFirst, participantGroup: 2, statementGroup: 1, minimumLength: 0))
@@ -491,24 +492,27 @@ struct OverviewPerspectivesExtractor: Sendable {
         }
         // Pattern 2: [Participant] (said that|stated that|announced that|argued that|warned that|noted that|confirmed that) [Statement].
         let patternSpeakerFirst =
-            #"([A-Z][A-Za-z0-9\s,\.\-]{2,60})\s+(?:said that|stated that|announced that|argued that|warned that|noted that|confirmed that|emphasized that|urged that)\s+([^\.\n]{15,200})"#
+            #"([A-Z][A-Za-z0-9\s,\.\-]{2,60})\s+(?:said that|stated that|announced that|argued that|warned that|noted that|confirmed that|emphasized that|urged that)\s+((?:[^.\n]|\.(?=\d)){15,200})"#
         // Pattern 2b: reported speech without an adjacent "that" (#313): "Foreign Secretary Ed Miliband said his
         // country does not accept…", "Édouard Geffray told TF1 television on Thursday night that…". The speaker
-        // excludes full stops, so it cannot reach back into the previous sentence.
+        // excludes full stops, so it cannot reach back into the previous sentence. The statement keeps decimals ("£8.9bn").
         let patternReported =
-            #"(\p{Lu}[\p{L}0-9\s,'’\-]{1,60}?)\s+(?:(?:said|says)\#(time)\s+(?:that\s+)?|told\s+(?:(?:[Tt]he|[Aa]n?)\s+[\p{L}0-9\s]{1,40}?|\p{Lu}[\p{L}0-9\s]{1,40}?|\p{Ll}+(?:\s+\p{Ll}+)?)\#(time)\s+that\s+)(?!(?:in|on|at|of|for|during|after|before|while|with|is|are|was|were|has|have|had|would|will|could|should|can|late|early|earlier|later|and|but|as|a\s+day\s+after)\b|\p{Ll}+ing\b)([\p{L}0-9“\"][^\.\n]{15,200})"#
+            #"(\p{Lu}[\p{L}0-9\s,'’\-]{1,60}?)\s+(?:(?:said|says|say)\s+(?:at|during|in|on)\s+[^,.\n"“”]{1,40}?\s+that\s+|(?:said|says|say)\#(time)\s+(?:that\s+)?|told\s+(?:(?:[Tt]he|[Aa]n?)\s+[\p{L}0-9\s]{1,40}?|\p{Lu}[\p{L}0-9\s]{1,40}?|\p{Ll}+(?:\s+\p{Ll}+)?)\#(time)\s+that\s+)(?!(?:in|on|at|of|for|during|after|before|while|with|is|are|was|were|has|have|had|would|will|could|should|can|late|early|earlier|later|and|but|a\s+day\s+after)\b|as\b(?!\s+(?:many|much|few|little|far|long|soon|well)\b)|\p{Ll}+ing\b)([\p{L}0-9“\"](?:[^.\n]|\.(?=\d)){15,200})"#
         // Pattern 3: According to [Participant], [Statement].
-        let patternAccordingTo = #"According to\s+([A-Z][A-Za-z0-9\s,\.\-]{2,60}),\s+([^\.\n]{15,200})"#
+        let patternAccordingTo =
+            #"According to\s+((?:\p{Ll}[\p{L}\-]*\s+){0,3}\p{Lu}[\p{L}0-9\s,\.\-]{1,80}),\s+(?=[\p{Ll}\d])((?:[^.\n]|\.(?=\d)){15,200})"#
         // Pattern 4 (#547): a whole sentence closed by its attribution, without quotation marks: "Russia launched
         // 50 drones at Kyiv, the Ukrainian air force said.", "…, said Mayor Vitali Klitschko.", "…, according to
         // the Gaza health ministry.", "…, Peskov told reporters on Monday." The tag must end the sentence.
         // A dateline ("PARIS: ") is not part of the statement.
-        // Full stops inside a number ("3.48") or an initialism ("U.S.") do not end it.
+        // Full stops inside a number ("3.48"), an initialism ("U.S.") or an abbreviation ("Oct. 29", "Mr.") do not end
+        // it, and it may quote a phrase ("…was “seriously wounded” but stable").
         let sentence =
-            #"(?:^|(?<=[.!?]\s))(?:\p{Lu}{2,}(?:\s\p{Lu}{2,})*:\s+)?(\p{Lu}(?:[^.\n"“”]|\.(?=\d)|(?<=\b\p{Lu})\.){15,200}?)"#
+            #"(?:^|(?<=[.!?]\s)(?<!\b(?:Mr|Mrs|Ms|Dr|St|Gen|Gov|Sen|Rep|Lt|Col)\.\s))(?:\p{Lu}{2,}(?:\s\p{Lu}{2,})*:\s+)?(\p{Lu}(?:[^.\n"“”]|\.(?=\d)|(?<=\b\p{Lu})\.|(?<=\b(?:Jan|Feb|Mar|Apr|Aug|Sep|Sept|Oct|Nov|Dec|Mr|Mrs|Ms|Dr|St|No))\.|“[^”\n]{1,120}”|"[^"\n]{1,120}"){15,300}?)"#
         // Up to eight words without a comma; `isCompleteSpeaker` decides whether they name someone ("the club's
         // sporting director Max Eberl", "the interior ministry"), so "authorities" or "he" yield nothing.
-        let tagSpeaker = #"([\p{L}0-9'’\-]+(?:\s+[\p{L}0-9'’\-]+){0,7}?)"#
+        let tagSpeaker =
+            #"((?:(?:\p{Lu}\.){2,}|[\p{L}0-9'’\-]+)(?:\s+(?:(?:\p{Lu}\.){2,}|[\p{L}0-9'’\-]+)){0,7}?)(?:\s+\(\p{Lu}{2,10}\))?"#
         // "in a statement", a weekday, date or platform ("late on Friday", "on 11 October", "on Oct. 9", "on X"), an
         // optional "(October 23, 2026)", then the full stop or a continuation ("…, as authorities searched…").
         let inStatement = #"(?:\s+in\s+a\s+statement)?"#
@@ -516,7 +520,7 @@ struct OverviewPerspectivesExtractor: Sendable {
             inStatement
             + #"(?:\s+(?:(?:late|early)\s+)?(?:on\s+)?(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)(?:\s+(?:night|morning|evening|afternoon))?|\s+on\s+(?:\d{1,2}\s+\p{Lu}\p{Ll}+|\p{Lu}\p{Ll}+\.?\s+\d{1,2}|X|Facebook|Telegram|Instagram|social\s+media))?"#
             + #"(?:\s*\([^)]{1,30}\))?"# + inStatement
-            + #"(?:\.|$|,\s+(?:adding|as|while|with|citing|saying|referring|noting)\b)"#
+            + #"(?:\.|$|,\s+(?:adding|as|while|with|citing|saying|referring|noting|(?:a\s+day\s+|days\s+|hours\s+)?after|following)\b)"#
         let patternTrailing =
             sentence + #",\s+"# + tagSpeaker
             + #"\s+(?:said|says|added|stated|warned|wrote|posted|told\s+(?:reporters|journalists|(?:[Tt]he\s+)?\p{Lu}[\p{L}\s]{1,30}?))"#
@@ -535,16 +539,20 @@ struct OverviewPerspectivesExtractor: Sendable {
             sentence + #",\s+according\s+to\s+"# + tagSpeaker + #"(?:\.|,\s+(?:adding|as|while|with|citing)\b)"#
         // A quotation closed by a described speaker: "…uncertain," political scientist Dusan Spasojevic told DW.
         var quotedTags: [Attribution?] = []
-        for quote in [#"\"([^\"“”]{10,250})\""#, #"“([^\"“”]{10,250})”"#] {
+        for quote in [#"\"([^\"“”]{10,400})\""#, #"“([^\"“”]{10,400})”"#] {
             let tagged =
                 quote + #",?\s*"# + tagSpeaker
-                + #"\s+(?:said|says|added|explained|warned|wrote|told\s+(?:reporters|journalists|(?:[Tt]he\s+)?\p{Lu}[\p{L}\s]{0,30}?))"#
-                + closing
+                + #"\s+(?:said|says|added|explained|warned|wrote|argued|told\s+(?:reporters|journalists|me|us|(?:[Tt]he\s+)?\p{Lu}[\p{L}\s]{0,30}?))\b"#
             quotedTags.append(Attribution(tagged, participantGroup: 2, statementGroup: 1, minimumLength: 0))
+            // A named speaker with one appositive: "…," Jorge Hernández-Bernal, a planetary scientist at …, said.
+            let appositive =
+                quote
+                + #",?\s*(\p{Lu}[\p{L}'’\-]+(?:\s+\p{Lu}[\p{L}'’\-]+){0,3}),\s+[^,"“”\n]{2,140}?,\s+(?:said|says|told|added|wrote|argued|explained)\b"#
+            quotedTags.append(Attribution(appositive, participantGroup: 2, statementGroup: 1, minimumLength: 0))
             // "…satisfied," said student representative Nathanael Combary.
             let describedAfterVerb =
                 quote
-                + #",?\s*(?:said|says|added)\s+((?:\p{Ll}[\p{L}\-]*\s+){1,3}\p{Lu}[\p{L}'’\-]*(?:\s+\p{Lu}[\p{L}'’\-]*){0,3})[.,]"#
+                + #",?\s*(?:said|says|added)\s+((?:\p{Ll}[\p{L}\-]*\s+){0,3}\p{Lu}[\p{L}'’\-]*(?:\s+\p{Lu}[\p{L}'’\-]*){0,3})[.,]"#
             quotedTags.append(Attribution(describedAfterVerb, participantGroup: 2, statementGroup: 1, minimumLength: 0))
         }
 
@@ -604,6 +612,11 @@ struct OverviewPerspectivesExtractor: Sendable {
         "\u{200B}", "\u{200C}", "\u{200D}", "\u{2060}", "\u{FEFF}", "\u{00AD}",
     ]
 
+    private static let asideOpeningRegex = try? NSRegularExpression(pattern: #"[–—]\s+(?:which|that|who|whom)\s+$"#)
+
+    private static let reportingWordRegex = try? NSRegularExpression(
+        pattern: #"\p{Lu}[\p{L}'’\-]*\s+(?:said|says|told)\b|\b[Aa]ccording to\b"#)
+
     private static let precedingPrepositionRegex = try? NSRegularExpression(
         pattern:
             #"(?:\b(?:in|at|from|to|by|near|across|around|into|with|during|about|against|told)\s+(?:the\s+|a\s+|an\s+|southeast\s+|north\s+|south\s+|east\s+|west\s+)?|%\s+of\s+)$"#,
@@ -642,9 +655,25 @@ struct OverviewPerspectivesExtractor: Sendable {
                 participantRange = NSRange(location: start, length: NSMaxRange(participantRange) - start)
             }
             let participant = cleanParticipant(nsString.substring(with: participantRange))
-            let statement = nsString.substring(with: match.range(at: statementGroup)).trimmingCharacters(
+            var statement = nsString.substring(with: match.range(at: statementGroup)).trimmingCharacters(
                 in: .whitespacesAndNewlines)
+            // A report inside a dashed aside ends with the aside: "rally – which Rio's City Hall said attracted about
+            // 1.1 million people – activists unfurled…".
+            if asideOpeningRegex?.firstMatch(
+                in: nsString as String, range: NSRange(location: 0, length: participantRange.location)) != nil,
+                let close = statement.range(of: #"\s[–—]\s"#, options: .regularExpression)
+            {
+                statement = String(statement[..<close.lowerBound])
+            }
             guard !participant.isEmpty, statement.count >= minimumStatementLength else { return nil }
+            // A statement before its tag that itself reports speech ("Clayton said in a memo…, according to a U.S.
+            // official") attributes a report, not a position.
+            if minimumStatementLength > 0, statementGroup < participantGroup,
+                reportingWordRegex?.firstMatch(in: statement, range: NSRange(statement.startIndex..., in: statement))
+                    != nil
+            {
+                return nil
+            }
             // An unquoted statement of capitalized words only is a speaker tag: in "…the capital, said Mayor Vitali
             // Klitschko." the reported-speech pattern reads the sentence as the speaker and the name as the statement.
             if minimumStatementLength > 0, statement.split(separator: " ").allSatisfy({ $0.first?.isUppercase == true })
@@ -707,6 +736,10 @@ struct OverviewPerspectivesExtractor: Sendable {
         }) {
             segments = Array(segments[..<clause])
         }
+        // An alias is not the speaker: "Switzerland's Federal Department of Foreign Affairs, or FDFA".
+        segments = [segments[0]] + segments.dropFirst().filter { !$0.lowercased().hasPrefix("or ") }
+        // An age is not part of the name: "Joao Paulo, 37".
+        segments = [segments[0]] + segments.dropFirst().filter { !$0.allSatisfy(\.isNumber) }
         // A clause before the speaker is not part of it: "Kenya has recorded a second Ebola death, the health
         // ministry", "half of last week's numbers, the Interior Ministry". An appositive title stays: "Jordan's
         // ambassador to the US, Dina Kawar".
@@ -716,6 +749,13 @@ struct OverviewPerspectivesExtractor: Sendable {
         {
             segments.removeFirst()
         }
+        // A later segment opening with a preposition describes the remark, not the speaker: "OCHA, in 2019",
+        // "Barrack, in remarks that contradict Netanyahu".
+        if let remark = segments.dropFirst().firstIndex(where: {
+            ["in", "at", "on", "during", "for", "with"].contains($0.split(separator: " ").first?.lowercased() ?? "")
+        }) {
+            segments = Array(segments[..<remark])
+        }
         // A trailing connective is not part of the speaker: "CGT trade union, meanwhile".
         while segments.count > 1, let last = segments.last?.lowercased(), trailingConnectives.contains(last) {
             segments.removeLast()
@@ -724,12 +764,16 @@ struct OverviewPerspectivesExtractor: Sendable {
         while let first = words.first, ["and", "but", "so", "the", "a", "an"].contains(first.lowercased()) {
             words.removeFirst()
         }
-        while let last = words.last, ["also", "has", "have", "had", "will", "would"].contains(last.lowercased()) {
+        // "Google has long", "Trump administration has repeatedly": auxiliaries, adverbs and a cut-off "at the" go.
+        while let last = words.last, last.first?.isLowercase == true,
+            trailingFillers.contains(last) || (last.count > 4 && last.hasSuffix("ly"))
+        {
             words.removeLast()
         }
         // "a figure the UN" is "UN": lowercase words before "the" and a name describe the statement, not the speaker.
         if let the = words.firstIndex(where: { $0.lowercased() == "the" }), the > 0, the + 1 < words.count,
-            words[..<the].allSatisfy({ $0.first?.isLowercase == true }), words[the + 1].first?.isUppercase == true
+            words[..<the].allSatisfy({ $0.first?.isLowercase == true }), words[the + 1].first?.isUppercase == true,
+            !["in", "of", "at", "for", "from", "with", "to", "by"].contains(words[the - 1].lowercased())
         {
             words.removeFirst(the + 1)
         }
@@ -747,17 +791,26 @@ struct OverviewPerspectivesExtractor: Sendable {
         // A speaker cut off at a relative word or pronoun is incomplete: "Seoul, which", "Kyiv and", "outbreak and is".
         if let last = words.last?.lowercased(), danglingWords.contains(last) { return false }
         // A finite verb, relative pronoun, speech verb or clause conjunction means the match spans a clause.
-        let clauseWord = words.contains {
-            clauseWords.contains($0.trimmingCharacters(in: CharacterSet(charactersIn: "\"'.,:-")).lowercased())
+        let clauseWord = words.contains { word in
+            let bare = word.trimmingCharacters(in: CharacterSet(charactersIn: "\"'.,:-"))
+            // An acronym is a name: "WHO chief Tedros Adhanom Ghebreyesus".
+            return bare.count < 2 || bare != bare.uppercased() ? clauseWords.contains(bare.lowercased()) : false
         }
         if clauseWord { return false }
         if let first = words.first?.lowercased(), subordinators.contains(first) { return false }
+        // "Police put their number at 13,000 while organisers" spans two clauses.
+        if words.dropFirst().contains(where: { subordinators.contains($0.lowercased()) }) { return false }
         // A title alone is cut off: "said Mr." is not a speaker.
         if words.count == 1, let only = words.first?.lowercased(), honorifics.contains(only) { return false }
         // A speaker names someone: "court filing" or "father of four" has no capitalized word. An institution or
         // office as the head noun names its speaker too: "the interior ministry", "the club's sporting director".
         // A data source is not a speaker: "according to the National Grid map", "according to the report".
         if let last = words.last?.lowercased(), documentNouns.contains(last) { return false }
+        if let head = words.first(where: { !["the", "a", "an"].contains($0.lowercased()) })?.lowercased(),
+            documentNouns.contains(head)
+        {
+            return false
+        }
         // A bare institution names the speaker within its story ("the military said", "police said");
         // "officials" and "authorities" stay vague.
         if let last = words.last?.lowercased(),
@@ -769,11 +822,12 @@ struct OverviewPerspectivesExtractor: Sendable {
     }
 
     private static let bareInstitutions: Set<String> = [
-        "police", "military", "army", "prosecutors", "government", "ministry", "court",
+        "police", "military", "army", "prosecutors", "government", "ministry", "court", "prefecture", "university",
     ]
     private static let documentNouns: Set<String> = [
         "map", "maps", "figures", "data", "report", "reports", "website", "tally", "count", "estimate", "estimates",
-        "survey", "poll", "statement", "records", "filing", "document", "documents", "study",
+        "survey", "poll", "statement", "records", "filing", "document", "documents", "study", "memo", "posts", "letter",
+        "suit", "lawsuit", "complaint",
     ]
     private static let institutionNouns: Set<String> = [
         "ministry", "military", "army", "police", "government", "prosecutors", "prosecutor", "court", "agency",
@@ -790,6 +844,10 @@ struct OverviewPerspectivesExtractor: Sendable {
     private static let clauseWords: Set<String> = [
         "is", "are", "was", "were", "which", "whom", "whose", "where", "who",
         "said", "says", "told", "after", "before", "because", "since", "until", "that",
+    ]
+    private static let trailingFillers: Set<String> = [
+        "also", "has", "have", "had", "will", "would", "long", "already", "always", "the", "a", "an", "of", "at", "for",
+        "in", "on", "with",
     ]
     private static let trailingConnectives: Set<String> = ["meanwhile", "however", "too", "also", "instead"]
     private static let honorifics: Set<String> = ["mr", "mrs", "ms", "dr", "sir", "prof"]
