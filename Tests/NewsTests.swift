@@ -2383,6 +2383,15 @@ struct NewsTests {
                     return false
                 }(), "Injected DNS cannot bypass hostname/literal guards")
         }
+        for (host, address) in [("93.184.216.34", "93.184.216.34"), ("[2606:4700::1111]", "2606:4700::1111")] {
+            let result = IPAddressValidator.validateHost(
+                host,
+                resolver: { _ in
+                    assertTrue(false, "Public literals never depend on host DNS or configured address families")
+                    return .unresolvable(reason: "No IPv4 interface configured")
+                })
+            assertEqual(result, .allowed(ips: [address]), "A public literal pins itself without resolution")
+        }
 
         // 1. Literal IPv4 Loopback & Private
         assertTrue(IPAddressValidator.checkLiteralIP("127.0.0.1") != nil, "127.0.0.1 must be blocked")
