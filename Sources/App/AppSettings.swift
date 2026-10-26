@@ -262,10 +262,21 @@ final class AppSettings: ObservableObject {
         if starredFeedURLs.contains(url) { setFeedStarred(url, false) }
     }
 
-    /// Stars or unstars a feed; a starred feed notifies about every new story.
-    func setFeedStarred(_ url: String, _ starred: Bool) {
-        if starred { starredFeedURLs.insert(url) } else { starredFeedURLs.remove(url) }
+    /// Feeds that can be starred at once (#588).
+    static let starredFeedLimit = 3
+
+    /// Stars or unstars a feed; a starred feed notifies about every new story. A star beyond the limit is refused
+    /// and nothing changes; returns whether the feed now has the requested state.
+    @discardableResult
+    func setFeedStarred(_ url: String, _ starred: Bool) -> Bool {
+        if starred {
+            guard starredFeedURLs.contains(url) || starredFeedURLs.count < Self.starredFeedLimit else { return false }
+            starredFeedURLs.insert(url)
+        } else {
+            starredFeedURLs.remove(url)
+        }
         defaults.set(starredFeedURLs.sorted(), forKey: Self.starredFeedURLsKey)
+        return true
     }
 
     // MARK: - Catalog
