@@ -18,6 +18,12 @@ struct NotificationDelivery: Sendable {
     var interests: Set<String> = []
     /// Feeds whose every story notifies.
     var starredFeedURLs: Set<String> = []
+    /// Events notified in the last day → the headline key (`EventFeedSummary.titleKey`) of their lead story then.
+    var notifiedEvents: [String: String] = [:]
+    /// Event id → the title of its lead story now (the story that opened the event).
+    var leadTitles: [String: String] = [:]
+    /// Called with the stories posted as banners, so the refresh can record their events.
+    var recordPosted: @Sendable ([FeedArticle]) async -> Void = { _ in }
 }
 
 /// Manages NLP-based notification triage, rich image attachments, and alert scheduling.
@@ -78,7 +84,7 @@ final class NotificationService: Sendable {
         score += entityScore * 0.30
 
         // 3. Breaking news signal words
-        let signalScore = min(Double(Self.breakingSignalCount(in: fullText)) / 3.0, 1.0)
+        let signalScore = min(Self.breakingSignalWeight(in: fullText) / 3.0, 1.0)
         score += signalScore * 0.30
 
         // 4. Baseline recency bonus
@@ -87,18 +93,20 @@ final class NotificationService: Sendable {
         return min(score, 1.0)
     }
 
-    private static let breakingSignals = [
-        "breaking", "just in", "urgent", "exclusive", "confirmed",
-        "announces", "launches", "acquires", "dies", "killed",
-        "arrested", "charged", "resigns", "fired", "recalled",
-        "emergency", "crisis", "attack", "explosion", "earthquake",
-        "replace", "ceo", "president", "elected", "indicted",
+    /// Words that mark breaking news weigh a full point; words that merely mark announcements and office holders
+    /// ("president", "announces", "launches") weigh half, so a routine press release does not pass for an alert (#545).
+    static let breakingSignals: [String: Double] = [
+        "breaking": 1, "just in": 1, "urgent": 1, "dies": 1, "killed": 1, "arrested": 1, "charged": 1, "indicted": 1,
+        "resigns": 1, "recalled": 1, "emergency": 1, "crisis": 1, "attack": 1, "explosion": 1, "earthquake": 1,
+        "exclusive": 0.5, "confirmed": 0.5, "announces": 0.5, "launches": 0.5, "acquires": 0.5, "fired": 0.5,
+        "replace": 0.5, "ceo": 0.5, "president": 0.5, "elected": 0.5,
     ]
 
-    /// Signal words present as whole words: "dies" must not fire on "studies", "diesel" or "bodies".
-    static func breakingSignalCount(in text: String) -> Int {
+    /// Summed weight of the signal words present as whole words: "dies" must not fire on "studies", "diesel" or
+    /// "bodies".
+    static func breakingSignalWeight(in text: String) -> Double {
         let padded = MuteRules.paddedPhrase(text)
-        return breakingSignals.filter { padded.contains(MuteRules.paddedPhrase($0)) }.count
+        return breakingSignals.filter { padded.contains(MuteRules.paddedPhrase($0.key)) }.map(\.value).reduce(0, +)
     }
 
     /// One report per event, the one that scores highest, in first-seen order, with its score; stories outside any
@@ -125,7 +133,8 @@ final class NotificationService: Sendable {
 
     /// Full-mode triage (#588): a story notifies when its feed is starred, when it is breaking (score ≥ 0.6), or when
     /// it is in one of the reader's top interest categories and three or more publishers cover its event. Everything
-    /// else is silent. Starred feeds are not counted against the banner limit.
+    /// else is silent. Starred feeds are not counted against the banner limit. Otherwise an event notified in the last
+    /// day stays quiet while its lead headline is the one notified; a new lead headline notifies again (#545).
     static func triage(_ ranked: [(article: FeedArticle, score: Double)], delivery: NotificationDelivery)
         -> [(article: FeedArticle, score: Double)]
     {
@@ -137,6 +146,11 @@ final class NotificationService: Sendable {
                 chosen.append(item)
                 continue
             }
+            if let event = delivery.events[article.id], let notified = delivery.notifiedEvents[event],
+                notified == leadKey(of: article, event: event, delivery: delivery)
+            {
+                continue
+            }
             guard budget > 0 else { continue }
             let category = article.category.flatMap(NewsCategory.match(from:))?.rawValue.lowercased()
             let publishers = delivery.events[article.id].flatMap { delivery.publishers[$0] } ?? 1
@@ -146,6 +160,11 @@ final class NotificationService: Sendable {
             budget -= 1
         }
         return chosen
+    }
+
+    /// The headline key recorded for an event when a banner is posted: its lead story's, else the posted report's.
+    static func leadKey(of article: FeedArticle, event: String, delivery: NotificationDelivery) -> String {
+        EventFeedSummary.titleKey(delivery.leadTitles[event] ?? article.title)
     }
 
     /// The reader's top interest categories (lowercased raw values) from the Briefing's interest weights, strongest
@@ -176,13 +195,18 @@ final class NotificationService: Sendable {
 
         case .full:
             let toNotify = Self.triage(ranked.sorted { $0.score > $1.score }, delivery: delivery)
+            var posted: [FeedArticle] = []
             for (index, item) in toNotify.enumerated() {
                 if index > 0 { try? await Task.sleep(for: spacing) }
-                guard !Task.isCancelled else { return }
-                await triggerFullNotification(
+                guard !Task.isCancelled else { break }
+                if await triggerFullNotification(
                     for: item.article, thread: delivery.events[item.article.id] ?? item.article.id,
                     breaking: item.score >= Self.breakingScore)
+                {
+                    posted.append(item.article)
+                }
             }
+            if !posted.isEmpty { await delivery.recordPosted(posted) }
         }
     }
 
@@ -246,7 +270,7 @@ final class NotificationService: Sendable {
 
     /// Posts one banner. The thread groups later reports of the same story under it in Notification Center; a
     /// breaking story sounds and interrupts like any alert, a lesser one is passive (listed, no sound, no wake).
-    private func triggerFullNotification(for article: FeedArticle, thread: String, breaking: Bool) async {
+    private func triggerFullNotification(for article: FeedArticle, thread: String, breaking: Bool) async -> Bool {
         let content = UNMutableNotificationContent()
 
         let sourceName = (article.source.components(separatedBy: "\n").first ?? article.source)
@@ -272,8 +296,10 @@ final class NotificationService: Sendable {
             try await post(request)
             logger.debug(
                 "Successfully scheduled full notification: \(identifier); attachments=\(content.attachments.count)")
+            return true
         } catch {
             logger.error("Failed to schedule full notification '\(identifier)': \(error.localizedDescription)")
+            return false
         }
     }
 

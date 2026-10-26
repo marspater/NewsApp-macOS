@@ -188,6 +188,17 @@ actor DatabaseEngine {
                 "UPDATE article_enrichment SET category = (SELECT news_topic(a.title, coalesce(a.description, ''), a.content) FROM articles a WHERE a.id = article_enrichment.article_id) WHERE category IS NULL;"
             )
 
+            // Events notified, so a new report of an event already announced stays quiet for a day (#545). A side
+            // table created on open, outside the numbered migrations, so it needs no schema version.
+            try executeSimple(
+                """
+                CREATE TABLE IF NOT EXISTS event_notifications (
+                    event_id TEXT PRIMARY KEY,
+                    notified_at REAL NOT NULL,
+                    lead_key TEXT NOT NULL
+                );
+                """
+            )
             // Ensure article_embeddings table exists on all databases (including pre-existing v21 databases) (#127, #307)
             try executeSimple(
                 """
@@ -3213,6 +3224,52 @@ actor DatabaseEngine {
             eligible.formUnion(rows.compactMap { $0[0] })
         }
         return eligible
+    }
+
+    /// Events notified since `since` → the headline key of their lead story when the banner was posted (#545).
+    func notifiedEvents(since: Date) throws -> [String: String] {
+        var result: [String: String] = [:]
+        for row in try eventRows(
+            "SELECT event_id, lead_key FROM event_notifications WHERE notified_at >= ?;",
+            [.real(since.timeIntervalSince1970)])
+        {
+            if let event = row[0], let key = row[1] { result[event] = key }
+        }
+        return result
+    }
+
+    /// Records the events a refresh posted banners for, with their lead headline keys; rows older than a week go.
+    func recordNotifiedEvents(_ leadKeys: [String: String], at date: Date) throws {
+        guard !leadKeys.isEmpty else { return }
+        let now = date.timeIntervalSince1970
+        for (event, key) in leadKeys {
+            try eventRows(
+                """
+                INSERT INTO event_notifications (event_id, notified_at, lead_key) VALUES (?, ?, ?)
+                ON CONFLICT(event_id) DO UPDATE SET notified_at = excluded.notified_at, lead_key = excluded.lead_key;
+                """, [.text(event), .real(now), .text(key)])
+        }
+        try eventRows("DELETE FROM event_notifications WHERE notified_at < ?;", [.real(now - 7 * 86400)])
+    }
+
+    /// The title of each event's lead story: the one that opened the event (lowest joined version, then earliest
+    /// publication). It stays the same when later reports join, unlike the newest member a card shows.
+    func eventLeadTitles(_ eventIDs: Set<String>) throws -> [String: String] {
+        var titles: [String: String] = [:]
+        let ids = eventIDs.sorted()
+        for start in stride(from: 0, to: ids.count, by: 400) {
+            let slice = Array(ids[start..<min(start + 400, ids.count)])
+            let placeholders = Array(repeating: "?", count: slice.count).joined(separator: ",")
+            for row in try eventRows(
+                """
+                SELECT m.event_id, a.title FROM event_members m JOIN articles a ON a.id = m.article_id
+                WHERE m.event_id IN (\(placeholders)) ORDER BY m.event_id, m.joined_version, a.published_at, a.id;
+                """, slice.map { .text($0) })
+            {
+                if let event = row[0], let title = row[1], titles[event] == nil { titles[event] = title }
+            }
+        }
+        return titles
     }
 
     /// Distinct publishers among the members of each event, for notification triage (#588).
