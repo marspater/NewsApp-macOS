@@ -10515,8 +10515,8 @@ struct NewsTests {
         ]
         assertEqual(
             FiniteBriefing(candidates: ranked, readIDs: [], now: now, priorities: priority).articles.map(\.id),
-            ["stored", "major"],
-            "Major stored importance precedes coverage; one publisher cannot occupy the briefing")
+            ["covered", "minor"],
+            "Coverage precedes recency when importance is removed; one publisher cannot occupy the briefing")
 
         let personalized = [
             article("general", age: 0, source: "General", category: "World"),
@@ -10529,8 +10529,20 @@ struct NewsTests {
             interests: ["science": 3])
         assertEqual(
             personalizedBriefing.articles.first?.id, "duplicate-event",
-            "Interest breaks neutral-importance and coverage ties before recency")
+            "Interest breaks coverage ties before recency")
         assertEqual(personalizedBriefing.articles.count, 2, "One event cannot consume two briefing slots")
+
+        // Direct unit tests for FiniteBriefing.rank contract
+        let r1 = FiniteBriefing.rank(
+            priority: .init(sourceCount: 3), interest: 0, sourceCount: 0, categoryCount: 0)
+        let r2 = FiniteBriefing.rank(
+            priority: .init(sourceCount: 1), interest: 5, sourceCount: 0, categoryCount: 0)
+        assertTrue(r2.lexicographicallyPrecedes(r1), "Source coverage precedes interest")
+        let r3 = FiniteBriefing.rank(
+            priority: .init(sourceCount: 2), interest: 3, sourceCount: 1, categoryCount: 1)
+        assertEqual(
+            r3, [2, 3, -2, -1],
+            "Rank vector formula matches [sourceCount, interest, -(sources + categories), -sources]")
 
         let db = DatabaseEngine(path: ":memory:")
         try await db.open()
@@ -10546,6 +10558,318 @@ struct NewsTests {
             "SQLite filters the exact window and read state before selection")
         assertEqual(
             try await db.fetchArticles(limit: nil).count, candidates.count, "The briefing leaves archive access intact")
+
+        // Test non-destructive briefing interests reset
+        let testNow = Date(timeIntervalSince1970: 1_700_000_000)
+        let interestsDb = DatabaseEngine(path: ":memory:")
+        try await interestsDb.open()
+        let testArticles = [
+            article("int-tech", age: 0, category: "Technology"),
+            article("int-science", age: 0, category: "Science"),
+            article("int-politics", age: 0, category: "Politics"),
+            article("int-old", age: 0, category: "Business"),
+        ]
+        _ = try await interestsDb.upsertArticles(testArticles)
+
+        let tenDaysAgo = testNow.addingTimeInterval(-10 * 86400)
+        try await interestsDb.markRead(articleId: "int-tech", isRead: true)
+        _ = try await interestsDb.eventRows(
+            "UPDATE article_state SET read_at = ? WHERE article_id = ?;",
+            [.real(tenDaysAgo.timeIntervalSince1970), .text("int-tech")])
+
+        let twoDaysAgo = testNow.addingTimeInterval(-2 * 86400)
+        try await interestsDb.markRead(articleId: "int-science", isRead: true)
+        _ = try await interestsDb.eventRows(
+            "UPDATE article_state SET read_at = ? WHERE article_id = ?;",
+            [.real(twoDaysAgo.timeIntervalSince1970), .text("int-science")])
+
+        let oneDayAgo = testNow.addingTimeInterval(-1 * 86400)
+        try await interestsDb.setSaved(articleId: "int-politics", isSaved: true)
+        _ = try await interestsDb.eventRows(
+            "UPDATE article_state SET saved_at = ? WHERE article_id = ?;",
+            [.real(oneDayAgo.timeIntervalSince1970), .text("int-politics")])
+
+        let thirtyFiveDaysAgo = testNow.addingTimeInterval(-35 * 86400)
+        try await interestsDb.markRead(articleId: "int-old", isRead: true)
+        _ = try await interestsDb.eventRows(
+            "UPDATE article_state SET read_at = ? WHERE article_id = ?;",
+            [.real(thirtyFiveDaysAgo.timeIntervalSince1970), .text("int-old")])
+
+        // 1. Without resetAt: respects 30-day window (excludes 35-day-old article)
+        let defaultInterests = try await interestsDb.briefingInterests(now: testNow)
+        assertEqual(defaultInterests["technology"], 1, "Read tech story within 30 days scores 1")
+        assertEqual(defaultInterests["science"], 1, "Read science story within 30 days scores 1")
+        assertEqual(defaultInterests["politics"], 3, "Saved politics story within 30 days scores 3")
+        assertTrue(defaultInterests["business"] == nil, "Business story older than 30 days excluded")
+
+        // 2. With resetAt = 5 days ago: excludes tech (10 days ago), keeps science (2 days ago) and politics (1 day ago)
+        let reset5DaysAgo = testNow.addingTimeInterval(-5 * 86400)
+        let resetInterests = try await interestsDb.briefingInterests(now: testNow, resetAt: reset5DaysAgo)
+        assertTrue(resetInterests["technology"] == nil, "Tech story read before reset cutoff is excluded")
+        assertEqual(resetInterests["science"], 1, "Science story read after reset cutoff is retained")
+        assertEqual(resetInterests["politics"], 3, "Politics story saved after reset cutoff is retained")
+
+        // 3. With resetAt = testNow: interests are completely cleared
+        let clearedInterests = try await interestsDb.briefingInterests(now: testNow, resetAt: testNow)
+        assertTrue(clearedInterests.isEmpty, "Resetting to now produces zero inferred interests")
+
+        // 4. Non-destructive assertion: read markers and bookmarks remain intact
+        assertTrue(
+            try await interestsDb.isRead(articleId: "int-tech"),
+            "Read status preserved after interests reset")
+        assertTrue(
+            try await interestsDb.isRead(articleId: "int-science"),
+            "Read status preserved after interests reset")
+        assertTrue(
+            try await interestsDb.isSaved(articleId: "int-politics"),
+            "Saved status preserved after interests reset")
+
+        try await testAdversarialDatabaseInterestsReset()
+    }
+
+    @MainActor
+    static func testAdversarialDatabaseInterestsReset() async throws {
+        print("  - Adversarial empirical challenge: briefingInterests boundary values & SQLite integrity...")
+        let testNow = Date(timeIntervalSince1970: 1_750_000_000)
+
+        func makeTestArticle(id: String, category: String, age: TimeInterval = 0) -> FeedArticle {
+            FeedArticle(
+                storedID: id,
+                title: "Test Article \(id)",
+                link: "https://example.com/test/\(id)",
+                guid: id,
+                description: "Description \(id)",
+                pubDate: testNow.addingTimeInterval(-age),
+                source: "Test Source",
+                category: category
+            )
+        }
+
+        // Test 1: Empty Database
+        let emptyDb = DatabaseEngine(path: ":memory:")
+        try await emptyDb.open()
+        let empty1 = try await emptyDb.briefingInterests(now: testNow, resetAt: nil)
+        assertTrue(empty1.isEmpty, "Empty database returns empty interests with nil resetAt")
+        let empty2 = try await emptyDb.briefingInterests(now: testNow, resetAt: testNow)
+        assertTrue(empty2.isEmpty, "Empty database returns empty interests with resetAt = now")
+        let empty3 = try await emptyDb.briefingInterests(now: testNow, resetAt: testNow.addingTimeInterval(86400))
+        assertTrue(empty3.isEmpty, "Empty database returns empty interests with future resetAt")
+        await emptyDb.close()
+
+        // Test 2: Cutoff Boundary Values (Future, Exactly 30 Days, 40 Days, Exactly Now)
+        let boundaryDb = DatabaseEngine(path: ":memory:")
+        try await boundaryDb.open()
+
+        let artAt30d = makeTestArticle(id: "b-exact-30d", category: "Technology")
+        let artOlder30d = makeTestArticle(id: "b-older-30d", category: "Technology")
+        let artNewer30d = makeTestArticle(id: "b-newer-30d", category: "Technology")
+        let artAt35d = makeTestArticle(id: "b-35d", category: "Business")
+        let artAt45d = makeTestArticle(id: "b-45d", category: "Business")
+        let artAt10d = makeTestArticle(id: "b-10d", category: "Science")
+        let artAt1d = makeTestArticle(id: "b-1d", category: "World")
+        let artAtNow = makeTestArticle(id: "b-now", category: "Politics")
+
+        _ = try await boundaryDb.upsertArticles([
+            artAt30d, artOlder30d, artNewer30d, artAt35d, artAt45d, artAt10d, artAt1d, artAtNow,
+        ])
+
+        let thirtyDaysSeconds = 30.0 * 86400.0
+        let tExact30d = testNow.addingTimeInterval(-thirtyDaysSeconds)
+        let tOlder30d = testNow.addingTimeInterval(-thirtyDaysSeconds - 2.0)
+        let tNewer30d = testNow.addingTimeInterval(-thirtyDaysSeconds + 2.0)
+        let t35d = testNow.addingTimeInterval(-35.0 * 86400.0)
+        let t45d = testNow.addingTimeInterval(-45.0 * 86400.0)
+        let t10d = testNow.addingTimeInterval(-10.0 * 86400.0)
+        let t1d = testNow.addingTimeInterval(-1.0 * 86400.0)
+        let tNow = testNow
+
+        // Set read/saved timestamps in article_state
+        try await boundaryDb.markRead(articleId: "b-exact-30d", isRead: true)
+        _ = try await boundaryDb.eventRows(
+            "UPDATE article_state SET read_at = ? WHERE article_id = ?;",
+            [.real(tExact30d.timeIntervalSince1970), .text("b-exact-30d")])
+
+        try await boundaryDb.markRead(articleId: "b-older-30d", isRead: true)
+        _ = try await boundaryDb.eventRows(
+            "UPDATE article_state SET read_at = ? WHERE article_id = ?;",
+            [.real(tOlder30d.timeIntervalSince1970), .text("b-older-30d")])
+
+        try await boundaryDb.markRead(articleId: "b-newer-30d", isRead: true)
+        _ = try await boundaryDb.eventRows(
+            "UPDATE article_state SET read_at = ? WHERE article_id = ?;",
+            [.real(tNewer30d.timeIntervalSince1970), .text("b-newer-30d")])
+
+        try await boundaryDb.markRead(articleId: "b-35d", isRead: true)
+        _ = try await boundaryDb.eventRows(
+            "UPDATE article_state SET read_at = ? WHERE article_id = ?;",
+            [.real(t35d.timeIntervalSince1970), .text("b-35d")])
+
+        try await boundaryDb.markRead(articleId: "b-45d", isRead: true)
+        _ = try await boundaryDb.eventRows(
+            "UPDATE article_state SET read_at = ? WHERE article_id = ?;",
+            [.real(t45d.timeIntervalSince1970), .text("b-45d")])
+
+        try await boundaryDb.markRead(articleId: "b-10d", isRead: true)
+        _ = try await boundaryDb.eventRows(
+            "UPDATE article_state SET read_at = ? WHERE article_id = ?;",
+            [.real(t10d.timeIntervalSince1970), .text("b-10d")])
+
+        try await boundaryDb.setSaved(articleId: "b-1d", isSaved: true)
+        _ = try await boundaryDb.eventRows(
+            "UPDATE article_state SET saved_at = ? WHERE article_id = ?;",
+            [.real(t1d.timeIntervalSince1970), .text("b-1d")])
+
+        try await boundaryDb.markRead(articleId: "b-now", isRead: true)
+        _ = try await boundaryDb.eventRows(
+            "UPDATE article_state SET read_at = ? WHERE article_id = ?;",
+            [.real(tNow.timeIntervalSince1970), .text("b-now")])
+
+        // 2a. Boundary: resetAt exactly 30 days ago (resetAt == thirtyDaysAgo)
+        // Technology should include exact-30d (1 pt) + newer-30d (1 pt) = 2 pts. Older-30d is excluded.
+        let interests30d = try await boundaryDb.briefingInterests(now: testNow, resetAt: tExact30d)
+        assertEqual(
+            interests30d["technology"], 2,
+            "Exact 30-day cutoff includes interaction at exact boundary and newer, excludes older")
+
+        // 2b. Boundary: resetAt 40 days ago (resetAt < thirtyDaysAgo)
+        // Even though resetAt is 40 days ago, 30-day window max(thirtyDaysAgo, resetAt) must prevail.
+        // Therefore, b-35d and b-45d (Business) must NOT appear in interests.
+        let t40d = testNow.addingTimeInterval(-40.0 * 86400.0)
+        let interests40d = try await boundaryDb.briefingInterests(now: testNow, resetAt: t40d)
+        assertTrue(interests40d["business"] == nil, "resetAt 40 days ago cannot bypass 30-day maximum lookback")
+        assertEqual(interests40d["technology"], 2, "Technology interactions within 30 days still scored")
+        assertEqual(interests40d["science"], 1, "Science 10d interaction scored")
+        assertEqual(interests40d["world"], 3, "World 1d saved interaction scored 3")
+
+        // 2c. Boundary: resetAt in the future (resetAt > now)
+        let tFuture = testNow.addingTimeInterval(3600)
+        let interestsFuture = try await boundaryDb.briefingInterests(now: testNow, resetAt: tFuture)
+        assertTrue(interestsFuture.isEmpty, "Future resetAt produces empty interests dictionary without error")
+
+        // 2d. Boundary: resetAt == now
+        // An interaction with read_at strictly before now is excluded.
+        let interestsNow = try await boundaryDb.briefingInterests(now: testNow, resetAt: testNow)
+        assertTrue(
+            interestsNow["technology"] == nil,
+            "Technology interactions prior to now excluded when resetAt == now")
+        assertTrue(
+            interestsNow["science"] == nil,
+            "Science interactions prior to now excluded when resetAt == now")
+        assertTrue(
+            interestsNow["world"] == nil,
+            "World interactions prior to now excluded when resetAt == now")
+
+        // Call with resetAt strictly after the latest interaction:
+        let interestsAfterAll = try await boundaryDb.briefingInterests(
+            now: testNow, resetAt: testNow.addingTimeInterval(0.001))
+        assertTrue(interestsAfterAll.isEmpty, "Resetting after all interactions produces completely empty interests")
+
+        // Test 3: Exactly 200 interaction records
+        let limitDb = DatabaseEngine(path: ":memory:")
+        try await limitDb.open()
+
+        var articles200: [FeedArticle] = []
+        for i in 0..<100 {
+            articles200.append(makeTestArticle(id: "tech-200-\(i)", category: "Technology"))
+        }
+        for i in 0..<100 {
+            articles200.append(makeTestArticle(id: "sci-200-\(i)", category: "Science"))
+        }
+        _ = try await limitDb.upsertArticles(articles200)
+
+        for i in 0..<100 {
+            let artId = "tech-200-\(i)"
+            try await limitDb.markRead(articleId: artId, isRead: true)
+            let stamp = testNow.addingTimeInterval(-Double(i + 1) * 3600.0)
+            _ = try await limitDb.eventRows(
+                "UPDATE article_state SET read_at = ? WHERE article_id = ?;",
+                [.real(stamp.timeIntervalSince1970), .text(artId)])
+        }
+        for i in 0..<100 {
+            let artId = "sci-200-\(i)"
+            try await limitDb.setSaved(articleId: artId, isSaved: true)
+            let stamp = testNow.addingTimeInterval(-Double(i + 1) * 3600.0)
+            _ = try await limitDb.eventRows(
+                "UPDATE article_state SET saved_at = ? WHERE article_id = ?;",
+                [.real(stamp.timeIntervalSince1970), .text(artId)])
+        }
+
+        let interests200 = try await limitDb.briefingInterests(now: testNow)
+        assertEqual(interests200["technology"], 100, "Exactly 100 read articles score 100 points")
+        assertEqual(interests200["science"], 300, "Exactly 100 saved articles score 300 points")
+
+        // Test 4: >200 records (e.g., 250 records testing recency DESC and LIMIT 200 truncation)
+        // Add 50 Business articles that were read 20 days ago (older than the 200 Tech & Science articles)
+        var articles50Extra: [FeedArticle] = []
+        for i in 0..<50 {
+            articles50Extra.append(makeTestArticle(id: "biz-extra-\(i)", category: "Business"))
+        }
+        _ = try await limitDb.upsertArticles(articles50Extra)
+        for i in 0..<50 {
+            let artId = "biz-extra-\(i)"
+            try await limitDb.markRead(articleId: artId, isRead: true)
+            let oldStamp = testNow.addingTimeInterval(-20.0 * 86400.0 - Double(i))
+            _ = try await limitDb.eventRows(
+                "UPDATE article_state SET read_at = ? WHERE article_id = ?;",
+                [.real(oldStamp.timeIntervalSince1970), .text(artId)])
+        }
+
+        // Total interactions in limitDb = 250.
+        // Because briefingInterests has LIMIT 200 ORDER BY interaction DESC,
+        // the 200 newest (100 Tech + 100 Science) should consume all 200 slots.
+        // The 50 older Business articles must be truncated out!
+        let interests250 = try await limitDb.briefingInterests(now: testNow)
+        assertEqual(interests250["technology"], 100, "Top 200 keeps all recent Technology reads")
+        assertEqual(interests250["science"], 300, "Top 200 keeps all recent Science saves")
+        assertTrue(interests250["business"] == nil, "50 older interactions truncated by LIMIT 200 clause")
+
+        // Test 5: 100% User Data Integrity in SQLite article_state
+        struct ArticleStateRow: Equatable {
+            let articleId: String
+            let isRead: String
+            let readAt: String
+            let isSaved: String
+            let savedAt: String
+        }
+
+        func queryArticleStates(engine: DatabaseEngine) async throws -> [ArticleStateRow] {
+            let sql = """
+                SELECT article_id, coalesce(is_read, '0'), coalesce(read_at, 'null'),
+                       coalesce(is_saved, '0'), coalesce(saved_at, 'null')
+                FROM article_state ORDER BY article_id;
+                """
+            let rows = try await engine.eventRows(sql)
+            return rows.map { r in
+                ArticleStateRow(
+                    articleId: r[0] ?? "",
+                    isRead: r[1] ?? "",
+                    readAt: r[2] ?? "",
+                    isSaved: r[3] ?? "",
+                    savedAt: r[4] ?? ""
+                )
+            }
+        }
+
+        let stateSnapshotBefore = try await queryArticleStates(engine: boundaryDb)
+        assertTrue(!stateSnapshotBefore.isEmpty, "article_state is populated before reset tests")
+
+        // Call briefingInterests with many different resetAt values repeatedly
+        _ = try await boundaryDb.briefingInterests(now: testNow, resetAt: testNow)
+        _ = try await boundaryDb.briefingInterests(now: testNow, resetAt: tFuture)
+        _ = try await boundaryDb.briefingInterests(now: testNow, resetAt: t1d)
+        _ = try await boundaryDb.briefingInterests(now: testNow, resetAt: t40d)
+        _ = try await boundaryDb.briefingInterests(now: testNow, resetAt: nil)
+
+        let stateSnapshotAfter = try await queryArticleStates(engine: boundaryDb)
+        assertEqual(
+            stateSnapshotBefore.count, stateSnapshotAfter.count,
+            "article_state row count is 100% unchanged after resetAt calls")
+        assertEqual(
+            stateSnapshotBefore, stateSnapshotAfter,
+            "Every single field of article_state (is_read, read_at, is_saved, saved_at) is 100% bit-for-bit preserved")
+
+        await boundaryDb.close()
+        await limitDb.close()
     }
 
     @MainActor
