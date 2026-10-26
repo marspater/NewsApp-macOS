@@ -470,7 +470,8 @@ def run_calibration():
     for d, r in zip(day_results, v3):
         print(f"{d['id']:<38} | {('N/A' if r is None else str(r)):>7}")
     expected_v3 = [88, 78, 66, 55, 51, 36, 33, 29, 15, 27, 18, None, None, None]
-    assert v3 == expected_v3, f"v3 readings {v3} differ from the documented bands {expected_v3}"
+    if v3 != expected_v3:
+        raise SystemExit(f"v3 readings {v3} differ from the documented bands {expected_v3}")
 
     print("\nAll historical calibration assertions passed successfully!")
 
