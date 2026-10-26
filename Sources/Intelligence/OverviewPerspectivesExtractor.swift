@@ -468,7 +468,7 @@ struct OverviewPerspectivesExtractor: Sendable {
         // Quote first, with either "said Participant" or "Participant said". Keep paired delimiters and
         // capture the original statement: typographic punctuation must not rewrite the cited evidence.
         let verbs =
-            #"(?:said|stated|announced|noted|argued|warned|confirmed|declared|emphasized|urged|reiterated|cautioned|explained)"#
+            #"(?:said|stated|announced|noted|argued|warned|confirmed|declared|emphasized|urged|reiterated|cautioned|explained|wrote|posted)"#
         let participant = #"([A-Z][A-Za-z0-9\s,\.\-]{2,60})"#
         // When and where the remark was made: "on Thursday night", "Tuesday", "in a statement", "at a news conference".
         let time =
@@ -519,8 +519,13 @@ struct OverviewPerspectivesExtractor: Sendable {
             + #"(?:\.|$|,\s+(?:adding|as|while|with|citing|saying|referring|noting)\b)"#
         let patternTrailing =
             sentence + #",\s+"# + tagSpeaker
-            + #"\s+(?:said|says|added|stated|warned|wrote|told\s+(?:reporters|journalists|(?:[Tt]he\s+)?\p{Lu}[\p{L}\s]{1,30}?))"#
+            + #"\s+(?:said|says|added|stated|warned|wrote|posted|told\s+(?:reporters|journalists|(?:[Tt]he\s+)?\p{Lu}[\p{L}\s]{1,30}?))"#
             + closing
+        // A speaker with one appositive: "…, the mayor of La Verrière, Nicolas Dainville, told AFP."
+        let patternTrailingAppositive =
+            sentence
+            + #",\s+((?:[\p{L}0-9'’\-]+\s+){0,6}[\p{L}0-9'’\-]+,\s+(?:[\p{L}0-9'’\-]+\s+){0,4}[\p{L}0-9'’\-]+),"#
+            + #"\s+(?:said|says|added|told\s+(?:reporters|journalists|(?:[Tt]he\s+)?\p{Lu}[\p{L}\s]{1,30}?))"# + closing
         // After the verb the speaker is a capitalized name or title: "…, said Mayor Vitali Klitschko.", never "…, said
         // on Monday…" or "…, said American tariffs hurt…".
         let patternTrailingVerbFirst =
@@ -549,6 +554,7 @@ struct OverviewPerspectivesExtractor: Sendable {
                 Attribution(patternAccordingTo, participantGroup: 1, statementGroup: 2, minimumLength: 10),
                 Attribution(patternReported, participantGroup: 1, statementGroup: 2, minimumLength: 15),
                 Attribution(patternTrailing, participantGroup: 2, statementGroup: 1, minimumLength: 15),
+                Attribution(patternTrailingAppositive, participantGroup: 2, statementGroup: 1, minimumLength: 15),
                 Attribution(patternTrailingVerbFirst, participantGroup: 2, statementGroup: 1, minimumLength: 15),
                 Attribution(patternTrailingAccordingTo, participantGroup: 2, statementGroup: 1, minimumLength: 15),
             ]).compactMap { $0 }
@@ -750,11 +756,25 @@ struct OverviewPerspectivesExtractor: Sendable {
         if words.count == 1, let only = words.first?.lowercased(), honorifics.contains(only) { return false }
         // A speaker names someone: "court filing" or "father of four" has no capitalized word. An institution or
         // office as the head noun names its speaker too: "the interior ministry", "the club's sporting director".
-        // A bare "police" or "the ministry" stays as vague as "officials".
-        if words.count > 1, let last = words.last?.lowercased(), institutionNouns.contains(last) { return true }
+        // A data source is not a speaker: "according to the National Grid map", "according to the report".
+        if let last = words.last?.lowercased(), documentNouns.contains(last) { return false }
+        // A bare institution names the speaker within its story ("the military said", "police said");
+        // "officials" and "authorities" stay vague.
+        if let last = words.last?.lowercased(),
+            words.count > 1 ? institutionNouns.contains(last) : bareInstitutions.contains(last)
+        {
+            return true
+        }
         return words.contains { $0.first?.isUppercase == true }
     }
 
+    private static let bareInstitutions: Set<String> = [
+        "police", "military", "army", "prosecutors", "government", "ministry", "court",
+    ]
+    private static let documentNouns: Set<String> = [
+        "map", "maps", "figures", "data", "report", "reports", "website", "tally", "count", "estimate", "estimates",
+        "survey", "poll", "statement", "records", "filing", "document", "documents", "study",
+    ]
     private static let institutionNouns: Set<String> = [
         "ministry", "military", "army", "police", "government", "prosecutors", "prosecutor", "court", "agency",
         "council", "commission", "committee", "spokesperson", "spokesman", "spokeswoman", "minister", "president",

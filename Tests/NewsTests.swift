@@ -20835,6 +20835,15 @@ struct NewsTests {
                 "\"We are not satisfied with the offer,\" said student representative Nathanael Combary, president of the group.",
                 "student representative Nathanael Combary", "We are not satisfied with the offer,"
             ),
+            // A bare institution is the speaker, never the nearby place (#547).
+            (
+                "At a base in southeast England housing US operations, police said an incident led to withdrawals.",
+                "police", "an incident led to withdrawals"
+            ),
+            (
+                "The 12-year-old girl was seriously wounded but stable, the mayor of La Verrière, Nicolas Dainville, told AFP.",
+                "Nicolas Dainville", "The 12-year-old girl was seriously wounded but stable"
+            ),
             (
                 "Chadema put the death toll at about 2,000, a figure the UN said it could not verify amid the shutdown.",
                 "UN", "it could not verify amid the shutdown"
@@ -20901,7 +20910,6 @@ struct NewsTests {
             "The Death Penalty Information Center, which publishes data and analysis on capital punishment in the United States, said Pike was the first inmate to survive after being injected with lethal doses of execution drugs.",
             "Trump, who waged war with Iran and has yet to broker peace in Ukraine, said on Wednesday that he should win.",
             "First reported by the Palm Beach Post, an attorney who represents the golf course said Trump is offering.",
-            "At a base in southeast England housing US operations, police said an incident led to withdrawals.",
             "A poll showed that 68% of Jewish Israelis said that the events were central.",
             "A witness told The Associated Press, a day after the kingdom said an attack occurred.",
             "Counter Terrorism Policing London is investigating and commander Helen Flanagan said officers were not linking it.",
@@ -20913,6 +20921,7 @@ struct NewsTests {
             "The bridge reopened to traffic after six weeks, officials said.",
             "The bridge reopened to traffic after six weeks, he said.",
             "Authorities said 2,500 police officers are patrolling the streets of the capital.",
+            "More than 3,700 homes were still without electricity on Saturday morning, according to the National Grid map.",
         ] {
             assertTrue(
                 reported(text).isEmpty,
