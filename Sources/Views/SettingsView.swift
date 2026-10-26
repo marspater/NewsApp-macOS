@@ -5,6 +5,7 @@ enum SettingsPane: String, CaseIterable, Identifiable {
     case general
     case subscriptions
     case muting
+    case reading
     case appearance
     case notifications
     case intelligence
@@ -17,7 +18,7 @@ enum SettingsPane: String, CaseIterable, Identifiable {
 
 struct SettingsView: View {
     static let lastPaneStorageKey = "lastSettingsPane"
-    /// Wide enough for all nine tabs in the toolbar, so none overflow into a menu.
+    /// Wide enough for all ten tabs in the toolbar, so none overflow into a menu.
     static let paneWidth = AppLayout.settingsPaneWidth
     static let paneHeight = AppLayout.settingsPaneHeight
 
@@ -46,6 +47,7 @@ struct SettingsView: View {
 
     @AppStorage(SettingsView.lastPaneStorageKey) private var selectedPane: SettingsPane = .general
     @AppStorage("briefingEditionHour") private var briefingEditionHour = FiniteBriefing.defaultEditionHour
+    @AppStorage("readingInterestsResetAt") private var readingInterestsResetAt = 0.0
     @State private var newFeedURL: String = ""
     @State private var webCacheSize: String = "Calculating…"
     @State private var databaseSize: String = "Calculating…"
@@ -61,6 +63,8 @@ struct SettingsView: View {
     /// The reader's current top interest categories, shown with the full-mode notification rule.
     @State private var notificationInterests: [String] = []
     @State private var confirmsUnmuteAll = false
+    @State private var inferredInterests: [String: Int] = [:]
+    @State private var confirmsResetInterests = false
     @ObservedObject private var updateChecker = UpdateChecker.shared
 
     var body: some View {
@@ -76,6 +80,10 @@ struct SettingsView: View {
             mutingTab
                 .tabItem { Label("Muting", systemImage: "speaker.slash") }
                 .tag(SettingsPane.muting)
+
+            readingTab
+                .tabItem { Label("Reading", systemImage: "book") }
+                .tag(SettingsPane.reading)
 
             appearanceTab
                 .tabItem { Label("Appearance", systemImage: "paintbrush") }
@@ -468,6 +476,109 @@ struct SettingsView: View {
         if appSettings.muteTopic(newMutedTopic) != nil { newMutedTopic = "" }
     }
 
+    // MARK: - Reading Tab
+
+    private var readingTab: some View {
+        Form {
+            Section(header: sectionHeader("Inferred Interests")) {
+                Text(
+                    "News infers your topic interests privately on this Mac based on stories you read and save over the last 30 days. These signals help prioritize relevant coverage in your Daily Briefing."
+                )
+                .font(AppTypography.caption)
+                .foregroundStyle(AppColor.secondaryText)
+
+                if sortedInterests.isEmpty {
+                    Text("No reading interests recorded yet. Read or save stories to build interest signals.")
+                        .font(AppTypography.caption)
+                        .foregroundStyle(AppColor.tertiaryText)
+                        .padding(.vertical, AppSpacing.xxs)
+                } else {
+                    ForEach(sortedInterests, id: \.category) { item in
+                        HStack {
+                            Text(categoryDisplayName(for: item.category))
+                                .font(AppTypography.body)
+                                .foregroundStyle(AppColor.primaryText)
+                            Spacer()
+                            Text("\(item.score) \(item.score == 1 ? "point" : "points")")
+                                .font(AppTypography.label.monospacedDigit())
+                                .foregroundStyle(AppColor.secondaryText)
+                        }
+                        .accessibilityElement(children: .combine)
+                        .accessibilityLabel(
+                            "\(categoryDisplayName(for: item.category)), \(item.score) \(item.score == 1 ? "point" : "points")"
+                        )
+                    }
+                }
+            }
+
+            Section {
+                Button("Reset Reading Interests…", role: .destructive) {
+                    confirmsResetInterests = true
+                }
+                .disabled(inferredInterests.isEmpty && readingInterestsResetAt == 0)
+                .accessibilityLabel("Reset Reading Interests")
+                .accessibilityHint(
+                    "Clears all inferred category weights immediately. Preserves read history and saved stories."
+                )
+
+                Text("Clears all inferred category weights immediately. Read history and saved stories are preserved.")
+                    .font(AppTypography.caption)
+                    .foregroundStyle(AppColor.secondaryText)
+            }
+        }
+        .formStyle(.grouped)
+        .frame(width: Self.paneWidth)
+        .task(id: readingInterestsResetAt) {
+            await reloadReadingInterests()
+        }
+        .confirmationDialog(
+            "Reset reading interests?",
+            isPresented: $confirmsResetInterests
+        ) {
+            Button("Reset Reading Interests", role: .destructive) {
+                resetReadingInterests()
+            }
+        } message: {
+            Text(
+                "Inferred category signals will be cleared immediately. Your read history and saved stories will not be deleted."
+            )
+        }
+    }
+
+    private var sortedInterests: [(category: String, score: Int)] {
+        inferredInterests
+            .map { (category: $0.key, score: $0.value) }
+            .sorted { lhs, rhs in
+                if lhs.score != rhs.score {
+                    return lhs.score > rhs.score
+                }
+                return lhs.category < rhs.category
+            }
+    }
+
+    private func categoryDisplayName(for key: String) -> String {
+        if let category = NewsCategory.match(from: key) {
+            return category.rawValue
+        }
+        return key.capitalized
+    }
+
+    @MainActor
+    private func reloadReadingInterests() async {
+        let cutoff = readingInterestsResetAt > 0 ? Date(timeIntervalSince1970: readingInterestsResetAt) : nil
+        do {
+            inferredInterests = try await articleStore.database.briefingInterests(now: Date(), resetAt: cutoff)
+        } catch {
+            inferredInterests = [:]
+        }
+    }
+
+    private func resetReadingInterests() {
+        let now = Date().timeIntervalSince1970
+        readingInterestsResetAt = now
+        inferredInterests = [:]
+    }
+
     // MARK: - 3. Notifications Tab
 
     private var notificationsTab: some View {
@@ -487,6 +598,12 @@ struct SettingsView: View {
                     isOn: Binding(
                         get: { appSettings.showsDockBadge },
                         set: { appSettings.setShowsDockBadge($0) }
+                    ))
+                Toggle(
+                    "Show in Menu Bar",
+                    isOn: Binding(
+                        get: { appSettings.showsMenuBarExtra },
+                        set: { appSettings.setShowsMenuBarExtra($0) }
                     ))
             }
 
@@ -917,6 +1034,43 @@ struct SettingsView: View {
 
     // MARK: - 8. Updates Tab
 
+    @ViewBuilder
+    private var updateNoticeBanner: some View {
+        NoticeView(tint: AppColor.accent) {
+            HStack(spacing: AppSpacing.sm) {
+                Image(systemName: "arrow.triangle.2.circlepath.circle.fill")
+                    .foregroundStyle(AppColor.accent)
+                    .imageScale(.large)
+                    .accessibilityHidden(true)
+
+                VStack(alignment: .leading, spacing: AppSpacing.textStack) {
+                    Text("Update Available")
+                        .font(AppTypography.headline)
+                        .foregroundStyle(AppColor.primaryText)
+
+                    if let latest = updateChecker.latestVersionString {
+                        let formatted = latest.hasPrefix("v") || latest.hasPrefix("V") ? latest : "v\(latest)"
+                        Text("Version \(formatted) is available on GitHub.")
+                            .font(AppTypography.caption)
+                            .foregroundStyle(AppColor.secondaryText)
+                    } else {
+                        Text("A new version of News is available on GitHub.")
+                            .font(AppTypography.caption)
+                            .foregroundStyle(AppColor.secondaryText)
+                    }
+                }
+
+                Spacer()
+
+                Button("View Release on GitHub") {
+                    updateChecker.openReleasePage()
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+            }
+        }
+    }
+
     private var updatesTab: some View {
         Form {
             Section(header: sectionHeader("News for macOS")) {
@@ -927,6 +1081,10 @@ struct SettingsView: View {
                 }
             }
             Section {
+                if updateChecker.updateAvailable {
+                    updateNoticeBanner
+                }
+
                 if let status = updateChecker.statusMessage {
                     Text(status)
                         .font(AppTypography.callout)
@@ -941,9 +1099,6 @@ struct SettingsView: View {
                     } else {
                         Button("Check for Updates") {
                             Task { await updateChecker.checkForUpdates(userInitiated: true) }
-                        }
-                        if updateChecker.updateAvailable {
-                            Button("View Release on GitHub") { updateChecker.openReleasePage() }
                         }
                     }
                 }

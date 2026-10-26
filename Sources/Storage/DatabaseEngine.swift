@@ -3241,14 +3241,17 @@ actor DatabaseEngine {
     }
 
     /// Interest signals stay on device and use a bounded recent reading/saving history, never publisher volume.
-    func briefingInterests(now: Date = Date()) throws -> [String: Int] {
+    /// When `resetAt` is provided, user reading/saving history before `resetAt` is ignored without modifying stored reading state or bookmarks.
+    func briefingInterests(now: Date = Date(), resetAt: Date? = nil) throws -> [String: Int] {
+        let thirtyDaysAgo = now.addingTimeInterval(-30 * 86400)
+        let cutoff = max(thirtyDaysAgo, resetAt ?? .distantPast)
         let rows = try eventRows(
             """
             SELECT coalesce(ae.category, a.category), s.is_saved FROM article_state s JOIN articles a ON a.id = s.article_id
             LEFT JOIN article_enrichment ae ON ae.article_id = a.id
             WHERE (s.is_saved = 1 OR s.is_read = 1) AND max(coalesce(s.saved_at, 0), coalesce(s.read_at, 0)) >= ?
             ORDER BY max(coalesce(s.saved_at, 0), coalesce(s.read_at, 0)) DESC LIMIT 200;
-            """, [.real(now.addingTimeInterval(-30 * 86400).timeIntervalSince1970)])
+            """, [.real(cutoff.timeIntervalSince1970)])
         var interests: [String: Int] = [:]
         for row in rows {
             if let category = row[0].flatMap(NewsCategory.match(from:)) {
@@ -3332,7 +3335,17 @@ actor DatabaseEngine {
             if let cached = picturedEvents[key] {
                 pictured = cached
             } else {
-                let members = try fetchArticles(limit: nil, id: row[2] == nil ? id : nil, eventID: row[2])
+                var members = try fetchArticles(limit: nil, id: row[2] == nil ? id : nil, eventID: row[2])
+                // A member only on a collection feed (World Tension panel) is hidden from lists: its image does not
+                // spare the listed stories a lookup (#595).
+                if let eventID = row[2], !scope.sql.isEmpty {
+                    let listed = Set(
+                        try eventRows(
+                            "SELECT a.id FROM event_members m JOIN articles a ON a.id = m.article_id WHERE m.event_id = ? \(scope.sql);",
+                            [.text(eventID)] + scope.params.map { .text($0.val as? String ?? "") }
+                        ).compactMap { $0[0] })
+                    members = members.filter { listed.contains($0.id) }
+                }
                 pictured = FeedArticle.bestCardImage(in: members) != nil
                 picturedEvents[key] = pictured
             }
