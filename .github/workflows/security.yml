@@ -7,7 +7,10 @@ on:
       - 'docs/**'
       - '**.md'
       - 'LICENSE'
+  # `closed` starts a run in the PR's concurrency group, which cancels its in-flight run
+  # so merged PRs stop holding macOS runners; every job skips on that run.
   pull_request:
+    types: [opened, synchronize, reopened, closed]
     branches: [main]
     paths-ignore:
       - 'docs/**'
@@ -27,6 +30,7 @@ concurrency:
 jobs:
   codeql:
     name: CodeQL (Swift)
+    if: github.event.action != 'closed'
     permissions:
       contents: read
       security-events: write
@@ -65,6 +69,7 @@ jobs:
 
   codeql-actions:
     name: CodeQL (Actions)
+    if: github.event.action != 'closed'
     permissions:
       contents: read
       security-events: write
@@ -86,7 +91,7 @@ jobs:
 
   dependency-review:
     name: Dependency Review
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' && github.event.action != 'closed'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -101,6 +106,7 @@ jobs:
 
   secret-scan:
     name: Secret Scan
+    if: github.event.action != 'closed'
     runs-on: ubuntu-latest
     permissions:
       contents: read
