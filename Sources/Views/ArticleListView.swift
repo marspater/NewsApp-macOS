@@ -64,6 +64,7 @@ struct ArticleListView: View {
     /// The stored edition, shared by every window: when it was selected and its story IDs in order.
     @AppStorage("briefingEditionSelectedAt") private var briefingEditionSelectedAt = 0.0
     @AppStorage("briefingEditionArticleIDs") private var briefingEditionArticleIDs = ""
+    @AppStorage("readingInterestsResetAt") private var readingInterestsResetAt = 0.0
     @State private var imagePrefetchStart = 0
     @Environment(\.readerImageLoader) private var imageLoader
     /// Launch shows the cached snapshot once, in one transition (DESIGN.md 13, #602); later windows start settled.
@@ -396,7 +397,12 @@ struct ArticleListView: View {
                     let priorities = try await articleStore.database.briefingPriorities(
                         articleIDs: candidates.map(\.id))
                     try Task.checkCancellation()
-                    let interests = try await articleStore.database.briefingInterests(now: now)
+                    let resetDate =
+                        readingInterestsResetAt > 0
+                        ? Date(timeIntervalSince1970: readingInterestsResetAt)
+                        : nil
+                    let interests = try await articleStore.database.briefingInterests(
+                        now: now, resetAt: resetDate)
                     try Task.checkCancellation()
                     let edition = FiniteBriefing(
                         candidates: candidates, readIDs: readManager.readArticles, now: now, priorities: priorities,
@@ -740,7 +746,7 @@ struct ArticleListView: View {
     private var listSubtitle: String {
         if isBriefing {
             let edition = (briefing?.startedAt ?? Date()).formatted(.dateTime.weekday(.wide).month(.wide).day())
-            return "\(edition) briefing · Selected by importance and your interests"
+            return "\(edition) briefing · Selected by coverage and your interests"
         }
         var parts = ["\(entries.count) \(entries.count == 1 ? "story" : "stories")"]
         if !isSearching && (selectedTopic ?? "Today") == "Today" {
@@ -807,36 +813,64 @@ struct ArticleListView: View {
 
     /// The lead is an inset card like the others and shares the list measure (DESIGN.md 3.4, 12).
     /// Both collections retain their original ordering and existing lazy rendering.
+    @ViewBuilder
     private func articleGrid(proxy _: ScrollViewProxy) -> some View {
         let listed = entries
-        let leadID: String? = {
-            if #available(macOS 26, *) {
-                return LeadStoryPresentation.firstEligibleID(
-                    in: listed, selectedTopic: selectedTopic, isSearching: isSearching
+        if isBriefing {
+            BriefingView(
+                entries: listed,
+                briefing: briefing,
+                tensionReading: nil,
+                tensionHistory: [],
+                actions: BriefingActions(
+                    onOpenArticle: { article in openArticle(article) },
+                    onOpenEvent: { event in
+                        if let entry = listed.first(where: {
+                            if case .event(let s, _, _) = $0 { return s.eventID == event.eventID }
+                            return false
+                        }) {
+                            openEvent(
+                                event.eventID,
+                                article: entry.representative,
+                                initialExperienceMode: .eventOverview
+                            )
+                        }
+                    },
+                    onStartNewBriefing: { startNewBriefing() },
+                    onBackToToday: { selectedTopic = "Today" }
                 )
-            }
-            return nil
-        }()
+            )
+            .allowsWindowActivationEvents(true)
+        } else {
+            let leadID: String? = {
+                if #available(macOS 26, *) {
+                    return LeadStoryPresentation.firstEligibleID(
+                        in: listed, selectedTopic: selectedTopic, isSearching: isSearching
+                    )
+                }
+                return nil
+            }()
 
-        return VStack(spacing: AppLayout.cardGap) {
-            if let leadID, let leadIndex = listed.firstIndex(where: { $0.id == leadID }) {
-                if leadIndex > 0 {
-                    cardCollection(Array(listed[..<leadIndex]))
+            VStack(spacing: AppLayout.cardGap) {
+                if let leadID, let leadIndex = listed.firstIndex(where: { $0.id == leadID }) {
+                    if leadIndex > 0 {
+                        cardCollection(Array(listed[..<leadIndex]))
+                    }
+                    entryCard(listed[leadIndex], isLead: true)
+                        .frame(maxWidth: AppLayout.listMaxWidth)
+                        .frame(maxWidth: .infinity)
+                    if leadIndex + 1 < listed.count {
+                        cardCollection(Array(listed[(leadIndex + 1)...]))
+                    }
+                } else {
+                    cardCollection(listed)
                 }
-                entryCard(listed[leadIndex], isLead: true)
-                    .frame(maxWidth: AppLayout.listMaxWidth)
-                    .frame(maxWidth: .infinity)
-                if leadIndex + 1 < listed.count {
-                    cardCollection(Array(listed[(leadIndex + 1)...]))
-                }
-            } else {
-                cardCollection(listed)
             }
+            .padding(.horizontal, AppLayout.pageInset)
+            .padding(.bottom, AppSpacing.xl)
+            // The click that brings an inactive window forward also opens the card under it (#594).
+            .allowsWindowActivationEvents(true)
         }
-        .padding(.horizontal, AppLayout.pageInset)
-        .padding(.bottom, AppSpacing.xl)
-        // The click that brings an inactive window forward also opens the card under it (#594).
-        .allowsWindowActivationEvents(true)
     }
 
     @ViewBuilder

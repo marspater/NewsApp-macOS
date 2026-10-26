@@ -31,6 +31,7 @@ struct NewsRegressionRunner {
                 catch { fatalError("Parser/embedding integration failed: \(error)") }
             }
             if selected("Tests/NotificationAttachmentTests.swift") { NotificationAttachmentTests.run() }
+            if selected("Tests/BriefingE2ETests.swift") { await BriefingE2ETests.run() }
             if selected("Tests/NewsTests.swift") { await NewsTests.main() }
         }
     }
@@ -98,6 +99,8 @@ swiftc "${NEWS_DEPENDENCY_FLAGS[@]}" "$@" -target "$(uname -m)-apple-macos${TARG
     Sources/Storage/SavedStoriesManager.swift \
     Sources/Services/OPMLManager.swift \
     Sources/Views/DesignSystem.swift \
+    Sources/Views/BriefingComponents.swift \
+    Sources/Views/BriefingView.swift \
     Sources/Views/ArticleRemoteImage.swift \
     Sources/Views/ReaderSupportViews.swift \
     Sources/Views/EventOverviewReaderView.swift \
@@ -109,6 +112,7 @@ swiftc "${NEWS_DEPENDENCY_FLAGS[@]}" "$@" -target "$(uname -m)-apple-macos${TARG
     Tests/StoryCorpus.swift \
     Tests/EventEmbeddingTests.swift \
     Tests/EpicNE2ETests.swift \
+    Tests/BriefingE2ETests.swift \
     "$TEST_STAGE/NewsTests.swift" Tests/FeedKitSwiftSoupTests.swift Tests/NotificationAttachmentTests.swift "$TEST_STAGE/Runner.swift" \
     Tests/TestDefaults.swift \
     -o "$OUTPUT"

@@ -68,6 +68,8 @@ swiftc "${NEWS_DEPENDENCY_FLAGS[@]}" -swift-version 6 -O -parse-as-library -targ
     Sources/Views/ArticleCardView.swift \
     Sources/Views/EventCardView.swift \
     Sources/Views/ArticleListView.swift \
+    Sources/Views/BriefingComponents.swift \
+    Sources/Views/BriefingView.swift \
     Sources/Views/ArticleWebView.swift \
     Sources/Views/ArticleRemoteImage.swift \
     Sources/Views/EventOverviewReaderView.swift \

@@ -91,7 +91,9 @@ SWIFT_SOURCES=(
     Sources/Views/SidebarView.swift
     Sources/Views/ArticleCardView.swift
     Sources/Views/EventCardView.swift
-    Sources/Views/ArticleListView.swift
+    Sources/Views/ArticleListView.swift \
+    Sources/Views/BriefingComponents.swift \
+    Sources/Views/BriefingView.swift \
     Sources/Views/ArticleDetailView.swift
     Sources/Views/ReaderSupportViews.swift
     Sources/Views/ArticleRemoteImage.swift

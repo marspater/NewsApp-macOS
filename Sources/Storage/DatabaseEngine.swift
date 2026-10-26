@@ -3222,14 +3222,17 @@ actor DatabaseEngine {
     }
 
     /// Interest signals stay on device and use a bounded recent reading/saving history, never publisher volume.
-    func briefingInterests(now: Date = Date()) throws -> [String: Int] {
+    /// When `resetAt` is provided, user reading/saving history before `resetAt` is ignored without modifying stored reading state or bookmarks.
+    func briefingInterests(now: Date = Date(), resetAt: Date? = nil) throws -> [String: Int] {
+        let thirtyDaysAgo = now.addingTimeInterval(-30 * 86400)
+        let cutoff = max(thirtyDaysAgo, resetAt ?? .distantPast)
         let rows = try eventRows(
             """
             SELECT coalesce(ae.category, a.category), s.is_saved FROM article_state s JOIN articles a ON a.id = s.article_id
             LEFT JOIN article_enrichment ae ON ae.article_id = a.id
             WHERE (s.is_saved = 1 OR s.is_read = 1) AND max(coalesce(s.saved_at, 0), coalesce(s.read_at, 0)) >= ?
             ORDER BY max(coalesce(s.saved_at, 0), coalesce(s.read_at, 0)) DESC LIMIT 200;
-            """, [.real(now.addingTimeInterval(-30 * 86400).timeIntervalSince1970)])
+            """, [.real(cutoff.timeIntervalSince1970)])
         var interests: [String: Int] = [:]
         for row in rows {
             if let category = row[0].flatMap(NewsCategory.match(from:)) {

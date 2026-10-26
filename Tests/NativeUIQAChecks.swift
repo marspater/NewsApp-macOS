@@ -952,6 +952,7 @@ struct NativeUIQAChecks {
         assertEqual(SettingsPane.general.rawValue, "general", "General pane raw value")
         assertEqual(SettingsPane.subscriptions.rawValue, "subscriptions", "Subscriptions pane raw value")
         assertEqual(SettingsPane.muting.rawValue, "muting", "Muting pane raw value")
+        assertEqual(SettingsPane.reading.rawValue, "reading", "Reading pane raw value")
         assertEqual(SettingsPane.appearance.rawValue, "appearance", "Appearance pane raw value")
         assertEqual(SettingsPane.notifications.rawValue, "notifications", "Notifications pane raw value")
         assertEqual(SettingsPane.intelligence.rawValue, "intelligence", "Intelligence pane raw value")
@@ -959,7 +960,7 @@ struct NativeUIQAChecks {
         assertEqual(SettingsPane.storage.rawValue, "storage", "Storage pane raw value")
         assertEqual(SettingsPane.updates.rawValue, "updates", "Updates pane raw value")
         assertEqual(SettingsView.lastPaneStorageKey, "lastSettingsPane", "Last pane storage key matches standard")
-        assertEqual(SettingsView.paneWidth, 720, "Settings pane width fits all nine tabs")
+        assertEqual(SettingsView.paneWidth, 720, "Settings pane width fits all ten tabs")
         assertEqual(SettingsView.paneHeight, 560, "All settings tabs share stable content bounds")
         assertEqual(SettingsView.predefinedCategory(for: "Tech"), .technology, "Legacy predefined alias is recognized")
         assertEqual(
