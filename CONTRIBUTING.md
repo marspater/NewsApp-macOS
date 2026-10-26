@@ -14,6 +14,7 @@ The current release simplification uses existing #102 labeled tune/English holdo
 
 ```sh
 ./test.sh                         # Full regressions, including parser-to-embedding/clustering integration; also run by the commit hook
+NEWS_TEST_FORCE=1 ./test.sh       # A plain ./test.sh skips the Swift runner when the same inputs already passed on this machine; this reruns it
 ./test.sh --parsing-regressions   # Focused offline HTML/feed compatibility and safety checks
 script/format.sh                  # swift-format; automatically formats staged Swift files in pre-commit hook
 script/format.sh --check          # Strict repository-wide Swift formatting lint
@@ -92,7 +93,7 @@ The native performance script requires an active Mac desktop. It compiles the pr
 
 `script/launch_baseline.sh` also needs an active desktop. It builds the production bundle under the identifier `com.marspater.news.launchcheck`, so its sandbox container is separate from the installed app, seeds that container with 10,000 stories and opens the app several times. Its feed points at a reserved `.invalid` host. The first-card time comes from a one-time `FirstCard` signpost and log line in the app.
 
-Before publication, fetch `origin/main`, review the diff and run checks affected by the change. Never report a check as passing unless it completed successfully. Record noteworthy behavior changes in [CHANGELOG.md](CHANGELOG.md); dated evidence belongs in `docs/audits/`.
+Before publication, fetch `origin/main`, review the diff and run checks affected by the change. Never report a check as passing unless it completed successfully. Record noteworthy behavior changes as a changelog fragment, `CHANGELOG.d/<issue>.md` with `- ` bullet lines (see [CHANGELOG.d/README.md](CHANGELOG.d/README.md)); never edit `CHANGELOG.md` in a feature PR, so parallel and stacked PRs do not conflict there. `python3 script/changelog_fold.py` folds the fragments into [CHANGELOG.md](CHANGELOG.md) before a tag. Dated evidence belongs in `docs/audits/`.
 
 The VoiceOver harness is parked (#268) and is not part of release verification; the notes below apply when it is resumed. It builds a separate `com.marspater.news.voiceoverqa` bundle and uses temporary SQLite and preferences. Its view environment supplies an in-memory image; the installed app and its protected image loader remain unchanged. Output goes to the printed temporary directory or `NEWS_VOICEOVER_OUTPUT`. Compilation has a 300-second deadline and automated runs a 120-second process-group deadline; commands and AX inspection have shorter internal deadlines. Missing Accessibility access or unsupported announcement observation is a reported prerequisite failure, not a crash or passing check.
 
@@ -137,7 +138,7 @@ PY
 
 ## Story experience tracking
 
-Use the [News · Story experience project](https://github.com/users/marspater/projects/2) and [program issue #90](https://github.com/marspater/NewsApp-macOS/issues/90) for this work. Before starting a slice, read its task acceptance criteria and dependencies. Update the relevant issue checklists and log implementation scope, completed checks, remaining gaps, and commit/PR state after each coherent slice.
+Use the [News · Story experience project](https://github.com/users/marspater/projects/2) and epics #571–#577 (the [24 October 2026 plan](docs/plans/2026-10-24-future-development.md); program issue #90 is closed) for this work. Board status runs Backlog, Ready, In progress, In review, Done, with Priority P0–P2. Before starting a slice, read its task acceptance criteria and dependencies. Update the relevant issue checklists and log implementation scope, completed checks, remaining gaps, and commit/PR state after each coherent slice.
 
 Private fingerprint capture and review use `FeedCatalog.supportedLanguages`, including optional extra feed lists and historical captures. Keep existing capture files intact; parked-language observations do not enter the current release denominator. Tuning is the default; `--corpus-review --corpus-holdout` explicitly unseals the fingerprint acceptance split. Use `--corpus-readiness DIR --corpus-holdout` to count support while leaving outcomes sealed. Its zero-false-merge sufficiency flag is conditional, not observed acceptance.
 
@@ -145,14 +146,14 @@ Keep uncommitted implementation In progress, linked PR work In review, and reser
 
 ## Security checks
 
-[The Security workflow](.github/workflows/security.yml) is the canonical advanced CodeQL configuration for Swift and GitHub Actions. Default CodeQL setup must remain disabled because GitHub rejects advanced uploads while it is enabled. Swift analysis builds the complete SwiftPM app target without optimization on the macOS 26 Apple Silicon runner with Xcode 26.3. Compiler subprocess sandboxing is disabled only for extraction; app sandbox entitlements are unchanged. Normal CI tests and verifies arm64 bundles on Xcode 27. Secret scanning and deterministic security regressions remain separate jobs.
+[The Security workflow](.github/workflows/security.yml) is the canonical advanced CodeQL configuration for Swift and GitHub Actions. Default CodeQL setup must remain disabled because GitHub rejects advanced uploads while it is enabled. Swift analysis builds the complete SwiftPM app target without optimization on the macOS 26 Apple Silicon runner with Xcode 26.3. Compiler subprocess sandboxing is disabled only for extraction; app sandbox entitlements are unchanged. Normal CI verifies arm64 bundles and Swift formatting on Xcode 27, and runs the test suite on the macOS 26 runner with Xcode 26.6 (CircleCI and Codemagic test on macOS 27 with Xcode 27). Secret scanning and deterministic security regressions remain separate jobs.
 
 ## Codemagic macOS runner
 
 [`codemagic.yaml`](codemagic.yaml) defines `news-arm64-verification`: Apple Silicon M2, pinned Xcode 27.0 and macOS 15 deployment target. It runs the existing full offline regressions, verifies the SwiftPM `News` target, builds with `build_release.sh`, checks arm64, signature, Hardened Runtime and App Sandbox, then retains the app ZIP, SHA-256 checksum and diagnostic logs. No signing credentials are required for this ad-hoc verification artifact.
 
-Connect `marspater/NewsApp-macOS` using the Codemagic GitHub App, select YAML configuration and enable the repository webhook. Start `news-arm64-verification` manually on the configuration branch for the first run. Thereafter, pushes to `main` and pull requests targeting `main` trigger the workflow; superseded builds are cancelled. GitHub Checks reporting depends on the GitHub App integration. Enable a required Codemagic check only after its first successful hosted run.
+Connect `marspater/NewsApp-macOS` using the Codemagic GitHub App, select YAML configuration and enable the repository webhook. Start `news-arm64-verification` manually on the configuration branch for the first run. Thereafter, pushes to `main` and pull requests targeting `main` trigger the workflow (documentation-only changes are skipped); superseded builds are cancelled. GitHub Checks reporting depends on the GitHub App integration. Enable a required Codemagic check only after its first successful hosted run.
 
-Codemagic is an additional build runner; the existing GitHub Security workflow remains responsible for CodeQL, dependency review and secret scanning. The artifact is ad-hoc signed, not notarized or automatically published to testers or GitHub Releases. Live publisher/corpus collection and parked VoiceOver checks are not run. Configuration validation and local script execution do not establish a successful Codemagic-hosted run.
+All three providers stay (Mars, 26 Oct 2026): GitHub Actions is the pipeline of record, CircleCI adds test-impact analysis, and Codemagic runs the full suite, the format check and the release build. Codemagic is an additional build runner; the existing GitHub Security workflow remains responsible for CodeQL, dependency review and secret scanning. The artifact is ad-hoc signed, not notarized or automatically published to testers or GitHub Releases. Live publisher/corpus collection and parked VoiceOver checks are not run. Configuration validation and local script execution do not establish a successful Codemagic-hosted run.
 
 References: [Codemagic YAML](https://docs.codemagic.io/yaml-basic-configuration/yaml-getting-started/), [Xcode 27.0 runner](https://docs.codemagic.io/specs-macos/xcode-27-0/), [GitHub Checks integration](https://docs.codemagic.io/yaml-notification/github-checks/).
