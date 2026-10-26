@@ -10,7 +10,7 @@ NewsApp is engineered with a **local-first, zero-telemetry architecture**. Readi
   ```text
   ~/Library/Containers/com.marspater.news/Data/Library/Application Support/com.marspater.news/news.sqlite3
   ```
-* **World Tension**: Opt-in panel headlines and on-device v2 assessments stay local. Up to 30 daily assessments and their bounded headline evidence are stored in `news.sqlite3.world-tension-v2.json` beside the library; no cloud model receives them.
+* **World Tension**: Opt-in panel headlines and on-device v2 assessments stay local. Up to 90 daily assessments and their bounded headline evidence are stored in `news.sqlite3.world-tension-v2.json` beside the library; the reading shown blends a day with its week on device (methodology v3), and no cloud model receives them.
 * **Separation of Concerns**: Ephemeral HTTP response caches (`URLCache`) are strictly segregated from durable user data. Clearing the HTTP cache does not alter bookmarks, read markers, or custom feed hierarchies.
 * **Spotlight Indexing**: Only stories you explicitly save are indexed in macOS Spotlight (`CoreSpotlight`) on your Mac, with their title, publisher, summary, and publication date (`com.marspater.news.saved-stories`). Unread and read feed items are never indexed. Removing a story from Saved Stories removes its Spotlight entry immediately, clearing caches leaves saved-story entries intact, and resetting or deleting the library removes all Spotlight entries.
 * **Muting**: Muted publisher hosts and topic words are stored in the app's local preferences and applied on your Mac; they are never sent anywhere.

@@ -659,6 +659,7 @@ struct NewsTests {
         try await testUserMuting()
         try await testTensionMethodology()
         try await testWorldTension()
+        testWorldTensionSmoothing()
         try await testUndatedArticleOrdering()
         try await testReaderFigures(fixtureRoot: fixtureRoot)
         testReaderExtractionFidelity(fixtureRoot: fixtureRoot)
@@ -3964,6 +3965,62 @@ struct NewsTests {
         assertEqual(notified, [stories[3].title], "Only unmuted new stories notify")
         assertEqual(manager.articles.count, 2, "Muted stories are still stored")
         manager.stopBackgroundWork()
+    }
+
+    /// Methodology v3 (#585): the shown reading is the 7-day weighted average of accepted assessments plus momentum;
+    /// estimates are shown as they are and never enter the average.
+    static func testWorldTensionSmoothing() {
+        print("  - Testing World Tension methodology v3: 7-day average, momentum and estimate exclusion (#585)...")
+        let day0 = TensionMethodology.day(containing: Date(timeIntervalSince1970: 1_780_000_000)).start
+        func reading(_ offset: Int, _ score: Int, estimate: Bool = false) -> WorldTensionReading {
+            WorldTensionReading(
+                evaluatedAt: day0.addingTimeInterval(Double(offset) * 86400 + 3600), inputHash: "hash-\(offset)",
+                modelGeneration: "generation",
+                headlines: [WorldTensionHeadline(id: "C1", title: "Airstrikes hit the port", publisher: "Panel")],
+                assessment: WorldTensionAssessment(
+                    score: score, summary: String(repeating: "s", count: 30), reasons: [],
+                    isEstimate: estimate ? true : nil))
+        }
+        func shown(_ history: [WorldTensionReading], day offset: Int) -> Int? {
+            WorldTensionSmoothing.displayed(history).first { $0.id == day0.addingTimeInterval(Double(offset) * 86400) }?
+                .assessment.score
+        }
+        let single = [reading(0, 40)]
+        assertEqual(shown(single, day: 0), 40, "One assessment is its own reading")
+        assertEqual(
+            WorldTensionSmoothing.displayed(single)[0].assessment.assessedScore, nil,
+            "The assessed score is noted only when the reading differs")
+        // 10, 20, 30 on consecutive days: 0.25 × 30 + 0.75 × (0.25 × 20 + 0.75 × 10) = 16.875 → 17, two rises +6.
+        let rising = [reading(0, 10), reading(1, 20), reading(2, 30)]
+        assertEqual(shown(rising, day: 2), 23, "The weighted average plus 3 per consecutive rise")
+        assertEqual(shown(rising, day: 1), 16, "12.5 rounds away from zero to 13, plus one rise")
+        assertEqual(
+            WorldTensionSmoothing.displayed(rising)[2].assessment.assessedScore, 30,
+            "Today's own assessment travels with the blended reading")
+        let surge = (0...5).map { reading($0, 10 + $0 * 15) }
+        assertEqual(
+            shown(surge, day: 5) ?? 0, Int((WorldTensionSmoothing.displayedScore(for: surge[5], in: surge))),
+            "displayedScore and displayed agree")
+        var average = 10.0
+        for score in [25.0, 40.0, 55.0, 70.0, 85.0] { average = 0.25 * score + 0.75 * average }
+        assertEqual(shown(surge, day: 5), Int(average.rounded()) + 9, "Momentum is capped at 9")
+        let gapped = [reading(0, 90), reading(8, 20)]
+        assertEqual(shown(gapped, day: 8), 20, "A reading older than the window does not carry over")
+        let broken = [reading(0, 10), reading(1, 20), reading(3, 30)]
+        let brokenAverage: Double = 0.25 * 30 + 0.75 * (0.25 * 20 + 0.75 * 10)
+        assertEqual(
+            shown(broken, day: 3), Int(brokenAverage.rounded()),
+            "A missing day breaks the rise streak but not the average"
+        )
+        let withEstimate = [reading(0, 10), reading(1, 90, estimate: true), reading(2, 30)]
+        assertEqual(shown(withEstimate, day: 1), 90, "An estimate is shown as it is")
+        let estimateAverage: Double = 0.25 * 30 + 0.75 * 10
+        assertEqual(
+            shown(withEstimate, day: 2), Int(estimateAverage.rounded()),
+            "An estimate never enters the average and is not a rise")
+        assertEqual(
+            WorldTensionSmoothing.displayed(withEstimate)[1].assessment.assessedScore, nil,
+            "An estimate keeps no assessed score")
     }
 
     static func testWorldTension() async throws {

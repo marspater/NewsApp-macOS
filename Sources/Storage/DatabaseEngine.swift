@@ -3669,6 +3669,9 @@ actor DatabaseEngine {
     /// AI methodology v2 has its own atomic history; v1 formula scores are never relabelled as AI assessments.
     func worldTensionStorageKey() -> String { dbPath + ":world-tension-v2" }
 
+    /// Days of World Tension readings kept on device: 90 since methodology v3 (#585), 30 before.
+    static let worldTensionHistoryDays = 90
+
     private var worldTensionURL: URL {
         URL(fileURLWithPath: dbPath + ".world-tension-v2.json")
     }
@@ -3692,7 +3695,7 @@ actor DatabaseEngine {
         let data = try file.read(upToCount: 4 * 1024 * 1024 + 1) ?? Data()
         guard data.count <= 4 * 1024 * 1024 else { throw CocoaError(.fileReadCorruptFile) }
         let history = try JSONDecoder().decode([WorldTensionReading].self, from: data)
-        guard history.count <= 30, Set(history.map(\.id)).count == history.count,
+        guard history.count <= Self.worldTensionHistoryDays, Set(history.map(\.id)).count == history.count,
             history.allSatisfy({
                 $0.assessment.isValid(headlines: $0.headlines) && $0.evaluatedAt.timeIntervalSince1970.isFinite
             })
@@ -3715,7 +3718,7 @@ actor DatabaseEngine {
         history.removeAll { $0.id == reading.id }
         history.append(reading)
         history.sort { $0.evaluatedAt < $1.evaluatedAt }
-        history = Array(history.suffix(30))
+        history = Array(history.suffix(Self.worldTensionHistoryDays))
         if dbPath == ":memory:" {
             inMemoryWorldTension = history
             return true

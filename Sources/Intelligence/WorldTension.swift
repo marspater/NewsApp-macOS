@@ -20,7 +20,7 @@ struct WorldTensionAssessment: Codable, Equatable, Sendable {
         let factor: WorldTensionFactor
         let explanation: String
     }
-    let score: Int
+    var score: Int
     let summary: String
     let reasons: [Reason]
     /// One sentence naming the main development behind the score. Nil in readings saved before it existed.
@@ -29,6 +29,9 @@ struct WorldTensionAssessment: Codable, Equatable, Sendable {
     var drivers: [String]? = nil
     /// True for the keyword estimate shown when the on-device model cannot produce a grounded assessment.
     var isEstimate: Bool? = nil
+    /// Today's own assessed score when `score` is the history-aware reading of methodology v3 (#585); nil in stored
+    /// readings and whenever the two agree. Never saved: the history keeps the assessed scores.
+    var assessedScore: Int? = nil
 
     private static let labels = WorldTensionFactor.allCases.map(\.rawValue) + ["Lead", "Summary", "Drivers", "Score"]
 
@@ -230,12 +233,60 @@ struct WorldTensionAssessment: Codable, Equatable, Sendable {
     }
 }
 
+/// Methodology v3 (#585): the reading shown for a day blends that day's accepted assessment with the stored history.
+/// The displayed score is the 7-day exponentially weighted average of the accepted assessments up to that day (the
+/// v1 smoothing constant, α = 0.25), plus a momentum term of 3 points per consecutive daily rise of the assessed
+/// score, capped at 9. Keyword estimates never enter the average and are shown as they are. The history keeps the
+/// assessed scores; blending happens when a history is handed to the sheet.
+enum WorldTensionSmoothing {
+    static let alpha = TensionWeights.calibratedV1.smoothingAlpha
+    static let window: TimeInterval = 7 * 86400
+    static let momentumStep = 3
+    static let momentumCap = 9
+
+    /// The accepted readings of `history` in day order, estimates left out.
+    private static func accepted(_ history: [WorldTensionReading]) -> [WorldTensionReading] {
+        history.filter { $0.assessment.isEstimate != true }.sorted { $0.id < $1.id }
+    }
+
+    /// The v3 reading for `reading` given the whole history it belongs to.
+    static func displayedScore(for reading: WorldTensionReading, in history: [WorldTensionReading]) -> Int {
+        guard reading.assessment.isEstimate != true else { return reading.assessment.score }
+        let days = accepted(history).filter { $0.id <= reading.id && $0.id > reading.id.addingTimeInterval(-window) }
+        guard let first = days.first else { return reading.assessment.score }
+        var average = Double(first.assessment.score)
+        for day in days.dropFirst() { average = alpha * Double(day.assessment.score) + (1 - alpha) * average }
+        var rises = 0
+        for (earlier, later) in zip(days.dropLast(), days.dropFirst()).reversed() {
+            guard later.id.timeIntervalSince(earlier.id) <= 86400, later.assessment.score > earlier.assessment.score
+            else { break }
+            rises += 1
+        }
+        let momentum = min(momentumCap, rises * momentumStep)
+        return min(100, max(0, Int(average.rounded()) + momentum))
+    }
+
+    /// `history` with every reading's score replaced by its v3 reading; the assessed score is kept beside it when the
+    /// two differ. Stored history is never written in this form.
+    static func displayed(_ history: [WorldTensionReading]) -> [WorldTensionReading] {
+        history.map { reading in
+            var shown = reading
+            let score = displayedScore(for: reading, in: history)
+            if score != reading.assessment.score {
+                shown.assessment.assessedScore = reading.assessment.score
+                shown.assessment.score = score
+            }
+            return shown
+        }
+    }
+}
+
 struct WorldTensionReading: Codable, Equatable, Sendable, Identifiable {
     let evaluatedAt: Date
     let inputHash: String
     let modelGeneration: String
     let headlines: [WorldTensionHeadline]
-    let assessment: WorldTensionAssessment
+    var assessment: WorldTensionAssessment
     var id: Date { TensionMethodology.day(containing: evaluatedAt).start }
     var level: TensionLevel { TensionLevel(index: Double(assessment.score)) }
 
@@ -432,7 +483,7 @@ actor WorldTensionService {
             title: "world-tension-v2:\(TensionMethodology.day(containing: now).start.timeIntervalSince1970)",
             description: NewsTextModel.generation, content: prompt)
         let history = try await database.worldTensionHistory()
-        if !force, history.last?.inputHash == hash { return history }
+        if !force, history.last?.inputHash == hash { return WorldTensionSmoothing.displayed(history) }
         let today = TensionMethodology.day(containing: now).start
         /// A saved estimate is the day's stand-in, not an assessment: only a model reading blocks the fallback.
         func hasAssessment(_ readings: [WorldTensionReading]) -> Bool {
@@ -474,19 +525,21 @@ actor WorldTensionService {
             let reading = WorldTensionReading(
                 evaluatedAt: now, inputHash: error == .rejected ? hash : hash + ":estimate",
                 modelGeneration: NewsTextModel.generation, headlines: current + previous, assessment: estimate)
-            guard error == .rejected else { return latest.filter { $0.id != today } + [reading] }
+            guard error == .rejected else {
+                return WorldTensionSmoothing.displayed(latest.filter { $0.id != today } + [reading])
+            }
             if try await !database.saveWorldTensionReading(reading, keepingAssessment: true) {
                 rejectedHashes.insert(hash)
                 throw error
             }
-            return try await database.worldTensionHistory()
+            return WorldTensionSmoothing.displayed(try await database.worldTensionHistory())
         }
         try Task.checkCancellation()
         let reading = WorldTensionReading(
             evaluatedAt: now, inputHash: hash, modelGeneration: NewsTextModel.generation,
             headlines: current + previous, assessment: assessment)
         try await database.saveWorldTensionReading(reading)
-        return try await database.worldTensionHistory()
+        return WorldTensionSmoothing.displayed(try await database.worldTensionHistory())
     }
     private nonisolated static func generate(prompt: String, headlines: [WorldTensionHeadline], model: NewsTextModel)
         async throws -> WorldTensionAssessment
