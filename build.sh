@@ -2,6 +2,7 @@
 set -e
 
 APP_NAME="News"
+source script/version.sh
 APP_DIR="${APP_NAME}.app"
 CONTENTS_DIR="${APP_DIR}/Contents"
 MACOS_DIR="${CONTENTS_DIR}/MacOS"
@@ -13,7 +14,7 @@ export CLANG_MODULE_CACHE_PATH="${CLANG_MODULE_CACHE_PATH:-${TMPDIR:-/tmp}/news-
 export SWIFT_MODULECACHE_PATH="$CLANG_MODULE_CACHE_PATH"
 
 
-echo "Building ${APP_NAME} v2.0 for macOS ${TARGET_MACOS} (arm64)..."
+echo "Building ${APP_NAME} ${NEWS_VERSION} (${NEWS_BUILD}) for macOS ${TARGET_MACOS} (arm64)..."
 
 # Clean old build
 rm -rf "${APP_DIR}"
@@ -51,6 +52,7 @@ swiftc "${NEWS_DEPENDENCY_FLAGS[@]}" -swift-version 6 -O -parse-as-library -targ
     Sources/Storage/DatabaseEngine.swift \
     Sources/Storage/DatabaseEngine+Events.swift \
     Sources/Storage/MigrationCoordinator.swift \
+    Sources/Storage/SpotlightIndexer.swift \
     Sources/Storage/ArticleStore.swift \
     Sources/Intelligence/ArticleIntelligence.swift \
     Sources/Intelligence/OverviewPassageSelector.swift \
@@ -97,6 +99,8 @@ swiftc "${NEWS_DEPENDENCY_FLAGS[@]}" -swift-version 6 -O -parse-as-library -targ
     Sources/Views/ArticleCardView.swift \
     Sources/Views/EventCardView.swift \
     Sources/Views/ArticleListView.swift \
+    Sources/Views/BriefingComponents.swift \
+    Sources/Views/BriefingView.swift \
     Sources/Views/ArticleDetailView.swift \
     Sources/Views/ReaderSupportViews.swift \
     Sources/Views/ArticleRemoteImage.swift \
@@ -111,6 +115,9 @@ swiftc "${NEWS_DEPENDENCY_FLAGS[@]}" -swift-version 6 -O -parse-as-library -targ
     Sources/Views/ArticleWebView.swift \
     Sources/App/NewsSignposts.swift \
     Sources/App/UpdateChecker.swift \
+    Sources/App/NewsURLParser.swift \
+    Sources/App/Intents.swift \
+    Sources/App/NotificationActionRouter.swift \
     Sources/App/NewsApp.swift \
     -o "${MACOS_DIR}/${APP_NAME}"
 
@@ -135,16 +142,40 @@ cat > "${CONTENTS_DIR}/Info.plist" <<EOF
     <key>CFBundleIconName</key>
     <string>AppIcon</string>
     <key>CFBundleShortVersionString</key>
-    <string>2.0.0</string>
+    <string>${NEWS_VERSION}</string>
     <key>CFBundleVersion</key>
-    <string>3</string>
+    <string>${NEWS_BUILD}</string>
     <key>LSMinimumSystemVersion</key>
     <string>${TARGET_MACOS}</string>
     <key>NSSupportsAutomaticGraphicsSwitching</key>
     <true/>
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleTypeRole</key>
+            <string>Viewer</string>
+            <key>CFBundleURLName</key>
+            <string>com.marspater.news.feed</string>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>feed</string>
+            </array>
+        </dict>
+        <dict>
+            <key>CFBundleTypeRole</key>
+            <string>Viewer</string>
+            <key>CFBundleURLName</key>
+            <string>com.marspater.news.story</string>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>news</string>
+            </array>
+        </dict>
+    </array>
 </dict>
 </plist>
 EOF
+plutil -lint "${CONTENTS_DIR}/Info.plist" >/dev/null
 
 echo "Signing binary..."
 find "${APP_DIR}" -name ".DS_Store" -delete

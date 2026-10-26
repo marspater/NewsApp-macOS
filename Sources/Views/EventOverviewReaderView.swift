@@ -55,8 +55,9 @@ struct EventOverviewReaderView: View {
     @Environment(\.effectiveContrast) private var contrast
     @Environment(\.effectiveReduceMotion) private var reduceMotion
 
-    /// Open by default: the list is the overview's only route to the original publications.
-    @State private var isSourcesExpanded: Bool = true
+    /// Collapsed until the person opens it; their choice holds for the rest of the session (DESIGN.md 9, #596).
+    @MainActor static var sourcesExpandedThisSession = false
+    @State private var isSourcesExpanded = Self.sourcesExpandedThisSession
 
     // MARK: - Layout Metrics & Bounds
     static let horizontalPageInset = AppLayout.pageInset
@@ -175,19 +176,14 @@ struct EventOverviewReaderView: View {
         !angle.summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && filterValidFacts(angle.facts).isEmpty
     }
 
-    static func hasCoverageSentimentContent(_ sentiment: OverviewCoverageSentiment?) -> Bool {
-        guard let sentiment = sentiment else { return false }
-        return !sentiment.label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    }
-
+    /// Coverage sentiment stays in the data for Briefing interests and is never shown (DESIGN.md 9, #597).
     static func hasEvidenceContent(
         timeline: [OverviewTimelineItem],
         perspectives: [OverviewPerspective],
-        thematicAngle: OverviewThematicAngle?,
-        coverageSentiment: OverviewCoverageSentiment?
+        thematicAngle: OverviewThematicAngle?
     ) -> Bool {
         !filterValidTimeline(timeline).isEmpty || !filterValidPerspectives(perspectives).isEmpty
-            || hasThematicAngleContent(thematicAngle) || hasCoverageSentimentContent(coverageSentiment)
+            || hasThematicAngleContent(thematicAngle)
     }
 
     private var validFacts: [OverviewFact] {
@@ -341,6 +337,7 @@ struct EventOverviewReaderView: View {
         VStack(alignment: .leading, spacing: AppSpacing.sm) {
             IntelligenceLabel("Event overview")
                 .font(AppTypography.overviewFont(.eyebrow, scale: textScale))
+                .help("Assembled on this Mac from the cited passages")
                 .accessibilityElement(children: .combine)
 
             Text(overview.title)
@@ -358,7 +355,7 @@ struct EventOverviewReaderView: View {
                     .monospacedDigit()
 
                 Text("·")
-                    .foregroundStyle(currentTertiaryTextColor)
+                    .foregroundStyle(currentSecondaryTextColor)
                     .accessibilityHidden(true)
 
                 Text(articleCountText)
@@ -367,7 +364,7 @@ struct EventOverviewReaderView: View {
                     .monospacedDigit()
 
                 Text("·")
-                    .foregroundStyle(currentTertiaryTextColor)
+                    .foregroundStyle(currentSecondaryTextColor)
                     .accessibilityHidden(true)
 
                 Text(publisherCountText)
@@ -448,8 +445,8 @@ struct EventOverviewReaderView: View {
                 !credit.isEmpty
             {
                 Text(credit)
-                    .font(AppTypography.overviewFont(.caption, scale: textScale))
-                    .foregroundStyle(currentTertiaryTextColor)
+                    .font(AppTypography.overviewFont(.annotation, scale: textScale))
+                    .foregroundStyle(currentSecondaryTextColor)
                     .textSelection(.enabled)
             }
         }
@@ -538,8 +535,6 @@ struct EventOverviewReaderView: View {
                 .foregroundStyle(AppColor.primaryText)
                 .accessibilityAddTraits(.isHeader)
                 .accessibilityHeading(.h2)
-            IntelligenceLabel("Assembled on this Mac from the cited passages")
-                .font(AppTypography.overviewFont(.caption, scale: textScale))
 
             VStack(alignment: .leading, spacing: AppSpacing.md) {
                 ForEach(clusteredHighlights) { group in
@@ -648,6 +643,7 @@ struct EventOverviewReaderView: View {
             isExpanded: Binding(
                 get: { isSourcesExpanded },
                 set: { val in
+                    Self.sourcesExpandedThisSession = val
                     if reduceMotion {
                         isSourcesExpanded = val
                     } else {
@@ -685,8 +681,8 @@ struct EventOverviewReaderView: View {
                                 .textSelection(.enabled)
 
                             Text(article.publicationDateText)
-                                .font(AppTypography.overviewFont(.caption, scale: textScale))
-                                .foregroundStyle(currentTertiaryTextColor)
+                                .font(AppTypography.overviewFont(.annotation, scale: textScale))
+                                .foregroundStyle(currentSecondaryTextColor)
                                 .monospacedDigit()
                         }
 
@@ -762,8 +758,8 @@ struct EventOverviewReaderView: View {
                     } label: {
                         HStack(alignment: .firstTextBaseline, spacing: AppSpacing.sm) {
                             Text(event.firstPublishedAt.formatted(.dateTime.month(.abbreviated).day()))
-                                .font(AppTypography.overviewFont(.captionMedium, scale: textScale))
-                                .foregroundStyle(currentTertiaryTextColor)
+                                .font(AppTypography.overviewFont(.annotation, scale: textScale))
+                                .foregroundStyle(currentSecondaryTextColor)
                                 .monospacedDigit()
                             Text(event.title)
                                 .font(AppTypography.overviewFont(.body, scale: textScale))
@@ -816,8 +812,7 @@ struct EventOverviewReaderView: View {
         if Self.hasEvidenceContent(
             timeline: overview.timeline,
             perspectives: overview.perspectives,
-            thematicAngle: overview.thematicAngle,
-            coverageSentiment: overview.coverageSentiment
+            thematicAngle: overview.thematicAngle
         ) {
             VStack(alignment: .leading, spacing: AppSpacing.lg) {
                 if !validTimeline.isEmpty {
@@ -831,13 +826,6 @@ struct EventOverviewReaderView: View {
                 // Thematic angle
                 if Self.hasThematicAngleContent(overview.thematicAngle), let angle = overview.thematicAngle {
                     thematicAngleSection(angle)
-                }
-
-                // Coverage tone / sentiment (only when evaluation justifies it)
-                if Self.hasCoverageSentimentContent(overview.coverageSentiment),
-                    let sentiment = overview.coverageSentiment
-                {
-                    sentimentSection(sentiment)
                 }
             }
         }
@@ -911,8 +899,8 @@ struct EventOverviewReaderView: View {
 
             if let pubDate = item.publicationDate, item.eventDate != nil {
                 Text("Reported \(formatTimelineDate(pubDate))")
-                    .font(AppTypography.overviewFont(.micro, scale: textScale))
-                    .foregroundStyle(currentTertiaryTextColor)
+                    .font(AppTypography.overviewFont(.annotation, scale: textScale))
+                    .foregroundStyle(currentSecondaryTextColor)
             }
         }
     }
@@ -947,18 +935,18 @@ struct EventOverviewReaderView: View {
 
                             if let wire = perspective.originalWireSource, !wire.isEmpty {
                                 Text("via \(wire) syndicate")
-                                    .font(AppTypography.overviewFont(.captionMedium, scale: textScale))
-                                    .foregroundStyle(currentTertiaryTextColor)
+                                    .font(AppTypography.overviewFont(.annotation, scale: textScale))
+                                    .foregroundStyle(currentSecondaryTextColor)
                             } else if let publisher = perspective.sourcePublisher, !publisher.isEmpty {
                                 Text("via \(publisher)")
-                                    .font(AppTypography.overviewFont(.captionMedium, scale: textScale))
-                                    .foregroundStyle(currentTertiaryTextColor)
+                                    .font(AppTypography.overviewFont(.annotation, scale: textScale))
+                                    .foregroundStyle(currentSecondaryTextColor)
                             }
                         }
 
                         Text(perspective.position)
                             .font(bodyFont)
-                            .foregroundStyle(currentSecondaryTextColor)
+                            .foregroundStyle(AppColor.primaryText)
                             .lineSpacing(bodyLineSpacing)
                             .fixedSize(horizontal: false, vertical: true)
                             .textSelection(.enabled)
@@ -1015,40 +1003,6 @@ struct EventOverviewReaderView: View {
                     factWithSuperscript(fact)
                 }
             }
-        }
-    }
-
-    private func sentimentSection(_ sentiment: OverviewCoverageSentiment) -> some View {
-        VStack(alignment: .leading, spacing: AppSpacing.xs) {
-            Text("Coverage tone")
-                .font(AppTypography.overviewFont(.section, scale: textScale))
-                .foregroundStyle(AppColor.primaryText)
-                .accessibilityAddTraits(.isHeader)
-                .accessibilityHeading(.h2)
-
-            VStack(alignment: .leading, spacing: AppSpacing.xs) {
-                HStack(spacing: AppSpacing.xs) {
-                    Image(systemName: "text.magnifyingglass")
-                        .foregroundStyle(currentSecondaryTextColor)
-                        .accessibilityHidden(true)
-                    Text("\(sentiment.label) tone · automated estimate")
-                        .font(AppTypography.overviewFont(.bodyMedium, scale: textScale))
-                        .foregroundStyle(AppColor.primaryText)
-                }
-
-                if let rationale = sentiment.rationale?.trimmingCharacters(in: .whitespacesAndNewlines),
-                    !rationale.isEmpty
-                {
-                    Text(rationale)
-                        .font(AppTypography.overviewFont(.annotation, scale: textScale))
-                        .foregroundStyle(currentSecondaryTextColor)
-                        .lineSpacing(AppSpacing.textStack * textScale)
-                        .textSelection(.enabled)
-                }
-            }
-            .padding(AppSpacing.sm)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .overviewCardSurface(borderColor: currentBorderStrokeColor, contrast: contrast)
         }
     }
 }

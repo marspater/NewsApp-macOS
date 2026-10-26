@@ -12,6 +12,7 @@ NewsApp is engineered with a **local-first, zero-telemetry architecture**. Readi
   ```
 * **World Tension**: Opt-in panel headlines and on-device v2 assessments stay local. Up to 30 daily assessments and their bounded headline evidence are stored in `news.sqlite3.world-tension-v2.json` beside the library; no cloud model receives them.
 * **Separation of Concerns**: Ephemeral HTTP response caches (`URLCache`) are strictly segregated from durable user data. Clearing the HTTP cache does not alter bookmarks, read markers, or custom feed hierarchies.
+* **Spotlight Indexing**: Only stories you explicitly save are indexed in macOS Spotlight (`CoreSpotlight`) on your Mac, with their title, publisher, summary, and publication date (`com.marspater.news.saved-stories`). Unread and read feed items are never indexed. Removing a story from Saved Stories removes its Spotlight entry immediately, clearing caches leaves saved-story entries intact, and resetting or deleting the library removes all Spotlight entries.
 * **Muting**: Muted publisher hosts and topic words are stored in the app's local preferences and applied on your Mac; they are never sent anywhere.
 * **No Account Required**: The application does not require user registration, account creation, or cloud authentication.
 
@@ -47,7 +48,7 @@ NewsApp provides three distinct notification privacy modes with clear network an
 * **Lead Images**: When a shown, unmuted story's group has no usable image, the app reads up to 256 KiB from the start of one report's article page (through the same protected client as the reader) to find its Open Graph, Twitter or schema.org article image. Publishers therefore receive requests for some stories you have not opened, at most 30 per refresh, outside Low Power Mode. Completed lookups are remembered; unreachable pages may retry. Article text from these lookups is not kept.
 * **Briefing**: Recent read and saved-story categories influence the finite Briefing on device. The app reads at most 200 existing local history records from the last 30 days; it creates no remote profile. Panel feeds fetched only for World Tension stay outside the ordinary feed unless subscribed; read/saved stories remain accessible.
 * **Story Importance**: Existing local importance ratings can break Briefing ties after publisher coverage. Refresh and Briefing selection do not request new ratings. Importance never hides stories, deletes them or suppresses feed ingestion; ordinary user-configured retention still applies.
-* **Event Grouping**: Headlines and feed summaries are compared locally using deterministic NaturalLanguage signals. Event decisions do not invoke an LLM or sentence-embedding promotion, and grouping works independently of the on-device AI setting.
+* **Event Grouping**: Headlines and feed summaries are compared locally using deterministic NaturalLanguage signals. Borderline pairs may be scored by the app's own on-device pair model (a fine-tuned MiniLM CoreML model); decisions never invoke an LLM, and grouping works independently of the on-device AI setting.
 * **Zero Cloud AI Egress**: Article content, summaries, and extracted metadata are never transmitted to third-party AI or cloud LLM APIs.
 
 ---
