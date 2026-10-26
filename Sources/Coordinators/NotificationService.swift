@@ -220,129 +220,12 @@ final class NotificationService: Sendable {
         new: [(article: FeedArticle, score: Double)], pending: [String: [(article: FeedArticle, score: Double)]],
         delivery: NotificationDelivery
     ) -> (banners: [PlannedBanner], queued: [QueuedPriority]) {
-        let ledger = delivery.ledger
-        func key(_ article: FeedArticle) -> String { delivery.events[article.id] ?? article.id }
-        func lead(_ article: FeedArticle) -> String { leadKey(of: article, event: key(article), delivery: delivery) }
-        func announces(_ article: FeedArticle) -> [String: String] {
-            delivery.events[article.id].map { [$0: lead(article)] } ?? [:]
-        }
-        func publishers(_ article: FeedArticle) -> Int {
-            delivery.events[article.id].flatMap { delivery.publishers[$0] } ?? 1
-        }
-        /// Whether the story's key may post in `lane`: not announced, a new lead headline, or a higher lane.
-        func fresh(_ article: FeedArticle, in lane: NotificationLane) -> Bool {
-            guard let event = delivery.events[article.id], let seen = ledger.announced[event] else { return true }
-            return seen.leadKey != lead(article) || lane > seen.lane
-        }
-        func priority(_ item: (article: FeedArticle, score: Double)) -> Bool {
-            delivery.events[item.article.id] != nil
-                && isPriority(title: item.article.title, score: item.score, publishers: publishers(item.article))
-        }
-        func normal(_ item: (article: FeedArticle, score: Double)) -> Bool {
-            let category = item.article.category.flatMap(NewsCategory.match(from:))?.rawValue.lowercased()
-            let interest =
-                category.map(delivery.interests.contains) == true && publishers(item.article) >= interestPublishers
-            return item.score >= breakingScore || interest
-        }
-        func starred(_ article: FeedArticle) -> Bool {
-            article.identityFeedURL.map(delivery.starredFeedURLs.contains) == true
-        }
-        let byScore = { (a: (article: FeedArticle, score: Double), b: (article: FeedArticle, score: Double)) in
-            a.score > b.score
-        }
-
-        // Each key takes its highest lane; its representative is the strongest story that qualifies for that lane.
-        var order: [String] = []
-        var members: [String: [(article: FeedArticle, score: Double)]] = [:]
-        for item in new {
-            if members[key(item.article)] == nil { order.append(key(item.article)) }
-            members[key(item.article), default: []].append(item)
-        }
-        var priorityKeys: [(article: FeedArticle, score: Double)] = []
-        var normalKeys: [(article: FeedArticle, score: Double)] = []
-        for id in order {
-            let items = members[id, default: []].sorted(by: byScore)
-            if let best = items.first(where: priority) {
-                if fresh(best.article, in: .priority) { priorityKeys.append(best) }
-            } else if !items.contains(where: { starred($0.article) }), let best = items.first(where: normal),
-                fresh(best.article, in: .normal)
-            {
-                normalKeys.append(best)
-            }
-        }
-
-        var banners: [PlannedBanner] = []
-        var taken = Set<String>()
-        // Priority: individual banners up to the limit, then one grouped banner for the rest and any waiting keys.
-        priorityKeys.sort(by: byScore)
-        let individual = priorityKeys.prefix(max(0, priorityLimit - ledger.priorityLastHalfHour))
-        for item in individual {
-            banners.append(
-                PlannedBanner(
-                    lane: .priority, grouped: false, article: item.article, thread: key(item.article), sound: true,
-                    announces: announces(item.article)))
-            taken.insert(key(item.article))
-        }
-        var overflow = priorityKeys.dropFirst(individual.count).map {
-            QueuedPriority(event: key($0.article), title: $0.article.title, score: $0.score, leadKey: lead($0.article))
-        }
-        let newOverflow = overflow
-        for waiting in ledger.priorityQueue where !overflow.contains(where: { $0.event == waiting.event }) {
-            if let seen = ledger.announced[waiting.event], seen.lane == .priority { continue }
-            overflow.append(waiting)
-        }
-        overflow.sort { $0.score > $1.score }
-        var queued: [QueuedPriority] = []
-        if !overflow.isEmpty {
-            if ledger.priorityGroupLastHalfHour {
-                queued = newOverflow
-            } else {
-                banners.append(
-                    PlannedBanner(
-                        lane: .priority, grouped: true, title: "Major news", headlines: overflow.prefix(2).map(\.title),
-                        count: overflow.count, thread: "priority", sound: true,
-                        announces: Dictionary(overflow.map { ($0.event, $0.leadKey) }) { first, _ in first }))
-                taken.formUnion(overflow.map(\.event))
-            }
-        }
-
-        // Starred: one banner per feed and window, standing for every pending story, once one of them is fresh.
-        for feed in delivery.starredFeedURLs.sorted() {
-            let items = (pending[feed] ?? []).sorted(by: byScore)
-            if let last = ledger.lastStarred[feed], delivery.now.timeIntervalSince(last) < starredWindow { continue }
-            var seen = Set<String>()
-            let freshItems = items.filter {
-                !taken.contains(key($0.article)) && fresh($0.article, in: .starred)
-                    && seen.insert(key($0.article)).inserted
-            }
-            guard let top = freshItems.first else { continue }
-            let covered = freshItems.reduce(into: [String: String]()) { $0.merge(announces($1.article)) { a, _ in a } }
-            if items.count == 1 {
-                banners.append(
-                    PlannedBanner(
-                        lane: .starred, grouped: false, article: top.article, feedURL: feed, thread: key(top.article),
-                        sound: top.score >= breakingScore, announces: covered))
-            } else {
-                let rest = items.filter { item in !freshItems.contains { $0.article.id == item.article.id } }
-                banners.append(
-                    PlannedBanner(
-                        lane: .starred, grouped: true, title: sourceName(top.article),
-                        headlines: (freshItems + rest).prefix(2).map(\.article.title), count: items.count,
-                        feedURL: feed, thread: "starred-\(feed)", sound: false, announces: covered))
-            }
-            taken.formUnion(freshItems.map { key($0.article) })
-        }
-
-        // Normal: today's qualification, up to the rolling hour's remaining allowance.
-        for item in normalKeys.filter({ !taken.contains(key($0.article)) }).sorted(by: byScore)
-            .prefix(max(0, normalLimit - ledger.normalLastHour))
-        {
-            banners.append(
-                PlannedBanner(
-                    lane: .normal, grouped: false, article: item.article, thread: key(item.article),
-                    sound: item.score >= breakingScore, announces: announces(item.article)))
-        }
-        return (banners, queued)
+        var planner = LanePlanner(delivery: delivery)
+        let (priorityKeys, normalKeys) = planner.classify(new)
+        let queued = planner.planPriority(priorityKeys)
+        planner.planStarred(pending)
+        planner.planNormal(normalKeys)
+        return (planner.banners, queued)
     }
 
     static func sourceName(_ article: FeedArticle) -> String {
@@ -577,5 +460,157 @@ final class NotificationService: Sendable {
         let context = CIContext(options: [.useSoftwareRenderer: true, .cacheIntermediates: false])
         return context.createCGImage(
             output, from: extent, format: .RGBA8, colorSpace: CGColorSpace(name: CGColorSpace.sRGB))
+    }
+}
+
+typealias ScoredStory = (article: FeedArticle, score: Double)
+
+/// One full-mode pass's lane decisions (#665, docs/notifications.md), filled lane by lane in posting order.
+private struct LanePlanner {
+    let delivery: NotificationDelivery
+    var banners: [PlannedBanner] = []
+    /// Keys a banner of this pass already covers.
+    var taken = Set<String>()
+
+    init(delivery: NotificationDelivery) { self.delivery = delivery }
+
+    func key(_ article: FeedArticle) -> String { delivery.events[article.id] ?? article.id }
+
+    func lead(_ article: FeedArticle) -> String {
+        NotificationService.leadKey(of: article, event: key(article), delivery: delivery)
+    }
+
+    func announces(_ article: FeedArticle) -> [String: String] {
+        delivery.events[article.id].map { [$0: lead(article)] } ?? [:]
+    }
+
+    func publishers(_ article: FeedArticle) -> Int {
+        delivery.events[article.id].flatMap { delivery.publishers[$0] } ?? 1
+    }
+
+    /// Whether the story's key may post in `lane`: not announced, a new lead headline, or a higher lane.
+    func fresh(_ article: FeedArticle, in lane: NotificationLane) -> Bool {
+        guard let event = delivery.events[article.id], let seen = delivery.ledger.announced[event] else { return true }
+        return seen.leadKey != lead(article) || lane > seen.lane
+    }
+
+    func isPriority(_ item: ScoredStory) -> Bool {
+        delivery.events[item.article.id] != nil
+            && NotificationService.isPriority(
+                title: item.article.title, score: item.score, publishers: publishers(item.article))
+    }
+
+    func isNormal(_ item: ScoredStory) -> Bool {
+        let category = item.article.category.flatMap(NewsCategory.match(from:))?.rawValue.lowercased()
+        let interest =
+            category.map(delivery.interests.contains) == true
+            && publishers(item.article) >= NotificationService.interestPublishers
+        return item.score >= NotificationService.breakingScore || interest
+    }
+
+    func isStarred(_ article: FeedArticle) -> Bool {
+        article.identityFeedURL.map(delivery.starredFeedURLs.contains) == true
+    }
+
+    /// Each key takes its highest lane; its representative is the strongest story that qualifies for that lane. Keys
+    /// with a starred story belong to the starred lane, which works from the feeds' pending stories.
+    func classify(_ new: [ScoredStory]) -> (priority: [ScoredStory], normal: [ScoredStory]) {
+        var order: [String] = []
+        var members: [String: [ScoredStory]] = [:]
+        for item in new {
+            if members[key(item.article)] == nil { order.append(key(item.article)) }
+            members[key(item.article), default: []].append(item)
+        }
+        var priority: [ScoredStory] = []
+        var normal: [ScoredStory] = []
+        for id in order {
+            let items = members[id, default: []].sorted { $0.score > $1.score }
+            if let best = items.first(where: isPriority) {
+                if fresh(best.article, in: .priority) { priority.append(best) }
+            } else if !items.contains(where: { isStarred($0.article) }), let best = items.first(where: isNormal),
+                fresh(best.article, in: .normal)
+            {
+                normal.append(best)
+            }
+        }
+        return (priority.sorted { $0.score > $1.score }, normal)
+    }
+
+    /// Individual banners up to the limit, then one grouped banner for the rest and any waiting keys. Returns the keys
+    /// that must wait because the grouped banner's window is still running.
+    mutating func planPriority(_ keys: [ScoredStory]) -> [QueuedPriority] {
+        let ledger = delivery.ledger
+        let individual = keys.prefix(max(0, NotificationService.priorityLimit - ledger.priorityLastHalfHour))
+        for item in individual {
+            banners.append(
+                PlannedBanner(
+                    lane: .priority, grouped: false, article: item.article, thread: key(item.article), sound: true,
+                    announces: announces(item.article)))
+            taken.insert(key(item.article))
+        }
+        let newOverflow = keys.dropFirst(individual.count).map {
+            QueuedPriority(event: key($0.article), title: $0.article.title, score: $0.score, leadKey: lead($0.article))
+        }
+        let waiting = ledger.priorityQueue.filter { item in
+            !newOverflow.contains { $0.event == item.event } && ledger.announced[item.event]?.lane != .priority
+        }
+        let overflow = (newOverflow + waiting).sorted { $0.score > $1.score }
+        guard !overflow.isEmpty else { return [] }
+        if ledger.priorityGroupLastHalfHour { return newOverflow }
+        banners.append(
+            PlannedBanner(
+                lane: .priority, grouped: true, title: "Major news", headlines: overflow.prefix(2).map(\.title),
+                count: overflow.count, thread: "priority", sound: true,
+                announces: Dictionary(overflow.map { ($0.event, $0.leadKey) }) { first, _ in first }))
+        taken.formUnion(overflow.map(\.event))
+        return []
+    }
+
+    /// One banner per feed and window, standing for every pending story, once one of them is fresh.
+    mutating func planStarred(_ pending: [String: [ScoredStory]]) {
+        for feed in delivery.starredFeedURLs.sorted() {
+            if let last = delivery.ledger.lastStarred[feed],
+                delivery.now.timeIntervalSince(last) < NotificationService.starredWindow
+            {
+                continue
+            }
+            planStarredFeed(feed, items: (pending[feed] ?? []).sorted { $0.score > $1.score })
+        }
+    }
+
+    private mutating func planStarredFeed(_ feed: String, items: [ScoredStory]) {
+        var seen = Set<String>()
+        let freshItems = items.filter {
+            !taken.contains(key($0.article)) && fresh($0.article, in: .starred) && seen.insert(key($0.article)).inserted
+        }
+        guard let top = freshItems.first else { return }
+        let covered = freshItems.reduce(into: [String: String]()) { $0.merge(announces($1.article)) { a, _ in a } }
+        if items.count == 1 {
+            banners.append(
+                PlannedBanner(
+                    lane: .starred, grouped: false, article: top.article, feedURL: feed, thread: key(top.article),
+                    sound: top.score >= NotificationService.breakingScore, announces: covered))
+        } else {
+            let rest = items.filter { item in !freshItems.contains { $0.article.id == item.article.id } }
+            banners.append(
+                PlannedBanner(
+                    lane: .starred, grouped: true, title: NotificationService.sourceName(top.article),
+                    headlines: (freshItems + rest).prefix(2).map(\.article.title), count: items.count, feedURL: feed,
+                    thread: "starred-\(feed)", sound: false, announces: covered))
+        }
+        taken.formUnion(freshItems.map { key($0.article) })
+    }
+
+    /// Today's qualification, up to the rolling hour's remaining allowance.
+    mutating func planNormal(_ keys: [ScoredStory]) {
+        let allowance = max(0, NotificationService.normalLimit - delivery.ledger.normalLastHour)
+        for item in keys.filter({ !taken.contains(key($0.article)) }).sorted(by: { $0.score > $1.score })
+            .prefix(allowance)
+        {
+            banners.append(
+                PlannedBanner(
+                    lane: .normal, grouped: false, article: item.article, thread: key(item.article),
+                    sound: item.score >= NotificationService.breakingScore, announces: announces(item.article)))
+        }
     }
 }
