@@ -252,6 +252,12 @@ struct SettingsView: View {
 
             // Form keeps subscription actions reachable through system keyboard navigation.
             Form {
+                let starLimitReached = appSettings.starredFeedURLs.count >= AppSettings.starredFeedLimit
+                if starLimitReached {
+                    Text("Up to \(AppSettings.starredFeedLimit) feeds can be starred")
+                        .font(AppTypography.caption)
+                        .foregroundStyle(AppColor.secondaryText)
+                }
                 ForEach(feedManager.feedURLs, id: \.self) { urlString in
                     HStack(spacing: AppSpacing.sm) {
                         let status = feedManager.feedStatuses[urlString]
@@ -336,7 +342,14 @@ struct SettingsView: View {
                                 .foregroundStyle(starred ? AppColor.accent : AppColor.secondaryText)
                         }
                         .buttonStyle(.plain)
-                        .help(starred ? "Notifies about every story" : "Notify about every story")
+                        .disabled(!starred && starLimitReached)
+                        .help(
+                            starred
+                                ? "Notifies about every story"
+                                : starLimitReached
+                                    ? "Up to \(AppSettings.starredFeedLimit) feeds can be starred"
+                                    : "Notify about every story"
+                        )
                         .accessibilityLabel(
                             starred
                                 ? "Stop notifying about every story from this feed"
