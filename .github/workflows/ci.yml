@@ -7,7 +7,10 @@ on:
       - 'docs/**'
       - '**.md'
       - 'LICENSE'
+  # `closed` starts a run in the PR's concurrency group, which cancels its in-flight run
+  # so merged PRs stop holding macOS runners; every job skips on that run.
   pull_request:
+    types: [ opened, synchronize, reopened, closed ]
     branches: [ main ]
     paths-ignore:
       - 'docs/**'
@@ -27,6 +30,7 @@ jobs:
   # The runner has no Xcode 27, so code built only with the macOS 27 SDK is left out here.
   test-arm64:
     name: Test (macOS 26, Apple Silicon)
+    if: github.event.action != 'closed'
     runs-on: macos-26
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
@@ -67,6 +71,7 @@ jobs:
 
   build-arm64:
     name: Build Verification (Apple Silicon)
+    if: github.event.action != 'closed'
     runs-on: xcode-27
     timeout-minutes: 20
     steps:
