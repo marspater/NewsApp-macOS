@@ -23,10 +23,14 @@ permissions:
   contents: read
 
 jobs:
+  # macOS 26 runtime coverage (#663): CircleCI and Codemagic already run this suite on macOS 27 with Xcode 27.
+  # The runner has no Xcode 27, so code built only with the macOS 27 SDK is left out here.
   test-arm64:
-    name: Test (Apple Silicon)
-    runs-on: xcode-27
-    timeout-minutes: 25
+    name: Test (macOS 26, Apple Silicon)
+    runs-on: macos-26
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+    timeout-minutes: 30
     steps:
       - name: Checkout Code
         uses: actions/checkout@v7
@@ -37,24 +41,23 @@ jobs:
           echo "Architecture: $(uname -m)"
           echo "Swift CLI: $(swift --version | head -n 1)"
           echo "Xcode: $(xcodebuild -version | tr '\n' ' ')"
+          [[ "$(sw_vers -productVersion)" == 26.* ]]
 
       - name: Ensure Executable Permissions
         run: chmod +x test.sh build.sh build_release.sh
 
+      # Xcode 26.6 build products: a cache of their own, apart from the Xcode 27 build job's.
       - name: Cache SwiftPM
         uses: actions/cache@v4
         with:
           path: |
             .build
             ~/Library/Caches/org.swift.swiftpm
-          key: swiftpm-${{ runner.os }}-${{ hashFiles('Package.resolved') }}
-          restore-keys: swiftpm-${{ runner.os }}-
+          key: swiftpm-${{ runner.os }}-xcode26-${{ hashFiles('Package.resolved') }}
+          restore-keys: swiftpm-${{ runner.os }}-xcode26-
 
       - name: Run Unit Tests
         run: ./test.sh
-
-      - name: Check Swift Formatting
-        run: script/format.sh --check
 
       - name: Verify Publisher Excerpts
         run: NEWS_NATIVE_HARNESS=Tests/PublisherExcerptTests.swift ./script/native_performance_baseline.sh
@@ -75,14 +78,18 @@ jobs:
       - name: Ensure Executable Permissions
         run: chmod +x build_release.sh
 
+      # On the shipping toolchain: swift-format output can differ between Xcode versions.
+      - name: Check Swift Formatting
+        run: script/format.sh --check
+
       - name: Cache SwiftPM
         uses: actions/cache@v4
         with:
           path: |
             .build
             ~/Library/Caches/org.swift.swiftpm
-          key: swiftpm-${{ runner.os }}-${{ hashFiles('Package.resolved') }}
-          restore-keys: swiftpm-${{ runner.os }}-
+          key: swiftpm-${{ runner.os }}-xcode27-${{ hashFiles('Package.resolved') }}
+          restore-keys: swiftpm-${{ runner.os }}-xcode27-
 
       - name: Build Ad-hoc arm64 Verification Bundle
         run: ./build_release.sh
