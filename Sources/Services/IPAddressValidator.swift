@@ -39,7 +39,16 @@ struct IPAddressValidator: Sendable {
             return .blocked(reason: directBlockReason)
         }
 
-        // 3. DNS Resolution check (resolves host and validates all resolved IP addresses)
+        // 3. A public literal is its own answer. Resolving it with AI_ADDRCONFIG would refuse it whenever
+        // the Mac briefly has no address of that family configured (Wi-Fi roam, DHCP renewal).
+        let literal = host.hasPrefix("[") && host.hasSuffix("]") ? String(host.dropFirst().dropLast()) : host
+        var ipv4 = in_addr()
+        var ipv6 = in6_addr()
+        if inet_pton(AF_INET, literal, &ipv4) == 1 || inet_pton(AF_INET6, literal, &ipv6) == 1 {
+            return .allowed(ips: [literal])
+        }
+
+        // 4. DNS Resolution check (resolves host and validates all resolved IP addresses)
         return resolver(host)
     }
 

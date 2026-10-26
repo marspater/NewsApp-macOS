@@ -15,6 +15,10 @@ public enum ClaimVerificationFailureReason: Sendable, Equatable {
     case detachedQuotation(claimText: String, passageID: String)
     case droppedAttribution(speaker: String, claimText: String, passageID: String)
     case ungroundedCitation(missingToken: String, passageID: String)
+    case speakerMismatch(claimSpeaker: String, passageID: String)
+    case misquotedReport(quote: String, passageID: String)
+    case actionMismatch(claimAction: String, passageID: String)
+    case quotationAsFact(passageID: String)
     case emptyClaim
 }
 
@@ -149,6 +153,18 @@ public struct OverviewClaimVerifier: Sendable {
         if let failure = verifyDroppedAttribution(statement: fact.text, passage: passage) {
             failures.append(failure)
         }
+        if let speaker = mismatchedSpeaker(statement: fact.text, passageText: passage.text) {
+            failures.append(.speakerMismatch(claimSpeaker: speaker, passageID: passage.id))
+        }
+        if let quote = misquotedReport(statement: fact.text, passageText: passage.text) {
+            failures.append(.misquotedReport(quote: quote, passageID: passage.id))
+        }
+        if let action = unsupportedAction(statement: fact.text, passageText: passage.text) {
+            failures.append(.actionMismatch(claimAction: action, passageID: passage.id))
+        }
+        if restatesQuotationAsFact(statement: fact.text, passageText: passage.text) {
+            failures.append(.quotationAsFact(passageID: passage.id))
+        }
         return failures
     }
 
@@ -184,11 +200,8 @@ public struct OverviewClaimVerifier: Sendable {
 
         // 1. Numbers
         let numbers = extractNumbers(from: statement)
-        for num in numbers {
-            let normalizedNum = normalizeText(num)
-            if !normalizedPassage.contains(normalizedNum) {
-                reasons.append(.numericMismatch(claimNumber: num, passageID: passage.id))
-            }
+        for num in numbers where !containsNumber(normalizeText(num), in: normalizedPassage) {
+            reasons.append(.numericMismatch(claimNumber: num, passageID: passage.id))
         }
 
         // 2. Currencies
@@ -268,7 +281,10 @@ public struct OverviewClaimVerifier: Sendable {
         let passageWords = " " + tokenize(passage.text).joined(separator: " ") + " "
         for pattern in attributionPatterns {
             // Search the original statement, so the range indexes the same string.
-            if let range = statement.range(of: pattern, options: [.caseInsensitive, .diacriticInsensitive]) {
+            // Whole words: "reinstated" does not contain the verb "stated".
+            if let range = statement.range(
+                of: #"\b"# + pattern + #"\b"#, options: [.regularExpression, .caseInsensitive, .diacriticInsensitive])
+            {
                 let prefix = String(statement[..<range.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
                 let entityCandidate = extractAttributionEntity(from: prefix)
                 let entityWords = tokenize(entityCandidate).joined(separator: " ")
@@ -310,7 +326,13 @@ public struct OverviewClaimVerifier: Sendable {
     private static let capitalizedFunctionWords: Set<String> = [
         "the", "a", "an", "he", "she", "they", "it", "we", "i", "you", "this", "that", "these", "those", "his",
         "her", "their", "its", "our", "my", "your", "in", "on", "at", "but", "and", "after", "before", "when",
-        "while", "as", "for", "with", "by", "from", "of", "to", "if", "there", "some", "many",
+        "while", "as", "for", "with", "by", "from", "of", "to", "if", "there", "some", "many", "monday", "tuesday",
+        "wednesday", "thursday", "friday", "saturday", "sunday", "january", "february", "march", "april", "june",
+        "july", "august", "september", "october", "november", "december",
+    ]
+
+    private static let unquotedFirstPerson: Set<String> = [
+        "we", "We", "our", "Our", "ours", "us", "my", "My", "me", "myself", "ourselves",
     ]
 
     private static let firstPersonPronouns: Set<String> = [
@@ -362,7 +384,12 @@ public struct OverviewClaimVerifier: Sendable {
         let quotes = regex.matches(in: statement, range: range).compactMap { match in
             [match.range(at: 1), match.range(at: 2)].first { $0.location != NSNotFound }.map(ns.substring(with:))
         }
-        guard !quotes.isEmpty else { return false }
+        // Speech copied without its quotation marks: "we have confirmed…" with no speaker. Case matters, so "US"
+        // and "World War I" are not pronouns.
+        guard !quotes.isEmpty else {
+            let claimWords = words(statement)
+            return claimWords.contains { unquotedFirstPerson.contains($0) } && reportedSpeakers(claimWords).isEmpty
+        }
         let outside = words(regex.stringByReplacingMatches(in: statement, range: range, withTemplate: " "))
         if outside.isEmpty { return true }
         let quotesFirstPerson = quotes.contains { !firstPersonPronouns.isDisjoint(with: tokenize($0)) }
@@ -426,6 +453,86 @@ public struct OverviewClaimVerifier: Sendable {
             .max { claim.intersection(tokenize($0)).count < claim.intersection(tokenize($1)).count } ?? passage
     }
 
+    // MARK: - Speaker, Quotation and Action Verification
+
+    /// Speakers named within four words of each reporting verb: before it ("the Israeli military said"), else after it
+    /// ("said Ford", "according to the health ministry"). Lowercased; "he said" names no one.
+    private static func reportedSpeakers(_ words: [String]) -> Set<String> {
+        var speakers = Set<String>()
+        for (index, word) in words.enumerated() where reportingVerbs.contains(word.lowercased()) {
+            let before = speakerWords(words[max(0, index - 4)..<index])
+            let after = speakerWords(words[min(index + 1, words.count)..<min(index + 5, words.count)])
+            speakers.formUnion(
+                (word.lowercased() == "according" || before.isEmpty ? after : before).map { $0.lowercased() })
+        }
+        return speakers
+    }
+
+    /// A claim that reports speech must name a speaker the closest passage sentence names, or any passage sentence
+    /// when that one reports none: "Carney said" for "Ford said", or "Hamas said" for "the military said Hamas
+    /// fighters attacked", is a renamed speaker. Returns the claim's speaker.
+    static func mismatchedSpeaker(statement: String, passageText: String) -> String? {
+        let claimSpeakers = reportedSpeakers(words(statement))
+        guard !claimSpeakers.isEmpty else { return nil }
+        var passageSpeakers = reportedSpeakers(words(closestSentence(to: statement, in: passageText)))
+        if passageSpeakers.isEmpty { passageSpeakers = reportedSpeakers(words(passageText)) }
+        return claimSpeakers.isDisjoint(with: passageSpeakers) ? claimSpeakers.sorted().joined(separator: " ") : nil
+    }
+
+    private static func quotations(_ text: String) -> [String] {
+        guard let regex = quotationRegex else { return [] }
+        let ns = text as NSString
+        return regex.matches(in: text, range: NSRange(location: 0, length: ns.length)).compactMap { match in
+            [match.range(at: 1), match.range(at: 2)].first { $0.location != NSNotFound }.map(ns.substring(with:))
+        }
+    }
+
+    /// A claim quotation holding a reporting clause ("will not give up Pokrovsk, the commander said,") must sit inside
+    /// one passage quotation; otherwise the claim moved the speaker into the quoted words. Returns that quotation.
+    static func misquotedReport(statement: String, passageText: String) -> String? {
+        let passageQuotes = quotations(passageText).map { " " + tokenize($0).joined(separator: " ") + " " }
+        return quotations(statement).first { quote in
+            let quoteWords = words(quote)
+            guard hasReportingConstruction(quoteWords) else { return false }
+            let folded = " " + tokenize(quote).joined(separator: " ") + " "
+            return !passageQuotes.contains { $0.contains(folded) }
+        }
+    }
+
+    /// A claim that copies eight or more words of a passage quotation must keep the quotation marks or name a
+    /// speaker: "These are the first elections … whose outcome is uncertain" restates an analyst's assessment as fact.
+    static func restatesQuotationAsFact(statement: String, passageText: String) -> Bool {
+        guard quotations(statement).isEmpty, !hasReportingConstruction(words(statement)) else { return false }
+        let claim = " " + tokenize(statement).joined(separator: " ") + " "
+        return quotations(passageText).contains { quote in
+            let quoteWords = tokenize(quote)
+            guard quoteWords.count >= 8 else { return false }
+            return (0...(quoteWords.count - 8)).contains { start in
+                claim.contains(" " + quoteWords[start..<start + 8].joined(separator: " ") + " ")
+            }
+        }
+    }
+
+    /// Legal and physical actions a summary must not upgrade: a summons is not an arrest.
+    private static let actionRegex = try? NSRegularExpression(
+        pattern:
+            #"\b(arrest|detain|charge|indict|convict|sentence|jail|imprison|summon|kill|wound|injure|resign|dismiss|expel|deport|execute|sue)(?:s|d|ed|es|ing|led)?\b"#,
+        options: [.caseInsensitive])
+
+    private static func actions(_ text: String) -> Set<String> {
+        guard let actionRegex else { return [] }
+        let ns = text as NSString
+        return Set(
+            actionRegex.matches(in: text, range: NSRange(location: 0, length: ns.length)).map {
+                ns.substring(with: $0.range(at: 1)).lowercased()
+            })
+    }
+
+    /// The first legal or physical action in the claim that the passage never reports in any form.
+    static func unsupportedAction(statement: String, passageText: String) -> String? {
+        actions(statement).subtracting(actions(passageText)).sorted().first
+    }
+
     // MARK: - Citation Grounding Verification
 
     private static func verifyCitationGrounding(
@@ -454,74 +561,6 @@ public struct OverviewClaimVerifier: Sendable {
             return true
         }
         return missing
-    }
-
-    // MARK: - Fallback Overview Creation
-
-    static func createFallbackOverview(
-        from original: EventOverviewDocument,
-        passages: [EvidencePassage],
-        articles: [FeedArticle],
-        report: OverviewVerificationReport
-    ) -> EventOverviewDocument {
-        // Retain only verified facts
-        let verifiedFacts = report.verifiedFacts
-        var retainedCitations: [OverviewCitation] = []
-        var seenCitationIDs: Set<String> = []
-
-        for fact in verifiedFacts {
-            for cid in fact.citationIDs {
-                if !seenCitationIDs.contains(cid), let cite = original.citations[cid] {
-                    seenCitationIDs.insert(cid)
-                    retainedCitations.append(cite)
-                }
-            }
-        }
-
-        // Build summary showing verified excerpts and source list
-        var summarySections: [String] = []
-
-        if !verifiedFacts.isEmpty {
-            var excerptsSection = "## Verified Excerpts\n"
-            for fact in verifiedFacts {
-                let quoteText = fact.citationIDs.compactMap { original.citations[$0]?.quote }.first ?? fact.text
-                excerptsSection += "• \"\(quoteText)\"\n"
-            }
-            summarySections.append(excerptsSection.trimmingCharacters(in: .whitespacesAndNewlines))
-        }
-
-        if !articles.isEmpty {
-            var sourcesSection = "## Sources\n"
-            for art in articles {
-                sourcesSection += "• \(art.source): \(art.title)\n"
-            }
-            summarySections.append(sourcesSection.trimmingCharacters(in: .whitespacesAndNewlines))
-        }
-
-        let fallbackSummary = summarySections.joined(separator: "\n\n")
-
-        let content = OverviewContent(
-            title: original.title,
-            summary: fallbackSummary.isEmpty ? original.title : fallbackSummary,
-            facts: verifiedFacts,
-            citations: retainedCitations,
-            leadImage: original.leadImage
-        )
-
-        let provenance = OverviewProvenance(
-            memberArticleIDs: original.memberArticleIDs,
-            kind: .fallbackExcerpts,
-            createdAt: original.createdAt,
-            updatedAt: Date()
-        )
-
-        return EventOverviewDocument(
-            id: original.id,
-            eventID: original.eventID,
-            version: original.version,
-            content: content,
-            provenance: provenance
-        )
     }
 
     // MARK: - Text Extraction Helpers
@@ -586,6 +625,13 @@ public struct OverviewClaimVerifier: Sendable {
         default:
             return text.contains(currency)
         }
+    }
+
+    /// A number not part of a longer one: "14" is not in "140", "2014" or "1.14", but is in "$14m".
+    private static func containsNumber(_ number: String, in text: String) -> Bool {
+        text.range(
+            of: #"(?<![\d.,])"# + NSRegularExpression.escapedPattern(for: number) + #"(?![\d]|[.,]\d)"#,
+            options: .regularExpression) != nil
     }
 
     private static func containsWholeWord(_ word: String, in text: String) -> Bool {

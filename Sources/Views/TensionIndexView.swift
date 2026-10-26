@@ -31,7 +31,6 @@ struct TensionIndexView: View {
     @EnvironmentObject var appSettings: AppSettings
     @Environment(\.dismiss) private var dismiss
     @Environment(\.effectiveReduceMotion) private var reduceMotion
-    @Environment(\.effectiveContrast) private var contrast
     @State private var history: [WorldTensionReading]
     @State private var loading = false
     @State private var errorMessage: String?
@@ -55,7 +54,9 @@ struct TensionIndexView: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Text(Self.navigationTitleText).font(AppTypography.sectionTitle).accessibilityAddTraits(.isHeader)
+                // The sheet title carries the page's one intelligence glyph (DESIGN.md 8.6).
+                IntelligenceLabel(Self.navigationTitleText).font(AppTypography.sectionTitle)
+                    .accessibilityAddTraits(.isHeader)
                 Spacer()
                 // The same header as the feed catalog: title and Done.
                 Button("Done") { dismiss() }
@@ -67,12 +68,20 @@ struct TensionIndexView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: AppSpacing.lg) {
                     if let reading = selected {
-                        readingHeader(reading)
-                        summaryCard(reading)
+                        group("Assessment") {
+                            readingHeader(reading)
+                            summary(reading)
+                        }
                         drivers(reading)
-                        DisclosureGroup("Factor Breakdown") { reasons(reading).padding(.top, AppSpacing.sm) }
+                        group {
+                            DisclosureGroup {
+                                reasons(reading).padding(.top, AppSpacing.sm)
+                            } label: {
+                                groupTitle("Factor Breakdown")
+                            }
+                        }
                         evidence(reading)
-                        if history.count > 1 { trend }
+                        if history.count > 1 { group("Past 30 Days") { trend } }
                     } else if loading {
                         ProgressView("Assessing international headlines…").frame(maxWidth: .infinity)
                     } else {
@@ -84,15 +93,10 @@ struct TensionIndexView: View {
                     if appSettings.aiEnabled, appSettings.tensionCollectionOptIn,
                         !unscoredHeadlines.isEmpty
                     {
-                        VStack(alignment: .leading, spacing: AppSpacing.sm) {
-                            Text("Current Panel Headlines").font(AppTypography.headline)
+                        group("Current Panel Headlines") {
                             Text("No score was saved. These publisher headlines remain available to inspect.")
                                 .font(AppTypography.caption).foregroundStyle(AppColor.secondaryText)
-                            ForEach(unscoredHeadlines, id: \.id) { headline in
-                                Text(headline.title).font(AppTypography.body).textSelection(.enabled)
-                                Text(headline.publisher).font(AppTypography.caption).foregroundStyle(
-                                    AppColor.secondaryText)
-                            }
+                            headlineTable(unscoredHeadlines)
                         }
                     }
                     if selected != nil, let errorMessage {
@@ -167,8 +171,38 @@ struct TensionIndexView: View {
             "\(movement) since the assessment on \(previous.evaluatedAt.formatted(date: .abbreviated, time: .omitted))"
     }
 
+    /// A titled group of the sheet (DESIGN.md 8.6): `md` inside, on the story card surface.
+    private func group<Content: View>(_ title: String? = nil, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: AppSpacing.md) {
+            if let title { groupTitle(title) }
+            content()
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .modifier(ContentPanel())
+    }
+
+    private func groupTitle(_ title: String) -> some View {
+        Text(title).font(AppTypography.sectionTitle).foregroundStyle(AppColor.primaryText)
+            .accessibilityAddTraits(.isHeader)
+    }
+
+    /// Panel headlines as a table: the C/P badge, publisher and headline in aligned columns.
+    private func headlineTable(_ headlines: [WorldTensionHeadline]) -> some View {
+        Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: AppSpacing.sm, verticalSpacing: AppSpacing.xs) {
+            ForEach(headlines, id: \.id) { headline in
+                GridRow {
+                    TagView(title: String(headline.id.prefix(1)))
+                        .accessibilityLabel(headline.id.hasPrefix("C") ? "Last 24 hours" : "Preceding six days")
+                    EyebrowText(headline.publisher)
+                    Text(headline.title).font(AppTypography.callout).fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                }
+            }
+        }
+    }
+
     /// The lead sentence in bold, then the synthesis; readings saved before leads existed show the synthesis alone.
-    private func summaryCard(_ reading: WorldTensionReading) -> some View {
+    private func summary(_ reading: WorldTensionReading) -> some View {
         VStack(alignment: .leading, spacing: AppSpacing.sm) {
             Group {
                 if let lead = reading.assessment.lead {
@@ -182,37 +216,33 @@ struct TensionIndexView: View {
                 Label("Keyword estimate · on-device assessment unavailable", systemImage: "exclamationmark.circle")
                     .font(AppTypography.caption).foregroundStyle(AppColor.secondaryText)
             } else {
-                IntelligenceLabel("Assessed on device")
+                Text("Assessed on this Mac").font(AppTypography.caption).foregroundStyle(AppColor.secondaryText)
             }
         }
-        .padding(AppSpacing.md)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(AppColor.surface, in: RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous)
-                .strokeBorder(AppColor.border(for: contrast), lineWidth: 0.5)
-        )
     }
 
     @ViewBuilder
     private func drivers(_ reading: WorldTensionReading) -> some View {
         let headlines = reading.drivingHeadlines
         if !headlines.isEmpty {
-            VStack(alignment: .leading, spacing: AppSpacing.sm) {
-                Text("What's Driving It").font(AppTypography.headline).accessibilityAddTraits(.isHeader)
-                ForEach(headlines, id: \.id) { headline in
-                    VStack(alignment: .leading, spacing: AppSpacing.textStack) {
-                        EyebrowText(headline.publisher)
-                        if let link = headline.link.flatMap(URL.init(string:)),
-                            ["http", "https"].contains(link.scheme?.lowercased())
-                        {
-                            Link(headline.title, destination: link).font(AppTypography.body)
-                                .multilineTextAlignment(.leading).help("Open the story in your browser")
-                        } else {
-                            Text(headline.title).font(AppTypography.body).textSelection(.enabled)
+            group("What's Driving It") {
+                Grid(
+                    alignment: .leadingFirstTextBaseline, horizontalSpacing: AppSpacing.sm,
+                    verticalSpacing: AppSpacing.sm
+                ) {
+                    ForEach(headlines, id: \.id) { headline in
+                        GridRow {
+                            EyebrowText(headline.publisher)
+                            if let link = headline.link.flatMap(URL.init(string:)),
+                                ["http", "https"].contains(link.scheme?.lowercased())
+                            {
+                                Link(headline.title, destination: link).font(AppTypography.body)
+                                    .multilineTextAlignment(.leading).help("Open the story in your browser")
+                            } else {
+                                Text(headline.title).font(AppTypography.body).textSelection(.enabled)
+                            }
                         }
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
         }
@@ -231,31 +261,25 @@ struct TensionIndexView: View {
                 }
             }
         }
-        .padding(AppSpacing.md)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(AppColor.surface, in: RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous)
-                .strokeBorder(AppColor.border(for: contrast), lineWidth: 0.5)
-        )
     }
 
     private func evidence(_ reading: WorldTensionReading) -> some View {
-        DisclosureGroup("All Panel Headlines") {
-            VStack(alignment: .leading, spacing: AppSpacing.sm) {
-                Text("C: last 24 hours · P: preceding six days").font(AppTypography.caption).foregroundStyle(
-                    AppColor.secondaryText)
-                ForEach(reading.headlines, id: \.id) { headline in
-                    Text("[\(headline.id)] \(headline.publisher): \(headline.title)")
-                        .font(AppTypography.callout).textSelection(.enabled)
-                }
-            }.padding(.top, AppSpacing.sm)
+        group {
+            DisclosureGroup {
+                VStack(alignment: .leading, spacing: AppSpacing.sm) {
+                    Text("C: last 24 hours · P: preceding six days").font(AppTypography.caption).foregroundStyle(
+                        AppColor.secondaryText)
+                    headlineTable(reading.headlines)
+                }.padding(.top, AppSpacing.sm)
+            } label: {
+                groupTitle("All Panel Headlines")
+            }
         }
     }
 
     private var trend: some View {
         VStack(alignment: .leading, spacing: AppSpacing.sm) {
-            Text("Past 30 Days").font(AppTypography.headline)
             Chart {
                 ForEach(Array(history.enumerated()), id: \.element.id) { index, reading in
                     LineMark(
@@ -302,8 +326,8 @@ struct TensionIndexView: View {
                 if loading { ProgressView().controlSize(.small) }
                 Button("Reassess") { reassessment += 1 }.disabled(loading)
             }.font(AppTypography.callout)
-            Text("Assessed on this Mac · last 24 hours · 12 international panel feeds")
-                .font(AppTypography.caption).foregroundStyle(AppColor.tertiaryText)
+            Text("Last 24 hours · 12 international panel feeds")
+                .font(AppTypography.caption).foregroundStyle(AppColor.secondaryText)
         }
     }
 
@@ -359,7 +383,7 @@ struct TensionScaleBar: View {
                     )
                     .overlay(
                         Capsule()
-                            .strokeBorder(AppColor.border(for: contrast).opacity(0.35), lineWidth: 0.5)
+                            .strokeBorder(AppColor.markerOutline(for: contrast), lineWidth: AppLayout.hairline)
                     )
                     .overlay(alignment: .leading) {
                         Capsule().fill(AppColor.primaryText)
@@ -458,7 +482,7 @@ struct TensionGlyph: View {
         let pulse = 0.03 * sin(breath * 2 * .pi)
         let halo = 0.36 + pulse
         context.stroke(
-            Path(ellipseIn: square(size, radius: halo)), with: .color(AppColor.tension(.mild).opacity(0.4)),
+            Path(ellipseIn: square(size, radius: halo)), with: .color(AppColor.tensionHalo),
             lineWidth: AppLayout.tensionStrokeWidth)
         let ripple = breath - floor(breath)
         context.stroke(
@@ -649,10 +673,7 @@ struct TensionSidebarButton: View {
             .frame(width: AppLayout.tensionDotSize, height: AppLayout.tensionDotSize)
             .overlay(
                 Circle()
-                    .strokeBorder(
-                        AppColor.border(for: contrast).opacity(0.35),
-                        lineWidth: 0.5
-                    )
+                    .strokeBorder(AppColor.markerOutline(for: contrast), lineWidth: AppLayout.hairline)
             )
             .accessibilityHidden(true)
     }
