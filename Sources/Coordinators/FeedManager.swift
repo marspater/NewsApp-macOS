@@ -34,7 +34,7 @@ class FeedManager: NSObject, ObservableObject {
 
     typealias FeedBatch = [FeedFetchResult]
     private let fetchBatch: @Sendable ([String], Bool) async -> FeedBatch
-    private let notifyBatch: @MainActor ([FeedArticle], AppSettings.NotificationMode) async -> Void
+    private let notifyBatch: @MainActor ([FeedArticle], NotificationDelivery) async -> Void
     private let enrichmentQueue: EnrichmentQueue
     private let allowsBackgroundWork: @MainActor () -> Bool
     private let imageFinder: StoryImageFinder
@@ -61,6 +61,8 @@ class FeedManager: NSObject, ObservableObject {
     private var refreshInterruptedBySleep = false
     /// Stories a cancelled refresh had already committed; the next completed refresh notifies them.
     private var pendingNotificationArticles: [FeedArticle] = []
+    /// The latest notification pass; the next one waits for it.
+    private var notificationPass: Task<Void, Never>?
     /// Retention runs at most once a day per launch, after a completed refresh.
     private var lastPruneAt: Date?
     /// When the latest refresh published its stories; shown in the list header.
@@ -78,9 +80,9 @@ class FeedManager: NSObject, ObservableObject {
     init(
         settings: AppSettings? = nil, store: ArticleStore? = nil, schedulesRefresh: Bool = true,
         fetchBatch: (@Sendable ([String], Bool) async -> FeedBatch)? = nil,
-        notifyBatch: @escaping @MainActor ([FeedArticle], AppSettings.NotificationMode) async -> Void = {
-            articles, mode in
-            await NotificationService.shared.triageAndNotify(newArticles: articles, mode: mode)
+        notifyBatch: @escaping @MainActor ([FeedArticle], NotificationDelivery) async -> Void = {
+            articles, delivery in
+            await NotificationService.shared.triageAndNotify(newArticles: articles, delivery: delivery)
         },
         enrichmentQueue: EnrichmentQueue? = nil,
         importanceJudge _: StoryImportanceJudge = .unavailable,
@@ -278,8 +280,7 @@ class FeedManager: NSObject, ObservableObject {
                 let loaded = try await self.articleStore.fetchArticles()
                 self.articles = loaded
                 await self.reloadFeedHealth()
-                // Catch up on articles a previous session collected but did not cluster.
-                self.clusterEventsInBackground()
+                // Catch-up clustering of what a previous session left waits for the list's first frame (#602).
             } catch {
                 self.logger.error("Failed to load cached articles: \(error.localizedDescription)")
             }
@@ -469,18 +470,64 @@ class FeedManager: NSObject, ObservableObject {
         let muting = appSettings.muteRules
         let notifiable = newArticles.filter { eligible.contains($0.id) && !muting.mutes($0) }
         if appSettings.notificationsEnabled && !notifiable.isEmpty {
-            let mode = appSettings.notificationMode
-            var batch = notifiable
-            // Clustering has run: in full mode, which posts a banner per story, reports of one event notify once, by
-            // their strongest report (#523). The summary modes count every new story and source, so they get all.
-            if mode == .full {
-                let events = (try? await articleStore.database.eventIDs(forArticles: notifiable.map(\.id))) ?? [:]
-                batch = await NotificationService.representatives(of: notifiable, events: events)
+            // Passes run one at a time: each reads the delivery tables only after the previous one has recorded its
+            // banners (#665).
+            let previous = notificationPass
+            let pass = Task { [weak self] in
+                await previous?.value
+                await self?.deliverNotifications(notifiable)
             }
-            await notifyBatch(batch, mode)
+            notificationPass = pass
+            await withTaskCancellationHandler {
+                await pass.value
+            } onCancel: {
+                pass.cancel()
+            }
         }
         guard !Task.isCancelled, !isStopped else { return }
         enrichArticlesInBackground()
+    }
+
+    /// One notification pass. Clustering has run: reports of one event notify once, by their strongest report, in
+    /// every mode (#523, #587). Full mode reads what the lanes need (#665, docs/notifications.md); delivery only reads
+    /// stories, and writes nothing but its own tables.
+    private func deliverNotifications(_ notifiable: [FeedArticle]) async {
+        let database = articleStore.database
+        var delivery = NotificationDelivery(mode: appSettings.notificationMode)
+        var storyIDs = notifiable.map(\.id)
+        if delivery.mode == .full {
+            let posted = now()
+            delivery.now = posted
+            delivery.ledger = (try? await database.notificationLedger(now: posted)) ?? NotificationLedger()
+            delivery.starredFeedURLs = appSettings.starredFeedURLs
+            // Pending starred stories start at the latest of the feed's last starred banner, its star time and a day
+            // ago, so starring a feed never brings up its backlog.
+            var since: [String: Date] = [:]
+            for feed in delivery.starredFeedURLs {
+                since[feed] = max(
+                    delivery.ledger.lastStarred[feed] ?? .distantPast,
+                    min(appSettings.starredFeedTimes[feed] ?? posted, posted), posted.addingTimeInterval(-86400))
+            }
+            delivery.starredPending =
+                (try? await database.feedStories(since: since, muting: appSettings.muteRules)) ?? [:]
+            storyIDs += delivery.starredPending.values.flatMap { $0.map(\.id) }
+            delivery.interests = NotificationService.topInterests(
+                (try? await database.briefingInterests(now: posted)) ?? [:])
+            delivery.record = { banner in
+                try? await database.recordNotification(banner, at: posted)
+            }
+            delivery.queue = { waiting in
+                try? await database.queuePriority(waiting, at: posted)
+            }
+        }
+        delivery.events = (try? await database.eventIDs(forArticles: storyIDs)) ?? [:]
+        if delivery.mode == .full {
+            let events = Set(delivery.events.values)
+            delivery.publishers = (try? await database.eventPublisherCounts(events)) ?? [:]
+            delivery.leadTitles = (try? await database.eventLeadTitles(events)) ?? [:]
+        }
+        guard !Task.isCancelled, !isStopped else { return }
+        await notifyBatch(notifiable, delivery)
     }
 
     /// Deletes read, unsaved stories older than the retention setting, once a day after a completed refresh.
