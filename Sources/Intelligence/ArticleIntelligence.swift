@@ -1015,8 +1015,11 @@ public final class ArticleAnalyzer: Sendable {
         // the caller asked for the extractive path (the reader asks only while AI is on). After a failed request
         // (switched off, downloading, refused, rate-limited, busy) it is stored at version 0, which the reader never
         // reuses, so it is redone when the summary is next opened.
+        // The release is English-only: text the language recognizer reads as another language gets the final
+        // extractive summary without a model call instead of a refusal round trip (#550). Undecided text still asks.
+        let language = EventMatchKey.language(of: String(budgetedContent.prefix(1000)))
         var provisional = false
-        if allowFoundationModels {
+        if allowFoundationModels, language == nil || language == "en" {
             do {
                 return try await modelAnalysis(title: title, content: budgetedContent, category: category)
             } catch is CancellationError {

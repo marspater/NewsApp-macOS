@@ -16255,6 +16255,21 @@ struct NewsTests {
             fallbackAnalysis.modelIdentifier, "apple.natural-language.fallback",
             "A refusal keeps source-based extraction")
         assertEqual(fallbackAnalysis.analysisVersion, 3, "A Mac without the model keeps its extractive summary")
+        // Non-English text never reaches the model and keeps a final extractive summary (#550).
+        let german =
+            "Die Brücke wurde nach Abschluss der Reparaturen wieder geöffnet. Der Verkehr rollte am Morgen wieder an. "
+            + "Der Stadtrat hatte die Reparaturen im Frühjahr genehmigt, nachdem Ingenieure Risse im Beton gefunden hatten."
+        let germanAnalysis = try await ArticleAnalyzer(
+            textModel: NewsTextModel { _, _ in
+                assertTrue(false, "Non-English text is not sent to the on-device model")
+                throw NewsTextModel.TemporarilyUnavailable()
+            }
+        ).analyze(title: "Brücke wieder geöffnet", content: german)
+        assertEqual(
+            germanAnalysis.modelIdentifier, "apple.natural-language.fallback", "German text gets the extractive summary"
+        )
+        assertEqual(germanAnalysis.analysisVersion, 3, "… as a final summary, not a provisional one")
+        assertFalse(germanAnalysis.summary.isEmpty, "The extractive summary covers the German text")
         let waitingAnalysis = try await ArticleAnalyzer(
             textModel: NewsTextModel { _, _ in throw NewsTextModel.TemporarilyUnavailable() }
         )
