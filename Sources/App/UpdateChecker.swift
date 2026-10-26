@@ -89,20 +89,30 @@ final class UpdateChecker: ObservableObject {
     @Published var statusMessage: String? = nil
 
     private let httpClient: SecureHTTPClient
+    private let now: @Sendable () -> Date
+    private let customAppVersion: String?
 
-    init(httpClient: SecureHTTPClient = .shared) { self.httpClient = httpClient }
+    init(
+        httpClient: SecureHTTPClient = .shared,
+        now: @escaping @Sendable () -> Date = { Date() },
+        currentAppVersion: String? = nil
+    ) {
+        self.httpClient = httpClient
+        self.now = now
+        self.customAppVersion = currentAppVersion
+    }
 
     private let logger = Logger(subsystem: "com.marspater.news", category: "UpdateChecker")
     private let minimumCheckInterval: TimeInterval = 6 * 3600  // 6 hours
 
     var currentAppVersion: String {
-        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "2.0.0"
+        customAppVersion ?? (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "2.0.0")
     }
 
     /// Checks for newer releases on GitHub.
     /// - Parameter userInitiated: If true, bypasses the 6-hour cache.
     func checkForUpdates(userInitiated: Bool = false) async {
-        if !userInitiated, let last = lastCheckDate, Date().timeIntervalSince(last) < minimumCheckInterval {
+        if !userInitiated, let last = lastCheckDate, now().timeIntervalSince(last) < minimumCheckInterval {
             logger.debug("Skipping automatic update check; cached within 6-hour window.")
             return
         }
@@ -149,7 +159,7 @@ final class UpdateChecker: ObservableObject {
             guard let remoteVersion = SemanticVersion.parse(payload.tagName) else {
                 logger.warning("Ignoring release tag with invalid SemVer: \(payload.tagName)")
                 statusMessage = "No valid updates found"
-                lastCheckDate = Date()
+                lastCheckDate = now()
                 return
             }
 
@@ -159,7 +169,7 @@ final class UpdateChecker: ObservableObject {
                 return
             }
 
-            lastCheckDate = Date()
+            lastCheckDate = now()
 
             if remoteVersion > localVersion {
                 // Verify that html_url belongs strictly to expected GitHub repository releases
@@ -184,7 +194,7 @@ final class UpdateChecker: ObservableObject {
             }
         } catch FeedError.httpStatus(404) {
             statusMessage = "No published release is available to compare."
-            lastCheckDate = Date()
+            lastCheckDate = now()
         } catch FeedError.httpStatus(let status) {
             statusMessage = "Update check failed (HTTP \(status))"
         } catch {

@@ -113,16 +113,20 @@ final class NotificationService: Sendable {
 
     /// One report per event, the one that scores highest, in first-seen order, with its score; stories outside any
     /// event stand alone. Several publishers covering one story then notify once instead of once each (#523), in
-    /// every mode (#587). Scoring tags every article once, so it runs off the main actor.
-    @concurrent nonisolated static func representatives(of articles: [FeedArticle], events: [String: String]) async
-        -> [(article: FeedArticle, score: Double)]
-    {
+    /// every mode (#587). A starred feed's report outranks any other, so triage still sees it as starred (#588).
+    /// Scoring tags every article once, so it runs off the main actor.
+    @concurrent nonisolated static func representatives(
+        of articles: [FeedArticle], events: [String: String], starredFeedURLs: Set<String> = []
+    ) async -> [(article: FeedArticle, score: Double)] {
+        func rank(_ article: FeedArticle, _ score: Double) -> (Int, Double) {
+            (article.identityFeedURL.map(starredFeedURLs.contains) == true ? 1 : 0, score)
+        }
         var order: [String] = []
         var best: [String: (article: FeedArticle, score: Double)] = [:]
         for article in articles {
             let key = events[article.id] ?? article.id
             let score = shared.computeImportance(title: article.title, description: article.description)
-            if let current = best[key], current.score >= score { continue }
+            if let current = best[key], rank(current.article, current.score) >= rank(article, score) { continue }
             if best[key] == nil { order.append(key) }
             best[key] = (article, score)
         }
@@ -131,8 +135,8 @@ final class NotificationService: Sendable {
 
     /// Full-mode triage (#588): a story notifies when its feed is starred, when it is breaking (score ≥ 0.6), or when
     /// it is in one of the reader's top interest categories and three or more publishers cover its event. Everything
-    /// else is silent. Starred feeds are not counted against the banner limit. An event notified in the last day
-    /// stays quiet while its lead headline is the one notified; a new lead headline notifies again (#545).
+    /// else is silent. Starred feeds are not counted against the banner limit. Otherwise an event notified in the last
+    /// day stays quiet while its lead headline is the one notified; a new lead headline notifies again (#545).
     static func triage(_ ranked: [(article: FeedArticle, score: Double)], delivery: NotificationDelivery)
         -> [(article: FeedArticle, score: Double)]
     {
@@ -140,13 +144,13 @@ final class NotificationService: Sendable {
         var budget = bannerLimit
         for item in ranked {
             let article = item.article
+            if let feed = article.identityFeedURL, delivery.starredFeedURLs.contains(feed) {
+                chosen.append(item)
+                continue
+            }
             if let event = delivery.events[article.id], let notified = delivery.notifiedEvents[event],
                 notified == leadKey(of: article, event: event, delivery: delivery)
             {
-                continue
-            }
-            if let feed = article.identityFeedURL, delivery.starredFeedURLs.contains(feed) {
-                chosen.append(item)
                 continue
             }
             guard budget > 0 else { continue }
@@ -179,7 +183,8 @@ final class NotificationService: Sendable {
     /// triaged reports one at a time, a pause apart, each threaded under its story.
     func triageAndNotify(newArticles: [FeedArticle], delivery: NotificationDelivery) async {
         guard !newArticles.isEmpty else { return }
-        let ranked = await Self.representatives(of: newArticles, events: delivery.events)
+        let ranked = await Self.representatives(
+            of: newArticles, events: delivery.events, starredFeedURLs: delivery.starredFeedURLs)
 
         switch delivery.mode {
         case .minimal:
