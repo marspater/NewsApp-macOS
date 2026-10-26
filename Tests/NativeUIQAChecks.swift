@@ -9,6 +9,7 @@ import Vision
 extension Notification.Name {
     static let openArticleFromNotification = Notification.Name("openArticleFromNotification")
     static let refreshFeedsCommand = Notification.Name("refreshFeedsCommand")
+    static let markAllReadCommand = Notification.Name("markAllReadCommand")
     static let nextArticleCommand = Notification.Name("nextArticleCommand")
     static let prevArticleCommand = Notification.Name("prevArticleCommand")
     static let toggleReadCommand = Notification.Name("toggleReadCommand")
@@ -83,6 +84,7 @@ struct NativeUIQAChecks {
             "Cards already inside the window do not restart prefetch")
         await testRemoteImageReuse()
         await testOverviewLeadImageUsesProtectedLoader()
+        await testCardImageOverflowTakesNoClicks()
 
         print("Finished \(testsRun) Native UI QA checks with \(failures) failures.")
         if failures > 0 {
@@ -253,9 +255,10 @@ struct NativeUIQAChecks {
             do { try VNImageRequestHandler(cgImage: image).perform([request]) } catch { return "" }
             return (request.results ?? []).compactMap { $0.topCandidates(1).first?.string }.joined(separator: "\n")
         }
-        // OCR is slow under load: wait until every expected line is recognised in one pass, then assert on that pass.
+        // OCR is slow under load and on a cold Vision model (10 s missed once on a first run): wait until every expected
+        // line is recognised in one pass, then assert on that pass.
         let expected = ["Previously accepted assessment", "Current Panel Headlines", "Current unscored panel evidence"]
-        let deadline = ContinuousClock.now + .seconds(10)
+        let deadline = ContinuousClock.now + .seconds(30)
         var text = renderedText()
         while !expected.allSatisfy(text.contains), ContinuousClock.now < deadline {
             host.layoutSubtreeIfNeeded()
@@ -361,6 +364,66 @@ struct NativeUIQAChecks {
         let deadline = Date().addingTimeInterval(5)
         while probe.requests.isEmpty, Date() < deadline { await Task.yield() }
         assertEqual(probe.requests, [url], "Overview lead image is requested through the reader image loader")
+    }
+
+    /// #593: a tall image filled into the card below overflows its header far above the card. A click on the control
+    /// above it must reach that control, not open the card below.
+    static func testCardImageOverflowTakesNoClicks() async {
+        print("  - Testing that a card image overflowing its frame takes no clicks meant for the card above...")
+        let suite = testDefaultsSuite("native.card-overflow")
+        defer { removeTestDefaults(suite) }
+        let settings = AppSettings(defaults: UserDefaults(suiteName: suite)!)
+        let store = ArticleStore(database: DatabaseEngine(path: ":memory:"))
+        await store.initialize()
+        let url = URL(string: "https://images.example/\(UUID().uuidString)/tall.jpg")!
+        let tall = CGContext(
+            data: nil, width: 40, height: 400, bitsPerComponent: 8, bytesPerRow: 160,
+            space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!.makeImage()!
+        var clicked: [String] = []
+        let below = FeedArticle(
+            title: "Pictured story", link: "https://example.com/pictured", guid: "pictured", description: "Summary.",
+            pubDate: Date(), source: "Test", imageUrl: url.absoluteString)
+        let host = NSHostingView(
+            rootView: VStack(spacing: AppLayout.cardGap) {
+                // Stands in for the footer of the card above: 120 pt at the top of the window.
+                Button("Above") { clicked.append("above") }
+                    .buttonStyle(.plain)
+                    .frame(maxWidth: .infinity, minHeight: 120, maxHeight: 120)
+                    .contentShape(Rectangle())
+                ArticleCardView(article: below, action: { clicked.append("below") }, footer: EmptyView())
+            }
+            .frame(width: 300)
+            .frame(maxHeight: .infinity, alignment: .top)
+            .environment(\.readerImageLoader) { _ in tall }
+            .environmentObject(settings).environmentObject(ReadManager(articleStore: store))
+            .environmentObject(SavedStoriesManager(articleStore: store)))
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 300, height: 800), styleMask: [.titled], backing: .buffered,
+            defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = host
+        window.makeKeyAndOrderFront(nil)
+        defer { window.close() }
+        let deadline = ContinuousClock.now + .seconds(3)
+        while DecodedImageCache.aspectRatio(for: url) == nil, ContinuousClock.now < deadline {
+            host.layoutSubtreeIfNeeded()
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        host.layoutSubtreeIfNeeded()
+        // Window coordinates start at the bottom: 60 pt below the top is the middle of the control above.
+        let point = NSPoint(x: 150, y: 740)
+        for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+            if let event = NSEvent.mouseEvent(
+                with: type, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)
+            {
+                window.sendEvent(event)
+            }
+        }
+        try? await Task.sleep(for: .milliseconds(100))
+        assertTrue(DecodedImageCache.aspectRatio(for: url) != nil, "The tall image is loaded under the control")
+        assertEqual(clicked, ["above"], "The click reaches the control above, not the card whose image overflows")
+        await store.database.close()
     }
 
     @MainActor private final class RemoteImageProbe {
@@ -761,7 +824,7 @@ struct NativeUIQAChecks {
         _ = EyebrowText("Publisher")
         _ = TagView(title: "Updated", tint: AppColor.accent)
         _ = TagView.intelligence()
-        _ = IntelligenceLabel("AI-generated summary")
+        _ = IntelligenceLabel("Generated summary")
         _ = NoticeView(tint: AppColor.warning) { Text("Notice") }
         for scale: CGFloat in [1.0, 1.3, 1.5] {
             _ = AppTypography.overviewFont(.title, scale: scale)

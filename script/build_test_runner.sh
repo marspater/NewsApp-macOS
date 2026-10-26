@@ -55,6 +55,7 @@ swiftc "${NEWS_DEPENDENCY_FLAGS[@]}" "$@" -target "$(uname -m)-apple-macos${TARG
     Sources/Storage/DatabaseEngine.swift \
     Sources/Storage/DatabaseEngine+Events.swift \
     Sources/Storage/MigrationCoordinator.swift \
+    Sources/Storage/SpotlightIndexer.swift \
     Sources/Storage/ArticleStore.swift \
     Sources/Intelligence/ArticleIntelligence.swift \
     Sources/Intelligence/OverviewPassageSelector.swift \
@@ -98,14 +99,20 @@ swiftc "${NEWS_DEPENDENCY_FLAGS[@]}" "$@" -target "$(uname -m)-apple-macos${TARG
     Sources/Storage/SavedStoriesManager.swift \
     Sources/Services/OPMLManager.swift \
     Sources/Views/DesignSystem.swift \
+    Sources/Views/BriefingComponents.swift \
     Sources/Views/BriefingView.swift \
     Sources/Views/ArticleRemoteImage.swift \
     Sources/Views/ReaderSupportViews.swift \
     Sources/Views/EventOverviewReaderView.swift \
     Sources/App/NewsSignposts.swift \
     Sources/App/UpdateChecker.swift \
+    Sources/App/NewsURLParser.swift \
+    Sources/App/Intents.swift \
+    Sources/App/NotificationActionRouter.swift \
     Tests/StoryCorpus.swift \
     Tests/EventEmbeddingTests.swift \
-    "$TEST_STAGE/NewsTests.swift" Tests/FeedKitSwiftSoupTests.swift Tests/NotificationAttachmentTests.swift Tests/BriefingE2ETests.swift "$TEST_STAGE/Runner.swift" \
+    Tests/EpicNE2ETests.swift \
+    Tests/BriefingE2ETests.swift \
+    "$TEST_STAGE/NewsTests.swift" Tests/FeedKitSwiftSoupTests.swift Tests/NotificationAttachmentTests.swift "$TEST_STAGE/Runner.swift" \
     Tests/TestDefaults.swift \
     -o "$OUTPUT"

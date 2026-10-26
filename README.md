@@ -31,6 +31,18 @@ Feed, image, extraction, update and protected Web preview requests use an on-dev
 
 A valid feed does not guarantee that the publisher exposes a full article. Paywalls, authentication, access restrictions and JavaScript-only pages can prevent reader extraction. The app does not generate replacement article text or bypass publisher restrictions.
 
+## Shortcuts & App Intents
+
+News integrates with macOS Shortcuts and Siri through App Intents:
+
+- **Refresh Feeds**: Fetches latest stories from all subscribed feeds in the background.
+- **Add Feed**: Subscribes to an RSS or Atom feed URL, validating format and checking duplicates.
+- **Open Section**: Jumps directly to Today, Unread, Briefing, or Saved Stories.
+- **Mark All as Read**: Marks all stories across your feeds as read.
+- **New Briefing**: Generates a fresh daily briefing edition on demand.
+
+The app also registers custom URL schemes (`feed://`, `feed:https://`, `feed:http://` for feed subscriptions and `news://story/<id>` for story deep linking).
+
 ## Requirements
 
 - Runtime: macOS 15 or later. Newer glass and Foundation Models features use availability checks.
@@ -72,7 +84,7 @@ Standard project, contribution, privacy and security documents stay at the root.
 
 ## Source layout
 
-- `Sources/App`: entry point, settings, theme and update checks.
+- `Sources/App`: entry point, settings, theme, update checks, URL schemes and App Intents.
 - `Sources/Views`: sidebar, list/grid, reader, WebKit and semantic design tokens.
 - `Sources/Services`: feed parsers, OPML, dates and secure HTTP ingestion.
 - `Sources/Storage`: SQLite, migrations and observable stores.
