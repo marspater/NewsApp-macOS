@@ -168,6 +168,8 @@ struct ArticleCardView<Footer: View>: View {
                             .frame(height: cardHeaderHeight)
                             .overlay { image.resizable().aspectRatio(contentMode: .fill) }
                             .clipped()
+                            // Clipping hides the overflow but does not stop it taking clicks meant for the card above.
+                            .contentShape(Rectangle())
                     } else {
                         editorialPlaceholder
                     }
@@ -305,6 +307,7 @@ struct ArticleCardView<Footer: View>: View {
                             }
                         }
                         .clipped()
+                        .contentShape(Rectangle())
                 } else if failed {
                     editorialPlaceholder
                 } else {

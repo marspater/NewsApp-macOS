@@ -2,7 +2,7 @@
 
 Refs #104, #153, #90. Base: `49f0396`, including the merged source-reader and overview accessibility work. Apple M5 / 24 GiB, macOS 27.0.1 (26A434), Xcode 27.0 (27A266a), Swift 6.4, SQLite 3.54.0; optimized arm64, deployment target macOS 15.
 
-Run `./test.sh --performance-baseline --active-work-cancellation`. The first flag selects optimized compilation; the second selects the active-work workload instead of the complete core baseline. The command emits five samples per operation. [Raw evidence](../benchmarks/2026-10-02-active-work-cancellation.json) retains two complete optimized runs, ten samples per operation, including the slower rollback tail in the second run. The full regression suite exercises one cancellation per operation against the same fixtures.
+Run `./test.sh --performance-baseline --active-work-cancellation`. The first flag selects optimized compilation; the second selects the active-work workload instead of the complete core baseline. The command emits five samples per operation. [Raw evidence](../benchmarks/2026-10-02-active-work-cancellation.json) retains two complete optimized runs, ten samples per operation, including the slower rollback tail in the second run. The full regression suite exercises one cancellation per operation against smaller clustering and parsing fixtures (150 rows, a 100-item feed; ingestion keeps 20,000 rows) that still cancel mid-work; since 25 October 2026 only this command uses the full workload.
 
 ## Transactional ingestion
 

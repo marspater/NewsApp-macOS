@@ -32,4 +32,8 @@ grep -q 'test atom(s) failed' "$WORK/err" || fail "analysis must report the atom
 script/ci_testsuite.sh --lcov "$WORK/out.lcov" Tests/Passing.swift > /dev/null 2> "$WORK/err" && fail "analysis without profiles must exit non-zero"
 grep -q 'no coverage profile' "$WORK/err" || fail "analysis must explain missing profiles"
 
+NEWS_TEST_RUNNER="$WORK/unbuilt" script/ci_testsuite.sh "$WORK/junit.xml" > /dev/null || fail "no selected atom must exit 0"
+[ ! -e "$WORK/unbuilt" ] || fail "no selected atom must not compile the runner"
+grep -q 'tests="0" failures="0"' "$WORK/junit.xml" || fail "no selected atom must report an empty suite"
+
 echo "✅ ci_testsuite.sh checks passed"

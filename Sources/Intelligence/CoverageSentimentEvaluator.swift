@@ -108,16 +108,24 @@ public struct ToneAssessment: Sendable, Equatable {
     }
 }
 
-/// Evaluator that determines whether automated coverage sentiment meets the threshold to ship in event overviews.
+/// Evaluator that determines whether automated coverage sentiment meets the reliability threshold to ship in event overviews.
 ///
-/// Implements the project requirement from Story Experience Plan & Epic #96:
-/// "Sentiment: необов'язкова тональність тексту, не оцінка істинності чи небезпеки події. Нижчий пріоритет, ніж якість викладу та джерел."
-/// "• Sections without sufficient data are absent; no template must be filled.
-///  • Sentiment ships only if evaluation justifies it."
+/// `CoverageSentimentEvaluator` enforces the project's quality invariants for journalistic tone analysis:
+/// - Sentiment indicates the stylistic framing of the text, not the factual veracity or hazard level of the real-world event.
+/// - Sections lacking statistically validated data are omitted rather than populated with speculative ratings.
+/// - Coverage sentiment ships in event overviews only when empirical corpus evaluation justifies its reliability.
+///
+/// ### Confounding Adversity Vocabulary
+/// Standard lexical sentiment taggers frequently misclassify objective disaster, accident, and crisis reporting
+/// (e.g., casualties, earthquakes, economic downturns) as editorial opinion. This evaluator measures false negativity
+/// rates across a frozen ground-truth corpus to prevent misleading sentiment badges from appearing in synthesized overviews.
 public final class CoverageSentimentEvaluator: Sendable {
+    /// The shared singleton evaluator instance.
     public static let shared = CoverageSentimentEvaluator()
 
-    /// Supported languages in the news catalog: en, de, fr, it, nl, pl, uk.
+    // MARK: - Catalog Configuration
+
+    /// Supported publication languages evaluated in the news catalog.
     public static let catalogLanguages: [String] = ["en", "de", "fr", "it", "nl", "pl", "uk"]
 
     /// Adversity and disaster keywords that cause naive lexical taggers to erroneously flag objective news as critical.
@@ -132,6 +140,8 @@ public final class CoverageSentimentEvaluator: Sendable {
         "disastrous decision", "reckless policy", "shameful", "outrageous", "incompetent",
         "brilliant triumph", "visionary leadership", "unacceptable blunder", "scandalous",
     ]
+
+    // MARK: - Ground-Truth Corpus
 
     /// Default frozen evaluation corpus containing objective crisis news, opinion pieces, milestones, and multilingual text.
     public static let defaultCorpus: [CorpusEvaluationItem] = [
@@ -227,9 +237,17 @@ public final class CoverageSentimentEvaluator: Sendable {
         ),
     ]
 
+    // MARK: - Initialization
+
+    /// Initializes a new coverage sentiment evaluator instance.
     public init() {}
 
+    // MARK: - Corpus Evaluation
+
     /// Runs quantitative evaluation across the corpus to test whether automated sentiment justifies shipping in overview UI.
+    ///
+    /// - Parameter corpus: An optional custom collection of labeled evaluation items. When omitted, ``defaultCorpus`` is used.
+    /// - Returns: A ``CoverageSentimentMetrics`` structure recording precision, false negativity rates, and the publication verdict.
     public func runCorpusEvaluation(corpus: [CorpusEvaluationItem]? = nil) -> CoverageSentimentMetrics {
         let items = corpus ?? Self.defaultCorpus
         var objectiveCrisisCount = 0
@@ -292,22 +310,41 @@ public final class CoverageSentimentEvaluator: Sendable {
         )
     }
 
-    /// Evaluates whether overview sentiment should be included in synthesized event overview.
+    // MARK: - Overview Inclusion Gate
+
+    /// Evaluates whether overview sentiment should be included in a synthesized event overview.
     ///
-    /// Always returns `false` based on the corpus evaluation results, enforcing the project invariant:
-    /// "Sentiment ships only if evaluation justifies it" and "Sections without sufficient data are absent".
+    /// Under the project's quality invariants, sentiment metadata is included only when benchmark evaluation
+    /// satisfies both false negativity (≤15%) and multilingual coverage (≥80%) criteria.
+    ///
+    /// - Parameter passages: The candidate evidence passages selected for the overview.
+    /// - Returns: `true` if coverage sentiment meets reliability thresholds; otherwise, `false`.
     public static func shouldIncludeInOverview(passages: [EvidencePassage]) -> Bool {
         _ = passages
         return shared.runCorpusEvaluation().justifiesOverviewSection
     }
 
     /// Internal helper evaluating whether overview sentiment should be included for member articles.
+    ///
+    /// - Parameter articles: The candidate feed articles in the event cluster.
+    /// - Returns: `true` if coverage sentiment meets reliability thresholds; otherwise, `false`.
     static func shouldIncludeInOverview(for articles: [FeedArticle]) -> Bool {
         _ = articles
         return shared.runCorpusEvaluation().justifiesOverviewSection
     }
 
+    // MARK: - Calibrated Tone Assessment
+
     /// Performs a calibrated, safe tone assessment on text that discounts confounding disaster vocabulary.
+    ///
+    /// Evaluates journalistic text using NaturalLanguage sentiment scoring while checking for adversity-confounding
+    /// vocabulary (e.g., casualties, disaster terms). If adversity terms are present without subjective editorial markers,
+    /// the classification is calibrated to `Neutral` with high confidence.
+    ///
+    /// - Parameters:
+    ///   - text: The input headline or article snippet to assess.
+    ///   - languageCode: An optional language identifier.
+    /// - Returns: A calibrated ``ToneAssessment`` containing the raw score, calibrated score, and explanatory rationale.
     public static func assessTextToneSafely(_ text: String, languageCode: String? = nil) -> ToneAssessment {
         let tagger = NLTagger(tagSchemes: [.sentimentScore])
         tagger.string = text
@@ -351,7 +388,12 @@ public final class CoverageSentimentEvaluator: Sendable {
         )
     }
 
+    // MARK: - Sentiment Synthesis
+
     /// Synthesizes coverage sentiment if evaluation justifies it; returns nil when evaluation fails criteria.
+    ///
+    /// - Parameter passages: The source evidence passages.
+    /// - Returns: An ``OverviewCoverageSentiment`` instance if criteria are satisfied; otherwise, `nil`.
     public static func synthesizeCoverageSentiment(passages: [EvidencePassage]) -> OverviewCoverageSentiment? {
         guard shouldIncludeInOverview(passages: passages) else { return nil }
         return OverviewCoverageSentiment(
@@ -363,6 +405,9 @@ public final class CoverageSentimentEvaluator: Sendable {
     }
 
     /// Internal synthesizer for feed articles.
+    ///
+    /// - Parameter articles: The cluster member articles.
+    /// - Returns: An ``OverviewCoverageSentiment`` instance if criteria are satisfied; otherwise, `nil`.
     static func synthesizeCoverageSentiment(for articles: [FeedArticle]) -> OverviewCoverageSentiment? {
         guard shouldIncludeInOverview(for: articles) else { return nil }
         return OverviewCoverageSentiment(
