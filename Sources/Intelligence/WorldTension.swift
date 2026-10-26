@@ -128,67 +128,83 @@ struct WorldTensionAssessment: Codable, Equatable, Sendable {
 
     // MARK: Keyword estimate
 
-    private static let typeWeights: [TensionEventType: Int] = [
-        .armedConflict: 9, .terrorism: 6, .coercion: 5, .cyberAttack: 4, .disaster: 4, .healthEmergency: 4,
-        .civilUnrest: 3,
-    ]
     private static let worstCaseCues = [
         "nuclear", "chemical weapons", "biological weapons", "dirty bomb", "radiation", "warhead", "warheads",
     ]
 
-    /// Per-headline weight from the v1 deterministic cues; the basis of driver ranking and of the estimate.
-    static func weight(of headline: WorldTensionHeadline) -> Int {
+    /// Per-headline weight from the calibrated v1 cue weights (#158): the event type's weight times the escalation
+    /// multiplier its cues show. Ranks hard news and driving headlines; the estimate itself scores whole events.
+    static func weight(of headline: WorldTensionHeadline) -> Double {
         let words = TensionEventClassifier.words(headline.title)
+        let weights = TensionWeights.calibratedV1
         let type =
             TensionEventType.allCases.filter {
                 TensionEventClassifier.containsCue(words, TensionEventClassifier.typeCues[$0] ?? [])
-            }.map { typeWeights[$0] ?? 0 }.max() ?? 0
+            }.map { weights.typeWeights[$0] ?? 0 }.max() ?? 0
         guard type > 0 else { return 0 }
-        var weight = type
-        if TensionEventClassifier.containsCue(words, TensionEventClassifier.escalatingCues) { weight += 3 }
-        if TensionEventClassifier.containsCue(words, TensionEventClassifier.deescalatingCues, reversible: true) {
-            weight -= 2
+        if TensionEventClassifier.containsCue(words, TensionEventClassifier.escalatingCues) {
+            return type * (weights.escalationMultipliers[.escalating] ?? 1)
         }
-        return max(1, weight)
+        if TensionEventClassifier.containsCue(words, TensionEventClassifier.deescalatingCues, reversible: true) {
+            return type * (weights.escalationMultipliers[.deescalating] ?? 1)
+        }
+        return type
     }
 
-    /// A transparent keyword estimate over current headlines, used only when no model assessment can be shown.
-    /// ponytail: fixed cue weights, not calibrated; replace with the calibrated v1 formula once #158 lands.
-    static func estimate(current: [WorldTensionHeadline]) -> Self? {
+    /// A transparent estimate over the day's panel corpus, used only when no model assessment can be shown. Each
+    /// unique event is classified from its headlines and passages and scored with the calibrated v1 weights (type,
+    /// reported deaths and harm, escalation, reporting breadth); the day's sum maps to the 0–100 index exactly as
+    /// `TensionCalibrator` scores the history (#544). The current headlines name the drivers.
+    static func estimate(current: [WorldTensionHeadline], day: TensionDayAssessment, rows: [TensionCorpusRow])
+        -> Self?
+    {
         let current = current.filter { $0.id.hasPrefix("C") }
         guard !current.isEmpty else { return nil }
-        let weights = current.map { ($0, weight(of: $0)) }
-        let hits = weights.filter { $0.1 > 0 }
-        let conflict = current.filter { headline in
-            let words = TensionEventClassifier.words(headline.title)
-            return [TensionEventType.armedConflict, .terrorism].contains {
-                TensionEventClassifier.containsCue(words, TensionEventClassifier.typeCues[$0] ?? [])
-            }
+        let score = TensionCalibrator.scoreDay(assessment: day)
+        let scored = score.eventScores.filter { $0.rawScore > 0 }.sorted { $0.rawScore > $1.rawScore }
+        let events = Dictionary(day.events.map { ($0.key, $0) }, uniquingKeysWith: { first, _ in first })
+        // The headline shown for each scoring event: headlines are stored article titles cut to 180 characters.
+        let headlineIDs = Dictionary(current.map { ($0.title, $0.id) }, uniquingKeysWith: { first, _ in first })
+        var headlineByArticle: [String: String] = [:]
+        for row in rows {
+            if let id = headlineIDs[String(row.article.title.prefix(180))] { headlineByArticle[row.article.id] = id }
+        }
+        var drivers: [String] = []
+        for event in scored {
+            guard let id = events[event.key]?.articleIDs.lazy.compactMap({ headlineByArticle[$0] }).first,
+                !drivers.contains(id)
+            else { continue }
+            drivers.append(id)
+        }
+        if drivers.isEmpty {
+            drivers = current.map { ($0, weight(of: $0)) }.filter { $0.1 > 0 }.sorted { $0.1 > $1.1 }.map(\.0.id)
         }
         let worstCase = current.contains {
             TensionEventClassifier.containsCue(TensionEventClassifier.words($0.title), worstCaseCues)
         }
-        // Panels carry several conflict reports every day, so the sum is halved: a busy day reads Warm, not Hot.
-        var score = min(70, 15 + hits.map(\.1).reduce(0, +) / 2)
-        if worstCase && !conflict.isEmpty { score = min(85, score + 10) }
-        let types = TensionEventType.allCases.filter { type in
-            current.contains {
-                TensionEventClassifier.containsCue(
-                    TensionEventClassifier.words($0.title), TensionEventClassifier.typeCues[type] ?? [])
-            }
+        let classifications = scored.compactMap { events[$0.key]?.classification }
+        let conflict = classifications.contains {
+            [TensionEventType.armedConflict, .terrorism].contains($0.type) || $0.deaths > .notReported
         }
-        let phrases = types.prefix(2).map { TensionBriefFacts.typePhrase($0) }
+        var typeScores: [TensionEventType: Double] = [:]
+        for event in scored {
+            if let type = events[event.key]?.classification.type { typeScores[type, default: 0] += event.rawScore }
+        }
+        let phrases = typeScores.sorted {
+            $0.value == $1.value ? $0.key.rawValue < $1.key.rawValue : $0.value > $1.value
+        }
+        .prefix(2).map { TensionBriefFacts.typePhrase($0.key) }
         let lead =
             phrases.isEmpty
-            ? "Today's international panel headlines describe no armed conflict, attacks or disasters."
-            : "Reports of \(phrases.joined(separator: " and ")) lead today's international panel headlines."
+            ? "Today's international panel reports describe no armed conflict, attacks or disasters."
+            : "Reports of \(phrases.joined(separator: " and ")) lead today's international panel coverage."
         return Self(
-            score: max(5, score),
+            score: Int((score.calibratedIndex ?? 0).rounded()),
             summary:
-                "This estimate counts conflict, attack, unrest and disaster cues in the panel headlines. It is shown because the on-device assessment is unavailable and does not weigh context or credibility.",
+                "This estimate classifies today's unique panel events by their conflict, attack, unrest, pressure, disaster and outbreak cues and scores them with the calibrated v1 weights for type, reported deaths and harm, escalation and reporting breadth. It is shown because the on-device assessment is unavailable and does not weigh context or credibility.",
             reasons: estimateReasons(
-                hits: hits.count, of: current.count, worstCase: worstCase, conflict: !conflict.isEmpty),
-            lead: lead, drivers: hits.sorted { $0.1 > $1.1 }.prefix(5).map(\.0.id), isEstimate: true)
+                hits: scored.count, of: day.events.count, worstCase: worstCase, conflict: conflict),
+            lead: lead, drivers: Array(drivers.prefix(5)), isEstimate: true)
     }
 
     /// The four factor sentences of a keyword estimate, stating only what the cues show.
@@ -197,7 +213,7 @@ struct WorldTensionAssessment: Codable, Equatable, Sendable {
             Reason(
                 factor: .scope,
                 explanation:
-                    "\(hits) of \(total) current panel headlines describe conflict, attacks, unrest, pressure or disasters."
+                    "\(hits) of \(total) unique events the panel reported today carry conflict, attack, unrest, pressure, disaster or outbreak cues."
             ),
             Reason(
                 factor: .worstCase,
@@ -210,8 +226,9 @@ struct WorldTensionAssessment: Codable, Equatable, Sendable {
             Reason(
                 factor: .reversibility,
                 explanation: conflict
-                    ? "Reports of fighting or attacks imply loss of life that cannot be reversed."
-                    : "No supplied headline describes fighting or attacks, so most reported harm appears reversible."),
+                    ? "Reports of fighting, attacks or deaths imply loss of life that cannot be reversed."
+                    : "No panel report describes fighting, attacks or deaths, so most reported harm appears reversible."
+            ),
         ]
     }
 }
@@ -497,7 +514,11 @@ actor WorldTensionService {
             // new set asks again. History is read again: another assessment may have been saved while the model ran.
             try Task.checkCancellation()
             let latest = try await database.worldTensionHistory()
-            guard !hasAssessment(latest), let estimate = WorldTensionAssessment.estimate(current: current) else {
+            let day = TensionDayAssessor.assess(
+                day: DateInterval(start: start, end: now), rows: rows, now: now, includingHeadlines: true)
+            guard !hasAssessment(latest),
+                let estimate = WorldTensionAssessment.estimate(current: current, day: day, rows: rows)
+            else {
                 if error == .rejected { rejectedHashes.insert(hash) }
                 throw error
             }
