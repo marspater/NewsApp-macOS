@@ -22,6 +22,7 @@ final class AppSettings: ObservableObject {
     static let mutedSourcesKey = "muted_sources"
     static let mutedTopicsKey = "muted_topics"
     static let mutedTopicSetsKey = "muted_topic_sets"
+    static let starredFeedURLsKey = "starred_feed_urls"
     static let tensionCollectionOptInKey = "tension_collection_opt_in"
     static let retiredFeedsVersionKey = "retired_feeds_version"
     static let dismissedAdvisoriesKey = "dismissed_advisories"
@@ -97,6 +98,8 @@ final class AppSettings: ObservableObject {
     @Published var tensionCollectionOptIn: Bool
     /// The reader's muted publisher hosts and topics; empty unless the reader adds rules.
     @Published private(set) var muteRules: MuteRules
+    /// Feeds whose every new story notifies, whatever the triage says (#588).
+    @Published private(set) var starredFeedURLs: Set<String>
     /// Mapping of normalized feed URL to the latest advisory date dismissed by the reader.
     @Published private(set) var dismissedAdvisories: [String: String]
 
@@ -177,6 +180,7 @@ final class AppSettings: ObservableObject {
             sources: defaults.stringArray(forKey: Self.mutedSourcesKey) ?? [],
             topics: defaults.stringArray(forKey: Self.mutedTopicsKey) ?? [],
             topicSets: defaults.stringArray(forKey: Self.mutedTopicSetsKey) ?? [])
+        self.starredFeedURLs = Set(defaults.stringArray(forKey: Self.starredFeedURLsKey) ?? [])
         self.dismissedAdvisories =
             (defaults.dictionary(forKey: Self.dismissedAdvisoriesKey) as? [String: String]) ?? [:]
     }
@@ -257,6 +261,24 @@ final class AppSettings: ObservableObject {
     func removeFeed(url: String) {
         feedURLs.removeAll { $0 == url }
         saveFeeds()
+        if starredFeedURLs.contains(url) { setFeedStarred(url, false) }
+    }
+
+    /// Feeds that can be starred at once (#588).
+    static let starredFeedLimit = 3
+
+    /// Stars or unstars a feed; a starred feed notifies about every new story. A star beyond the limit is refused
+    /// and nothing changes; returns whether the feed now has the requested state.
+    @discardableResult
+    func setFeedStarred(_ url: String, _ starred: Bool) -> Bool {
+        if starred {
+            guard starredFeedURLs.contains(url) || starredFeedURLs.count < Self.starredFeedLimit else { return false }
+            starredFeedURLs.insert(url)
+        } else {
+            starredFeedURLs.remove(url)
+        }
+        defaults.set(starredFeedURLs.sorted(), forKey: Self.starredFeedURLsKey)
+        return true
     }
 
     // MARK: - Catalog

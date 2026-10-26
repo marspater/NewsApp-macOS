@@ -60,6 +60,8 @@ struct SettingsView: View {
     @State private var newMutedSource = ""
     @State private var newMutedTopic = ""
     @State private var muteCounts = MuteRuleCounts()
+    /// The reader's current top interest categories, shown with the full-mode notification rule.
+    @State private var notificationInterests: [String] = []
     @State private var confirmsUnmuteAll = false
     @State private var inferredInterests: [String: Int] = [:]
     @State private var confirmsResetInterests = false
@@ -250,6 +252,12 @@ struct SettingsView: View {
 
             // Form keeps subscription actions reachable through system keyboard navigation.
             Form {
+                let starLimitReached = appSettings.starredFeedURLs.count >= AppSettings.starredFeedLimit
+                if starLimitReached {
+                    Text("Up to \(AppSettings.starredFeedLimit) feeds can be starred")
+                        .font(AppTypography.caption)
+                        .foregroundStyle(AppColor.secondaryText)
+                }
                 ForEach(feedManager.feedURLs, id: \.self) { urlString in
                     HStack(spacing: AppSpacing.sm) {
                         let status = feedManager.feedStatuses[urlString]
@@ -325,6 +333,27 @@ struct SettingsView: View {
                             }
                         }
                         Spacer()
+                        let starred = appSettings.starredFeedURLs.contains(urlString)
+                        Button {
+                            appSettings.setFeedStarred(urlString, !starred)
+                        } label: {
+                            Image(systemName: starred ? "star.fill" : "star")
+                                .font(AppTypography.label)
+                                .foregroundStyle(starred ? AppColor.accent : AppColor.secondaryText)
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(!starred && starLimitReached)
+                        .help(
+                            starred
+                                ? "Notifies about every story"
+                                : starLimitReached
+                                    ? "Up to \(AppSettings.starredFeedLimit) feeds can be starred"
+                                    : "Notify about every story"
+                        )
+                        .accessibilityLabel(
+                            starred
+                                ? "Stop notifying about every story from this feed"
+                                : "Notify about every story from this feed")
                         Button(role: .destructive) {
                             pendingUnsubscribe = urlString
                         } label: {
@@ -644,11 +673,33 @@ struct SettingsView: View {
                             .foregroundStyle(AppColor.secondaryText)
                     }
                     .padding(.top, AppSpacing.xxs)
+                    if appSettings.notificationMode == .full {
+                        Text(fullNotificationRule)
+                            .font(AppTypography.caption)
+                            .foregroundStyle(AppColor.secondaryText)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
             }
         }
         .formStyle(.grouped)
         .frame(width: Self.paneWidth)
+        .task {
+            let weights = (try? await articleStore.database.briefingInterests()) ?? [:]
+            notificationInterests = NotificationService.rankedInterests(weights).compactMap { key in
+                NewsCategory.allCases.first { $0.rawValue.lowercased() == key }?.rawValue
+            }
+        }
+    }
+
+    /// The full-mode rule in one sentence, with the interests it currently reads (#588).
+    private var fullNotificationRule: String {
+        let interests =
+            notificationInterests.isEmpty
+            ? "your top reading interests (none yet; they come from the stories you open and save)"
+            : "your top reading interests (\(notificationInterests.joined(separator: ", ")))"
+        return
+            "Banners arrive for breaking stories, for stories in \(interests) when three or more publishers cover them, and for every story from a feed starred in Subscriptions."
     }
 
     // MARK: - 4. Intelligence Tab

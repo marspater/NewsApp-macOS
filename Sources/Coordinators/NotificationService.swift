@@ -5,12 +5,19 @@ import UniformTypeIdentifiers
 import UserNotifications
 import os
 
-/// What a refresh hands the notification service besides the new stories: the mode and the event of each story,
-/// so one event notifies once and later reports of it thread under the first banner (#587).
+/// What a refresh hands the notification service besides the new stories: the mode, the event of each story (so one
+/// event notifies once and later reports thread under the first banner, #587) and what full-mode triage reads
+/// (#588). Everything here comes from the reader's own library and settings.
 struct NotificationDelivery: Sendable {
     var mode: AppSettings.NotificationMode
     /// Story id → event id, for stories clustering has grouped; a story outside any event is absent.
     var events: [String: String] = [:]
+    /// Event id → number of distinct publishers among its members.
+    var publishers: [String: Int] = [:]
+    /// The reader's top interest categories, lowercased `NewsCategory` raw values.
+    var interests: Set<String> = []
+    /// Feeds whose every story notifies.
+    var starredFeedURLs: Set<String> = []
 }
 
 /// Manages NLP-based notification triage, rich image attachments, and alert scheduling.
@@ -22,10 +29,13 @@ final class NotificationService: Sendable {
     /// Pause between two banners of one refresh: posted at once, macOS stacks them and one hides behind the other.
     private let spacing: Duration
 
-    /// A story this strong is breaking news: its banner sounds and interrupts like any alert; the rest are passive.
+    /// A story this strong is breaking news: it notifies on its own, and its banner sounds and interrupts like any
+    /// alert; the rest are passive.
     static let breakingScore = 0.6
-    /// Full-mode threshold below which a story does not notify.
-    static let notifyScore = 0.45
+    /// An interest story needs this many publishers on its event before it notifies.
+    static let interestPublishers = 3
+    /// Banners per refresh in full mode; starred feeds are not counted.
+    static let bannerLimit = 5
 
     init(
         post: (@Sendable (UNNotificationRequest) async throws -> Void)? = nil, spacing: Duration = .seconds(2)
@@ -93,27 +103,67 @@ final class NotificationService: Sendable {
 
     /// One report per event, the one that scores highest, in first-seen order, with its score; stories outside any
     /// event stand alone. Several publishers covering one story then notify once instead of once each (#523), in
-    /// every mode (#587). Scoring tags every article once, so it runs off the main actor.
-    @concurrent nonisolated static func representatives(of articles: [FeedArticle], events: [String: String]) async
-        -> [(article: FeedArticle, score: Double)]
-    {
+    /// every mode (#587). A starred feed's report outranks any other, so triage still sees it as starred (#588).
+    /// Scoring tags every article once, so it runs off the main actor.
+    @concurrent nonisolated static func representatives(
+        of articles: [FeedArticle], events: [String: String], starredFeedURLs: Set<String> = []
+    ) async -> [(article: FeedArticle, score: Double)] {
+        func rank(_ article: FeedArticle, _ score: Double) -> (Int, Double) {
+            (article.identityFeedURL.map(starredFeedURLs.contains) == true ? 1 : 0, score)
+        }
         var order: [String] = []
         var best: [String: (article: FeedArticle, score: Double)] = [:]
         for article in articles {
             let key = events[article.id] ?? article.id
             let score = shared.computeImportance(title: article.title, description: article.description)
-            if let current = best[key], current.score >= score { continue }
+            if let current = best[key], rank(current.article, current.score) >= rank(article, score) { continue }
             if best[key] == nil { order.append(key) }
             best[key] = (article, score)
         }
         return order.compactMap { best[$0] }
     }
 
+    /// Full-mode triage (#588): a story notifies when its feed is starred, when it is breaking (score ≥ 0.6), or when
+    /// it is in one of the reader's top interest categories and three or more publishers cover its event. Everything
+    /// else is silent. Starred feeds are not counted against the banner limit.
+    static func triage(_ ranked: [(article: FeedArticle, score: Double)], delivery: NotificationDelivery)
+        -> [(article: FeedArticle, score: Double)]
+    {
+        var chosen: [(article: FeedArticle, score: Double)] = []
+        var budget = bannerLimit
+        for item in ranked {
+            let article = item.article
+            if let feed = article.identityFeedURL, delivery.starredFeedURLs.contains(feed) {
+                chosen.append(item)
+                continue
+            }
+            guard budget > 0 else { continue }
+            let category = article.category.flatMap(NewsCategory.match(from:))?.rawValue.lowercased()
+            let publishers = delivery.events[article.id].flatMap { delivery.publishers[$0] } ?? 1
+            let interest = category.map(delivery.interests.contains) == true && publishers >= interestPublishers
+            guard item.score >= breakingScore || interest else { continue }
+            chosen.append(item)
+            budget -= 1
+        }
+        return chosen
+    }
+
+    /// The reader's top interest categories (lowercased raw values) from the Briefing's interest weights, strongest
+    /// first; ties break alphabetically so the list is stable.
+    static func rankedInterests(_ weights: [String: Int], limit: Int = 3) -> [String] {
+        weights.sorted { $0.value == $1.value ? $0.key < $1.key : $0.value > $1.value }.prefix(limit).map(\.key)
+    }
+
+    static func topInterests(_ weights: [String: Int], limit: Int = 3) -> Set<String> {
+        Set(rankedInterests(weights, limit: limit))
+    }
+
     /// NLP-driven triage: dispatches notifications according to the active NotificationMode. Full mode posts the
-    /// strongest reports one at a time, a pause apart, each threaded under its story.
-    func triageAndNotify(newArticles: [FeedArticle], delivery: NotificationDelivery, maxNotifications: Int = 3) async {
+    /// triaged reports one at a time, a pause apart, each threaded under its story.
+    func triageAndNotify(newArticles: [FeedArticle], delivery: NotificationDelivery) async {
         guard !newArticles.isEmpty else { return }
-        let ranked = await Self.representatives(of: newArticles, events: delivery.events)
+        let ranked = await Self.representatives(
+            of: newArticles, events: delivery.events, starredFeedURLs: delivery.starredFeedURLs)
 
         switch delivery.mode {
         case .minimal:
@@ -125,8 +175,7 @@ final class NotificationService: Sendable {
             await triggerPrivateNotification()
 
         case .full:
-            let toNotify = ranked.sorted { $0.score > $1.score }.filter { $0.score >= Self.notifyScore }
-                .prefix(maxNotifications)
+            let toNotify = Self.triage(ranked.sorted { $0.score > $1.score }, delivery: delivery)
             for (index, item) in toNotify.enumerated() {
                 if index > 0 { try? await Task.sleep(for: spacing) }
                 guard !Task.isCancelled else { return }

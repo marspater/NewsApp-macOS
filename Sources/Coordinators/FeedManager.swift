@@ -470,8 +470,18 @@ class FeedManager: NSObject, ObservableObject {
         if appSettings.notificationsEnabled && !notifiable.isEmpty {
             // Clustering has run: reports of one event notify once, by their strongest report, in every mode (#523,
             // #587); the service picks them from the events handed over.
-            let events = (try? await articleStore.database.eventIDs(forArticles: notifiable.map(\.id))) ?? [:]
-            await notifyBatch(notifiable, NotificationDelivery(mode: appSettings.notificationMode, events: events))
+            let database = articleStore.database
+            let events = (try? await database.eventIDs(forArticles: notifiable.map(\.id))) ?? [:]
+            var delivery = NotificationDelivery(mode: appSettings.notificationMode, events: events)
+            if delivery.mode == .full {
+                // Full mode notifies about breaking stories, top-interest stories with enough publishers and starred
+                // feeds (#588); the interests are the Briefing's, read from the reader's own history.
+                delivery.publishers = (try? await database.eventPublisherCounts(Set(events.values))) ?? [:]
+                delivery.interests = NotificationService.topInterests(
+                    (try? await database.briefingInterests(now: now())) ?? [:])
+                delivery.starredFeedURLs = appSettings.starredFeedURLs
+            }
+            await notifyBatch(notifiable, delivery)
         }
         guard !Task.isCancelled, !isStopped else { return }
         enrichArticlesInBackground()
