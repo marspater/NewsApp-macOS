@@ -98,7 +98,10 @@ Canada's prime minister defending trade with countries that do not share its val
 accusation of election meddling, and three 9to5Mac daily deals round-ups of different days joined as one story. Clock
 window with it: 770 of 1,954 (39%), 1,367 cards, 25 groups (12 by event links), 21 attached reports; printed share
 451 (37%), 15 stories. Named cases unchanged. Sheet: `story-group-review-f.csv` (SHA-256 `f4baa6c9…`). Kept out of
-this slice; a story-pass rule that one publisher's series items never agree would remove the deals group.
+this slice by decision (it adds 7 groups, 2 of them wrong, and moves no named case); its diffs are kept in the
+implementer's scratch directory, not in the repository. The deals round-ups also show a gap in the #688 series guard:
+two of them merged at event level, because their headlines ("Deals: …") carry no date, so no calendar-day conflict can
+fire between days, and the edition guard needs edition words.
 
 ## Matcher findings from the review
 
