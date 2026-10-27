@@ -599,6 +599,11 @@ struct EventMatchPolicy: Sendable, Equatable {
     /// A related-act pair links two events into one story when it shares at least this many specific names (#581):
     /// a country or a common name alone linked unrelated stories in 35 of 56 reviewed related-act rows.
     var storyLinkAnchors = 2
+    /// The pair model's story signal (#627): two events, or a report alone and an event, are one story when two thirds
+    /// of their cross pairs score p_same + p_related at or above this with p_different at most 0.15, share one specific
+    /// name that is not a common actor, and share a keyword or reach the semantic veto's cosine. Infinity turns it off;
+    /// off by default (measured on the library holdout, see docs/audits/2026-10-27-three-way-pair-model.md).
+    var storyModelThreshold: Double = .infinity
     /// The pair model reads the time gap and whether both reports come from one publisher as plain words in front of
     /// each text (#626). Off: the shipped model was trained without the prefix, and the prefixed candidates added false
     /// merges on tune (docs/audits/2026-10-24-pair-model-pretraining.md). On to evaluate a model trained with it.

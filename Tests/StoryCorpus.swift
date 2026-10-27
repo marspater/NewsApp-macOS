@@ -148,7 +148,8 @@ enum StoryCorpus {
                     let energy = ProcessInfo.processInfo.environment["NEWS_ENERGY"] != "0"
                     let report = try await EventClusterer.run(
                         in: db, matchPolicy: policy, now: clock,
-                        allowsEnergy: energy, pairProbability: pairProbabilityFromEnvironment())
+                        allowsEnergy: energy, pairProbability: pairProbabilityFromEnvironment(),
+                        storyProbabilities: storyProbabilitiesFromEnvironment())
                     onPass?(report)
                 }
                 clock = clock.addingTimeInterval(6 * 3600)
@@ -157,7 +158,11 @@ enum StoryCorpus {
             var result: [String: String] = [:]
             for item in items {
                 let resolved = try await db.resolvedArticleID(for: item)
-                let event = try await db.eventID(forArticle: resolved)
+                var event = try await db.eventID(forArticle: resolved)
+                // NEWS_SCORE_STORIES=1 (#627) scores stories instead of events: two events of one story count as one.
+                if ProcessInfo.processInfo.environment["NEWS_SCORE_STORIES"] == "1", let id = event {
+                    event = try await db.storyID(forEvent: id)
+                }
                 result[item.id] = event.map { "event:" + $0 } ?? "document:" + resolved
             }
             await db.close()
@@ -170,7 +175,7 @@ enum StoryCorpus {
 
     /// The matcher policy with the sweep overrides of the evaluation flags (#525, #582): NEWS_PAIR_THRESHOLD,
     /// NEWS_RESCUE_TWO_ANCHORS (cosine), NEWS_MODEL_ANCHORLESS (cosine), NEWS_COMPATIBLE_REQUIRES_MATCH=1,
-    /// NEWS_COMPATIBLE_SHARE, NEWS_SAME_PUBLISHER=1. NEWS_PAIR_MODEL=0 turns the model off at the call site.
+    /// NEWS_COMPATIBLE_SHARE, NEWS_SAME_PUBLISHER=1, NEWS_STORY_MODEL (#627). NEWS_PAIR_MODEL=0 turns the model off at the call site.
     /// The pair model the evaluation flags use (#624): `NEWS_PAIR_MODEL=0` none, `NEWS_PAIR_MODEL_PATH` a candidate
     /// `pairscorer.mlmodelc` (compile a `.mlpackage` with `xcrun coremlcompiler compile`), otherwise the shipped one.
     /// With a candidate, `NEWS_PAIR_RULE=story` (#627, evaluation only) admits on p_same + p_related when p_same
@@ -189,6 +194,16 @@ enum StoryCorpus {
         }
     }
 
+    /// A separate story model for the story signal (#627, evaluation): `NEWS_STORY_MODEL_PATH` a three-way
+    /// `pairscorer.mlmodelc` whose p_same + p_related the story pass reads instead of the pair model's.
+    static func storyProbabilitiesFromEnvironment()
+        -> (@Sendable (String, String) async -> (same: Double, related: Double)?)?
+    {
+        guard let path = ProcessInfo.processInfo.environment["NEWS_STORY_MODEL_PATH"] else { return nil }
+        let model = PairScorer(modelURL: URL(fileURLWithPath: path))
+        return { @Sendable a, b in await model.probabilities(a, b) }
+    }
+
     static func policyFromEnvironment() -> EventMatchPolicy {
         let environment = ProcessInfo.processInfo.environment
         var policy = EventMatchPolicy.standard
@@ -202,6 +217,7 @@ enum StoryCorpus {
         if environment["NEWS_COMPATIBLE_REQUIRES_MATCH"] == "1" { policy.compatibleRequiresMatch = true }
         if let value = environment["NEWS_COMPATIBLE_SHARE"].flatMap(Double.init) { policy.compatibleShare = value }
         if environment["NEWS_SAME_PUBLISHER"] == "1" { policy.samePublisherRequiresMatch = true }
+        if let value = environment["NEWS_STORY_MODEL"].flatMap(Double.init) { policy.storyModelThreshold = value }
         if let value = environment["NEWS_PAIR_PREFIX"] { policy.pairModelPrefix = value == "1" }
         return policy
     }
