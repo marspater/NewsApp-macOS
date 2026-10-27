@@ -20,6 +20,7 @@ script/format.sh --check          # Strict repository-wide Swift formatting lint
 script/design_lint.sh              # DESIGN.md ratchet (first step of ./test.sh); --update only after lowering counts
 ./test.sh --story-regressions     # Focused offline identity, reader and persistence checks
 ./test.sh --matcher-regressions   # Authored matcher corpus (#506) and story regressions (#581): pairwise lines and failing pair ids, nothing else
+NEWS_VERDICTS=verdicts.json ./test.sh --verdict-replay # Bounded calibration (#629): verdicts decided as the reader did at the bare and the calibrated pair-model cutoff; JSON array of {"pairModel", "cosine", "sharedSpecific", "gapHours", "sameAct", "same"}, synthetic verdicts without the variable
 ./test.sh --curation-live /private/tmp/library-backup.sqlite3 /private/tmp/curation-report # Opt-in on-device rating audit of a SQLite backup; private titles stay local
 python3 script/evaluation/importance_review.py sheet /private/tmp/curation-report  # #309: blind private sheet of minor-rated stories (never overwrites a sheet)
 python3 script/evaluation/importance_review.py report /private/tmp/curation-report # #309: aggregate-only hidden-important rate with Wilson bounds and re-rate stability

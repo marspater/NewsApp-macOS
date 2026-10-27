@@ -70,6 +70,8 @@ enum EventClusterer {
             return await PairScorer.shared.probabilities(a, b)
         }
         var report = EventClusteringReport()
+        /// The reader's verdicts move the pair model's cutoff by at most ±0.05 (#629); nil, and today's cutoff, below 50.
+        let calibration = allowsEnergy ? PairCalibration.fit((try? await database.calibrationRows()) ?? []) : nil
         /// Under the energy rule (#534) neither model runs: pairs they might have settled stay as the rules left them
         /// and the rows involved are marked one matcher version behind, so the next pass with energy reads them again.
         var deferred = Set<String>()
@@ -219,7 +221,17 @@ enum EventClusterer {
                     }
                     modelScores[key] = await pairProbability(input(a), input(b))
                 }
-                if let probability = modelScores[key] ?? nil, probability >= matchPolicy.pairModelThreshold {
+                let cutoff = { (probability: Double) -> Double in
+                    guard let calibration else { return matchPolicy.pairModelThreshold }
+                    return calibration.cutoff(
+                        matchPolicy.pairModelThreshold,
+                        PairCalibration.features(
+                            pairModel: probability, cosine: pair.embeddingCosine,
+                            sharedSpecific: pair.sharedSpecificAnchors,
+                            gapHours: abs(a.date.timeIntervalSince(b.date)) / 3600,
+                            sameAct: pair.conflict != .differentAct))
+                }
+                if let probability = modelScores[key] ?? nil, probability >= cutoff(probability) {
                     pair = EventMatcher.modelConfirmed(pair, policy: matchPolicy)
                 }
             }

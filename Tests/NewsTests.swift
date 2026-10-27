@@ -425,6 +425,30 @@ struct NewsTests {
             try await testStoryRegressionCorpus()
             return
         }
+        if CommandLine.arguments.contains("--verdict-replay") {
+            // NEWS_VERDICTS: a JSON array of {"pairModel", "cosine", "sharedSpecific", "gapHours", "sameAct", "same"}
+            // (#629); without it, the synthetic verdicts of the unit test.
+            struct Verdict: Decodable {
+                let pairModel: Double, cosine: Double?, sharedSpecific: Int, gapHours: Double, sameAct: Bool, same: Bool
+            }
+            var rows = syntheticVerdicts(120)
+            if let path = ProcessInfo.processInfo.environment["NEWS_VERDICTS"] {
+                let data = try Data(contentsOf: URL(fileURLWithPath: path))
+                rows = try JSONDecoder().decode([Verdict].self, from: data).map {
+                    PairCalibration.Row(
+                        features: PairCalibration.features(
+                            pairModel: $0.pairModel, cosine: $0.cosine, sharedSpecific: $0.sharedSpecific,
+                            gapHours: $0.gapHours, sameAct: $0.sameAct),
+                        same: $0.same)
+                }
+            }
+            let replay = verdictReplay(rows)
+            print(
+                "    verdict replay (#629): \(replay.verdicts) verdicts, \(replay.bare) decided as the reader did at the"
+                    + " cutoff, \(replay.calibrated) with the calibration\(replay.fitted ? "" : " (dormant)")")
+            assertTrue(replay.calibrated >= replay.bare, "The calibration decides no fewer verdicts right")
+            return
+        }
         if CommandLine.arguments.contains("--embedding-vectors") {
             guard let output = ProcessInfo.processInfo.environment["NEWS_EVENT_OUTPUT"] else {
                 throw StoryCorpus.Failure.invalid("--embedding-vectors needs NEWS_EVENT_OUTPUT")
@@ -680,6 +704,7 @@ struct NewsTests {
             try await testEventCorpusHarness(fixtureRoot: fixtureRoot)
             try await testMatcherRegressionCorpus()
             try await testStoryRegressionCorpus()
+            try await testPairCalibration()
             try testCapturedFingerprintReview()
             try await testAuditPersistenceAndRoutingRegressions(fixtureRoot: fixtureRoot)
             try await testUndatedArticleOrdering()
@@ -791,6 +816,7 @@ struct NewsTests {
         try await testEventCorpusHarness(fixtureRoot: fixtureRoot)
         try await testMatcherRegressionCorpus()
         try await testStoryRegressionCorpus()
+        try await testPairCalibration()
         try testCapturedFingerprintReview()
         await testFTS5SearchAndOperators()
         try await testUnchangedFTSRefresh()
@@ -11658,6 +11684,92 @@ struct NewsTests {
         print(
             "    Outcome labels: log show --predicate 'subsystem == \"com.marspater.news\" AND category == \"NewsTextModel\"' "
                 + "--last 10m")
+    }
+
+    /// A verdict replay (#629): how many verdicts the pair model decides as the reader did at `base`, and with the
+    /// calibration fitted on them. Clean when the calibration decides at least as many as the bare cutoff.
+    static func verdictReplay(
+        _ rows: [PairCalibration.Row], base: Double = EventMatchPolicy.standard.pairModelThreshold
+    ) -> (verdicts: Int, bare: Int, calibrated: Int, fitted: Bool) {
+        let calibration = PairCalibration.fit(rows)
+        var bare = 0
+        var calibrated = 0
+        for row in rows {
+            if (row.features[0] >= base) == row.same { bare += 1 }
+            let cutoff = calibration?.cutoff(base, row.features) ?? base
+            if (row.features[0] >= cutoff) == row.same { calibrated += 1 }
+        }
+        return (rows.count, bare, calibrated, calibration != nil)
+    }
+
+    /// Synthetic verdicts: the pair model spread over 0.82–0.98, and the reader says "same" for reports under 24 h
+    /// apart, which the bare cutoff cannot see.
+    static func syntheticVerdicts(_ count: Int) -> [PairCalibration.Row] {
+        (0..<count).map { index in
+            let gap = Double(index * 7 % 60)
+            return PairCalibration.Row(
+                features: PairCalibration.features(
+                    pairModel: 0.82 + 0.16 * Double(index % 17) / 16, cosine: 0.7, sharedSpecific: 2, gapHours: gap,
+                    sameAct: true),
+                same: gap < 24)
+        }
+    }
+
+    /// Bounded calibration (#629): dormant below 50 verdicts, never more than ±0.05 off the cutoff, gone when the stored
+    /// pair signals are cleared, and a clean synthetic verdict replay.
+    static func testPairCalibration() async throws {
+        print("  - Testing the bounded pair-model calibration from reader verdicts (#629)...")
+        let base = EventMatchPolicy.standard.pairModelThreshold
+        assertTrue(PairCalibration.fit(syntheticVerdicts(49)) == nil, "Dormant below 50 verdicts")
+        let oneAnswer = syntheticVerdicts(80).map { PairCalibration.Row(features: $0.features, same: true) }
+        assertTrue(PairCalibration.fit(oneAnswer) == nil, "Verdicts with one answer fit nothing")
+        guard let calibration = PairCalibration.fit(syntheticVerdicts(120)) else {
+            return assertTrue(false, "120 verdicts with both answers fit a calibration")
+        }
+        for features in [[0.0, 0, 0, 0, 0], [1.0, 1, 1, 1, 1], [0.9, 0.7, 0.4, 0, 1], [0.9, 0.7, 0.4, 1, 1]] {
+            let cutoff = calibration.cutoff(base, features)
+            assertTrue(abs(cutoff - base) <= PairCalibration.maximumShift + 1e-12, "The cutoff moves at most ±0.05")
+        }
+        let near = PairCalibration.features(pairModel: 0.9, cosine: 0.7, sharedSpecific: 2, gapHours: 2, sameAct: true)
+        let far = PairCalibration.features(pairModel: 0.9, cosine: 0.7, sharedSpecific: 2, gapHours: 48, sameAct: true)
+        assertTrue(calibration.cutoff(base, near) < calibration.cutoff(base, far), "It learns what the verdicts say")
+        let replay = verdictReplay(syntheticVerdicts(120))
+        assertTrue(replay.fitted && replay.calibrated >= replay.bare, "The synthetic verdict replay is clean")
+
+        // Verdicts reach the fit through the stored signals of their pair decisions; without them it is dormant again.
+        let db = DatabaseEngine(path: ":memory:")
+        try await db.open()
+        let start = Date(timeIntervalSince1970: 1_700_000_000)
+        let reports = (0..<4).map { index in
+            FeedArticle(
+                storedID: "verdict-\(index)", title: "Report \(index)", link: "https://verdict.invalid/\(index)",
+                guid: "verdict-\(index)", description: "", pubDate: start.addingTimeInterval(Double(index) * 3600),
+                source: "Publisher \(index)")
+        }
+        try await db.upsertArticles(reports)
+        var ids: [String] = []
+        for report in reports { ids.append(try await db.resolvedArticleID(for: report)) }
+        func decision(_ a: String, _ b: String) -> DatabaseEngine.PairDecision {
+            let (low, high) = a < b ? (a, b) : (b, a)
+            return DatabaseEngine.PairDecision(
+                articleID: low, otherArticleID: high, decision: "borderline", reason: "borderline", score: 0.6,
+                features: #"{"cosine":0.7,"entity":0.5,"pairModel":0.88,"sharedAnchors":2,"sharedKeywords":2,"#
+                    + #""sharedSpecific":2,"what":0.3}"#)
+        }
+        try await db.upsertPairDecisions(
+            [decision(ids[0], ids[1]), decision(ids[2], ids[3])], matcherVersion: EventMatcher.version)
+        for (table, a, b) in [("event_inclusions", ids[0], ids[1]), ("event_exclusions", ids[2], ids[3])] {
+            let (low, high) = a < b ? (a, b) : (b, a)
+            try await db.eventRows(
+                "INSERT INTO \(table)(article_id, other_article_id, created_at) VALUES (?, ?, ?);",
+                [.text(low), .text(high), .real(start.timeIntervalSince1970)])
+        }
+        let rows = try await db.calibrationRows()
+        assertEqual(rows.map(\.same).sorted { !$0 && $1 }, [false, true], "One row per verdict with a stored signal")
+        assertEqual(rows.first?.features.count, 5, "Five features per verdict")
+        try await db.eventRows("UPDATE pair_assessments SET features = NULL;")
+        assertEqual(try await db.calibrationRows().count, 0, "Cleared pair signals reset the calibration")
+        await db.close()
     }
 
     /// Authored story regressions (#581): the known story failures as synthetic families, asserted exactly at both levels,
