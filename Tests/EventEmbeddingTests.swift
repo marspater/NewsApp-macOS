@@ -17,6 +17,73 @@ extension NewsTests {
         try await testArticleEmbeddingsForeignKeyCascade()
         try await testHybridEventMatcherSemanticRescueAndVeto()
         try await testEmbeddingAwareValidationOfAssignedMembers()
+        await testPairScorerReadsTheBinaryModel()
+        try await testStoryModelSignal()
+    }
+
+    /// The story signal (#627): two events sharing one specific name are one story by the rules only with a second name;
+    /// with `storyModelThreshold` set, a story model's p_same + p_related at or above it (p_different at most 0.15)
+    /// links them. Off by default, so the default pass keeps them apart.
+    private static func testStoryModelSignal() async throws {
+        let start = Date(timeIntervalSince1970: 1_700_000_000)
+        func report(_ id: Int, _ title: String, hours: Double) -> FeedArticle {
+            FeedArticle(
+                title: title, link: "https://storymodel.invalid/\(id)", guid: "storymodel-\(id)", description: "",
+                pubDate: start.addingTimeInterval(hours * 3600), source: "Publisher \(id)")
+        }
+        let articles = [
+            report(1, "Parliament votes to oust Prime Minister Novak", hours: 0),
+            report(2, "Parliament votes to oust Novak as Prime Minister", hours: 1),
+            report(3, "Thousands protest in the capital after parliament votes to oust Novak", hours: 5),
+            report(4, "Thousands protest in the capital streets after parliament votes to oust Novak", hours: 6),
+        ]
+        /// The stories of the vote event and the protest event, nil when they are not two events.
+        func stories(threshold: Double) async throws -> (String?, String?)? {
+            let db = DatabaseEngine(path: ":memory:")
+            try await db.open()
+            try await db.upsertArticles(articles)
+            var policy = EventMatchPolicy.standard
+            policy.storyModelThreshold = threshold
+            _ = try await EventClusterer.run(
+                in: db, matchPolicy: policy, now: start.addingTimeInterval(7 * 3600), allowsEnergy: true,
+                pairProbability: { @Sendable _, _ in nil }, storyProbabilities: { @Sendable _, _ in (0.6, 0.35) })
+            var ids: [String] = []
+            for article in articles { ids.append(try await db.resolvedArticleID(for: article)) }
+            var result: (String?, String?)?
+            if let vote = try await db.eventID(forArticle: ids[0]),
+                let protest = try await db.eventID(forArticle: ids[2]),
+                vote != protest
+            {
+                result = (try await db.storyID(forEvent: vote), try await db.storyID(forEvent: protest))
+            }
+            await db.close()
+            return result
+        }
+        guard let off = try await stories(threshold: .infinity), let on = try await stories(threshold: 0.8) else {
+            assertTrue(false, "The vote and the protest are two events")
+            return
+        }
+        assertTrue(off.0 != off.1, "One shared name is no story by the rules alone")
+        assertTrue(on.0 != nil && on.0 == on.1, "The story model's signal links them")
+    }
+
+    /// The shipped pair model is binary (v11 weights): `PairScorer` reads it as same-event probability with related 0,
+    /// and `probability` is the same-event probability of `probabilities` (#627).
+    private static func testPairScorerReadsTheBinaryModel() async {
+        let scorer = PairScorer()
+        guard await scorer.isAvailable else {
+            assertTrue(false, "The bundled pair model loads")
+            return
+        }
+        let a = "Magnitude 6.1 earthquake strikes eastern Turkey\nBuildings collapsed in Malatya."
+        let b = "Strong earthquake hits eastern Turkey, buildings collapse\nA 6.1 quake struck near Malatya."
+        guard let both = await scorer.probabilities(a, b), let same = await scorer.probability(a, b) else {
+            assertTrue(false, "The pair model scores a pair")
+            return
+        }
+        assertEqual(both.related, 0, "A binary pair model has no related-act probability")
+        assertEqual(both.same, same, "probability is the same-event probability")
+        assertTrue(same > 0 && same < 1, "A probability lies between 0 and 1")
     }
 
     // MARK: - BertWordPieceTokenizer (#127)

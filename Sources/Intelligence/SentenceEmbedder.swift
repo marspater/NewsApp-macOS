@@ -359,8 +359,10 @@ actor SentenceEmbedder {
     }
 }
 
-/// The project's own pair cross-encoder (#525): the probability that two texts report one event, from MiniLM fine-tuned
-/// on pairs mined from library copies (`script/training/train_pair_model.py`). Unavailable without the bundled model;
+/// The project's own pair cross-encoder (#525): the probabilities that two texts report one event (`same`) or another
+/// act of one story (`related`, #627), from MiniLM fine-tuned on pairs mined from library copies
+/// (`script/training/train_pair_model.py`). A three-way model answers through its `probabilities` output (different,
+/// related, same); a binary model through `probability`, read as related 0. Unavailable without the bundled model;
 /// the matcher then decides as it did before.
 actor PairScorer {
     static let shared = PairScorer()
@@ -371,7 +373,7 @@ actor PairScorer {
     private let tokenizer: BertWordPieceTokenizer?
     /// Probabilities by text pair for the app's lifetime: the texts determine the answer, so passes that meet the same
     /// unmerged pair again do not run the model again. ponytail: cleared at 20,000 entries; persist if relaunches matter.
-    private var cache: [Int: Double] = [:]
+    private var cache: [Int: (same: Double, related: Double)] = [:]
 
     init(modelURL: URL? = nil, vocabURL: URL? = nil) {
         let modelURL = modelURL ?? bundledModelResource("pairscorer", "mlmodelc")
@@ -393,17 +395,22 @@ actor PairScorer {
 
     var isAvailable: Bool { model != nil && tokenizer != nil }
 
-    /// The mean of both orders, since a cross-encoder reads its two inputs differently.
-    func probability(_ a: String, _ b: String) -> Double? {
+    /// The probability that the two texts report one event; event admission reads this (#627).
+    func probability(_ a: String, _ b: String) -> Double? { probabilities(a, b)?.same }
+
+    /// Same-event and related-act probabilities, each the mean of both orders, since a cross-encoder reads its two
+    /// inputs differently.
+    func probabilities(_ a: String, _ b: String) -> (same: Double, related: Double)? {
         let key = (a < b ? a + "\u{0}" + b : b + "\u{0}" + a).hashValue
         if let cached = cache[key] { return cached }
         guard let forward = score(a, b), let backward = score(b, a) else { return nil }
         if cache.count >= 20_000 { cache.removeAll() }
-        cache[key] = (forward + backward) / 2
-        return cache[key]
+        let mean = (same: (forward.same + backward.same) / 2, related: (forward.related + backward.related) / 2)
+        cache[key] = mean
+        return mean
     }
 
-    private func score(_ a: String, _ b: String) -> Double? {
+    private func score(_ a: String, _ b: String) -> (same: Double, related: Double)? {
         guard let model, let tokenizer else { return nil }
         let encoded = tokenizer.encodePair(a, b, maxSequenceLength: Self.maxSequenceLength)
         var inputs: [String: MLFeatureValue] = [:]
@@ -418,9 +425,12 @@ actor PairScorer {
             inputs[name] = MLFeatureValue(multiArray: array)
         }
         guard let provider = try? MLDictionaryFeatureProvider(dictionary: inputs),
-            let output = try? model.prediction(from: provider),
-            let probability = output.featureValue(for: "probability")?.multiArrayValue
+            let output = try? model.prediction(from: provider)
         else { return nil }
-        return probability[0].doubleValue
+        if let classes = output.featureValue(for: "probabilities")?.multiArrayValue, classes.count == 3 {
+            return (classes[2].doubleValue, classes[1].doubleValue)
+        }
+        guard let probability = output.featureValue(for: "probability")?.multiArrayValue else { return nil }
+        return (probability[0].doubleValue, 0)
     }
 }

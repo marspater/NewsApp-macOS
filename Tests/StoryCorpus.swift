@@ -127,6 +127,13 @@ enum StoryCorpus {
     static func eventMemberships(articles: [FeedArticle], onPass: ((EventClusteringReport) -> Void)? = nil) async throws
         -> [String: String]
     {
+        try await memberships(articles: articles, onPass: onPass).mapValues(\.event)
+    }
+
+    /// The same replay with each item's story card as well (#581): its event's story, else the item alone.
+    static func memberships(articles: [FeedArticle], onPass: ((EventClusteringReport) -> Void)? = nil) async throws
+        -> [String: (event: String, story: String)]
+    {
         let items = articles.sorted { ($0.pubDate, $0.id) < ($1.pubDate, $1.id) }
         guard var clock = items.first?.pubDate else { return [:] }
         let db = DatabaseEngine(path: ":memory:")
@@ -148,17 +155,24 @@ enum StoryCorpus {
                     let energy = ProcessInfo.processInfo.environment["NEWS_ENERGY"] != "0"
                     let report = try await EventClusterer.run(
                         in: db, matchPolicy: policy, now: clock,
-                        allowsEnergy: energy, pairProbability: pairProbabilityFromEnvironment())
+                        allowsEnergy: energy, pairProbability: pairProbabilityFromEnvironment(),
+                        storyProbabilities: storyProbabilitiesFromEnvironment())
                     onPass?(report)
                 }
                 clock = clock.addingTimeInterval(6 * 3600)
                 if index < items.count, items[index].pubDate > clock { clock = items[index].pubDate }
             }
-            var result: [String: String] = [:]
+            var result: [String: (event: String, story: String)] = [:]
             for item in items {
                 let resolved = try await db.resolvedArticleID(for: item)
                 let event = try await db.eventID(forArticle: resolved)
-                result[item.id] = event.map { "event:" + $0 } ?? "document:" + resolved
+                var story = "document:" + resolved
+                if let event { story = "story:" + (try await db.storyID(forEvent: event) ?? event) }
+                // NEWS_SCORE_STORIES=1 (#627) scores stories instead of events: two events of one story count as one.
+                let scoresStories = ProcessInfo.processInfo.environment["NEWS_SCORE_STORIES"] == "1"
+                result[item.id] = (
+                    scoresStories ? story : (event.map { "event:" + $0 } ?? "document:" + resolved), story
+                )
             }
             await db.close()
             return result
@@ -170,15 +184,33 @@ enum StoryCorpus {
 
     /// The matcher policy with the sweep overrides of the evaluation flags (#525, #582): NEWS_PAIR_THRESHOLD,
     /// NEWS_RESCUE_TWO_ANCHORS (cosine), NEWS_MODEL_ANCHORLESS (cosine), NEWS_COMPATIBLE_REQUIRES_MATCH=1,
-    /// NEWS_COMPATIBLE_SHARE, NEWS_SAME_PUBLISHER=1. NEWS_PAIR_MODEL=0 turns the model off at the call site.
+    /// NEWS_COMPATIBLE_SHARE, NEWS_SAME_PUBLISHER=1, NEWS_STORY_MODEL (#627). NEWS_PAIR_MODEL=0 turns the model off at the call site.
     /// The pair model the evaluation flags use (#624): `NEWS_PAIR_MODEL=0` none, `NEWS_PAIR_MODEL_PATH` a candidate
     /// `pairscorer.mlmodelc` (compile a `.mlpackage` with `xcrun coremlcompiler compile`), otherwise the shipped one.
+    /// With a candidate, `NEWS_PAIR_RULE=story` (#627, evaluation only) admits on p_same + p_related when p_same
+    /// outweighs p_related and p_different is at most 0.10, so NEWS_PAIR_THRESHOLD applies to that sum.
     static func pairProbabilityFromEnvironment() -> (@Sendable (String, String) async -> Double?)? {
         let environment = ProcessInfo.processInfo.environment
         if environment["NEWS_PAIR_MODEL"] == "0" { return { @Sendable _, _ in nil } }
         guard let path = environment["NEWS_PAIR_MODEL_PATH"] else { return nil }
         let candidate = PairScorer(modelURL: URL(fileURLWithPath: path))
-        return { @Sendable a, b in await candidate.probability(a, b) }
+        guard environment["NEWS_PAIR_RULE"] == "story" else {
+            return { @Sendable a, b in await candidate.probability(a, b) }
+        }
+        return { @Sendable a, b in
+            guard let p = await candidate.probabilities(a, b) else { return nil }
+            return p.same > p.related && 1 - p.same - p.related <= 0.10 ? p.same + p.related : 0
+        }
+    }
+
+    /// A separate story model for the story signal (#627, evaluation): `NEWS_STORY_MODEL_PATH` a three-way
+    /// `pairscorer.mlmodelc` whose p_same + p_related the story pass reads instead of the pair model's.
+    static func storyProbabilitiesFromEnvironment()
+        -> (@Sendable (String, String) async -> (same: Double, related: Double)?)?
+    {
+        guard let path = ProcessInfo.processInfo.environment["NEWS_STORY_MODEL_PATH"] else { return nil }
+        let model = PairScorer(modelURL: URL(fileURLWithPath: path))
+        return { @Sendable a, b in await model.probabilities(a, b) }
     }
 
     static func policyFromEnvironment() -> EventMatchPolicy {
@@ -194,6 +226,7 @@ enum StoryCorpus {
         if environment["NEWS_COMPATIBLE_REQUIRES_MATCH"] == "1" { policy.compatibleRequiresMatch = true }
         if let value = environment["NEWS_COMPATIBLE_SHARE"].flatMap(Double.init) { policy.compatibleShare = value }
         if environment["NEWS_SAME_PUBLISHER"] == "1" { policy.samePublisherRequiresMatch = true }
+        if let value = environment["NEWS_STORY_MODEL"].flatMap(Double.init) { policy.storyModelThreshold = value }
         if let value = environment["NEWS_PAIR_PREFIX"] { policy.pairModelPrefix = value == "1" }
         // The semantic veto and rescue cutoffs (#628), swept when the sentence encoder changes.
         if let value = environment["NEWS_SEMANTIC_VETO"].flatMap(Double.init) { policy.semanticVetoThreshold = value }
