@@ -264,11 +264,12 @@ actor SentenceEmbedder {
                 let batch = try? model.predictions(
                     fromBatch: MLArrayBatchProvider(array: inputs.map(\.provider)))
             else { return nil }
-            return inputs.indices.map { position in
-                batch.features(at: position).featureValue(for: "last_hidden_state")?.multiArrayValue.flatMap {
-                    pooled($0, tokens: inputs[position].tokens)
-                }
+            var vectors: [[Float]?] = []
+            for position in inputs.indices {
+                let hidden = batch.features(at: position).featureValue(for: "last_hidden_state")?.multiArrayValue
+                vectors.append(hidden.flatMap { pooled($0, tokens: inputs[position].tokens) })
             }
+            return vectors
         }
     }
 
