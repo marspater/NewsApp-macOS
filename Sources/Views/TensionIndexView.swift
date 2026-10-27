@@ -149,8 +149,15 @@ struct TensionIndexView: View {
         }
     }
 
-    /// Where the reading sits among the past month's assessments, or its change since the previous one.
+    /// Today's own assessment when the shown reading blends it with the week's history (methodology v3), then where
+    /// the reading sits among the past month's assessments, or its change since the previous one.
     private func comparison(_ reading: WorldTensionReading) -> String? {
+        let assessed = reading.assessment.assessedScore.map { "Today's assessment \($0)°, 7-day reading shown. " }
+        let text = (assessed ?? "") + (ranking(reading) ?? "")
+        return text.isEmpty ? nil : text
+    }
+
+    private func ranking(_ reading: WorldTensionReading) -> String? {
         let others = history.filter {
             $0.id < reading.id && $0.id > reading.id.addingTimeInterval(-30 * 86400)
                 && $0.modelGeneration == reading.modelGeneration && $0.assessment.isEstimate != true
@@ -353,7 +360,7 @@ struct TensionIndexView: View {
             if appSettings.aiEnabled, appSettings.tensionCollectionOptIn {
                 let accepted = try? await articleStore.database.worldTensionHistory()
                 guard !Task.isCancelled, appSettings.aiEnabled, appSettings.tensionCollectionOptIn else { return }
-                if let accepted { history = accepted }
+                if let accepted { history = WorldTensionSmoothing.displayed(accepted) }
                 let now = Date()
                 if let rows = try? await articleStore.database.tensionCorpus(
                     day: DateInterval(start: now.addingTimeInterval(-86400), end: now),
