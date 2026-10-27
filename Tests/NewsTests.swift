@@ -11315,17 +11315,21 @@ struct NewsTests {
         }
         let storyID = try await db.storyID(forEvent: vote)
         assertEqual(storyID, try await db.storyID(forEvent: protest), "Two acts of one story share a story")
-        assertTrue(storyID == vote || storyID == protest, "The story is named by one of its events")
+        assertEqual(storyID, vote, "The story is named by its earliest event")
         assertTrue(
             report.changedEvents.contains(vote) && report.changedEvents.contains(protest), "Story changes are reported")
         assertEqual(try await db.storyEventIDs(storyID ?? "").sorted(), [vote, protest].sorted(), "Both events belong")
+        assertEqual(try await db.storyEventIDs(protest).sorted(), [vote, protest].sorted(), "… from either event")
         var summaries = try await db.eventFeedSummaries(forArticles: [ids[0]])
         assertEqual(summaries.count, 1, "One card for the story")
-        assertEqual(summaries.first?.eventID, storyID, "The card carries the story id")
+        assertEqual(summaries.first?.eventID, protest, "The card opens the story's newest event")
+        assertEqual(
+            try await db.relatedActEvents(eventID: protest, limit: .max).map(\.eventID), [vote],
+            "The newest event's overview reaches the story's earlier event")
         assertEqual(summaries.first?.members.count, 4, "All four reports are on the card")
         assertEqual(summaries.first?.membershipVersion, 2, "The story version is the sum of its events' versions")
         assertEqual(summaries.first?.seenVersion, nil, "Never opened")
-        assertEqual(try await db.markEventSeen(storyID ?? ""), 2, "Seeing the story marks every event")
+        assertEqual(try await db.markEventSeen(protest), 2, "Seeing the story through its open event marks every event")
         summaries = try await db.eventFeedSummaries(forArticles: [ids[0]])
         assertEqual(summaries.first?.seenVersion, 2, "Seen versions add up")
         assertFalse(summaries.first?.hasSubstantiveUpdate ?? true, "Nothing new since the reader looked")

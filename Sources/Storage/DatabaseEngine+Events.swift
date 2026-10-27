@@ -551,9 +551,10 @@ extension DatabaseEngine {
         return try eventRows("SELECT coalesce(story_id, id) FROM events WHERE id = ?;", [.text(live)]).first?[0]
     }
 
-    /// Live events of a story, the lead first.
-    func storyEventIDs(_ storyID: String) throws -> [String] {
-        try eventRows(
+    /// Live events of the story that `eventID` (any of its events, or the story id) belongs to, the story's own id first.
+    func storyEventIDs(_ eventID: String) throws -> [String] {
+        let storyID = try storyID(forEvent: eventID) ?? eventID
+        return try eventRows(
             "SELECT id FROM events WHERE merged_into IS NULL AND (id = ? OR story_id = ?) ORDER BY id = ? DESC, created_at, id;",
             [.text(storyID), .text(storyID), .text(storyID)]
         ).compactMap { $0[0] }
@@ -590,24 +591,31 @@ extension DatabaseEngine {
                     groups.append([target, single])
                 }
             }
-            // A story is named by its earliest event of two or more reports, never by an attached report alone.
-            var current: [String: (story: String?, rank: Int, created: Double)] = [:]
+            // A story is named by its earliest event of two or more reports, never by an attached report alone; events
+            // are ordered by their first report (date, then article ID), since event IDs are random.
+            var current: [String: (story: String?, order: (Int, Double, String, String))] = [:]
             for row in try eventRows(
                 """
-                SELECT e.id, e.story_id, (SELECT count(*) FROM event_members m WHERE m.event_id = e.id) < 2, e.created_at
-                FROM events e WHERE e.merged_into IS NULL AND e.updated_at >= ?;
+                SELECT e.id, e.story_id, (SELECT count(*) FROM event_members m WHERE m.event_id = e.id) < 2, first.date,
+                    first.id
+                FROM events e
+                LEFT JOIN (
+                    SELECT m.event_id, \(Self.articleDateOrder) AS date, a.id,
+                        row_number() OVER (PARTITION BY m.event_id ORDER BY \(Self.articleDateOrder), a.id) AS n
+                    FROM event_members m JOIN articles a ON a.id = m.article_id
+                ) first ON first.event_id = e.id AND first.n = 1
+                WHERE e.merged_into IS NULL AND e.updated_at >= ?;
                 """, [.real(activeSince.timeIntervalSince1970)])
             {
-                if let id = row[0] { current[id] = (row[1], row[2] == "1" ? 1 : 0, row[3].flatMap(Double.init) ?? 0) }
+                guard let id = row[0] else { continue }
+                current[id] = (row[1], (row[2] == "1" ? 1 : 0, row[3].flatMap(Double.init) ?? 0, row[4] ?? "", id))
             }
             var desired: [String: String?] = current.mapValues { _ in nil }
             for group in groups {
                 let members = group.filter { current[$0] != nil }
                 guard members.count >= 2,
-                    let lead = members.min(by: {
-                        (current[$0]?.rank ?? 0, current[$0]?.created ?? 0, $0)
-                            < (current[$1]?.rank ?? 0, current[$1]?.created ?? 0, $1)
-                    })
+                    let lead = members.compactMap({ id in current[id].map { (id, $0.order) } })
+                        .min(by: { $0.1 < $1.1 })?.0
                 else { continue }
                 for member in members { desired[member] = lead }
             }
@@ -976,7 +984,8 @@ extension DatabaseEngine {
             ).first?.first.flatMap { $0.flatMap(Int.init) } ?? 0
         guard total > 0 else { return [] }
         var common = Set<String>()
-        for term in terms.sorted().prefix(64) {
+        // Every term is checked, one FTS count each: a cap let all but the alphabetically first names through (#581).
+        for term in terms.sorted() {
             try Task.checkCancellation()
             let words = term.split { !$0.isLetter && !$0.isNumber }
             guard !words.isEmpty else { continue }
@@ -1369,9 +1378,22 @@ extension DatabaseEngine {
                         articleID: member.articleID, source: member.source, title: member.title, date: member.date,
                         joinedVersion: member.joinedVersion + others, isRead: member.isRead, isSaved: member.isSaved)
                 }
+                // The card opens the story's newest event of two or more reports, by its first report (#581): the
+                // latest act, whose reports raise the card's update mark; `story_id` stays the earliest event.
+                var first: [String: (date: Date, id: String)] = [:]
+                var counts: [String: Int] = [:]
+                for row in story.rows {
+                    counts[row.event, default: 0] += 1
+                    let key = (row.member.date, row.member.articleID)
+                    if let known = first[row.event], (known.date, known.id) <= key { continue }
+                    first[row.event] = key
+                }
+                let open =
+                    first.filter { (counts[$0.key] ?? 0) >= 2 }
+                    .max(by: { ($0.value.date, $0.value.id, $0.key) < ($1.value.date, $1.value.id, $1.key) })?.key
                 summaries.append(
                     EventFeedSummary(
-                        eventID: story.id, membershipVersion: membershipVersion, seenVersion: seenVersion,
+                        eventID: open ?? story.id, membershipVersion: membershipVersion, seenVersion: seenVersion,
                         members: members))
             }
             for row in rows {
@@ -1538,7 +1560,7 @@ extension DatabaseEngine {
     }
 
     /// Live events whose members the matcher judged a different act of the same story as this event's members
-    /// (decision "related-act"), each by its earliest member, newest event first.
+    /// (decision "related-act"), and the other events of its story (#581), each by its earliest member, newest first.
     func relatedActEvents(eventID: String, limit: Int = EventStoryRelation.linkLimit) throws -> [RelatedStoryEvent] {
         guard let live = try resolvedEventID(eventID) else { return [] }
         let rows = try eventRows(
@@ -1563,10 +1585,25 @@ extension DatabaseEngine {
                 eventID: id, articleID: articleID, title: title,
                 firstPublishedAt: Date(timeIntervalSince1970: published))
         }
+        // The other events of its story (#581), each by its earliest report: the overview opens the story's newest
+        // event, and "Earlier in This Story" reaches the story's earlier events through this list.
+        for id in try storyEventIDs(live) where id != live && earliest[id] == nil {
+            guard
+                let row = try eventRows(
+                    """
+                    SELECT a.id, a.title, a.published_at FROM event_members m JOIN articles a ON a.id = m.article_id
+                    WHERE m.event_id = ? AND \(Self.visibleArticle) ORDER BY a.published_at, a.id LIMIT 1;
+                    """, [.text(id)]
+                ).first, let articleID = row[0], let title = row[1], let published = row[2].flatMap({ Double($0) })
+            else { continue }
+            earliest[id] = RelatedStoryEvent(
+                eventID: id, articleID: articleID, title: title,
+                firstPublishedAt: Date(timeIntervalSince1970: published))
+        }
         return Array(
             earliest.values.sorted {
                 $0.firstPublishedAt == $1.firstPublishedAt
-                    ? $0.eventID < $1.eventID : $0.firstPublishedAt > $1.firstPublishedAt
+                    ? $0.articleID < $1.articleID : $0.firstPublishedAt > $1.firstPublishedAt
             }.prefix(limit))
     }
 
