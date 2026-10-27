@@ -279,32 +279,21 @@ struct EventOverviewAccessibilityTests {
             "The summary repeats the bullets, so an angle with facts shows only the cited bullets")
 
         // Coverage Sentiment
-        assertFalse(EventOverviewReaderView.hasCoverageSentimentContent(nil), "Nil coverage sentiment is absent")
-        let blankSentiment = OverviewCoverageSentiment(score: 0.1, label: "  ", confidence: 0.8, rationale: nil)
-        assertFalse(
-            EventOverviewReaderView.hasCoverageSentimentContent(blankSentiment), "Blank sentiment label is absent")
-        let validSentiment = OverviewCoverageSentiment(
-            score: 0.3, label: "Cautious", confidence: 0.85, rationale: "Measured optimism.")
-        assertTrue(
-            EventOverviewReaderView.hasCoverageSentimentContent(validSentiment), "Valid coverage sentiment is present")
-
         // Evidence section compound check
         assertFalse(
             EventOverviewReaderView.hasEvidenceContent(
                 timeline: [],
                 perspectives: [],
-                thematicAngle: nil,
-                coverageSentiment: nil
+                thematicAngle: nil
             ),
-            "Evidence container is absent when all 4 sub-sections are empty"
+            "Evidence container is absent when all 3 sub-sections are empty"
         )
 
         assertTrue(
             EventOverviewReaderView.hasEvidenceContent(
                 timeline: [validTimelineItem],
                 perspectives: [],
-                thematicAngle: nil,
-                coverageSentiment: nil
+                thematicAngle: nil
             ),
             "Evidence container is present when timeline has data"
         )

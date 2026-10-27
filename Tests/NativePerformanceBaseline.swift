@@ -81,7 +81,9 @@ private final class BaselineDelegate: NSObject, NSApplicationDelegate {
         let manager = FeedManager(
             settings: settings, store: store, schedulesRefresh: false,
             fetchBatch: { urls, _ in urls.map { ($0, incoming, nil, nil) } })
-        // Finish the initial catch-up before window timing; refresh still uses real collection/signposts.
+        // Finish the catch-up the window would start after its first frame (#602) before window timing; refresh still
+        // uses real collection/signposts.
+        manager.clusterEventsInBackground()
         await manager.waitForEventClustering()
         let container = AppContainer(
             appSettings: settings, articleStore: store, feedManager: manager,

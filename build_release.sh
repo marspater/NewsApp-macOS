@@ -2,6 +2,7 @@
 set -e
 
 APP_NAME="News"
+source script/version.sh
 APP_DIR="${APP_NAME}.app"
 CONTENTS_DIR="${APP_DIR}/Contents"
 MACOS_DIR="${CONTENTS_DIR}/MacOS"
@@ -14,7 +15,7 @@ export SWIFT_MODULECACHE_PATH="$CLANG_MODULE_CACHE_PATH"
 
 
 echo "=================================================="
-echo "🚀 Building arm64 Verification for ${APP_NAME} (macOS ${TARGET_MACOS})"
+echo "🚀 Building arm64 Verification for ${APP_NAME} ${NEWS_VERSION} (${NEWS_BUILD}, macOS ${TARGET_MACOS})"
 echo "=================================================="
 
 rm -rf "${APP_DIR}" "${BUILD_TMP}"
@@ -45,6 +46,7 @@ SWIFT_SOURCES=(
     Sources/Storage/DatabaseEngine.swift
     Sources/Storage/DatabaseEngine+Events.swift
     Sources/Storage/MigrationCoordinator.swift
+    Sources/Storage/SpotlightIndexer.swift
     Sources/Storage/ArticleStore.swift
     Sources/Intelligence/ArticleIntelligence.swift
     Sources/Intelligence/OverviewPassageSelector.swift
@@ -90,7 +92,9 @@ SWIFT_SOURCES=(
     Sources/Views/SidebarView.swift
     Sources/Views/ArticleCardView.swift
     Sources/Views/EventCardView.swift
-    Sources/Views/ArticleListView.swift
+    Sources/Views/ArticleListView.swift \
+    Sources/Views/BriefingComponents.swift \
+    Sources/Views/BriefingView.swift \
     Sources/Views/ArticleDetailView.swift
     Sources/Views/ReaderSupportViews.swift
     Sources/Views/ArticleRemoteImage.swift
@@ -105,6 +109,9 @@ SWIFT_SOURCES=(
     Sources/Views/ArticleWebView.swift
     Sources/App/NewsSignposts.swift
     Sources/App/UpdateChecker.swift
+    Sources/App/NewsURLParser.swift
+    Sources/App/Intents.swift
+    Sources/App/NotificationActionRouter.swift
     Sources/App/NewsApp.swift
 )
 
@@ -141,18 +148,42 @@ cat > "${CONTENTS_DIR}/Info.plist" << PLIST_EOF
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>2.0.0</string>
+    <string>${NEWS_VERSION}</string>
     <key>CFBundleVersion</key>
-    <string>1</string>
+    <string>${NEWS_BUILD}</string>
     <key>LSMinimumSystemVersion</key>
     <string>${TARGET_MACOS}</string>
     <key>NSSupportsAutomaticGraphicsSwitching</key>
     <true/>
     <key>NSHighResolutionCapable</key>
     <true/>
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleTypeRole</key>
+            <string>Viewer</string>
+            <key>CFBundleURLName</key>
+            <string>com.marspater.news.feed</string>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>feed</string>
+            </array>
+        </dict>
+        <dict>
+            <key>CFBundleTypeRole</key>
+            <string>Viewer</string>
+            <key>CFBundleURLName</key>
+            <string>com.marspater.news.story</string>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>news</string>
+            </array>
+        </dict>
+    </array>
 </dict>
 </plist>
 PLIST_EOF
+plutil -lint "${CONTENTS_DIR}/Info.plist" >/dev/null
 
 # Code signing with Hardened Runtime
 echo "🔐 Signing binary with Hardened Runtime..."

@@ -9,8 +9,6 @@ literal-frame Sources/Views/FeedCatalogView.swift 1
 literal-frame Sources/Views/MainView.swift 3
 literal-frame Sources/Views/SidebarView.swift 1
 literal-opacity Sources/Views/FeedCatalogView.swift 1
-literal-opacity Sources/Views/TensionIndexView.swift 3
 literal-stroke Sources/Views/ArticleDetailView.swift 1
 literal-stroke Sources/Views/ReaderSupportViews.swift 1
 literal-stroke Sources/Views/SidebarView.swift 1
-literal-stroke Sources/Views/TensionIndexView.swift 4
