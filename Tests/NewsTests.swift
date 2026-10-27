@@ -462,6 +462,9 @@ struct NewsTests {
                     "    people \(value.people.sorted()) orgs \(value.organizations.sorted()) places \(value.places.sorted())"
                         + " names \(value.names.sorted()) numbers \(value.titleNumbers.sorted()) act \(value.actClass)")
                 print("    keywords \(value.keywords.sorted())")
+                print(
+                    "    days \(value.calendarDays.sorted()) series \(value.series ?? "none") \(value.seriesTerms.sorted())"
+                        + " editions \(value.editions.sorted())")
             }
             return
         }
@@ -7696,6 +7699,42 @@ struct NewsTests {
         let late = features(["afad"], quake.keywords, hours: 40, places: ["malatya"])
         assertEqual(EventMatcher.assess(quake, late).conflict, .timeGap, "Reports far apart in time never match")
 
+        // #688: explicit days are calendar tokens, not figures; one publisher's series name is no evidence.
+        let dated = EventFeatures(
+            title: "Dockworkers to strike on October 21st, union says", description: "", date: now)
+        assertEqual(dated.calendarDays, ["10-21"], "An ordinal date is a calendar day")
+        assertTrue(dated.titleNumbers.isEmpty, "A date's day is not a headline figure")
+        assertEqual(
+            EventFeatures(title: "Port faces 21 October walkout", description: "", date: now).calendarDays, ["10-21"],
+            "A day-first date reads the same")
+        var dayOne = quake
+        dayOne.calendarDays = ["10-21"]
+        var dayTwo = quakeLater
+        dayTwo.calendarDays = ["10-22"]
+        assertEqual(EventMatcher.assess(dayOne, dayTwo).conflict, .calendarDay, "Different explicit days differ")
+        let lead = "Catch up with the most important stories from around Europe this October 21st, 2026 - business."
+        let morning = EventFeatures(
+            title: "Latest news bulletin | October 21st, 2026 – Morning", description: lead, date: now)
+        let evening = EventFeatures(
+            title: "Latest news bulletin | October 21st, 2026 – Evening", description: lead,
+            date: now.addingTimeInterval(10 * 3600))
+        assertEqual(morning.series, "latest news bulletin", "The text before the separator names the series")
+        assertEqual(morning.editions, ["morning"], "The edition slot is read from the headline")
+        assertEqual(
+            EventMatcher.assess(morning, evening, samePublisher: true).conflict, .edition,
+            "Two editions of one publisher's series are two items")
+        assertTrue(
+            EventMatcher.assess(morning, evening).conflict != .edition, "Editions conflict only inside one series")
+        var seriesFirst = quake
+        seriesFirst.series = "afad daily"
+        seriesFirst.seriesTerms = ["afad", "malatya"]
+        var seriesSecond = quakeLater
+        seriesSecond.series = "afad daily"
+        assertTrue(EventMatcher.assess(seriesFirst, seriesSecond).isMatch, "Two publishers' shared names count")
+        assertFalse(
+            EventMatcher.assess(seriesFirst, seriesSecond, samePublisher: true).isMatch,
+            "Inside one publisher's series its name is no shared evidence")
+
         let followUpTerms: Set<String> = ["earthquake", "damage", "rescue", "tent", "camp", "aid", "shelter", "winter"]
         assertTrue(
             EventMatcher.assess(quake, features(["afad"], followUpTerms, hours: 2, places: ["malatya"])).isMatch,
@@ -12016,7 +12055,8 @@ struct NewsTests {
                         if let va = vectorCache[items[i].id], let vb = vectorCache[items[j].id] {
                             similarity = SentenceEmbedder.cosineSimilarity(va, vb)
                         }
-                        let pair = EventMatcher.assess(a, b, embeddingSimilarity: similarity)
+                        let pair = EventMatcher.assess(
+                            a, b, embeddingSimilarity: similarity, samePublisher: items[i].source == items[j].source)
                         let diagnosePolicy = StoryCorpus.policyFromEnvironment()
                         func input(_ index: Int) -> String {
                             let text = EventFeatures.matchingText(
@@ -12318,7 +12358,11 @@ struct NewsTests {
         ] {
             try await db.eventRows("DELETE FROM \(table);")
         }
-        let newest = try await recentLibraryRows(db).newest
+        // NEWS_HOLDOUT_NOW=<epoch> pins the clock to when the holdout was drawn, for a copy taken later (#688).
+        var newest = try await recentLibraryRows(db).newest
+        if let pinned = ProcessInfo.processInfo.environment["NEWS_HOLDOUT_NOW"].flatMap({ TimeInterval($0) }) {
+            newest = Date(timeIntervalSince1970: pinned)
+        }
         let policy = StoryCorpus.policyFromEnvironment()
         let modelOff = ProcessInfo.processInfo.environment["NEWS_PAIR_MODEL"] == "0"
         let candidate = ProcessInfo.processInfo.environment["NEWS_PAIR_MODEL_PATH"]
