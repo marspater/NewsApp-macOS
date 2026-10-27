@@ -218,20 +218,24 @@ struct ArticleDetailView: View {
                     },
                     onSelectRelatedEvent: { related in
                         Task {
-                            guard
-                                let article = try? await articleStore.database.fetchArticles(
-                                    limit: 1, id: related.articleID
-                                ).first
-                            else { return }
-                            // The same sequence as moving to the next story; the earlier event opens on its overview.
-                            resetReaderState()
-                            currentOverview = nil
-                            eventMemberArticles = []
-                            overviewRequestedArticleID = article.id
-                            activeArticle = article
-                            readManager.markAsRead(article.id)
-                            // Opening an event from here counts as seeing it, as it does from the feed.
-                            await articleStore.markEventSeen(related.eventID)
+                            do {
+                                guard
+                                    let article = try await articleStore.database.fetchArticles(
+                                        limit: 1, id: related.articleID
+                                    ).first
+                                else { return }
+                                // The same sequence as moving to the next story; the earlier event opens on its overview.
+                                resetReaderState()
+                                currentOverview = nil
+                                eventMemberArticles = []
+                                overviewRequestedArticleID = article.id
+                                activeArticle = article
+                                readManager.markAsRead(article.id)
+                                // Opening an event from here counts as seeing it, as it does from the feed.
+                                await articleStore.markEventSeen(related.eventID)
+                            } catch {
+                                articleStore.operationError = "This story could not be opened. Please try again."
+                            }
                         }
                     },
                     onCombineRelatedEvent: { related in

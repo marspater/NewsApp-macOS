@@ -217,7 +217,7 @@ public struct OverviewComposer: Sendable {
             citationsByPassageID[passage.id] = cit
         }
 
-        let citationsMap = Dictionary(uniqueKeysWithValues: allCitations.map { ($0.id, $0) })
+        let citationsMap = Dictionary(allCitations.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         let timelineItems = OverviewTimelineExtractor.extractTimeline(
             passages: passages,
             articles: articles,
@@ -430,13 +430,16 @@ public struct OverviewComposer: Sendable {
     ) -> [OverviewPerspective] {
         let excludeStrings = Set(
             excludeSentences.map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() })
+        let excludeWordsList = excludeStrings.compactMap { ex -> Set<String>? in
+            let words = Set(TensionEventClassifier.words(ex))
+            return words.isEmpty ? nil : words
+        }
         return perspectives.filter { p in
             let pos = p.position.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
             if excludeStrings.contains(pos) { return false }
             let pWords = Set(TensionEventClassifier.words(pos))
             guard !pWords.isEmpty else { return true }
-            for ex in excludeStrings {
-                let exWords = Set(TensionEventClassifier.words(ex))
+            for exWords in excludeWordsList {
                 let union = pWords.union(exWords).count
                 if union > 0 && Double(pWords.intersection(exWords).count) / Double(union) >= 0.7 {
                     return false
@@ -452,14 +455,16 @@ public struct OverviewComposer: Sendable {
     ) -> [OverviewIndustryImpact] {
         let excludeStrings = Set(
             excludeSentences.map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() })
+        let excludeWordsList = excludeStrings.compactMap { ex -> Set<String>? in
+            let words = Set(ex.components(separatedBy: CharacterSet.alphanumerics.inverted).filter { !$0.isEmpty })
+            return words.isEmpty ? nil : words
+        }
         return impact.filter { item in
             let imp = item.implication.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
             if excludeStrings.contains(imp) { return false }
             let words = Set(imp.components(separatedBy: CharacterSet.alphanumerics.inverted).filter { !$0.isEmpty })
             guard !words.isEmpty else { return false }
-            for ex in excludeStrings {
-                let exWords = Set(
-                    ex.components(separatedBy: CharacterSet.alphanumerics.inverted).filter { !$0.isEmpty })
+            for exWords in excludeWordsList {
                 let union = words.union(exWords).count
                 if union > 0 && Double(words.intersection(exWords).count) / Double(union) >= 0.6 {
                     return false

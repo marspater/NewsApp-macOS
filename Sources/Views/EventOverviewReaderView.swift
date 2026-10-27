@@ -14,6 +14,7 @@ import SwiftUI
 ///    "Earlier in This Story": related earlier events, each opening its own overview (#314)
 /// 6. Sources: every member publication, read here or opened on the publisher's site
 /// Sections without enough data are absent.
+@MainActor
 struct EventOverviewReaderView: View {
     let overview: EventOverviewDocument
     let memberArticles: [FeedArticle]
@@ -109,7 +110,9 @@ struct EventOverviewReaderView: View {
     }
 
     // MARK: - Citation Resolution Helper
-    static func matchingArticle(for citation: OverviewCitation, in memberArticles: [FeedArticle]) -> FeedArticle? {
+    nonisolated static func matchingArticle(for citation: OverviewCitation, in memberArticles: [FeedArticle])
+        -> FeedArticle?
+    {
         if let match = memberArticles.first(where: { $0.id == citation.articleID }) {
             return match
         }
@@ -124,7 +127,10 @@ struct EventOverviewReaderView: View {
             return match
         }
         if let name = citation.sourceName, !name.isEmpty,
-            let match = memberArticles.first(where: { $0.source.caseInsensitiveCompare(name) == .orderedSame })
+            let match = memberArticles.first(where: {
+                $0.source.caseInsensitiveCompare(name) == .orderedSame
+                    || $0.publisherName.caseInsensitiveCompare(name) == .orderedSame
+            })
         {
             return match
         }
@@ -136,26 +142,26 @@ struct EventOverviewReaderView: View {
     }
 
     // MARK: - Sparse Section Filtering
-    static func hasSummaryContent(_ summary: String) -> Bool {
+    nonisolated static func hasSummaryContent(_ summary: String) -> Bool {
         !summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
-    static func hasLeadImageContent(_ leadImage: OverviewLeadImage?) -> Bool {
+    nonisolated static func hasLeadImageContent(_ leadImage: OverviewLeadImage?) -> Bool {
         guard let leadImage = leadImage else { return false }
         return !leadImage.url.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
-    static func filterValidFacts(_ facts: [OverviewFact]) -> [OverviewFact] {
+    nonisolated static func filterValidFacts(_ facts: [OverviewFact]) -> [OverviewFact] {
         facts.filter { !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     }
 
-    static func filterValidTimeline(_ timeline: [OverviewTimelineItem]) -> [OverviewTimelineItem] {
+    nonisolated static func filterValidTimeline(_ timeline: [OverviewTimelineItem]) -> [OverviewTimelineItem] {
         timeline.filter {
             !$0.summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }
     }
 
-    static func sortTimelineItems(_ items: [OverviewTimelineItem]) -> [OverviewTimelineItem] {
+    nonisolated static func sortTimelineItems(_ items: [OverviewTimelineItem]) -> [OverviewTimelineItem] {
         items.enumerated().sorted { left, right in
             let a = left.element
             let b = right.element
@@ -175,21 +181,21 @@ struct EventOverviewReaderView: View {
         }.map(\.element)
     }
 
-    static func filterValidPerspectives(_ perspectives: [OverviewPerspective]) -> [OverviewPerspective] {
+    nonisolated static func filterValidPerspectives(_ perspectives: [OverviewPerspective]) -> [OverviewPerspective] {
         perspectives.filter {
             !$0.participant.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 && !$0.position.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }
     }
 
-    static func filterValidIndustryImpact(_ impact: [OverviewIndustryImpact]) -> [OverviewIndustryImpact] {
+    nonisolated static func filterValidIndustryImpact(_ impact: [OverviewIndustryImpact]) -> [OverviewIndustryImpact] {
         impact.filter {
             !$0.industry.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 && !$0.implication.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }
     }
 
-    static func hasThematicAngleContent(_ angle: OverviewThematicAngle?) -> Bool {
+    nonisolated static func hasThematicAngleContent(_ angle: OverviewThematicAngle?) -> Bool {
         guard let angle = angle else { return false }
         let title = angle.title.trimmingCharacters(in: .whitespacesAndNewlines)
         let summary = angle.summary.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -198,12 +204,12 @@ struct EventOverviewReaderView: View {
     }
 
     /// The extractor builds the summary from the first facts, so it shows only when there are no bullets to repeat.
-    static func showsThematicAngleSummary(_ angle: OverviewThematicAngle) -> Bool {
+    nonisolated static func showsThematicAngleSummary(_ angle: OverviewThematicAngle) -> Bool {
         !angle.summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && filterValidFacts(angle.facts).isEmpty
     }
 
     /// Coverage sentiment stays in the data for Briefing interests and is never shown (DESIGN.md 9, #597).
-    static func hasEvidenceContent(
+    nonisolated static func hasEvidenceContent(
         timeline: [OverviewTimelineItem],
         perspectives: [OverviewPerspective],
         industryImpact: [OverviewIndustryImpact] = [],

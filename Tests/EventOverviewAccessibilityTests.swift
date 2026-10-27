@@ -60,6 +60,7 @@ struct EventOverviewAccessibilityTests {
         testEpicT2TimelineSpineAndSorting()
         testEpicT3HighlightSeparationAndHierarchy()
         testEpicT4DistinctPerspectivesDesign()
+        await testEpicTRobustnessConcurrencyAndErrorHandling()
 
         print("Finished \(testsRun) event overview accessibility checks with \(failures) failures.")
         if failures > 0 {
@@ -737,5 +738,129 @@ struct EventOverviewAccessibilityTests {
         assertEqual(
             voPersp, "EU Envoy. Supports binding commitments. via Bloomberg",
             "VoiceOver reads participant, position, and source in sequence")
+    }
+
+    // MARK: - 11. Epic T: Strict Concurrency, Error Handling & Memory Safety
+    static func testEpicTRobustnessConcurrencyAndErrorHandling() async {
+        print("  - Testing Epic T: Strict Concurrency, Error Handling & Memory Safety...")
+
+        // 1. Resiliency to duplicate article IDs (must not trap with uniqueKeysWithValues duplicate key error)
+        let artDuplicate1 = FeedArticle(
+            storedID: "art_dup", title: "Steel manufacturers face raw material shortages and shutdown",
+            link: "https://example.com/art1", guid: "g1", description: "First copy",
+            pubDate: Date(), source: "Reuters Top News"
+        )
+        let artDuplicate2 = FeedArticle(
+            storedID: "art_dup", title: "Steel manufacturers face raw material shortages and shutdown",
+            link: "https://example.com/art1_alt", guid: "g2", description: "Second copy with duplicate ID",
+            pubDate: Date(), source: "Reuters Top News"
+        )
+        let passDuplicate = EvidencePassage(
+            id: "pass_dup_1", articleID: "art_dup",
+            text:
+                "Steel manufacturers face severe raw material shortages and announced immediate shutdown of three factories."
+        )
+
+        let extractedFromDuplicates = OverviewIndustryImpactExtractor.extractIndustryImpact(
+            passages: [passDuplicate],
+            articles: [artDuplicate1, artDuplicate2],
+            existingCitations: [:]
+        )
+        assertTrue(
+            extractedFromDuplicates.items.count > 0,
+            "extractIndustryImpact safely handles duplicate article IDs without fatalError"
+        )
+
+        // 2. Fallback citation metadata generation when existingCitations is empty
+        if let firstItem = extractedFromDuplicates.items.first,
+            let firstCite = extractedFromDuplicates.citations.first
+        {
+            assertEqual(firstItem.industry, "Manufacturing", "Identifies manufacturing industry impact")
+            assertEqual(firstCite.sourceName, "Reuters Top News", "Populates source metadata from article")
+            assertEqual(
+                firstCite.sourceTitle, "Steel manufacturers face raw material shortages and shutdown", "Populates title"
+            )
+
+            // 3. validateIndustryImpact with duplicate passages and duplicate articles
+            let isValid = OverviewIndustryImpactExtractor.validateIndustryImpact(
+                firstItem,
+                against: [firstCite.id: firstCite],
+                passages: [passDuplicate, passDuplicate],
+                articles: [artDuplicate1, artDuplicate2]
+            )
+            assertTrue(isValid, "validateIndustryImpact safely validates with duplicate passage/article IDs")
+        } else {
+            assertTrue(false, "Expected extracted industry impact item")
+        }
+
+        // 4. Citation resolution by publisherName when source string differs
+        let guardianArticle = FeedArticle(
+            storedID: "guardian_1", title: "Tech giants face antitrust mandates",
+            link: "https://www.theguardian.com/technology/2026/oct/27/story", guid: "g_guid", description: "",
+            pubDate: Date(), source: "Technology - Latest"
+        )
+        // FeedCatalog resolves theguardian.com to "The Guardian", while article.source is "Technology - Latest"
+        assertEqual(guardianArticle.publisherName, "The Guardian", "FeedCatalog resolves Guardian domain")
+        let guardianCitation = OverviewCitation(
+            id: "cite_guardian", articleID: "guardian_unknown_id", passageID: "p1",
+            passageFingerprint: "fp", quote: "quote",
+            source: OverviewSourceMetadata(title: "Tech giants", name: "The Guardian", url: nil, publishedAt: nil)
+        )
+        let resolvedMatch = EventOverviewReaderView.matchingArticle(for: guardianCitation, in: [guardianArticle])
+        assertEqual(
+            resolvedMatch?.id, guardianArticle.id,
+            "matchingArticle matches citation sourceName against article.publisherName"
+        )
+
+        // 5. Nonisolated helper invocation from detached task across actor boundaries
+        let detachedResult = await Task.detached { () -> Bool in
+            let sorted = EventOverviewReaderView.sortTimelineItems([])
+            let impactFiltered = EventOverviewReaderView.filterValidIndustryImpact([])
+            let hasContent = EventOverviewReaderView.hasEvidenceContent(
+                timeline: sorted,
+                perspectives: [],
+                industryImpact: impactFiltered,
+                thematicAngle: nil
+            )
+            return !hasContent
+        }.value
+        assertTrue(detachedResult, "Pure static helpers are nonisolated and callable from background tasks")
+
+        // 6. Concurrency stress test: parallel extraction across tasks
+        await withTaskGroup(of: Bool.self) { group in
+            for i in 0..<10 {
+                let sentence = "Energy companies reported soaring power grid costs and pipeline disruption #\(i)."
+                let pass = EvidencePassage(id: "p_conc_\(i)", articleID: "a_conc_\(i)", text: sentence)
+                let art = FeedArticle(
+                    storedID: "a_conc_\(i)", title: "Energy grid costs",
+                    link: "https://example.com/energy/\(i)", guid: "e_\(i)", description: "",
+                    pubDate: Date(), source: "Energy Weekly"
+                )
+                group.addTask {
+                    let ext = OverviewIndustryImpactExtractor.extractIndustryImpact(
+                        passages: [pass],
+                        articles: [art],
+                        existingCitations: [:]
+                    )
+                    return ext.items.count <= 1
+                }
+            }
+            for await success in group {
+                assertTrue(success, "Concurrent industry impact extraction executed safely")
+            }
+        }
+
+        // 7. Deduplication edge cases (empty strings, whitespace-only, disjoint texts)
+        let emptyPerspective = OverviewPerspective(
+            id: "p_empty", participant: "Speaker", position: "   ", sourcePublisher: "Source")
+        let dedupedEmpty = OverviewComposer.deduplicatePerspectives([emptyPerspective], against: ["Valid highlight"])
+        assertEqual(dedupedEmpty.count, 1, "Empty position is handled without crash")
+
+        let dedupedNoExclusion = OverviewComposer.deduplicateIndustryImpact(
+            extractedFromDuplicates.items, against: [])
+        assertEqual(
+            dedupedNoExclusion.count, extractedFromDuplicates.items.count,
+            "Empty exclusion array retains all impact items"
+        )
     }
 }

@@ -130,6 +130,25 @@ struct OverviewIndustryImpactExtractor: Sendable {
         "outage", "outages", "disruption", "disruptions", "grounded",
     ]
 
+    private static let multiWordRegexes: [String: NSRegularExpression] = {
+        var dict: [String: NSRegularExpression] = [:]
+        var allCues: [String] = implicationCues
+        for industry in StandardIndustry.allCases {
+            allCues.append(contentsOf: industry.cues)
+        }
+        for cue in allCues where cue.contains(" ") {
+            if dict[cue] == nil,
+                let regex = try? NSRegularExpression(
+                    pattern: "\\b\(NSRegularExpression.escapedPattern(for: cue))\\b",
+                    options: [.caseInsensitive]
+                )
+            {
+                dict[cue] = regex
+            }
+        }
+        return dict
+    }()
+
     struct ExtractedIndustryImpact: Sendable {
         let items: [OverviewIndustryImpact]
         let citations: [OverviewCitation]
@@ -150,7 +169,7 @@ struct OverviewIndustryImpactExtractor: Sendable {
         var results: [OverviewIndustryImpact] = []
         var impactCitations: [OverviewCitation] = []
         var coveredIndustries = Set<StandardIndustry>()
-        let articlesByID = Dictionary(uniqueKeysWithValues: articles.map { ($0.id, $0) })
+        let articlesByID = Dictionary(articles.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
 
         // Build mapping from passage ID to citation
         var passageToCitation: [String: OverviewCitation] = [:]
@@ -161,9 +180,16 @@ struct OverviewIndustryImpactExtractor: Sendable {
         }
 
         for passage in passages {
-            guard let citation = passageToCitation[passage.id],
-                let article = articlesByID[passage.articleID]
-            else { continue }
+            guard let article = articlesByID[passage.articleID] else { continue }
+            let citation = passageToCitation[passage.id]
+            let sourceMeta =
+                citation?.source
+                ?? OverviewSourceMetadata(
+                    title: article.title,
+                    name: article.source,
+                    url: article.link,
+                    publishedAt: article.pubDate
+                )
 
             let sentences = extractCandidateSentences(from: passage.text)
             for sentence in sentences {
@@ -183,7 +209,7 @@ struct OverviewIndustryImpactExtractor: Sendable {
                     passageID: passage.id,
                     passageFingerprint: passage.fingerprint,
                     quote: sentence,
-                    source: citation.source
+                    source: sourceMeta
                 )
 
                 let candidateImpact = OverviewIndustryImpact(
@@ -232,6 +258,9 @@ struct OverviewIndustryImpactExtractor: Sendable {
     /// Matches a cue either as a distinct word in the word set (single-word cue) or as a bounded phrase.
     private static func matchesCue(_ cue: String, in text: String, words: Set<String>) -> Bool {
         if cue.contains(" ") {
+            if let regex = multiWordRegexes[cue] {
+                return regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)) != nil
+            }
             guard
                 let regex = try? NSRegularExpression(
                     pattern: "\\b\(NSRegularExpression.escapedPattern(for: cue))\\b",
@@ -347,8 +376,8 @@ struct OverviewIndustryImpactExtractor: Sendable {
         guard !impact.implication.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
         guard StandardIndustry.allCases.contains(where: { $0.rawValue == impact.industry }) else { return false }
 
-        let passagesByID = Dictionary(uniqueKeysWithValues: passages.map { ($0.id, $0) })
-        let articlesByID = Dictionary(uniqueKeysWithValues: articles.map { ($0.id, $0) })
+        let passagesByID = Dictionary(passages.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let articlesByID = Dictionary(articles.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
 
         for citID in impact.citationIDs {
             guard let citation = citations[citID] else { return false }
