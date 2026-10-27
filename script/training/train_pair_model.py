@@ -35,12 +35,14 @@ classes and is only reported. `weight` scales the row's loss (reviewed labels an
 Training uses the word pieces the app exported, so it sees exactly the ids the app sends. The tokenizer port below only
 serves the shipped-model check and the self-check; `encode_ids` mirrors `BertWordPieceTokenizer.encodePair`.
 """
+import argparse
 import csv
+import dataclasses
 import hashlib
 import json
-import platform
 import math
 import pathlib
+import platform
 import re
 import struct
 import sys
@@ -50,7 +52,6 @@ import zlib
 import coremltools as ct
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
-from wordpiece import MAX_LENGTH, Tokenizer, require
 import numpy as np
 import torch
 from transformers import (
@@ -59,6 +60,7 @@ from transformers import (
     BertModel,
     get_linear_schedule_with_warmup,
 )
+from wordpiece import MAX_LENGTH, Tokenizer, require
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 BATCH = 32  # training batch size, both stages
@@ -67,6 +69,31 @@ CLASSES = ('different', 'related', 'same')
 SMOOTHING = 0.05
 FROZEN_LAYERS = 2  # stage 2 keeps the embeddings and this many lower encoder layers fixed (#627)
 GDELT_DIFFERENT = 0.55  # a GDELT pair below this cosine is a different story, not possibly a related act
+STATE = 'pairscorer-state.pt'  # the trained weights beside the exported model
+
+
+@dataclasses.dataclass(frozen=True)
+class Stage:
+    """One training stage's hyperparameters: epochs, learning rate, lower encoder layers frozen (with the embeddings)
+    and label smoothing."""
+    epochs: int
+    rate: float
+    frozen: int = 0
+    smoothing: float = SMOOTHING
+
+
+# Mars's 25 October configuration (#624, #627): stage 2 with the lower layers frozen, stage 1 over every layer.
+LIBRARY_STAGE = Stage(3, 1.5e-5, FROZEN_LAYERS)
+PRETRAIN_STAGE = Stage(2, 3e-5)
+
+
+def private_file(value):
+    """An input file named on the command line, which must be a regular file outside this checkout."""
+    path = pathlib.Path(value).expanduser().resolve()
+    checkout = pathlib.Path(__file__).resolve().parents[2]
+    if not path.is_file() or checkout in path.parents:
+        raise argparse.ArgumentTypeError(f'{value} is not a private file outside the checkout')
+    return path
 CONFIG = BertConfig(
     vocab_size=30522, hidden_size=384, num_hidden_layers=6, num_attention_heads=12, intermediate_size=1536,
     max_position_embeddings=512, type_vocab_size=2, hidden_act='gelu', layer_norm_eps=1e-12, num_labels=3,
@@ -209,9 +236,8 @@ def kinds(rows):
 
 
 def describe_state(path):
-    """The file name and SHA-256 of a stage-1 state."""
-    data = pathlib.Path(path).read_bytes()  # the operator's own state file, named on the command line
-    return {'file': pathlib.Path(path).name, 'sha256': hashlib.sha256(data).hexdigest()}
+    """The file name and SHA-256 of an input file `private_file` validated."""
+    return {'file': path.name, 'sha256': hashlib.sha256(path.read_bytes()).hexdigest()}  # NOSONAR
 
 
 def split(rows):
@@ -307,21 +333,28 @@ def held_out_line(name, epoch, probabilities, masks):
 
 # Admission rules for a three-way model (#627): `same` admits on p_same; `story` admits on p_same + p_related when
 # same outweighs related and p_different is at most 0.10. The cutoff is chosen on tune and on this held-out sweep.
-RULES = {
-    'same': (lambda p, c: p[2] >= c, (0.5, 0.6, 0.7, 0.8, 0.85, 0.9, 0.95)),
-    'story': (lambda p, c: p[1] + p[2] >= c and p[2] > p[1] and p[0] <= 0.10, (0.8, 0.85, 0.9, 0.93, 0.95, 0.97)),
-}
+def admits_same(p, cutoff):
+    return p[2] >= cutoff
+
+
+def admits_story(p, cutoff):
+    return p[1] + p[2] >= cutoff and p[2] > p[1] and p[0] <= 0.10
+
+
+RULES = (('same', admits_same, (0.5, 0.6, 0.7, 0.8, 0.85, 0.9, 0.95)),
+         ('story', admits_story, (0.8, 0.85, 0.9, 0.93, 0.95, 0.97)))
 
 
 def sweep(probabilities, masks):
     """Rows that allow only `same` against rows that exclude it, admitted under each rule and cutoff."""
     rows = [(p, m == 4) for p, m in zip(probabilities, masks, strict=True) if m == 4 or not m & 4]
+    positives = sum(1 for _, same in rows if same)
     lines = []
-    for name, (admits, cutoffs) in RULES.items():
+    for name, admits, cutoffs in RULES:
         for cutoff in cutoffs:
-            tp = sum(1 for p, same in rows if same and admits(p, cutoff))
-            fp = sum(1 for p, same in rows if not same and admits(p, cutoff))
-            lines.append(f'{name} >= {cutoff}: TP {tp}, FP {fp}, FN {sum(1 for _, same in rows if same) - tp}')
+            admitted = [same for p, same in rows if admits(p, cutoff)]
+            tp = sum(admitted)
+            lines.append(f'{name} >= {cutoff}: TP {tp}, FP {len(admitted) - tp}, FN {positives - tp}')
     return lines
 
 
@@ -343,9 +376,10 @@ def run_epoch(model, data, device, optimization, batch):
         optimizer.zero_grad()
 
 
-def fit_stage(model, tokenizer, rows, device, epochs, rate, name, report, frozen=0, smoothing=SMOOTHING):
-    """One training stage on `rows`; per-epoch held-out numbers are printed and the last ones recorded. With `frozen`,
-    the embeddings and that many lower encoder layers keep their weights (#627)."""
+def fit_stage(model, tokenizer, rows, device, stage, name, report):
+    """One training stage on `rows`; per-epoch held-out numbers are printed and the last ones recorded. With
+    `stage.frozen`, the embeddings and that many lower encoder layers keep their weights (#627)."""
+    epochs, rate, frozen, smoothing = stage.epochs, stage.rate, stage.frozen, stage.smoothing
     fit, held = split(rows)
     print(f'{name}: {len(fit)} training {kinds(fit)}, {len(held)} held out {kinds(held)}, '
           f'{len(rows) - len(fit) - len(held)} straddling dropped')
@@ -408,8 +442,7 @@ def sharpen_gdelt(rows, tokenizer, device, batch=256):
     return rows, sharpened
 
 
-def train(rows, epochs=3, rate=1.5e-5, pretrain=None, pretrain_epochs=2, pretrain_rate=3e-5, init=None, out=None,
-          frozen=FROZEN_LAYERS, smoothing=SMOOTHING):
+def train(rows, library=LIBRARY_STAGE, pretrain=None, pretraining=PRETRAIN_STAGE, init=None, out=None):
     """Stage 1 on the public pretraining pairs when given (#624; saved as `pretrain-state.pt` in `out`), or the
     state `init`, then stage 2 on the library pairs with the lower layers frozen (#627)."""
     torch.manual_seed(525)
@@ -423,10 +456,10 @@ def train(rows, epochs=3, rate=1.5e-5, pretrain=None, pretrain_epochs=2, pretrai
     report = {}
     if pretrain:
         pretrain, report['gdelt_sharpened'] = sharpen_gdelt(pretrain, tokenizer, device)
-        fit_stage(model, tokenizer, pretrain, device, pretrain_epochs, pretrain_rate, 'pretrain', report)
+        fit_stage(model, tokenizer, pretrain, device, pretraining, 'pretrain', report)
         if out:
             torch.save(model.state_dict(), pathlib.Path(out) / 'pretrain-state.pt')
-    held = fit_stage(model, tokenizer, rows, device, epochs, rate, 'library', report, frozen, smoothing)
+    held = fit_stage(model, tokenizer, rows, device, library, 'library', report)
     return model.cpu().eval(), tokenizer, held, report
 
 
@@ -521,7 +554,6 @@ def self_check():
 
 def main(argv):
     """PAIRS.csv OUT_DIR [--pretrain A.csv ...] [--init STATE.pt]: train, export and write metadata.json."""
-    import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument('pairs')
     parser.add_argument('out')
@@ -530,30 +562,32 @@ def main(argv):
     parser.add_argument('--pretrain-cap', type=int, default=120_000, help='rows kept per pretraining CSV')
     parser.add_argument('--epochs', type=int, default=3)
     parser.add_argument('--rate', type=float, default=1.5e-5)
-    parser.add_argument('--init', help='a pretrain-state.pt to start stage 2 from instead of stage 1')
-    parser.add_argument('--exclude-headlines', help='folded headlines, one a line, whose rows are left out (#627)')
+    parser.add_argument('--init', type=private_file,
+                        help='a pretrain-state.pt to start stage 2 from instead of stage 1')
+    parser.add_argument('--exclude-headlines', type=private_file,
+                        help='folded headlines, one a line, whose rows are left out (#627)')
     parser.add_argument('--frozen', type=int, default=FROZEN_LAYERS, help='lower encoder layers frozen in stage 2')
     parser.add_argument('--smoothing', type=float, default=SMOOTHING, help='label smoothing of the stage-2 loss')
     parser.add_argument('--sweep', action='store_true',
-                        help='no training: the held-out sweep of OUT_DIR/pairscorer-state.pt on PAIRS.csv')
+                        help=f'no training: the held-out sweep of OUT_DIR/{STATE} on PAIRS.csv')
     args = parser.parse_args(argv)
     if args.exclude_headlines:
-        EXCLUDED.update(line.strip() for line in pathlib.Path(args.exclude_headlines).read_text().splitlines())
+        EXCLUDED.update(line.strip() for line in args.exclude_headlines.read_text().splitlines())  # NOSONAR
         EXCLUDED.discard('')
     rows = read_pairs(args.pairs)
     if args.sweep:
         model = BertForSequenceClassification(CONFIG)
-        model.load_state_dict(torch.load(pathlib.Path(args.out) / 'pairscorer-state.pt', weights_only=True))
+        model.load_state_dict(torch.load(pathlib.Path(args.out) / STATE, weights_only=True))
         device = torch.device('mps' if torch.backends.mps.is_available() else 'cpu')
         held = split(rows)[1]
         print('\n'.join(sweep(predict(model.to(device), tensors(Tokenizer(), held), device), [r[0] for r in held])))
         return
     pretrain = [r for path in args.pretrain for r in read_pairs(path, cap=args.pretrain_cap)]
-    trained, tok, held_out, report = train(rows, epochs=args.epochs, rate=args.rate, pretrain=pretrain or None,
-                                           pretrain_epochs=args.pretrain_epochs, init=args.init, out=args.out,
-                                           frozen=args.frozen, smoothing=args.smoothing)
+    trained, tok, held_out, report = train(
+        rows, Stage(args.epochs, args.rate, args.frozen, args.smoothing), pretrain or None,
+        Stage(args.pretrain_epochs, 3e-5), args.init, args.out)
     out = pathlib.Path(args.out)
-    torch.save(trained.state_dict(), out / 'pairscorer-state.pt')
+    torch.save(trained.state_dict(), out / STATE)
     export(trained, tok, held_out, args.out)
     metadata = {
         'model': 'pairscorer', 'base': 'sentence-transformers/all-MiniLM-L6-v2 (shipped minilm.mlmodelc weights)',
@@ -581,8 +615,8 @@ if __name__ == '__main__':
     elif len(sys.argv) == 4 and sys.argv[1] == '--export':
         rows = read_pairs(sys.argv[2])
         model = BertForSequenceClassification(CONFIG)
-        state = pathlib.Path(sys.argv[3]).resolve() / 'pairscorer-state.pt'
-        require(state.is_file(), 'Train first: the output directory has no pairscorer-state.pt')
+        state = pathlib.Path(sys.argv[3]).resolve() / STATE
+        require(state.is_file(), f'Train first: the output directory has no {STATE}')
         model.load_state_dict(torch.load(state, weights_only=True))
         export(model.eval(), Tokenizer(), split(rows)[1], sys.argv[3])
     elif len(sys.argv) == 1:
