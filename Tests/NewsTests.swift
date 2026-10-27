@@ -1501,7 +1501,7 @@ struct NewsTests {
         // Overview generation & cached lookup (#104, #153)
         let eventArticles = Array(archive.prefix(3))
         let queue = EnrichmentQueue(store: store)
-        let coordinator = OverviewGenerationCoordinator(store: store, queue: queue, textModel: .unavailable)
+        let coordinator = OverviewGenerationCoordinator(store: store, queue: queue)
         for i in 0..<10 {
             let start = ProcessInfo.processInfo.systemUptime
             let doc = await coordinator.requestOverview(
@@ -8946,7 +8946,7 @@ struct NewsTests {
         let evidenceCoordinator: OverviewGenerationCoordinator? =
             environment["NEWS_OVERVIEWS_EXTRACT"] == "1"
             ? OverviewGenerationCoordinator(
-                store: evidenceStore, allowsModel: { true },
+                store: evidenceStore,
                 extractText: { link in
                     let outcome = await ContentExtractionPipeline.shared.extractArticleWithIdentity(from: link).outcome
                     await fetches.add(Task.isCancelled ? "cutAtDeadline" : outcome.kindName)
@@ -11253,7 +11253,7 @@ struct NewsTests {
             "Saved publisher bodies survive cache purging")
         // Unit tests never reach the live on-device model.
         let coordinator = OverviewGenerationCoordinator(
-            store: store, queue: EnrichmentQueue(store: store), textModel: .unavailable)
+            store: store, queue: EnrichmentQueue(store: store))
         let cachedOverview = await coordinator.requestOverview(
             eventID: event.id, eventTitle: "Harbor bridge",
             membershipVersion: event.membershipVersion,
@@ -16140,12 +16140,9 @@ struct NewsTests {
             await reply.during?()
             return reply.outcome
         }
-        func coordinator(_ model: NewsTextModel = refusing, deadline: Duration = .seconds(4))
-            -> OverviewGenerationCoordinator
-        {
+        func coordinator(deadline: Duration = .seconds(4)) -> OverviewGenerationCoordinator {
             OverviewGenerationCoordinator(
-                store: store, queue: EnrichmentQueue(store: store), textModel: model, allowsModel: { true },
-                allowsEnergy: { true },
+                store: store, queue: EnrichmentQueue(store: store), allowsEnergy: { true },
                 extractText: extractor, extractionDeadline: deadline)
         }
         func stored(_ id: String) async throws -> FeedArticle? {
@@ -16154,25 +16151,16 @@ struct NewsTests {
 
         // Extracted text replaces the summary before the inputs are fixed, and invalidates an older overview.
         _ = try await database.upsertArticles([a, b])
-        let plain = OverviewGenerationCoordinator(
-            store: store, queue: EnrichmentQueue(store: store), textModel: refusing, allowsModel: { true })
+        let plain = OverviewGenerationCoordinator(store: store, queue: EnrichmentQueue(store: store))
         let before = await plain.requestOverview(
             eventID: "evidence", eventTitle: "Harbor bridge", membershipVersion: 1, articles: [a, b])
         assertTrue(before != nil, "Without an extractor the summary overview is stored")
         await pages.set(a.link, success(page("Publisher A")))
         await pages.set(b.link, success(page("Publisher B")))
-        let prompts = TestCounter()
-        let recording = NewsTextModel { prompt, _ in
-            if prompt.contains("Return plain text only:"), prompt.contains("two damaged support cables") {
-                await prompts.increment()
-            }
-            return "I refuse"
-        }
-        let extracting = coordinator(recording)
+        let extracting = coordinator()
         let after = await extracting.requestOverview(
             eventID: "evidence", eventTitle: "Harbor bridge", membershipVersion: 1, articles: [a, b])
         assertEqual(try await stored(a.id)?.fullContent, page("Publisher A"), "Accepted publisher text is stored")
-        assertEqual(await prompts.value, 0, "Publisher extraction never schedules model prose")
         assertTrue(after?.inputTextHash != before?.inputTextHash, "Extracted text gives the overview new inputs")
         assertEqual(
             try await database.fetchEventOverview(eventID: "evidence")?.id, after?.id,
@@ -16180,7 +16168,6 @@ struct NewsTests {
         let again = await extracting.requestOverview(
             eventID: "evidence", eventTitle: "Harbor bridge", membershipVersion: 1, articles: [a, b])
         assertEqual(again?.id, after?.id, "Copies from before extraction still hit the stored overview")
-        assertEqual(await prompts.value, 0, "The stored excerpt overview is reused without a model")
         assertEqual(await log.count(a.link), 1, "Stored text is never fetched again")
 
         // The reader's own article is left to the reader.
@@ -16291,8 +16278,7 @@ struct NewsTests {
         _ = try await database.upsertArticles([u, v])
         await pages.set(u.link, success(page("Publisher U")))
         let gated = OverviewGenerationCoordinator(
-            store: store, queue: EnrichmentQueue(store: store), textModel: refusing, allowsModel: { false },
-            allowsEnergy: { false },
+            store: store, queue: EnrichmentQueue(store: store), allowsEnergy: { false },
             extractText: extractor)
         _ = await gated.requestOverview(
             eventID: "gated", eventTitle: "Harbor bridge", membershipVersion: 1, articles: [u, v])
@@ -16561,46 +16547,30 @@ struct NewsTests {
             OverviewClaimVerifier.verifyOverview(stale, passages: passages, articles: [article1, article2])
                 .isFullyVerified,
             "Citation fingerprint must match the current publisher passage")
-        let selected = OverviewPassageSelector().selectPassages(
-            from: [article1, article2], budget: OverviewTokenBudget()
-        ).passages
-        let firstID = "P\(selected.firstIndex(where: { $0.articleID == article1.id })! + 1)"
-        let secondID = "P\(selected.firstIndex(where: { $0.articleID == article2.id })! + 1)"
-        let selectedAnswer = answer.replacingOccurrences(of: "|P1|", with: "|first|").replacingOccurrences(
-            of: "|P2|", with: "|\(secondID)|"
-        ).replacingOccurrences(of: "|first|", with: "|\(firstID)|")
-        let requests = TestCounter()
-        let coordinatedModel = NewsTextModel { prompt, _ in
-            await requests.increment()
-            if prompt.contains("Return plain text only:") { return selectedAnswer }
-            return prompt.contains("Engineers destroyed the bridge.") ? "NO" : "YES"
-        }
         let database = DatabaseEngine(path: ":memory:")
         try await database.open()
         _ = try await database.upsertArticles([article1, article2])
         let store = ArticleStore(database: database)
         let coordinator = OverviewGenerationCoordinator(
-            store: store, queue: EnrichmentQueue(store: store), textModel: coordinatedModel, allowsModel: { true })
+            store: store, queue: EnrichmentQueue(store: store))
         let coordinated = await coordinator.requestOverview(
             eventID: "plain", eventTitle: "Bridge reopening", membershipVersion: 1, articles: [article1, article2])
         assertEqual(coordinated?.summary, "", "Production requests omit generated prose")
         assertEqual(coordinated?.kind, .fallbackExcerpts, "Production requests use publisher excerpts")
-        assertEqual(await requests.value, 0, "Production overview generation never calls the model")
         let persisted = try await database.fetchEventOverview(eventID: "plain")
         assertEqual(persisted?.id, coordinated?.id, "SQLite stores the generated excerpt document")
         assertEqual(persisted?.summary, "", "SQLite preserves the empty summary")
         assertTrue(!(persisted?.facts.isEmpty ?? true), "SQLite retains publisher facts and citations")
         let blocked = OverviewGenerationCoordinator(
-            store: store, queue: EnrichmentQueue(store: store), textModel: coordinatedModel, allowsModel: { false })
+            store: store, queue: EnrichmentQueue(store: store))
         let aiOff = await blocked.requestOverview(
             eventID: "blocked", eventTitle: "Bridge", membershipVersion: 1, articles: [article1, article2])
-        assertEqual(await requests.value, 0, "AI-disabled requests make no model calls")
         assertEqual(
             try await database.fetchEventOverview(eventID: "blocked")?.isStale(currentMembershipVersion: 1), false,
-            "AI-disabled publisher excerpts are final")
+            "Publisher excerpts are final")
         let reused = await coordinator.requestOverview(
             eventID: "blocked", eventTitle: "Bridge", membershipVersion: 1, articles: [article1, article2])
-        assertEqual(reused?.id, aiOff?.id, "Enabling AI reuses the same final excerpts")
+        assertEqual(reused?.id, aiOff?.id, "Another coordinator reuses the same final excerpts")
 
         let legacy = EventOverviewDocument(
             eventID: "legacy",
@@ -16629,7 +16599,7 @@ struct NewsTests {
         await eventually("Held jobs fill the excerpt queue") { await queue.activeJobCount() == 3 }
         let checks = TestCounter()
         let shared = OverviewGenerationCoordinator(
-            store: store, queue: queue, textModel: coordinatedModel,
+            store: store, queue: queue,
             allowsEnergy: {
                 await checks.increment()
                 return true
@@ -16654,7 +16624,6 @@ struct NewsTests {
         assertTrue(joined != nil, "Cancelling warmup preserves the reader's shared generation")
         assertEqual(joined?.summary, "", "The joined generation returns excerpts")
         for holder in holders { _ = await holder.value }
-        assertEqual(await requests.value, 0, "The shared generation also makes no model calls")
         // A macOS update can replace the on-device model: stored overviews and summaries regenerate with the new one.
         let summary = ArticleAnalysis(
             summary: "The bridge reopened.", keyPoints: ["Traffic resumed."], entities: [], category: "World",
@@ -16944,11 +16913,13 @@ struct NewsTests {
             let active: Bool
             let sound: Bool
             let body: String
+            let category: String
             init(_ request: UNNotificationRequest) {
                 thread = request.content.threadIdentifier
                 active = request.content.interruptionLevel == .active
                 sound = request.content.sound != nil
                 body = request.content.body
+                category = request.content.categoryIdentifier
             }
         }
         actor Recorder {
@@ -16978,6 +16949,9 @@ struct NewsTests {
             zip(posted, posted.dropFirst()).allSatisfy { $1.at - $0.at >= .milliseconds(60) },
             "Banners of one refresh are posted at least the spacing apart")
         assertTrue(posted.allSatisfy { $0.active && $0.sound }, "Breaking stories are active alerts with sound")
+        assertTrue(
+            posted.allSatisfy { $0.category == NotificationActionIdentifier.category },
+            "A story's banner carries Save, Mark as Read and Open (#560)")
         let quietRecorder = Recorder()
         let quietService = NotificationService(post: { await quietRecorder.record(Posted($0)) }, spacing: .zero)
         await quietService.triageAndNotify(newArticles: [quiet], delivery: .init(mode: .full))
@@ -16991,6 +16965,7 @@ struct NewsTests {
         assertEqual(
             (await minimalRecorder.posted).first?.body, "2 new articles across 2 sources",
             "Summary modes count one report per event too")
+        assertEqual((await minimalRecorder.posted).first?.category, "", "A summary banner has no story actions")
 
         // 6. Normal lane (#588, #665): of 100 new stories, three are breaking, every fourth is Technology (a top
         // interest) and every tenth event has three publishers. At most five normal banners in the rolling hour.
@@ -17252,6 +17227,7 @@ struct NewsTests {
             let title: String
             let body: String
             let thread: String
+            let category: String
         }
         actor Recorder {
             var posted: [Posted] = []
@@ -17259,7 +17235,7 @@ struct NewsTests {
                 posted.append(
                     Posted(
                         title: request.content.title, body: request.content.body,
-                        thread: request.content.threadIdentifier))
+                        thread: request.content.threadIdentifier, category: request.content.categoryIdentifier))
             }
         }
         let recorder = Recorder()
@@ -17271,8 +17247,11 @@ struct NewsTests {
         }
         var store = ArticleStore(database: DatabaseEngine(path: path))
         await store.initialize()
-        // A refresh without a clock reads the real one at the pass, as the app does, after its stories are stored.
-        func refresh(plain: [FeedArticle] = [], starred: [FeedArticle] = [], at clock: Date? = nil) async {
+        // A refresh without a clock reads the real one at the pass, as the app does, after its stories are stored. It
+        // returns the titles of the stories its banners covered (#584).
+        @discardableResult
+        func refresh(plain: [FeedArticle] = [], starred: [FeedArticle] = [], at clock: Date? = nil) async -> Set<String>
+        {
             let manager = FeedManager(
                 settings: settings, store: store, schedulesRefresh: false,
                 fetchBatch: { urls, _ in urls.map { ($0, $0 == starredFeed ? starred : plain, nil, nil) } },
@@ -17281,12 +17260,15 @@ struct NewsTests {
                 }, imageFinder: .unavailable, now: { clock ?? Date() })
             await manager.fetchFeedsAsync()
             manager.stopBackgroundWork()
+            return Set(store.articles.filter { manager.notifiedStoryIDs.contains($0.id) }.map(\.title))
         }
 
         // The normal limit rolls: five of six post, a refresh 30 minutes later after a relaunch posts none, and one 61
         // minutes after the first posts again.
-        await refresh(plain: Array(loud.prefix(6)), at: start)
+        let firstNotified = await refresh(plain: Array(loud.prefix(6)), at: start)
         assertEqual(await recorder.posted.count, 5, "Five normal banners in the first hour")
+        assertEqual(firstNotified.count, 5, "The five posted stories count as notified, the sixth does not")
+        assertTrue(firstNotified.isSubset(of: Set(headlines.prefix(6))), "Only this refresh's stories are notified")
         await store.database.close()
         store = ArticleStore(database: DatabaseEngine(path: path))
         await store.initialize()
@@ -17313,14 +17295,19 @@ struct NewsTests {
             starred: backlog + [story("fresh", "Starred column on winter bulbs", source: "Starred Daily")])
         let single = await recorder.posted.dropFirst(before)
         assertEqual(single.map(\.title), ["Starred Daily"], "The feed's first new story is one starred banner")
+        assertEqual(
+            single.map(\.category), [NotificationActionIdentifier.category],
+            "A starred story's banner has story actions")
         let burst = (0..<20).map { story("burst-\($0)", "Starred note \($0) about orchards", source: "Starred Daily") }
-        await refresh(starred: burst, at: Date().addingTimeInterval(21 * 60))
+        let burstNotified = await refresh(starred: burst, at: Date().addingTimeInterval(21 * 60))
+        assertEqual(burstNotified, Set(burst.map(\.title)), "A grouped banner's stories all count as notified")
         let grouped = await recorder.posted.dropFirst(before + 1)
         assertEqual(grouped.count, 1, "Twenty new starred stories are one banner: \(grouped.map(\.body))")
         assertEqual(grouped.first?.thread, "starred-\(starredFeed)", "The burst is threaded under the feed")
         assertTrue(
             grouped.first?.body.hasPrefix("20 new stories\n") == true,
             "The burst counts every story: \(grouped.first?.body ?? "")")
+        assertEqual(grouped.first?.category, "", "A grouped banner has no story actions")
         await store.database.close()
     }
 
@@ -17409,6 +17396,43 @@ struct NewsTests {
         assertEqual(
             await recorder.threads, first + [announced], "A new report notifies once the lead headline changed")
         await store.database.close()
+
+        // A merge never makes an announced story new again: the absorbed event's announcement and waiting priority key
+        // move to the event it joined, keyed to that event's lead headline, so its next report stays quiet.
+        let merges = DatabaseEngine(path: ":memory:")
+        try await merges.open()
+        let lead = report("m1", "Dam bursts near Mosul as floodwater reaches villages", hoursAgo: 4, source: "Wire One")
+        let fragment = report("m2", "Breaking: Mosul dam failure, emergency declared", hoursAgo: 3, source: "Daily Two")
+        let waiting = report("m3", "Breaking: Mosul flood toll rises, emergency declared", hoursAgo: 2, source: "Post")
+        let later = report("m4", "Breaking: Mosul evacuations widen, emergency declared", hoursAgo: 1, source: "Times")
+        _ = try await merges.upsertArticles([lead, fragment, waiting, later])
+        let survivor = try await merges.createEvent(memberArticleIDs: [lead.id]).id
+        let absorbed = try await merges.createEvent(memberArticleIDs: [fragment.id]).id
+        let queued = try await merges.createEvent(memberArticleIDs: [waiting.id]).id
+        try await merges.recordNotification(
+            PlannedBanner(
+                lane: .priority, grouped: false, thread: absorbed, sound: true,
+                announces: [absorbed: EventFeedSummary.titleKey(fragment.title)]), at: now)
+        let stale = QueuedPriority(event: queued, title: waiting.title, score: 0.8, leadKey: "old", story: waiting.id)
+        try await merges.queuePriority([stale], at: now)
+        _ = try await merges.mergeEvents(absorbed, into: survivor)
+        _ = try await merges.mergeEvents(queued, into: survivor)
+        let ledger = try await merges.notificationLedger(now: now)
+        let leadKey = EventFeedSummary.titleKey(lead.title)
+        assertEqual(
+            ledger.announced, [survivor: .init(leadKey: leadKey, lane: .priority)],
+            "The survivor inherits the absorbed announcement and its lane, under its own lead headline")
+        assertEqual(
+            ledger.priorityQueue,
+            [QueuedPriority(event: survivor, title: waiting.title, score: 0.8, leadKey: leadKey, story: waiting.id)],
+            "A waiting priority key moves to the survivor with its story")
+        let quiet = NotificationService.plan(
+            new: [(article: later, score: 0.9)], pending: [:],
+            delivery: NotificationDelivery(
+                mode: .full, events: [later.id: survivor], publishers: [survivor: 2],
+                leadTitles: [survivor: lead.title], now: now, ledger: ledger))
+        assertTrue(quiet.banners.isEmpty, "A breaking report of the merged event posts no second banner")
+        await merges.close()
     }
 
     @MainActor
@@ -17499,7 +17523,7 @@ struct NewsTests {
         let failingDb = DatabaseEngine(path: ":memory:")
         let failingStore = ArticleStore(database: failingDb)
         let coordinator = OverviewGenerationCoordinator(
-            store: failingStore, queue: EnrichmentQueue(store: failingStore), textModel: .unavailable)
+            store: failingStore, queue: EnrichmentQueue(store: failingStore))
         await failingDb.close()
         let result = await coordinator.requestOverview(
             eventID: "err-event", eventTitle: "Error Event", membershipVersion: 1,
@@ -19545,7 +19569,7 @@ struct NewsTests {
         _ = try await db.upsertArticles(articles)
         let store = ArticleStore(database: db)
         let queue = EnrichmentQueue(store: store)
-        let coordinator = OverviewGenerationCoordinator(store: store, queue: queue, textModel: .unavailable)
+        let coordinator = OverviewGenerationCoordinator(store: store, queue: queue)
 
         // 1. Generate on request for the visible event
         let overviewV1 = await coordinator.requestOverview(
@@ -19654,7 +19678,7 @@ struct NewsTests {
         _ = try await db.upsertArticles(articles)
         let store = ArticleStore(database: db)
         let queue = EnrichmentQueue(store: store)
-        let coordinator = OverviewGenerationCoordinator(store: store, queue: queue, textModel: .unavailable)
+        let coordinator = OverviewGenerationCoordinator(store: store, queue: queue)
 
         // Fill the bounded queue so requests stay in flight until the gate opens.
         let hold = OpenGate()
@@ -20876,7 +20900,7 @@ struct NewsTests {
 
         let store = ArticleStore(database: db)
         let queue = EnrichmentQueue(store: store)
-        let coordinator = OverviewGenerationCoordinator(store: store, queue: queue, textModel: .unavailable)
+        let coordinator = OverviewGenerationCoordinator(store: store, queue: queue)
 
         // 1. Initially, no event exists and no overview exists for art1
         let initialSummaries = try await store.eventFeedSummaries(for: [art1.id])
