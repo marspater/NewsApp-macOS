@@ -210,6 +210,11 @@ private final class WorldTensionQADelegate: NSObject, NSApplicationDelegate {
         print(
             "Live on-device assessment: score \(reading.assessment.score), \(reading.assessment.reasons.count) supported factors, \(ProcessInfo.processInfo.systemUptime - modelStart) seconds"
         )
+        if let assessed = reading.assessment.assessedScore {
+            print(
+                "Methodology v3 reading \(reading.assessment.score)° blends today's assessment \(assessed)° with the week"
+            )
+        }
         settings.aiEnabled = true
         settings.tensionCollectionOptIn = true
         let sheet = show(

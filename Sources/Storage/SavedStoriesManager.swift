@@ -56,6 +56,25 @@ final class SavedStoriesManager: ObservableObject {
         persistSaved(matching, isSaved: false)
     }
 
+    func removeAll() {
+        savedArticles.removeAll()
+        savedArticleIDs.removeAll()
+        savedArticleLinks.removeAll()
+        let previous = mutationTask
+        pendingMutations += 1
+        mutationTask = Task {
+            await previous?.value
+            await articleStore.removeAllSavedStories()
+            pendingMutations -= 1
+            if pendingMutations == 0 {
+                savedArticles = articleStore.savedArticles
+                savedArticleIDs = Set(savedArticles.map { $0.id })
+                savedArticleLinks = Set(savedArticles.map { $0.normalizedLink }.filter(DatabaseEngine.isDocumentURL))
+                mutationTask = nil
+            }
+        }
+    }
+
     func isSaved(_ article: FeedArticle) -> Bool {
         savedArticleIDs.contains(article.id)
             || (DatabaseEngine.isDocumentURL(article.normalizedLink)
