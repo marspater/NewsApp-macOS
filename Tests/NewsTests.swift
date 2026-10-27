@@ -11689,6 +11689,8 @@ struct NewsTests {
         func key(_ a: String, _ b: String) -> String { a < b ? a + "+" + b : b + "+" + a }
         let eventGaps = Set(fixture.knownGaps.events.map { key($0[0], $0[1]) })
         let storyGaps = Set(fixture.knownGaps.stories.map { key($0[0], $0[1]) })
+        // NEWS_ENERGY=0 (#534): the rules-only replay holds every match for a pass with energy, so only links are checked.
+        let rulesOnly = ProcessInfo.processInfo.environment["NEWS_ENERGY"] == "0"
         var failures: [String] = []
         var linked = (events: 0, stories: 0)
         for i in items.indices {
@@ -11701,10 +11703,10 @@ struct NewsTests {
                 let predictedStory = memberships[a.id]?.story == memberships[b.id]?.story
                 if predictedEvent { linked.events += 1 }
                 if predictedStory { linked.stories += 1 }
-                if predictedEvent != (event != eventGaps.contains(pair)) {
+                if predictedEvent != (event != eventGaps.contains(pair)), predictedEvent || !rulesOnly {
                     failures.append("event \(pair) \(predictedEvent ? "linked" : "apart")")
                 }
-                if predictedStory != (story != storyGaps.contains(pair)) {
+                if predictedStory != (story != storyGaps.contains(pair)), predictedStory || !rulesOnly {
                     failures.append("story \(pair) \(predictedStory ? "linked" : "apart")")
                 }
             }
@@ -11737,7 +11739,11 @@ struct NewsTests {
                 storedID: $0.id, title: $0.title, link: "https://matcher-regressions.invalid/\($0.id)", guid: $0.id,
                 description: $0.description ?? "", pubDate: $0.published, source: $0.source)
         }
-        let memberships = try await StoryCorpus.eventMemberships(articles: articles)
+        // NEWS_ENERGY=0 replays Low Power Mode (#534): a fresh replay has no stored vectors, so every rule match waits for
+        // a pass with energy and the true-positive floor cannot hold; the false-pair ceiling still applies.
+        let rulesOnly = ProcessInfo.processInfo.environment["NEWS_ENERGY"] == "0"
+        var deferred = 0
+        let memberships = try await StoryCorpus.eventMemberships(articles: articles) { deferred += $0.deferred }
         var metrics = EventCorpusMetrics()
         var falsePairs: [String] = []
         var missedPairs: [String] = []
@@ -11755,8 +11761,11 @@ struct NewsTests {
         print("    matcher regressions v\(EventMatcher.version): \(metrics.line)")
         print("    false pairs: \(falsePairs.isEmpty ? "none" : falsePairs.joined(separator: ", "))")
         print("    missed pairs: \(missedPairs.isEmpty ? "none" : missedPairs.joined(separator: ", "))")
+        if rulesOnly {
+            print("    rules only (NEWS_ENERGY=0): \(deferred) rows deferred to a pass with energy; no floor")
+        }
         assertTrue(
-            metrics.truePositives >= fixture.expected.minimumTruePositives,
+            rulesOnly || metrics.truePositives >= fixture.expected.minimumTruePositives,
             "Authored corpus true positives fell below the recorded floor (\(metrics.truePositives))")
         assertTrue(
             metrics.falsePositives <= fixture.expected.maximumFalsePositives,

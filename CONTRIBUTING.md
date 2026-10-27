@@ -60,7 +60,7 @@ NEWS_SNAPSHOT_DB=copy.sqlite3 ./test.sh --fragment-merge-timing # Local: one fra
 NEWS_PAIR_PREFIX=1 # Evaluate a pair model trained with the gap-and-publisher prefix (#626); off by default, and the exporters follow it
 NEWS_PAIR_MODEL_PATH=OUT/pairscorer.mlmodelc # A candidate pair model for --library-holdout, --event-corpus and --matcher-regressions instead of the shipped one (#624); compile the .mlpackage first with `xcrun coremlcompiler compile OUT/pairscorer.mlpackage OUT`
 NEWS_PAIR_THRESHOLD=0.8 NEWS_RESCUE_TWO_ANCHORS=0.65 NEWS_MODEL_ANCHORLESS=0.85 NEWS_COMPATIBLE_REQUIRES_MATCH=1 NEWS_COMPATIBLE_SHARE=1 NEWS_SAME_PUBLISHER=1 # Sweep overrides for --library-holdout, --event-corpus and --matcher-regressions (#582); each alone, measured against the holdout
-NEWS_ENERGY=0 ./test.sh --matcher-regressions # The rules-only pass of Low Power Mode (#534): no embedding, no pair model; deferred rows counted, not re-read
+NEWS_ENERGY=0 ./test.sh --matcher-regressions # The rules-only pass of Low Power Mode (#534): no embedding, no pair model; deferred rows counted, not re-read. A fresh replay has no stored vectors, so every rule match waits for a pass with energy: the true-positive floor and the story links are not checked in this mode, only that nothing is linked wrongly
 ./test.sh --corpus-capture DIR    # Opt-in, live: capture catalog feed items into a private directory (#102)
 ./test.sh --corpus-review DIR     # Fingerprint match review sheet and precision against private labels (#102)
 ./test.sh --corpus-readiness DIR --corpus-holdout # Eligible held-out document counts only; no scores, labels or review-file writes
