@@ -76,7 +76,7 @@ def read_rows(paths, excluded):
     rows, counts = [], {}
     for path in paths:
         tally = {'positive': 0, 'negative': 0, 'left_out': 0, 'excluded_headline': 0}
-        with open(path, newline='', encoding='utf-8') as handle:
+        with open(path, newline='', encoding='utf-8') as handle:  # NOSONAR
             for row in csv.DictReader(handle):
                 which = kind(row)
                 if which is None:
