@@ -11767,8 +11767,13 @@ struct NewsTests {
         let rows = try await db.calibrationRows()
         assertEqual(rows.map(\.same).sorted { !$0 && $1 }, [false, true], "One row per verdict with a stored signal")
         assertEqual(rows.first?.features.count, 5, "Five features per verdict")
-        try await db.eventRows("UPDATE pair_assessments SET features = NULL;")
-        assertEqual(try await db.calibrationRows().count, 0, "Cleared pair signals reset the calibration")
+        try await db.clearArticleEnrichment()
+        let cleared = try await db.calibrationRows()
+        assertEqual(cleared.count, 0, "Clear AI Analysis empties the calibration's input")
+        assertTrue(PairCalibration.fit(cleared) == nil, "… so the calibration is dormant again")
+        assertEqual(
+            try await db.eventRows("SELECT count(*) FROM pair_assessments;").first?.first ?? nil, "2",
+            "The pair decisions themselves remain")
         await db.close()
     }
 

@@ -2988,7 +2988,8 @@ actor DatabaseEngine {
     // MARK: - Granular Cache Purging
 
     /// Clears all AI analysis data: summaries, key points, entities, event overviews, story embeddings, stored matcher
-    /// signals and the World Tension history. Articles, events, pair decisions and subscriptions remain intact.
+    /// signals, the pair decisions' stored signals (which resets the verdict calibration, #629) and the World Tension
+    /// history. Articles, events, pair decisions and subscriptions remain intact.
     func clearArticleEnrichment() throws {
         guard db != nil else { return }
         try beginTransaction()
@@ -2998,6 +2999,7 @@ actor DatabaseEngine {
             try clearEventOverviews()
             try executeSimple("DELETE FROM article_embeddings;")
             try executeSimple("DELETE FROM article_features;")
+            try executeSimple("UPDATE pair_assessments SET features = NULL;")
             try commitTransaction()
         } catch {
             loggedOptional("rollbackTransaction") { try rollbackTransaction() }
