@@ -19,7 +19,7 @@ script/format.sh                  # swift-format; automatically formats staged S
 script/format.sh --check          # Strict repository-wide Swift formatting lint
 script/design_lint.sh              # DESIGN.md ratchet (first step of ./test.sh); --update only after lowering counts
 ./test.sh --story-regressions     # Focused offline identity, reader and persistence checks
-./test.sh --matcher-regressions   # Authored matcher corpus (#506): pairwise line and failing pair ids, nothing else
+./test.sh --matcher-regressions   # Authored matcher corpus (#506) and story regressions (#581): pairwise lines and failing pair ids, nothing else
 ./test.sh --curation-live /private/tmp/library-backup.sqlite3 /private/tmp/curation-report # Opt-in on-device rating audit of a SQLite backup; private titles stay local
 python3 script/evaluation/importance_review.py sheet /private/tmp/curation-report  # #309: blind private sheet of minor-rated stories (never overwrites a sheet)
 python3 script/evaluation/importance_review.py report /private/tmp/curation-report # #309: aggregate-only hidden-important rate with Wilson bounds and re-rate stability

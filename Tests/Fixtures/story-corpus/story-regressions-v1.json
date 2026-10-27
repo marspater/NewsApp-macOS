@@ -1,0 +1,279 @@
+{
+  "version": 1,
+  "note": "Authored story regressions (#581): the known story failures of the 24 and 27 October library reviews, rewritten as synthetic reports from fictional publishers. Both levels are asserted exactly: which reports share an event (`event`) and which share a story card (`story`, else the event). A pair listed in `knownGaps` is asserted the other way round from its label, so a fix that closes a gap fails this test until the gap is removed from the list. Families sit five days apart so the candidate window isolates them.",
+  "knownGaps": {
+    "events": [
+      ["s18-a", "s18-d"], ["s18-b", "s18-d"], ["s18-c", "s18-d"],
+      ["s20-a", "s20-c"], ["s20-a", "s20-d"], ["s20-b", "s20-c"], ["s20-b", "s20-d"],
+      ["s23-a", "s23-b"]
+    ],
+    "stories": [
+      ["s18-a", "s18-d"], ["s18-b", "s18-d"], ["s18-c", "s18-d"],
+      ["s23-a", "s23-b"]
+    ]
+  },
+  "articles": [
+    {
+      "id": "s17-a",
+      "title": "Wildfire destroys historic Wolfsberg hunting lodge in Bavaria",
+      "description": "A wildfire swept through the historic Wolfsberg hunting lodge in the Bavarian Alps overnight, destroying its timber roof, firefighters said.",
+      "source": "Wire One",
+      "published": "2026-12-20T08:00:00Z",
+      "event": "s17-fire",
+      "story": "s17"
+    },
+    {
+      "id": "s17-b",
+      "title": "Bavaria wildfire guts Wolfsberg hunting lodge",
+      "description": "Firefighters in Bavaria fought for hours to contain a wildfire that gutted the Wolfsberg hunting lodge, a protected landmark in the Alps.",
+      "source": "Daily Two",
+      "published": "2026-12-20T09:30:00Z",
+      "event": "s17-fire",
+      "story": "s17"
+    },
+    {
+      "id": "s17-c",
+      "title": "Police arrest man over Wolfsberg lodge wildfire in Bavaria",
+      "description": "Bavarian police arrested a 41-year-old man suspected of starting the wildfire that destroyed the Wolfsberg hunting lodge, prosecutors said.",
+      "source": "Herald Three",
+      "published": "2026-12-20T15:00:00Z",
+      "event": "s17-arrest",
+      "story": "s17"
+    },
+    {
+      "id": "s17-d",
+      "title": "Suspect arrested after Wolfsberg lodge destroyed by wildfire",
+      "description": "Police in Bavaria arrested a suspect after the wildfire at the Wolfsberg hunting lodge, a protected landmark, prosecutors said.",
+      "source": "Tribune Four",
+      "published": "2026-12-20T17:00:00Z",
+      "event": "s17-arrest",
+      "story": "s17"
+    },
+    {
+      "id": "s18-a",
+      "title": "Gunmen kill seven at church funeral in Jordan",
+      "description": "Masked gunmen opened fire on mourners at a church funeral in the Jordanian town of Karak, killing seven people, officials said.",
+      "source": "Wire One",
+      "published": "2026-12-25T10:00:00Z",
+      "event": "s18-attack",
+      "story": "s18"
+    },
+    {
+      "id": "s18-b",
+      "title": "Seven killed as gunmen attack church in Jordan",
+      "description": "Gunmen attacked a church funeral in Karak in southern Jordan, killing seven mourners and wounding dozens, authorities said.",
+      "source": "Daily Two",
+      "published": "2026-12-25T11:00:00Z",
+      "event": "s18-attack",
+      "story": "s18"
+    },
+    {
+      "id": "s18-c",
+      "title": "Jordan church shooting leaves seven dead",
+      "description": "Seven mourners were shot dead at a church funeral in Karak, Jordan, and dozens were wounded, officials said.",
+      "source": "Herald Three",
+      "published": "2026-12-25T13:00:00Z",
+      "event": "s18-attack",
+      "story": "s18"
+    },
+    {
+      "id": "s18-d",
+      "title": "King orders firm response after deadly church attack in Jordan",
+      "description": "The king ordered security forces to respond firmly after gunmen killed seven people at a church funeral in Karak.",
+      "source": "Tribune Four",
+      "published": "2026-12-25T20:00:00Z",
+      "event": "s18-attack",
+      "story": "s18"
+    },
+    {
+      "id": "s19-a",
+      "title": "France to deploy 70,000 police as students call new protests",
+      "description": "The interior ministry in Paris said 70,000 police officers would be deployed across France for protests called by student unions.",
+      "source": "Wire One",
+      "published": "2026-12-30T09:00:00Z",
+      "event": "s19-deploy",
+      "story": "s19"
+    },
+    {
+      "id": "s19-b",
+      "title": "France deploys 70,000 police ahead of protests, shuts Paris museums",
+      "description": "France will deploy 70,000 police for the protests and close the Louvre and other Paris museums, the interior ministry said.",
+      "source": "Daily Two",
+      "published": "2026-12-30T10:00:00Z",
+      "event": "s19-deploy",
+      "story": "s19"
+    },
+    {
+      "id": "s19-c",
+      "title": "70,000 officers to police student protests across France",
+      "description": "Some 70,000 officers will be on duty across France, including in Paris, as students march, the interior ministry said.",
+      "source": "Herald Three",
+      "published": "2026-12-30T11:00:00Z",
+      "event": "s19-deploy",
+      "story": "s19"
+    },
+    {
+      "id": "s19-d",
+      "title": "France to deploy 70,000 police for fresh weekend protests",
+      "description": "The interior ministry said 70,000 police would again be deployed for a new round of weekend protests in Paris and other cities.",
+      "source": "Tribune Four",
+      "published": "2026-12-31T07:00:00Z",
+      "event": "s19-deploy",
+      "story": "s19"
+    },
+    {
+      "id": "s19-e",
+      "title": "Court in Paris upholds ban on student march as 70,000 police deploy",
+      "description": "A court in Paris upheld the interior ministry's ban on a student march, as 70,000 police officers were deployed across France for the protests.",
+      "source": "Courier Five",
+      "published": "2026-12-30T16:00:00Z",
+      "event": "s19-ruling",
+      "story": "s19"
+    },
+    {
+      "id": "s20-a",
+      "title": "Kenya reports second death from Ebola",
+      "description": "Kenya's health ministry said a second patient had died of Ebola in Nairobi, as the outbreak spreads in East Africa.",
+      "source": "Wire One",
+      "published": "2027-01-04T08:00:00Z",
+      "event": "s20-kenya",
+      "story": "s20"
+    },
+    {
+      "id": "s20-b",
+      "title": "Ebola: Kenya announces second death",
+      "description": "Health officials in Nairobi confirmed Kenya's second Ebola death, a relative of the first patient.",
+      "source": "Daily Two",
+      "published": "2027-01-04T10:00:00Z",
+      "event": "s20-kenya",
+      "story": "s20"
+    },
+    {
+      "id": "s20-c",
+      "title": "Nigeria confirms first Ebola case",
+      "description": "Nigeria's health minister said the country's first Ebola patient was being treated in isolation in Lagos.",
+      "source": "Herald Three",
+      "published": "2027-01-05T09:00:00Z",
+      "event": "s20-nigeria",
+      "story": "s20"
+    },
+    {
+      "id": "s20-d",
+      "title": "Nigeria isolates first Ebola patient in Lagos",
+      "description": "Health authorities in Lagos isolated Nigeria's first Ebola patient and traced her contacts, the health minister said.",
+      "source": "Tribune Four",
+      "published": "2027-01-05T11:00:00Z",
+      "event": "s20-nigeria",
+      "story": "s20"
+    },
+    {
+      "id": "s21-a",
+      "title": "Pope Leo needs no further cancer treatment, Vatican says",
+      "description": "Doctors at the Vatican said Pope Leo would need no further treatment after his lung cancer surgery.",
+      "source": "Wire One",
+      "published": "2027-01-09T09:00:00Z",
+      "event": "s21-health"
+    },
+    {
+      "id": "s21-b",
+      "title": "Vatican says Pope Leo will not need more cancer treatment",
+      "description": "Pope Leo has recovered from lung cancer surgery and needs no further treatment, his doctors at the Vatican said.",
+      "source": "Daily Two",
+      "published": "2027-01-09T10:00:00Z",
+      "event": "s21-health"
+    },
+    {
+      "id": "s21-c",
+      "title": "Pope Leo helps broker ceasefire for besieged city of Hollin",
+      "description": "Pope Leo and the White House helped broker a humanitarian ceasefire for the besieged city of Hollin so that aid can be delivered, officials said.",
+      "source": "Herald Three",
+      "published": "2027-01-09T15:00:00Z",
+      "event": "s21-ceasefire"
+    },
+    {
+      "id": "s21-d",
+      "title": "Ceasefire for Hollin brokered with Pope Leo's help, White House says",
+      "description": "The White House said a humanitarian ceasefire for Hollin had been brokered with the help of Pope Leo, so that aid can reach the city.",
+      "source": "Tribune Four",
+      "published": "2027-01-09T16:00:00Z",
+      "event": "s21-ceasefire"
+    },
+    {
+      "id": "s22-a",
+      "title": "Magnitude 5.8 earthquake shakes eastern Turkey near Malatya",
+      "description": "A magnitude 5.8 earthquake struck eastern Turkey near Malatya, damaging buildings, the disaster agency AFAD said.",
+      "source": "Wire One",
+      "published": "2027-01-14T08:00:00Z",
+      "event": "s22-quake"
+    },
+    {
+      "id": "s22-b",
+      "title": "Quake of magnitude 5.8 damages buildings in Malatya",
+      "description": "Buildings were damaged in Malatya in eastern Turkey after a magnitude 5.8 earthquake, AFAD said.",
+      "source": "Daily Two",
+      "published": "2027-01-14T09:00:00Z",
+      "event": "s22-quake"
+    },
+    {
+      "id": "s22-c",
+      "title": "Turkey's central bank raises interest rate to 50%",
+      "description": "The Central Bank of the Republic of Turkey raised its main interest rate to 50% in Ankara to fight inflation.",
+      "source": "Herald Three",
+      "published": "2027-01-14T11:00:00Z",
+      "event": "s22-rates"
+    },
+    {
+      "id": "s22-d",
+      "title": "Turkish central bank lifts interest rate to 50% to fight inflation",
+      "description": "Turkey's central bank in Ankara lifted its main interest rate to 50%, citing persistent inflation.",
+      "source": "Tribune Four",
+      "published": "2027-01-14T12:00:00Z",
+      "event": "s22-rates"
+    },
+    {
+      "id": "s23-a",
+      "title": "Deals: Pixel tablet, noise-cancelling earbuds, USB-C chargers, more",
+      "description": "Today's best deals on tablets, earbuds and chargers from major retailers, picked by Gadget Nine.",
+      "source": "Gadget Nine",
+      "published": "2027-01-19T15:30:00Z"
+    },
+    {
+      "id": "s23-b",
+      "title": "Deals: Laptop $300 off, noise-cancelling earbuds, smart speakers, more",
+      "description": "Today's best deals on laptops, earbuds and smart speakers from major retailers, picked by Gadget Nine.",
+      "source": "Gadget Nine",
+      "published": "2027-01-20T15:30:00Z"
+    },
+    {
+      "id": "s23-c",
+      "title": "Deals: Smart speakers, USB-C chargers, gaming mice, more",
+      "description": "Today's best deals on smart speakers, chargers and gaming mice from major retailers, picked by Gadget Nine.",
+      "source": "Gadget Nine",
+      "published": "2027-01-21T15:30:00Z"
+    },
+    {
+      "id": "s24-a",
+      "title": "Storm Arlo batters southwest England with 90mph gusts",
+      "description": "Storm Arlo brought gusts of 90mph to Cornwall and Devon, leaving thousands of homes without power, the Met Office said.",
+      "source": "Wire One",
+      "published": "2027-01-24T20:00:00Z",
+      "event": "s24-arlo"
+    },
+    {
+      "id": "s24-b",
+      "title": "Thousands without power as Storm Arlo hits Cornwall and Devon",
+      "description": "Thousands of homes in Cornwall and Devon lost power as Storm Arlo brought high winds, the Met Office said.",
+      "source": "Daily Two",
+      "published": "2027-01-24T21:00:00Z",
+      "event": "s24-arlo"
+    },
+    {
+      "id": "s24-c",
+      "title": "Storm Bryn to bring 80mph gusts and heavy rain to southwest England",
+      "description": "The Met Office warned that Storm Bryn would bring 80mph gusts and heavy rain to Cornwall and Devon later in the week.",
+      "source": "Herald Three",
+      "published": "2027-01-25T12:00:00Z",
+      "event": "s24-bryn"
+    }
+  ]
+}
