@@ -65,9 +65,6 @@ actor OverviewGenerationCoordinator {
 
     init(
         store: ArticleStore? = nil, queue: EnrichmentQueue = .shared,
-        // Compatibility for audit callers; production excerpts never use a model.
-        textModel _: NewsTextModel = .unavailable,
-        allowsModel _: @escaping @Sendable () async -> Bool = { false },
         allowsEnergy: (@Sendable () async -> Bool)? = nil,
         extractText: (@Sendable (_ link: String) async -> ExtractionOutcome)? = nil,
         extractionDeadline: Duration = .seconds(4)

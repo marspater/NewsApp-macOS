@@ -112,6 +112,10 @@ struct SidebarView: View {
             }
             .symbolRenderingMode(.monochrome)
             .transaction { $0.animation = nil }
+            // The list reports only selection changes; a click on the selected row still returns to its list.
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+            .simultaneousGesture(TapGesture().onEnded { selectedTopic = title })
             .tag(title)
             .accessibilityValue(isLoading ? "Refreshing" : badgeValue)
     }
