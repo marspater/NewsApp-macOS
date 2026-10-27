@@ -555,6 +555,7 @@ struct NewsTests {
             }
             try await exportTrainingPairs(
                 snapshots: snapshots, output: output, corpusPath: corpusPath,
+                holdoutPath: environment["NEWS_LIBRARY_HOLDOUT"],
                 verdictsOnly: CommandLine.arguments.contains("--verdicts-only"))
             return
         }
@@ -11228,12 +11229,25 @@ struct NewsTests {
         let csv = try String(contentsOf: directory.appendingPathComponent("verdicts.csv"), encoding: .utf8)
         // Texts carry newlines, so the rows are checked by their markers rather than split by line.
         assertTrue(
-            csv.hasPrefix("label,group,text_a,text_b,pieces_a,pieces_b,weight\n"), "The export has a weight column")
+            csv.hasPrefix("label,group,text_a,text_b,pieces_a,pieces_b,weight,marginal\n"),
+            "The export has weight and marginal columns (#627)")
         assertEqual(csv.components(separatedBy: ",\"v:").count - 1, 2, "One row per verdict")
-        assertEqual(
-            csv.components(separatedBy: ",5\n").count - 1 + (csv.hasSuffix(",5") ? 1 : 0), 2, "Verdict rows weigh five")
+        assertEqual(csv.components(separatedBy: ",5,").count - 1, 2, "Verdict rows weigh five")
         assertTrue(
-            csv.contains("\n0,\"v:") && csv.contains("\n1,\"v:"), "An exclusion is a negative, an inclusion a positive")
+            csv.contains("\n0,\"v:") && csv.contains("\n2,\"v:") && csv.contains(",5,01"),
+            "An exclusion is not one occurrence (0, marginal 01), an inclusion is same (2)")
+        // A library-holdout article (#579) never leaves as a training row, verdicts included.
+        let heldOut = directory.appendingPathComponent("holdout-protest.json")
+        try JSONSerialization.data(withJSONObject: [["a": ids[2], "b": "elsewhere", "label": "different"]])
+            .write(to: heldOut)
+        let held = directory.appendingPathComponent("held")
+        try FileManager.default.createDirectory(
+            at: held, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
+        try await exportTrainingPairs(
+            snapshots: path, output: held.path, corpusPath: corpus.path, holdoutPath: heldOut.path,
+            verdictsOnly: true)
+        let heldCSV = try String(contentsOf: held.appendingPathComponent("verdicts.csv"), encoding: .utf8)
+        assertEqual(heldCSV.components(separatedBy: ",\"v:").count - 1, 1, "The holdout article's verdict is left out")
         // The gate: re-clustering the copy without corrections re-merges the excluded vote pair, so the harness fails.
         let holdout = directory.appendingPathComponent("holdout.json")
         try Data("[]".utf8).write(to: holdout)
@@ -12283,9 +12297,10 @@ struct NewsTests {
     /// The library holdout (#579): `NEWS_LIBRARY_HOLDOUT` is a JSON array of `{"a", "b", "label"}` with article ids of
     /// `NEWS_SNAPSHOT_DB` and labels `same`, `related` or `different`. A temporary copy of the library is re-clustered
     /// from scratch inside the active window (events, memberships, match state, pair decisions and corrections removed;
-    /// stored signals and vectors kept), then every labelled pair is scored by whether both stories share an event. `same`
-    /// predicted is a true pair; `related` or `different` predicted is a false pair. Also prints the share of recent
-    /// stories shown in a multi-publisher event. The copy is deleted afterwards.
+    /// stored signals and vectors kept), then every labelled pair is scored twice (#627): strict event (both stories in
+    /// one event; `same` is a true pair, `related` or `different` a false one, `different` also counted alone) and story
+    /// level (both stories' events in one `story_id`; `same` and `related` are true pairs, only `different` is a false
+    /// merge). Also prints the share of recent stories shown in a multi-publisher event. The copy is deleted afterwards.
     static func evaluateLibraryHoldout(snapshot: String, holdout: String) async throws {
         guard !snapshot.contains("/Library/Containers/") else {
             throw StoryCorpus.Failure.invalid("Evaluate on a copy of the library, never the live file")
@@ -12318,7 +12333,11 @@ struct NewsTests {
         ] {
             try await db.eventRows("DELETE FROM \(table);")
         }
-        let newest = try await recentLibraryRows(db).newest
+        // NEWS_HOLDOUT_NOW=<epoch> pins the clock to when the holdout was drawn, for a copy taken later (#688).
+        var newest = try await recentLibraryRows(db).newest
+        if let pinned = ProcessInfo.processInfo.environment["NEWS_HOLDOUT_NOW"].flatMap({ TimeInterval($0) }) {
+            newest = Date(timeIntervalSince1970: pinned)
+        }
         let policy = StoryCorpus.policyFromEnvironment()
         let modelOff = ProcessInfo.processInfo.environment["NEWS_PAIR_MODEL"] == "0"
         let candidate = ProcessInfo.processInfo.environment["NEWS_PAIR_MODEL_PATH"]
@@ -12347,11 +12366,16 @@ struct NewsTests {
                     "\(verdict.same ? "inclusion separated" : "exclusion re-merged"): \(verdict.a) + \(verdict.b)")
             }
         }
+        var storyOf: [String: String] = [:]
+        for row in try await db.eventRows("SELECT id, coalesce(story_id, id) FROM events WHERE merged_into IS NULL;") {
+            if let id = row[0], let story = row[1] { storyOf[id] = story }
+        }
         var truePairs = 0
         var falsePairs = 0
         var missed = 0
         var keptApart = 0
         var byLabel: [String: (linked: Int, total: Int)] = [:]
+        var inStory: [String: (linked: Int, total: Int)] = [:]
         // NEWS_EVENT_DIAGNOSE=1 names the misses and the wrong links with their headlines (local console only).
         let diagnose = ProcessInfo.processInfo.environment["NEWS_EVENT_DIAGNOSE"] == "1"
         var titles: [String: String] = [:]
@@ -12364,11 +12388,18 @@ struct NewsTests {
             let linked = memberships[pair.a] != nil && memberships[pair.a] == memberships[pair.b]
             byLabel[pair.label, default: (0, 0)].total += 1
             if linked { byLabel[pair.label, default: (0, 0)].linked += 1 }
+            let story = memberships[pair.a].map { storyOf[$0] ?? $0 }
+            let storyLinked = story != nil && story == memberships[pair.b].map { storyOf[$0] ?? $0 }
+            inStory[pair.label, default: (0, 0)].total += 1
+            if storyLinked { inStory[pair.label, default: (0, 0)].linked += 1 }
             switch (pair.label == "same", linked) {
             case (true, true): truePairs += 1
             case (true, false): missed += 1
             case (false, true): falsePairs += 1
             case (false, false): keptApart += 1
+            }
+            if diagnose, storyLinked, !linked, pair.label == "different" {
+                print("      WRONG STORY [different] \(titles[pair.a] ?? pair.a) || \(titles[pair.b] ?? pair.b)")
             }
             if diagnose, (pair.label == "same") != linked {
                 let (low, high) = pair.a < pair.b ? (pair.a, pair.b) : (pair.b, pair.a)
@@ -12389,10 +12420,6 @@ struct NewsTests {
         let sources = Dictionary(grouping: recent.filter { $0.event != nil }) { $0.event ?? "" }
             .mapValues { Set($0.map(\.source)).count }
         let multi = recent.filter { ($0.event.flatMap { sources[$0] } ?? 0) >= 2 }.count
-        var storyOf: [String: String] = [:]
-        for row in try await db.eventRows("SELECT id, coalesce(story_id, id) FROM events WHERE merged_into IS NULL;") {
-            if let id = row[0], let story = row[1] { storyOf[id] = story }
-        }
         let byStory = Dictionary(grouping: recent.filter { $0.event != nil }) { storyOf[$0.event ?? ""] ?? "" }
         let storySources = byStory.mapValues { Set($0.map(\.source)).count }
         let multiStory = recent.filter { ($0.event.flatMap { storySources[storyOf[$0] ?? ""] } ?? 0) >= 2 }.count
@@ -12436,6 +12463,28 @@ struct NewsTests {
         for (label, counts) in byLabel.sorted(by: { $0.key < $1.key }) {
             print("      \(label): \(counts.linked) of \(counts.total) linked")
         }
+        // The dual gate (#627): strict event and story level, the counts the gate compares.
+        let same = byLabel["same"] ?? (0, 0)
+        let related = byLabel["related"] ?? (0, 0)
+        let different = byLabel["different"] ?? (0, 0)
+        let linkedPairs = same.linked + related.linked + different.linked
+        print(
+            String(
+                format: "    strict event: %d linked = %d same, %d related, %d different; precision %.3f, "
+                    + "recall %.3f (%d of %d same)",
+                linkedPairs, same.linked, related.linked, different.linked,
+                linkedPairs == 0 ? 0 : Double(same.linked) / Double(linkedPairs),
+                same.total == 0 ? 0 : Double(same.linked) / Double(same.total), same.linked, same.total))
+        let storyTrue = (inStory["same"]?.linked ?? 0) + (inStory["related"]?.linked ?? 0)
+        let storyFalse = inStory["different"]?.linked ?? 0
+        let storyTotal = (inStory["same"]?.total ?? 0) + (inStory["related"]?.total ?? 0)
+        print(
+            String(
+                format: "    story level: %d in one story = %d same or related (%d same, %d related), %d different; "
+                    + "precision %.3f, recall %.3f (%d of %d same or related)",
+                storyTrue + storyFalse, storyTrue, inStory["same"]?.linked ?? 0, inStory["related"]?.linked ?? 0,
+                storyFalse, storyTrue + storyFalse == 0 ? 0 : Double(storyTrue) / Double(storyTrue + storyFalse),
+                storyTotal == 0 ? 0 : Double(storyTrue) / Double(storyTotal), storyTrue, storyTotal))
         print(
             String(
                 format: "    library: %d recent stories, %d (%.0f%%) in a multi-publisher event; %d passes, "
@@ -12545,17 +12594,24 @@ struct NewsTests {
 
     /// Mines labelled pairs for the pair model (#525) from copies of real libraries into `NEWS_EVENT_OUTPUT/pairs.csv`.
     /// `NEWS_SNAPSHOT_DB` lists the copies, colon-separated; a file inside an app container is refused, so the live
-    /// library is never opened. Positives: two English reports from different publishers in one stored event that the
-    /// current rules match directly. Negatives: two reports sharing a specific name or place 36 h to 7 days apart, which
-    /// the matcher's window keeps apart by definition; never act-class negatives. Articles of the private corpus
-    /// (`NEWS_EVENT_CORPUS`, tune and holdout) are left out by URL and headline, and every article from a day around the
-    /// corpus dates, so no other report of a corpus event is trained on. The CSV carries headline and lead
-    /// text, so it is written only to the private directory and never overwritten.
-    /// The reader's verdicts (#552) come first with weight 5: every "Same Event" pair as a positive and every "Not the
-    /// Same Event" pair as a negative, group `v:<low id>`; a mined row of the same pair is then skipped. With
-    /// `verdictsOnly` only those rows are written, as `verdicts.csv`.
+    /// library is never opened. Rows follow the three-way contract of `script/training/train_pair_model.py` (#627):
+    /// `label` 0 different, 1 related, 2 same; `marginal` empty, or the classes whose summed probability is the target.
+    /// Positives (2): two English reports from different publishers in one stored event that the current rules match
+    /// directly, unless the stored decision was the pair model's alone (#627: 21% of those were false in the #551
+    /// review; a reader verdict or a reviewed label brings such a pair back). Negatives: two reports sharing a specific
+    /// name or place 36 h to 7 days apart, which the matcher's window keeps apart by definition (0, marginal `01`: not
+    /// one occurrence, possibly a later act of one story); never act-class negatives. Same-day negatives (0, weight 2):
+    /// the same within 36 h across two events of two or more members in different stories, only with a hard conflict
+    /// (place, figure, period, year, weekday) or a cosine below 0.58, so fragments of one story are not negatives.
+    /// Articles of the private corpus (`NEWS_EVENT_CORPUS`, tune and holdout) are left out by URL and headline, and every
+    /// article from a day around the corpus dates, so no other report of a corpus event is trained on; the articles of
+    /// the library holdout (`holdoutPath`, #579) and any copy of their headlines are left out too. The CSV carries
+    /// headline and lead text, so it is written only to the private directory and never overwritten.
+    /// The reader's verdicts (#552) come first with weight 5: every "Same Event" pair as same (2) and every "Not the
+    /// Same Event" pair as not one occurrence (0, marginal `01`), group `v:<low id>`; a mined row of the same pair is
+    /// then skipped. With `verdictsOnly` only those rows are written, as `verdicts.csv`.
     static func exportTrainingPairs(
-        snapshots: String, output: String, corpusPath: String, verdictsOnly: Bool = false
+        snapshots: String, output: String, corpusPath: String, holdoutPath: String? = nil, verdictsOnly: Bool = false
     ) async throws {
         let file = try StoryCorpus.privateDirectory(output)
             .appendingPathComponent(verdictsOnly ? "verdicts.csv" : "pairs.csv")
@@ -12577,6 +12633,13 @@ struct NewsTests {
             (dates.min() ?? .distantFuture).addingTimeInterval(
                 -86400)...(dates.max() ?? .distantPast)
             .addingTimeInterval(86400)
+        struct HoldoutPair: Decodable {
+            let a: String, b: String
+        }
+        let holdoutIDs = Set(
+            try holdoutPath.map {
+                try JSONDecoder().decode([HoldoutPair].self, from: Data(contentsOf: URL(fileURLWithPath: $0)))
+            }?.flatMap { [$0.a, $0.b] } ?? [])
         struct Row {
             let id: String, title: String, description: String, source: String, date: Date, event: String?
             var text: String { EventFeatures.matchingText(title: title, description: description) }
@@ -12585,9 +12648,10 @@ struct NewsTests {
         // The app's own word pieces travel with each text, so training sees exactly the ids the app will send.
         let tokenizer = try BertWordPieceTokenizer(vocabURL: URL(fileURLWithPath: "Sources/Resources/Models/vocab.txt"))
         func pieces(_ text: String) -> String { tokenizer.pieces(text).map { String($0) }.joined(separator: " ") }
-        var lines = ["label,group,text_a,text_b,pieces_a,pieces_b,weight"]
+        var lines = ["label,group,text_a,text_b,pieces_a,pieces_b,weight,marginal"]
         var seen = Set<String>()
         var excluded = 0
+        var holdoutExcluded = 0
         var verdicts = 0
         for path in snapshots.split(separator: ":").map(String.init) {
             guard !path.contains("/Library/Containers/") else {
@@ -12596,7 +12660,7 @@ struct NewsTests {
             let db = DatabaseEngine(path: path)
             try await db.open()
             var rows: [Row] = []
-            for values in try await db.eventRows(
+            let articles = try await db.eventRows(
                 """
                 SELECT a.id, a.title, coalesce(a.description, ''), a.source, a.published_at,
                     coalesce(a.canonical_url, ''), e.id
@@ -12605,9 +12669,15 @@ struct NewsTests {
                 LEFT JOIN events e ON e.id = m.event_id AND e.merged_into IS NULL
                 WHERE a.published_at IS NOT NULL;
                 """)
-            {
+            let holdoutTitles = Set(
+                articles.filter { $0[0].map(holdoutIDs.contains) == true }.compactMap { $0[1] }.map(key))
+            for values in articles {
                 guard let id = values[0], let title = values[1], let published = values[4].flatMap({ Double($0) })
                 else { continue }
+                if holdoutIDs.contains(id) || holdoutTitles.contains(key(title)) {
+                    holdoutExcluded += 1
+                    continue
+                }
                 if corpusTitles.contains(key(title)) || corpusURLs.contains(values[5] ?? "")
                     || corpusWindow.contains(Date(timeIntervalSince1970: published))
                 {
@@ -12624,10 +12694,22 @@ struct NewsTests {
                 SELECT article_id, other_article_id, 1 FROM event_inclusions
                 UNION ALL SELECT article_id, other_article_id, 0 FROM event_exclusions;
                 """)
+            // Pairs the pair model alone linked (#627), keyed low id first like the decisions.
+            let modelOnly = Set(
+                try await db.eventRows(
+                    "SELECT article_id || char(10) || other_article_id FROM pair_assessments "
+                        + "WHERE decision = 'match' AND reason = 'pairModel';"
+                ).compactMap { $0.first ?? nil })
+            // The story of each event (#581); a copy clustered before the story layer has each event as its own story.
+            var storyOf: [String: String] = [:]
+            let stories = "SELECT id, coalesce(story_id, id) FROM events WHERE merged_into IS NULL;"
+            for row in try await db.eventRows(stories) {
+                if let id = row[0], let story = row[1] { storyOf[id] = story }
+            }
             await db.close()
             let features = rows.map { EventFeatures(title: $0.title, description: $0.description, date: $0.date) }
             let prefixed = StoryCorpus.policyFromEnvironment().pairModelPrefix
-            func append(_ label: Int, _ group: String, _ i: Int, _ j: Int, weight: Int = 1) {
+            func append(_ label: Int, _ group: String, _ i: Int, _ j: Int, weight: Int = 1, marginal: String = "") {
                 let pairKey = [key(rows[i].title) + "|" + rows[i].source, key(rows[j].title) + "|" + rows[j].source]
                     .sorted().joined(separator: "\n")
                 guard seen.insert(pairKey).inserted else { return }
@@ -12641,7 +12723,7 @@ struct NewsTests {
                 lines.append(
                     [
                         String(label), quoted(group), quoted(input(i)), quoted(input(j)), pieces(input(i)),
-                        pieces(input(j)), String(weight),
+                        pieces(input(j)), String(weight), marginal,
                     ].joined(separator: ","))
             }
             let indexByID = Dictionary(rows.indices.map { (rows[$0].id, $0) }, uniquingKeysWith: { a, _ in a })
@@ -12650,7 +12732,11 @@ struct NewsTests {
                     let high = correction[1].flatMap({ indexByID[$0] })
                 else { continue }
                 let before = lines.count
-                append(correction[2] == "1" ? 1 : 0, "v:" + rows[low].id, low, high, weight: 5)
+                if correction[2] == "1" {
+                    append(2, "v:" + rows[low].id, low, high, weight: 5)
+                } else {
+                    append(0, "v:" + rows[low].id, low, high, weight: 5, marginal: "01")
+                }
                 verdicts += lines.count - before
             }
             if verdictsOnly { continue }
@@ -12660,17 +12746,23 @@ struct NewsTests {
             for index in members.values.filter({ $0.count >= 2 }).flatMap({ $0 }) {
                 vectors[index] = await SentenceEmbedder.shared.embed(rows[index].text)
             }
+            func cosine(_ i: Int, _ j: Int) -> Double? {
+                vectors[i].flatMap { a in vectors[j].map { SentenceEmbedder.cosineSimilarity(a, $0) } }
+            }
             var positives = 0
+            var modelOnlySkipped = 0
             for (event, indices) in members where indices.count >= 2 {
                 for (n, i) in indices.enumerated() {
                     for j in indices[(n + 1)...] where rows[i].source != rows[j].source {
-                        let cosine = vectors[i].flatMap { a in
-                            vectors[j].map { SentenceEmbedder.cosineSimilarity(a, $0) }
-                        }
-                        guard EventMatcher.assess(features[i], features[j], embeddingSimilarity: cosine).isMatch
+                        guard EventMatcher.assess(features[i], features[j], embeddingSimilarity: cosine(i, j)).isMatch
                         else { continue }
+                        let (low, high) = rows[i].id < rows[j].id ? (rows[i].id, rows[j].id) : (rows[j].id, rows[i].id)
+                        if modelOnly.contains(low + "\n" + high) {
+                            modelOnlySkipped += 1
+                            continue
+                        }
                         let before = lines.count
-                        append(1, "e:" + event, i, j)
+                        append(2, "e:" + event, i, j)
                         positives += lines.count - before
                     }
                 }
@@ -12701,15 +12793,17 @@ struct NewsTests {
                 }
             }
             let negatives = candidates.sorted { order($0) < order($1) }.prefix(2 * positives)
-            for pair in negatives { append(0, "n:" + rows[pair[0]].id, pair[0], pair[1]) }
+            for pair in negatives { append(0, "n:" + rows[pair[0]].id, pair[0], pair[1], marginal: "01") }
             // Same-day negatives (#625): two reports sharing a specific anchor within 36 h that sit in different
-            // events of two or more members each, the same-topic-different-story case the model confuses. They
-            // repeat the matcher's own separations, so they weigh 2, not 5 like a reviewed label, and are capped at
-            // the number of positives.
+            // events of two or more members each, the same-topic-different-story case the model confuses. Fragments
+            // of one story sit in such events too (#627), so only pairs in different stories with a hard conflict or a
+            // cosine below 0.58 are kept. They repeat the matcher's own separations, so they weigh 2, not 5 like a
+            // reviewed label, and are capped at the number of positives.
             let eventSizes = Dictionary(grouping: rows.indices.filter { rows[$0].event != nil }) {
                 rows[$0].event ?? ""
             }
             .mapValues(\.count)
+            let hardConflicts: Set<EventConflict> = [.places, .titleNumbers, .period, .year, .weekday]
             var sameDay = Set<[Int]>()
             for indices in byAnchor.values {
                 let sample =
@@ -12717,8 +12811,13 @@ struct NewsTests {
                 for (n, i) in sample.enumerated() {
                     for j in sample[(n + 1)...] where rows[i].source != rows[j].source {
                         guard let a = rows[i].event, let b = rows[j].event, a != b, (eventSizes[a] ?? 0) >= 2,
-                            (eventSizes[b] ?? 0) >= 2, abs(rows[i].date.timeIntervalSince(rows[j].date)) <= 36 * 3600
+                            (eventSizes[b] ?? 0) >= 2, abs(rows[i].date.timeIntervalSince(rows[j].date)) <= 36 * 3600,
+                            (storyOf[a] ?? a) != (storyOf[b] ?? b)
                         else { continue }
+                        let conflict = EventMatcher.assess(features[i], features[j]).conflict
+                        guard conflict.map(hardConflicts.contains) == true || (cosine(i, j) ?? 1) < 0.58 else {
+                            continue
+                        }
                         sameDay.insert(i < j ? [i, j] : [j, i])
                     }
                 }
@@ -12730,14 +12829,16 @@ struct NewsTests {
                 sameDayWritten += lines.count - before
             }
             print(
-                "    \(URL(fileURLWithPath: path).lastPathComponent): \(rows.count) English articles, \(positives) positives, "
-                    + "\(negatives.count) negatives, \(sameDayWritten) same-day negatives (#625)"
+                "    \(URL(fileURLWithPath: path).lastPathComponent): \(rows.count) English articles, \(positives) positives "
+                    + "(\(modelOnlySkipped) pair-model-only links left out), \(negatives.count) negatives, "
+                    + "\(sameDayWritten) of \(sameDay.count) clean same-day negatives (#625, #627)"
             )
         }
         try StoryCorpus.writePrivate(Data(lines.joined(separator: "\n").utf8), to: file, replacing: false)
         print(
             "    exported \(lines.count - 1) pairs for the pair model (#525), \(verdicts) of them reader verdicts (#552); "
-                + "\(excluded) corpus or corpus-window articles left out"
+                + "\(excluded) corpus or corpus-window articles and \(holdoutExcluded) library-holdout articles "
+                + "(\(holdoutIDs.count) ids) left out"
         )
     }
 
