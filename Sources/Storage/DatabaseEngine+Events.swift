@@ -560,27 +560,58 @@ extension DatabaseEngine {
     }
 
     /// Writes the story of every live event updated since `activeSince`: the earliest event of each group names the
-    /// story, an event in no group is a story of its own. Returns the events whose story changed.
-    func assignStories(_ groups: [[String]], since activeSince: Date) throws -> Set<String> {
+    /// story, an event in no group is a story of its own. `attaching` maps a report alone to the event whose story it
+    /// joins (#581): it joins as the only member of its own event, created at `date` when it has none; a report that
+    /// now shares an event with others is left out. Returns the events whose story changed and the events created.
+    func assignStories(
+        _ groups: [[String]], attaching: [String: String] = [:], since activeSince: Date, at date: Date = Date()
+    ) throws -> Set<String> {
         try inEventTransaction { () throws -> Set<String> in
-            var current: [String: (story: String?, created: Double)] = [:]
+            var groups = groups
+            var created = Set<String>()
+            for (article, target) in attaching.sorted(by: { $0.key < $1.key }) {
+                guard let member = try memberArticleID(article) else { continue }
+                let single: String
+                if let own = try eventRows("SELECT event_id FROM event_members WHERE article_id = ?;", [.text(member)])
+                    .first?[0]
+                {
+                    guard
+                        try eventRows("SELECT count(*) FROM event_members WHERE event_id = ?;", [.text(own)]).first?[0]
+                            == "1"
+                    else { continue }
+                    single = own
+                } else {
+                    single = try insertEvent(members: [member], at: date.timeIntervalSince1970)
+                    created.insert(single)
+                }
+                if let index = groups.firstIndex(where: { $0.contains(target) }) {
+                    groups[index].append(single)
+                } else {
+                    groups.append([target, single])
+                }
+            }
+            // A story is named by its earliest event of two or more reports, never by an attached report alone.
+            var current: [String: (story: String?, rank: Int, created: Double)] = [:]
             for row in try eventRows(
-                "SELECT id, story_id, created_at FROM events WHERE merged_into IS NULL AND updated_at >= ?;",
-                [.real(activeSince.timeIntervalSince1970)])
+                """
+                SELECT e.id, e.story_id, (SELECT count(*) FROM event_members m WHERE m.event_id = e.id) < 2, e.created_at
+                FROM events e WHERE e.merged_into IS NULL AND e.updated_at >= ?;
+                """, [.real(activeSince.timeIntervalSince1970)])
             {
-                if let id = row[0] { current[id] = (row[1], row[2].flatMap(Double.init) ?? 0) }
+                if let id = row[0] { current[id] = (row[1], row[2] == "1" ? 1 : 0, row[3].flatMap(Double.init) ?? 0) }
             }
             var desired: [String: String?] = current.mapValues { _ in nil }
             for group in groups {
                 let members = group.filter { current[$0] != nil }
                 guard members.count >= 2,
                     let lead = members.min(by: {
-                        (current[$0]?.created ?? 0, $0) < (current[$1]?.created ?? 0, $1)
+                        (current[$0]?.rank ?? 0, current[$0]?.created ?? 0, $0)
+                            < (current[$1]?.rank ?? 0, current[$1]?.created ?? 0, $1)
                     })
                 else { continue }
                 for member in members { desired[member] = lead }
             }
-            var changed = Set<String>()
+            var changed = created
             for (id, story) in desired where current[id]?.story != story {
                 try eventRows(
                     "UPDATE events SET story_id = ? WHERE id = ?;", [story.map { .text($0) } ?? .null, .text(id)])
@@ -588,6 +619,18 @@ extension DatabaseEngine {
             }
             return changed
         }
+    }
+
+    /// Events of one report that belong to a story (#581): reports the story pass attached as acts of their own.
+    func storyAttachedEventIDs(since activeSince: Date) throws -> Set<String> {
+        Set(
+            try eventRows(
+                """
+                SELECT e.id FROM events e JOIN event_members m ON m.event_id = e.id
+                WHERE e.merged_into IS NULL AND e.story_id IS NOT NULL AND e.updated_at >= ?
+                GROUP BY e.id HAVING count(*) = 1;
+                """, [.real(activeSince.timeIntervalSince1970)]
+            ).compactMap { $0[0] })
     }
 
     /// The event that currently holds an article; old article IDs resolve to the stored document.
@@ -1013,6 +1056,18 @@ extension DatabaseEngine {
         guard let live = try? liveEvent(eventID) else { return nil }
         let members = try eventMatchRows("\(Self.eventMatchColumns) WHERE m.event_id = ?;", [.text(live.id)])
         return (live.id, live.version, members)
+    }
+
+    /// Visible reports published since `activeSince` that no event holds and the current matcher has processed: the
+    /// reports alone the story pass may attach to a story (#581).
+    func unclusteredEventMatchRows(since activeSince: Date, matcherVersion: Int) throws -> [EventMatchRow] {
+        try eventMatchRows(
+            """
+            \(Self.eventMatchColumns)
+            WHERE m.event_id IS NULL AND ms.matcher_version = ? AND \(Self.articleDateOrder) >= ?
+                AND \(Self.visibleArticle)
+            ORDER BY a.id;
+            """, [.integer(matcherVersion), .real(activeSince.timeIntervalSince1970)])
     }
 
     /// Every live event updated since `activeSince`, with its members, for merging fragments of one story.

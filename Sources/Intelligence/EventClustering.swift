@@ -428,18 +428,29 @@ enum EventClusterer {
         }
         /// Two thirds of the cross pairs between the earliest members of two events agree by the rules alone (#581): no
         /// conflict other than a different act, `storyLinkAnchors` shared specific names that are not common actors, and
-        /// a shared keyword.
-        func storyPairsAgree(_ a: [EventMatchRow], _ b: [EventMatchRow], common: Set<String>) async -> Bool {
+        /// a shared keyword. A report alone (`single`) may instead share one such name, a headline figure ("70,000
+        /// police") and two keywords, and every agreeing pair also needs the semantic veto's cosine.
+        func storyPairsAgree(
+            _ a: [EventMatchRow], _ b: [EventMatchRow], common: Set<String>, single: Bool = false
+        ) async -> Bool {
             var agreeing = 0
             var total = 0
             for left in a.prefix(Self.storySampleSize) {
                 for right in b.prefix(Self.storySampleSize) {
                     total += 1
                     let pair = await ruled(left, right)
-                    let names = features(left).specificAnchors.intersection(features(right).specificAnchors)
-                        .subtracting(common).count
+                    // A series name one publisher repeats is no shared name here either (#688).
+                    let template =
+                        EventFeatures.sharedSeriesTerms(
+                            features(left), features(right),
+                            samePublisher: !left.source.isEmpty && left.source == right.source) ?? []
+                    let (l, r) = (features(left).without(template), features(right).without(template))
+                    let names = l.specificAnchors.intersection(r.specificAnchors).subtracting(common).count
+                    let sharesFigure = !l.titleNumbers.isDisjoint(with: r.titleNumbers)
+                    let figure = single && names >= 1 && pair.sharedKeywords >= 2 && sharesFigure
                     if (pair.conflict == nil || pair.conflict == .differentAct)
-                        && names >= matchPolicy.storyLinkAnchors && pair.sharedKeywords >= 1
+                        && (names >= matchPolicy.storyLinkAnchors || figure) && pair.sharedKeywords >= 1
+                        && (!single || (pair.embeddingCosine ?? 0) >= matchPolicy.semanticVetoThreshold)
                     {
                         agreeing += 1
                     }
@@ -450,12 +461,23 @@ enum EventClusterer {
         /// The story pass (#581): two active events sharing at least `storyLinkAnchors` specific names that are not
         /// common actors of the week (`EventStoryRelation.commonActorShare`, the "Earlier in This Story" guard) are one
         /// story when `storyPairsAgree`; a reader's exclusion across the two events vetoes the link. Stories are
-        /// connected components named by the earliest event; pair decisions and memberships are untouched.
+        /// connected components named by their earliest event of two or more reports; pair decisions and memberships are
+        /// untouched.
+        /// A report alone in the active window, unclustered or the only member of its event, joins the story of the
+        /// event of two or more reports it agrees with best (`storyPairsAgree`, `single`), as a one-member event of its
+        /// own, when its headline and one of the event's name a shared specific name; a reader's exclusion against that
+        /// event's members vetoes it.
         func linkStories() async throws -> Set<String> {
             let activeSince = now.addingTimeInterval(-candidatePolicy.activeEventLifetime)
-            let events = try await database.activeEventMembers(since: activeSince)
-            await prefetch(events.flatMap { $0.members })
-            let exclusions = try await database.eventExclusions(for: events.flatMap { $0.members.map(\.id) })
+            let active = try await database.activeEventMembers(since: activeSince)
+            let events = active.filter { $0.members.count >= 2 }
+            let singles =
+                active.filter { $0.members.count == 1 }.flatMap(\.members)
+                + (try await database.unclusteredEventMatchRows(
+                    since: activeSince, matcherVersion: EventMatcher.version))
+            await prefetch(events.flatMap { $0.members } + singles)
+            let exclusions = try await database.eventExclusions(
+                for: events.flatMap { $0.members.map(\.id) } + singles.map(\.id))
             let allAnchors = Dictionary(
                 events.map { event in
                     (event.id, event.members.reduce(into: Set<String>()) { $0.formUnion(features($1).specificAnchors) })
@@ -487,7 +509,33 @@ enum EventClusterer {
                     components.join(event.id, other)
                 }
             }
-            return try await database.assignStories(components.groups, since: activeSince)
+            var attached: [String: String] = [:]
+            for single in singles {
+                try Task.checkCancellation()
+                var shared: [String: Int] = [:]
+                for anchor in features(single).specificAnchors.subtracting(common) {
+                    for id in eventsByAnchor[anchor] ?? [] { shared[id, default: 0] += 1 }
+                }
+                // Most shared names first, then the event that began first (event IDs are random): one story per report.
+                func rank(_ id: String) -> (Int, Date, String) {
+                    (-(shared[id] ?? 0), membersOf[id]?.first?.date ?? .distantFuture, id)
+                }
+                for id in shared.keys.sorted(by: { rank($0) < rank($1) }) {
+                    guard let members = membersOf[id],
+                        exclusions[single.id]?.isDisjoint(with: members.map(\.id)) != false,
+                        // Its own headline names the story: a live blog's latest entry can carry another one.
+                        features(single).specificAnchors.subtracting(common).contains(where: { name in
+                            Self.headline(single.title, names: name)
+                                && members.contains { Self.headline($0.title, names: name) }
+                        }),
+                        let gap = Self.closestGap([single], members), gap <= candidatePolicy.activeEventLifetime,
+                        await storyPairsAgree([single], members, common: common, single: true)
+                    else { continue }
+                    attached[single.id] = id
+                    break
+                }
+            }
+            return try await database.assignStories(components.groups, attaching: attached, since: activeSince, at: now)
         }
         /// Every cross-pair needs specific shared evidence; a contradiction or exclusion always vetoes a merge.
         var fragmentExclusions: [String: Set<String>] = [:]
@@ -529,10 +577,12 @@ enum EventClusterer {
         /// The larger event survives (ties: the older ID), and the other forwards to it.
         func mergeFragments() async throws -> EventClusteringReport {
             var merges = EventClusteringReport()
-            var events = try await database.activeEventMembers(
-                since: now.addingTimeInterval(-candidatePolicy.activeEventLifetime)
-            )
-            .sorted { $0.members.count != $1.members.count ? $0.members.count > $1.members.count : $0.id < $1.id }
+            let activeSince = now.addingTimeInterval(-candidatePolicy.activeEventLifetime)
+            // A report the story pass attached as an act of its own stays one: attaching never changes events (#581).
+            let attached = try await database.storyAttachedEventIDs(since: activeSince)
+            var events = try await database.activeEventMembers(since: activeSince)
+                .filter { !attached.contains($0.id) }
+                .sorted { $0.members.count != $1.members.count ? $0.members.count > $1.members.count : $0.id < $1.id }
             fragmentExclusions = try await database.eventExclusions(for: events.flatMap { $0.members.map(\.id) })
             await prefetch(events.flatMap { $0.members })
             // Names and action words together: a name the tagger types in one report can be a plain word in another.
@@ -638,6 +688,17 @@ enum EventClusterer {
             for id in parent.keys { groups[find(id), default: []].append(id) }
             return groups.values.filter { $0.count >= 2 }.map { $0.sorted() }
         }
+    }
+
+    /// The name's words appear together in the headline, ignoring case, accents and punctuation (#581).
+    static func headline(_ title: String, names name: String) -> Bool {
+        func words(_ text: String) -> [String] {
+            text.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil).lowercased()
+                .split(whereSeparator: { !$0.isLetter && !$0.isNumber }).map(String.init)
+        }
+        let (title, name) = (words(title), words(name))
+        guard !name.isEmpty, name.count <= title.count else { return false }
+        return (0...(title.count - name.count)).contains { Array(title[$0..<($0 + name.count)]) == name }
     }
 
     private static func closestGap(_ lhs: [EventMatchRow], _ rhs: [EventMatchRow]) -> TimeInterval? {
