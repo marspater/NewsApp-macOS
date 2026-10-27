@@ -55,6 +55,8 @@ enum AppColor {
 
     /// The World Tension scale from Zen to Boiling, for the gauge, glyph and trend points.
     static let tensionScale = Gradient(colors: [success, warning, caution, danger, critical])
+    /// The mild glyph's breathing halo.
+    static var tensionHalo: Color { tension(.mild).opacity(0.4) }
 
     static func tension(_ level: TensionLevel) -> Color {
         switch level {
@@ -85,6 +87,11 @@ enum AppColor {
     /// Card and container strokes: the separator, or a stronger stroke with Increase Contrast (DESIGN.md 11).
     static func border(for contrast: ColorSchemeContrast) -> Color {
         contrast == .increased ? primaryText.opacity(0.50) : borderSubtle
+    }
+
+    /// The faint outline that separates a tension dot or scale from its background.
+    static func markerOutline(for contrast: ColorSchemeContrast) -> Color {
+        border(for: contrast).opacity(0.35)
     }
 
     /// Captions and other secondary text in the reader reach full contrast with Increase Contrast.
@@ -127,8 +134,7 @@ enum AppLayout {
     /// Portrait figures stop here instead of filling the window height.
     static let readerFigureMaxHeight: CGFloat = 560
     static let progressBarHeight: CGFloat = 2
-    static let catalogSheetMinWidth: CGFloat = 680
-    static let catalogSheetIdealWidth: CGFloat = 720
+    static let catalogSheetWidth: CGFloat = 720
     static let catalogSheetMinHeight: CGFloat = 560
     /// Overview timeline rail: dot, rail column and the connecting line.
     static let timelineDotSize: CGFloat = 8
@@ -477,7 +483,7 @@ struct IntelligenceLabel: View {
             Text(title)
                 .foregroundStyle(AppColor.primaryText)
         }
-        .font(AppTypography.headline)
+        // No font of its own: the caller sets it (headline in the summary panel, eyebrow in the overview).
         .accessibilityElement(children: .combine)
     }
 }
@@ -517,7 +523,7 @@ struct ContentPanel: ViewModifier {
             .background(AppColor.surface, in: RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous)
-                    .strokeBorder(AppColor.border(for: contrast), lineWidth: 0.5)
+                    .strokeBorder(AppColor.border(for: contrast), lineWidth: AppLayout.hairline)
             )
     }
 }

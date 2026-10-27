@@ -169,8 +169,9 @@ struct ReaderFigureView: View {
                 // Selectable text is backed by an AppKit view; a label set directly on it made accessibility label
                 // resolution loop until the stack overflowed. A plain container carries the spoken label instead.
                 HStack(spacing: 0) {
+                    // Attribution stays at the secondary color, like every reader and overview text (DESIGN.md 9).
                     Text(credit).font(AppTypography.readerCaptionFont(scale: textScale)).foregroundStyle(
-                        AppColor.tertiaryText(for: contrast)
+                        AppColor.secondaryText(for: contrast)
                     ).textSelection(.enabled)
                 }
                 .accessibilityElement(children: .ignore)

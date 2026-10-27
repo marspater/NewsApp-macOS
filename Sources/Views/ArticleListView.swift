@@ -64,8 +64,12 @@ struct ArticleListView: View {
     /// The stored edition, shared by every window: when it was selected and its story IDs in order.
     @AppStorage("briefingEditionSelectedAt") private var briefingEditionSelectedAt = 0.0
     @AppStorage("briefingEditionArticleIDs") private var briefingEditionArticleIDs = ""
+    @AppStorage("readingInterestsResetAt") private var readingInterestsResetAt = 0.0
     @State private var imagePrefetchStart = 0
     @Environment(\.readerImageLoader) private var imageLoader
+    /// Launch shows the cached snapshot once, in one transition (DESIGN.md 13, #602); later windows start settled.
+    @MainActor static var hasSettledLaunch = false
+    @State private var isSettled = ArticleListView.hasSettledLaunch
 
     private var imagePrefetchURLs: [URL] {
         buffer.displayed.articles.dropFirst(imagePrefetchStart).prefix(30).compactMap {
@@ -158,6 +162,7 @@ struct ArticleListView: View {
     private func listContent(proxy: ScrollViewProxy) -> some View {
         if !filteredArticles.isEmpty {
             articleGrid(proxy: proxy)
+                .opacity(isSettled ? 1 : 0)
             if isBriefing { briefingCompletion }
             if hasMoreResults {
                 Button("Load More Stories") { pageRequest += 1 }
@@ -235,7 +240,29 @@ struct ArticleListView: View {
         }
         .task(id: taskQueryReloadKey) {
             await performQueryReload()
+            await settleLaunch()
         }
+    }
+
+    /// Once the cached snapshot is loaded, waits (at most a second) for the first page's card images, shows the cards
+    /// in one transition, and only then starts the launch refresh and the catch-up clustering with its image lookup.
+    private func settleLaunch() async {
+        guard !Self.hasSettledLaunch, articleStore.isReady, !isLoadingPage else { return }
+        let urls = entries.prefix(12).compactMap {
+            FeedArticle.bestCardImage(in: [$0.representative] + $0.visibleArticles)
+        }
+        let loader = imageLoader
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask { await DecodedImageCache.prefetch(urls, using: loader) }
+            group.addTask { try? await Task.sleep(for: .seconds(1)) }
+            await group.next()
+            group.cancelAll()
+        }
+        guard !Task.isCancelled, !Self.hasSettledLaunch else { return }
+        Self.hasSettledLaunch = true
+        withAnimation(reduceMotion ? nil : AppMotion.navigation) { isSettled = true }
+        feedManager.fetchFeeds()
+        feedManager.clusterEventsInBackground()
     }
 
     @ViewBuilder
@@ -370,7 +397,12 @@ struct ArticleListView: View {
                     let priorities = try await articleStore.database.briefingPriorities(
                         articleIDs: candidates.map(\.id))
                     try Task.checkCancellation()
-                    let interests = try await articleStore.database.briefingInterests(now: now)
+                    let resetDate =
+                        readingInterestsResetAt > 0
+                        ? Date(timeIntervalSince1970: readingInterestsResetAt)
+                        : nil
+                    let interests = try await articleStore.database.briefingInterests(
+                        now: now, resetAt: resetDate)
                     try Task.checkCancellation()
                     let edition = FiniteBriefing(
                         candidates: candidates, readIDs: readManager.readArticles, now: now, priorities: priorities,
@@ -535,13 +567,14 @@ struct ArticleListView: View {
             applyPendingUpdates(proxy: proxy)
         } label: {
             Label(
-                count > 0 ? "\(count) New \(count == 1 ? "Story" : "Stories")" : "Show Updates", systemImage: "arrow.up"
+                count > 0 ? "Show \(count) New \(count == 1 ? "Story" : "Stories")" : "Show Updates",
+                systemImage: "arrow.up"
             )
             .font(AppTypography.label)
             .monospacedDigit()
             .labelStyle(.titleAndIcon)
         }
-        .help("Show the latest stories (U). The list keeps its place until you do.")
+        .help("Stories that arrived in the background (U)")
         .accessibilityHint("Moves to the top of the updated list")
     }
 
@@ -703,7 +736,7 @@ struct ArticleListView: View {
                     .symbolEffect(
                         .rotate, options: .repeat(.continuous), isActive: feedManager.isAnyFeedLoading && !reduceMotion)
             }
-            .help(feedManager.isAnyFeedLoading ? "Refreshing feeds…" : "Refresh feeds (R or ⌘R)")
+            .help(feedManager.isAnyFeedLoading ? "Refreshing feeds…" : "Check feeds for new stories (R or ⌘R)")
             .accessibilityLabel("Refresh Feeds")
             .accessibilityValue(feedManager.isAnyFeedLoading ? "Refreshing" : "")
         }
@@ -713,7 +746,7 @@ struct ArticleListView: View {
     private var listSubtitle: String {
         if isBriefing {
             let edition = (briefing?.startedAt ?? Date()).formatted(.dateTime.weekday(.wide).month(.wide).day())
-            return "\(edition) briefing · Selected by importance and your interests"
+            return "\(edition) briefing · Selected by coverage and your interests"
         }
         var parts = ["\(entries.count) \(entries.count == 1 ? "story" : "stories")"]
         if !isSearching && (selectedTopic ?? "Today") == "Today" {
@@ -780,34 +813,64 @@ struct ArticleListView: View {
 
     /// The lead is an inset card like the others and shares the list measure (DESIGN.md 3.4, 12).
     /// Both collections retain their original ordering and existing lazy rendering.
+    @ViewBuilder
     private func articleGrid(proxy _: ScrollViewProxy) -> some View {
         let listed = entries
-        let leadID: String? = {
-            if #available(macOS 26, *) {
-                return LeadStoryPresentation.firstEligibleID(
-                    in: listed, selectedTopic: selectedTopic, isSearching: isSearching
+        if isBriefing {
+            BriefingView(
+                entries: listed,
+                briefing: briefing,
+                tensionReading: nil,
+                tensionHistory: [],
+                actions: BriefingActions(
+                    onOpenArticle: { article in openArticle(article) },
+                    onOpenEvent: { event in
+                        if let entry = listed.first(where: {
+                            if case .event(let s, _, _) = $0 { return s.eventID == event.eventID }
+                            return false
+                        }) {
+                            openEvent(
+                                event.eventID,
+                                article: entry.representative,
+                                initialExperienceMode: .eventOverview
+                            )
+                        }
+                    },
+                    onStartNewBriefing: { startNewBriefing() },
+                    onBackToToday: { selectedTopic = "Today" }
                 )
-            }
-            return nil
-        }()
+            )
+            .allowsWindowActivationEvents(true)
+        } else {
+            let leadID: String? = {
+                if #available(macOS 26, *) {
+                    return LeadStoryPresentation.firstEligibleID(
+                        in: listed, selectedTopic: selectedTopic, isSearching: isSearching
+                    )
+                }
+                return nil
+            }()
 
-        return VStack(spacing: AppLayout.cardGap) {
-            if let leadID, let leadIndex = listed.firstIndex(where: { $0.id == leadID }) {
-                if leadIndex > 0 {
-                    cardCollection(Array(listed[..<leadIndex]))
+            VStack(spacing: AppLayout.cardGap) {
+                if let leadID, let leadIndex = listed.firstIndex(where: { $0.id == leadID }) {
+                    if leadIndex > 0 {
+                        cardCollection(Array(listed[..<leadIndex]))
+                    }
+                    entryCard(listed[leadIndex], isLead: true)
+                        .frame(maxWidth: AppLayout.listMaxWidth)
+                        .frame(maxWidth: .infinity)
+                    if leadIndex + 1 < listed.count {
+                        cardCollection(Array(listed[(leadIndex + 1)...]))
+                    }
+                } else {
+                    cardCollection(listed)
                 }
-                entryCard(listed[leadIndex], isLead: true)
-                    .frame(maxWidth: AppLayout.listMaxWidth)
-                    .frame(maxWidth: .infinity)
-                if leadIndex + 1 < listed.count {
-                    cardCollection(Array(listed[(leadIndex + 1)...]))
-                }
-            } else {
-                cardCollection(listed)
             }
+            .padding(.horizontal, AppLayout.pageInset)
+            .padding(.bottom, AppSpacing.xl)
+            // The click that brings an inactive window forward also opens the card under it (#594).
+            .allowsWindowActivationEvents(true)
         }
-        .padding(.horizontal, AppLayout.pageInset)
-        .padding(.bottom, AppSpacing.xl)
     }
 
     @ViewBuilder
@@ -1176,8 +1239,8 @@ struct KeyboardShortcutsView: View {
             "List",
             [
                 ("G", "Group stories by event"),
-                ("U", "Show queued updates"),
-                ("R or ⌘R", "Refresh feeds"),
+                ("U", "Show new stories that arrived in the background"),
+                ("R or ⌘R", "Check feeds for new stories"),
                 ("⌥⌘U", "Mark all loaded stories as read"),
                 ("⌘J / ⌘K", "Next and previous story (menu)"),
                 ("⌘1 – ⌘4", "Today, Unread, Saved Stories, History"),
