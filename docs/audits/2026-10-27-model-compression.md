@@ -54,6 +54,33 @@ From `--compute-plan`, with candidates passed through `NEWS_EMBEDDING_MODEL_PATH
 - **`.all` sends the pair model's short function to the GPU.** Under `.all`, Core ML puts the pair model's 64-token function 100% on the GPU, as it did with MiniLM's short functions. `PairScorer` should load with `.cpuAndNeuralEngine` when it takes the fixed lengths.
 - **No latency numbers.** These runs had a 1-minute load average of 6.5–10 with another build running, so the latency they produced is not reported here. The compressed models do not ship, so no quiet measurement was needed.
 
+## PairScorer at fixed lengths
+
+`PairScorer` now works like `SentenceEmbedder`:
+- It loads the `length_64`, `length_128` and `length_256` functions of the shipped fp16 re-export with `.cpuAndNeuralEngine`.
+- It pads each pair to the shortest function that holds it.
+- It writes its three inputs through the arrays' buffers instead of one boxed `NSNumber` per element.
+- It keeps the cache and the mean of both orders.
+- A model with a single 256-token function, which `train_pair_model.py` exports, still loads and runs every pair at 256.
+
+The weights are unchanged: the shipped v3 state, with a probability difference of 0.0 against the earlier model. A second fp16 export from the same state has identical weights but differently named operations, and it differs by up to 0.0066 in probability.
+
+Checks, the merged base (256-token model) against the change:
+- Authored corpus: identical output, v13 TP 23, FP 0, FN 2.
+- Story regressions: identical, 23 event pairs and 31 story pairs, with known gaps of 8 event pairs and 4 story pairs.
+- Tune replay: the whole report is identical, en 44 / 0 / 49.
+
+Placement and latency, measured on a quiet machine with no training or build running and a 1-minute load average of 2.4–2.9. The 55 corpus pairs need 64 or 128 tokens.
+
+| Pair model | Neural Engine share (`.cpuAndNeuralEngine`) | One pair, median | 55 pairs, batched per length | Load |
+| --- | --- | --- | --- | --- |
+| before: one 256-token function, `.all` | 76% | 1.8 ms | 87 ms | 697 ms |
+| before, `.cpuAndNeuralEngine` | 76% | 1.8 ms | 87 ms | 685 ms |
+| after: 64/128/256 functions, `.cpuAndNeuralEngine` | 80% (64), 57% (128), 75% (256) | 0.7 ms | 27 ms | 1,775 ms |
+| after, `.all` | the 64-token function 100% on the GPU | 0.8 ms | 31 ms | 1,495 ms |
+
+The load time covers three functions; it is paid once per launch. The first quiet attempt aborted in Core ML. A stale compiled-model cache of the test binary (`~/Library/Caches/runner_pair`, "Original module missing") was hit while the `.all` and GPU loads compiled the 64-token GPU graph. Core ML raises that as an Objective-C exception, which Swift cannot catch. The run passed after the cache was cleared. The app loads with `.cpuAndNeuralEngine` only, which does not build that graph.
+
 ## Decision
 
-`minilm.mlmodelc` and `pairscorer.mlmodelc` stay fp16. The compression step stays in `compress_models.py` for a later model or a looser gate.
+`minilm.mlmodelc` and `pairscorer.mlmodelc` stay fp16; the pair model ships as its fixed-length fp16 re-export. The compression step stays in `compress_models.py` for a later model or a looser gate.

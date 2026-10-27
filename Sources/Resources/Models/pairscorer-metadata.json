@@ -2,10 +2,13 @@
  "model": "pairscorer",
  "base": "the shipped minilm.mlmodelc weights (sentence-transformers/all-MiniLM-L6-v2, Apache License 2.0)",
  "trained_with": "script/training/train_pair_model.py (#525), matcher v11 training set: pairs mined from a library copy by --export-pairs, positives from stored events, negatives sharing an anchor 36 h to 7 days apart",
- "converted_with": {"coremltools": "9.0", "torch": "2.7.1", "conversion_date": "2026-10-24"},
- "inputs": {"input_ids": "int32 [1, 256]", "attention_mask": "int32 [1, 256]", "token_type_ids": "int32 [1, 256]"},
+ "weights": "unchanged since 24 October 2026: the training state pairmodel-2026-10-24-v3/pairscorer-state.pt (SHA-256 69d45c41015db8411cd9810d1cfd2f48c0d28fd30945abf974d463d7b74d978f) whose 256-token export shipped",
+ "converted_with": {"coremltools": "9.0", "torch": "2.14.1", "conversion_date": "2026-10-27", "script": "script/training/compress_models.py --mode fp16"},
+ "functions": {"length_64": "int32 [1, 64]", "length_128": "int32 [1, 128]", "length_256": "int32 [1, 256] (default)"},
+ "inputs": ["input_ids", "attention_mask", "token_type_ids"],
  "outputs": ["probability"],
  "precision": "float16",
- "check": "train_pair_model.py --check-shipped (weight import against minilm.mlmodelc); a retrained model's OUT/metadata.json (#624) replaces this file when it ships",
- "note": "Training CSVs stay outside the repository; their SHA-256 are in docs/audits/2026-10-24-pair-model-pretraining.md from #624 on."
+ "compute_units": "cpuAndNeuralEngine",
+ "check": "compress_models.py report: the largest probability difference against the earlier 256-token model over 870 pair orders of the authored corpus is 0.0; a retrained model's OUT/metadata.json (#624) replaces this file when it ships",
+ "note": "#554: PairScorer pads each pair to the shortest function that holds it. Training CSVs stay outside the repository; their SHA-256 are in docs/audits/2026-10-24-pair-model-pretraining.md from #624 on."
 }

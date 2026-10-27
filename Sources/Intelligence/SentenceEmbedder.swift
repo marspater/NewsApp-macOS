@@ -367,33 +367,51 @@ actor SentenceEmbedder {
 actor PairScorer {
     static let shared = PairScorer()
     static let maxSequenceLength = 256
+    /// The model's functions (#554): `length_64`, `length_128` and `length_256` share one set of weights, and a pair
+    /// runs padded to the shortest that holds it, the padding masked out. A model of one 256-token function (a candidate
+    /// from `train_pair_model.py`) runs every pair at 256.
+    static let sequenceLengths = [64, 128, maxSequenceLength]
 
     private let logger = Logger(subsystem: "com.marspater.news", category: "PairScorer")
-    private let model: MLModel?
+    /// One loaded function per sequence length; empty when the model is missing or does not load.
+    private let models: [Int: MLModel]
     private let tokenizer: BertWordPieceTokenizer?
     /// Probabilities by text pair for the app's lifetime: the texts determine the answer, so passes that meet the same
     /// unmerged pair again do not run the model again. ponytail: cleared at 20,000 entries; persist if relaunches matter.
     private var cache: [Int: (same: Double, related: Double)] = [:]
 
+    /// `.cpuAndNeuralEngine` (#554): under `.all` Core ML put the 64-token function on the GPU, which clustering in the
+    /// background would take from the interface.
     init(modelURL: URL? = nil, vocabURL: URL? = nil) {
         let modelURL = modelURL ?? bundledModelResource("pairscorer", "mlmodelc")
         let vocabURL = vocabURL ?? bundledModelResource("vocab", "txt")
         tokenizer = try? BertWordPieceTokenizer(vocabURL: vocabURL)
         guard FileManager.default.fileExists(atPath: modelURL.path) else {
-            model = nil
+            models = [:]
             return
         }
-        let config = MLModelConfiguration()
-        config.computeUnits = .all
-        do {
-            model = try MLModel(contentsOf: modelURL, configuration: config)
-        } catch {
-            logger.error("Failed to load the pair model: \(error.localizedDescription)")
-            model = nil
+        func load(_ function: String?) throws -> MLModel {
+            let config = MLModelConfiguration()
+            config.computeUnits = .cpuAndNeuralEngine
+            config.functionName = function
+            return try MLModel(contentsOf: modelURL, configuration: config)
         }
+        var models: [Int: MLModel] = [:]
+        for length in Self.sequenceLengths {
+            models[length] = try? load("length_\(length)")
+        }
+        if models.count < Self.sequenceLengths.count {
+            do {
+                models = [Self.maxSequenceLength: try load(nil)]
+            } catch {
+                logger.error("Failed to load the pair model: \(error.localizedDescription)")
+                models = [:]
+            }
+        }
+        self.models = models
     }
 
-    var isAvailable: Bool { model != nil && tokenizer != nil }
+    var isAvailable: Bool { !models.isEmpty && tokenizer != nil }
 
     /// The probability that the two texts report one event; event admission reads this (#627).
     func probability(_ a: String, _ b: String) -> Double? { probabilities(a, b)?.same }
@@ -411,17 +429,23 @@ actor PairScorer {
     }
 
     private func score(_ a: String, _ b: String) -> (same: Double, related: Double)? {
-        guard let model, let tokenizer else { return nil }
+        guard let tokenizer else { return nil }
         let encoded = tokenizer.encodePair(a, b, maxSequenceLength: Self.maxSequenceLength)
+        let tokens = encoded.attentionMask.lastIndex(of: 1).map { $0 + 1 } ?? 0
+        guard let length = models.keys.sorted().first(where: { $0 >= tokens }), let model = models[length] else {
+            return nil
+        }
         var inputs: [String: MLFeatureValue] = [:]
         for (name, values) in [
             ("input_ids", encoded.inputIDs), ("attention_mask", encoded.attentionMask),
             ("token_type_ids", encoded.tokenTypeIDs),
         ] {
-            guard let array = try? MLMultiArray(shape: [1, NSNumber(value: values.count)], dataType: .int32) else {
+            guard let array = try? MLMultiArray(shape: [1, NSNumber(value: length)], dataType: .int32) else {
                 return nil
             }
-            for (index, value) in values.enumerated() { array[index] = NSNumber(value: value) }
+            array.withUnsafeMutableBufferPointer(ofType: Int32.self) { buffer, _ in
+                _ = buffer.initialize(from: values.prefix(length))
+            }
             inputs[name] = MLFeatureValue(multiArray: array)
         }
         guard let provider = try? MLDictionaryFeatureProvider(dictionary: inputs),

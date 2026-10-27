@@ -78,7 +78,10 @@ class PairEncoder(torch.nn.Module):
         for layer in bert.encoder.layer:
             output = layer(hidden, attention_mask=blocked)
             hidden = output[0] if isinstance(output, tuple) else output
-        return torch.sigmoid(self.model.classifier(bert.pooler(hidden))[:, 0])
+        logits = self.model.classifier(bert.pooler(hidden))
+        if logits.shape[-1] == 1:  # binary: `probability` of one event
+            return torch.sigmoid(logits[:, 0])
+        return torch.softmax(logits, dim=-1)  # three-way (#627): `probabilities` of different, related, same
 
 
 def pair_probability(models, tokenizer, a, b):
@@ -90,7 +93,10 @@ def pair_probability(models, tokenizer, a, b):
     length = min(length for length in models if length >= used)
     feed = {name: np.array([values[:length]], dtype=np.int32)
             for name, values in (('input_ids', ids), ('attention_mask', mask), ('token_type_ids', types))}
-    return float(np.ravel(models[length].predict(feed)['probability'])[0])
+    output = models[length].predict(feed)
+    if 'probability' in output:
+        return float(np.ravel(output['probability'])[0])
+    return float(np.ravel(output['probabilities'])[2])  # three-way: the same-event class
 
 
 def compiled_pair_functions(path):
@@ -134,15 +140,18 @@ def main(argv):
 
 
 def export(args, out):
-    from transformers import BertForSequenceClassification
+    from transformers import BertConfig, BertForSequenceClassification
     from train_pair_model import CONFIG
     bert, _ = build('hub')
     export_functions(Encoder(bert).eval(), ('input_ids', 'attention_mask'), ('last_hidden_state', 'pooler_output'),
                      LENGTHS, out / 'minilm.mlpackage', compress=lambda m: compress(m, args.mode))
-    model = BertForSequenceClassification(CONFIG)
-    model.load_state_dict(torch.load(args.pair_state, weights_only=True))
+    state = torch.load(args.pair_state, weights_only=True)
+    labels = state['classifier.weight'].shape[0]  # the shipped v3 model is binary, M17's head three-way
+    model = BertForSequenceClassification(BertConfig(**{**CONFIG.to_dict(), 'num_labels': labels}))
+    model.load_state_dict(state)
     export_functions(PairEncoder(model.eval()).eval(), ('input_ids', 'attention_mask', 'token_type_ids'),
-                     ('probability',), PAIR_LENGTHS, out / 'pairscorer.mlpackage',
+                     ('probability' if labels == 1 else 'probabilities',), PAIR_LENGTHS,
+                     out / 'pairscorer.mlpackage',
                      compress=lambda m: compress(m, args.mode))
 
 
