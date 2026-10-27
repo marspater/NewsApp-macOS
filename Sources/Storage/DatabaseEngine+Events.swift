@@ -612,12 +612,9 @@ extension DatabaseEngine {
             }
             var desired: [String: String?] = current.mapValues { _ in nil }
             for group in groups {
-                let members = group.filter { current[$0] != nil }
-                guard members.count >= 2,
-                    let lead = members.compactMap({ id in current[id].map { (id, $0.order) } })
-                        .min(by: { $0.1 < $1.1 })?.0
-                else { continue }
-                for member in members { desired[member] = lead }
+                let ranked = group.compactMap { id in current[id].map { (id: id, order: $0.order) } }
+                guard ranked.count >= 2, let lead = ranked.min(by: { $0.order < $1.order })?.id else { continue }
+                for member in ranked { desired[member.id] = lead }
             }
             var changed = created
             for (id, story) in desired where current[id]?.story != story {
