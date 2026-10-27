@@ -57,7 +57,7 @@ Release and engineering hygiene
 
 ## 2. Plan — programs and issues
 
-The original seven programs (J–P) each have a GitHub epic with sub-issues and a milestone. **Program S was added on 25 October 2026 as a separately parked, future-facing Epic**; it is not a release gate. **Program T was added on 26 October 2026 and is blocked by M and L.** Every implementation issue lands as one PR with `./test.sh`, `script/format.sh --check`, a staged `./build.sh`, a CHANGELOG line and board move; UI PRs carry the DESIGN.md checklist. No AI attribution lines in commits or PRs. Effort S < 1 day, M 1–3 days, L > 3 days.
+The original seven programs (J–P) each have a GitHub epic with sub-issues and a milestone. **Program S was added on 25 October 2026 as a separately parked, future-facing Epic**; it is not a release gate. **Program T was added on 26 October 2026; since 27 October it is blocked by M's story layer (#581) only.** Every implementation issue lands as one PR with `./test.sh`, `script/format.sh --check`, a staged `./build.sh`, a CHANGELOG line and board move; UI PRs carry the DESIGN.md checklist. No AI attribution lines in commits or PRs. Effort S < 1 day, M 1–3 days, L > 3 days.
 
 ### J · Robustness and data safety (epic #571, milestone J)
 
@@ -156,9 +156,9 @@ The original seven programs (J–P) each have a GitHub epic with sub-issues and 
 - [x] Add #651–#656 to GitHub Project #2.
 - [x] Set Status = Backlog and Priority = P2 for every card; keep the `parked` label.
 
-### T · Story Overview and editorial UX (epic #669, milestone T, **BLOCKED** by M #574 and L #573; added 26 October 2026)
+### T · Story Overview and editorial UX (epic #669, milestone T, **BLOCKED** by #581; added 26 October 2026)
 
-**Dependency:** #669 is blocked by #574 (M · Matching: story-level grouping and measured matcher iteration) and #573 (L · Logic hardening of the deterministic layers), recorded as GitHub issue dependencies. M's story layer (#581) changes what an overview and its timeline span; L owns the `Overview*` logic and perspective attribution (#547). Planning only: no implementation PRs, and every card stays in Backlog until both epics are closed.
+**Dependency:** #669 is blocked by #581 (M's story layer and its act and timeline wording), recorded as a GitHub issue dependency. It was blocked by all of M (#574) and by L (#573) until 27 October 2026, when Mars narrowed it: T needs the story layer, not M's model work, and L is closed. M's story layer changes what an overview and its timeline span; the `Overview*` logic and perspective attribution (#547) landed with L. #581 closes with its singleton-and-wording follow-up PR, not with #631. Planning only: no implementation PRs, and every card stays in Backlog until #581 is closed.
 
 | # | Issue | Scope | Acceptance | Effort | Pri |
 |---|---|---|---|---|---|
@@ -172,6 +172,7 @@ Shared acceptance for all four (in #669): sections absent without valid data, st
 **Board setup checklist**
 - [x] Create milestone T.
 - [x] Create #669 with sub-issues #670–#673 and record the blocked-by dependencies on #574 and #573.
+- [x] Narrow #669's blocker to #581 and correct the schema reservation: #545 took no version, so v28 is free (27 October 2026).
 - [x] Add #669–#673 to GitHub Project #2 with Status = Backlog and Priority = P2.
 
 ## 3. Order
