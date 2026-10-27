@@ -7,7 +7,12 @@ on:
       - 'docs/**'
       - '**.md'
       - 'LICENSE'
+  # `closed` starts a run in the PR's concurrency group, which cancels its in-flight run
+  # so merged PRs stop holding macOS runners; every job skips on that run.
+  # The group keys on the PR number: a merged PR's `closed` run has `github.ref` set to
+  # main, so a ref-keyed group would cancel main's run instead of the PR's.
   pull_request:
+    types: [opened, synchronize, reopened, closed]
     branches: [main]
     paths-ignore:
       - 'docs/**'
@@ -21,12 +26,13 @@ permissions:
   contents: read
 
 concurrency:
-  group: security-${{ github.workflow }}-${{ github.ref }}
+  group: security-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
   codeql:
     name: CodeQL (Swift)
+    if: github.event.action != 'closed'
     permissions:
       contents: read
       security-events: write
@@ -65,6 +71,7 @@ jobs:
 
   codeql-actions:
     name: CodeQL (Actions)
+    if: github.event.action != 'closed'
     permissions:
       contents: read
       security-events: write
@@ -86,7 +93,7 @@ jobs:
 
   dependency-review:
     name: Dependency Review
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' && github.event.action != 'closed'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -101,6 +108,7 @@ jobs:
 
   secret-scan:
     name: Secret Scan
+    if: github.event.action != 'closed'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -110,7 +118,7 @@ jobs:
         with:
           fetch-depth: 0
       - name: TruffleHog OSS
-        uses: trufflesecurity/trufflehog@e76dff8a7e57d6df0c60ad8cbf5d5cba505a8fc9 # v3.99.2
+        uses: trufflesecurity/trufflehog@31ce31ee1abbcc7dc8eee5764c17121c3044c8b2 # v3.99.7
         with:
           extra_args: --results=verified,unknown
 

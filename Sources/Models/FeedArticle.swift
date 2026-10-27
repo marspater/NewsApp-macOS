@@ -159,7 +159,7 @@ public struct ReaderBlock: Codable, Hashable, Sendable {
 }
 
 public struct ReaderDocument: Codable, Hashable, Sendable {
-    public static let currentVersion = 11
+    public static let currentVersion = 12
     public var version = currentVersion
     public let blocks: [ReaderBlock]
     public var images: [ReaderImageCandidate]? = nil
@@ -226,16 +226,31 @@ public struct ReaderDocument: Codable, Hashable, Sendable {
         let textBlocks = blocks.filter { $0.kind == .paragraph || $0.kind == .quote || $0.kind == .listItem }
         let totalCount = textBlocks.map(\.text.count).reduce(0, +)
         if totalCount < 600 && textBlocks.count <= 2 { return false }
-        if let last = textBlocks.last?.text.lowercased(),
-            last.contains("continue reading")
-                || last.contains("read full article")
-                || last.contains("appeared first on")
-                || (last.contains("the post") && last.contains("appeared first"))
-        {
-            return false
-        }
+        if let last = textBlocks.last?.text, Self.closesAsTeaser(last) { return false }
         return true
     }
+
+    /// A feed teaser's last text block: it trails off in an ellipsis, or closes with the publisher's own link line
+    /// ("Read full article", "Continue reading…", "Read the full story at The Verge.", "Read more on …", "The post …
+    /// appeared first on …"). Length never overrides this: three long paragraphs ending so are still a teaser (#586).
+    public static func closesAsTeaser(_ text: String) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        if trimmed.hasSuffix("…") || trimmed.hasSuffix("...") { return true }
+        let last = trimmed.lowercased()
+        if last.contains("continue reading") || last.contains("read full article") || last.contains("appeared first on")
+            || (last.contains("the post") && last.contains("appeared first"))
+        {
+            return true
+        }
+        return last.range(of: teaserClosingPattern, options: .regularExpression) != nil
+    }
+
+    /// A closing line that names where the rest is: "Read the full story at <publisher>", "Read more on <publisher>",
+    /// "Continue reading at <publisher>". Only at the end of the block, and only with a destination, so a sentence
+    /// that merely says "read more" does not count.
+    static let teaserClosingPattern =
+        #"(?:read (?:the )?full (?:article|story|post)|read more|continue reading|read the rest) (?:at|on|from) [^.…!?\n]{1,60}[.…!\s]*$"#
 }
 
 struct ArticleFilterQuery: Equatable, Sendable {
