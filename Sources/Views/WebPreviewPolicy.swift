@@ -27,8 +27,16 @@ enum WebPreviewPolicy {
             guard let jsonString = String(data: data, encoding: .utf8) else {
                 throw FeedError.network("Preview policy encoding failed")
             }
+            // The default store is keyed by process name, so concurrent processes of one binary
+            // (parallel test runners, a second app instance) overwrite each other's compiled file
+            // and fail with WKErrorDomain Code=6. Rules compile once per launch; keep them private.
+            let storeURL = FileManager.default.temporaryDirectory
+                .appending(path: "NewsContentRules-\(ProcessInfo.processInfo.processIdentifier)")
+            guard let store = WKContentRuleListStore(url: storeURL) else {
+                throw FeedError.network("Preview policy store unavailable")
+            }
             return try await withCheckedThrowingContinuation { continuation in
-                WKContentRuleListStore.default().compileContentRuleList(
+                store.compileContentRuleList(
                     forIdentifier: "NewsProtectedPreview-v1",
                     encodedContentRuleList: jsonString
                 ) { list, error in
