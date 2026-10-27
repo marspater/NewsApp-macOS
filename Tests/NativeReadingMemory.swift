@@ -106,7 +106,9 @@ private final class ReadingDelegate: NSObject, NSApplicationDelegate {
             appSettings: settings, articleStore: store, feedManager: manager,
             themeManager: ThemeManager())
         defer { manager.stopBackgroundWork() }
-        // The manager clusters the newly stored stories on start; finish that first so only reading is measured.
+        // The window clusters the newly stored stories after its first frame (#602); finish that first so only reading
+        // is measured.
+        manager.clusterEventsInBackground()
         await manager.waitForEventClustering()
 
         let libraryRows = try await database.counts().total

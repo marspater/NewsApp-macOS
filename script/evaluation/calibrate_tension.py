@@ -448,6 +448,31 @@ def run_calibration():
         assert gap_day["calibrated"] is None, f"{gap_id} must have calibrated=None"
         assert gap_day["smoothed"] is None, f"{gap_id} must have smoothed=None"
 
+    # Methodology v3 (#585, docs/methodology/world-tension-v3.md): each day's index read as that day's assessment,
+    # the 7-day exponentially weighted average (alpha 0.25, restarted at the oldest day in the window, rounded half
+    # away from zero like Swift's rounded()) plus 3 points per consecutive daily rise, capped at 9.
+    print("\n--- Methodology v3 reading (7-day window, alpha 0.25, momentum 3 per rise, cap 9) ---")
+    indices = [d["calibrated"] for d in day_results]
+    v3 = []
+    for i, value in enumerate(indices):
+        if value is None:
+            v3.append(None)
+            continue
+        window = [indices[j] for j in range(max(0, i - 6), i + 1) if indices[j] is not None]
+        smoothed = window[0]
+        for later in window[1:]:
+            smoothed = SMOOTHING_ALPHA * later + (1.0 - SMOOTHING_ALPHA) * smoothed
+        rises, j = 0, i
+        while j > 0 and indices[j - 1] is not None and indices[j] > indices[j - 1]:
+            rises += 1
+            j -= 1
+        v3.append(min(100, max(0, math.floor(smoothed + 0.5) + min(9, 3 * rises))))
+    for d, r in zip(day_results, v3):
+        print(f"{d['id']:<38} | {('N/A' if r is None else str(r)):>7}")
+    expected_v3 = [88, 78, 66, 55, 51, 36, 33, 29, 15, 27, 18, None, None, None]
+    if v3 != expected_v3:
+        raise SystemExit(f"v3 readings {v3} differ from the documented bands {expected_v3}")
+
     print("\nAll historical calibration assertions passed successfully!")
 
 
