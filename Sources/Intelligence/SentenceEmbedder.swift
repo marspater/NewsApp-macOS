@@ -223,27 +223,41 @@ actor SentenceEmbedder {
         return Self.pooled(hidden, tokens: input.tokens)
     }
 
-    /// Embeds texts in one Core ML batch (#540); a text the model cannot embed keeps its position as nil. When the
-    /// batch is refused, each text runs alone.
+    /// Texts per Core ML batch: every output of a batch holds IOSurface memory until the batch is released, and one
+    /// batch of a few thousand texts exhausted the system's IOSurfaces, which Core ML raises as an exception the
+    /// fallback below cannot catch.
+    static let batchLimit = 64
+
+    /// Embeds texts in Core ML batches of at most `batchLimit` (#540); a text the model cannot embed keeps its position
+    /// as nil. When a batch is refused, its texts run alone.
     func embedBatch(_ texts: [String]) -> [[Float]?] {
         guard let model, let tokenizer, !texts.isEmpty else { return texts.map { _ in nil } }
         let inputs = texts.map { Self.input(tokenizer, $0) }
-        let providers = inputs.compactMap { $0?.provider }
-        guard let batch = try? model.predictions(fromBatch: MLArrayBatchProvider(array: providers)) else {
-            return texts.map { embed($0) }
-        }
-        var vectors: [[Float]?] = []
-        var index = 0
-        for input in inputs {
-            guard let input else {
-                vectors.append(nil)
+        var vectors = [[Float]?](repeating: nil, count: texts.count)
+        let embeddable = inputs.indices.filter { inputs[$0] != nil }
+        for start in stride(from: 0, to: embeddable.count, by: Self.batchLimit) {
+            let indices = Array(embeddable[start..<min(start + Self.batchLimit, embeddable.count)])
+            guard let batch = Self.pooledBatch(model, indices.compactMap { inputs[$0] }) else {
+                for index in indices { vectors[index] = embed(texts[index]) }
                 continue
             }
-            let hidden = batch.features(at: index).featureValue(for: "last_hidden_state")?.multiArrayValue
-            vectors.append(hidden.flatMap { Self.pooled($0, tokens: input.tokens) })
-            index += 1
+            for (vector, index) in zip(batch, indices) { vectors[index] = vector }
         }
         return vectors
+    }
+
+    /// One batch, pooled inside an autorelease pool so its outputs' memory is returned before the next batch.
+    private static func pooledBatch(_ model: MLModel, _ inputs: [Input]) -> [[Float]?]? {
+        autoreleasepool {
+            guard let batch = try? model.predictions(fromBatch: MLArrayBatchProvider(array: inputs.map(\.provider)))
+            else { return nil }
+            var vectors: [[Float]?] = []
+            for position in inputs.indices {
+                let hidden = batch.features(at: position).featureValue(for: "last_hidden_state")?.multiArrayValue
+                vectors.append(hidden.flatMap { pooled($0, tokens: inputs[position].tokens) })
+            }
+            return vectors
+        }
     }
 
     private struct Input {
