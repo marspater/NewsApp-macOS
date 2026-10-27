@@ -15,9 +15,11 @@ first two encoder layers frozen. The loss is cross-entropy against the classes a
 classes' probabilities), label-smoothed by 0.05 and scaled by the row weight, with no class weight on top. GDELT hard
 negatives (group `g:`, partial `01`) whose shipped-MiniLM cosine is below 0.55 count as exact `different`.
 `--exclude-headlines FILE` (folded headlines of the library holdout and the tune corpus, one a line) leaves out every
-row of every input that names one: GDELT pages carry the same headlines. Tune and holdout never enter training; the cutoff is chosen afterwards by the Swift replay against the library holdout, which is
-the gate.
-`train_pair_model.py --check-shipped` checks the weight import alone against the shipped model.
+row of every input that names one: GDELT pages carry the same headlines. Tune and holdout never enter training; the
+cutoff is chosen afterwards on tune and on the held-out sweep, and the Swift replay against the library holdout is the
+gate.
+`train_pair_model.py --check-shipped [MODEL.mlmodelc]` checks the weight import alone against the shipped encoder, or
+against another compiled encoder (one flexible-length function, or one function per enumerated length, #554).
 
 Pairs CSV contract (#627), written by `./test.sh --export-pairs`, `pretrain_pairs.py` and `sample_pairs.py --labels`:
     label,group,text_a,text_b,pieces_a,pieces_b,weight,marginal
@@ -27,9 +29,9 @@ twice). `marginal` is empty for an exact label, or the class ids (digits) whose 
 partial label: `12` one story, same or related (WCEP-10 pairs more than 18 h apart); `01` not one occurrence (GDELT hard
 negatives, far-apart library negatives, "Not the Same Event" verdicts: none of them says the two reports are different
 stories). Reviewed `different` labels and clean same-day negatives stay exact `different`. `label` is then one of those
-classes and is only reported. `weight` scales the row's loss (reviewed labels and verdicts 5, same-day negatives 2); `pieces_*` are the app's
-word-piece ids, space-separated; `group` names where the row came from. A file without the `marginal` column is a
-binary file of the earlier contract: 1 is same (2), 0 is different (0).
+classes and is only reported. `weight` scales the row's loss (reviewed labels and verdicts 5, same-day negatives 2);
+`pieces_*` are the app's word-piece ids, space-separated; `group` names where the row came from. A file without the
+`marginal` column is a binary file of the earlier contract: 1 is same (2), 0 is different (0).
 Training uses the word pieces the app exported, so it sees exactly the ids the app sends. The tokenizer port below only
 serves the shipped-model check and the self-check; `encode_ids` mirrors `BertWordPieceTokenizer.encodePair`.
 """
@@ -70,9 +72,9 @@ CONFIG = BertConfig(
     max_position_embeddings=512, type_vocab_size=2, hidden_act='gelu', layer_norm_eps=1e-12, num_labels=3,
     attn_implementation='eager')
 CONST = re.compile(
-    r'tensor<fp16, \[([0-9, ]+)\]> (\w+) = const\(\)\[name = tensor<string, \[\]>\("\w+"\), '
-    r'val = tensor<fp16, \[[0-9, ]+\]>\(BLOBFILE\(path = tensor<string, \[\]>\("@model_path/weights/weight.bin"\), '
-    r'offset = tensor<uint64, \[\]>\((\d+)\)')
+    r'tensor<fp16, \[([0-9, ]+)\]> (\w+) = const\(\)\[name = (?:tensor<string, \[\]>|string)\("\w+"\), '
+    r'val = tensor<fp16, \[[0-9, ]+\]>\(BLOBFILE\(path = (?:tensor<string, \[\]>|string)'
+    r'\("@model_path/weights/weight.bin"\), offset = (?:tensor<uint64, \[\]>|uint64)\((\d+)\)')
 
 
 def shipped_state(path=SHIPPED):
@@ -85,13 +87,14 @@ def shipped_state(path=SHIPPED):
         require(sentinel == 0xDEADBEEF and dtype == 1, f'Unexpected blob header for {name}')
         shape = [int(d) for d in dims.split(', ')]
         values = np.frombuffer(blob, dtype=np.float16, count=size // 2, offset=start).reshape(shape)
-        state[name.removeprefix('model_').removesuffix('_to_fp16')] = torch.from_numpy(values.astype(np.float32))
+        key = re.sub(r'^(model|bert)_', '', name).removesuffix('_to_fp16')
+        state[key] = torch.from_numpy(values.astype(np.float32))
     return state
 
 
-def load_shipped(module):
+def load_shipped(module, path=SHIPPED):
     """Copies the shipped weights into a `BertModel`; every parameter must be found."""
-    state = shipped_state()
+    state = shipped_state(path=path)
     target = module.state_dict()
     loaded = {key: state[key.replace('.', '_')] for key in target if key.replace('.', '_') in state}
     missing = [key for key, value in module.named_parameters() if key not in loaded]
@@ -99,21 +102,36 @@ def load_shipped(module):
     module.load_state_dict(loaded, strict=False)
 
 
-def check_shipped():
+def compiled_functions(path=SHIPPED):
+    """A compiled encoder's functions by input length (`length_16` …); a single flexible-length function (the encoder
+    before #554) stands under its longest length, 128, which it accepts like any shorter one."""
+    description = json.loads((path / 'metadata.json').read_text())
+    functions = (description[0] if isinstance(description, list) else description).get('functions') or []
+    if not functions:
+        return {128: ct.models.CompiledMLModel(str(path))}
+    return {int(function['name'].removeprefix('length_')):
+            ct.models.CompiledMLModel(str(path), function_name=function['name']) for function in functions}
+
+
+def check_shipped(path=SHIPPED):
     """The imported weights reproduce the shipped Core ML model's hidden states."""
     tokenizer, bert = Tokenizer(), BertModel(CONFIG, add_pooling_layer=True).eval()
-    load_shipped(bert)
-    shipped = ct.models.CompiledMLModel(str(SHIPPED))
+    load_shipped(bert, path=path)
+    models = compiled_functions(path)
     for text in ('Erdoğan meets Sánchez in Ankara', 'Magnitude 6.1 earthquake strikes eastern Turkey'):
         ids = tokenizer.encode_single(text)
         with torch.no_grad():
             ours = bert(input_ids=torch.tensor([ids]), attention_mask=torch.ones(1, len(ids), dtype=torch.long))
-        theirs = shipped.predict({
-            'input_ids': np.array([ids], dtype=np.int32), 'attention_mask': np.ones((1, len(ids)), dtype=np.int32)})
-        difference = np.abs(ours.last_hidden_state.numpy() - theirs['last_hidden_state']).max()
+        length = min(size for size in models if size >= len(ids))
+        padded = np.zeros((1, length), dtype=np.int32)
+        mask = np.zeros((1, length), dtype=np.int32)
+        padded[0, :len(ids)] = ids
+        mask[0, :len(ids)] = 1
+        theirs = models[length].predict({'input_ids': padded, 'attention_mask': mask})['last_hidden_state']
+        difference = np.abs(ours.last_hidden_state.numpy() - theirs[:, :len(ids)]).max()
         require(difference < 0.05, f'Imported weights differ from the shipped model by {difference:.3f}')
-        print(f'  shipped parity for {len(ids)} tokens: max difference {difference:.4f}')
-    print('Shipped MiniLM weights import check passed')
+        print(f'  shipped parity for {len(ids)} tokens on {path.name}: max difference {difference:.4f}')
+    print(f'Shipped MiniLM weights import check passed for {path.name}')
 
 
 def targets(row):
@@ -491,8 +509,10 @@ def self_check():
     story = torch.tensor([[False, True, True]])
     require(float(partial_loss(torch.tensor([[-9.0, 4.0, 0.0]]), story, 0.0)) < 0.02
             and float(partial_loss(torch.tensor([[-9.0, 0.0, 4.0]]), story, 0.0)) < 0.02
-            and float(partial_loss(torch.tensor([[4.0, 0.0, 0.0]]), story, 0.0)) > 3, 'A partial label sums its classes')
-    require(fold('Erdoğan meets Sánchez, again!') == 'erdogan meets sanchez again', 'Headlines fold for the leak check')
+            and float(partial_loss(torch.tensor([[4.0, 0.0, 0.0]]), story, 0.0)) > 3,
+            'A partial label sums its classes')
+    require(fold('Erdoğan meets Sánchez, again!') == 'erdogan meets sanchez again',
+            'Headlines fold for the leak check')
     swept = sweep([[0.02, 0.08, 0.90], [0.05, 0.60, 0.35], [0.30, 0.05, 0.65]], [4, 2, 1])
     require('same >= 0.9: TP 1, FP 0, FN 0' in swept and 'same >= 0.6: TP 1, FP 1, FN 0' in swept
             and 'story >= 0.9: TP 1, FP 0, FN 0' in swept, 'Held-out sweep under both admission rules')
@@ -553,8 +573,9 @@ def main(argv):
 
 
 if __name__ == '__main__':
-    if sys.argv[1:] == ['--check-shipped']:
-        check_shipped()
+    if len(sys.argv) >= 2 and sys.argv[1] == '--check-shipped':
+        path = pathlib.Path(sys.argv[2]) if len(sys.argv) > 2 else SHIPPED
+        check_shipped(path)
     elif len(sys.argv) >= 3 and sys.argv[1] != '--export':
         main(sys.argv[1:])
     elif len(sys.argv) == 4 and sys.argv[1] == '--export':
