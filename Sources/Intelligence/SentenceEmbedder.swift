@@ -173,12 +173,19 @@ actor SentenceEmbedder {
     static let modelVersion = 2
     static let vectorDimension = 384
     static let maxSequenceLength = 128
+    /// The model's functions (#554): `convert_minilm.py` exports one fixed-length function per entry, `length_16` to
+    /// `length_128`, sharing one set of weights, and each text runs in the shortest that holds it. A flexible 1–128
+    /// length kept the whole model on the CPU; fixed lengths run on the Neural Engine.
+    static let sequenceLengths = [16, 32, 64, maxSequenceLength]
 
     private let logger = Logger(subsystem: "com.marspater.news", category: "SentenceEmbedder")
-    private let model: MLModel?
+    /// One loaded function per sequence length; empty when the model is missing or a function does not load.
+    private let models: [Int: MLModel]
     private let tokenizer: BertWordPieceTokenizer?
 
-    init(modelURL: URL? = nil, vocabURL: URL? = nil) {
+    /// `.cpuAndNeuralEngine` by default (#554): under `.all` Core ML placed the 16- to 64-token functions on the GPU,
+    /// which clustering in the background would take from the interface.
+    init(modelURL: URL? = nil, vocabURL: URL? = nil, computeUnits: MLComputeUnits = .cpuAndNeuralEngine) {
         let effectiveModelURL = modelURL ?? bundledModelResource("minilm", "mlmodelc")
         let effectiveVocabURL = vocabURL ?? bundledModelResource("vocab", "txt")
 
@@ -195,82 +202,104 @@ actor SentenceEmbedder {
             self.tokenizer = nil
         }
 
+        var models: [Int: MLModel] = [:]
         if FileManager.default.fileExists(atPath: effectiveModelURL.path) {
-            let config = MLModelConfiguration()
-            config.computeUnits = .all
             do {
-                self.model = try MLModel(contentsOf: effectiveModelURL, configuration: config)
+                for length in Self.sequenceLengths {
+                    let config = MLModelConfiguration()
+                    config.computeUnits = computeUnits
+                    config.functionName = "length_\(length)"
+                    models[length] = try MLModel(contentsOf: effectiveModelURL, configuration: config)
+                }
             } catch {
                 logger.error("Failed to load MLModel from \(effectiveModelURL.path): \(error.localizedDescription)")
-                self.model = nil
+                models = [:]
             }
-        } else {
-            self.model = nil
         }
+        self.models = models
     }
 
     /// Whether on-device embeddings are ready and available.
     var isAvailable: Bool {
-        model != nil && tokenizer != nil
+        !models.isEmpty && tokenizer != nil
     }
 
     /// Generates a 384-dimensional L2-normalized float vector for input text.
     func embed(_ text: String) -> [Float]? {
-        guard let model, let tokenizer, let input = Self.input(tokenizer, text),
+        guard let tokenizer, let input = Self.input(tokenizer, text), let model = models[input.length],
             let output = try? model.prediction(from: input.provider),
             let hidden = output.featureValue(for: "last_hidden_state")?.multiArrayValue
         else { return nil }
         return Self.pooled(hidden, tokens: input.tokens)
     }
 
-    /// Embeds texts in one Core ML batch (#540); a text the model cannot embed keeps its position as nil. When the
-    /// batch is refused, each text runs alone.
+    /// Texts per Core ML batch (#554): every output of a batch holds IOSurface memory until the batch is released, and
+    /// one batch of a few thousand texts exhausted the system's IOSurfaces, which Core ML raises as an exception.
+    static let batchLimit = 64
+
+    /// Embeds texts in Core ML batches per sequence length (#540, #554); a text the model cannot embed keeps its
+    /// position as nil. When a batch is refused, its texts run alone.
     func embedBatch(_ texts: [String]) -> [[Float]?] {
-        guard let model, let tokenizer, !texts.isEmpty else { return texts.map { _ in nil } }
+        guard let tokenizer, !models.isEmpty else { return texts.map { _ in nil } }
         let inputs = texts.map { Self.input(tokenizer, $0) }
-        let providers = inputs.compactMap { $0?.provider }
-        guard let batch = try? model.predictions(fromBatch: MLArrayBatchProvider(array: providers)) else {
-            return texts.map { embed($0) }
-        }
-        var vectors: [[Float]?] = []
-        var index = 0
-        for input in inputs {
-            guard let input else {
-                vectors.append(nil)
-                continue
+        var vectors = [[Float]?](repeating: nil, count: texts.count)
+        for (length, model) in models {
+            let all = inputs.indices.filter { inputs[$0]?.length == length }
+            for start in stride(from: 0, to: all.count, by: Self.batchLimit) {
+                let indices = Array(all[start..<min(start + Self.batchLimit, all.count)])
+                guard let batch = Self.pooledBatch(model, indices.compactMap { inputs[$0] }) else {
+                    for index in indices { vectors[index] = embed(texts[index]) }
+                    continue
+                }
+                for (vector, index) in zip(batch, indices) { vectors[index] = vector }
             }
-            let hidden = batch.features(at: index).featureValue(for: "last_hidden_state")?.multiArrayValue
-            vectors.append(hidden.flatMap { Self.pooled($0, tokens: input.tokens) })
-            index += 1
         }
         return vectors
+    }
+
+    /// One batch, pooled inside an autorelease pool so its outputs' memory is returned before the next batch.
+    private static func pooledBatch(_ model: MLModel, _ inputs: [Input]) -> [[Float]?]? {
+        autoreleasepool {
+            guard
+                let batch = try? model.predictions(
+                    fromBatch: MLArrayBatchProvider(array: inputs.map(\.provider)))
+            else { return nil }
+            return inputs.indices.map { position in
+                batch.features(at: position).featureValue(for: "last_hidden_state")?.multiArrayValue.flatMap {
+                    pooled($0, tokens: inputs[position].tokens)
+                }
+            }
+        }
     }
 
     private struct Input {
         let provider: MLDictionaryFeatureProvider
         let tokens: Int
+        let length: Int
     }
 
-    /// The model's two inputs, trimmed to the tokens present (#540): the model reads 1 to 128 tokens, and padding to
-    /// 128 cost attention over 128 positions for a 30-token headline. Values are written through the arrays' buffers.
+    /// The model's two inputs at the next exported length (#540, #554): padding to 128 cost attention over 128
+    /// positions for a 30-token headline, so a text takes the shortest length that holds it. The attention mask leaves
+    /// the padding out and `pooled` averages the tokens present only. Values are written through the arrays' buffers.
     private static func input(_ tokenizer: BertWordPieceTokenizer, _ text: String) -> Input? {
         let encoded = tokenizer.encode(text, maxSequenceLength: maxSequenceLength)
         let tokens = encoded.attentionMask.lastIndex(of: 1).map { $0 + 1 } ?? 0
-        guard tokens > 0, let ids = try? MLMultiArray(shape: [1, NSNumber(value: tokens)], dataType: .int32),
-            let mask = try? MLMultiArray(shape: [1, NSNumber(value: tokens)], dataType: .int32)
+        let length = sequenceLengths.first { $0 >= tokens } ?? maxSequenceLength
+        guard tokens > 0, let ids = try? MLMultiArray(shape: [1, NSNumber(value: length)], dataType: .int32),
+            let mask = try? MLMultiArray(shape: [1, NSNumber(value: length)], dataType: .int32)
         else { return nil }
         ids.withUnsafeMutableBufferPointer(ofType: Int32.self) { buffer, _ in
-            _ = buffer.initialize(from: encoded.inputIDs.prefix(tokens))
+            _ = buffer.initialize(from: encoded.inputIDs.prefix(length))
         }
         mask.withUnsafeMutableBufferPointer(ofType: Int32.self) { buffer, _ in
-            _ = buffer.initialize(from: encoded.attentionMask.prefix(tokens))
+            _ = buffer.initialize(from: encoded.attentionMask.prefix(length))
         }
         guard
             let provider = try? MLDictionaryFeatureProvider(dictionary: [
                 "input_ids": MLFeatureValue(multiArray: ids), "attention_mask": MLFeatureValue(multiArray: mask),
             ])
         else { return nil }
-        return Input(provider: provider, tokens: tokens)
+        return Input(provider: provider, tokens: tokens, length: length)
     }
 
     /// Mean over the tokens present, L2-normalized, summed through the array's buffer (#540): the boxed subscript cost
@@ -289,6 +318,16 @@ actor SentenceEmbedder {
                         cblas_saxpy(
                             Int32(vectorDimension), 1, buffer.baseAddress! + token * tokenStride, dimensionStride,
                             sum.baseAddress!, 1)
+                    }
+                }
+            }
+        } else if hidden.dataType == .float16 {
+            // The fixed-length export returns half floats (#554); summed in Float, as the boxed path below did.
+            let dimensionStride = Int(dimensionStride)
+            hidden.withUnsafeBufferPointer(ofType: Float16.self) { buffer in
+                for token in 0..<tokens {
+                    for dimension in 0..<vectorDimension {
+                        pooled[dimension] += Float(buffer[token * tokenStride + dimension * dimensionStride])
                     }
                 }
             }
