@@ -526,10 +526,14 @@ enum EventClusterer {
                 }
                 // Most shared names first, then the event whose first report came first (date, then article ID; event IDs
                 // are random): one story per report.
-                func rank(_ id: String) -> (Int, Date, String) {
-                    (-(shared[id] ?? 0), membersOf[id]?.first?.date ?? .distantFuture, membersOf[id]?.first?.id ?? id)
+                func precedes(_ lhs: String, _ rhs: String) -> Bool {
+                    let (left, right) = (shared[lhs] ?? 0, shared[rhs] ?? 0)
+                    if left != right { return left > right }
+                    let (a, b) = (membersOf[lhs]?.first, membersOf[rhs]?.first)
+                    let (dateA, dateB) = (a?.date ?? .distantFuture, b?.date ?? .distantFuture)
+                    return dateA != dateB ? dateA < dateB : (a?.id ?? lhs) < (b?.id ?? rhs)
                 }
-                for id in shared.keys.sorted(by: { rank($0) < rank($1) }) {
+                for id in shared.keys.sorted(by: precedes) {
                     guard let members = membersOf[id],
                         exclusions[single.id]?.isDisjoint(with: members.map(\.id)) != false,
                         // Its own headline names the story: a live blog's latest entry can carry another one.
