@@ -26,24 +26,26 @@ Authored-corpus texts: median 40 word pieces, at most 57.
 
 | | before, shipped `.all` | after, `.cpuAndNeuralEngine` | after, `.all` | after, `.cpuOnly` |
 | --- | --- | --- | --- | --- |
-| one text, median | 1.1 ms | 0.9 ms | 1.4 ms | 0.9 ms |
-| 2,000 texts, one batch per length | 927 ms | 727 ms | 1,387 ms | 1,018 ms |
-| load, compiled model cached | 253 ms | 119 ms | 1,203 ms | 330 ms |
+| one text, median | 1.1 ms | 0.9 ms | 2.8 ms | 1.1 ms |
+| 2,000 texts, batches of 64 per length | 927 ms | 742 ms | 1,671 ms | 1,380 ms |
+| load, compiled model cached | 253 ms | 130 ms | 1,254 ms | 435 ms |
 
 Under a training run's GPU load the shipped model took 5.8 ms a text and 9.7 s per 2,000 texts. The pair model takes 1.8 ms a pair under `.all` and 1.9 ms under `.cpuAndNeuralEngine`.
 
-One defect was found and fixed on the way. The fixed-length export returns half floats, and `pooled` read those through the boxed `MLMultiArray` subscript: 8.7 s per 2,000 texts. It now sums them from the buffer.
+Two defects were found and fixed on the way.
+
+- The fixed-length export returns half floats, and `pooled` read those through the boxed `MLMultiArray` subscript: 8.7 s per 2,000 texts. It now sums them from the buffer.
+- `embedBatch` sent every text of a pass as one Core ML batch, and each output holds IOSurface memory until the batch is released. On the merged stack (`origin/mars/m-683-importance-judges`), `--performance-baseline` aborts with "Failed to allocate memory IOSurface object", an Objective-C exception the batch fallback cannot catch, with the old model and code as well. Batches are now at most 64 texts, each inside an autorelease pool; that costs nothing (742 ms against 727 ms per 2,000 texts).
 
 ## Gates
 
 - **Vector parity:** pooled cosine against the shipped model, on all 56 authored-corpus texts (`--embedding-vectors`), is at least 0.999967 (median 0.999978); none is below 0.9999. `SentenceEmbedder.modelVersion` stays 2 (the #540 precedent), so stored embeddings stay valid.
 - **Authored corpus:** v13 TP 23, FP 0, FN 2 before and after.
 - **Tune replay:** en TP 44, FP 0, FN 49 before and after. The whole report is identical.
-- **`embedding_cold_2000_ms` (gate 1,040 ms):** not measured cleanly; see the open item below. On the corpus texts, which are longer than the synthetic ones the gate uses, 2,000 texts take 727 ms after against 927 ms before.
+- **`embedding_cold_2000_ms` (gate 1,040 ms):** 832 and 768 ms after in two runs (load average 2.8 and 3.3 at the start). The pre-merge runner with the old model took 482 ms minutes later (load 3.7); the merged base cannot run it (above). The synthetic texts are about 8 word pieces, where the CPU path is cheapest and the four function loads weigh most. On the corpus texts, 2,000 texts take 742 ms after against 927 ms before.
 
 ## Open
 
-- Since 07:45 every `--performance-baseline` run has aborted with "Failed to allocate memory IOSurface object" inside Core ML batch prediction. The unchanged base runner with the old model aborts the same way, and about 5,000 IOSurfaces are allocated system-wide. The cold-2000 number waits for a clean machine.
-- Core ML raises this failure as an Objective-C exception, which Swift cannot catch, so the batch fallback in `embedBatch` cannot help. This is the case before and after the change.
+- `PairScorer` builds its inputs through the boxed subscript and runs one prediction per order; it is untouched here.
 - Pair model, for its owner: a fixed 256-token input pads most pairs threefold. Fixed 64/128/256 functions in the same multifunction form would shorten them, and `.cpuAndNeuralEngine` costs it nothing.
 - Palettization (slice 3) re-measures placement with this flag.
