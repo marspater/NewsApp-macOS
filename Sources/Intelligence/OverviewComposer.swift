@@ -223,11 +223,38 @@ public struct OverviewComposer: Sendable {
             articles: articles,
             existingCitations: citationsMap
         )
-        let perspectives = OverviewPerspectivesExtractor.extractPerspectives(
+        let rawPerspectives = OverviewPerspectivesExtractor.extractPerspectives(
             passages: passages,
             articles: articles,
             existingCitations: citationsMap
         )
+        // No text appears both as a highlight and as a perspective (T4, #673)
+        let highlightStrings = Set(
+            selectedFacts.map { $0.statement.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+                + selectedFacts.map { $0.quote.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() })
+        let perspectives = rawPerspectives.filter { p in
+            let pos = p.position.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            if highlightStrings.contains(pos) { return false }
+            let pWords = Set(TensionEventClassifier.words(pos))
+            guard !pWords.isEmpty else { return true }
+            for h in highlightStrings {
+                let hWords = Set(TensionEventClassifier.words(h))
+                let union = pWords.union(hWords).count
+                if union > 0 && Double(pWords.intersection(hWords).count) / Double(union) >= 0.7 {
+                    return false
+                }
+            }
+            return true
+        }
+
+        let extractedImpact = OverviewIndustryImpactExtractor.extractIndustryImpact(
+            passages: passages,
+            articles: articles,
+            existingCitations: citationsMap,
+            excludeSentences: Set(selectedFacts.map(\.statement) + selectedFacts.map(\.quote))
+        )
+        allCitations.append(contentsOf: extractedImpact.citations)
+        let industryImpact = extractedImpact.items
 
         let thematicAngle = OverviewThematicAngleExtractor.extractThematicAngle(
             facts: validFacts,
@@ -245,12 +272,15 @@ public struct OverviewComposer: Sendable {
         }
 
         let evidenceSections: OverviewEvidenceSections?
-        if !timelineItems.isEmpty || !perspectives.isEmpty || thematicAngle != nil || coverageSentiment != nil {
+        if !timelineItems.isEmpty || !perspectives.isEmpty || !industryImpact.isEmpty || thematicAngle != nil
+            || coverageSentiment != nil
+        {
             evidenceSections = OverviewEvidenceSections(
                 timeline: timelineItems,
                 perspectives: perspectives,
                 thematicAngle: thematicAngle,
-                coverageSentiment: coverageSentiment
+                coverageSentiment: coverageSentiment,
+                industryImpact: industryImpact
             )
         } else {
             evidenceSections = nil
@@ -301,7 +331,8 @@ public struct OverviewComposer: Sendable {
                 timeline: timeline.items,
                 perspectives: document.perspectives,
                 thematicAngle: document.thematicAngle,
-                coverageSentiment: document.coverageSentiment
+                coverageSentiment: document.coverageSentiment,
+                industryImpact: document.industryImpact
             )
         )
         return EventOverviewDocument(
@@ -429,7 +460,7 @@ public struct OverviewComposer: Sendable {
             let sections = OverviewEvidenceSections(
                 timeline: fallback.timeline, perspectives: fallback.perspectives,
                 thematicAngle: fallback.thematicAngle, coverageSentiment: fallback.coverageSentiment,
-                introduction: introduction)
+                introduction: introduction, industryImpact: fallback.industryImpact)
             let content = OverviewContent(
                 title: fallback.title, summary: introduction.map(\.text).joined(separator: " "),
                 facts: facts, citations: Array(fallback.citations.values) + citations,

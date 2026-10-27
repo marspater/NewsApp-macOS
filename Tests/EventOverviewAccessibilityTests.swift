@@ -56,6 +56,10 @@ struct EventOverviewAccessibilityTests {
         testIncreaseContrastScalers()
         testReduceMotionPolicy()
         testTextScalingAndLayoutMetrics()
+        testEpicT1IndustryImpact()
+        testEpicT2TimelineSpineAndSorting()
+        testEpicT3HighlightSeparationAndHierarchy()
+        testEpicT4DistinctPerspectivesDesign()
 
         print("Finished \(testsRun) event overview accessibility checks with \(failures) failures.")
         if failures > 0 {
@@ -405,5 +409,237 @@ struct EventOverviewAccessibilityTests {
         assertEqual(
             EventOverviewReaderView.horizontalPageInset, 24.0,
             "Horizontal page inset matches AppLayout.pageInset (24.0)")
+    }
+
+    // MARK: - 7. Epic T1: Industry Impact
+    static func testEpicT1IndustryImpact() {
+        print("  - Testing Epic T1: Industry Impact...")
+
+        // 1. Fixed list of 12 standard industries
+        assertEqual(
+            OverviewIndustryImpactExtractor.StandardIndustry.allCases.count, 12,
+            "StandardIndustry must have exactly 12 documented industries"
+        )
+        let expectedIndustries = Set([
+            "Energy", "Financial Services", "Healthcare", "Technology",
+            "Transportation", "Agriculture", "Manufacturing", "Retail & E-commerce",
+            "Media & Entertainment", "Telecommunications", "Real Estate", "Defense & Aerospace",
+        ])
+        let actualIndustries = Set(OverviewIndustryImpactExtractor.StandardIndustry.allCases.map(\.rawValue))
+        assertEqual(actualIndustries, expectedIndustries, "Documented industries match Epic T specification")
+
+        // 2. Sparse filtering: filterValidIndustryImpact
+        let blankImpact = [
+            OverviewIndustryImpact(id: "i1", industry: "  ", implication: "Valid implication", citationIDs: []),
+            OverviewIndustryImpact(id: "i2", industry: "Technology", implication: "", citationIDs: []),
+            OverviewIndustryImpact(id: "i3", industry: "", implication: "", citationIDs: []),
+        ]
+        assertEqual(
+            EventOverviewReaderView.filterValidIndustryImpact(blankImpact).count, 0,
+            "Blank or incomplete industry impact items are pruned"
+        )
+        let validItem = OverviewIndustryImpact(
+            id: "i4", industry: "Transportation",
+            implication: "Automakers halted production at two plants.", citationIDs: ["c1"]
+        )
+        assertEqual(
+            EventOverviewReaderView.filterValidIndustryImpact([validItem]).count, 1,
+            "Valid industry impact item is retained"
+        )
+
+        // 3. Container presence with industry impact
+        assertTrue(
+            EventOverviewReaderView.hasEvidenceContent(
+                timeline: [],
+                perspectives: [],
+                industryImpact: [validItem],
+                thematicAngle: nil
+            ),
+            "Evidence container is present when industry impact has valid data"
+        )
+
+        // 4. Extraction: sports fixture produces no industry impact
+        let sportsArticle = FeedArticle(
+            storedID: "sports_1",
+            title: "Championship Match Ends in Victory",
+            link: "https://example.com/sports",
+            guid: "sports_guid",
+            description:
+                "The home team celebrated after winning the final match 3-1 before cheering fans in the stadium.",
+            pubDate: Date(),
+            source: "SportsWire"
+        )
+        let sportsPassage = EvidencePassage(
+            id: "pass_sports",
+            articleID: "sports_1",
+            text: "The home team celebrated after winning the final match 3-1 before cheering fans in the stadium."
+        )
+        let sportsCitation = OverviewCitation(
+            id: "cite_sports",
+            articleID: "sports_1",
+            passageID: "pass_sports",
+            passageFingerprint: sportsPassage.fingerprint,
+            quote: "The home team celebrated after winning the final match 3-1 before cheering fans in the stadium.",
+            source: nil
+        )
+        let sportsExtracted = OverviewIndustryImpactExtractor.extractIndustryImpact(
+            passages: [sportsPassage],
+            articles: [sportsArticle],
+            existingCitations: ["cite_sports": sportsCitation]
+        )
+        assertEqual(sportsExtracted.items.count, 0, "Non-business text (sports) produces no industry impact")
+
+        // 5. Stated impact shows named industry + implication + citation
+        let autoSentence =
+            "Automakers announced major production halts and layoffs across three assembly plants due to parts shortages."
+        let autoArticle = FeedArticle(
+            storedID: "auto_1",
+            title: "Automakers Announce Factory Shutdowns",
+            link: "https://example.com/auto",
+            guid: "auto_guid",
+            description: autoSentence,
+            pubDate: Date(),
+            source: "Reuters"
+        )
+        let autoPassage = EvidencePassage(
+            id: "pass_auto",
+            articleID: "auto_1",
+            text: autoSentence
+        )
+        let autoCitation = OverviewCitation(
+            id: "cite_auto",
+            articleID: "auto_1",
+            passageID: "pass_auto",
+            passageFingerprint: autoPassage.fingerprint,
+            quote: autoSentence,
+            source: OverviewSourceMetadata(
+                title: "Auto News", name: "Reuters", url: "https://example.com/auto", publishedAt: Date())
+        )
+        let autoExtracted = OverviewIndustryImpactExtractor.extractIndustryImpact(
+            passages: [autoPassage],
+            articles: [autoArticle],
+            existingCitations: ["cite_auto": autoCitation]
+        )
+        assertEqual(autoExtracted.items.count, 1, "Extracts stated industry impact from grounded passage")
+        assertEqual(autoExtracted.items.first?.industry, "Transportation", "Maps automakers to Transportation industry")
+
+        // 6. VoiceOver accessibility label
+        let impactVO = EventOverviewReaderView.industryImpactAccessibilityLabel(
+            industry: "Transportation",
+            implication: "Automakers announced production halts.",
+            citations: [autoCitation]
+        )
+        assertEqual(
+            impactVO, "Transportation: Automakers announced production halts. Source: Reuters",
+            "VoiceOver combines industry, implication, and source cleanly"
+        )
+    }
+
+    // MARK: - 8. Epic T2: Timeline Spine and Sorting
+    static func testEpicT2TimelineSpineAndSorting() {
+        print("  - Testing Epic T2: Timeline Spine and Sorting...")
+
+        let pastDate1 = Date(timeIntervalSince1970: 1000)
+        let pastDate2 = Date(timeIntervalSince1970: 2000)
+        let pubDateOnly = Date(timeIntervalSince1970: 1500)
+        let futureDate = Date(timeIntervalSince1970: 500)  // earlier timestamp, but planned event
+
+        let item1 = OverviewTimelineItem(
+            id: "t1", dateText: "Oct 1", summary: "Initial event", isFuturePlan: false, eventDate: pastDate1)
+        let item2 = OverviewTimelineItem(
+            id: "t2", dateText: "Oct 5", summary: "Followup event", isFuturePlan: false, eventDate: pastDate2)
+        let item3 = OverviewTimelineItem(
+            id: "t3", dateText: "Oct 3", summary: "Reported discovery", isFuturePlan: false,
+            publicationDate: pubDateOnly)
+        let item4 = OverviewTimelineItem(
+            id: "t4", dateText: "Next Week", summary: "Scheduled vote", isFuturePlan: true, eventDate: futureDate)
+
+        let sorted = EventOverviewReaderView.sortTimelineItems([item4, item2, item1, item3])
+        assertEqual(
+            sorted.map { $0.id }, ["t1", "t3", "t2", "t4"], "Chronological sort with planned items ordered last")
+
+        // Pruning empty summary
+        let emptySummary = OverviewTimelineItem(id: "t5", dateText: "Oct 2", summary: "  ", isFuturePlan: false)
+        assertEqual(
+            EventOverviewReaderView.filterValidTimeline([emptySummary]).count, 0, "Item with empty summary is pruned")
+
+        // VoiceOver labels
+        let cit = OverviewCitation(
+            id: "c_t", articleID: "a1", passageID: "p1", passageFingerprint: "fp", quote: "quote",
+            source: OverviewSourceMetadata(title: nil, name: "AP", url: nil, publishedAt: nil))
+        let voPast = EventOverviewReaderView.timelineItemAccessibilityLabel(item: item1, citations: [cit])
+        assertEqual(voPast, "Oct 1. Initial event. Source: AP", "VoiceOver past event reads date, summary, source")
+
+        let voPubOnly = EventOverviewReaderView.timelineItemAccessibilityLabel(item: item3, citations: [cit])
+        assertEqual(
+            voPubOnly, "Reported Oct 3. Reported discovery. Source: AP",
+            "VoiceOver publication-only reads Reported prefix")
+
+        let voPlan = EventOverviewReaderView.timelineItemAccessibilityLabel(item: item4, citations: [cit])
+        assertEqual(
+            voPlan, "Next Week. Planned. Scheduled vote. Source: AP",
+            "VoiceOver planned item includes Planned announcement")
+    }
+
+    // MARK: - 9. Epic T3: Highlight Separation and Hierarchy
+    static func testEpicT3HighlightSeparationAndHierarchy() {
+        print("  - Testing Epic T3: Highlight Separation and Hierarchy...")
+
+        // Spacing ratio: inter-gap (16pt) >= 2 * intra-gap (4pt)
+        assertTrue(AppSpacing.md >= 2 * AppSpacing.xxs, "Highlight inter-gap is at least 2x intra-gap")
+
+        // Unknown publisher fallback
+        let citNoSource = OverviewCitation(
+            id: "c_none", articleID: "a1", passageID: "p1", passageFingerprint: "fp", quote: "quote", source: nil)
+        let voNoPub = EventOverviewReaderView.highlightAccessibilityLabel(
+            takeaway: "Clean energy funding approved", publisher: nil, citations: [citNoSource])
+        assertEqual(voNoPub, "Clean energy funding approved", "Unknown publisher omits attribution in VoiceOver")
+
+        let voWithPub = EventOverviewReaderView.highlightAccessibilityLabel(
+            takeaway: "Clean energy funding approved", publisher: "Financial Times", citations: [])
+        assertEqual(
+            voWithPub, "Clean energy funding approved. Source: Financial Times",
+            "Known publisher includes source attribution")
+    }
+
+    // MARK: - 10. Epic T4: Distinct Perspectives Design
+    static func testEpicT4DistinctPerspectivesDesign() {
+        print("  - Testing Epic T4: Distinct Perspectives Design...")
+
+        // filterValidPerspectives requires BOTH participant AND position non-empty
+        let pEmptyParticipant = OverviewPerspective(id: "p1", participant: "  ", position: "Supports treaty")
+        let pEmptyPosition = OverviewPerspective(id: "p2", participant: "EU Envoy", position: "")
+        let pValid = OverviewPerspective(
+            id: "p3", participant: "EU Envoy", position: "Supports binding commitments", sourcePublisher: "Bloomberg")
+
+        let filtered = EventOverviewReaderView.filterValidPerspectives([pEmptyParticipant, pEmptyPosition, pValid])
+        assertEqual(filtered.count, 1, "Only perspectives with both non-empty participant and position are kept")
+        assertEqual(filtered.first?.id, "p3", "Keeps valid perspective")
+
+        // Section absent when 0 remain
+        assertFalse(
+            EventOverviewReaderView.hasEvidenceContent(
+                timeline: [],
+                perspectives: [pEmptyParticipant],
+                industryImpact: [],
+                thematicAngle: nil
+            ),
+            "Section is absent when perspectives has no valid items"
+        )
+
+        // 1-perspective fixture has no false balance (retains exactly 1, does not synthesize counter)
+        assertEqual(
+            EventOverviewReaderView.filterValidPerspectives([pValid]).count, 1,
+            "Single perspective is preserved without false balance")
+
+        // VoiceOver label reads participant, position, source in order
+        let voPersp = EventOverviewReaderView.perspectiveAccessibilityLabel(
+            participant: "EU Envoy",
+            position: "Supports binding commitments",
+            source: "via Bloomberg"
+        )
+        assertEqual(
+            voPersp, "EU Envoy. Supports binding commitments. via Bloomberg",
+            "VoiceOver reads participant, position, and source in sequence")
     }
 }

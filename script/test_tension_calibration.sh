@@ -39,6 +39,7 @@ swiftc "${NEWS_DEPENDENCY_FLAGS[@]}" -target "$(uname -m)-apple-macos${TARGET_MA
     Sources/Intelligence/OverviewTimelineExtractor.swift \
     Sources/Intelligence/OverviewPerspectivesExtractor.swift \
     Sources/Intelligence/OverviewThematicAngleExtractor.swift \
+    Sources/Intelligence/OverviewIndustryImpactExtractor.swift \
     Sources/Intelligence/CoverageSentimentEvaluator.swift \
     Sources/Intelligence/EventCandidates.swift \
     Sources/Intelligence/IntelligencePolicy.swift \

@@ -151,15 +151,41 @@ struct EventOverviewReaderView: View {
 
     static func filterValidTimeline(_ timeline: [OverviewTimelineItem]) -> [OverviewTimelineItem] {
         timeline.filter {
-            !$0.dateText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                || !$0.summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            !$0.summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }
+    }
+
+    static func sortTimelineItems(_ items: [OverviewTimelineItem]) -> [OverviewTimelineItem] {
+        items.enumerated().sorted { left, right in
+            let a = left.element
+            let b = right.element
+            if a.isFuturePlan != b.isFuturePlan {
+                return !a.isFuturePlan && b.isFuturePlan
+            }
+            let dateA = a.eventDate ?? a.publicationDate
+            let dateB = b.eventDate ?? b.publicationDate
+            if let dateA, let dateB, dateA != dateB {
+                return dateA < dateB
+            }
+            if dateA != nil && dateB == nil { return true }
+            if dateA == nil && dateB != nil { return false }
+            if a.eventDate != nil && b.eventDate == nil { return true }
+            if a.eventDate == nil && b.eventDate != nil { return false }
+            return left.offset < right.offset
+        }.map(\.element)
     }
 
     static func filterValidPerspectives(_ perspectives: [OverviewPerspective]) -> [OverviewPerspective] {
         perspectives.filter {
             !$0.participant.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                || !$0.position.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                && !$0.position.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+    }
+
+    static func filterValidIndustryImpact(_ impact: [OverviewIndustryImpact]) -> [OverviewIndustryImpact] {
+        impact.filter {
+            !$0.industry.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                && !$0.implication.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }
     }
 
@@ -180,10 +206,11 @@ struct EventOverviewReaderView: View {
     static func hasEvidenceContent(
         timeline: [OverviewTimelineItem],
         perspectives: [OverviewPerspective],
+        industryImpact: [OverviewIndustryImpact] = [],
         thematicAngle: OverviewThematicAngle?
     ) -> Bool {
         !filterValidTimeline(timeline).isEmpty || !filterValidPerspectives(perspectives).isEmpty
-            || hasThematicAngleContent(thematicAngle)
+            || !filterValidIndustryImpact(industryImpact).isEmpty || hasThematicAngleContent(thematicAngle)
     }
 
     private var validFacts: [OverviewFact] {
@@ -194,8 +221,16 @@ struct EventOverviewReaderView: View {
         Self.filterValidTimeline(overview.timeline)
     }
 
+    private var sortedTimeline: [OverviewTimelineItem] {
+        Self.sortTimelineItems(validTimeline)
+    }
+
     private var validPerspectives: [OverviewPerspective] {
         Self.filterValidPerspectives(overview.perspectives)
+    }
+
+    private var validIndustryImpact: [OverviewIndustryImpact] {
+        Self.filterValidIndustryImpact(overview.industryImpact)
     }
 
     // MARK: - VoiceOver Accessibility Labels
@@ -232,6 +267,73 @@ struct EventOverviewReaderView: View {
 
     static func openWebArticleAccessibilityLabel(title: String, source: String) -> String {
         "Open original publication: \(title) on \(source)"
+    }
+
+    static func highlightAccessibilityLabel(
+        takeaway: String, publisher: String?, citations: [OverviewCitation] = []
+    ) -> String {
+        let trimmed = takeaway.trimmingCharacters(in: .whitespacesAndNewlines)
+        let base = trimmed.hasSuffix(".") ? String(trimmed.dropLast()) : trimmed
+        if let publisher, !publisher.isEmpty {
+            return "\(base). Source: \(publisher)"
+        }
+        let sources = citations.compactMap(\.sourceName).filter { !$0.isEmpty }.joined(separator: ", ")
+        if !sources.isEmpty {
+            return "\(base). Source: \(sources)"
+        }
+        return trimmed
+    }
+
+    static func perspectiveAccessibilityLabel(
+        participant: String, position: String, source: String?, citations: [OverviewCitation] = []
+    ) -> String {
+        let pPart = participant.trimmingCharacters(in: .whitespacesAndNewlines)
+        let pPosTrimmed = position.trimmingCharacters(in: .whitespacesAndNewlines)
+        let pPos = pPosTrimmed.hasSuffix(".") ? String(pPosTrimmed.dropLast()) : pPosTrimmed
+        var parts = [pPart, pPos]
+        if let source, !source.isEmpty {
+            parts.append(source)
+        } else {
+            let sources = citations.compactMap(\.sourceName).filter { !$0.isEmpty }.joined(separator: ", ")
+            if !sources.isEmpty {
+                parts.append("Source: \(sources)")
+            }
+        }
+        return parts.joined(separator: ". ")
+    }
+
+    static func industryImpactAccessibilityLabel(
+        industry: String, implication: String, citations: [OverviewCitation] = []
+    ) -> String {
+        let trimmed = implication.trimmingCharacters(in: .whitespacesAndNewlines)
+        let base = trimmed.hasSuffix(".") ? String(trimmed.dropLast()) : trimmed
+        let sources = citations.compactMap(\.sourceName).filter { !$0.isEmpty }.joined(separator: ", ")
+        if !sources.isEmpty {
+            return "\(industry): \(base). Source: \(sources)"
+        }
+        return "\(industry): \(trimmed)"
+    }
+
+    static func timelineItemAccessibilityLabel(
+        item: OverviewTimelineItem, citations: [OverviewCitation] = []
+    ) -> String {
+        var parts: [String] = []
+        if item.eventDate != nil && !item.dateText.isEmpty {
+            parts.append(item.dateText)
+        } else if !item.dateText.isEmpty {
+            parts.append("Reported \(item.dateText)")
+        }
+        if item.isFuturePlan {
+            parts.append("Planned")
+        }
+        let summaryTrimmed = item.summary.trimmingCharacters(in: .whitespacesAndNewlines)
+        let summary = summaryTrimmed.hasSuffix(".") ? String(summaryTrimmed.dropLast()) : summaryTrimmed
+        parts.append(summary)
+        let sources = citations.compactMap(\.sourceName).filter { !$0.isEmpty }.joined(separator: ", ")
+        if !sources.isEmpty {
+            parts.append("Source: \(sources)")
+        }
+        return parts.joined(separator: ". ")
     }
 
     private var uniquePublishers: [String] {
@@ -493,37 +595,18 @@ struct EventOverviewReaderView: View {
         Self.citedSources(citationIDs, citations: overview.citations, memberArticles: memberArticles)
     }
 
-    struct ClusteredHighlightGroup: Identifiable {
-        let id: String
-        let publisherName: String?
-        let facts: [OverviewFact]
-    }
-
-    private var clusteredHighlights: [ClusteredHighlightGroup] {
-        var groups: [ClusteredHighlightGroup] = []
-        var publisherToGroupIndex: [String: Int] = [:]
-
-        for fact in validFacts {
-            let pubName: String? = fact.citationIDs.compactMap { citID -> String? in
-                guard let cit = overview.citations[citID] else { return nil }
-                return cit.sourceName ?? matchingArticle(for: cit)?.publisherName
-            }.first
-
-            let key = pubName ?? fact.id
-            if let existingIndex = publisherToGroupIndex[key] {
-                let existing = groups[existingIndex]
-                groups[existingIndex] = ClusteredHighlightGroup(
-                    id: existing.id,
-                    publisherName: existing.publisherName,
-                    facts: existing.facts + [fact]
-                )
-            } else {
-                let newIndex = groups.count
-                publisherToGroupIndex[key] = newIndex
-                groups.append(ClusteredHighlightGroup(id: key, publisherName: pubName, facts: [fact]))
+    private func factPublisher(_ fact: OverviewFact) -> String? {
+        for citID in fact.citationIDs {
+            if let citation = overview.citations[citID] {
+                if let name = citation.sourceName?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty {
+                    return name
+                }
+                if let match = matchingArticle(for: citation), !match.publisherName.isEmpty {
+                    return match.publisherName
+                }
             }
         }
-        return groups
+        return nil
     }
 
     // MARK: - Section 4: Key Facts
@@ -537,24 +620,64 @@ struct EventOverviewReaderView: View {
                 .accessibilityHeading(.h2)
 
             VStack(alignment: .leading, spacing: AppSpacing.md) {
-                ForEach(clusteredHighlights) { group in
-                    HStack(alignment: .top, spacing: AppSpacing.sm) {
-                        Circle()
-                            .frame(width: AppSpacing.xxs, height: AppSpacing.xxs)
-                            .foregroundStyle(AppColor.accent)
-                            .padding(.top, AppLayout.bulletTopInset * textScale)
-                            .accessibilityHidden(true)
+                ForEach(validFacts) { fact in
+                    highlightRow(fact)
+                }
+            }
+            .padding(.vertical, AppSpacing.xxs)
+        }
+    }
 
-                        VStack(alignment: .leading, spacing: AppSpacing.xxs) {
-                            ForEach(group.facts) { fact in
-                                factWithSuperscript(fact)
+    @ViewBuilder
+    private func highlightRow(_ fact: OverviewFact) -> some View {
+        let publisher = factPublisher(fact)
+        let citations = fact.citationIDs.compactMap { overview.citations[$0] }
+        let sources = citedSources(fact.citationIDs)
+
+        HStack(alignment: .top, spacing: AppSpacing.sm) {
+            Circle()
+                .frame(width: AppSpacing.xxs, height: AppSpacing.xxs)
+                .foregroundStyle(AppColor.accent)
+                .padding(.top, AppLayout.bulletTopInset * textScale)
+                .accessibilityHidden(true)
+
+            VStack(alignment: .leading, spacing: AppSpacing.xxs) {
+                Text(fact.text)
+                    .font(bodyFont)
+                    .lineSpacing(bodyLineSpacing)
+                    .foregroundStyle(AppColor.primaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
+
+                let hasPublisher = publisher != nil && !publisher!.isEmpty
+                let hasCitations = !citations.isEmpty
+
+                if hasPublisher || hasCitations {
+                    ReaderTagLayout(spacing: AppSpacing.eyebrowGap) {
+                        if let publisher, !publisher.isEmpty {
+                            Text(publisher)
+                                .font(AppTypography.overviewFont(.annotation, scale: textScale))
+                                .foregroundStyle(currentSecondaryTextColor)
+                        }
+
+                        ForEach(fact.citationIDs, id: \.self) { id in
+                            if let citation = overview.citations[id] {
+                                citationPill(citation)
                             }
                         }
                     }
                 }
             }
-            .padding(.vertical, AppSpacing.xxs)
         }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(
+            Self.highlightAccessibilityLabel(
+                takeaway: fact.text,
+                publisher: publisher,
+                citations: citations
+            )
+        )
+        .accessibilityActions { citationAccessibilityActions(sources) }
     }
 
     private func factWithSuperscript(_ fact: OverviewFact) -> some View {
@@ -804,7 +927,7 @@ struct EventOverviewReaderView: View {
         }
     }
 
-    // MARK: - Section 5: Evidence Sections (Timeline, Perspectives, Angle)
+    // MARK: - Section 5: Evidence Sections (Timeline, Perspectives, Industry Impact, Angle)
 
     @ViewBuilder
     private var evidenceSections: some View {
@@ -812,6 +935,7 @@ struct EventOverviewReaderView: View {
         if Self.hasEvidenceContent(
             timeline: overview.timeline,
             perspectives: overview.perspectives,
+            industryImpact: overview.industryImpact,
             thematicAngle: overview.thematicAngle
         ) {
             VStack(alignment: .leading, spacing: AppSpacing.lg) {
@@ -821,6 +945,10 @@ struct EventOverviewReaderView: View {
 
                 if !validPerspectives.isEmpty {
                     perspectivesSection
+                }
+
+                if !validIndustryImpact.isEmpty {
+                    industryImpactSection
                 }
 
                 // Thematic angle
@@ -840,8 +968,8 @@ struct EventOverviewReaderView: View {
                 .accessibilityHeading(.h2)
 
             VStack(alignment: .leading, spacing: 0) {
-                ForEach(Array(validTimeline.enumerated()), id: \.element.id) { index, item in
-                    timelineRow(item, isLast: index == validTimeline.count - 1)
+                ForEach(Array(sortedTimeline.enumerated()), id: \.element.id) { index, item in
+                    timelineRow(item, isFirst: index == 0, isLast: index == sortedTimeline.count - 1)
                 }
             }
             .padding(.vertical, AppSpacing.xxs)
@@ -849,19 +977,33 @@ struct EventOverviewReaderView: View {
     }
 
     @ViewBuilder
-    private func timelineRow(_ item: OverviewTimelineItem, isLast: Bool) -> some View {
+    private func timelineRow(_ item: OverviewTimelineItem, isFirst: Bool, isLast: Bool) -> some View {
+        let citations = item.citationIDs.compactMap { overview.citations[$0] }
+        let sources = citedSources(item.citationIDs)
+
         HStack(alignment: .top, spacing: AppSpacing.sm) {
-            timelineRailNode(isLast: isLast)
+            timelineRailNode(item: item, isFirst: isFirst, isLast: isLast)
+                .accessibilityHidden(true)
             timelineRowContent(item, isLast: isLast)
         }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Self.timelineItemAccessibilityLabel(item: item, citations: citations))
+        .accessibilityActions { citationAccessibilityActions(sources) }
     }
 
-    private func timelineRailNode(isLast: Bool) -> some View {
+    private func timelineRailNode(item: OverviewTimelineItem, isFirst: Bool, isLast: Bool) -> some View {
         VStack(spacing: 0) {
-            Circle()
-                .fill(AppColor.accent)
+            if !isFirst {
+                Rectangle()
+                    .fill(AppColor.timelineRail(for: contrast))
+                    .frame(width: AppLayout.timelineRailStroke, height: AppSpacing.textStack)
+            } else {
+                Spacer()
+                    .frame(height: AppSpacing.textStack)
+            }
+
+            timelineMarker(for: item)
                 .frame(width: AppLayout.timelineDotSize, height: AppLayout.timelineDotSize)
-                .padding(.top, AppSpacing.textStack)
 
             if !isLast {
                 Rectangle()
@@ -873,6 +1015,21 @@ struct EventOverviewReaderView: View {
         .frame(width: AppLayout.timelineRailWidth)
     }
 
+    @ViewBuilder
+    private func timelineMarker(for item: OverviewTimelineItem) -> some View {
+        if item.isFuturePlan {
+            DiamondShape()
+                .fill(AppColor.accent)
+        } else if item.eventDate == nil {
+            Circle()
+                .strokeBorder(AppColor.accent, lineWidth: AppLayout.timelineRailStroke)
+                .background(Circle().fill(AppColor.background))
+        } else {
+            Circle()
+                .fill(AppColor.accent)
+        }
+    }
+
     private func timelineRowContent(_ item: OverviewTimelineItem, isLast: Bool) -> some View {
         VStack(alignment: .leading, spacing: AppSpacing.xxs) {
             timelineDateRow(item)
@@ -881,26 +1038,46 @@ struct EventOverviewReaderView: View {
         .padding(.bottom, isLast ? 0 : AppSpacing.md)
     }
 
+    @ViewBuilder
     private func timelineDateRow(_ item: OverviewTimelineItem) -> some View {
-        HStack(spacing: AppSpacing.xs) {
-            Text(item.dateText)
-                .font(AppTypography.overviewFont(.annotation, scale: textScale))
-                .foregroundStyle(AppColor.accent)
-                .bold()
+        let hasDateText = !item.dateText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let hasEventDate = item.eventDate != nil
+        let hasPubDate = item.publicationDate != nil
 
-            if item.isFuturePlan {
-                TagView(
-                    title: "Plan",
-                    tint: AppColor.accent,
-                    font: AppTypography.overviewFont(.micro, scale: textScale)
-                )
-                .accessibilityLabel("Planned event")
-            }
+        if hasDateText || hasEventDate || hasPubDate || item.isFuturePlan {
+            HStack(spacing: AppSpacing.xs) {
+                if hasEventDate && hasDateText {
+                    Text(item.dateText)
+                        .font(AppTypography.overviewFont(.annotation, scale: textScale))
+                        .foregroundStyle(AppColor.accent)
+                        .bold()
+                } else if !hasEventDate && (hasDateText || hasPubDate) {
+                    let displayDate =
+                        hasDateText
+                        ? item.dateText
+                        : (item.publicationDate.map(formatTimelineDate) ?? "")
+                    if !displayDate.isEmpty {
+                        Text("Reported \(displayDate)")
+                            .font(AppTypography.overviewFont(.annotation, scale: textScale))
+                            .foregroundStyle(AppColor.accent)
+                            .bold()
+                    }
+                }
 
-            if let pubDate = item.publicationDate, item.eventDate != nil {
-                Text("Reported \(formatTimelineDate(pubDate))")
-                    .font(AppTypography.overviewFont(.annotation, scale: textScale))
-                    .foregroundStyle(currentSecondaryTextColor)
+                if item.isFuturePlan {
+                    TagView(
+                        title: "Plan",
+                        tint: AppColor.accent,
+                        font: AppTypography.overviewFont(.micro, scale: textScale)
+                    )
+                    .accessibilityLabel("Planned event")
+                }
+
+                if let pubDate = item.publicationDate, hasEventDate {
+                    Text("Reported \(formatTimelineDate(pubDate))")
+                        .font(AppTypography.overviewFont(.annotation, scale: textScale))
+                        .foregroundStyle(currentSecondaryTextColor)
+                }
             }
         }
     }
@@ -918,44 +1095,142 @@ struct EventOverviewReaderView: View {
                 .accessibilityAddTraits(.isHeader)
                 .accessibilityHeading(.h2)
 
-            VStack(alignment: .leading, spacing: AppSpacing.sm) {
+            VStack(alignment: .leading, spacing: AppSpacing.md) {
                 ForEach(validPerspectives) { perspective in
-                    VStack(alignment: .leading, spacing: AppSpacing.xs) {
-                        HStack(alignment: .firstTextBaseline, spacing: AppSpacing.xs) {
-                            Image(systemName: "quote.opening")
-                                .font(AppTypography.overviewFont(.caption, scale: textScale))
-                                .foregroundStyle(AppColor.accent)
-                                .accessibilityHidden(true)
+                    perspectiveRow(perspective)
+                }
+            }
+            .padding(.vertical, AppSpacing.xxs)
+        }
+    }
 
-                            citedText(
-                                perspective.participant, citationIDs: perspective.citationIDs,
-                                font: AppTypography.overviewFont(.emphasis, scale: textScale)
-                            )
-                            .foregroundStyle(AppColor.primaryText)
+    @ViewBuilder
+    private func perspectiveRow(_ perspective: OverviewPerspective) -> some View {
+        let source =
+            perspective.originalWireSource.map { "via \($0) syndicate" }
+            ?? perspective.sourcePublisher.map { "via \($0)" }
+        let citations = perspective.citationIDs.compactMap { overview.citations[$0] }
+        let sources = citedSources(perspective.citationIDs)
 
-                            if let wire = perspective.originalWireSource, !wire.isEmpty {
-                                Text("via \(wire) syndicate")
-                                    .font(AppTypography.overviewFont(.annotation, scale: textScale))
-                                    .foregroundStyle(currentSecondaryTextColor)
-                            } else if let publisher = perspective.sourcePublisher, !publisher.isEmpty {
-                                Text("via \(publisher)")
+        VStack(alignment: .leading, spacing: AppSpacing.sm) {
+            HStack(alignment: .top, spacing: AppSpacing.sm) {
+                Image(systemName: "person.crop.circle")
+                    .font(AppTypography.overviewFont(.emphasis, scale: textScale))
+                    .foregroundStyle(AppColor.accent)
+                    .accessibilityHidden(true)
+
+                VStack(alignment: .leading, spacing: AppSpacing.xxs) {
+                    Text(perspective.participant)
+                        .font(AppTypography.overviewFont(.emphasis, scale: textScale))
+                        .foregroundStyle(AppColor.primaryText)
+                        .textSelection(.enabled)
+
+                    Text(perspective.position)
+                        .font(bodyFont)
+                        .lineSpacing(bodyLineSpacing)
+                        .foregroundStyle(AppColor.primaryText)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+
+                    let hasSource = source != nil && !source!.isEmpty
+                    let hasCitations = !citations.isEmpty
+
+                    if hasSource || hasCitations {
+                        ReaderTagLayout(spacing: AppSpacing.eyebrowGap) {
+                            if let source, !source.isEmpty {
+                                Text(source)
                                     .font(AppTypography.overviewFont(.annotation, scale: textScale))
                                     .foregroundStyle(currentSecondaryTextColor)
                             }
-                        }
 
-                        Text(perspective.position)
-                            .font(bodyFont)
-                            .foregroundStyle(AppColor.primaryText)
-                            .lineSpacing(bodyLineSpacing)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .textSelection(.enabled)
+                            ForEach(perspective.citationIDs, id: \.self) { id in
+                                if let citation = overview.citations[id] {
+                                    citationPill(citation)
+                                }
+                            }
+                        }
                     }
-                    .padding(AppSpacing.sm)
-                    .overviewCardSurface(borderColor: currentBorderStrokeColor, contrast: contrast)
                 }
             }
+
+            if perspective.id != validPerspectives.last?.id {
+                Divider().opacity(Self.dividerOpacity(for: contrast))
+            }
         }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(
+            Self.perspectiveAccessibilityLabel(
+                participant: perspective.participant,
+                position: perspective.position,
+                source: source,
+                citations: citations
+            )
+        )
+        .accessibilityActions { citationAccessibilityActions(sources) }
+    }
+
+    private var industryImpactSection: some View {
+        VStack(alignment: .leading, spacing: AppSpacing.sm) {
+            Text("Industry Impact")
+                .font(AppTypography.overviewFont(.section, scale: textScale))
+                .foregroundStyle(AppColor.primaryText)
+                .accessibilityAddTraits(.isHeader)
+                .accessibilityHeading(.h2)
+
+            VStack(alignment: .leading, spacing: AppSpacing.md) {
+                ForEach(validIndustryImpact) { item in
+                    industryImpactRow(item)
+                }
+            }
+            .padding(.vertical, AppSpacing.xxs)
+        }
+    }
+
+    @ViewBuilder
+    private func industryImpactRow(_ item: OverviewIndustryImpact) -> some View {
+        let citations = item.citationIDs.compactMap { overview.citations[$0] }
+        let sources = citedSources(item.citationIDs)
+
+        VStack(alignment: .leading, spacing: AppSpacing.sm) {
+            VStack(alignment: .leading, spacing: AppSpacing.xxs) {
+                TagView(
+                    title: item.industry,
+                    tint: AppColor.accent,
+                    font: AppTypography.overviewFont(.micro, scale: textScale)
+                )
+                .accessibilityHidden(true)
+
+                Text(item.implication)
+                    .font(bodyFont)
+                    .lineSpacing(bodyLineSpacing)
+                    .foregroundStyle(AppColor.primaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
+
+                if !citations.isEmpty {
+                    ReaderTagLayout(spacing: AppSpacing.eyebrowGap) {
+                        ForEach(item.citationIDs, id: \.self) { id in
+                            if let citation = overview.citations[id] {
+                                citationPill(citation)
+                            }
+                        }
+                    }
+                }
+            }
+
+            if item.id != validIndustryImpact.last?.id {
+                Divider().opacity(Self.dividerOpacity(for: contrast))
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(
+            Self.industryImpactAccessibilityLabel(
+                industry: item.industry,
+                implication: item.implication,
+                citations: citations
+            )
+        )
+        .accessibilityActions { citationAccessibilityActions(sources) }
     }
 
     private func thematicAngleSection(_ angle: OverviewThematicAngle) -> some View {
@@ -1004,6 +1279,20 @@ struct EventOverviewReaderView: View {
                 }
             }
         }
+    }
+}
+
+// MARK: - Timeline Diamond Shape
+
+struct DiamondShape: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: rect.midX, y: rect.minY))
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.midY))
+        path.addLine(to: CGPoint(x: rect.midX, y: rect.maxY))
+        path.addLine(to: CGPoint(x: rect.minX, y: rect.midY))
+        path.closeSubpath()
+        return path
     }
 }
 

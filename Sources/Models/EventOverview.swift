@@ -220,6 +220,26 @@ public struct OverviewThematicAngle: Codable, Hashable, Sendable, Identifiable {
     }
 }
 
+/// An entry in an event overview describing a stated practical implication on a named industry sector (Epic T, #670).
+public struct OverviewIndustryImpact: Codable, Hashable, Sendable, Identifiable {
+    public let id: String
+    public let industry: String
+    public let implication: String
+    public let citationIDs: [String]
+
+    public init(
+        id: String = UUID().uuidString,
+        industry: String,
+        implication: String,
+        citationIDs: [String] = []
+    ) {
+        self.id = id
+        self.industry = industry
+        self.implication = implication
+        self.citationIDs = citationIDs
+    }
+}
+
 /// Optional evaluated tone of coverage; omitted when evidence or corpus evaluation does not justify it.
 public struct OverviewCoverageSentiment: Codable, Hashable, Sendable {
     public let score: Double
@@ -235,18 +255,19 @@ public struct OverviewCoverageSentiment: Codable, Hashable, Sendable {
     }
 }
 
-/// Optional structured evidence sections: chronological timeline, participant perspectives, thematic angle, and evaluated coverage sentiment.
+/// Optional structured evidence sections: chronological timeline, participant perspectives, industry impact, thematic angle, and evaluated coverage sentiment.
 public struct OverviewEvidenceSections: Codable, Hashable, Sendable {
     /// Sentence-level citations for a model-written introduction; absent in older and extractive documents.
     public let introduction: [OverviewFact]?
     public let timeline: [OverviewTimelineItem]
     public let perspectives: [OverviewPerspective]
+    public let industryImpact: [OverviewIndustryImpact]
     public let thematicAngle: OverviewThematicAngle?
     public let coverageSentiment: OverviewCoverageSentiment?
 
     public var isEmpty: Bool {
-        introduction?.isEmpty != false && timeline.isEmpty && perspectives.isEmpty && thematicAngle == nil
-            && coverageSentiment == nil
+        introduction?.isEmpty != false && timeline.isEmpty && perspectives.isEmpty && industryImpact.isEmpty
+            && thematicAngle == nil && coverageSentiment == nil
     }
 
     public init(
@@ -254,13 +275,44 @@ public struct OverviewEvidenceSections: Codable, Hashable, Sendable {
         perspectives: [OverviewPerspective] = [],
         thematicAngle: OverviewThematicAngle? = nil,
         coverageSentiment: OverviewCoverageSentiment? = nil,
-        introduction: [OverviewFact]? = nil
+        introduction: [OverviewFact]? = nil,
+        industryImpact: [OverviewIndustryImpact] = []
     ) {
         self.timeline = timeline
         self.perspectives = perspectives
         self.thematicAngle = thematicAngle
         self.coverageSentiment = coverageSentiment
         self.introduction = introduction
+        self.industryImpact = industryImpact
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case introduction, timeline, perspectives, industryImpact, thematicAngle, coverageSentiment
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.introduction = try container.decodeIfPresent([OverviewFact].self, forKey: .introduction)
+        self.timeline = try container.decodeIfPresent([OverviewTimelineItem].self, forKey: .timeline) ?? []
+        self.perspectives = try container.decodeIfPresent([OverviewPerspective].self, forKey: .perspectives) ?? []
+        self.industryImpact =
+            try container.decodeIfPresent(
+                [OverviewIndustryImpact].self, forKey: .industryImpact
+            ) ?? []
+        self.thematicAngle = try container.decodeIfPresent(OverviewThematicAngle.self, forKey: .thematicAngle)
+        self.coverageSentiment = try container.decodeIfPresent(
+            OverviewCoverageSentiment.self, forKey: .coverageSentiment
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(introduction, forKey: .introduction)
+        if !timeline.isEmpty { try container.encode(timeline, forKey: .timeline) }
+        if !perspectives.isEmpty { try container.encode(perspectives, forKey: .perspectives) }
+        if !industryImpact.isEmpty { try container.encode(industryImpact, forKey: .industryImpact) }
+        try container.encodeIfPresent(thematicAngle, forKey: .thematicAngle)
+        try container.encodeIfPresent(coverageSentiment, forKey: .coverageSentiment)
     }
 }
 
@@ -346,7 +398,8 @@ public struct EventOverviewDocument: Codable, Hashable, Sendable, Identifiable {
     /// with stored publisher headlines, complete publisher sentences, and empty summaries. 9: Highlights ranked by
     /// word overlap with coverage headlines; fragments under five words excluded. 10: sentences closed by their
     /// attribution, described and institutional speakers, and verifier speaker, quotation and action checks (#547).
-    public static let currentAnalysisVersion = 10
+    /// 11: conditional Industry Impact section (#670).
+    public static let currentAnalysisVersion = 11
 
     public let id: String
     public let eventID: String
@@ -367,6 +420,7 @@ public struct EventOverviewDocument: Codable, Hashable, Sendable, Identifiable {
     public var evidenceSections: OverviewEvidenceSections? { content.evidenceSections }
     public var timeline: [OverviewTimelineItem] { evidenceSections?.timeline ?? [] }
     public var perspectives: [OverviewPerspective] { evidenceSections?.perspectives ?? [] }
+    public var industryImpact: [OverviewIndustryImpact] { evidenceSections?.industryImpact ?? [] }
     public var thematicAngle: OverviewThematicAngle? { evidenceSections?.thematicAngle }
     public var coverageSentiment: OverviewCoverageSentiment? { evidenceSections?.coverageSentiment }
     public var memberArticleIDs: [String] { provenance.memberArticleIDs }
