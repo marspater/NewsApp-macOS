@@ -596,7 +596,8 @@ extension DatabaseEngine {
             }
             var desired: [String: String?] = current.mapValues { _ in nil }
             for group in groups {
-                let ranked = group.compactMap { id in current[id].map { (id: id, rank: $0.rank) } }
+                var ranked: [(id: String, rank: StoryRank)] = []
+                for id in group { if let rank = current[id]?.rank { ranked.append((id, rank)) } }
                 guard ranked.count >= 2, let lead = ranked.min(by: { $0.rank < $1.rank })?.id else { continue }
                 for member in ranked { desired[member.id] = lead }
             }
