@@ -16,6 +16,26 @@ extension NewsTests {
         try await testArticleEmbeddingsForeignKeyCascade()
         try await testHybridEventMatcherSemanticRescueAndVeto()
         try await testEmbeddingAwareValidationOfAssignedMembers()
+        await testPairScorerReadsTheBinaryModel()
+    }
+
+    /// The shipped pair model is binary (v11 weights): `PairScorer` reads it as same-event probability with related 0,
+    /// and `probability` is the same-event probability of `probabilities` (#627).
+    private static func testPairScorerReadsTheBinaryModel() async {
+        let scorer = PairScorer()
+        guard await scorer.isAvailable else {
+            assertTrue(false, "The bundled pair model loads")
+            return
+        }
+        let a = "Magnitude 6.1 earthquake strikes eastern Turkey\nBuildings collapsed in Malatya."
+        let b = "Strong earthquake hits eastern Turkey, buildings collapse\nA 6.1 quake struck near Malatya."
+        guard let both = await scorer.probabilities(a, b), let same = await scorer.probability(a, b) else {
+            assertTrue(false, "The pair model scores a pair")
+            return
+        }
+        assertEqual(both.related, 0, "A binary pair model has no related-act probability")
+        assertEqual(both.same, same, "probability is the same-event probability")
+        assertTrue(same > 0 && same < 1, "A probability lies between 0 and 1")
     }
 
     // MARK: - BertWordPieceTokenizer (#127)

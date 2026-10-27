@@ -173,12 +173,20 @@ enum StoryCorpus {
     /// NEWS_COMPATIBLE_SHARE, NEWS_SAME_PUBLISHER=1. NEWS_PAIR_MODEL=0 turns the model off at the call site.
     /// The pair model the evaluation flags use (#624): `NEWS_PAIR_MODEL=0` none, `NEWS_PAIR_MODEL_PATH` a candidate
     /// `pairscorer.mlmodelc` (compile a `.mlpackage` with `xcrun coremlcompiler compile`), otherwise the shipped one.
+    /// With a candidate, `NEWS_PAIR_RULE=story` (#627, evaluation only) admits on p_same + p_related when p_same
+    /// outweighs p_related and p_different is at most 0.10, so NEWS_PAIR_THRESHOLD applies to that sum.
     static func pairProbabilityFromEnvironment() -> (@Sendable (String, String) async -> Double?)? {
         let environment = ProcessInfo.processInfo.environment
         if environment["NEWS_PAIR_MODEL"] == "0" { return { @Sendable _, _ in nil } }
         guard let path = environment["NEWS_PAIR_MODEL_PATH"] else { return nil }
         let candidate = PairScorer(modelURL: URL(fileURLWithPath: path))
-        return { @Sendable a, b in await candidate.probability(a, b) }
+        guard environment["NEWS_PAIR_RULE"] == "story" else {
+            return { @Sendable a, b in await candidate.probability(a, b) }
+        }
+        return { @Sendable a, b in
+            guard let p = await candidate.probabilities(a, b) else { return nil }
+            return p.same > p.related && 1 - p.same - p.related <= 0.10 ? p.same + p.related : 0
+        }
     }
 
     static func policyFromEnvironment() -> EventMatchPolicy {
