@@ -229,29 +229,14 @@ public struct OverviewComposer: Sendable {
             existingCitations: citationsMap
         )
         // No text appears both as a highlight and as a perspective (T4, #673)
-        let highlightStrings = Set(
-            selectedFacts.map { $0.statement.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
-                + selectedFacts.map { $0.quote.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() })
-        let perspectives = rawPerspectives.filter { p in
-            let pos = p.position.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-            if highlightStrings.contains(pos) { return false }
-            let pWords = Set(TensionEventClassifier.words(pos))
-            guard !pWords.isEmpty else { return true }
-            for h in highlightStrings {
-                let hWords = Set(TensionEventClassifier.words(h))
-                let union = pWords.union(hWords).count
-                if union > 0 && Double(pWords.intersection(hWords).count) / Double(union) >= 0.7 {
-                    return false
-                }
-            }
-            return true
-        }
+        let highlightStrings = selectedFacts.map(\.statement) + selectedFacts.map(\.quote)
+        let perspectives = deduplicatePerspectives(rawPerspectives, against: highlightStrings)
 
         let extractedImpact = OverviewIndustryImpactExtractor.extractIndustryImpact(
             passages: passages,
             articles: articles,
             existingCitations: citationsMap,
-            excludeSentences: Set(selectedFacts.map(\.statement) + selectedFacts.map(\.quote))
+            excludeSentences: Set(highlightStrings)
         )
         allCitations.append(contentsOf: extractedImpact.citations)
         let industryImpact = extractedImpact.items
@@ -439,6 +424,51 @@ public struct OverviewComposer: Sendable {
         """
     }
 
+    static func deduplicatePerspectives(
+        _ perspectives: [OverviewPerspective],
+        against excludeSentences: [String]
+    ) -> [OverviewPerspective] {
+        let excludeStrings = Set(
+            excludeSentences.map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() })
+        return perspectives.filter { p in
+            let pos = p.position.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            if excludeStrings.contains(pos) { return false }
+            let pWords = Set(TensionEventClassifier.words(pos))
+            guard !pWords.isEmpty else { return true }
+            for ex in excludeStrings {
+                let exWords = Set(TensionEventClassifier.words(ex))
+                let union = pWords.union(exWords).count
+                if union > 0 && Double(pWords.intersection(exWords).count) / Double(union) >= 0.7 {
+                    return false
+                }
+            }
+            return true
+        }
+    }
+
+    static func deduplicateIndustryImpact(
+        _ impact: [OverviewIndustryImpact],
+        against excludeSentences: [String]
+    ) -> [OverviewIndustryImpact] {
+        let excludeStrings = Set(
+            excludeSentences.map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() })
+        return impact.filter { item in
+            let imp = item.implication.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            if excludeStrings.contains(imp) { return false }
+            let words = Set(imp.components(separatedBy: CharacterSet.alphanumerics.inverted).filter { !$0.isEmpty })
+            guard !words.isEmpty else { return false }
+            for ex in excludeStrings {
+                let exWords = Set(
+                    ex.components(separatedBy: CharacterSet.alphanumerics.inverted).filter { !$0.isEmpty })
+                let union = words.union(exWords).count
+                if union > 0 && Double(words.intersection(exWords).count) / Double(union) >= 0.6 {
+                    return false
+                }
+            }
+            return true
+        }
+    }
+
     /// Verified model sentences in answer order, with counts of the lines dropped.
     private struct ModelDraft {
         var introduction: [OverviewFact] = []
@@ -457,18 +487,40 @@ public struct OverviewComposer: Sendable {
 
         /// The synthesized overview: model introduction and facts, the fallback's other sections and citations.
         func document(replacing fallback: EventOverviewDocument) -> EventOverviewDocument {
+            let modelSentences = (introduction + facts).map(\.text)
+            let dedupedPerspectives = OverviewComposer.deduplicatePerspectives(
+                fallback.perspectives,
+                against: modelSentences
+            )
+            let dedupedImpact = OverviewComposer.deduplicateIndustryImpact(
+                fallback.industryImpact,
+                against: modelSentences
+            )
             let sections = OverviewEvidenceSections(
-                timeline: fallback.timeline, perspectives: fallback.perspectives,
-                thematicAngle: fallback.thematicAngle, coverageSentiment: fallback.coverageSentiment,
-                introduction: introduction, industryImpact: fallback.industryImpact)
+                timeline: fallback.timeline,
+                perspectives: dedupedPerspectives,
+                thematicAngle: fallback.thematicAngle,
+                coverageSentiment: fallback.coverageSentiment,
+                introduction: introduction,
+                industryImpact: dedupedImpact
+            )
             let content = OverviewContent(
-                title: fallback.title, summary: introduction.map(\.text).joined(separator: " "),
-                facts: facts, citations: Array(fallback.citations.values) + citations,
-                leadImage: fallback.leadImage, evidenceSections: sections)
+                title: fallback.title,
+                summary: introduction.map(\.text).joined(separator: " "),
+                facts: facts,
+                citations: Array(fallback.citations.values) + citations,
+                leadImage: fallback.leadImage,
+                evidenceSections: sections
+            )
             return EventOverviewDocument(
-                eventID: fallback.eventID, version: fallback.version, content: content,
+                eventID: fallback.eventID,
+                version: fallback.version,
+                content: content,
                 provenance: OverviewProvenance(
-                    memberArticleIDs: fallback.provenance.memberArticleIDs, kind: .synthesized))
+                    memberArticleIDs: fallback.provenance.memberArticleIDs,
+                    kind: .synthesized
+                )
+            )
         }
     }
 

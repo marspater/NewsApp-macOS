@@ -74,6 +74,7 @@ swiftc "${NEWS_DEPENDENCY_FLAGS[@]}" -swift-version 6 -O -parse-as-library -targ
     Sources/Services/OPMLManager.swift \
     Sources/App/NewsSignposts.swift \
     Sources/App/UpdateChecker.swift \
+    Sources/App/NotificationActionRouter.swift \
     Tests/ReaderAccessibilityTests.swift \
     -o reader_test_runner
 

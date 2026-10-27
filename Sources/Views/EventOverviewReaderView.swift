@@ -314,14 +314,38 @@ struct EventOverviewReaderView: View {
         return "\(industry): \(trimmed)"
     }
 
+    static func formatPerspectiveSource(wire: String?, publisher: String?) -> String? {
+        if let wire = wire?.trimmingCharacters(in: .whitespacesAndNewlines), !wire.isEmpty {
+            let cleanWire = wire.hasPrefix("via ") ? String(wire.dropFirst(4)) : wire
+            return "via \(cleanWire) syndicate"
+        }
+        if let pub = publisher?.trimmingCharacters(in: .whitespacesAndNewlines), !pub.isEmpty {
+            let cleanPub = pub.hasPrefix("via ") ? String(pub.dropFirst(4)) : pub
+            return "via \(cleanPub)"
+        }
+        return nil
+    }
+
     static func timelineItemAccessibilityLabel(
         item: OverviewTimelineItem, citations: [OverviewCitation] = []
     ) -> String {
         var parts: [String] = []
-        if item.eventDate != nil && !item.dateText.isEmpty {
-            parts.append(item.dateText)
-        } else if !item.dateText.isEmpty {
-            parts.append("Reported \(item.dateText)")
+        let displayDate: String
+        if !item.dateText.isEmpty {
+            displayDate = item.dateText
+        } else if let pubDate = item.publicationDate {
+            displayDate = timelineDateFormatter.string(from: pubDate)
+        } else {
+            displayDate = ""
+        }
+
+        if !displayDate.isEmpty {
+            if item.eventDate != nil {
+                parts.append(displayDate)
+            } else {
+                let label = displayDate.hasPrefix("Reported ") ? displayDate : "Reported \(displayDate)"
+                parts.append(label)
+            }
         }
         if item.isFuturePlan {
             parts.append("Planned")
@@ -986,6 +1010,7 @@ struct EventOverviewReaderView: View {
                 .accessibilityHidden(true)
             timelineRowContent(item, isLast: isLast)
         }
+        .fixedSize(horizontal: false, vertical: true)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Self.timelineItemAccessibilityLabel(item: item, citations: citations))
         .accessibilityActions { citationAccessibilityActions(sources) }
@@ -1057,7 +1082,8 @@ struct EventOverviewReaderView: View {
                         ? item.dateText
                         : (item.publicationDate.map(formatTimelineDate) ?? "")
                     if !displayDate.isEmpty {
-                        Text("Reported \(displayDate)")
+                        let text = displayDate.hasPrefix("Reported ") ? displayDate : "Reported \(displayDate)"
+                        Text(text)
                             .font(AppTypography.overviewFont(.annotation, scale: textScale))
                             .foregroundStyle(AppColor.accent)
                             .bold()
@@ -1106,9 +1132,10 @@ struct EventOverviewReaderView: View {
 
     @ViewBuilder
     private func perspectiveRow(_ perspective: OverviewPerspective) -> some View {
-        let source =
-            perspective.originalWireSource.map { "via \($0) syndicate" }
-            ?? perspective.sourcePublisher.map { "via \($0)" }
+        let source = Self.formatPerspectiveSource(
+            wire: perspective.originalWireSource,
+            publisher: perspective.sourcePublisher
+        )
         let citations = perspective.citationIDs.compactMap { overview.citations[$0] }
         let sources = citedSources(perspective.citationIDs)
 

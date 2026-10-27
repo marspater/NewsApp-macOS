@@ -74,6 +74,7 @@ swiftc "${NEWS_DEPENDENCY_FLAGS[@]}" -target "$(uname -m)-apple-macos${TARGET_MA
     Sources/Views/EventOverviewReaderView.swift \
     Sources/App/NewsSignposts.swift \
     Sources/App/UpdateChecker.swift \
+    Sources/App/NotificationActionRouter.swift \
     Tests/TensionCalibrationTests.swift \
     Tests/TensionCalibrationRunner.swift \
     Tests/TestDefaults.swift \

@@ -523,7 +523,58 @@ struct EventOverviewAccessibilityTests {
         assertEqual(autoExtracted.items.count, 1, "Extracts stated industry impact from grounded passage")
         assertEqual(autoExtracted.items.first?.industry, "Transportation", "Maps automakers to Transportation industry")
 
-        // 6. VoiceOver accessibility label
+        // 6. Substring false positive prevention (e.g. soil matching oil, in order to matching order)
+        let soilSentence =
+            "The researchers collected soil samples in the forest in order to verify local geology without disruption."
+        let soilArticle = FeedArticle(
+            storedID: "soil_1", title: "Forest Soil Survey", link: "https://example.com/soil",
+            guid: "soil_guid", description: soilSentence, pubDate: Date(), source: "Science Daily")
+        let soilPassage = EvidencePassage(id: "pass_soil", articleID: "soil_1", text: soilSentence)
+        let soilCitation = OverviewCitation(
+            id: "cite_soil", articleID: "soil_1", passageID: "pass_soil",
+            passageFingerprint: soilPassage.fingerprint, quote: soilSentence,
+            source: OverviewSourceMetadata(title: "Science", name: "Science Daily", url: nil, publishedAt: nil))
+        let soilExtracted = OverviewIndustryImpactExtractor.extractIndustryImpact(
+            passages: [soilPassage],
+            articles: [soilArticle],
+            existingCitations: ["cite_soil": soilCitation]
+        )
+        assertEqual(
+            soilExtracted.items.count, 0, "Substring false positives (soil, in order to) produce no industry impact")
+
+        // 7. Sports fixture rejection even with business implication cues
+        let sportsBizSentence =
+            "The football championship match tickets were cancelled and player wages cut after stadium disruptions."
+        let sportsBizArticle = FeedArticle(
+            storedID: "sports_biz_1", title: "Championship Tournament Disruption", link: "https://example.com/sb",
+            guid: "sb_guid", description: sportsBizSentence, pubDate: Date(), source: "SportsDaily")
+        let sportsBizPassage = EvidencePassage(id: "pass_sb", articleID: "sports_biz_1", text: sportsBizSentence)
+        let sportsBizCitation = OverviewCitation(
+            id: "cite_sb", articleID: "sports_biz_1", passageID: "pass_sb",
+            passageFingerprint: sportsBizPassage.fingerprint, quote: sportsBizSentence,
+            source: OverviewSourceMetadata(title: "Sports", name: "SportsDaily", url: nil, publishedAt: nil))
+        let sportsBizExtracted = OverviewIndustryImpactExtractor.extractIndustryImpact(
+            passages: [sportsBizPassage],
+            articles: [sportsBizArticle],
+            existingCitations: ["cite_sb": sportsBizCitation]
+        )
+        assertEqual(
+            sportsBizExtracted.items.count, 0, "Sports fixture with implication cues produces no industry impact")
+
+        // 8. Deduplication against highlights and intro
+        let duplicateImpact = OverviewIndustryImpact(
+            id: "imp_auto", industry: "Transportation",
+            implication:
+                "Automakers announced major production halts and layoffs across three assembly plants due to parts shortages.",
+            citationIDs: ["cite_auto"])
+        let deduped = OverviewComposer.deduplicateIndustryImpact(
+            [duplicateImpact],
+            against: [
+                "Automakers announced major production halts and layoffs across three assembly plants due to parts shortages."
+            ])
+        assertEqual(deduped.count, 0, "Industry impact duplicating highlight statement is filtered out")
+
+        // 9. VoiceOver accessibility label
         let impactVO = EventOverviewReaderView.industryImpactAccessibilityLabel(
             industry: "Transportation",
             implication: "Automakers announced production halts.",
@@ -579,6 +630,27 @@ struct EventOverviewAccessibilityTests {
         assertEqual(
             voPlan, "Next Week. Planned. Scheduled vote. Source: AP",
             "VoiceOver planned item includes Planned announcement")
+
+        // Item with empty dateText but publicationDate gets formatted Reported prefix
+        let itemPubDateOnlyNoText = OverviewTimelineItem(
+            id: "t_pub_only", dateText: "", summary: "Regulatory filing published", isFuturePlan: false,
+            publicationDate: Date(timeIntervalSince1970: 1_700_000_000))
+        let voPubFallback = EventOverviewReaderView.timelineItemAccessibilityLabel(
+            item: itemPubDateOnlyNoText, citations: [cit])
+        assertTrue(
+            voPubFallback.hasPrefix("Reported "),
+            "VoiceOver timeline item with empty dateText uses publicationDate with Reported prefix"
+        )
+
+        // Item with dateText already prefixed does not duplicate prefix
+        let itemAlreadyReported = OverviewTimelineItem(
+            id: "t_already_rep", dateText: "Reported Nov 15", summary: "Filing announced", isFuturePlan: false)
+        let voAlreadyRep = EventOverviewReaderView.timelineItemAccessibilityLabel(
+            item: itemAlreadyReported, citations: [cit])
+        assertFalse(
+            voAlreadyRep.contains("Reported Reported"),
+            "VoiceOver timeline item does not duplicate Reported prefix"
+        )
     }
 
     // MARK: - 9. Epic T3: Highlight Separation and Hierarchy
@@ -631,6 +703,30 @@ struct EventOverviewAccessibilityTests {
         assertEqual(
             EventOverviewReaderView.filterValidPerspectives([pValid]).count, 1,
             "Single perspective is preserved without false balance")
+
+        // Attribution formatting
+        assertEqual(
+            EventOverviewReaderView.formatPerspectiveSource(wire: nil, publisher: "Reuters"),
+            "via Reuters",
+            "Publisher formatted as via [publisher]"
+        )
+        assertEqual(
+            EventOverviewReaderView.formatPerspectiveSource(wire: nil, publisher: "via Reuters"),
+            "via Reuters",
+            "Does not duplicate via prefix on publisher"
+        )
+        assertEqual(
+            EventOverviewReaderView.formatPerspectiveSource(wire: "AP", publisher: "Local Paper"),
+            "via AP syndicate",
+            "Wire source formatted as via [wire] syndicate"
+        )
+
+        // Deduplication against highlights
+        let dupPersp = OverviewPerspective(
+            id: "p_dup", participant: "CEO", position: "Clean energy funding approved", sourcePublisher: "FT")
+        let dedupedP = OverviewComposer.deduplicatePerspectives(
+            [dupPersp], against: ["Clean energy funding approved"])
+        assertEqual(dedupedP.count, 0, "Perspective duplicating highlight statement is filtered out")
 
         // VoiceOver label reads participant, position, source in order
         let voPersp = EventOverviewReaderView.perspectiveAccessibilityLabel(

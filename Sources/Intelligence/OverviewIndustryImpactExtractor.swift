@@ -31,33 +31,36 @@ struct OverviewIndustryImpactExtractor: Sendable {
             case .energy:
                 return [
                     "energy", "utilities", "oil", "gas", "petroleum", "refinery", "refineries", "crude", "drilling",
-                    "pipeline", "power grid", "electricity", "renewable energy", "solar", "wind farm", "nuclear power",
-                    "utility company",
+                    "pipeline", "pipelines", "power grid", "electricity", "renewable energy", "solar", "wind farm",
+                    "wind farms", "nuclear power", "utility company", "utility companies",
                 ]
             case .financialServices:
                 return [
-                    "banking", "banks", "lender", "lenders", "financial services", "credit", "mortgage", "mortgages",
-                    "wall street", "investment bank", "hedge fund", "fintech", "liquidity", "capital requirements",
-                    "interest rate margin",
+                    "banking", "bank", "banks", "lender", "lenders", "financial services", "credit", "mortgage",
+                    "mortgages",
+                    "wall street", "investment bank", "investment banks", "hedge fund", "hedge funds", "fintech",
+                    "liquidity",
+                    "capital requirements", "interest rate margin",
                 ]
             case .healthcare:
                 return [
                     "healthcare", "pharmaceutical", "pharmaceuticals", "pharma", "drugmaker", "drugmakers",
-                    "medical device", "medical devices", "biotech", "hospital", "hospitals", "clinical",
-                    "fda approval", "prescription drug", "vaccine", "vaccines",
+                    "drug", "drugs", "medical device", "medical devices", "biotech", "hospital", "hospitals",
+                    "clinical",
+                    "fda approval", "prescription drug", "prescription drugs", "vaccine", "vaccines",
                 ]
             case .technology:
                 return [
                     "technology", "tech sector", "semiconductor", "semiconductors", "chipmaker", "chipmakers",
-                    "chips", "hardware", "software", "cloud computing", "cloud provider", "data centers",
-                    "artificial intelligence", "cybersecurity",
+                    "chip", "chips", "hardware", "software", "cloud computing", "cloud provider", "cloud providers",
+                    "data centers", "data center", "artificial intelligence", "cybersecurity",
                 ]
             case .transportation:
                 return [
                     "transportation", "airline", "airlines", "aircraft", "aviation", "flight", "flights", "airport",
                     "airports", "carrier", "carriers", "automaker", "automakers", "carmaker", "carmakers",
-                    "auto industry", "automotive", "vehicles", "electric vehicles", "shipping", "freight", "railroad",
-                    "railways", "transit",
+                    "auto industry", "automotive", "vehicle", "vehicles", "electric vehicles", "shipping", "freight",
+                    "railroad", "railroads", "railway", "railways", "transit",
                 ]
             case .agriculture:
                 return [
@@ -68,24 +71,25 @@ struct OverviewIndustryImpactExtractor: Sendable {
             case .manufacturing:
                 return [
                     "manufacturing", "manufacturer", "manufacturers", "factory", "factories", "industrial", "steel",
-                    "aluminum", "heavy industry", "machinery", "chemicals", "foundry", "smelter", "production line",
-                    "raw materials",
+                    "aluminum", "heavy industry", "machinery", "chemical", "chemicals", "foundry", "smelter",
+                    "production line", "raw materials",
                 ]
             case .retailAndEcommerce:
                 return [
-                    "retail", "retailers", "supermarket", "supermarkets", "e-commerce", "department stores",
-                    "apparel", "consumer goods", "grocery", "merchandise", "shopping malls", "foot traffic", "stores",
+                    "retail", "retailer", "retailers", "supermarket", "supermarkets", "e-commerce", "department stores",
+                    "apparel", "consumer goods", "grocery", "merchandise", "shopping malls", "foot traffic", "store",
+                    "stores",
                 ]
             case .mediaAndEntertainment:
                 return [
                     "streaming", "broadcaster", "broadcasters", "television", "media industry", "cable provider",
-                    "film", "movie", "studios", "hollywood", "box office", "entertainment", "music industry", "gaming",
-                    "video games",
+                    "cable providers", "film", "movie", "studios", "hollywood", "box office", "entertainment",
+                    "music industry", "gaming", "video games",
                 ]
             case .telecommunications:
                 return [
-                    "telecom", "telecommunications", "wireless", "broadband", "mobile network", "cellular", "5g",
-                    "spectrum",
+                    "telecom", "telecoms", "telecommunications", "wireless", "broadband", "mobile network",
+                    "mobile networks", "cellular", "5g", "spectrum",
                 ]
             case .realEstate:
                 return [
@@ -95,7 +99,8 @@ struct OverviewIndustryImpactExtractor: Sendable {
                 ]
             case .defenseAndAerospace:
                 return [
-                    "defense", "aerospace", "defense contractor", "military spending", "weapons", "missiles",
+                    "defense", "aerospace", "defense contractor", "defense contractors", "military spending",
+                    "weapon", "weapons", "missile", "missiles", "fighter jet", "fighter jets", "defense budget",
                     "lockheed", "raytheon", "northrop", "general dynamics", "boeing defense", "pentagon contract",
                     "airbus defense",
                 ]
@@ -162,8 +167,12 @@ struct OverviewIndustryImpactExtractor: Sendable {
 
             let sentences = extractCandidateSentences(from: passage.text)
             for sentence in sentences {
-                guard isEligibleSentence(sentence, excludeSentences: excludeSentences) else { continue }
-                guard let industry = identifyIndustry(for: sentence) else { continue }
+                guard isEligibleSentence(sentence, article: article, excludeSentences: excludeSentences) else {
+                    continue
+                }
+                let lower = sentence.lowercased()
+                let words = wordsSet(from: lower)
+                guard let industry = identifyIndustry(for: lower, words: words) else { continue }
                 guard !coveredIndustries.contains(industry) else { continue }
 
                 // Build a dedicated citation for this exact sentence to satisfy verbatim quote grounding
@@ -216,7 +225,79 @@ struct OverviewIndustryImpactExtractor: Sendable {
         return sentences
     }
 
-    private static func isEligibleSentence(_ sentence: String, excludeSentences: Set<String>) -> Bool {
+    private static func wordsSet(from text: String) -> Set<String> {
+        Set(text.components(separatedBy: CharacterSet.alphanumerics.inverted).filter { !$0.isEmpty })
+    }
+
+    /// Matches a cue either as a distinct word in the word set (single-word cue) or as a bounded phrase.
+    private static func matchesCue(_ cue: String, in text: String, words: Set<String>) -> Bool {
+        if cue.contains(" ") {
+            guard
+                let regex = try? NSRegularExpression(
+                    pattern: "\\b\(NSRegularExpression.escapedPattern(for: cue))\\b",
+                    options: [.caseInsensitive]
+                )
+            else {
+                return false
+            }
+            return regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)) != nil
+        } else {
+            return words.contains(cue.lowercased())
+        }
+    }
+
+    private static func hasImplication(text: String, words: Set<String>) -> Bool {
+        for cue in implicationCues {
+            if cue == "order" {
+                if words.contains("order") {
+                    let cleaned =
+                        text
+                        .replacingOccurrences(of: "in order to", with: " ")
+                        .replacingOccurrences(of: "in order that", with: " ")
+                        .replacingOccurrences(of: "in order for", with: " ")
+                    let cleanedWords = wordsSet(from: cleaned)
+                    if cleanedWords.contains("order") {
+                        return true
+                    }
+                }
+            } else if matchesCue(cue, in: text, words: words) {
+                return true
+            }
+        }
+        return false
+    }
+
+    private static func isSportsContent(article: FeedArticle, sentence: String) -> Bool {
+        let text = "\(article.title) \(sentence)".lowercased()
+        let words = wordsSet(from: text)
+        let singleWordSports: Set<String> = [
+            "championship", "tournament", "stadium", "fifa", "uefa", "nfl", "nba", "mlb", "nhl",
+            "striker", "goalkeeper", "quarterback", "touchdown", "halftime", "playoff", "playoffs",
+            "fixture", "fixtures", "ballpark", "innings", "athletic", "athletics", "matchday",
+        ]
+        if !words.isDisjoint(with: singleWordSports) {
+            return true
+        }
+        let phrases = [
+            "premier league", "world cup", "champions league", "super bowl", "penalty shootout", "final match",
+        ]
+        for phrase in phrases {
+            if text.contains(phrase) {
+                return true
+            }
+        }
+        return false
+    }
+
+    private static func isEligibleSentence(
+        _ sentence: String,
+        article: FeedArticle,
+        excludeSentences: Set<String>
+    ) -> Bool {
+        if isSportsContent(article: article, sentence: sentence) {
+            return false
+        }
+
         // Must not be a forecast or investment advice
         if OverviewThematicAngleValidator.isForecast(sentence)
             || OverviewThematicAngleValidator.isInvestmentAdvice(sentence)
@@ -224,22 +305,17 @@ struct OverviewIndustryImpactExtractor: Sendable {
             return false
         }
 
-        // Must match at least one practical implication cue
         let lower = sentence.lowercased()
-        let hasImplication = implicationCues.contains { cue in
-            lower.contains(cue)
-        }
-        guard hasImplication else { return false }
+        let words = wordsSet(from: lower)
+        guard hasImplication(text: lower, words: words) else { return false }
 
-        // Must not overlap with introduction or highlight sentences
-        let sentenceWords = Set(TensionEventClassifier.words(sentence))
-        guard !sentenceWords.isEmpty else { return false }
+        guard !words.isEmpty else { return false }
 
         for excluded in excludeSentences {
-            let excludedWords = Set(TensionEventClassifier.words(excluded))
-            let union = sentenceWords.union(excludedWords).count
+            let excludedWords = wordsSet(from: excluded.lowercased())
+            let union = words.union(excludedWords).count
             if union > 0 {
-                let overlap = Double(sentenceWords.intersection(excludedWords).count) / Double(union)
+                let overlap = Double(words.intersection(excludedWords).count) / Double(union)
                 if overlap >= 0.6 {
                     return false
                 }
@@ -249,11 +325,10 @@ struct OverviewIndustryImpactExtractor: Sendable {
         return true
     }
 
-    private static func identifyIndustry(for sentence: String) -> StandardIndustry? {
-        let lower = sentence.lowercased()
+    private static func identifyIndustry(for text: String, words: Set<String>) -> StandardIndustry? {
         for industry in StandardIndustry.allCases {
             for cue in industry.cues {
-                if lower.contains(cue) {
+                if matchesCue(cue, in: text, words: words) {
                     return industry
                 }
             }
