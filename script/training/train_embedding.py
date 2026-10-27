@@ -26,6 +26,7 @@ gates and with `SentenceEmbedder.modelVersion` bumped.
 import argparse
 import csv
 import hashlib
+import itertools
 import json
 import math
 import pathlib
@@ -86,9 +87,18 @@ def read_rows(paths, excluded):
                     tally[which] += 1
                     rows.append({'kind': which, 'group': row['group'], 'a': row['text_a'], 'b': row['text_b'],
                                  'weight': float(row.get('weight') or 1)})
-        digest = hashlib.sha256(pathlib.Path(path).read_bytes()).hexdigest()  # NOSONAR: the operator's own input
-        counts[pathlib.Path(path).name] = {'sha256': digest, **tally}
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        counts[path.name] = {'sha256': digest, **tally}
     return rows, counts
+
+
+def private_file(value):
+    """An input file, which must be a regular file outside this checkout."""
+    path = pathlib.Path(value).expanduser().resolve()
+    checkout = pathlib.Path(__file__).resolve().parents[2]
+    if not path.is_file() or checkout in path.parents:
+        raise argparse.ArgumentTypeError(f'{value} is not a private file outside the checkout')
+    return path
 
 
 def held(text):
@@ -209,31 +219,31 @@ def train(bert, tokenizer, rows, device, epochs, rate, seed=628):
 
 def holdout_headlines(path):
     """Both headlines of every library-holdout pair (#579), folded."""
-    return {fold(item[key]) for item in json.loads(pathlib.Path(path).read_text()) for key in ('title_a', 'title_b')}
+    return {fold(item[key]) for item in json.loads(path.read_text()) for key in ('title_a', 'title_b')}
 
 
 def tune_headlines(path):
     """The folded headlines of the tune split of the private corpus; the holdout split's entries are skipped."""
-    return {fold(item['title']) for item in json.loads(pathlib.Path(path).read_text())['articles']
+    return {fold(item['title']) for item in json.loads(path.read_text())['articles']
             if item.get('split') == 'tune'}
 
 
 def main(argv):
-    from transformers import BertModel
     from convert_minilm import HUB_MODEL, HUB_REVISION
+    from transformers import BertModel
     parser = argparse.ArgumentParser()
     parser.add_argument('out')
-    parser.add_argument('--pairs', nargs='+', required=True)
-    parser.add_argument('--exclude-headlines', required=True)
-    parser.add_argument('--holdout', required=True, help='the library holdout JSON (#579), whose headlines are left out')
-    parser.add_argument('--tune-corpus', required=True, help='the private event corpus; its tune headlines are left out')
+    parser.add_argument('--pairs', nargs='+', required=True, type=private_file)
+    parser.add_argument('--exclude-headlines', required=True, type=private_file)
+    parser.add_argument('--holdout', required=True, type=private_file, help='the library holdout JSON (#579), whose headlines are left out')
+    parser.add_argument('--tune-corpus', required=True, type=private_file, help='the private event corpus; its tune headlines are left out')
     parser.add_argument('--epochs', type=int, default=1)
     parser.add_argument('--rate', type=float, default=2e-5)
     parser.add_argument('--dry-run', action='store_true', help='counts and the leakage check only')
     args = parser.parse_args(argv)
     out = pathlib.Path(args.out).resolve()
     require(not any((parent / '.git').exists() for parent in [out, *out.parents]), 'Write outside Git checkouts')
-    excluded = {line.strip() for line in pathlib.Path(args.exclude_headlines).read_text().splitlines() if line.strip()}
+    excluded = {line.strip() for line in args.exclude_headlines.read_text().splitlines() if line.strip()}
     excluded |= holdout_headlines(args.holdout) | tune_headlines(args.tune_corpus)
     rows, counts = read_rows(args.pairs, excluded)
     leaked = [r for r in rows if headline(r['a']) in excluded or headline(r['b']) in excluded]
@@ -287,7 +297,7 @@ def self_check():
     data = [{'kind': 'positive', 'group': f'e:{t}', 'a': f'{t} kills many', 'b': f'{t} toll rises', 'weight': 1.0}
             for t in topics]
     data += [{'kind': 'negative', 'group': 's:x', 'a': f'{t} kills many', 'b': f'{u} toll rises', 'weight': 2.0}
-             for t, u in zip(topics, topics[1:])]
+             for t, u in itertools.pairwise(topics)]
     device = torch.device('cpu')
     before = sum(float(x) for x in losses(bert, tokenizer, data[:8], data[8:], device))
     global BATCH
