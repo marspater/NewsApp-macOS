@@ -7,4 +7,6 @@ NEWS_DEPENDENCY_BIN=$(swift build --force-resolved-versions --configuration rele
     --arch "$NEWS_DEPENDENCY_ARCH" --show-bin-path)
 # Caller scripts consume this array after sourcing; Bash arrays cannot be exported to child processes.
 # shellcheck disable=SC2034
-NEWS_DEPENDENCY_FLAGS=(-I "$NEWS_DEPENDENCY_BIN" -I "$NEWS_DEPENDENCY_BIN/Modules" "$NEWS_DEPENDENCY_BIN/libNewsParsingDependencies.a")
+# -j: without it swiftc runs one frontend job at a time (the test runner compiled in 38 s serially, 23 s with -j10).
+NEWS_DEPENDENCY_FLAGS=(-I "$NEWS_DEPENDENCY_BIN" -I "$NEWS_DEPENDENCY_BIN/Modules" "$NEWS_DEPENDENCY_BIN/libNewsParsingDependencies.a"
+    -j "$(sysctl -n hw.ncpu)")

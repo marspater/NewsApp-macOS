@@ -22,3 +22,6 @@ script/evaluation/__pycache__/
 
 # Codacy local CLI state
 .codacy/
+
+# Agent teamwork scratch state
+.agents/
