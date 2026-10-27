@@ -11259,6 +11259,13 @@ struct NewsTests {
                 "SELECT (SELECT count(*) FROM event_exclusions) + (SELECT count(*) FROM event_inclusions);"
             ).first?.first.flatMap { $0.flatMap(Int.init) } ?? 0
         assertTrue(verdicts >= 2, "Both corrections are recorded")
+        let protestVerdicts =
+            try await db.eventRows(
+                """
+                SELECT (SELECT count(*) FROM event_exclusions WHERE ? IN (article_id, other_article_id))
+                    + (SELECT count(*) FROM event_inclusions WHERE ? IN (article_id, other_article_id));
+                """, [.text(ids[2]), .text(ids[2])]
+            ).first?.first.flatMap { $0.flatMap(Int.init) } ?? 0
         await db.close()
         let corpus = directory.appendingPathComponent("corpus.json")
         try Data(#"{"articles":[{"title":"Unrelated corpus item","published":"2010-01-01T00:00:00Z"}]}"#.utf8)
@@ -11286,7 +11293,9 @@ struct NewsTests {
             snapshots: path, output: held.path, corpusPath: corpus.path, holdoutPath: heldOut.path,
             verdictsOnly: true)
         let heldCSV = try String(contentsOf: held.appendingPathComponent("verdicts.csv"), encoding: .utf8)
-        assertEqual(heldCSV.components(separatedBy: ",\"v:").count - 1, 1, "The holdout article's verdict is left out")
+        assertEqual(
+            heldCSV.components(separatedBy: ",\"v:").count - 1, verdicts - protestVerdicts,
+            "The holdout article's verdicts are left out")
         // The gate: re-clustering the copy without corrections re-merges the excluded vote pair, so the harness fails.
         let holdout = directory.appendingPathComponent("holdout.json")
         try Data("[]".utf8).write(to: holdout)
