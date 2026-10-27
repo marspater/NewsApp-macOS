@@ -20,9 +20,10 @@ A model ships only when the Swift replay (tune, authored corpus) is identical an
 import argparse
 import gc
 import json
+import multiprocessing
 import pathlib
 import platform
-import subprocess
+import subprocess  # nosec B404
 import sys
 
 import coremltools as ct
@@ -31,7 +32,16 @@ import numpy as np
 import torch
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
-from convert_minilm import LENGTHS, MAX_TOKENS, UNITS, Encoder, build, compiled_functions, export_functions, pooled
+from convert_minilm import (
+    LENGTHS,
+    MAX_TOKENS,
+    UNITS,
+    Encoder,
+    build,
+    compiled_functions,
+    export_functions,
+    pooled,
+)
 from wordpiece import Tokenizer, require
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
@@ -113,14 +123,25 @@ def size(path):
 
 
 def compile_model(package, out):
-    subprocess.run(['xcrun', 'coremlcompiler', 'compile', str(package), str(out)], check=True, capture_output=True)
+    """Compiles with Xcode's own compiler, which also writes the metadata that lists a model's functions; the
+    arguments are this script's own paths."""
+    subprocess.run(  # nosec B603 # nosemgrep
+        ['/usr/bin/xcrun', 'coremlcompiler', 'compile', str(package), str(out)], check=True, capture_output=True)
     return out / (package.stem + '.mlmodelc')
+
+
+def private_file(value):
+    """An input file, which must be a regular file outside this checkout."""
+    path = pathlib.Path(value).expanduser().resolve()
+    if not path.is_file() or ROOT in path.parents:
+        raise argparse.ArgumentTypeError(f'{value} is not a private file outside the checkout')
+    return path
 
 
 def main(argv):
     parser = argparse.ArgumentParser()
     parser.add_argument('out')
-    parser.add_argument('--pair-state', required=True, help='pairscorer-state.pt of the shipped pair model')
+    parser.add_argument('--pair-state', required=True, type=private_file, help='pairscorer-state.pt of the shipped pair model')
     parser.add_argument('--mode', choices=sorted(MODES), default='int8')
     parser.add_argument('--check-only', action='store_true', help='compare the packages already in OUT_DIR/MODE')
     args = parser.parse_args(argv)
@@ -129,19 +150,21 @@ def main(argv):
     out.mkdir(parents=True, exist_ok=True)
     texts = [a['title'] + '\n' + (a.get('description') or '')[:600]
              for a in json.loads(FIXTURE.read_text())['articles']]
-    tokenizer = Tokenizer()
 
     if not args.check_only:
         export(args, out)
         # The comparison runs in a fresh process: Core ML predictions after the exports crashed this one (torch 2.14).
-        subprocess.run([sys.executable, __file__, *argv, '--check-only'], check=True)  # NOSONAR: this script
+        process = multiprocessing.get_context('spawn').Process(target=check, args=(args, out, texts))
+        process.start()
+        process.join()
+        require(process.exitcode == 0, f'The comparison failed (exit {process.exitcode})')
         return
-    check(args, out, texts, tokenizer)
+    check(args, out, texts)
 
 
 def export(args, out):
-    from transformers import BertConfig, BertForSequenceClassification
     from train_pair_model import CONFIG
+    from transformers import BertConfig, BertForSequenceClassification
     bert, _ = build('hub')
     export_functions(Encoder(bert).eval(), ('input_ids', 'attention_mask'), ('last_hidden_state', 'pooler_output'),
                      LENGTHS, out / 'minilm.mlpackage', compress=lambda m: compress(m, args.mode))
@@ -155,7 +178,8 @@ def export(args, out):
                      compress=lambda m: compress(m, args.mode))
 
 
-def check(args, out, texts, tokenizer):
+def check(args, out, texts):
+    tokenizer = Tokenizer()
     ours, shipped = compiled_functions(compile_model(out / 'minilm.mlpackage', out)), compiled_functions(
         MODELS / 'minilm.mlmodelc')
     cosines = []
@@ -168,7 +192,8 @@ def check(args, out, texts, tokenizer):
             padded[0, :len(ids)], mask[0, :len(ids)] = ids, 1
             hidden = models[length].predict({'input_ids': padded, 'attention_mask': mask})['last_hidden_state']
             vectors.append(pooled(np.asarray(hidden)[:, :len(ids)]))
-        cosines.append(float(np.dot(*vectors)))
+        ours_vector, shipped_vector = vectors
+        cosines.append(float(np.dot(ours_vector, shipped_vector)))
     del ours, shipped, models  # loading the pair model beside eight encoder functions crashed the process
     gc.collect()
     ours = compiled_pair_functions(compile_model(out / 'pairscorer.mlpackage', out))
@@ -193,6 +218,7 @@ def check(args, out, texts, tokenizer):
 def self_check():
     """A tiny random pair model through every mode: three joined functions that agree with PyTorch."""
     import tempfile
+
     from transformers import BertConfig, BertForSequenceClassification
     torch.manual_seed(554)
     config = BertConfig(vocab_size=200, hidden_size=128, num_hidden_layers=2, num_attention_heads=4,
