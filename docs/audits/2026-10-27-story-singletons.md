@@ -66,36 +66,76 @@ number it does not have. Merging these needs a different story signal (#627's th
 
 ## Group review
 
-All 24 groups were reviewed (the copy has 24, not the 100 the acceptance names): 8 joined by event-to-event links (two
-of them also carry an attached report), 16 that exist only because a report attached alone. Labels: 24 right, 0 wrong
-(0 of 8 and 0 of 16); every one of the 18 attachments right. Weakest calls, both labelled right: a Yemeni leader's
-statement on the Houthis attached to the Houthi strikes on Saudi Arabia, and a mourning report from the Riyadh airport
-attack attached to an event that already mixes the Riyadh and Dammam airport attacks (an event-level error that
-predates this slice). The sheet with group ids, member article ids, publishers, headlines and labels is
+First run (commit 1836f73): all 24 groups were reviewed (the copy has 24, not the 100 the acceptance names): 8 joined
+by event-to-event links (two of them also carry an attached report), 16 that exist only because a report attached
+alone. Labels by Claude: 24 right, 0 wrong (0 of 8 and 0 of 16); every one of the 18 attachments right. The
+orchestrator, to whom Mars delegated the spot-check, then reviewed all 24 groups independently of these labels: 0
+wrong. Three were borderline and accepted: the 9to5Mac iOS 27.2 bundle, a Yemeni leader's statement on the Houthis
+beside the Houthi strikes on Saudi Arabia, and a Le Pen poll beside her campaign kick-off. Sheet:
 `~/news-eval/m581-singletons-2026-10-27/story-group-review.csv` (`0600`, SHA-256 `fc0e3bad…dc4e1`).
+
+## Review round: story opening, common actors, ties (A–C)
+
+- The card opens the story's newest event of two or more reports (by first report), and that event's "Earlier in
+  This Story" lists the story's earlier events; `story_id` stays the earliest event.
+- `commonStoryTerms` checks every name two units share instead of the first 64 alphabetically; this also affects the
+  "Earlier in This Story" relation, and can only remove links.
+- Story naming and attachment ties go by first report (date, then article ID), never by the random event ID.
+
+Result, same setup: holdout pair results unchanged at every cutoff (15/1/3, 14/1/3, 15/1/2, 16/1/2); printed share
+449 of 1,211 (37%), cards 867, 12 stories joining two or more events; clock window 759 of 1,954 reports (39%) in a
+multi-publisher card, 1,382 cards, 18 story groups (7 by event links, 11 by attachment alone), 13 attached reports.
+The common-actor check removed six groups (among them the Witkoff and Putin talks link and five attachments); every
+remaining group is one of the 24 reviewed right, so 0 wrong. Two runs gave identical numbers and identical groups.
+Named cases unchanged. Sheet: `story-group-review-abc.csv` (SHA-256 `630d4af8…`).
+
+## Measured and not adopted: the 72 h story window (F)
+
+Sampling each side's five members nearest in time to the other (instead of the five earliest) and reading story pairs
+up to 72 h apart (every other conflict still vetoing; admission and fragment merges unchanged) left the holdout pairs
+unchanged and was deterministic over two runs, but 2 of 25 groups were wrong (8%, above the 2% gate): a report on
+Canada's prime minister defending trade with countries that do not share its values attached to the US embassy's
+accusation of election meddling, and three 9to5Mac daily deals round-ups of different days joined as one story. Clock
+window with it: 770 of 1,954 (39%), 1,367 cards, 25 groups (12 by event links), 21 attached reports; printed share
+451 (37%), 15 stories. Named cases unchanged. Sheet: `story-group-review-f.csv` (SHA-256 `f4baa6c9…`). Kept out of
+this slice; a story-pass rule that one publisher's series items never agree would remove the deals group.
+
+## Matcher findings from the review
+
+- Event 7023B132 (Storm Austen) contains the Guardian's report on Storm Boelo, a different named storm: an
+  event-level false merge.
+- The Hindu's "Obama blasts Trump's 'chaos and cruelty'…" has the same headline as the Arab News member and matches it
+  (score 0.73), but it cannot join the event: its pair with the BBC member is vetoed by the semantic veto (cosine
+  0.548 against 0.55; its feed description starts mid-sentence), and admission needs every member pair free of
+  conflict. The story pass then attached it.
+
+## Notifications (traced, no change)
+
+Notifications are decided per event and only for reports inserted by the refresh that notifies. Attaching a report
+already in the library creates its one-member event but no new report, so nothing notifies. A new report attached in
+the same pass is its own one-member event with no ledger entry, exactly as it was when unclustered (its key was its
+own id), so it notifies as before; nothing dedupes it against the story's other events, either before or after this
+slice. A story's version rises with an attachment; that only marks the card as updated.
 
 ## Where an attached report shows
 
 - Card: one more report on the story card (newest first), counted in its stories and publishers; its event's version
   adds to the story's, so a new attachment marks the card as updated until the reader opens it.
-- Overview: the story opens its lead event's overview, which reads only that event's reports; the attached report is
-  not cited there.
-- "Earlier in This Story": listed only when it began before the lead event and the lexical relation or a related-act
-  decision links it, like any other event; a later attachment is on the card, not in that list. Listing every event of
-  a story by `story_id` is for the connected timeline (#671).
+- Overview: the card opens the story's newest event of two or more reports; an attached report never opens a story and
+  is not cited in that overview.
+- "Earlier in This Story": the open event lists the story's events that began before it (`relatedActEvents`), next to
+  the lexical and related-act links; `ArticleStore.relatedStoryEvents` still caps the list at three links, lexical
+  first, so a long story's earlier events can be cut (for #671).
 
 ## Limits found
 
 - The story rule compares a report with an event's five earliest members, so a report more than 36 h after the event
-  began conflicts on time with all of them and never attaches.
-- `commonStoryTerms` checks only the first 64 terms in alphabetical order; the story pass passes it every anchor of
-  every active event, so most common actors (names after "c") are never tested. Not changed here: it also governs the
-  event-to-event links already reviewed in #631.
-- Story-level numbers can move by one group between identical runs when two candidate events tie, since event IDs are
-  random; the tie now goes to the event that began first.
+  began conflicts on time with all of them and never attaches (F above measured the fix).
+- Fixed in the review round: the 64-term common-actor cap and the random-ID ties.
 
 ## Receipts
 
 `~/news-eval/m581-singleton-stories-2026-10-27/` (`0700`): `before-final/` and `after-final/` hold the holdout logs,
 `story-groups.csv` and `story-cards.csv` (SHA-256 `269c0999…da02` before, `2b7d3376…b1ea` after); earlier runs of this
-slice (`after/`, `after-w/`) are kept as they were.
+slice (`after/`, `after-w/`) are kept as they were; `abc-run1/`, `abc-run2/` (review round) and `f-run1/`, `f-run2/`
+(the 72 h window) hold the later runs.

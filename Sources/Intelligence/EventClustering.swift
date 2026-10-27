@@ -482,9 +482,17 @@ enum EventClusterer {
                 events.map { event in
                     (event.id, event.members.reduce(into: Set<String>()) { $0.formUnion(features($1).specificAnchors) })
                 }, uniquingKeysWith: { a, _ in a })
+            // Only a name an event shares with another event or with a report alone can link anything, so only those
+            // are checked for being common actors, each of them.
+            var holders: [String: Int] = [:]
+            for anchors in allAnchors.values { for anchor in anchors { holders[anchor, default: 0] += 1 } }
+            for single in singles {
+                for anchor in features(single).specificAnchors where holders[anchor] != nil {
+                    holders[anchor, default: 0] += 1
+                }
+            }
             let common = try await database.commonStoryTerms(
-                allAnchors.values.reduce(into: Set<String>()) { $0.formUnion($1) }, before: now,
-                share: EventStoryRelation.commonActorShare)
+                Set(holders.filter { $0.value >= 2 }.keys), before: now, share: EventStoryRelation.commonActorShare)
             let anchorsOf = allAnchors.mapValues { $0.subtracting(common) }
             var eventsByAnchor: [String: Set<String>] = [:]
             for (id, anchors) in anchorsOf {
@@ -516,9 +524,10 @@ enum EventClusterer {
                 for anchor in features(single).specificAnchors.subtracting(common) {
                     for id in eventsByAnchor[anchor] ?? [] { shared[id, default: 0] += 1 }
                 }
-                // Most shared names first, then the event that began first (event IDs are random): one story per report.
+                // Most shared names first, then the event whose first report came first (date, then article ID; event IDs
+                // are random): one story per report.
                 func rank(_ id: String) -> (Int, Date, String) {
-                    (-(shared[id] ?? 0), membersOf[id]?.first?.date ?? .distantFuture, id)
+                    (-(shared[id] ?? 0), membersOf[id]?.first?.date ?? .distantFuture, membersOf[id]?.first?.id ?? id)
                 }
                 for id in shared.keys.sorted(by: { rank($0) < rank($1) }) {
                     guard let members = membersOf[id],
