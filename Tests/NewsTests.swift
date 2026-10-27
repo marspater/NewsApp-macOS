@@ -462,6 +462,9 @@ struct NewsTests {
                     "    people \(value.people.sorted()) orgs \(value.organizations.sorted()) places \(value.places.sorted())"
                         + " names \(value.names.sorted()) numbers \(value.titleNumbers.sorted()) act \(value.actClass)")
                 print("    keywords \(value.keywords.sorted())")
+                print(
+                    "    days \(value.calendarDays.sorted()) series \(value.series ?? "none") \(value.seriesTerms.sorted())"
+                        + " editions \(value.editions.sorted())")
             }
             return
         }
@@ -7697,6 +7700,42 @@ struct NewsTests {
         let late = features(["afad"], quake.keywords, hours: 40, places: ["malatya"])
         assertEqual(EventMatcher.assess(quake, late).conflict, .timeGap, "Reports far apart in time never match")
 
+        // #688: explicit days are calendar tokens, not figures; one publisher's series name is no evidence.
+        let dated = EventFeatures(
+            title: "Dockworkers to strike on October 21st, union says", description: "", date: now)
+        assertEqual(dated.calendarDays, ["10-21"], "An ordinal date is a calendar day")
+        assertTrue(dated.titleNumbers.isEmpty, "A date's day is not a headline figure")
+        assertEqual(
+            EventFeatures(title: "Port faces 21 October walkout", description: "", date: now).calendarDays, ["10-21"],
+            "A day-first date reads the same")
+        var dayOne = quake
+        dayOne.calendarDays = ["10-21"]
+        var dayTwo = quakeLater
+        dayTwo.calendarDays = ["10-22"]
+        assertEqual(EventMatcher.assess(dayOne, dayTwo).conflict, .calendarDay, "Different explicit days differ")
+        let lead = "Catch up with the most important stories from around Europe this October 21st, 2026 - business."
+        let morning = EventFeatures(
+            title: "Latest news bulletin | October 21st, 2026 – Morning", description: lead, date: now)
+        let evening = EventFeatures(
+            title: "Latest news bulletin | October 21st, 2026 – Evening", description: lead,
+            date: now.addingTimeInterval(10 * 3600))
+        assertEqual(morning.series, "latest news bulletin", "The text before the separator names the series")
+        assertEqual(morning.editions, ["morning"], "The edition slot is read from the headline")
+        assertEqual(
+            EventMatcher.assess(morning, evening, samePublisher: true).conflict, .edition,
+            "Two editions of one publisher's series are two items")
+        assertTrue(
+            EventMatcher.assess(morning, evening).conflict != .edition, "Editions conflict only inside one series")
+        var seriesFirst = quake
+        seriesFirst.series = "afad daily"
+        seriesFirst.seriesTerms = ["afad", "malatya"]
+        var seriesSecond = quakeLater
+        seriesSecond.series = "afad daily"
+        assertTrue(EventMatcher.assess(seriesFirst, seriesSecond).isMatch, "Two publishers' shared names count")
+        assertFalse(
+            EventMatcher.assess(seriesFirst, seriesSecond, samePublisher: true).isMatch,
+            "Inside one publisher's series its name is no shared evidence")
+
         let followUpTerms: Set<String> = ["earthquake", "damage", "rescue", "tent", "camp", "aid", "shelter", "winter"]
         assertTrue(
             EventMatcher.assess(quake, features(["afad"], followUpTerms, hours: 2, places: ["malatya"])).isMatch,
@@ -8330,16 +8369,16 @@ struct NewsTests {
         let all = try await db.fetchArticles(limit: nil)
         let active = all.filter { $0.pubDate >= activeSince }
         var ratings: [[String: String]] = []
-        let judge = StoryImportanceJudge { report in
-            await OnDeviceImportanceJudge.shared.rate(report)
-        }
         for pass in 1...100 {
             let before = ratings.count
             let pending = try await db.pendingImportanceRows(activeSince: activeSince, limit: 60)
             if pending.isEmpty { break }
             for row in pending {
                 try Task.checkCancellation()
-                guard let importance = await judge.rate(OnDeviceImportanceJudge.report(row)) else { continue }
+                guard let importance = await OnDeviceImportanceJudge.shared.rate(OnDeviceImportanceJudge.report(row))
+                else {
+                    continue
+                }
                 if try await db.recordImportance(
                     row.id, importance, at: clock, expectedTitle: row.title, expectedDescription: row.description)
                 {
@@ -8448,7 +8487,7 @@ struct NewsTests {
         var found = 0
         for pass in 1...10 {
             let report = try await StoryCurator.run(
-                in: db, judge: .unavailable, imageFinder: .publisherPages, now: clock)
+                in: db, imageFinder: .publisherPages, now: clock)
             checks += report.imagesChecked
             found += report.imagesFound
             print("IMAGE_PASS \(pass) checked=\(report.imagesChecked) found=\(report.imagesFound)")
@@ -9139,25 +9178,19 @@ struct NewsTests {
             try await panel.fetchArticles(limit: nil, hidingWaitingStories: true).count, 2,
             "Panel and ordinary stories remain visible")
         let collectionOff = try await StoryCurator.run(
-            in: panel, judge: .unavailable, now: now.addingTimeInterval(26 * 3600))
+            in: panel, now: now.addingTimeInterval(26 * 3600))
         assertEqual(
             collectionOff.expired, 0, "Image/audit curation never expires a story, regardless of collection")
         await panel.close()
 
-        // The curator rates unrated stories within its budget; without a model nothing is rated and nothing hides.
+        // Audit ratings (the opt-in live curation measurement) never hide a story.
         let curated = DatabaseEngine(path: ":memory:")
         try await curated.open()
         try await curated.upsertArticles([story("c1", "One"), story("c2", "Two"), story("c3", "Three")])
-        let unrated = try await StoryCurator.run(in: curated, judge: .unavailable, now: now)
-        assertEqual(unrated.rated, 0, "Without a model nothing is rated")
         assertEqual(
             try await curated.fetchArticles(limit: nil, hidingWaitingStories: true).count, 3, "Unrated stories show")
-        let rater = StoryImportanceJudge { $0.id == "c1" ? .major : .minor }
-        let first = try await StoryCurator.run(in: curated, judge: rater, budget: 2, now: now)
-        assertEqual(first.rated, 2, "Rating stays within its budget")
-        assertEqual(
-            try await StoryCurator.run(in: curated, judge: rater, budget: 2, now: now).rated, 1,
-            "A later pass rates the rest")
+        try await curated.recordImportance("c1", .major, at: now)
+        for id in ["c2", "c3"] { try await curated.recordImportance(id, .minor, at: now) }
         assertEqual(
             Set(try await curated.fetchArticles(limit: nil, hidingWaitingStories: true).map(\.id)), ["c1", "c2", "c3"],
             "Explicit audit ratings cannot hide stories")
@@ -9201,10 +9234,6 @@ struct NewsTests {
             settings: settings, store: store, schedulesRefresh: false,
             fetchBatch: { urls, _ in urls.map { ($0, reports, nil, nil) } },
             notifyBatch: { articles, _ in notified += articles.map(\.title) },
-            importanceJudge: StoryImportanceJudge { _ in
-                assertTrue(false, "Refresh must not schedule importance ratings")
-                return nil
-            },
             imageFinder: StoryImageFinder { _ in
                 await pages.wait()
                 return .none
@@ -9459,7 +9488,7 @@ struct NewsTests {
             if link.hasSuffix("/waiting") { return .found("https://cdn.example/waiting.jpg") }
             return .found("https://cdn.example/found.jpg")
         }
-        let report = try await StoryCurator.run(in: db, judge: .unavailable, imageFinder: finder, now: now)
+        let report = try await StoryCurator.run(in: db, imageFinder: finder, now: now)
         assertEqual(report.imagesFound, 2, "Both an event and a minor singleton receive images")
         assertEqual(
             try await db.storyImages(for: ["e1", "e2", "plain"]).count, 1,
@@ -11220,6 +11249,19 @@ struct NewsTests {
                 "INSERT INTO event_inclusions(article_id, other_article_id, created_at) VALUES (?, ?, ?);",
                 [.text(pair.0), .text(pair.1), .real(now.timeIntervalSince1970)])
         }
+        // The protest report joins the vote's story alone (#581), so the separation also excludes it: count the pairs.
+        let verdicts =
+            try await db.eventRows(
+                "SELECT (SELECT count(*) FROM event_exclusions) + (SELECT count(*) FROM event_inclusions);"
+            ).first?.first.flatMap { $0.flatMap(Int.init) } ?? 0
+        assertTrue(verdicts >= 2, "Both corrections are recorded")
+        let protestVerdicts =
+            try await db.eventRows(
+                """
+                SELECT (SELECT count(*) FROM event_exclusions WHERE ? IN (article_id, other_article_id))
+                    + (SELECT count(*) FROM event_inclusions WHERE ? IN (article_id, other_article_id));
+                """, [.text(ids[2]), .text(ids[2])]
+            ).first?.first.flatMap { $0.flatMap(Int.init) } ?? 0
         await db.close()
         let corpus = directory.appendingPathComponent("corpus.json")
         try Data(#"{"articles":[{"title":"Unrelated corpus item","published":"2010-01-01T00:00:00Z"}]}"#.utf8)
@@ -11231,8 +11273,8 @@ struct NewsTests {
         assertTrue(
             csv.hasPrefix("label,group,text_a,text_b,pieces_a,pieces_b,weight,marginal\n"),
             "The export has weight and marginal columns (#627)")
-        assertEqual(csv.components(separatedBy: ",\"v:").count - 1, 2, "One row per verdict")
-        assertEqual(csv.components(separatedBy: ",5,").count - 1, 2, "Verdict rows weigh five")
+        assertEqual(csv.components(separatedBy: ",\"v:").count - 1, verdicts, "One row per verdict")
+        assertEqual(csv.components(separatedBy: ",5,").count - 1, verdicts, "Verdict rows weigh five")
         assertTrue(
             csv.contains("\n0,\"v:") && csv.contains("\n2,\"v:") && csv.contains(",5,01"),
             "An exclusion is not one occurrence (0, marginal 01), an inclusion is same (2)")
@@ -11247,7 +11289,9 @@ struct NewsTests {
             snapshots: path, output: held.path, corpusPath: corpus.path, holdoutPath: heldOut.path,
             verdictsOnly: true)
         let heldCSV = try String(contentsOf: held.appendingPathComponent("verdicts.csv"), encoding: .utf8)
-        assertEqual(heldCSV.components(separatedBy: ",\"v:").count - 1, 1, "The holdout article's verdict is left out")
+        assertEqual(
+            heldCSV.components(separatedBy: ",\"v:").count - 1, verdicts - protestVerdicts,
+            "The holdout article's verdicts are left out")
         // The gate: re-clustering the copy without corrections re-merges the excluded vote pair, so the harness fails.
         let holdout = directory.appendingPathComponent("holdout.json")
         try Data("[]".utf8).write(to: holdout)
@@ -11293,17 +11337,21 @@ struct NewsTests {
         }
         let storyID = try await db.storyID(forEvent: vote)
         assertEqual(storyID, try await db.storyID(forEvent: protest), "Two acts of one story share a story")
-        assertTrue(storyID == vote || storyID == protest, "The story is named by one of its events")
+        assertEqual(storyID, vote, "The story is named by its earliest event")
         assertTrue(
             report.changedEvents.contains(vote) && report.changedEvents.contains(protest), "Story changes are reported")
         assertEqual(try await db.storyEventIDs(storyID ?? "").sorted(), [vote, protest].sorted(), "Both events belong")
+        assertEqual(try await db.storyEventIDs(protest).sorted(), [vote, protest].sorted(), "… from either event")
         var summaries = try await db.eventFeedSummaries(forArticles: [ids[0]])
         assertEqual(summaries.count, 1, "One card for the story")
-        assertEqual(summaries.first?.eventID, storyID, "The card carries the story id")
+        assertEqual(summaries.first?.eventID, protest, "The card opens the story's newest event")
+        assertEqual(
+            try await db.relatedActEvents(eventID: protest, limit: .max).map(\.eventID), [vote],
+            "The newest event's overview reaches the story's earlier event")
         assertEqual(summaries.first?.members.count, 4, "All four reports are on the card")
         assertEqual(summaries.first?.membershipVersion, 2, "The story version is the sum of its events' versions")
         assertEqual(summaries.first?.seenVersion, nil, "Never opened")
-        assertEqual(try await db.markEventSeen(storyID ?? ""), 2, "Seeing the story marks every event")
+        assertEqual(try await db.markEventSeen(protest), 2, "Seeing the story through its open event marks every event")
         summaries = try await db.eventFeedSummaries(forArticles: [ids[0]])
         assertEqual(summaries.first?.seenVersion, 2, "Seen versions add up")
         assertFalse(summaries.first?.hasSubstantiveUpdate ?? true, "Nothing new since the reader looked")
@@ -11349,6 +11397,48 @@ struct NewsTests {
                 "An exclusion across the events vetoes the story link")
         }
         await apart.close()
+        assertTrue(
+            EventClusterer.headline("Elon Musk’s dangerous grip on outer space", names: "musk"),
+            "A name in a headline is found across case and possessives")
+        assertTrue(EventClusterer.headline("iOS 27.2: Three new features", names: "ios 27.2"), "Multi-word names match")
+        assertFalse(EventClusterer.headline("Muskrat numbers rise", names: "musk"), "Only whole words match")
+        // A report alone that agrees with the story joins its card as a one-member event; it never names the story,
+        // never merges into an event, and a reader's exclusion against the story's reports takes it out again.
+        let attach = DatabaseEngine(path: ":memory:")
+        try await attach.open()
+        let appointment = story(
+            6, "Novak's party appoints interim leader in Ljubljana after parliament ousts him", hours: 3)
+        try await attach.upsertArticles(stories + [appointment])
+        _ = try await EventClusterer.run(in: attach, now: now)
+        _ = try await EventClusterer.run(in: attach, now: now.addingTimeInterval(60))
+        let appointmentID = try await attach.resolvedArticleID(for: appointment)
+        var attachIDs: [String] = []
+        for article in stories { attachIDs.append(try await attach.resolvedArticleID(for: article)) }
+        if let single = try await attach.eventID(forArticle: appointmentID),
+            let voteEvent = try await attach.eventID(forArticle: attachIDs[0])
+        {
+            assertEqual(
+                try await attach.eventMatchMembers(eventID: single)?.members.count, 1,
+                "The attached report stays an event of its own")
+            let lead = try await attach.storyID(forEvent: voteEvent)
+            assertEqual(try await attach.storyID(forEvent: single), lead, "The report alone joins the story")
+            assertTrue(lead != single, "A report alone never names the story")
+            assertEqual(
+                try await attach.eventFeedSummaries(forArticles: [attachIDs[0]]).first?.members.count, 5,
+                "The story card shows the attached report")
+            for other in attachIDs {
+                let (low, high) = appointmentID < other ? (appointmentID, other) : (other, appointmentID)
+                try await attach.eventRows(
+                    "INSERT INTO event_exclusions(article_id, other_article_id, created_at) VALUES (?, ?, ?);",
+                    [.text(low), .text(high), .real(now.timeIntervalSince1970)])
+            }
+            _ = try await EventClusterer.run(in: attach, now: now.addingTimeInterval(120))
+            assertEqual(
+                try await attach.storyID(forEvent: single), single, "An exclusion against the story takes it out")
+        } else {
+            assertTrue(false, "The appointment is attached to the vote's story as an event of its own")
+        }
+        await attach.close()
         await db.close()
     }
 
@@ -12030,7 +12120,8 @@ struct NewsTests {
                         if let va = vectorCache[items[i].id], let vb = vectorCache[items[j].id] {
                             similarity = SentenceEmbedder.cosineSimilarity(va, vb)
                         }
-                        let pair = EventMatcher.assess(a, b, embeddingSimilarity: similarity)
+                        let pair = EventMatcher.assess(
+                            a, b, embeddingSimilarity: similarity, samePublisher: items[i].source == items[j].source)
                         let diagnosePolicy = StoryCorpus.policyFromEnvironment()
                         func input(_ index: Int) -> String {
                             let text = EventFeatures.matchingText(
@@ -12424,7 +12515,31 @@ struct NewsTests {
         let storySources = byStory.mapValues { Set($0.map(\.source)).count }
         let multiStory = recent.filter { ($0.event.flatMap { storySources[storyOf[$0] ?? ""] } ?? 0) >= 2 }.count
         let joinedStories = byStory.filter { Set($0.value.compactMap(\.event)).count >= 2 }
+        // The feed's cards: one per story, one per report no story holds (#581).
+        func card(_ row: LibraryRow) -> String { row.event.map { storyOf[$0] ?? $0 } ?? row.id }
+        let cards = Set(recent.map(card)).count
         if let output = ProcessInfo.processInfo.environment["NEWS_EVENT_OUTPUT"] {
+            // Every report of the clusterer's window (72 h before its clock, NEWS_HOLDOUT_NOW when set) with its card, for
+            // card counts and named cases (#581).
+            let windowRows = try await db.eventRows(
+                """
+                SELECT a.id, a.source, a.published_at, m.event_id, a.title,
+                    (SELECT count(*) FROM event_members x WHERE x.event_id = m.event_id)
+                FROM articles a LEFT JOIN event_members m ON m.article_id = a.id
+                WHERE a.published_at >= ? AND \(DatabaseEngine.visibleArticle) ORDER BY a.published_at, a.id;
+                """, [.real(newest.timeIntervalSince1970 - 3 * 86_400)])
+            let cardLines =
+                ["card,article,source,published,event,event_size,title"]
+                + windowRows.map { row in
+                    let card = row[3].map { storyOf[$0] ?? $0 } ?? row[0] ?? ""
+                    let title = "\"" + (row[4] ?? "").replacingOccurrences(of: "\"", with: "\"\"") + "\""
+                    let fields = [row[0], row[1], row[2], row[3], row[5]].map { $0 ?? "" }
+                    return ([card] + fields + [title]).joined(separator: ",")
+                }
+            try StoryCorpus.writePrivate(
+                Data(cardLines.joined(separator: "\n").utf8),
+                to: try StoryCorpus.privateDirectory(output).appendingPathComponent("story-cards.csv"),
+                replacing: false)
             // One line per story that joins two or more events: each event's earliest headline, for the group review.
             var lines = ["story_id,events,members,acts"]
             for (story, rows) in joinedStories.sorted(by: { $0.key < $1.key }) {
@@ -12451,6 +12566,7 @@ struct NewsTests {
                 format:
                     "    stories: %d (%.0f%%) recent stories in a multi-publisher story; %d stories join two or more events",
                 multiStory, recent.isEmpty ? 0 : 100 * Double(multiStory) / Double(recent.count), joinedStories.count))
+        print("    cards: \(cards) for \(recent.count) recent stories (one per story, one per report no story holds)")
         if !verdicts.isEmpty {
             print("    verdicts (#552): \(verdicts.count) in the copy, \(verdictFailures.count) violated")
             for failure in verdictFailures { print("      \(failure)") }

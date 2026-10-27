@@ -6,7 +6,7 @@ import NaturalLanguage
 /// `storageVersion` and recomputes them when the version changes or the title or description does (#522).
 struct EventFeatures: Hashable, Sendable, Codable {
     /// Bump when extraction changes; stored records of older versions are recomputed on first use.
-    static let storageVersion = 2
+    static let storageVersion = 3
     /// Dominant language when the recognizer is reasonably sure; nil otherwise.
     var language: String?
     // Who
@@ -33,6 +33,16 @@ struct EventFeatures: Hashable, Sendable, Codable {
     var actLemmas: Set<String> = []
     /// The act the headline leads with, from `actLemmas` (#522). `unknown` never vetoes.
     var actClass: ActClass = .unknown
+    /// Explicit month and day mentions in the headline ("October 21st", "21 October") as "10-21" (#688). Two headlines
+    /// naming disjoint days report different days; the day's digits are not headline figures.
+    var calendarDays: Set<String> = []
+    /// The headline's text before its first "|", ":" or "—", normalized: a publisher's series name ("Latest news
+    /// bulletin", "9to5Mac Daily") when two headlines of one publisher share it (#688).
+    var series: String?
+    /// Terms the series prefix alone yields; between two items of one publisher's series they are not evidence.
+    var seriesTerms: Set<String> = []
+    /// Edition slots named in the headline ("Morning", "Evening"): two items of one series in different slots differ.
+    var editions: Set<String> = []
 
     var anchors: Set<String> { people.union(organizations).union(places).union(names) }
     /// Places that name a country, canonicalized to a region code (`@US`).
@@ -41,6 +51,25 @@ struct EventFeatures: Hashable, Sendable, Codable {
     var localPlaces: Set<String> { places.filter { !$0.hasPrefix("@") } }
     /// Names that point at one occurrence: people, organizations, local places and untyped names, not countries.
     var specificAnchors: Set<String> { anchors.subtracting(countries) }
+
+    /// The series name's terms when two reports of one publisher share a series prefix (#688); nil for any other pair.
+    static func sharedSeriesTerms(_ a: EventFeatures, _ b: EventFeatures, samePublisher: Bool) -> Set<String>? {
+        samePublisher && a.series != nil && a.series == b.series ? a.seriesTerms.union(b.seriesTerms) : nil
+    }
+
+    /// The features without the given terms: inside one publisher's series its name is no evidence (#688).
+    func without(_ terms: Set<String>) -> EventFeatures {
+        guard !terms.isEmpty else { return self }
+        var copy = self
+        copy.people.subtract(terms)
+        copy.organizations.subtract(terms)
+        copy.places.subtract(terms)
+        copy.names.subtract(terms)
+        copy.keywords.subtract(terms)
+        copy.titleNumbers.subtract(terms)
+        copy.primaryTitleTerms.subtract(terms)
+        return copy
+    }
 }
 
 /// Place names compared as places. Aliases and nationality adjectives resolve to one region code, and country names
@@ -101,10 +130,19 @@ extension EventFeatures {
     private static let weekdayNames: Set<String> = [
         "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
     ]
-    private static let monthNames: Set<String> = [
+    private static let months = [
         "january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november",
         "december",
     ]
+    private static let monthNames = Set(months)
+    /// "October 21", "October 21st", "21 October", "21st of October" (#688).
+    private static let monthDayPattern: NSRegularExpression = {
+        let month = "(" + months.joined(separator: "|") + ")"
+        let day = #"(\d{1,2})(?:st|nd|rd|th)?"#
+        let pattern = #"\b(?:"# + month + #"\s+"# + day + "|" + day + #"\s+(?:of\s+)?"# + month + #")\b"#
+        return (try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive])) ?? NSRegularExpression()
+    }()
+    private static let editionWords: Set<String> = ["morning", "midday", "afternoon", "evening", "night", "overnight"]
     private static let numberWords: [String: String] = [
         "one": "1", "two": "2", "three": "3", "four": "4", "five": "5", "six": "6", "seven": "7", "eight": "8",
         "nine": "9", "ten": "10", "eleven": "11", "twelve": "12", "dozen": "12", "twenty": "20", "hundred": "100",
@@ -435,6 +473,22 @@ extension EventFeatures {
         let tollNumbers = Self.tolls(in: title.lowercased()).intersection(collector.features.titleNumbers)
         collector.features.titleNumbers.subtract(tollNumbers)
         collector.features.tollNumbers = tollNumbers
+        // A date names the day, not a figure (#688): "October 21" and "October 22" conflict as days.
+        let days = Self.calendarDays(in: title)
+        collector.features.calendarDays = Set(days.map(\.token))
+        collector.features.titleNumbers.subtract(days.map(\.digits))
+        collector.features.primaryTitleTerms.subtract(days.map(\.digits))
+        collector.features.editions = Set(title.lowercased().split(whereSeparator: { !$0.isLetter }).map(String.init))
+            .intersection(Self.editionWords)
+        if let cut = title.firstIndex(where: { "|:—".contains($0) }),
+            title[title.index(after: cut)...].contains(where: { $0.isLetter || $0.isNumber }),
+            case let prefix = String(title[..<cut]), !Self.normalized(prefix).isEmpty
+        {
+            // The prefix has no separator of its own, so its features have no series.
+            let terms = EventFeatures(title: prefix, description: "", date: date)
+            collector.features.series = Self.normalized(prefix)
+            collector.features.seriesTerms = terms.anchors.union(terms.keywords).union(terms.titleNumbers)
+        }
         // "Three dead after mall shooting": a primary clause that only counts consequences names no act of its own,
         // so it cannot separate the report from coverage that leads with the shooting itself.
         if collector.features.primaryTitleTerms.allSatisfy({
@@ -464,6 +518,17 @@ extension EventFeatures {
             + numberWordPattern + #")\b"#)
     private static let numberWordPattern =
         "one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|dozen|twenty|hundred"
+
+    /// Explicit month-and-day mentions of a headline as "month-day" tokens, with the day's digits as written (#688).
+    private static func calendarDays(in title: String) -> [(token: String, digits: String)] {
+        monthDayPattern.matches(in: title, range: NSRange(title.startIndex..., in: title)).compactMap { match in
+            func group(_ index: Int) -> String? { Range(match.range(at: index), in: title).map { String(title[$0]) } }
+            guard let month = (group(1) ?? group(4)).flatMap({ months.firstIndex(of: $0.lowercased()) }),
+                let digits = group(2) ?? group(3), let day = Int(digits), (1...31).contains(day)
+            else { return nil }
+            return ("\(month + 1)-\(day)", digits)
+        }
+    }
 
     /// Numbers that count casualties in a headline: "kills at least 30", "30 people killed", "toll rises to 33".
     static func tolls(in title: String) -> Set<String> {
@@ -543,8 +608,8 @@ struct EventMatchPolicy: Sendable, Equatable {
 
 /// Facts that rule a pair out regardless of how similar the rest of the text is.
 enum EventConflict: String, Sendable, Equatable {
-    case language, unknownDate, timeGap, period, year, weekday, differentAct, titleNumbers, places, excluded,
-        semanticDivergence
+    case language, unknownDate, timeGap, period, year, weekday, calendarDay, edition, differentAct, titleNumbers,
+        places, excluded, semanticDivergence
 }
 
 struct EventPairAssessment: Sendable, Equatable {
@@ -570,10 +635,10 @@ struct EventPairAssessment: Sendable, Equatable {
 enum EventMatcher {
     /// Bump when matching changes, a retrained pair model included; recent articles and active memberships are
     /// revalidated. Unchanged archived memberships remain intact.
-    static let version = 12
+    static let version = 13
 
     private static func pairConflict(
-        _ a: EventFeatures, _ b: EventFeatures, gap: TimeInterval, maximumTimeGap: TimeInterval
+        _ a: EventFeatures, _ b: EventFeatures, gap: TimeInterval, maximumTimeGap: TimeInterval, sameSeries: Bool
     ) -> EventConflict? {
         func disjoint(_ lhs: Set<String>, _ rhs: Set<String>) -> Bool {
             !lhs.isEmpty && !rhs.isEmpty && lhs.isDisjoint(with: rhs)
@@ -589,6 +654,9 @@ enum EventMatcher {
         if disjoint(a.periods, b.periods) { return .period }
         if disjoint(a.years, b.years) { return .year }
         if disjoint(a.weekdays, b.weekdays) { return .weekday }
+        if disjoint(a.calendarDays, b.calendarDays) { return .calendarDay }
+        // Morning and evening bulletins of one series are two items however alike their template reads (#688).
+        if sameSeries && disjoint(a.editions, b.editions) { return .edition }
         if disjoint(a.titleNumbers, b.titleNumbers) { return .titleNumbers }
         // Three shared specific names outweigh one place the tagger mistyped ("Bellingham" as a place, #580).
         if !sharesPlace && a.specificAnchors.intersection(b.specificAnchors).count < 3
@@ -611,10 +679,15 @@ enum EventMatcher {
     /// Who, what, where and when for one pair. Headline similarity alone never passes: a match needs
     /// a shared name or place, shared action terms, closeness in time and no contradicting facts.
     /// When available, neural sentence embeddings (#127, #307) veto semantic divergence and rescue paraphrased matches.
+    /// Two items of one publisher's series (`samePublisher` and the same `series`) do not share the series name's terms
+    /// as evidence, and differ when they name different edition slots (#688).
     static func assess(
         _ a: EventFeatures, _ b: EventFeatures, policy: EventMatchPolicy = .standard,
-        embeddingSimilarity: Double? = nil
+        embeddingSimilarity: Double? = nil, samePublisher: Bool = false
     ) -> EventPairAssessment {
+        let template = EventFeatures.sharedSeriesTerms(a, b, samePublisher: samePublisher)
+        let sameSeries = template != nil
+        let (a, b) = (a.without(template ?? []), b.without(template ?? []))
         let neuralEligible = usesNeuralPaths(a, b)
         let embeddingSimilarity = neuralEligible ? embeddingSimilarity : nil
         let gap = abs(a.date.timeIntervalSince(b.date))
@@ -627,7 +700,7 @@ enum EventMatcher {
         let time = gap <= policy.fullTimeCredit ? 1.0 : max(0.0, 1.0 - (gap - policy.fullTimeCredit) / timeSpan)
         let score = 0.4 * what + 0.4 * entity + 0.2 * time
 
-        var conflict = pairConflict(a, b, gap: gap, maximumTimeGap: policy.maximumTimeGap)
+        var conflict = pairConflict(a, b, gap: gap, maximumTimeGap: policy.maximumTimeGap, sameSeries: sameSeries)
         let sharedSpecific = a.specificAnchors.intersection(b.specificAnchors).union(crossSpecific).count
         let sharedEvidence =
             sharedKeywords
