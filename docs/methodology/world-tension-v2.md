@@ -1,5 +1,7 @@
 # World Tension v2 — on-device headline assessment
 
+Version 3 ([world-tension-v3.md](world-tension-v3.md)) blends the day's assessment below with the week's history for the reading the sheet shows; the assessment itself is unchanged.
+
 v2 replaces the displayed v1 formula with an AI judgment of global stability from current international headlines. The AI chooses a 0–100 reading through reasoning; factor scores are not multiplied or summed. Bands are Zen (0–19), Mild (20–39), Warm (40–59), Hot (60–79) and Boiling (80–100). These labels describe an interpretation of the supplied news, not a measured probability of catastrophe.
 
 ## Evidence and factors
@@ -21,7 +23,7 @@ Grounding is deterministic: every figure in the lead, summary and rationales mus
 
 ## Policy, caching and history
 
-AI and panel collection must be enabled before any cache is read. Low Power Mode and thermal pressure defer assessment. When the on-device model cannot run or its drafts fail validation and no assessment exists for the current UTC day, the sheet shows a keyword estimate: fixed weights on the v1 deterministic cues of the current headlines, halved so a typical day of conflict reports reads Warm rather than Hot, labelled as an estimate and never as AI, and never saved. When an accepted assessment exists for the day, it stays and the failure is reported beside it.
+AI and panel collection must be enabled before any cache is read. Low Power Mode and thermal pressure defer assessment. When the on-device model cannot run or its drafts fail validation and no assessment exists for the current UTC day, the sheet shows a keyword estimate: the day's unique panel events, classified by the v1 deterministic cues in their headlines and passages and scored with the calibrated v1 weights (type, reported deaths and harm, escalation, reporting breadth) exactly as the v1 history is scored, labelled as an estimate and never as AI, and never saved. When an accepted assessment exists for the day, it stays and the failure is reported beside it.
 
 Inputs, UTC day and macOS model generation identify cached assessments. Concurrent identical requests share generation; cancelled callers do not publish or persist their answer. Reassess bypasses the completed cache. All processing uses the existing on-device model seam, fresh sessions and greedy sampling; nothing is sent to cloud AI.
 
