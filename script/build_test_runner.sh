@@ -103,6 +103,7 @@ swiftc "${NEWS_DEPENDENCY_FLAGS[@]}" "$@" -target "$(uname -m)-apple-macos${TARG
     Sources/App/NewsSignposts.swift \
     Sources/App/UpdateChecker.swift \
     Tests/StoryCorpus.swift \
+    Tests/ImportanceAudit.swift \
     Tests/EventEmbeddingTests.swift \
     "$TEST_STAGE/NewsTests.swift" Tests/FeedKitSwiftSoupTests.swift Tests/NotificationAttachmentTests.swift "$TEST_STAGE/Runner.swift" \
     Tests/TestDefaults.swift \
