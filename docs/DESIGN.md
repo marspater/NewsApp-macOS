@@ -139,7 +139,25 @@ A single click on the card opens the event overview, with the lead report one mo
 
 ### 8.4 Briefing
 
-Briefing is a situation board, not a second Today list (decision of 24 October 2026): a hero carousel of the day's most covered stories with their images, a World Tension strip with its drivers, then dense story tiles with one cited key fact and a publisher count, grouped by region or topic. Its tokens, tile anatomy, copy and the carousel rules (the only auto-advancing motion in the app) are specified by #604 once the mock from #603 is approved, and replace this paragraph. Already decided and binding for the mock: the carousel shows the three to five most covered stories, rotates about every 45 s with a slow cross-fade, pauses on hover and focus, offers arrows and dots, shows only the first story under Reduce Motion and never runs while a story is open; a tile's key fact is cited from the overview highlights, its image comes from any report (section 8.2) and one click opens it. Until then the Briefing list uses the story card and the rules of this section, and nothing in it auto-advances.
+Briefing is a situation board presenting the day's essential intelligence, selected once daily at the configured edition hour (default 7:00 AM) and frozen across all windows until the next edition or explicit New Briefing. It is composed of three primary zones: a top hero carousel, a World Tension executive strip, and categorized dense story tiles.
+
+| Component | Hierarchy & Tokens | Anatomy & Invariants |
+| --- | --- | --- |
+| Hero carousel | `AppLayout.leadStoryHeight` (360 pt), `AppRadius.card` (12 pt), `AppColor.leadScrim` | Top 3–5 stories ranked by publisher coverage count (`sourceCount` descending). Displays lead image via `bestCardImage` across all member reports. Overlay contains publisher `EyebrowText`, headline in `AppTypography.leadStoryHeadline` (28 pt serif), publisher count `TagView`, timestamp in `caption`, and `UnreadDot`. Left/Right arrow controls and bottom dot indicators. |
+| World Tension strip | `AppColor.surface`, `AppRadius.card`, `AppSpacing.md` (16 pt) inner padding | Top row: current reading in `AppTypography.tensionReading` (44 pt bold rounded), degree symbol, level name with colored dot (`AppColor.tension(level)`), and a 7-day sparkline trend chart (`LineMark`, Catmull-Rom interpolation). Bottom row: three driving headlines (`reading.drivingHeadlines.prefix(3)`) in a 3-column grid with publisher eyebrow and headline. |
+| Dense story tiles | `AppColor.surface`, `AppRadius.card`, hairline border, resting shadow | Up to 10 stories grouped by region or topic with `AppTypography.sectionTitle` headers. Tile anatomy: publisher eyebrow, timestamp, unread dot; headline in `AppTypography.headline` (unread in `primaryText`, read in `secondaryText`); one deterministic key fact cited from event overview highlights with publisher badge; footer coverage count tag and bookmark glyph. Single click opens the story. |
+| Completion banner | `AppSpacing.lg` padding, centered | Title in `AppTypography.sectionTitle` ("Briefing complete" or "N of 10 stories read"), subtitle in `caption` with edition selection time and next edition arrival time, and "Back to Today" button. |
+
+**Carousel Motion Rules**:
+- The hero carousel is the **only auto-advancing motion permitted in the app**.
+- Rotates to the next slide every **45 seconds** using a slow cross-fade transition (`AppMotion.state`, duration ~0.6 s).
+- Auto-advance **pauses immediately on pointer hover** and **on keyboard focus**. It resumes when hover and focus clear.
+- Auto-advance **never runs while a story is open** in the reader or a modal sheet.
+- Under **Reduce Motion** (`effectiveReduceMotion == true`), the timer is completely stopped, cross-fade animation is disabled (`nil`), and only the first story is displayed statically. Manual arrow and dot controls remain interactive.
+
+**Empty and Completed State Copy**:
+- When no unread, unmuted stories exist in the 24 h window, Briefing renders `ContentUnavailableView`: symbol `"text.book.closed"`, title "No Stories for This Briefing", description "There are no unread, unmuted stories published in the last 24 hours. Your archive and normal feed remain available.", and "Refresh Feeds" action.
+- Completed state copy: "Briefing complete", subtitle "Briefing selected at [time]. The next briefing arrives at [time]. New stories stay in Today."
 
 ### 8.5 States
 
@@ -222,7 +240,7 @@ macOS has no Dynamic Type. Chrome uses system text styles so it matches system c
 - Use `AppMotion` (hover, state, navigation) or the system's own animation. Every explicit animation is `nil` when `effectiveReduceMotion` is true; symbol effects stop too.
 - Animate state the person caused (expand, save, mode switch, applying queued updates). Never animate content arriving from a refresh while the person is reading.
 - Launch is one settle transition: the cached snapshot appears with `AppMotion.navigation` once its first page and that page's card images are ready (`nil` under Reduce Motion), and nothing moves again until the person acts. No per-card pop-in and no progress animation over the list; fetching, clustering and image lookup start after that first frame.
-- Glass morphs only between related controls in one container. No parallax, auto-playing motion, confetti or attention-seeking pulses; a card never cycles through an event's images on hover. The Briefing hero carousel is the one planned exception: section 8.4 (#604) defines it, and nothing else auto-advances.
+- Glass morphs only between related controls in one container. No parallax, auto-playing motion, confetti or attention-seeking pulses; a card never cycles through an event's images on hover. The Briefing hero carousel is the one permitted auto-advancing motion in the app: it rotates top stories every 45 s with a slow cross-fade, pauses on hover and keyboard focus, halts completely while any story is open, and disables rotation under Reduce Motion (displaying the first story only, per section 8.4). Nothing else auto-advances.
 
 ## 14. Symbols and menus
 

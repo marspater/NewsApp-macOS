@@ -13,6 +13,10 @@ elif xcrun --find swift-format >/dev/null 2>&1; then
 elif command -v swift >/dev/null 2>&1; then
     SWIFT_FORMAT="swift format"
 else
+    if [[ -n "${CI:-}" ]]; then
+        echo "❌ swift-format not found; refusing to pass the format check without a toolchain." >&2
+        exit 1
+    fi
     echo "⚠️ swift-format not found in PATH or Xcode toolchain. Skipping format." >&2
     exit 0
 fi
@@ -68,16 +72,13 @@ case "$MODE" in
         ;;
     --all)
         echo "🎨 Formatting all Swift files in Sources and Tests..."
-        find Sources Tests -name "*.swift" | sort | while IFS= read -r file; do
-            run_format_file "$file"
-        done
+        # One process across all cores; one swift-format launch per file took several times longer.
+        $SWIFT_FORMAT format -i --parallel -r "${CONFIG_ARG[@]}" Sources Tests
         echo "✅ Finished formatting all Swift files."
         ;;
     --check|--lint-all)
         echo "🔍 Linting all Swift files in Sources and Tests..."
-        find Sources Tests -name "*.swift" | sort | while IFS= read -r file; do
-            run_lint_file "$file"
-        done
+        $SWIFT_FORMAT lint -s --parallel -r "${CONFIG_ARG[@]}" Sources Tests
         echo "✅ All Swift files pass formatting lint."
         ;;
     "")
