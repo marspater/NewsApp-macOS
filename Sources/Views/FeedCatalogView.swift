@@ -59,15 +59,16 @@ struct FeedCatalogView: View {
             .padding(.top, AppLayout.pageInset)
             .padding(.bottom, AppSpacing.xs)
 
-            // Topic filter: the system segmented control carries the selected state for VoiceOver.
+            // Nine topics do not fit a segmented control; a menu reaches every one by pointer and keyboard (#600).
             Picker("Topic", selection: $selectedSet) {
                 Text("All Topics").tag(CatalogSet?.none)
-                ForEach(CatalogSet.offered) { set in
-                    Text(set.title).tag(CatalogSet?.some(set))
+                ForEach(CatalogSet.offered) { topicSet in
+                    Text(topicSet.title).tag(CatalogSet?.some(topicSet))
                 }
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
+            .pickerStyle(.menu)
+            .fixedSize()
+            .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, AppLayout.pageInset)
             .padding(.vertical, AppSpacing.xs)
 
@@ -99,15 +100,15 @@ struct FeedCatalogView: View {
                         }
                     }
 
-                    ForEach(displayedSets) { set in
-                        let feeds = matchingFeeds(in: set)
+                    ForEach(displayedSets) { topicSet in
+                        let feeds = matchingFeeds(in: topicSet)
                         if !feeds.isEmpty {
                             Section {
                                 ForEach(feeds) { feed in
                                     row(feed)
                                 }
                             } header: {
-                                header(for: set, matchingFeeds: feeds)
+                                header(for: topicSet, matchingFeeds: feeds)
                             }
                         }
                     }
@@ -115,10 +116,9 @@ struct FeedCatalogView: View {
                 .listStyle(.inset)
             }
         }
-        .frame(
-            minWidth: AppLayout.catalogSheetMinWidth, idealWidth: AppLayout.catalogSheetIdealWidth,
-            minHeight: AppLayout.catalogSheetMinHeight
-        )
+        // One width while open: suggested topics recomputing after a subscription never resize the sheet.
+        .frame(width: AppLayout.catalogSheetWidth)
+        .frame(minHeight: AppLayout.catalogSheetMinHeight)
         .navigationTitle(Self.navigationTitleText)
         .toolbar(removing: .title)
         .toolbar {

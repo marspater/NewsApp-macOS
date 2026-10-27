@@ -1283,9 +1283,14 @@ final class ContentExtractionPipeline: Sendable {
         candidateParagraphs = Self.withoutFurniture(candidateParagraphs)
         // A feed teaser ends in its own "Read full article" or "Continue reading" link: the page holds more. A whole
         // page ends in its footer, so only short bodies are judged; a stray "Read more" link never re-extracts a page.
+        // A last text block that trails off or closes with "Read the full story at <publisher>" is a teaser whatever
+        // the length (The Verge, #586), so the three-paragraph completeness rule below never overrides it.
         let isTruncated =
             soup.flatMap { try? $0.body()?.text() }.map(DOMElementNode.readerWhitespace).map {
                 $0.count <= 5000 && $0.range(of: Self.truncationPattern, options: .regularExpression) != nil
+            } == true
+            || candidateParagraphs.last(where: { [.paragraph, .quote, .listItem].contains($0.kind) }).map {
+                ReaderDocument.closesAsTeaser($0.text)
             } == true
 
         // Keep media in publisher order, without allowing images to qualify an empty article.
@@ -1469,9 +1474,10 @@ final class ContentExtractionPipeline: Sendable {
         #"(?i)^(?:[\p{Lu}][\p{L}.'’-]+(?: [\p{Lu}][\p{L}.'’-]+){0,3} )?(?:is|has been|was) (?:a |an |the )?(?:[\p{L}-]+ ){0,4}"#
         + #"(?:editor|reporter|writer|correspondent|journalist|columnist|host|co-host|producer|critic|contributor|analyst)\b"#
 
-    /// A feed teaser's closing link ("Read full article", "Continue reading…", optionally followed by "Comments").
+    /// A feed teaser's closing link ("Read full article", "Continue reading…", "Read the full story at The Verge",
+    /// optionally followed by "Comments").
     static let truncationPattern =
-        #"(?i)(?:read (?:the )?full (?:article|story|post)|continue reading|read more)[.…\s]*(?:comments?)?[\s.…]*$"#
+        #"(?i)(?:read (?:the )?full (?:article|story|post)|continue reading|read more)(?: (?:at|on|from) [^.…\n]{1,60})?[.…\s]*(?:comments?)?[\s.…]*$"#
 
     /// Drops page furniture that survives container selection on any publisher: navigation headings
     /// ("Most Popular", "Recommended Stories"), the cards that follow a trailing one, and author bios.
