@@ -377,10 +377,14 @@ struct TensionDayAssessment: Equatable, Sendable {
 
 enum TensionDayAssessor {
     /// Classifies a day's unique events from the stored panel corpus. Articles outside the day or the panel are
-    /// ignored, each event counts once however many outlets reported it, and no score is computed.
-    static func assess(day: DateInterval, rows: [TensionCorpusRow], now: Date, methodology: TensionMethodology = .v1)
-        -> TensionDayAssessment
-    {
+    /// ignored, each event counts once however many outlets reported it, and no score is computed. With
+    /// `includingHeadlines`, each article's headline is read as a fact of its own beside the passages: the keyword
+    /// estimate (#544) reads it because a feed teaser often carries the cue only in its headline; the history keeps
+    /// to passages as the methodology documents.
+    static func assess(
+        day: DateInterval, rows: [TensionCorpusRow], now: Date, methodology: TensionMethodology = .v1,
+        includingHeadlines: Bool = false
+    ) -> TensionDayAssessment {
         let rows = rows.filter {
             methodology.member(feedURL: $0.feedURL) != nil && $0.article.pubDate >= day.start
                 && $0.article.pubDate < day.end
@@ -398,7 +402,14 @@ enum TensionDayAssessor {
                 }
                 articles.sort { $0.id < $1.id }
                 let passages = articles.flatMap { selector.extractRankedPassages(from: $0) }
-                let facts = PassageFactExtractor.deterministicExtract(passages: passages)
+                let headlines =
+                    includingHeadlines
+                    ? articles.map {
+                        PassageAnchoredFact(
+                            id: "headline:" + $0.id, statement: $0.title, passageID: "headline", quote: $0.title,
+                            articleID: $0.id)
+                    } : []
+                let facts = headlines + PassageFactExtractor.deterministicExtract(passages: passages)
                 let reporting = methodology.panel.filter { member in members.contains { $0.feedURL == member.url } }
                 events.append(
                     TensionEventDay(
