@@ -61,34 +61,34 @@ struct EventOverviewReaderView: View {
     @State private var isSourcesExpanded = Self.sourcesExpandedThisSession
 
     // MARK: - Layout Metrics & Bounds
-    static let horizontalPageInset = AppLayout.pageInset
+    nonisolated static let horizontalPageInset = AppLayout.pageInset
 
-    static func readingColumnMaxWidth(for scale: CGFloat) -> CGFloat {
+    nonisolated static func readingColumnMaxWidth(for scale: CGFloat) -> CGFloat {
         AppLayout.readingColumnMaxWidth(for: scale)
     }
 
     // MARK: - Contrast & Color Scalers
-    static func borderStrokeColor(for contrast: ColorSchemeContrast) -> Color {
+    nonisolated static func borderStrokeColor(for contrast: ColorSchemeContrast) -> Color {
         AppColor.border(for: contrast)
     }
 
-    static func dividerOpacity(for contrast: ColorSchemeContrast) -> Double {
+    nonisolated static func dividerOpacity(for contrast: ColorSchemeContrast) -> Double {
         contrast == .increased ? 0.60 : 0.20
     }
 
-    static func pillBorderOpacity(for contrast: ColorSchemeContrast) -> Double {
+    nonisolated static func pillBorderOpacity(for contrast: ColorSchemeContrast) -> Double {
         contrast == .increased ? 0.60 : 0.0
     }
 
-    static func pillBackgroundOpacity(for contrast: ColorSchemeContrast) -> Double {
+    nonisolated static func pillBackgroundOpacity(for contrast: ColorSchemeContrast) -> Double {
         contrast == .increased ? 0.22 : 0.12
     }
 
-    static func secondaryTextColor(for contrast: ColorSchemeContrast) -> Color {
+    nonisolated static func secondaryTextColor(for contrast: ColorSchemeContrast) -> Color {
         contrast == .increased ? AppColor.primaryText : AppColor.secondaryText
     }
 
-    static func tertiaryTextColor(for contrast: ColorSchemeContrast) -> Color {
+    nonisolated static func tertiaryTextColor(for contrast: ColorSchemeContrast) -> Color {
         AppColor.tertiaryText(for: contrast)
     }
 
@@ -105,7 +105,7 @@ struct EventOverviewReaderView: View {
     }
 
     // MARK: - Animation Policy
-    static func readerAnimation(reduceMotion: Bool) -> Animation? {
+    nonisolated static func readerAnimation(reduceMotion: Bool) -> Animation? {
         reduceMotion ? nil : AppMotion.navigation
     }
 
@@ -240,7 +240,7 @@ struct EventOverviewReaderView: View {
     }
 
     // MARK: - VoiceOver Accessibility Labels
-    static func headerMetadataAccessibilityLabel(
+    nonisolated static func headerMetadataAccessibilityLabel(
         formattedUpdateTime: String,
         articleCountText: String,
         publisherCountText: String
@@ -248,7 +248,7 @@ struct EventOverviewReaderView: View {
         "Updated \(formattedUpdateTime), \(articleCountText), \(publisherCountText)"
     }
 
-    static func leadImageAccessibilityLabel(_ leadImage: OverviewLeadImage) -> String {
+    nonisolated static func leadImageAccessibilityLabel(_ leadImage: OverviewLeadImage) -> String {
         let caption = leadImage.caption?.trimmingCharacters(in: .whitespacesAndNewlines)
         let credit = leadImage.credit?.trimmingCharacters(in: .whitespacesAndNewlines)
         var parts: [String] = []
@@ -263,19 +263,19 @@ struct EventOverviewReaderView: View {
         return parts.joined(separator: ". ")
     }
 
-    static func citationAccessibilityLabel(sourceName: String, quote: String) -> String {
+    nonisolated static func citationAccessibilityLabel(sourceName: String, quote: String) -> String {
         "Citation from \(sourceName): \(quote)"
     }
 
-    static func readArticleAccessibilityLabel(title: String, source: String) -> String {
+    nonisolated static func readArticleAccessibilityLabel(title: String, source: String) -> String {
         "Read \(title) from \(source) in Source publication mode"
     }
 
-    static func openWebArticleAccessibilityLabel(title: String, source: String) -> String {
+    nonisolated static func openWebArticleAccessibilityLabel(title: String, source: String) -> String {
         "Open original publication: \(title) on \(source)"
     }
 
-    static func highlightAccessibilityLabel(
+    nonisolated static func highlightAccessibilityLabel(
         takeaway: String, publisher: String?, citations: [OverviewCitation] = []
     ) -> String {
         let trimmed = takeaway.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -290,7 +290,7 @@ struct EventOverviewReaderView: View {
         return trimmed
     }
 
-    static func perspectiveAccessibilityLabel(
+    nonisolated static func perspectiveAccessibilityLabel(
         participant: String, position: String, source: String?, citations: [OverviewCitation] = []
     ) -> String {
         let pPart = participant.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -308,7 +308,7 @@ struct EventOverviewReaderView: View {
         return parts.joined(separator: ". ")
     }
 
-    static func industryImpactAccessibilityLabel(
+    nonisolated static func industryImpactAccessibilityLabel(
         industry: String, implication: String, citations: [OverviewCitation] = []
     ) -> String {
         let trimmed = implication.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -320,7 +320,7 @@ struct EventOverviewReaderView: View {
         return "\(industry): \(trimmed)"
     }
 
-    static func formatPerspectiveSource(wire: String?, publisher: String?) -> String? {
+    nonisolated static func formatPerspectiveSource(wire: String?, publisher: String?) -> String? {
         if let wire = wire?.trimmingCharacters(in: .whitespacesAndNewlines), !wire.isEmpty {
             let cleanWire = wire.hasPrefix("via ") ? String(wire.dropFirst(4)) : wire
             return "via \(cleanWire) syndicate"
@@ -332,7 +332,7 @@ struct EventOverviewReaderView: View {
         return nil
     }
 
-    static func timelineItemAccessibilityLabel(
+    nonisolated static func timelineItemAccessibilityLabel(
         item: OverviewTimelineItem, citations: [OverviewCitation] = []
     ) -> String {
         var parts: [String] = []
@@ -340,7 +340,7 @@ struct EventOverviewReaderView: View {
         if !item.dateText.isEmpty {
             displayDate = item.dateText
         } else if let pubDate = item.publicationDate {
-            displayDate = timelineDateFormatter.string(from: pubDate)
+            displayDate = pubDate.formatted(date: .abbreviated, time: .omitted)
         } else {
             displayDate = ""
         }
@@ -389,25 +389,12 @@ struct EventOverviewReaderView: View {
         return list
     }
 
-    private static let relativeFormatter: RelativeDateTimeFormatter = {
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .full
-        return formatter
-    }()
-
-    private static let timelineDateFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.dateStyle = .medium
-        formatter.timeStyle = .none
-        return formatter
-    }()
-
     private var formattedUpdateTime: String {
-        Self.relativeFormatter.localizedString(for: overview.updatedAt, relativeTo: Date())
+        overview.updatedAt.formatted(.relative(presentation: .numeric))
     }
 
     private func formatTimelineDate(_ date: Date) -> String {
-        Self.timelineDateFormatter.string(from: date)
+        date.formatted(date: .abbreviated, time: .omitted)
     }
 
     private var articleCountText: String {
@@ -589,16 +576,17 @@ struct EventOverviewReaderView: View {
     }
 
     /// The 1-based number of the member article a citation comes from, as listed under Sources.
-    static func sourceIndex(for citation: OverviewCitation, in memberArticles: [FeedArticle]) -> Int? {
+    nonisolated static func sourceIndex(for citation: OverviewCitation, in memberArticles: [FeedArticle]) -> Int? {
         if let match = matchingArticle(for: citation, in: memberArticles),
             let idx = memberArticles.firstIndex(where: { $0.id == match.id })
         {
             return idx + 1
         }
-        if let pub = citation.sourceName,
+        if let pub = citation.sourceName?.trimmingCharacters(in: .whitespacesAndNewlines), !pub.isEmpty,
             let idx = memberArticles.firstIndex(where: {
                 $0.publisherName.localizedCaseInsensitiveContains(pub)
                     || pub.localizedCaseInsensitiveContains($0.publisherName)
+                    || $0.source.localizedCaseInsensitiveContains(pub)
             })
         {
             return idx + 1
@@ -608,7 +596,7 @@ struct EventOverviewReaderView: View {
 
     /// Each cited source number once, in source order, paired with the item's first citation from that source,
     /// so a superscript opens its own source's passage.
-    static func citedSources(
+    nonisolated static func citedSources(
         _ citationIDs: [String], citations: [String: OverviewCitation], memberArticles: [FeedArticle]
     ) -> [(index: Int, citation: OverviewCitation)] {
         var seen = Set<Int>()
@@ -734,7 +722,9 @@ struct EventOverviewReaderView: View {
     /// Opens the source a `news-citation://<index>` link names; every other link keeps the system behaviour.
     private func citationOpenURLAction(_ sources: [(index: Int, citation: OverviewCitation)]) -> OpenURLAction {
         OpenURLAction { url in
-            guard url.scheme == Self.citationScheme, let index = url.host.flatMap({ Int($0) }),
+            guard url.scheme == Self.citationScheme,
+                let index = url.host.flatMap(Int.init)
+                    ?? Int(url.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))),
                 let source = sources.first(where: { $0.index == index })
             else { return .systemAction }
             onSelectCitation(source.citation, matchingArticle(for: source.citation))
@@ -750,10 +740,10 @@ struct EventOverviewReaderView: View {
         }
     }
 
-    static let citationScheme = "news-citation"
+    nonisolated static let citationScheme = "news-citation"
 
     /// The sentence followed by its source numbers as accent superscripts linking to `news-citation://<index>`.
-    static func citedAttributedString(_ text: String, sources: [Int], scale: CGFloat) -> AttributedString {
+    nonisolated static func citedAttributedString(_ text: String, sources: [Int], scale: CGFloat) -> AttributedString {
         var result = AttributedString(text)
         for index in sources {
             var mark = AttributedString("[\(index)]")

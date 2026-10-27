@@ -136,7 +136,7 @@ struct OverviewIndustryImpactExtractor: Sendable {
         for industry in StandardIndustry.allCases {
             allCues.append(contentsOf: industry.cues)
         }
-        for cue in allCues where cue.contains(" ") {
+        for cue in allCues where cue.contains(" ") || cue.contains("-") {
             if dict[cue] == nil,
                 let regex = try? NSRegularExpression(
                     pattern: "\\b\(NSRegularExpression.escapedPattern(for: cue))\\b",
@@ -171,6 +171,14 @@ struct OverviewIndustryImpactExtractor: Sendable {
         var coveredIndustries = Set<StandardIndustry>()
         let articlesByID = Dictionary(articles.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
 
+        // Pre-compute exclude token sets once to avoid redundant allocations in candidate loops
+        let excludeStrings = Set(
+            excludeSentences.map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() })
+        let excludeWordsList = excludeStrings.compactMap { ex -> Set<String>? in
+            let w = wordsSet(from: ex)
+            return w.isEmpty ? nil : w
+        }
+
         // Build mapping from passage ID to citation
         var passageToCitation: [String: OverviewCitation] = [:]
         for citation in existingCitations.values {
@@ -193,7 +201,14 @@ struct OverviewIndustryImpactExtractor: Sendable {
 
             let sentences = extractCandidateSentences(from: passage.text)
             for sentence in sentences {
-                guard isEligibleSentence(sentence, article: article, excludeSentences: excludeSentences) else {
+                guard
+                    isEligibleSentence(
+                        sentence,
+                        article: article,
+                        excludeStrings: excludeStrings,
+                        excludeWordsList: excludeWordsList
+                    )
+                else {
                     continue
                 }
                 let lower = sentence.lowercased()
@@ -255,20 +270,9 @@ struct OverviewIndustryImpactExtractor: Sendable {
         Set(text.components(separatedBy: CharacterSet.alphanumerics.inverted).filter { !$0.isEmpty })
     }
 
-    /// Matches a cue either as a distinct word in the word set (single-word cue) or as a bounded phrase.
+    /// Matches a cue either via precompiled regex (for multi-word or hyphenated cues) or as a distinct word in the word set.
     private static func matchesCue(_ cue: String, in text: String, words: Set<String>) -> Bool {
-        if cue.contains(" ") {
-            if let regex = multiWordRegexes[cue] {
-                return regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)) != nil
-            }
-            guard
-                let regex = try? NSRegularExpression(
-                    pattern: "\\b\(NSRegularExpression.escapedPattern(for: cue))\\b",
-                    options: [.caseInsensitive]
-                )
-            else {
-                return false
-            }
+        if let regex = multiWordRegexes[cue] {
             return regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)) != nil
         } else {
             return words.contains(cue.lowercased())
@@ -321,7 +325,8 @@ struct OverviewIndustryImpactExtractor: Sendable {
     private static func isEligibleSentence(
         _ sentence: String,
         article: FeedArticle,
-        excludeSentences: Set<String>
+        excludeStrings: Set<String>,
+        excludeWordsList: [Set<String>]
     ) -> Bool {
         if isSportsContent(article: article, sentence: sentence) {
             return false
@@ -335,13 +340,15 @@ struct OverviewIndustryImpactExtractor: Sendable {
         }
 
         let lower = sentence.lowercased()
+        if excludeStrings.contains(lower) {
+            return false
+        }
+
         let words = wordsSet(from: lower)
         guard hasImplication(text: lower, words: words) else { return false }
-
         guard !words.isEmpty else { return false }
 
-        for excluded in excludeSentences {
-            let excludedWords = wordsSet(from: excluded.lowercased())
+        for excludedWords in excludeWordsList {
             let union = words.union(excludedWords).count
             if union > 0 {
                 let overlap = Double(words.intersection(excludedWords).count) / Double(union)

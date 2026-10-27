@@ -223,7 +223,11 @@ struct ArticleDetailView: View {
                                     let article = try await articleStore.database.fetchArticles(
                                         limit: 1, id: related.articleID
                                     ).first
-                                else { return }
+                                else {
+                                    articleStore.operationError = "This story is no longer available in your archive."
+                                    return
+                                }
+                                guard !Task.isCancelled else { return }
                                 // The same sequence as moving to the next story; the earlier event opens on its overview.
                                 resetReaderState()
                                 currentOverview = nil
@@ -243,6 +247,7 @@ struct ArticleDetailView: View {
                             guard await articleStore.includeEvent(related.eventID, inEvent: overview.eventID) else {
                                 return
                             }
+                            guard !Task.isCancelled else { return }
                             relatedStories = nil
                             await loadEventOverviewForActiveArticle()
                         }

@@ -862,5 +862,78 @@ struct EventOverviewAccessibilityTests {
             dedupedNoExclusion.count, extractedFromDuplicates.items.count,
             "Empty exclusion array retains all impact items"
         )
+
+        // 8. Hyphenated cue matching: e-commerce in Retail & E-commerce sector
+        let ecommerceArticle = FeedArticle(
+            storedID: "art_ecom", title: "Retailers see massive delivery demand surge",
+            link: "https://example.com/retail", guid: "g_ecom", description: "",
+            pubDate: Date(), source: "Retail News"
+        )
+        let ecommercePassage = EvidencePassage(
+            id: "pass_ecom", articleID: "art_ecom",
+            text:
+                "Major retailers reported a historic surge in e-commerce orders and widespread delivery shortages across the nation."
+        )
+        let ecommerceExtracted = OverviewIndustryImpactExtractor.extractIndustryImpact(
+            passages: [ecommercePassage],
+            articles: [ecommerceArticle],
+            existingCitations: [:]
+        )
+        assertTrue(
+            ecommerceExtracted.items.contains(where: { $0.industry == "Retail & E-commerce" }),
+            "extractIndustryImpact correctly identifies hyphenated cue 'e-commerce' as Retail & E-commerce"
+        )
+
+        // 9. sourceIndex empty and whitespace string safety
+        let emptyNameCitation = OverviewCitation(
+            id: "cite_empty", articleID: "art_unknown", passageID: "p_unk",
+            passageFingerprint: "fp", quote: "quote",
+            source: OverviewSourceMetadata(title: nil, name: "   ", url: nil, publishedAt: nil)
+        )
+        let emptyIndexMatch = EventOverviewReaderView.sourceIndex(for: emptyNameCitation, in: [ecommerceArticle])
+        assertEqual(emptyIndexMatch, nil, "sourceIndex returns nil for whitespace-only citation source name")
+
+        // 10. Background concurrency for accessibility label functions
+        let bgLabelsSuccess = await Task.detached { () -> Bool in
+            let item = OverviewTimelineItem(
+                id: "t_bg", dateText: "", summary: "Background timeline event", isFuturePlan: false,
+                publicationDate: Date(timeIntervalSince1970: 1_700_000_000)
+            )
+            let tlLabel = EventOverviewReaderView.timelineItemAccessibilityLabel(item: item)
+            let pLabel = EventOverviewReaderView.perspectiveAccessibilityLabel(
+                participant: "Analyst", position: "Cautious outlook", source: "Bloomberg"
+            )
+            let iLabel = EventOverviewReaderView.industryImpactAccessibilityLabel(
+                industry: "Energy", implication: "Costs soar", citations: []
+            )
+            let attr = EventOverviewReaderView.citedAttributedString("Summary fact", sources: [1, 2], scale: 1.0)
+            return !tlLabel.isEmpty && !pLabel.isEmpty && !iLabel.isEmpty && !attr.characters.isEmpty
+        }.value
+        assertTrue(bgLabelsSuccess, "Accessibility and attribution functions are thread-safe and nonisolated")
+
+        // 11. OverviewEvidenceSections serialization & backwards compatibility
+        let testImpact = OverviewIndustryImpact(
+            id: "imp_test", industry: "Energy", implication: "Fuel costs escalated by 20%",
+            citationIDs: ["c1"]
+        )
+        let sectionsWithImpact = OverviewEvidenceSections(industryImpact: [testImpact])
+        assertFalse(sectionsWithImpact.isEmpty, "Evidence sections with industry impact is not empty")
+
+        do {
+            let encoded = try JSONEncoder().encode(sectionsWithImpact)
+            let decoded = try JSONDecoder().decode(OverviewEvidenceSections.self, from: encoded)
+            assertEqual(decoded.industryImpact.count, 1, "Decoded industry impact count matches")
+            assertEqual(decoded.industryImpact.first?.industry, "Energy", "Decoded industry matches")
+            assertEqual(
+                decoded.industryImpact.first?.implication, "Fuel costs escalated by 20%", "Decoded implication matches")
+
+            // Backwards compatibility: decode JSON without industryImpact field
+            let legacyJSON = "{}".data(using: .utf8)!
+            let decodedLegacy = try JSONDecoder().decode(OverviewEvidenceSections.self, from: legacyJSON)
+            assertTrue(decodedLegacy.industryImpact.isEmpty, "Legacy JSON decodes with empty industry impact")
+            assertTrue(decodedLegacy.isEmpty, "Legacy empty JSON decodes as empty evidence sections")
+        } catch {
+            assertTrue(false, "OverviewEvidenceSections JSON serialization threw: \(error)")
+        }
     }
 }
