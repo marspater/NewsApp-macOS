@@ -83,7 +83,6 @@ class FeedManager: NSObject, ObservableObject {
             await NotificationService.shared.triageAndNotify(newArticles: articles, mode: mode)
         },
         enrichmentQueue: EnrichmentQueue? = nil,
-        importanceJudge _: StoryImportanceJudge = .unavailable,
         imageFinder: StoryImageFinder = .publisherPages,
         allowsBackgroundWork: @escaping @MainActor () -> Bool = { IntelligencePolicy.allowsEnergy() },
         powerEvents: NotificationCenter? = nil,
@@ -636,7 +635,7 @@ class FeedManager: NSObject, ObservableObject {
             defer { self?.logger.info("Story image lookup finished") }
             let work = Task.detached(priority: .utility) {
                 try await StoryCurator.run(
-                    in: database, judge: .unavailable, imageFinder: finder, muting: muting,
+                    in: database, imageFinder: finder, muting: muting,
                     keepingFeedURLs: retained)
             }
             let result = await withTaskCancellationHandler {
