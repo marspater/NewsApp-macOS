@@ -34,18 +34,20 @@ struct EventCardView: View {
     var body: some View {
         ArticleCardView(
             article: representative, isSelected: isSelected, compact: compact,
-            imageFallbacks: visibleMembers.filter { $0.id != representative.id },
+            imageFallbacks: (needsHiddenMemberImage ? members : visibleMembers).filter { $0.id != representative.id },
             isLead: isLead, action: openRepresentative, footer: coverage
         )
         .task(id: "\(summary.eventID):\(summary.membershipVersion):\(isExpanded):\(loadAttempt)") {
-            // Collapsed cards already have the visible page's image candidates. Fetch full coverage only on demand.
-            guard isExpanded else { return }
+            // Collapsed cards use the visible page's image candidates and fetch full coverage only on demand, or when
+            // none of them has an image and the event has members hidden from lists (World Tension panel feeds, #595).
+            guard isExpanded || needsHiddenMemberImage else { return }
             do {
                 let loaded = try await articleStore.eventMemberArticles(eventID: summary.eventID)
                 try Task.checkCancellation()
                 members = loaded
                 hasLoaded = true
                 loadFailed = false
+                guard isExpanded else { return }
                 // Optional: a failed or slow lookup only leaves the submenu out.
                 let related = (try? await articleStore.relatedStoryEvents(eventID: summary.eventID)) ?? []
                 if !Task.isCancelled { relatedEvents = related }
@@ -53,6 +55,11 @@ struct EventCardView: View {
                 if !Task.isCancelled { loadFailed = true }
             }
         }
+    }
+
+    private var needsHiddenMemberImage: Bool {
+        summary.members.count > visibleMembers.count
+            && FeedArticle.bestCardImage(in: [representative] + visibleMembers) == nil
     }
 
     // MARK: - Coverage
