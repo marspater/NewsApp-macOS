@@ -212,12 +212,17 @@ actor DatabaseEngine {
                     title TEXT NOT NULL,
                     score REAL NOT NULL,
                     lead_key TEXT NOT NULL,
-                    queued_at REAL NOT NULL
+                    queued_at REAL NOT NULL,
+                    story_id TEXT NOT NULL DEFAULT ''
                 );
                 """
             )
             if try !columnNames(of: "event_notifications").contains("lane") {
                 try executeSimple("ALTER TABLE event_notifications ADD COLUMN lane INTEGER NOT NULL DEFAULT 0;")
+            }
+            if try !columnNames(of: "notification_priority_queue").contains("story_id") {
+                try executeSimple(
+                    "ALTER TABLE notification_priority_queue ADD COLUMN story_id TEXT NOT NULL DEFAULT '';")
             }
             // Ensure article_embeddings table exists on all databases (including pre-existing v21 databases) (#127, #307)
             try executeSimple(
@@ -3257,6 +3262,7 @@ actor DatabaseEngine {
         try eventRows(
             "UPDATE notification_priority_queue SET queued_at = ? WHERE queued_at > ?;", [.real(clock), .real(clock)])
         try eventRows("DELETE FROM notification_priority_queue WHERE queued_at < ?;", [.real(clock - 86400)])
+        try foldMergedNotifications(since: clock - 86400)
         func count(_ sql: String, since: TimeInterval) throws -> Int {
             let value = try eventRows(sql, [.real(clock - since)]).first?.first ?? nil
             return value.flatMap { Int($0) } ?? 0
@@ -3287,13 +3293,60 @@ actor DatabaseEngine {
             }
         }
         ledger.priorityQueue = try eventRows(
-            "SELECT event_id, title, score, lead_key FROM notification_priority_queue ORDER BY score DESC;"
+            "SELECT event_id, title, score, lead_key, story_id FROM notification_priority_queue ORDER BY score DESC;"
         ).compactMap { row in
-            guard let event = row[0], let title = row[1], let score = row[2].flatMap(Double.init), let key = row[3]
+            guard let event = row[0], let title = row[1], let score = row[2].flatMap({ Double($0) }), let key = row[3]
             else { return nil }
-            return QueuedPriority(event: event, title: title, score: score, leadKey: key)
+            return QueuedPriority(event: event, title: title, score: score, leadKey: key, story: row[4] ?? "")
         }
         return ledger
+    }
+
+    /// An event merged into another (#524, #541) hands its delivery state to the event it joined (#545), so a merge
+    /// never makes an announced story new again. An announcement of the last day keeps its time and lane under the
+    /// survivor, recorded with the survivor's lead headline now (or the survivor's own recent one), so only a later
+    /// change of that headline notifies again. A waiting priority key moves the same way. Merges forward one hop, so
+    /// one pass settles every row.
+    private func foldMergedNotifications(since cutoff: TimeInterval) throws {
+        let forwarded = "JOIN events e ON e.id = t.event_id WHERE e.merged_into IS NOT NULL"
+        let announced = try eventRows(
+            "SELECT t.event_id, e.merged_into, t.lead_key, t.notified_at, t.lane FROM event_notifications t \(forwarded);"
+        )
+        let queued = try eventRows(
+            "SELECT t.event_id, e.merged_into, t.lead_key FROM notification_priority_queue t \(forwarded);")
+        guard !announced.isEmpty || !queued.isEmpty else { return }
+        let leads = try eventLeadTitles(Set((announced + queued).compactMap { $0[1] }))
+        func leadKey(_ row: [String?]) -> String {
+            row[1].flatMap { leads[$0] }.map { EventFeedSummary.titleKey($0) } ?? row[2] ?? ""
+        }
+        for row in announced {
+            guard let absorbed = row[0], let survivor = row[1] else { continue }
+            if let time = row[3].flatMap({ Double($0) }), time >= cutoff, let lane = row[4].flatMap({ Int($0) }) {
+                try eventRows(
+                    """
+                    INSERT INTO event_notifications (event_id, notified_at, lead_key, lane) VALUES (?, ?, ?, ?)
+                    ON CONFLICT(event_id) DO UPDATE SET
+                        lane = CASE WHEN event_notifications.notified_at >= ?
+                            THEN max(event_notifications.lane, excluded.lane) ELSE excluded.lane END,
+                        lead_key = CASE WHEN event_notifications.notified_at >= ?
+                            THEN event_notifications.lead_key ELSE excluded.lead_key END,
+                        notified_at = max(event_notifications.notified_at, excluded.notified_at);
+                    """,
+                    [
+                        .text(survivor), .real(time), .text(leadKey(row)), .integer(lane), .real(cutoff),
+                        .real(cutoff),
+                    ])
+            }
+            try eventRows("DELETE FROM event_notifications WHERE event_id = ?;", [.text(absorbed)])
+        }
+        for row in queued {
+            guard let absorbed = row[0], let survivor = row[1] else { continue }
+            // A survivor already waiting keeps its own row.
+            try eventRows(
+                "UPDATE OR IGNORE notification_priority_queue SET event_id = ?, lead_key = ? WHERE event_id = ?;",
+                [.text(survivor), .text(leadKey(row)), .text(absorbed)])
+            try eventRows("DELETE FROM notification_priority_queue WHERE event_id = ?;", [.text(absorbed)])
+        }
     }
 
     /// Records one posted banner (#665): its delivery row, and each event it announces with the highest lane that
@@ -3330,13 +3383,14 @@ actor DatabaseEngine {
         for item in waiting {
             try eventRows(
                 """
-                INSERT INTO notification_priority_queue (event_id, title, score, lead_key, queued_at) VALUES (?, ?, ?, ?, ?)
+                INSERT INTO notification_priority_queue (event_id, title, score, lead_key, queued_at, story_id)
+                VALUES (?, ?, ?, ?, ?, ?)
                 ON CONFLICT(event_id) DO UPDATE SET title = excluded.title, score = max(score, excluded.score),
-                    lead_key = excluded.lead_key;
+                    lead_key = excluded.lead_key, story_id = excluded.story_id;
                 """,
                 [
                     .text(item.event), .text(item.title), .real(item.score), .text(item.leadKey),
-                    .real(date.timeIntervalSince1970),
+                    .real(date.timeIntervalSince1970), .text(item.story),
                 ])
         }
     }

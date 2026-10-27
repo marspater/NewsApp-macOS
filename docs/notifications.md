@@ -7,7 +7,7 @@ not counted by any lane.
 ## Separation of concerns
 
 - Ingestion stores every fetched story. Clustering groups stories into events. Delivery only reads.
-- Delivery never deletes, hides or edits an article, an event or an article's state. Its only writes are the two
+- Delivery never deletes, hides or edits an article, an event or an article's state. Its only writes are the three
   side tables below. A story that is deduplicated, throttled or over a limit stays in the database, the feed and the
   Briefing exactly as before.
 - Muted stories (`MuteRules`) and duplicate rows (`article_reconciliations`) are filtered before delivery, as today.
@@ -119,6 +119,13 @@ An event is **announced** when any banner (individual or grouped, any lane) has 
 - it now qualifies for a **higher lane** than the highest lane it was announced in (normal → starred or priority,
   starred → priority): one banner in the new lane.
 
+**Merged events.** When clustering merges an event into another (fragment merge #541, "Same Event as…" #524), the
+absorbed event's announcement of the last 24 hours moves to the event it joined, keeping its time and highest lane.
+The moved announcement records the survivor's lead headline as it is now, unless the survivor has its own
+announcement from the last 24 hours, which it keeps. A merge alone never makes an announced story new again, and only a
+later change of the survivor's lead headline notifies again. A waiting priority key moves to the survivor the same way;
+a survivor that already waits keeps its own key. `notificationLedger` settles both tables at the start of each pass.
+
 This replaces #649's rule that a starred feed bypasses the 24 h dedupe. A starred report of an event announced in the
 starred or priority lane posts no individual banner. It still counts in the feed's next grouped banner's N (see
 "Starred").
@@ -162,7 +169,7 @@ Nothing is deleted or hidden in any case.
 
 ## Storage
 
-Two side tables, created with `CREATE TABLE IF NOT EXISTS` on open, with no `user_version` (the side-table approach
+Three side tables, created with `CREATE TABLE IF NOT EXISTS` on open, with no `user_version` (the side-table approach
 Mars approved for #545 on 26 Oct):
 
 - `event_notifications(event_id PRIMARY KEY, notified_at, lead_key, lane)`: exists (#545). Gains `lane`: 0 normal,
@@ -171,8 +178,9 @@ Mars approved for #545 on 26 Oct):
 - `notification_deliveries(id INTEGER PRIMARY KEY, lane INTEGER NOT NULL, grouped INTEGER NOT NULL, feed_url TEXT,
   story_count INTEGER NOT NULL, delivered_at REAL NOT NULL)`: one row per posted banner. `feed_url` is set for starred
   banners. Rows older than 7 days are pruned on write.
-- `notification_priority_queue(event_id PRIMARY KEY, title, score, lead_key, queued_at)`: pending priority keys
-  (section "Priority bursts"). Rows older than 24 h are dropped on read.
+- `notification_priority_queue(event_id PRIMARY KEY, title, score, lead_key, queued_at, story_id)`: pending priority
+  keys (section "Priority bursts"). `story_id` is the story that qualified the key (#584), added to older databases
+  through one guarded `ALTER TABLE`, empty on rows they queued. Rows older than 24 h are dropped on read.
 
 Reads:
 
@@ -183,6 +191,14 @@ Reads:
 
 A banner is recorded **immediately after it posts**, before the 2-second pause of #587, so quitting mid-pass loses no
 count. A banner whose post fails is not recorded and counts toward nothing.
+
+## What other features read
+
+- **Story actions** (#560): a story's own banner carries the `ARTICLE_ACTIONS` category (Save, Mark as Read, Open).
+  Grouped banners stand for several stories and carry none; clicking one opens the app.
+- **Notified stories** (#584): `FeedManager.notifiedStoryIDs` holds every story a posted banner covered since launch:
+  an individual banner's story, a grouped starred banner's pending stories and a grouped priority banner's stories.
+  It is in memory only and resets at launch. Minimal and Privacy modes add nothing to it.
 
 ## Simultaneous arrivals
 

@@ -63,6 +63,8 @@ class FeedManager: NSObject, ObservableObject {
     private var pendingNotificationArticles: [FeedArticle] = []
     /// The latest notification pass; the next one waits for it.
     private var notificationPass: Task<Void, Never>?
+    /// Stories a full-mode banner has covered since launch (`PlannedBanner.stories`), for the Dock badge (#584).
+    @Published private(set) var notifiedStoryIDs: Set<String> = []
     /// Retention runs at most once a day per launch, after a completed refresh.
     private var lastPruneAt: Date?
     /// When the latest refresh published its stories; shown in the list header.
@@ -513,8 +515,9 @@ class FeedManager: NSObject, ObservableObject {
             storyIDs += delivery.starredPending.values.flatMap { $0.map(\.id) }
             delivery.interests = NotificationService.topInterests(
                 (try? await database.briefingInterests(now: posted)) ?? [:])
-            delivery.record = { banner in
+            delivery.record = { [weak self] banner in
                 try? await database.recordNotification(banner, at: posted)
+                await self?.markNotified(banner.stories)
             }
             delivery.queue = { waiting in
                 try? await database.queuePriority(waiting, at: posted)
@@ -528,6 +531,10 @@ class FeedManager: NSObject, ObservableObject {
         }
         guard !Task.isCancelled, !isStopped else { return }
         await notifyBatch(notifiable, delivery)
+    }
+
+    private func markNotified(_ stories: [String]) {
+        notifiedStoryIDs.formUnion(stories)
     }
 
     /// Deletes read, unsaved stories older than the retention setting, once a day after a completed refresh.

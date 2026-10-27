@@ -54,6 +54,8 @@ struct QueuedPriority: Sendable, Equatable {
     var title: String
     var score: Double
     var leadKey: String
+    /// The story that qualified the key, for `PlannedBanner.stories`; empty for a key queued by an earlier build.
+    var story = ""
 }
 
 /// The delivery tables as a pass reads them, with every time clamped to the pass's clock.
@@ -93,6 +95,11 @@ struct PlannedBanner: Sendable {
     var sound: Bool
     /// Event id → lead headline key, for each event the banner announces.
     var announces: [String: String] = [:]
+    /// The stories a grouped banner stands for.
+    var members: [String] = []
+
+    /// The stories the banner covers: its own story, or a grouped banner's members (#584).
+    var stories: [String] { article.map { [$0.id] } ?? members }
 }
 
 /// Manages NLP-based notification triage, rich image attachments, and alert scheduling.
@@ -358,6 +365,8 @@ final class NotificationService: Sendable {
             content.subtitle = article.title
             content.body = article.description.isEmpty ? "" : String(article.description.prefix(200))
             content.userInfo = ["articleLink": article.link, "articleID": article.id]
+            // Save, Mark as Read and Open (#560) act on one story, so only a story's own banner carries them.
+            content.categoryIdentifier = NotificationActionIdentifier.category
             if let imageUrl = FeedArticle.bestCardImage(in: [article]),
                 let attachment = await downloadNotificationAttachment(from: imageUrl)
             {
@@ -551,7 +560,9 @@ private struct LanePlanner {
             taken.insert(key(item.article))
         }
         let newOverflow = keys.dropFirst(individual.count).map {
-            QueuedPriority(event: key($0.article), title: $0.article.title, score: $0.score, leadKey: lead($0.article))
+            QueuedPriority(
+                event: key($0.article), title: $0.article.title, score: $0.score, leadKey: lead($0.article),
+                story: $0.article.id)
         }
         let waiting = ledger.priorityQueue.filter { item in
             !newOverflow.contains { $0.event == item.event } && ledger.announced[item.event]?.lane != .priority
@@ -563,7 +574,8 @@ private struct LanePlanner {
             PlannedBanner(
                 lane: .priority, grouped: true, title: "Major news", headlines: overflow.prefix(2).map(\.title),
                 count: overflow.count, thread: "priority", sound: true,
-                announces: Dictionary(overflow.map { ($0.event, $0.leadKey) }) { first, _ in first }))
+                announces: Dictionary(overflow.map { ($0.event, $0.leadKey) }) { first, _ in first },
+                members: overflow.map(\.story).filter { !$0.isEmpty }))
         taken.formUnion(overflow.map(\.event))
         return []
     }
@@ -598,7 +610,7 @@ private struct LanePlanner {
                 PlannedBanner(
                     lane: .starred, grouped: true, title: NotificationService.sourceName(top.article),
                     headlines: (freshItems + rest).prefix(2).map(\.article.title), count: items.count, feedURL: feed,
-                    thread: "starred-\(feed)", sound: false, announces: covered))
+                    thread: "starred-\(feed)", sound: false, announces: covered, members: items.map(\.article.id)))
         }
         taken.formUnion(freshItems.map { key($0.article) })
     }

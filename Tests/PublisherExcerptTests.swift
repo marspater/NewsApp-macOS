@@ -345,11 +345,10 @@ struct PublisherExcerptTests {
         let store = ArticleStore(database: db)
         let queue = EnrichmentQueue(store: store)
 
-        // Coordinator with allowsModel returning false (AI disabled)
+        // The coordinator never calls a model: publisher excerpts are its only overview.
         let coordinator = OverviewGenerationCoordinator(
             store: store,
             queue: queue,
-            allowsModel: { false },
             allowsEnergy: { true },
             extractText: nil
         )
@@ -386,7 +385,6 @@ struct PublisherExcerptTests {
 
         let coordinator = OverviewGenerationCoordinator(
             store: nil,
-            allowsModel: { false },
             extractText: nil
         )
 
