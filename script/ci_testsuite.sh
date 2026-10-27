@@ -29,7 +29,8 @@ if [ -z "${NEWS_TEST_RUNNER:-}" ] && [ -n "$LCOV_PATH" ] && [ -n "${CIRCLE_BUILD
     # Analysis invokes this script once per atom; build the instrumented runner once per CI job.
     RUNNER="${TMPDIR:-/tmp}/news-coverage-runner-$CIRCLE_BUILD_NUM"
 fi
-if [ ! -x "$RUNNER" ]; then
+# Impact analysis can select no atom; then nothing is compiled or run.
+if [ $# -gt 0 ] && [ ! -x "$RUNNER" ]; then
     script/build_test_runner.sh "$RUNNER" ${COVERAGE_FLAGS[@]+"${COVERAGE_FLAGS[@]}"} || exit 1
 fi
 
@@ -64,7 +65,7 @@ $CASES  </testsuite>
 EOF
 fi
 
-if [ -n "$LCOV_PATH" ]; then
+if [ -n "$LCOV_PATH" ] && [ $# -gt 0 ]; then
     # Report the atom failure itself rather than a coverage error caused by it.
     if [ "$STATUS" -ne 0 ]; then
         echo "Analysis skipped: $FAILURES test atom(s) failed." >&2
