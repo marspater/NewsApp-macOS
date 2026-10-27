@@ -9,11 +9,10 @@ jobs:
     steps:
       - checkout
       - run:
-          name: "Design lint, evaluation and testsuite self-checks"
+          name: "Design lint, evaluation and testsuite self-checks (Swift formatting runs in GitHub Actions)"
           command: |
             script/design_lint.sh
-            script/format.sh --check
-            for check in evaluate publisher_review publisher_dates overview_review importance_review relation_review catalog_review; do
+            for check in evaluate publisher_review publisher_dates overview_review importance_review relation_review catalog_review fit_pair_head; do
               python3 "script/evaluation/$check.py"
             done
             script/test_ci_testsuite.sh
@@ -23,6 +22,17 @@ jobs:
       xcode: "27.0"
     steps:
       - checkout
+      - run:
+          name: "Skip documentation-only changes"
+          command: |
+            # Same rule as the pre-commit hook and the GitHub paths-ignore: Markdown anywhere or anything under docs/.
+            git fetch -q origin main || true
+            base=$(git merge-base HEAD FETCH_HEAD 2>/dev/null || true)
+            if [ -z "$base" ] || [ "$base" = "$(git rev-parse HEAD)" ]; then base=HEAD~1; fi
+            if changed=$(git diff --name-only "$base" HEAD) && [ -z "$(echo "$changed" | grep -vE '(\.md$|^docs/)')" ]; then
+              echo "Documentation-only change since $base; skipping macOS tests."
+              circleci-agent step halt
+            fi
       - run:
           name: "Ensure permissions"
           command: chmod +x test.sh build.sh build_release.sh script/build_test_runner.sh script/ci_testsuite.sh
