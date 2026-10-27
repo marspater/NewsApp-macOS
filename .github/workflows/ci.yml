@@ -54,7 +54,7 @@ jobs:
 
       # Xcode 26.6 build products: a cache of their own, apart from the Xcode 27 build job's.
       - name: Cache SwiftPM
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             .build
@@ -90,7 +90,7 @@ jobs:
         run: script/format.sh --check
 
       - name: Cache SwiftPM
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             .build
