@@ -194,10 +194,12 @@ struct ReaderAccessibilityTests {
 
     static func testLeadImageFraming() {
         print("  - Testing lead image framing for square and portrait photos...")
-        assertTrue(ArticleCardView.framesLeadImageWhole(aspectRatio: 1), "Square photos are framed whole")
-        assertTrue(ArticleCardView.framesLeadImageWhole(aspectRatio: 0.8), "Portrait photos are framed whole")
-        assertFalse(ArticleCardView.framesLeadImageWhole(aspectRatio: 16.0 / 9.0), "Wide photos fill the card")
-        assertFalse(ArticleCardView.framesLeadImageWhole(aspectRatio: nil), "Unknown sizes fill the card")
+        assertTrue(ArticleCardView<EmptyView>.framesLeadImageWhole(aspectRatio: 1), "Square photos are framed whole")
+        assertTrue(
+            ArticleCardView<EmptyView>.framesLeadImageWhole(aspectRatio: 0.8), "Portrait photos are framed whole")
+        assertFalse(
+            ArticleCardView<EmptyView>.framesLeadImageWhole(aspectRatio: 16.0 / 9.0), "Wide photos fill the card")
+        assertFalse(ArticleCardView<EmptyView>.framesLeadImageWhole(aspectRatio: nil), "Unknown sizes fill the card")
     }
 
     static func testEarlierInStoryState() {
@@ -323,5 +325,28 @@ struct ReaderAccessibilityTests {
         assertFalse(
             ArticleDetailView.shouldPassThroughToSystem(modifiers: emptyModifiers),
             "Unmodified single-key strokes are captured by reader shortcuts")
+
+        // #597: one summary label that says how the summary was made.
+        assertEqual(
+            ArticleDetailView.summaryLabel(modelIdentifier: "apple.natural-language.fallback"), "Extractive summary",
+            "Selected sentences are an extractive summary")
+        assertEqual(
+            ArticleDetailView.summaryLabel(modelIdentifier: "apple.foundation-model"), "Generated summary",
+            "The on-device model writes a generated summary")
+        assertEqual(
+            ArticleDetailView.summaryLabel(modelIdentifier: nil), "Generated summary",
+            "Before analysis the label names the model summary")
+
+        // #594: Esc and B step back one reader; a section click or ⌘1 returns to the list from any depth.
+        var path = NavigationPath()
+        path.append("first")
+        path.append("second")
+        ArticleDetailView.stepBack(&path)
+        assertEqual(path.count, 1, "Esc steps back one reader")
+        path.append("second")
+        ArticleDetailView.stepBack(&path, toList: true)
+        assertTrue(path.isEmpty, "Reselecting the section or ⌘1 returns to the list")
+        ArticleDetailView.stepBack(&path)
+        assertTrue(path.isEmpty, "Stepping back from the list is a no-op")
     }
 }
